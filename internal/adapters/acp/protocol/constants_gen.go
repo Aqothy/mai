@@ -9,6 +9,7 @@ const ProtocolVersionNumber = 1
 const (
 	AgentMethodAuthenticate           = "authenticate"
 	AgentMethodInitialize             = "initialize"
+	AgentMethodLogout                 = "logout"
 	AgentMethodSessionCancel          = "session/cancel"
 	AgentMethodSessionClose           = "session/close"
 	AgentMethodSessionList            = "session/list"

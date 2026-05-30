@@ -9,6 +9,20 @@ import (
 	"fmt"
 )
 
+// Authentication-related capabilities supported by the agent.
+type AgentAuthCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+	// Whether the agent supports the logout method.
+	//
+	// By supplying '{}' it means that the agent supports the logout method.
+	Logout *LogoutCapabilities `json:"logout,omitempty"`
+}
+
 // Capabilities supported by the agent.
 //
 // Advertised during initialization to inform the client about
@@ -22,6 +36,10 @@ type AgentCapabilities struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]any `json:"_meta,omitempty"`
+	// Authentication-related capabilities supported by the agent.
+	//
+	// Defaults to {} if unset.
+	Auth AgentAuthCapabilities `json:"auth,omitempty"`
 	// Whether the agent supports 'session/load'.
 	//
 	// Defaults to false if unset.
@@ -54,6 +72,12 @@ func (v *AgentCapabilities) UnmarshalJSON(b []byte) error {
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
+	}
+	{
+		_rm, _ok := m["auth"]
+		if !_ok || (string(_rm) == "null") {
+			json.Unmarshal([]byte("{}"), &a.Auth)
+		}
 	}
 	{
 		_rm, _ok := m["loadSession"]
@@ -1824,7 +1848,7 @@ type InitializeResponse struct {
 	Meta map[string]any `json:"_meta,omitempty"`
 	// Capabilities supported by the agent.
 	//
-	// Defaults to {"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}} if unset.
+	// Defaults to {"auth":{},"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}} if unset.
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities,omitempty"`
 	// Information about the Agent name and version sent to the Client.
 	//
@@ -1864,7 +1888,7 @@ func (v *InitializeResponse) UnmarshalJSON(b []byte) error {
 	{
 		_rm, _ok := m["agentCapabilities"]
 		if !_ok || (string(_rm) == "null") {
-			json.Unmarshal([]byte("{\"loadSession\":false,\"mcpCapabilities\":{\"http\":false,\"sse\":false},\"promptCapabilities\":{\"audio\":false,\"embeddedContext\":false,\"image\":false},\"sessionCapabilities\":{}}"), &a.AgentCapabilities)
+			json.Unmarshal([]byte("{\"auth\":{},\"loadSession\":false,\"mcpCapabilities\":{\"http\":false,\"sse\":false},\"promptCapabilities\":{\"audio\":false,\"embeddedContext\":false,\"image\":false},\"sessionCapabilities\":{}}"), &a.AgentCapabilities)
 		}
 	}
 	{
@@ -2005,6 +2029,48 @@ type LoadSessionResponse struct {
 }
 
 func (v *LoadSessionResponse) Validate() error {
+	return nil
+}
+
+// Logout capabilities supported by the agent.
+//
+// By supplying '{}' it means that the agent supports the logout method.
+type LogoutCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+}
+
+// Request parameters for the logout method.
+//
+// Terminates the current authenticated session.
+type LogoutRequest struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+}
+
+func (v *LogoutRequest) Validate() error {
+	return nil
+}
+
+// Response to the 'logout' method.
+type LogoutResponse struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+	Meta map[string]any `json:"_meta,omitempty"`
+}
+
+func (v *LogoutResponse) Validate() error {
 	return nil
 }
 
@@ -4866,6 +4932,10 @@ type Agent interface {
 	//
 	// See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/initialization)
 	Initialize(ctx context.Context, params InitializeRequest) (InitializeResponse, error)
+	// Request parameters for the logout method.
+	//
+	// Terminates the current authenticated session.
+	Logout(ctx context.Context, params LogoutRequest) (LogoutResponse, error)
 	// Notification to cancel ongoing operations for a session.
 	//
 	// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/prompt-turn#cancellation)
