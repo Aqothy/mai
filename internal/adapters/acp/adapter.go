@@ -12,6 +12,7 @@ import (
 
 	"github.com/Aqothy/maiD/internal/adapters"
 	acpclient "github.com/Aqothy/maiD/internal/adapters/acp/client"
+	protocol "github.com/Aqothy/maiD/internal/adapters/acp/protocol"
 	"github.com/Aqothy/maiD/internal/model"
 )
 
@@ -70,12 +71,7 @@ func (a *Adapter) StartConnection(ctx context.Context, req adapters.StartConnect
 			StartedAt:     startedAt,
 			InitializedAt: client.InitializedAt,
 			Capabilities:  capabilitySet(initResp.AgentCapabilities),
-			ACP: &model.ACPMetadata{
-				AgentInfo:         initResp.AgentInfo,
-				AgentCapabilities: initResp.AgentCapabilities,
-				AuthMethods:       initResp.AuthMethods,
-				RawInitialize:     rawInit,
-			},
+			Metadata:      metadataFromInitialize(initResp, rawInit),
 		},
 	}
 	go h.wait()
@@ -91,18 +87,7 @@ type Handle struct {
 }
 
 func (h *Handle) Info() model.AgentConnection {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	info := h.info
-	info.Command = append([]string(nil), h.info.Command...)
-	if h.info.ACP != nil {
-		acp := *h.info.ACP
-		if h.info.ACP.RawInitialize != nil {
-			acp.RawInitialize = append(json.RawMessage(nil), h.info.ACP.RawInitialize...)
-		}
-		info.ACP = &acp
-	}
-	return info
+	return h.info
 }
 
 func (h *Handle) Close() error {
@@ -123,17 +108,29 @@ func (h *Handle) wait() {
 	h.mu.Unlock()
 }
 
-func capabilitySet(agentCapabilities map[string]any) model.CapabilitySet {
-	caps := model.CapabilitySet{
+func capabilitySet(_ protocol.AgentCapabilities) model.CapabilitySet {
+	return model.CapabilitySet{
 		Sessions: true,
 		Prompt:   true,
 		Cancel:   true,
 	}
+}
 
-	if sessionCaps, ok := agentCapabilities["sessionCapabilities"].(map[string]any); ok {
-		caps.Models = sessionCaps["setModel"] == true || sessionCaps["set_model"] == true
-		caps.Modes = sessionCaps["setMode"] == true || sessionCaps["set_mode"] == true
+func metadataFromInitialize(initResp protocol.InitializeResponse, rawInit json.RawMessage) map[string]json.RawMessage {
+	metadata := map[string]json.RawMessage{
+		"agentCapabilities": marshalRaw(initResp.AgentCapabilities),
+		"authMethods":       marshalRaw(initResp.AuthMethods),
 	}
+	if initResp.AgentInfo != nil {
+		metadata["agentInfo"] = marshalRaw(initResp.AgentInfo)
+	}
+	if len(rawInit) > 0 {
+		metadata["rawInitialize"] = append(json.RawMessage(nil), rawInit...)
+	}
+	return metadata
+}
 
-	return caps
+func marshalRaw(value any) json.RawMessage {
+	raw, _ := json.Marshal(value)
+	return raw
 }

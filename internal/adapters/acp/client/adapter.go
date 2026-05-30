@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/jsonrpc2"
-	"github.com/Aqothy/maiD/internal/adapters/acp/protocol"
+	protocol "github.com/Aqothy/maiD/internal/adapters/acp/protocol"
 )
 
 type Connection struct {
@@ -35,26 +35,22 @@ func NewConnection(peerInput io.WriteCloser, peerOutput io.ReadCloser) *Connecti
 }
 
 func (c *Connection) InitializeConnection(ctx context.Context) (protocol.InitializeResponse, error) {
+	title := "Mai Daemon"
 	initReq := protocol.InitializeRequest{
-		ProtocolVersion: protocol.ProtocolVersion,
-		ClientCapabilities: protocol.ClientCapabilities{
-			FS: protocol.FileSystemCapabilities{},
-		},
-		ClientInfo: &protocol.Implementation{Name: "maiD", Title: "Mai Daemon", Version: "0.1.0"},
+		ProtocolVersion:    protocol.ProtocolVersionNumber,
+		ClientCapabilities: protocol.ClientCapabilities{},
+		ClientInfo:         &protocol.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
 
 	var initResp protocol.InitializeResponse
 	if err := c.conn.Call(ctx, "initialize", initReq).Await(ctx, &initResp); err != nil {
 		return protocol.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", err)
 	}
-	if initResp.ProtocolVersion != protocol.ProtocolVersion {
+	if initResp.ProtocolVersion != protocol.ProtocolVersionNumber {
 		return protocol.InitializeResponse{}, fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
 	}
 	if initResp.AuthMethods == nil {
-		initResp.AuthMethods = []any{}
-	}
-	if initResp.AgentCapabilities == nil {
-		initResp.AgentCapabilities = map[string]any{}
+		initResp.AuthMethods = []protocol.AuthMethod{}
 	}
 
 	c.Initialize = initResp
