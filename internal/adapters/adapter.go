@@ -17,6 +17,11 @@ type ConnectionHandle interface {
 	Close() error
 }
 
+type Authenticator interface {
+	Authenticate(ctx context.Context, methodID string) (model.AgentConnection, error)
+	Logout(ctx context.Context) (model.AgentConnection, error)
+}
+
 type Adapter interface {
 	StartConnection(ctx context.Context, req StartConnectionRequest) (ConnectionHandle, error)
 }

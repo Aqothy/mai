@@ -52,6 +52,34 @@ func TestAgentInitSupportsMultipleConnectionsAndReusesSameName(t *testing.T) {
 	}
 }
 
+func TestAgentAuthenticate(t *testing.T) {
+	s := NewServer()
+	defer s.Close()
+
+	initReq, err := ipc.NewRequest(ipc.ActionAgentInit, ipc.AgentInitParams{Name: "codex", Kind: "acp", Command: helperCommand("auth")})
+	if err != nil {
+		t.Fatalf("NewRequest init: %v", err)
+	}
+	if resp := s.handle(initReq); !resp.OK {
+		t.Fatalf("agent init failed: %s", resp.Message)
+	}
+	authReq, err := ipc.NewRequest(ipc.ActionAgentAuthenticate, ipc.AgentAuthenticateParams{Name: "codex", MethodID: "agent-login"})
+	if err != nil {
+		t.Fatalf("NewRequest auth: %v", err)
+	}
+	resp := s.handle(authReq)
+	if !resp.OK {
+		t.Fatalf("agent auth failed: %s", resp.Message)
+	}
+	var conn model.AgentConnection
+	if err := json.Unmarshal(resp.Data, &conn); err != nil {
+		t.Fatalf("decode connection: %v", err)
+	}
+	if len(conn.Metadata["authenticatedAt"]) == 0 {
+		t.Fatalf("authenticatedAt metadata missing: %#v", conn.Metadata)
+	}
+}
+
 func initAgent(t *testing.T, s *Server, name string) model.AgentConnection {
 	t.Helper()
 	req, err := ipc.NewRequest(ipc.ActionAgentInit, ipc.AgentInitParams{Name: name, Kind: "acp", Command: helperCommand()})
@@ -69,8 +97,9 @@ func initAgent(t *testing.T, s *Server, name string) model.AgentConnection {
 	return conn
 }
 
-func helperCommand() []string {
-	return []string{"env", "MAID_DAEMON_ACP_HELPER=1", os.Args[0], "-test.run=TestHelperProcess"}
+func helperCommand(args ...string) []string {
+	cmd := []string{"env", "MAID_DAEMON_ACP_HELPER=1", os.Args[0], "-test.run=TestHelperProcess", "--"}
+	return append(cmd, args...)
 }
 
 func TestHelperProcess(t *testing.T) {
@@ -78,7 +107,16 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 
-	line, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
+	mode := ""
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			mode = os.Args[i+1]
+			break
+		}
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadBytes('\n')
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read request: %v", err)
 		os.Exit(1)
@@ -97,14 +135,18 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 
+	authMethods := []any{}
+	if mode == "auth" {
+		authMethods = []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
+	}
 	resp := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      json.RawMessage(req.ID),
 		"result": map[string]any{
 			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{"sessionCapabilities": map[string]any{}},
+			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "sessionCapabilities": map[string]any{}},
 			"agentInfo":         map[string]any{"name": "fake-acp-agent"},
-			"authMethods":       []any{},
+			"authMethods":       authMethods,
 		},
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
@@ -112,5 +154,31 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 
-	_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
+	line, err = reader.ReadBytes('\n')
+	if err != nil {
+		return
+	}
+	if mode != "auth" {
+		return
+	}
+	var authReq struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params struct {
+			MethodID string `json:"methodId"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(line, &authReq); err != nil {
+		fmt.Fprintf(os.Stderr, "decode auth request: %v", err)
+		os.Exit(1)
+	}
+	if authReq.Method != "authenticate" || authReq.Params.MethodID != "agent-login" {
+		fmt.Fprintf(os.Stderr, "unexpected auth request: %s", line)
+		os.Exit(1)
+	}
+	resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(authReq.ID), "result": map[string]any{}}
+	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+		fmt.Fprintf(os.Stderr, "write auth response: %v", err)
+		os.Exit(1)
+	}
 }

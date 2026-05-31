@@ -50,10 +50,16 @@ func agentCommand(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing agent subcommand")
 	}
-	if args[0] != "init" {
+	switch args[0] {
+	case "init":
+		return agentInit(args[1:])
+	case "auth", "authenticate":
+		return agentAuthenticate(args[1:])
+	case "logout":
+		return agentLogout(args[1:])
+	default:
 		return fmt.Errorf("unknown agent subcommand: %s", args[0])
 	}
-	return agentInit(args[1:])
 }
 
 func agentInit(args []string) error {
@@ -75,6 +81,36 @@ func agentInit(args []string) error {
 	}
 
 	return sendRequest(*socketPath, ipc.ActionAgentInit, ipc.AgentInitParams{Name: *name, Kind: *kind, Command: command})
+}
+
+func agentAuthenticate(args []string) error {
+	fs := flag.NewFlagSet("agent auth", flag.ExitOnError)
+	socketPath := fs.String("socket", ipc.DefaultSocketPath, "unix socket path")
+	name := fs.String("name", "", "agent connection name")
+	methodID := fs.String("method", "", "ACP auth method id advertised by the agent")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" && fs.NArg() > 0 {
+		*name = fs.Arg(0)
+	}
+	if *methodID == "" {
+		return errors.New("agent auth requires --method")
+	}
+	return sendRequest(*socketPath, ipc.ActionAgentAuthenticate, ipc.AgentAuthenticateParams{Name: *name, MethodID: *methodID})
+}
+
+func agentLogout(args []string) error {
+	fs := flag.NewFlagSet("agent logout", flag.ExitOnError)
+	socketPath := fs.String("socket", ipc.DefaultSocketPath, "unix socket path")
+	name := fs.String("name", "", "agent connection name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" && fs.NArg() > 0 {
+		*name = fs.Arg(0)
+	}
+	return sendRequest(*socketPath, ipc.ActionAgentLogout, ipc.AgentLogoutParams{Name: *name})
 }
 
 func sendRequest(socketPath string, action string, params any) error {
@@ -100,5 +136,7 @@ func usage() {
 	maiD [--socket /tmp/maiD.sock]
 	maiD agent init [--socket /tmp/maiD.sock] [--name codex] [--kind acp] -- <acp-adapter-command> [args...]
 	maiD agent init [--socket /tmp/maiD.sock] [--name codex] -- codex-acp
-	maiD agent init [--socket /tmp/maiD.sock] [--name codex] --cmd "npx @zed-industries/codex-acp"`)
+	maiD agent init [--socket /tmp/maiD.sock] [--name codex] --cmd "npx @zed-industries/codex-acp"
+	maiD agent auth [--socket /tmp/maiD.sock] --name codex --method agent-login
+	maiD agent logout [--socket /tmp/maiD.sock] --name codex`)
 }

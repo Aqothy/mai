@@ -90,6 +90,40 @@ func (h *Handle) Info() model.AgentConnection {
 	return h.info
 }
 
+func (h *Handle) Authenticate(ctx context.Context, methodID string) (model.AgentConnection, error) {
+	resp, err := h.client.Authenticate(ctx, methodID)
+	if err != nil {
+		return model.AgentConnection{}, err
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.info.Metadata == nil {
+		h.info.Metadata = make(map[string]json.RawMessage)
+	}
+	now := time.Now()
+	h.info.Metadata["authenticatedAt"] = marshalRaw(now)
+	h.info.Metadata["authenticatedMethodId"] = marshalRaw(methodID)
+	h.info.Metadata["authenticateResponse"] = marshalRaw(resp)
+	return h.info, nil
+}
+
+func (h *Handle) Logout(ctx context.Context) (model.AgentConnection, error) {
+	resp, err := h.client.Logout(ctx)
+	if err != nil {
+		return model.AgentConnection{}, err
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.info.Metadata == nil {
+		h.info.Metadata = make(map[string]json.RawMessage)
+	}
+	h.info.Metadata["loggedOutAt"] = marshalRaw(time.Now())
+	h.info.Metadata["logoutResponse"] = marshalRaw(resp)
+	return h.info, nil
+}
+
 func (h *Handle) Close() error {
 	h.once.Do(func() {
 		_ = h.client.Close()

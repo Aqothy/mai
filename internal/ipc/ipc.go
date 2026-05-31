@@ -8,7 +8,11 @@ import (
 
 const DefaultSocketPath = "/tmp/maiD.sock"
 
-const ActionAgentInit = "agent-init"
+const (
+	ActionAgentInit         = "agent-init"
+	ActionAgentAuthenticate = "agent-authenticate"
+	ActionAgentLogout       = "agent-logout"
+)
 
 type Request struct {
 	Action string          `json:"action"`
@@ -25,6 +29,15 @@ type AgentInitParams struct {
 	Name    string   `json:"name"`
 	Kind    string   `json:"kind,omitempty"`
 	Command []string `json:"command"`
+}
+
+type AgentAuthenticateParams struct {
+	Name     string `json:"name"`
+	MethodID string `json:"methodId"`
+}
+
+type AgentLogoutParams struct {
+	Name string `json:"name"`
 }
 
 func NewRequest(action string, params any) (Request, error) {

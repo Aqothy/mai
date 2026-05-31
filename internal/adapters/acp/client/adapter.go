@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -43,7 +44,7 @@ func (c *Connection) InitializeConnection(ctx context.Context) (protocol.Initial
 	}
 
 	var initResp protocol.InitializeResponse
-	if err := c.conn.Call(ctx, "initialize", initReq).Await(ctx, &initResp); err != nil {
+	if err := c.conn.Call(ctx, protocol.AgentMethodInitialize, initReq).Await(ctx, &initResp); err != nil {
 		return protocol.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", err)
 	}
 	if initResp.ProtocolVersion != protocol.ProtocolVersionNumber {
@@ -56,6 +57,59 @@ func (c *Connection) InitializeConnection(ctx context.Context) (protocol.Initial
 	c.Initialize = initResp
 	c.InitializedAt = time.Now()
 	return initResp, nil
+}
+
+func (c *Connection) Authenticate(ctx context.Context, methodID string) (protocol.AuthenticateResponse, error) {
+	resolvedMethodID, err := c.resolveAuthMethodID(methodID)
+	if err != nil {
+		return protocol.AuthenticateResponse{}, err
+	}
+
+	params := protocol.AuthenticateRequest{MethodId: resolvedMethodID}
+	var resp protocol.AuthenticateResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodAuthenticate, params).Await(ctx, &resp); err != nil {
+		return protocol.AuthenticateResponse{}, fmt.Errorf("ACP authenticate failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) Logout(ctx context.Context) (protocol.LogoutResponse, error) {
+	if c.Initialize.AgentCapabilities.Auth.Logout == nil {
+		return protocol.LogoutResponse{}, fmt.Errorf("ACP agent did not advertise logout capability")
+	}
+
+	var resp protocol.LogoutResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodLogout, protocol.LogoutRequest{}).Await(ctx, &resp); err != nil {
+		return protocol.LogoutResponse{}, fmt.Errorf("ACP logout failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) resolveAuthMethodID(methodID string) (string, error) {
+	if methodID == "" {
+		return "", fmt.Errorf("ACP authenticate requires a method id")
+	}
+	for _, method := range c.Initialize.AuthMethods {
+		if authMethodID(method) == methodID {
+			return methodID, nil
+		}
+	}
+	return "", fmt.Errorf("ACP auth method %q was not advertised", methodID)
+}
+
+func authMethodID(method protocol.AuthMethod) string {
+	if method.Agent != nil {
+		return method.Agent.Id
+	}
+
+	var raw struct {
+		ID string `json:"id"`
+	}
+	data, err := json.Marshal(method)
+	if err == nil {
+		_ = json.Unmarshal(data, &raw)
+	}
+	return raw.ID
 }
 
 func (c *Connection) Close() error {

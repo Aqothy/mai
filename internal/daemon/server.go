@@ -91,6 +91,10 @@ func (s *Server) handle(req ipc.Request) ipc.Response {
 	switch req.Action {
 	case ipc.ActionAgentInit:
 		return s.handleAgentInit(req)
+	case ipc.ActionAgentAuthenticate:
+		return s.handleAgentAuthenticate(req)
+	case ipc.ActionAgentLogout:
+		return s.handleAgentLogout(req)
 	default:
 		return ipc.Response{OK: false, Message: "unknown action: " + req.Action}
 	}
@@ -137,6 +141,70 @@ func (s *Server) handleAgentInit(req ipc.Request) ipc.Response {
 	s.connections[name] = handle
 	s.mu.Unlock()
 	return ok("initialized agent "+name, handle.Info())
+}
+
+func (s *Server) handleAgentAuthenticate(req ipc.Request) ipc.Response {
+	var params ipc.AgentAuthenticateParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	if params.Name == "" {
+		return ipc.Response{OK: false, Message: "agent authenticate requires a connection name"}
+	}
+
+	handle, err := s.connection(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+	authenticator, supportsAuth := handle.(adapters.Authenticator)
+	if !supportsAuth {
+		return ipc.Response{OK: false, Message: "agent does not support authentication"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	info, err := authenticator.Authenticate(ctx, params.MethodID)
+	if err != nil {
+		return fail(err)
+	}
+	return ok("authenticated agent "+params.Name, info)
+}
+
+func (s *Server) handleAgentLogout(req ipc.Request) ipc.Response {
+	var params ipc.AgentLogoutParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	if params.Name == "" {
+		return ipc.Response{OK: false, Message: "agent logout requires a connection name"}
+	}
+
+	handle, err := s.connection(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+	authenticator, supportsAuth := handle.(adapters.Authenticator)
+	if !supportsAuth {
+		return ipc.Response{OK: false, Message: "agent does not support authentication"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	info, err := authenticator.Logout(ctx)
+	if err != nil {
+		return fail(err)
+	}
+	return ok("logged out agent "+params.Name, info)
+}
+
+func (s *Server) connection(name string) (adapters.ConnectionHandle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	handle := s.connections[name]
+	if handle == nil {
+		return nil, fmt.Errorf("agent %q is not initialized", name)
+	}
+	return handle, nil
 }
 
 func adapterFor(kind model.AgentKind) (adapters.Adapter, error) {
