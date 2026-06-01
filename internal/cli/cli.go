@@ -11,6 +11,7 @@ import (
 
 	"github.com/Aqothy/maiD/internal/daemon"
 	"github.com/Aqothy/maiD/internal/ipc"
+	"github.com/Aqothy/maiD/internal/web"
 )
 
 func RunAuto(args []string) error {
@@ -44,10 +45,23 @@ func RunClient(args []string) error {
 		return agentCommand(args[1:])
 	case "session":
 		return sessionCommand(args[1:])
+	case "web":
+		return webCommand(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func webCommand(args []string) error {
+	fs := flag.NewFlagSet("web", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:8765", "HTTP listen address")
+	socketPath := fs.String("socket", ipc.DefaultSocketPath, "unix socket path")
+	startDaemon := fs.Bool("daemon", true, "start an embedded daemon if one is not already running")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return web.Run(web.Options{Addr: *addr, SocketPath: *socketPath, StartDaemon: *startDaemon})
 }
 
 func agentCommand(args []string) error {
@@ -292,6 +306,7 @@ func absPath(path string) string {
 func usage() {
 	_, _ = fmt.Fprintln(os.Stderr, `usage
 	maiD [--socket /tmp/maiD.sock]
+	maiD web [--addr 127.0.0.1:8765] [--socket /tmp/maiD.sock] [--daemon=true]
 	maiD agent init [--socket /tmp/maiD.sock] [--name codex] [--kind acp] -- <acp-adapter-command> [args...]
 	maiD agent init [--socket /tmp/maiD.sock] [--name codex] -- codex-acp
 	maiD agent init [--socket /tmp/maiD.sock] [--name codex] --cmd "npx @zed-industries/codex-acp"

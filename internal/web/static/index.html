@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>maiD</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>maiD</h1>
+        <small id="socketPath">Local web UI</small>
+      </div>
+      <small id="current">No current session</small>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Agent</h2>
+
+        <label for="agentName">Connection name</label>
+        <input id="agentName" value="codex" />
+
+        <label for="agentCommand">ACP command</label>
+        <input id="agentCommand" placeholder="codex-acp or npx @zed-industries/codex-acp" />
+
+        <button id="agentInit">Init agent</button>
+
+        <label for="authMethod">Auth method id</label>
+        <input id="authMethod" placeholder="agent-login" />
+
+        <button id="auth" class="secondary">Authenticate</button>
+        <button id="logout" class="secondary">Logout</button>
+      </section>
+
+      <section class="card">
+        <h2>Session</h2>
+
+        <label for="cwd">Working directory</label>
+        <input id="cwd" />
+
+        <label for="sessionID">Session id</label>
+        <input id="sessionID" placeholder="filled after session/new or click a listed session" />
+
+        <label for="mcpServers">MCP servers JSON array</label>
+        <textarea id="mcpServers" placeholder='[{"name":"filesystem","command":"/path/to/server","args":[],"env":[]}]'></textarea>
+
+        <button id="sessionNew">New</button>
+        <button id="sessionList">List</button>
+        <button id="sessionLoad" class="secondary">Load</button>
+        <button id="sessionResume" class="secondary">Resume</button>
+        <button id="sessionClose" class="danger">Close</button>
+      </section>
+    </div>
+
+    <section class="card sessions-card">
+      <h2>Sessions</h2>
+      <div id="sessions"><small>No sessions loaded.</small></div>
+    </section>
+
+    <section class="card response-card">
+      <h2>Response</h2>
+      <div id="status" class="status">Ready.</div>
+      <pre id="output">Ready.</pre>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
