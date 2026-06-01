@@ -22,6 +22,14 @@ type Authenticator interface {
 	Logout(ctx context.Context) (model.AgentConnection, error)
 }
 
+type SessionManager interface {
+	NewSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error)
+	LoadSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error)
+	ResumeSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error)
+	CloseSession(ctx context.Context, sessionID string) (model.AgentThread, error)
+	ListSessions(ctx context.Context, req model.AgentSessionListRequest) (model.AgentThreadList, error)
+}
+
 type Adapter interface {
 	StartConnection(ctx context.Context, req StartConnectionRequest) (ConnectionHandle, error)
 }

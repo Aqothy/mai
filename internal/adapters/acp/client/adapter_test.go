@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	protocol "github.com/Aqothy/maiD/internal/adapters/acp/protocol"
 )
 
 func TestInitializeConnection(t *testing.T) {
@@ -116,6 +118,42 @@ func TestLogout(t *testing.T) {
 	}
 }
 
+func TestSessionMethods(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, conn := startHelperConnection(t, "sessions")
+	defer cmd.Wait()
+	defer conn.Close()
+
+	if _, err := conn.InitializeConnection(ctx); err != nil {
+		t.Fatalf("InitializeConnection: %v", err)
+	}
+	newResp, err := conn.NewSession(ctx, protocol.NewSessionRequest{Cwd: "/tmp/project", McpServers: []protocol.McpServer{}})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if newResp.SessionId != "sess_new" {
+		t.Fatalf("new session id = %q", newResp.SessionId)
+	}
+	listResp, err := conn.ListSessions(ctx, protocol.ListSessionsRequest{})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionId != "sess_new" {
+		t.Fatalf("sessions = %#v", listResp.Sessions)
+	}
+	if _, err := conn.LoadSession(ctx, protocol.LoadSessionRequest{SessionId: "sess_new", Cwd: "/tmp/project", McpServers: []protocol.McpServer{}}); err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if _, err := conn.ResumeSession(ctx, protocol.ResumeSessionRequest{SessionId: "sess_new", Cwd: "/tmp/project", McpServers: []protocol.McpServer{}}); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if _, err := conn.CloseSession(ctx, "sess_new"); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+}
+
 func startHelperConnection(t *testing.T, args ...string) (*exec.Cmd, *Connection) {
 	t.Helper()
 	cmdArgs := append([]string{"MAID_ACP_HELPER=1", os.Args[0], "-test.run=TestHelperProcess", "--"}, args...)
@@ -150,7 +188,8 @@ func TestHelperProcess(t *testing.T) {
 		}
 	}
 
-	line, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadBytes('\n')
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read request: %v", err)
 		os.Exit(1)
@@ -180,6 +219,12 @@ func TestHelperProcess(t *testing.T) {
 	if mode == "auth" {
 		authMethods = []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
 	}
+	sessionCapabilities := map[string]any{}
+	loadSession := false
+	if mode == "sessions" {
+		loadSession = true
+		sessionCapabilities = map[string]any{"list": map[string]any{}, "resume": map[string]any{}, "close": map[string]any{}}
+	}
 	resp := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      json.RawMessage(req.ID),
@@ -187,8 +232,9 @@ func TestHelperProcess(t *testing.T) {
 			"protocolVersion": protocolVersion,
 			"agentCapabilities": map[string]any{
 				"auth":                map[string]any{"logout": map[string]any{}},
+				"loadSession":         loadSession,
 				"promptCapabilities":  map[string]any{},
-				"sessionCapabilities": map[string]any{},
+				"sessionCapabilities": sessionCapabilities,
 			},
 			"agentInfo":   map[string]any{"name": "fake-acp-agent", "version": "0.0.0"},
 			"authMethods": authMethods,
@@ -199,10 +245,14 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 
+	if mode == "sessions" {
+		serveSessionRequests(reader)
+		return
+	}
 	if mode != "auth" && mode != "logout" {
 		return
 	}
-	line, err = bufio.NewReader(os.Stdin).ReadBytes('\n')
+	line, err = reader.ReadBytes('\n')
 	if err != nil {
 		return
 	}
@@ -233,5 +283,40 @@ func TestHelperProcess(t *testing.T) {
 	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
 		fmt.Fprintf(os.Stderr, "write auth response: %v", err)
 		os.Exit(1)
+	}
+}
+
+func serveSessionRequests(reader *bufio.Reader) {
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.Unmarshal(line, &req); err != nil {
+			fmt.Fprintf(os.Stderr, "decode session request: %v", err)
+			os.Exit(1)
+		}
+
+		var result any = map[string]any{}
+		switch req.Method {
+		case "session/new":
+			result = map[string]any{"sessionId": "sess_new"}
+		case "session/list":
+			result = map[string]any{"sessions": []any{map[string]any{"sessionId": "sess_new", "cwd": "/tmp/project", "title": "Test session"}}}
+		case "session/load", "session/resume", "session/close":
+			result = map[string]any{}
+		default:
+			fmt.Fprintf(os.Stderr, "unexpected session request: %s", line)
+			os.Exit(1)
+		}
+		resp := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": result}
+		if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+			fmt.Fprintf(os.Stderr, "write session response: %v", err)
+			os.Exit(1)
+		}
 	}
 }

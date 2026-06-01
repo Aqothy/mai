@@ -85,6 +85,46 @@ func (c *Connection) Logout(ctx context.Context) (protocol.LogoutResponse, error
 	return resp, nil
 }
 
+func (c *Connection) NewSession(ctx context.Context, req protocol.NewSessionRequest) (protocol.NewSessionResponse, error) {
+	var resp protocol.NewSessionResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodSessionNew, req).Await(ctx, &resp); err != nil {
+		return protocol.NewSessionResponse{}, fmt.Errorf("ACP session/new failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) LoadSession(ctx context.Context, req protocol.LoadSessionRequest) (protocol.LoadSessionResponse, error) {
+	var resp protocol.LoadSessionResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodSessionLoad, req).Await(ctx, &resp); err != nil {
+		return protocol.LoadSessionResponse{}, fmt.Errorf("ACP session/load failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) ResumeSession(ctx context.Context, req protocol.ResumeSessionRequest) (protocol.ResumeSessionResponse, error) {
+	var resp protocol.ResumeSessionResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodSessionResume, req).Await(ctx, &resp); err != nil {
+		return protocol.ResumeSessionResponse{}, fmt.Errorf("ACP session/resume failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) CloseSession(ctx context.Context, sessionID protocol.SessionId) (protocol.CloseSessionResponse, error) {
+	var resp protocol.CloseSessionResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodSessionClose, protocol.CloseSessionRequest{SessionId: sessionID}).Await(ctx, &resp); err != nil {
+		return protocol.CloseSessionResponse{}, fmt.Errorf("ACP session/close failed: %w", err)
+	}
+	return resp, nil
+}
+
+func (c *Connection) ListSessions(ctx context.Context, req protocol.ListSessionsRequest) (protocol.ListSessionsResponse, error) {
+	var resp protocol.ListSessionsResponse
+	if err := c.conn.Call(ctx, protocol.AgentMethodSessionList, req).Await(ctx, &resp); err != nil {
+		return protocol.ListSessionsResponse{}, fmt.Errorf("ACP session/list failed: %w", err)
+	}
+	return resp, nil
+}
+
 func (c *Connection) resolveAuthMethodID(methodID string) (string, error) {
 	if methodID == "" {
 		return "", fmt.Errorf("ACP authenticate requires a method id")

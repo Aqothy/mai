@@ -95,6 +95,16 @@ func (s *Server) handle(req ipc.Request) ipc.Response {
 		return s.handleAgentAuthenticate(req)
 	case ipc.ActionAgentLogout:
 		return s.handleAgentLogout(req)
+	case ipc.ActionSessionNew:
+		return s.handleSessionNew(req)
+	case ipc.ActionSessionLoad:
+		return s.handleSessionLoad(req)
+	case ipc.ActionSessionResume:
+		return s.handleSessionResume(req)
+	case ipc.ActionSessionClose:
+		return s.handleSessionClose(req)
+	case ipc.ActionSessionList:
+		return s.handleSessionList(req)
 	default:
 		return ipc.Response{OK: false, Message: "unknown action: " + req.Action}
 	}
@@ -197,6 +207,101 @@ func (s *Server) handleAgentLogout(req ipc.Request) ipc.Response {
 	return ok("logged out agent "+params.Name, info)
 }
 
+func (s *Server) handleSessionNew(req ipc.Request) ipc.Response {
+	var params ipc.SessionNewParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	manager, err := s.sessionManager(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	thread, err := manager.NewSession(ctx, model.AgentSessionRequest{Cwd: params.Cwd, Options: params.Options})
+	if err != nil {
+		return fail(err)
+	}
+	return ok("created session "+thread.ID, thread)
+}
+
+func (s *Server) handleSessionLoad(req ipc.Request) ipc.Response {
+	var params ipc.SessionLoadParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	manager, err := s.sessionManager(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	thread, err := manager.LoadSession(ctx, model.AgentSessionRequest{SessionID: params.SessionID, Cwd: params.Cwd, Options: params.Options})
+	if err != nil {
+		return fail(err)
+	}
+	return ok("loaded session "+thread.ID, thread)
+}
+
+func (s *Server) handleSessionResume(req ipc.Request) ipc.Response {
+	var params ipc.SessionResumeParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	manager, err := s.sessionManager(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	thread, err := manager.ResumeSession(ctx, model.AgentSessionRequest{SessionID: params.SessionID, Cwd: params.Cwd, Options: params.Options})
+	if err != nil {
+		return fail(err)
+	}
+	return ok("resumed session "+thread.ID, thread)
+}
+
+func (s *Server) handleSessionClose(req ipc.Request) ipc.Response {
+	var params ipc.SessionCloseParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	manager, err := s.sessionManager(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	thread, err := manager.CloseSession(ctx, params.SessionID)
+	if err != nil {
+		return fail(err)
+	}
+	return ok("closed session "+thread.ID, thread)
+}
+
+func (s *Server) handleSessionList(req ipc.Request) ipc.Response {
+	var params ipc.SessionListParams
+	if err := req.DecodeParams(&params); err != nil {
+		return fail(err)
+	}
+	manager, err := s.sessionManager(params.Name)
+	if err != nil {
+		return fail(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	list, err := manager.ListSessions(ctx, model.AgentSessionListRequest{Cwd: params.Cwd, Cursor: params.Cursor, Options: params.Options})
+	if err != nil {
+		return fail(err)
+	}
+	return ok(fmt.Sprintf("listed %d sessions", len(list.Threads)), list)
+}
+
 func (s *Server) connection(name string) (adapters.ConnectionHandle, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -205,6 +310,21 @@ func (s *Server) connection(name string) (adapters.ConnectionHandle, error) {
 		return nil, fmt.Errorf("agent %q is not initialized", name)
 	}
 	return handle, nil
+}
+
+func (s *Server) sessionManager(name string) (adapters.SessionManager, error) {
+	if name == "" {
+		return nil, fmt.Errorf("session actions require a connection name")
+	}
+	handle, err := s.connection(name)
+	if err != nil {
+		return nil, err
+	}
+	manager, supportsSessions := handle.(adapters.SessionManager)
+	if !supportsSessions {
+		return nil, fmt.Errorf("agent does not support sessions")
+	}
+	return manager, nil
 }
 
 func adapterFor(kind model.AgentKind) (adapters.Adapter, error) {

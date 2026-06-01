@@ -12,6 +12,11 @@ const (
 	ActionAgentInit         = "agent-init"
 	ActionAgentAuthenticate = "agent-authenticate"
 	ActionAgentLogout       = "agent-logout"
+	ActionSessionNew        = "session-new"
+	ActionSessionLoad       = "session-load"
+	ActionSessionResume     = "session-resume"
+	ActionSessionClose      = "session-close"
+	ActionSessionList       = "session-list"
 )
 
 type Request struct {
@@ -38,6 +43,38 @@ type AgentAuthenticateParams struct {
 
 type AgentLogoutParams struct {
 	Name string `json:"name"`
+}
+
+type SessionNewParams struct {
+	Name    string          `json:"name"`
+	Cwd     string          `json:"cwd"`
+	Options json.RawMessage `json:"options,omitempty"`
+}
+
+type SessionLoadParams struct {
+	Name      string          `json:"name"`
+	SessionID string          `json:"sessionId"`
+	Cwd       string          `json:"cwd"`
+	Options   json.RawMessage `json:"options,omitempty"`
+}
+
+type SessionResumeParams struct {
+	Name      string          `json:"name"`
+	SessionID string          `json:"sessionId"`
+	Cwd       string          `json:"cwd"`
+	Options   json.RawMessage `json:"options,omitempty"`
+}
+
+type SessionCloseParams struct {
+	Name      string `json:"name"`
+	SessionID string `json:"sessionId"`
+}
+
+type SessionListParams struct {
+	Name    string          `json:"name"`
+	Cwd     string          `json:"cwd,omitempty"`
+	Cursor  string          `json:"cursor,omitempty"`
+	Options json.RawMessage `json:"options,omitempty"`
 }
 
 func NewRequest(action string, params any) (Request, error) {

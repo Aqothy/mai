@@ -80,6 +80,52 @@ func TestAgentAuthenticate(t *testing.T) {
 	}
 }
 
+func TestSessionNewAndList(t *testing.T) {
+	s := NewServer()
+	defer s.Close()
+
+	initReq, err := ipc.NewRequest(ipc.ActionAgentInit, ipc.AgentInitParams{Name: "codex", Kind: "acp", Command: helperCommand("sessions")})
+	if err != nil {
+		t.Fatalf("NewRequest init: %v", err)
+	}
+	if resp := s.handle(initReq); !resp.OK {
+		t.Fatalf("agent init failed: %s", resp.Message)
+	}
+
+	cwd := t.TempDir()
+	newReq, err := ipc.NewRequest(ipc.ActionSessionNew, ipc.SessionNewParams{Name: "codex", Cwd: cwd})
+	if err != nil {
+		t.Fatalf("NewRequest session new: %v", err)
+	}
+	newResp := s.handle(newReq)
+	if !newResp.OK {
+		t.Fatalf("session new failed: %s", newResp.Message)
+	}
+	var thread model.AgentThread
+	if err := json.Unmarshal(newResp.Data, &thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	if thread.ID != "sess_new" || thread.Cwd != cwd {
+		t.Fatalf("thread = %#v", thread)
+	}
+
+	listReq, err := ipc.NewRequest(ipc.ActionSessionList, ipc.SessionListParams{Name: "codex"})
+	if err != nil {
+		t.Fatalf("NewRequest session list: %v", err)
+	}
+	listResp := s.handle(listReq)
+	if !listResp.OK {
+		t.Fatalf("session list failed: %s", listResp.Message)
+	}
+	var list model.AgentThreadList
+	if err := json.Unmarshal(listResp.Data, &list); err != nil {
+		t.Fatalf("decode thread list: %v", err)
+	}
+	if len(list.Threads) != 1 || list.Threads[0].ID != "sess_new" {
+		t.Fatalf("thread list = %#v", list)
+	}
+}
+
 func initAgent(t *testing.T, s *Server, name string) model.AgentConnection {
 	t.Helper()
 	req, err := ipc.NewRequest(ipc.ActionAgentInit, ipc.AgentInitParams{Name: name, Kind: "acp", Command: helperCommand()})
@@ -139,12 +185,18 @@ func TestHelperProcess(t *testing.T) {
 	if mode == "auth" {
 		authMethods = []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
 	}
+	sessionCapabilities := map[string]any{}
+	loadSession := false
+	if mode == "sessions" {
+		loadSession = true
+		sessionCapabilities = map[string]any{"list": map[string]any{}, "resume": map[string]any{}, "close": map[string]any{}}
+	}
 	resp := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      json.RawMessage(req.ID),
 		"result": map[string]any{
 			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "sessionCapabilities": map[string]any{}},
+			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "loadSession": loadSession, "sessionCapabilities": sessionCapabilities},
 			"agentInfo":         map[string]any{"name": "fake-acp-agent"},
 			"authMethods":       authMethods,
 		},
@@ -152,6 +204,11 @@ func TestHelperProcess(t *testing.T) {
 	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
 		fmt.Fprintf(os.Stderr, "write response: %v", err)
 		os.Exit(1)
+	}
+
+	if mode == "sessions" {
+		serveDaemonSessionRequests(reader)
+		return
 	}
 
 	line, err = reader.ReadBytes('\n')
@@ -180,5 +237,43 @@ func TestHelperProcess(t *testing.T) {
 	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
 		fmt.Fprintf(os.Stderr, "write auth response: %v", err)
 		os.Exit(1)
+	}
+}
+
+func serveDaemonSessionRequests(reader *bufio.Reader) {
+	cwdBySession := map[string]string{}
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Cwd string `json:"cwd"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(line, &req); err != nil {
+			fmt.Fprintf(os.Stderr, "decode session request: %v", err)
+			os.Exit(1)
+		}
+
+		var result any = map[string]any{}
+		switch req.Method {
+		case "session/new":
+			cwdBySession["sess_new"] = req.Params.Cwd
+			result = map[string]any{"sessionId": "sess_new"}
+		case "session/list":
+			result = map[string]any{"sessions": []any{map[string]any{"sessionId": "sess_new", "cwd": cwdBySession["sess_new"], "title": "Test session"}}}
+		default:
+			fmt.Fprintf(os.Stderr, "unexpected session request: %s", line)
+			os.Exit(1)
+		}
+		resp := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": result}
+		if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
+			fmt.Fprintf(os.Stderr, "write session response: %v", err)
+			os.Exit(1)
+		}
 	}
 }

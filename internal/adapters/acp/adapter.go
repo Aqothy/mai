@@ -87,6 +87,8 @@ type Handle struct {
 }
 
 func (h *Handle) Info() model.AgentConnection {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.info
 }
 
@@ -124,6 +126,87 @@ func (h *Handle) Logout(ctx context.Context) (model.AgentConnection, error) {
 	return h.info, nil
 }
 
+func (h *Handle) NewSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
+	options, err := decodeSessionOptions(req.Options)
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	resp, err := h.client.NewSession(ctx, protocol.NewSessionRequest{Cwd: req.Cwd, McpServers: options.MCPServers})
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	if resp.SessionId == "" {
+		return model.AgentThread{}, fmt.Errorf("ACP session/new returned an empty session id")
+	}
+	return h.thread(string(resp.SessionId), req.Cwd, nil, nil, resp), nil
+}
+
+func (h *Handle) LoadSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
+	options, err := decodeSessionOptions(req.Options)
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	sessionID := protocol.SessionId(req.SessionID)
+	resp, err := h.client.LoadSession(ctx, protocol.LoadSessionRequest{SessionId: sessionID, Cwd: req.Cwd, McpServers: options.MCPServers})
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	return h.thread(req.SessionID, req.Cwd, nil, nil, resp), nil
+}
+
+func (h *Handle) ResumeSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
+	options, err := decodeSessionOptions(req.Options)
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	sessionID := protocol.SessionId(req.SessionID)
+	resp, err := h.client.ResumeSession(ctx, protocol.ResumeSessionRequest{SessionId: sessionID, Cwd: req.Cwd, McpServers: options.MCPServers})
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	return h.thread(req.SessionID, req.Cwd, nil, nil, resp), nil
+}
+
+func (h *Handle) CloseSession(ctx context.Context, sessionID string) (model.AgentThread, error) {
+	resp, err := h.client.CloseSession(ctx, protocol.SessionId(sessionID))
+	if err != nil {
+		return model.AgentThread{}, err
+	}
+	return h.thread(sessionID, "", nil, nil, resp), nil
+}
+
+func (h *Handle) ListSessions(ctx context.Context, req model.AgentSessionListRequest) (model.AgentThreadList, error) {
+	var cwd *string
+	if req.Cwd != "" {
+		cwd = &req.Cwd
+	}
+	var cursor *string
+	if req.Cursor != "" {
+		cursor = &req.Cursor
+	}
+
+	resp, err := h.client.ListSessions(ctx, protocol.ListSessionsRequest{Cwd: cwd, Cursor: cursor})
+	if err != nil {
+		return model.AgentThreadList{}, err
+	}
+
+	agentName := h.Info().Name
+	threads := make([]model.AgentThread, 0, len(resp.Sessions))
+	for _, session := range resp.Sessions {
+		threads = append(threads, model.AgentThread{
+			AgentName:        agentName,
+			AgentKind:        model.AgentKindACP,
+			ID:               string(session.SessionId),
+			BackendSessionID: string(session.SessionId),
+			Cwd:              session.Cwd,
+			Title:            session.Title,
+			UpdatedAt:        session.UpdatedAt,
+			Metadata:         session.Meta,
+		})
+	}
+	return model.AgentThreadList{AgentName: agentName, AgentKind: model.AgentKindACP, Threads: threads, NextCursor: resp.NextCursor}, nil
+}
+
 func (h *Handle) Close() error {
 	h.once.Do(func() {
 		_ = h.client.Close()
@@ -142,11 +225,44 @@ func (h *Handle) wait() {
 	h.mu.Unlock()
 }
 
-func capabilitySet(_ protocol.AgentCapabilities) model.CapabilitySet {
-	return model.CapabilitySet{
-		Sessions: true,
-		Prompt:   true,
-		Cancel:   true,
+func (h *Handle) thread(sessionID string, cwd string, title *string, updatedAt *string, raw any) model.AgentThread {
+	return model.AgentThread{
+		AgentName:        h.Info().Name,
+		AgentKind:        model.AgentKindACP,
+		ID:               sessionID,
+		BackendSessionID: sessionID,
+		Cwd:              cwd,
+		Title:            title,
+		UpdatedAt:        updatedAt,
+		Raw:              marshalRaw(raw),
+	}
+}
+
+type sessionOptions struct {
+	MCPServers []protocol.McpServer `json:"mcpServers,omitempty"`
+}
+
+func decodeSessionOptions(raw json.RawMessage) (sessionOptions, error) {
+	if len(raw) == 0 {
+		return sessionOptions{MCPServers: []protocol.McpServer{}}, nil
+	}
+	var options sessionOptions
+	if err := json.Unmarshal(raw, &options); err != nil {
+		return sessionOptions{}, fmt.Errorf("decode ACP session options: %w", err)
+	}
+	if options.MCPServers == nil {
+		options.MCPServers = []protocol.McpServer{}
+	}
+	return options, nil
+}
+
+func capabilitySet(capabilities protocol.AgentCapabilities) model.AgentCapabilities {
+	return model.AgentCapabilities{
+		SessionCreate: true,
+		SessionList:   capabilities.SessionCapabilities.List != nil,
+		SessionLoad:   capabilities.LoadSession,
+		SessionResume: capabilities.SessionCapabilities.Resume != nil,
+		SessionClose:  capabilities.SessionCapabilities.Close != nil,
 	}
 }
 
