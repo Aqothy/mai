@@ -143,7 +143,7 @@ func (i *ProviderRuntimeIngestion) ingestRecovered(event provider.RuntimeEvent) 
 }
 
 func (i *ProviderRuntimeIngestion) Ingest(event provider.RuntimeEvent) {
-	if event.ThreadID == "" || i == nil || i.engine == nil {
+	if event.ThreadID == "" {
 		return
 	}
 	if i.eventFromStaleProviderInstance(event) {

@@ -2,8 +2,6 @@ package orchestration
 
 import (
 	"fmt"
-	"log"
-	"runtime/debug"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -35,18 +33,10 @@ type sessionUpdate struct {
 	Error      string
 }
 
-func (e *Engine) sessionUpdateRecovered(update sessionUpdate) (result DispatchResult, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			if violation, ok := rec.(*InvariantViolationError); ok {
-				err = violation
-				return
-			}
-			log.Printf("orchestration: session update %q panicked: %v\n%s", update.Kind, rec, debug.Stack())
-			err = fmt.Errorf("session update %q panicked: %v", update.Kind, rec)
-		}
-	}()
-	return e.applySessionUpdate(update)
+func (e *Engine) sessionUpdateRecovered(update sessionUpdate) (DispatchResult, error) {
+	return recoverEngineOperation(fmt.Sprintf("session update %q", update.Kind), func() (DispatchResult, error) {
+		return e.applySessionUpdate(update)
+	})
 }
 
 func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error) {

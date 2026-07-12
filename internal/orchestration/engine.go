@@ -124,8 +124,7 @@ func (e *Engine) worker() {
 			// Escalate an invariant violation AFTER replying, so the in-flight
 			// caller deterministically receives the typed error before the
 			// engine closes and the handler (the daemon's shutdown) runs.
-			var violation *InvariantViolationError
-			if errors.As(err, &violation) {
+			if violation, ok := errors.AsType[*InvariantViolationError](err); ok {
 				e.Close()
 				e.mu.Lock()
 				handler := e.onInvariant
@@ -234,22 +233,12 @@ func (e *Engine) process(command Command) (DispatchResult, error) {
 
 // dispatchRecovered converts a pre-mutation (decider/validation) panic into a
 // command error so one bad command cannot wedge the worker. Panics that fire
-// after the event log began mutating never reach here — withLockNotify
-// escalates them to fatalf, because store and read model may now disagree.
-func (e *Engine) dispatchRecovered(command Command) (result DispatchResult, err error) {
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			return
-		}
-		if violation, ok := rec.(*InvariantViolationError); ok {
-			err = violation // already logged by withLockNotify; the worker escalates
-			return
-		}
-		log.Printf("orchestration: command %q panicked: %v\n%s", command.Type, rec, debug.Stack())
-		err = fmt.Errorf("command %q panicked: %v", command.Type, rec)
-	}()
-	return e.dispatch(command)
+// after the event log began mutating arrive as InvariantViolationError because
+// store and read model may now disagree.
+func (e *Engine) dispatchRecovered(command Command) (DispatchResult, error) {
+	return recoverEngineOperation(fmt.Sprintf("command %q", command.Type), func() (DispatchResult, error) {
+		return e.dispatch(command)
+	})
 }
 
 func (e *Engine) dispatch(command Command) (DispatchResult, error) {
@@ -281,20 +270,28 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 // an error so one bad event cannot wedge the worker, mirroring
 // dispatchRecovered. Post-mutation panics surface as InvariantViolationError
 // and the worker escalates them instead.
-func (e *Engine) appendRecovered(input EventInput) (result DispatchResult, err error) {
+func (e *Engine) appendRecovered(input EventInput) (DispatchResult, error) {
+	return recoverEngineOperation(fmt.Sprintf("appending event %q", input.Type), func() (DispatchResult, error) {
+		return e.appendInput(input)
+	})
+}
+
+// recoverEngineOperation is the common panic boundary for work executed by the
+// engine worker. withLockNotify has already classified post-mutation panics as
+// invariant violations; all other panics are safe to report as operation
+// errors because no event was appended.
+func recoverEngineOperation(operation string, run func() (DispatchResult, error)) (result DispatchResult, err error) {
 	defer func() {
-		rec := recover()
-		if rec == nil {
-			return
+		if rec := recover(); rec != nil {
+			if violation, ok := rec.(*InvariantViolationError); ok {
+				err = violation
+				return
+			}
+			log.Printf("orchestration: %s panicked: %v\n%s", operation, rec, debug.Stack())
+			err = fmt.Errorf("%s panicked: %v", operation, rec)
 		}
-		if violation, ok := rec.(*InvariantViolationError); ok {
-			err = violation // already logged by withLockNotify; the worker escalates
-			return
-		}
-		log.Printf("orchestration: appending event %q panicked: %v\n%s", input.Type, rec, debug.Stack())
-		err = fmt.Errorf("appending event %q panicked: %v", input.Type, rec)
 	}()
-	return e.appendInput(input)
+	return run()
 }
 
 // appendInput appends a provider/server event against an existing thread. The
@@ -715,8 +712,8 @@ func (e *Engine) OnInvariantViolation(fn func(*InvariantViolationError)) {
 //     dispatchRecovered/appendRecovered, which convert it into a command
 //     error — one bad command cannot wedge the daemon.
 //   - AFTER mutation began (store.Append/projection.Apply): the mutex is
-//     released, everything committed to the store is still published, and
-//     then fatalf terminates the daemon — see fatalf for why.
+//     released, everything committed to the store is still published, and a
+//     typed invariant violation tells the worker to close the engine.
 //
 // Listeners run outside the lock but synchronously on the worker. A listener
 // that needs engine work must hand it to another goroutine; awaiting a queued
