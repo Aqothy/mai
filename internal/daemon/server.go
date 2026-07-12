@@ -3,7 +3,10 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +28,8 @@ func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit 
 }
 
 type Server struct {
+	logger *slog.Logger
+
 	mu         sync.Mutex
 	httpServer *http.Server
 
@@ -47,16 +52,91 @@ type Server struct {
 }
 
 func NewServer() *Server {
+	return newServer(newLoggerFromEnv())
+}
+
+func newServer(logger *slog.Logger) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel}
+	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel}
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
 	s.providerService = providerservice.New(openProviderInstance)
 	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService)
 	go s.ingestion.Run(ctx, s.providerService.Events())
-	s.orchestration.OnEvent(func(event orchestration.Event) { s.publishOrchestrationEvent(event) })
+	s.orchestration.OnEvent(func(event orchestration.Event) {
+		s.logEvent(event)
+		s.publishOrchestrationEvent(event)
+	})
 	return s
+}
+
+func newLoggerFromEnv() *slog.Logger {
+	level := slog.LevelInfo
+	switch strings.ToLower(os.Getenv("MAID_LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// logEvent deliberately records only correlation metadata. Event payloads can
+// contain prompts, tool output, attachments, and secrets and do not belong in
+// routine daemon logs. Full events remain available through replay/diagnostics.
+func (s *Server) logEvent(event orchestration.Event) {
+	attrs := []any{
+		"sequence", event.Sequence,
+		"event", event.Type,
+		"actor", event.Actor,
+		"thread", event.ThreadID(),
+	}
+	if event.CommandID != "" {
+		attrs = append(attrs, "command", event.CommandID)
+	}
+
+	// Streamed text and reasoning chunks are intentionally absent. They are
+	// high-volume, may contain private content, and their lifecycle boundaries
+	// are already represented by turn/session events.
+	switch event.Type {
+	case orchestration.EventThreadMessageSent:
+		return
+	case orchestration.EventThreadItemUpserted:
+		item := event.Payload.Item
+		if item == nil || item.TextDelta != "" {
+			return
+		}
+		attrs = append(attrs, "item", item.ID, "kind", item.Kind, "status", item.Status, "turn", item.TurnID)
+	case orchestration.EventThreadSessionStatusSet:
+		if session := event.Payload.Session; session != nil {
+			attrs = append(attrs, "provider", session.ProviderInstanceID, "status", session.Status, "turn", session.ActiveTurnID, "generation", session.ProviderGeneration)
+		}
+	case orchestration.EventThreadTurnStartRequested,
+		orchestration.EventThreadTurnInterruptRequested,
+		orchestration.EventThreadTurnInterruptConfirmed,
+		orchestration.EventThreadTurnInterruptFailed:
+		attrs = append(attrs, "turn", event.Payload.TurnID)
+	case orchestration.EventThreadApprovalOpened, orchestration.EventThreadApprovalResolved:
+		if approval := event.Payload.Approval; approval != nil {
+			attrs = append(attrs, "request", approval.RequestID, "turn", approval.TurnID, "kind", approval.RequestType, "decision", approval.Decision)
+		}
+	case orchestration.EventThreadPlanUpdated:
+		if plan := event.Payload.Plan; plan != nil {
+			attrs = append(attrs, "entries", len(plan.Entries))
+		}
+	case orchestration.EventThreadConfigOptionsUpdated:
+		attrs = append(attrs, "options", len(event.Payload.ConfigOptions))
+	case orchestration.EventThreadSlashCommandsUpdated:
+		attrs = append(attrs, "commands", len(event.Payload.SlashCommands))
+	case orchestration.EventThreadTokenUsageUpdated:
+		if usage := event.Payload.TokenUsage; usage != nil {
+			attrs = append(attrs, "usedTokens", usage.UsedTokens)
+		}
+	}
+	s.logger.Debug("orchestration event", attrs...)
 }
 
 // handleInvariantViolation preserves main's ownership of process exit while
@@ -122,5 +202,10 @@ func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return s.providerService.StartInstance(ctx, spec, restart)
+	started := time.Now()
+	info, err := s.providerService.StartInstance(ctx, spec, restart)
+	if err == nil {
+		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
+	}
+	return info, err
 }

@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,8 +67,9 @@ const rpcOutboundQueueSize = 1024
 const maxInboundMessageBytes = 32 << 20
 
 type rpcClient struct {
-	id   string
-	conn *jsonrpc2.Connection
+	id     string
+	conn   *jsonrpc2.Connection
+	logger *slog.Logger
 
 	outbound chan rpcOutbound
 	done     chan struct{}
@@ -142,7 +144,7 @@ func (s *Server) RunWebSocket(addr string) error {
 		return fatalErr
 	}
 	defer s.Close()
-	log.Printf("maiD JSON-RPC WebSocket listening at ws://%s/rpc", addr)
+	s.logger.Info("server listening", "http", "http://"+addr, "websocket", "ws://"+addr+"/rpc")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -158,7 +160,7 @@ func (s *Server) WebSocketHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
-			log.Printf("websocket accept: %v", err)
+			s.logger.Warn("websocket accept failed", "error", err)
 			return
 		}
 		// The library default (32KiB) is too small for real commands: a single
@@ -177,10 +179,10 @@ func (s *Server) WebSocketHandler() http.HandlerFunc {
 			Writer: writer,
 			Closer: socket,
 			OnInternalError: func(err error) {
-				log.Printf("client jsonrpc internal error: %v", err)
+				s.logger.Error("JSON-RPC internal error", "error", err)
 			},
 			OnNotificationError: func(err error) {
-				log.Printf("client jsonrpc notification error: %v", err)
+				s.logger.Warn("JSON-RPC notification failed", "error", err)
 			},
 			Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
 				client = s.registerRPCClient(c)
@@ -196,9 +198,11 @@ func (s *Server) WebSocketHandler() http.HandlerFunc {
 
 func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 	client := &rpcClient{id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn, outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
+	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
 	s.rpcClients[client.id] = client
 	s.rpcMu.Unlock()
+	client.logger.Info("client connected")
 	go client.writeOutbound()
 	return client
 }
@@ -212,7 +216,9 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 		delete(s.rpcClients, client.id)
 	}
 	s.rpcMu.Unlock()
-	client.closeOutbound()
+	if client.closeOutbound() {
+		client.logger.Info("client disconnected")
+	}
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -225,7 +231,7 @@ func (c *rpcClient) closeOutbound() bool {
 
 func (c *rpcClient) overflowClose(what string) {
 	if c.closeOutbound() {
-		log.Printf("client %s outbound overflow on %s; closing connection", c.id, what)
+		c.logger.Warn("client outbound queue full; closing connection", "method", what)
 		go func() { _ = c.conn.Close() }()
 	}
 }
@@ -238,7 +244,7 @@ func (c *rpcClient) writeOutbound() {
 		case msg := <-c.outbound:
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := c.conn.Notify(ctx, msg.method, msg.params); err != nil {
-				log.Printf("notify %s to %s: %v", msg.method, c.id, err)
+				c.logger.Warn("client notification failed", "method", msg.method, "error", err)
 			}
 			cancel()
 		}
@@ -280,14 +286,23 @@ func (c *rpcClient) subscribedThreadList() bool {
 }
 
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
+	started := time.Now()
 	// jsonrpc2 treats a non-nil result alongside a non-nil error as a handler
 	// contract violation (logged via OnInternalError), so drop zero-value
 	// results from pass-through calls like Dispatch/StartProvider on failure.
 	defer func() {
 		err = rpcError(err)
+		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond)}
+		if h.client != nil && h.client.id != "" {
+			attrs = append(attrs, "client", h.client.id)
+		}
 		if err != nil {
 			result = nil
+			attrs = append(attrs, "error", compactError(err))
+			h.server.logger.Warn("RPC failed", attrs...)
+			return
 		}
+		h.server.logger.Debug("RPC completed", attrs...)
 	}()
 	switch req.Method {
 	case RPCMethodOrchestrationDispatchCommand:
@@ -379,6 +394,15 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 	}
 }
 
+func compactError(err error) string {
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	const maxBytes = 512
+	if len(message) > maxBytes {
+		return message[:maxBytes] + "…"
+	}
+	return message
+}
+
 func rpcError(err error) error {
 	if err == nil {
 		return nil
@@ -427,7 +451,7 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	}
 
 	if len(threadClients) > 0 {
-		if params, ok := marshalNotification(orchestration.ThreadStreamItem{Kind: "event", Event: &event}, RPCMethodOrchestrationSubscribeThread); ok {
+		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: "event", Event: &event}, RPCMethodOrchestrationSubscribeThread); ok {
 			for _, client := range threadClients {
 				client.notify(RPCMethodOrchestrationSubscribeThread, params)
 			}
@@ -440,17 +464,17 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	if !ok {
 		return
 	}
-	if params, ok := marshalNotification(orchestration.ThreadListStreamItem{Kind: "thread-upserted", Sequence: event.Sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
+	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: "thread-upserted", Sequence: event.Sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
 		for _, client := range threadListClients {
 			client.notify(RPCMethodOrchestrationSubscribeThreadList, params)
 		}
 	}
 }
 
-func marshalNotification(item any, method string) (json.RawMessage, bool) {
+func (s *Server) marshalNotification(item any, method string) (json.RawMessage, bool) {
 	params, err := json.Marshal(item)
 	if err != nil {
-		log.Printf("marshal %s notification: %v", method, err)
+		s.logger.Error("notification encoding failed", "method", method, "error", err)
 		return nil, false
 	}
 	return params, true
