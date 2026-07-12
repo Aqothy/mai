@@ -1,2 +1,6 @@
-github.com/Aqothy/jsonrpc2 v0.0.0-20260527182138-ff05ac2843af h1:YIZB76KQ8fBCidb8hHqqobSRUFyXUWMS+jBjfOX7LrA=
-github.com/Aqothy/jsonrpc2 v0.0.0-20260527182138-ff05ac2843af/go.mod h1:JYE0H2dW5xBYAFUUF4b/CS/VS/SafdWSz70eIBKTGTM=
+github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be h1:yA4FE1tpiNu5QQKS281OpoqDF7MUor/LWrg6TNKUdmc=
+github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be/go.mod h1:9lqEUDjB2oAgqzLYzM6rjMv6GVIpAwgIEFqVX6p8UnA=
+github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505 h1:qaNaiWBumfAkntvzfSPoxW7bh1zK6z8VaONzp93ZRbk=
+github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505/go.mod h1:JYE0H2dW5xBYAFUUF4b/CS/VS/SafdWSz70eIBKTGTM=
+github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
+github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=

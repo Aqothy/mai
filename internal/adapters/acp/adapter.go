@@ -2,35 +2,55 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters"
-	acpclient "github.com/Aqothy/maiD/internal/adapters/acp/client"
-	protocol "github.com/Aqothy/maiD/internal/adapters/acp/protocol"
-	"github.com/Aqothy/maiD/internal/model"
+	acp "github.com/Aqothy/go-acp"
+	"github.com/Aqothy/go-acp/schema"
+	"github.com/Aqothy/maiD/internal/provider"
 )
 
-type Adapter struct{}
+const DriverKind provider.DriverKind = "acp"
 
-func New() *Adapter { return &Adapter{} }
+// Config is the driver-owned provider.start configuration for an ACP process.
+type Config struct {
+	Command []string `json:"command"`
+}
 
-func (a *Adapter) StartConnection(ctx context.Context, req adapters.StartConnectionRequest) (adapters.ConnectionHandle, error) {
-	if len(req.Command) == 0 {
-		return nil, fmt.Errorf("missing ACP adapter command")
+// OpenInstance decodes the ACP configuration, starts the agent, initializes the
+// connection, and publishes provider-neutral runtime events through emit.
+func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (*Instance, error) {
+	if spec.InstanceID == "" {
+		return nil, fmt.Errorf("missing provider instance id")
 	}
-	if req.Name == "" {
-		req.Name = filepath.Base(req.Command[0])
+	if len(spec.Config) == 0 {
+		return nil, fmt.Errorf("missing ACP config")
+	}
+	var config Config
+	if err := json.Unmarshal(spec.Config, &config); err != nil {
+		return nil, fmt.Errorf("decode ACP config: %w", err)
+	}
+	if len(config.Command) == 0 {
+		return nil, fmt.Errorf("ACP config requires command")
+	}
+	if spec.Name == "" {
+		spec.Name = filepath.Base(config.Command[0])
 	}
 
 	startedAt := time.Now()
-	cmd := exec.Command(req.Command[0], req.Command[1:]...)
+	cmd := exec.Command(config.Command[0], config.Command[1:]...)
 	cmd.Stderr = os.Stderr
+	configureProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -47,55 +67,167 @@ func (a *Adapter) StartConnection(ctx context.Context, req adapters.StartConnect
 		return nil, fmt.Errorf("start ACP agent: %w", err)
 	}
 
-	client := acpclient.NewConnection(stdin, stdout)
-	initResp, err := client.InitializeConnection(ctx)
+	h := newInstance(emit)
+	h.cmd = cmd
+	h.stdin = stdin
+	h.stdout = stdout
+	logger := slog.Default().With("component", "acp-sdk", "providerInstance", spec.InstanceID)
+	if err := h.connectClient(acp.Combine(stdout, stdin), logger); err != nil {
+		h.cancel()
+		_ = h.closeIO()
+		killProcessTree(cmd)
+		_ = cmd.Wait()
+		return nil, err
+	}
+
+	initResp, err := h.initializeConnection(ctx)
 	if err != nil {
-		_ = client.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		h.cancel()
+		_ = h.conn.Close()
+		_ = h.closeIO()
+		killProcessTree(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
 
 	rawInit, _ := json.Marshal(initResp)
-	h := &Handle{
-		cmd:    cmd,
-		client: client,
-		info: model.AgentConnection{
-			Name:          req.Name,
-			Kind:          model.AgentKindACP,
-			Command:       append([]string(nil), req.Command...),
-			PID:           cmd.Process.Pid,
-			Status:        model.ConnectionStatusInitialized,
-			StartedAt:     startedAt,
-			InitializedAt: client.InitializedAt,
-			Capabilities:  capabilitySet(initResp.AgentCapabilities),
-			Metadata:      metadataFromInitialize(initResp, rawInit),
-		},
+	h.info = provider.InstanceInfo{
+		InstanceID:    spec.InstanceID,
+		Name:          spec.Name,
+		Driver:        DriverKind,
+		PID:           cmd.Process.Pid,
+		Status:        provider.InstanceStatusInitialized,
+		StartedAt:     startedAt,
+		InitializedAt: h.initializedAt,
+		Capabilities:  capabilitySet(initResp),
+		Auth:          authStateFromACP(initResp),
+		Metadata:      metadataFromInitialize(initResp, rawInit),
 	}
 	go h.wait()
 	return h, nil
 }
 
-type Handle struct {
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	client *acpclient.Connection
-	info   model.AgentConnection
-	once   sync.Once
+type Instance struct {
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	stdout        io.ReadCloser
+	conn          *acp.ClientConnection
+	agentPeer     *acp.AgentPeer
+	ctx           context.Context
+	cancel        context.CancelFunc
+	initializedAt time.Time
+	initialize    schema.InitializeResponse
+	info          provider.InstanceInfo
+
+	// sessions holds all per-session state (stream, turn, config, scope, tool
+	// reconciliation, pending permissions) keyed by ACP session id;
+	// sessionsByThread is the thread->session index. Unbinding a session is
+	// deleting its one entry plus the index entry.
+	sessions         map[string]*acpSession
+	sessionsByThread map[string]string
+
+	runtimeEventListener provider.RuntimeEventListener
+	// reaped is set once wait() has reaped the agent process. From then on the
+	// agent's pid and process group id may be recycled by unrelated processes,
+	// so Close must no longer signal them. It is set (under mu) BEFORE wait
+	// does any post-reap signalling, so Close can never observe a stale false
+	// after the reap.
+	reaped bool
+	// killedTree coordinates Close and wait so at most one of them runs
+	// killProcessTree. Guarded by mu.
+	killedTree bool
+	once       sync.Once
+	closeErr   error
 }
 
-func (h *Handle) Info() model.AgentConnection {
+func newInstance(listener provider.RuntimeEventListener) *Instance {
+	h := &Instance{
+		runtimeEventListener: listener,
+		sessions:             make(map[string]*acpSession),
+		sessionsByThread:     make(map[string]string),
+	}
+	h.ctx, h.cancel = context.WithCancel(context.Background())
+	return h
+}
+
+// connectClient wires the go-acp client app over the transport. Only the
+// permission handler is registered: session/update is consumed through the
+// SDK's session router (per-session ordered streams), and the ACP fs/terminal
+// client methods stay unregistered on purpose — unregistered methods answer
+// method-not-found, which is the product decision (no fs/terminal support).
+func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) error {
+	app := acp.Client(acp.AppOptions{
+		OnInternalError: func(err error) {
+			logger.Error("ACP connection internal error", "error", err)
+		},
+		OnNotificationError: func(err error) {
+			logger.Error("ACP notification handler error", "error", err)
+		},
+	}).OnRequestPermission(func(ctx context.Context, call acp.ClientRequest[schema.RequestPermissionRequest]) (schema.RequestPermissionResponse, error) {
+		return h.requestPermission(ctx, call.Params)
+	})
+	conn, err := app.Connect(h.ctx, rwc)
+	if err != nil {
+		return fmt.Errorf("connect ACP client: %w", err)
+	}
+	h.conn = conn
+	h.agentPeer = conn.Agent()
+	return nil
+}
+
+func (h *Instance) agent() *acp.AgentPeer { return h.agentPeer }
+
+func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
+	title := "Mai Daemon"
+	initReq := schema.InitializeRequest{
+		ProtocolVersion:    schema.CurrentProtocolVersion,
+		ClientCapabilities: &schema.ClientCapabilities{},
+		ClientInfo:         &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
+	}
+	initResp, err := h.agent().Initialize(ctx, initReq)
+	if err != nil {
+		return schema.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", acpRequestError(err))
+	}
+	if initResp.ProtocolVersion != schema.CurrentProtocolVersion {
+		return schema.InitializeResponse{}, fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
+	}
+	if initResp.AuthMethods == nil {
+		initResp.AuthMethods = []schema.AuthMethod{}
+	}
+	h.mu.Lock()
+	h.initialize = initResp
+	h.initializedAt = time.Now()
+	h.mu.Unlock()
+	return initResp, nil
+}
+
+func (h *Instance) Info() provider.InstanceInfo {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.info
+	return cloneInstanceInfo(h.info)
 }
 
-func (h *Handle) Authenticate(ctx context.Context, methodID string) (model.AgentConnection, error) {
-	resp, err := h.client.Authenticate(ctx, methodID)
+func cloneInstanceInfo(conn provider.InstanceInfo) provider.InstanceInfo {
+	conn.Auth.Methods = append([]provider.AuthMethod(nil), conn.Auth.Methods...)
+	if conn.Metadata != nil {
+		metadata := make(map[string]json.RawMessage, len(conn.Metadata))
+		for key, value := range conn.Metadata {
+			metadata[key] = append(json.RawMessage(nil), value...)
+		}
+		conn.Metadata = metadata
+	}
+	return conn
+}
+
+func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.InstanceInfo, error) {
+	resolvedMethodID, err := h.resolveAuthMethodID(methodID)
 	if err != nil {
-		return model.AgentConnection{}, err
+		return provider.InstanceInfo{}, err
+	}
+	resp, err := h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
+	if err != nil {
+		return provider.InstanceInfo{}, acpRequestError(err)
 	}
 
 	h.mu.Lock()
@@ -104,16 +236,20 @@ func (h *Handle) Authenticate(ctx context.Context, methodID string) (model.Agent
 		h.info.Metadata = make(map[string]json.RawMessage)
 	}
 	now := time.Now()
+	h.info.Auth.Status = provider.AuthStatusAuthenticated
 	h.info.Metadata["authenticatedAt"] = marshalRaw(now)
-	h.info.Metadata["authenticatedMethodId"] = marshalRaw(methodID)
+	h.info.Metadata["authenticatedMethodId"] = marshalRaw(resolvedMethodID)
 	h.info.Metadata["authenticateResponse"] = marshalRaw(resp)
-	return h.info, nil
+	return cloneInstanceInfo(h.info), nil
 }
 
-func (h *Handle) Logout(ctx context.Context) (model.AgentConnection, error) {
-	resp, err := h.client.Logout(ctx)
+func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
+	if !h.Info().Capabilities.Logout {
+		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
+	}
+	resp, err := h.agent().Logout(ctx, schema.LogoutRequest{})
 	if err != nil {
-		return model.AgentConnection{}, err
+		return provider.InstanceInfo{}, acpRequestError(err)
 	}
 
 	h.mu.Lock()
@@ -121,166 +257,95 @@ func (h *Handle) Logout(ctx context.Context) (model.AgentConnection, error) {
 	if h.info.Metadata == nil {
 		h.info.Metadata = make(map[string]json.RawMessage)
 	}
+	h.info.Auth.Status = provider.AuthStatusUnauthenticated
 	h.info.Metadata["loggedOutAt"] = marshalRaw(time.Now())
 	h.info.Metadata["logoutResponse"] = marshalRaw(resp)
-	return h.info, nil
+	return cloneInstanceInfo(h.info), nil
 }
 
-func (h *Handle) NewSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
-	options, err := decodeSessionOptions(req.Options)
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	resp, err := h.client.NewSession(ctx, protocol.NewSessionRequest{Cwd: req.Cwd, McpServers: options.MCPServers})
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	if resp.SessionId == "" {
-		return model.AgentThread{}, fmt.Errorf("ACP session/new returned an empty session id")
-	}
-	return h.thread(string(resp.SessionId), req.Cwd, nil, nil, resp), nil
-}
-
-func (h *Handle) LoadSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
-	options, err := decodeSessionOptions(req.Options)
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	sessionID := protocol.SessionId(req.SessionID)
-	resp, err := h.client.LoadSession(ctx, protocol.LoadSessionRequest{SessionId: sessionID, Cwd: req.Cwd, McpServers: options.MCPServers})
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	return h.thread(req.SessionID, req.Cwd, nil, nil, resp), nil
-}
-
-func (h *Handle) ResumeSession(ctx context.Context, req model.AgentSessionRequest) (model.AgentThread, error) {
-	options, err := decodeSessionOptions(req.Options)
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	sessionID := protocol.SessionId(req.SessionID)
-	resp, err := h.client.ResumeSession(ctx, protocol.ResumeSessionRequest{SessionId: sessionID, Cwd: req.Cwd, McpServers: options.MCPServers})
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	return h.thread(req.SessionID, req.Cwd, nil, nil, resp), nil
-}
-
-func (h *Handle) CloseSession(ctx context.Context, sessionID string) (model.AgentThread, error) {
-	resp, err := h.client.CloseSession(ctx, protocol.SessionId(sessionID))
-	if err != nil {
-		return model.AgentThread{}, err
-	}
-	return h.thread(sessionID, "", nil, nil, resp), nil
-}
-
-func (h *Handle) ListSessions(ctx context.Context, req model.AgentSessionListRequest) (model.AgentThreadList, error) {
-	var cwd *string
-	if req.Cwd != "" {
-		cwd = &req.Cwd
-	}
-	var cursor *string
-	if req.Cursor != "" {
-		cursor = &req.Cursor
-	}
-
-	resp, err := h.client.ListSessions(ctx, protocol.ListSessionsRequest{Cwd: cwd, Cursor: cursor})
-	if err != nil {
-		return model.AgentThreadList{}, err
-	}
-
-	agentName := h.Info().Name
-	threads := make([]model.AgentThread, 0, len(resp.Sessions))
-	for _, session := range resp.Sessions {
-		threads = append(threads, model.AgentThread{
-			AgentName:        agentName,
-			AgentKind:        model.AgentKindACP,
-			ID:               string(session.SessionId),
-			BackendSessionID: string(session.SessionId),
-			Cwd:              session.Cwd,
-			Title:            session.Title,
-			UpdatedAt:        session.UpdatedAt,
-			Metadata:         session.Meta,
-		})
-	}
-	return model.AgentThreadList{AgentName: agentName, AgentKind: model.AgentKindACP, Threads: threads, NextCursor: resp.NextCursor}, nil
-}
-
-func (h *Handle) Close() error {
+func (h *Instance) Close() error {
 	h.once.Do(func() {
-		_ = h.client.Close()
-		if h.cmd.Process != nil {
-			_ = h.cmd.Process.Kill()
+		if h.cancel != nil {
+			h.cancel()
 		}
+		if h.conn != nil {
+			_ = h.conn.Close()
+		}
+		h.closeErr = h.closeIO()
+		// Signal while holding mu: wait() sets reaped under the same lock as
+		// the very first thing after cmd.Wait() returns, so a false reaped
+		// here means the process is still un-reaped (at worst a zombie) and
+		// its pid/pgid cannot have been recycled while we signal it.
+		h.mu.Lock()
+		if !h.reaped && !h.killedTree {
+			h.killedTree = true
+			killProcessTree(h.cmd)
+		}
+		h.mu.Unlock()
 	})
-	return nil
+	return h.closeErr
 }
 
-func (h *Handle) wait() {
+func (h *Instance) wait() {
 	_ = h.cmd.Wait()
-	_ = h.client.Close()
+	// The leader is reaped: record that (and claim the kill) BEFORE any
+	// signalling, so Close never signals a recycled pid/pgid and at most one
+	// killProcessTree runs.
 	h.mu.Lock()
-	h.info.Status = model.ConnectionStatusExited
+	h.reaped = true
+	h.info.Status = provider.InstanceStatusExited
+	killed := h.killedTree
+	h.killedTree = true
 	h.mu.Unlock()
+	if !killed {
+		// Wrappers may background the real agent and exit first. Terminate the
+		// process group immediately after reaping the leader, while its
+		// descendants still make the group identity unambiguous.
+		killProcessTree(h.cmd)
+	}
+	_ = h.closeIO()
 }
 
-func (h *Handle) thread(sessionID string, cwd string, title *string, updatedAt *string, raw any) model.AgentThread {
-	return model.AgentThread{
-		AgentName:        h.Info().Name,
-		AgentKind:        model.AgentKindACP,
-		ID:               sessionID,
-		BackendSessionID: sessionID,
-		Cwd:              cwd,
-		Title:            title,
-		UpdatedAt:        updatedAt,
-		Raw:              marshalRaw(raw),
+func (h *Instance) closeIO() error {
+	var errs []error
+	if h.stdin != nil {
+		errs = append(errs, h.stdin.Close())
 	}
+	if h.stdout != nil {
+		errs = append(errs, h.stdout.Close())
+	}
+	return errors.Join(errs...)
 }
 
-type sessionOptions struct {
-	MCPServers []protocol.McpServer `json:"mcpServers,omitempty"`
+func (h *Instance) resolveAuthMethodID(methodID string) (string, error) {
+	if methodID == "" {
+		return "", fmt.Errorf("ACP authenticate requires a method id")
+	}
+	h.mu.Lock()
+	methods := append([]schema.AuthMethod(nil), h.initialize.AuthMethods...)
+	h.mu.Unlock()
+	for _, method := range methods {
+		if authMethodID(method) == methodID {
+			return methodID, nil
+		}
+	}
+	return "", fmt.Errorf("ACP auth method %q was not advertised as a supported agent auth method", methodID)
 }
 
-func decodeSessionOptions(raw json.RawMessage) (sessionOptions, error) {
-	if len(raw) == 0 {
-		return sessionOptions{MCPServers: []protocol.McpServer{}}, nil
-	}
-	var options sessionOptions
-	if err := json.Unmarshal(raw, &options); err != nil {
-		return sessionOptions{}, fmt.Errorf("decode ACP session options: %w", err)
-	}
-	if options.MCPServers == nil {
-		options.MCPServers = []protocol.McpServer{}
-	}
-	return options, nil
-}
-
-func capabilitySet(capabilities protocol.AgentCapabilities) model.AgentCapabilities {
-	return model.AgentCapabilities{
-		SessionCreate: true,
-		SessionList:   capabilities.SessionCapabilities.List != nil,
-		SessionLoad:   capabilities.LoadSession,
-		SessionResume: capabilities.SessionCapabilities.Resume != nil,
-		SessionClose:  capabilities.SessionCapabilities.Close != nil,
-	}
-}
-
-func metadataFromInitialize(initResp protocol.InitializeResponse, rawInit json.RawMessage) map[string]json.RawMessage {
-	metadata := map[string]json.RawMessage{
-		"agentCapabilities": marshalRaw(initResp.AgentCapabilities),
-		"authMethods":       marshalRaw(initResp.AuthMethods),
-	}
-	if initResp.AgentInfo != nil {
-		metadata["agentInfo"] = marshalRaw(initResp.AgentInfo)
-	}
-	if len(rawInit) > 0 {
-		metadata["rawInitialize"] = append(json.RawMessage(nil), rawInit...)
-	}
-	return metadata
-}
-
-func marshalRaw(value any) json.RawMessage {
-	raw, _ := json.Marshal(value)
-	return raw
+func newID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	buf := make([]byte, 36)
+	hex.Encode(buf[0:8], b[0:4])
+	buf[8] = '-'
+	hex.Encode(buf[9:13], b[4:6])
+	buf[13] = '-'
+	hex.Encode(buf[14:18], b[6:8])
+	buf[18] = '-'
+	hex.Encode(buf[19:23], b[8:10])
+	buf[23] = '-'
+	hex.Encode(buf[24:36], b[10:16])
+	return string(buf)
 }
