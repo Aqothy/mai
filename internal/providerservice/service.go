@@ -246,7 +246,6 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 	lock.Lock()
 	defer lock.Unlock()
 
-	var previous ProviderInstance
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
@@ -255,9 +254,7 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 	if existing := s.instances[spec.InstanceID]; existing != nil {
 		info := existing.Info()
 		if info.Status != provider.InstanceStatusExited {
-			if restart {
-				previous = existing
-			} else {
+			if !restart {
 				existingSpec := s.instanceSpecs[spec.InstanceID]
 				if existingSpec.Driver != spec.Driver {
 					s.mu.Unlock()
@@ -270,8 +267,6 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 				s.mu.Unlock()
 				return info, nil
 			}
-		} else {
-			previous = existing
 		}
 	}
 	s.mu.Unlock()
@@ -309,8 +304,6 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 	s.mu.Unlock()
 	if current != nil && current != instance {
 		_ = current.Close()
-	} else if previous != nil && previous != instance {
-		_ = previous.Close()
 	}
 	return info, nil
 }
@@ -704,13 +697,13 @@ func (s *Service) bindThreadSession(threadID string, instanceID provider.Instanc
 		return
 	}
 	s.mu.Lock()
-	route := s.threadRoutes[threadID]
-	route.InstanceID = instanceID
-	route.Generation = generation
-	route.ProviderSessionID = providerSessionID
-	route.ResumeCursor = append(json.RawMessage(nil), resumeCursor...)
-	route.StartInput = cloneStartSessionInput(startInput)
-	s.threadRoutes[threadID] = route
+	s.threadRoutes[threadID] = threadRoute{
+		InstanceID:        instanceID,
+		Generation:        generation,
+		ProviderSessionID: providerSessionID,
+		ResumeCursor:      append(json.RawMessage(nil), resumeCursor...),
+		StartInput:        cloneStartSessionInput(startInput),
+	}
 	s.mu.Unlock()
 }
 

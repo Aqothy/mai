@@ -173,14 +173,7 @@ func (h *Instance) finishSessionLoad(sessionID string) {
 // live-bound session whose prompt the agent rejected.
 func sessionNotFoundError(err error) bool {
 	var providerErr *provider.RequestError
-	if errors.As(err, &providerErr) {
-		return int64(providerErr.Code) == acp.CodeResourceNotFound
-	}
-	converted := acpRequestError(err)
-	if converted != err && errors.As(converted, &providerErr) {
-		return int64(providerErr.Code) == acp.CodeResourceNotFound
-	}
-	return false
+	return errors.As(acpRequestError(err), &providerErr) && int64(providerErr.Code) == acp.CodeResourceNotFound
 }
 
 const acpSessionModeOptionID = "acp.session-mode"
@@ -203,13 +196,12 @@ func (h *Instance) cacheSessionState(sessionID string, configOptions []schema.Se
 	}
 	session.config = nil
 	session.hasConfig = false
-	if modes == nil {
-		session.modes = nil
-		return
+	session.modes = nil
+	if modes != nil {
+		state := *modes
+		state.AvailableModes = append([]schema.SessionMode(nil), modes.AvailableModes...)
+		session.modes = &state
 	}
-	state := *modes
-	state.AvailableModes = append([]schema.SessionMode(nil), modes.AvailableModes...)
-	session.modes = &state
 }
 
 func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOption {

@@ -80,8 +80,6 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 		}
 	case <-permissionCtx.Done():
 		response.decision = provider.ApprovalDecisionCancel
-	case <-ctx.Done():
-		response.decision = provider.ApprovalDecisionCancel
 	}
 	resp := permissionResponseForApproval(req.Options, response)
 	h.recordPermissionResolved(req, state, requestID, resp)

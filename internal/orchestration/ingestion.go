@@ -211,9 +211,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 	ts.reasoningActive = true
 	itemID := reasoningItemID(event, ts.reasoningSegment)
 	var full *reasoningPayload
-	var pending string
-	switch {
-	case len(event.Payload.Attachments) > 0:
+	if len(event.Payload.Attachments) > 0 {
 		// Non-text content (ACP thought chunks are full ContentBlocks) flushes
 		// immediately as the COMPLETE replacement payload, so an attachment is
 		// never hidden until the settle checkpoint.
@@ -226,17 +224,10 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 		// after this reasoning entry.
 		i.completeOpenAssistantMessages(event, createdAt)
 	}
-	if full == nil && pending == "" {
+	if full == nil {
 		return
 	}
-	item := &Item{ID: itemID, Kind: provider.ItemKindReasoning, Status: provider.ItemStatusInProgress, TurnID: TurnID(event.TurnID)}
-	if full != nil {
-		item.Payload = marshalEventPayload(full)
-	} else {
-		// TextDelta keeps flushed events O(chunk); the settleReasoning
-		// checkpoint carries the complete payload.
-		item.TextDelta = pending
-	}
+	item := &Item{ID: itemID, Kind: provider.ItemKindReasoning, Status: provider.ItemStatusInProgress, TurnID: TurnID(event.TurnID), Payload: marshalEventPayload(full)}
 	i.recordItem(event, item, createdAt)
 }
 

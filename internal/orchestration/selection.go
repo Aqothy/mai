@@ -111,15 +111,14 @@ func applyThreadProviderSelectionPatch(thread *Thread, providerInstanceID provid
 	if thread == nil {
 		return
 	}
-	specified := providerInstanceID != "" || selection != nil
-	switch {
-	case providerInstanceID != "":
+	if providerInstanceID != "" {
 		thread.ProviderInstanceID = providerInstanceID
 		thread.ModelSelection = cloneModelSelection(selection)
-	case selection != nil:
+	} else if selection != nil {
 		thread.ModelSelection = cloneModelSelection(selection)
 	}
-	if sessionCleared || (specified && sessionBindingStaleFor(thread.ProviderInstanceID, thread.Session)) {
+	selectionSpecified := providerInstanceID != "" || selection != nil
+	if sessionCleared || (selectionSpecified && sessionBindingStaleFor(thread.ProviderInstanceID, thread.Session)) {
 		thread.Session = nil
 	}
 }
