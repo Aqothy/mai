@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/store"
 )
 
 // ProviderInstance is the provider adapter seam used by the Service. The
@@ -82,6 +83,11 @@ type Service struct {
 	activeEventGenerations map[provider.InstanceID]uint64
 	nextEventGeneration    uint64
 
+	routeStore     store.RouteStore
+	storeMu        sync.Mutex
+	dirtyInstances map[provider.InstanceID]struct{}
+	dirtyRoutes    map[string]struct{}
+
 	// ingress is the fan-in hub: every instance's runtime events funnel here and
 	// runHub forwards active-generation events to the single events channel
 	// consumed by ProviderRuntimeIngestion. This keeps providerservice free of
@@ -95,7 +101,15 @@ type Service struct {
 	wg        sync.WaitGroup
 }
 
-func New(openInstance InstanceFactory) *Service {
+// Option configures a Service.
+type Option func(*Service)
+
+// WithRouteStore enables persistence for routes and instance specs.
+func WithRouteStore(routeStore store.RouteStore) Option {
+	return func(s *Service) { s.routeStore = routeStore }
+}
+
+func New(openInstance InstanceFactory, opts ...Option) *Service {
 	s := &Service{
 		instances:              make(map[provider.InstanceID]ProviderInstance),
 		instanceSpecs:          make(map[provider.InstanceID]provider.InstanceSpec),
@@ -106,11 +120,91 @@ func New(openInstance InstanceFactory) *Service {
 		ingress:                make(chan runtimeEventEnvelope, runtimeEventBuffer),
 		events:                 make(chan provider.RuntimeEvent, runtimeEventBuffer),
 		closed:                 make(chan struct{}),
+		dirtyInstances:         make(map[provider.InstanceID]struct{}),
+		dirtyRoutes:            make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	s.wg.Add(1)
 	go s.runHub()
 	return s
+}
+
+func (s *Service) persistThreadRoute(threadID string) {
+	if s.routeStore == nil || threadID == "" {
+		return
+	}
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	s.dirtyRoutes[threadID] = struct{}{}
+	s.flushPersistenceLocked()
+}
+
+func (s *Service) persistInstanceSpec(instanceID provider.InstanceID) {
+	if s.routeStore == nil || instanceID == "" {
+		return
+	}
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	s.dirtyInstances[instanceID] = struct{}{}
+	s.flushPersistenceLocked()
+}
+
+func (s *Service) flushPersistenceLocked() {
+	for instanceID := range s.dirtyInstances {
+		s.mu.Lock()
+		spec, ok := s.instanceSpecs[instanceID]
+		spec = cloneInstanceSpec(spec)
+		s.mu.Unlock()
+		if !ok {
+			delete(s.dirtyInstances, instanceID)
+			continue
+		}
+		if err := s.routeStore.SaveInstance(spec); err != nil {
+			log.Printf("providerservice: persist instance %q spec: %v (will retry)", instanceID, err)
+			continue
+		}
+		delete(s.dirtyInstances, instanceID)
+	}
+
+	for threadID := range s.dirtyRoutes {
+		if s.persistThreadRouteLocked(threadID) {
+			delete(s.dirtyRoutes, threadID)
+		}
+	}
+}
+
+func (s *Service) persistThreadRouteLocked(threadID string) bool {
+	s.mu.Lock()
+	route, ok := s.threadRoutes[threadID]
+	if ok {
+		route.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
+		route.StartInput = cloneStartSessionInput(route.StartInput)
+	}
+	s.mu.Unlock()
+
+	if !ok {
+		if err := s.routeStore.DeleteRoute(threadID); err != nil {
+			log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
+			return false
+		}
+		return true
+	}
+	if _, dirty := s.dirtyInstances[route.InstanceID]; dirty {
+		return false
+	}
+	if err := s.routeStore.SaveRoute(threadID, store.RouteRecord{
+		InstanceID:        route.InstanceID,
+		ProviderSessionID: route.ProviderSessionID,
+		ResumeCursor:      route.ResumeCursor,
+		StartInput:        route.StartInput,
+	}); err != nil {
+		log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
+		return false
+	}
+	return true
 }
 
 func (s *Service) Close() {
@@ -126,6 +220,12 @@ func (s *Service) Close() {
 		// runHub has exited, so nothing sends to events anymore; closing it tells
 		// the consumer (ingestion) the stream is over.
 		close(s.events)
+
+		if s.routeStore != nil {
+			s.storeMu.Lock()
+			s.flushPersistenceLocked()
+			s.storeMu.Unlock()
+		}
 
 		s.mu.Lock()
 		instances := make([]ProviderInstance, 0, len(s.instances))
@@ -304,6 +404,7 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 	if current != nil && current != instance {
 		_ = current.Close()
 	}
+	s.persistInstanceSpec(spec.InstanceID)
 	return info, nil
 }
 
@@ -475,6 +576,7 @@ func (s *Service) releaseThreadRouteForSwitch(ctx context.Context, threadID stri
 		delete(s.threadRoutes, threadID)
 	}
 	s.mu.Unlock()
+	s.persistThreadRoute(threadID)
 
 	if err != nil {
 		return
@@ -658,13 +760,15 @@ func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigO
 // atomic operation relative to StartInstance.
 func (s *Service) updateRouteStartInput(threadID string, instanceID provider.InstanceID, update func(*provider.StartSessionInput)) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	route, ok := s.threadRoutes[threadID]
 	if !ok || route.InstanceID != instanceID {
+		s.mu.Unlock()
 		return
 	}
 	update(&route.StartInput)
 	s.threadRoutes[threadID] = route
+	s.mu.Unlock()
+	s.persistThreadRoute(threadID)
 }
 
 func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInput) error {
@@ -680,6 +784,7 @@ func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInp
 	s.mu.Lock()
 	delete(s.threadRoutes, input.ThreadID)
 	s.mu.Unlock()
+	s.persistThreadRoute(input.ThreadID)
 	return nil
 }
 
@@ -702,6 +807,7 @@ func (s *Service) bindThreadSession(threadID string, instanceID provider.Instanc
 		StartInput:        cloneStartSessionInput(startInput),
 	}
 	s.mu.Unlock()
+	s.persistThreadRoute(threadID)
 }
 
 func (s *Service) routeForThread(threadID string) threadRoute {
