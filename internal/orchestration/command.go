@@ -11,16 +11,14 @@ import (
 // rejected or retried (idempotently, by CommandID). Provider/server
 // observations are not commands — they enter the log through Engine.AppendEvent.
 const (
-	CommandThreadCreate             = "thread.create"
-	CommandThreadMetaUpdate         = "thread.meta.update"
-	CommandThreadTurnStart          = "thread.turn.start"
-	CommandThreadTurnInterrupt      = "thread.turn.interrupt"
-	CommandThreadApprovalRespond    = "thread.approval.respond"
-	CommandThreadSessionPrepare     = "thread.session.prepare"
-	CommandThreadSessionStop        = "thread.session.stop"
-	CommandThreadRuntimeModeSet     = "thread.runtime-mode.set"
-	CommandThreadInteractionModeSet = "thread.interaction-mode.set"
-	CommandThreadConfigOptionSet    = "thread.config-option.set"
+	CommandThreadCreate          = "thread.create"
+	CommandThreadMetaUpdate      = "thread.meta.update"
+	CommandThreadTurnStart       = "thread.turn.start"
+	CommandThreadTurnInterrupt   = "thread.turn.interrupt"
+	CommandThreadApprovalRespond = "thread.approval.respond"
+	CommandThreadSessionPrepare  = "thread.session.prepare"
+	CommandThreadSessionStop     = "thread.session.stop"
+	CommandThreadConfigOptionSet = "thread.config-option.set"
 )
 
 type Command struct {
@@ -32,8 +30,6 @@ type Command struct {
 	ProviderInstanceID provider.InstanceID       `json:"providerInstanceId,omitempty"`
 	Cwd                string                    `json:"cwd,omitempty"`
 	ModelSelection     *provider.ModelSelection  `json:"modelSelection,omitempty"`
-	RuntimeMode        RuntimeMode               `json:"runtimeMode,omitempty"`
-	InteractionMode    ProviderInteractionMode   `json:"interactionMode,omitempty"`
 	Message            *CommandMessage           `json:"message,omitempty"`
 	RequestID          ApprovalID                `json:"requestId,omitempty"`
 	Decision           provider.ApprovalDecision `json:"decision,omitempty"`

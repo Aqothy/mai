@@ -50,10 +50,6 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadSessionStopRequested(event)
 	case EventThreadSessionStopFailed:
 		p.applyThreadSessionStopFailed(event)
-	case EventThreadRuntimeModeSet:
-		p.applyThreadRuntimeModeSet(event)
-	case EventThreadInteractionModeSet:
-		p.applyThreadInteractionModeSet(event)
 	case EventThreadApprovalResponseRequested:
 		p.applyThreadApprovalResponseRequested(event)
 	case EventThreadItemUpserted:
@@ -129,14 +125,6 @@ func (p *Projection) applyThreadCreated(event Event) {
 	if p.threads[threadID] != nil {
 		return
 	}
-	runtimeMode := payload.RuntimeMode
-	if runtimeMode == "" {
-		runtimeMode = RuntimeModeFullAccess
-	}
-	interactionMode := payload.InteractionMode
-	if interactionMode == "" {
-		interactionMode = ProviderInteractionModeDefault
-	}
 	title := payload.Title
 	if title == "" {
 		title = "Untitled thread"
@@ -152,8 +140,6 @@ func (p *Projection) applyThreadCreated(event Event) {
 		Title:              title,
 		ProviderInstanceID: payload.ProviderInstanceID,
 		ModelSelection:     cloneModelSelection(payload.ModelSelection),
-		RuntimeMode:        runtimeMode,
-		InteractionMode:    interactionMode,
 		Cwd:                payload.Cwd,
 		Timeline:           Timeline{},
 		CreatedAt:          event.OccurredAt,
@@ -171,12 +157,6 @@ func (p *Projection) applyThreadMetaUpdated(event Event) {
 		thread.Title = payload.Title
 	}
 	applyThreadProviderSelectionPatch(thread, payload.ProviderInstanceID, payload.ModelSelection, payload.SessionCleared)
-	if payload.RuntimeMode != "" {
-		thread.RuntimeMode = payload.RuntimeMode
-	}
-	if payload.InteractionMode != "" {
-		thread.InteractionMode = payload.InteractionMode
-	}
 	if payload.Cwd != "" {
 		thread.Cwd = payload.Cwd
 	}
@@ -322,28 +302,6 @@ func (p *Projection) applyThreadTurnInterruptFailed(event Event) {
 		return
 	}
 	thread.LatestTurn.InterruptRequested = false
-	thread.UpdatedAt = event.OccurredAt
-}
-
-func (p *Projection) applyThreadRuntimeModeSet(event Event) {
-	thread := p.ensureThread(event)
-	if thread == nil || event.Payload.RuntimeMode == "" {
-		return
-	}
-	thread.RuntimeMode = event.Payload.RuntimeMode
-	if thread.Session != nil {
-		thread.Session.RuntimeMode = event.Payload.RuntimeMode
-		thread.Session.UpdatedAt = event.OccurredAt
-	}
-	thread.UpdatedAt = event.OccurredAt
-}
-
-func (p *Projection) applyThreadInteractionModeSet(event Event) {
-	thread := p.ensureThread(event)
-	if thread == nil || event.Payload.InteractionMode == "" {
-		return
-	}
-	thread.InteractionMode = event.Payload.InteractionMode
 	thread.UpdatedAt = event.OccurredAt
 }
 
@@ -548,7 +506,7 @@ func ensureSessionBinding(thread *Thread, event Event) *SessionBinding {
 	if providerInstanceID == "" {
 		providerInstanceID = thread.ProviderInstanceID
 	}
-	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, RuntimeMode: thread.RuntimeMode, Cwd: thread.Cwd, Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
+	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
 	return thread.Session
 }
 
@@ -600,7 +558,7 @@ func ThreadListVisible(event Event) bool {
 	case EventThreadMessageSent:
 		// Only user messages surface in the thread list (LatestUserMessageAt).
 		return event.Payload.Role == MessageRoleUser
-	case EventThreadItemUpserted, EventThreadPlanUpdated, EventThreadInteractionModeSetRequested:
+	case EventThreadItemUpserted, EventThreadPlanUpdated:
 		return false
 	}
 	return true
@@ -620,5 +578,5 @@ func threadListEntryFromThread(thread Thread) ThreadListEntry {
 			pendingApprovals = true
 		}
 	}
-	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), RuntimeMode: thread.RuntimeMode, InteractionMode: thread.InteractionMode, Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), LatestUserMessageAt: latestUserMessageAt, HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), LatestUserMessageAt: latestUserMessageAt, HasPendingApprovals: pendingApprovals}
 }

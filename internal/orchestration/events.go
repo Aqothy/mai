@@ -10,29 +10,26 @@ import (
 type EventType string
 
 const (
-	EventThreadCreated                     EventType = "thread.created"
-	EventThreadMetaUpdated                 EventType = "thread.meta-updated"
-	EventThreadMessageSent                 EventType = "thread.message-sent"
-	EventThreadTurnStartRequested          EventType = "thread.turn-start-requested"
-	EventThreadTurnInterruptRequested      EventType = "thread.turn-interrupt-requested"
-	EventThreadTurnInterruptConfirmed      EventType = "thread.turn-interrupt-confirmed"
-	EventThreadTurnInterruptFailed         EventType = "thread.turn-interrupt-failed"
-	EventThreadApprovalResponseRequested   EventType = "thread.approval-response-requested"
-	EventThreadSessionPrepareRequested     EventType = "thread.session-prepare-requested"
-	EventThreadSessionStopRequested        EventType = "thread.session-stop-requested"
-	EventThreadSessionStopFailed           EventType = "thread.session-stop-failed"
-	EventThreadRuntimeModeSet              EventType = "thread.runtime-mode-set"
-	EventThreadInteractionModeSetRequested EventType = "thread.interaction-mode-set-requested"
-	EventThreadInteractionModeSet          EventType = "thread.interaction-mode-set"
-	EventThreadConfigOptionSetRequested    EventType = "thread.config-option-set-requested"
-	EventThreadSessionStatusSet            EventType = "thread.session-status-set"
-	EventThreadItemUpserted                EventType = "thread.item-upserted"
-	EventThreadPlanUpdated                 EventType = "thread.plan-updated"
-	EventThreadApprovalOpened              EventType = "thread.approval-opened"
-	EventThreadApprovalResolved            EventType = "thread.approval-resolved"
-	EventThreadConfigOptionsUpdated        EventType = "thread.config-options-updated"
-	EventThreadSlashCommandsUpdated        EventType = "thread.slash-commands-updated"
-	EventThreadTokenUsageUpdated           EventType = "thread.token-usage-updated"
+	EventThreadCreated                   EventType = "thread.created"
+	EventThreadMetaUpdated               EventType = "thread.meta-updated"
+	EventThreadMessageSent               EventType = "thread.message-sent"
+	EventThreadTurnStartRequested        EventType = "thread.turn-start-requested"
+	EventThreadTurnInterruptRequested    EventType = "thread.turn-interrupt-requested"
+	EventThreadTurnInterruptConfirmed    EventType = "thread.turn-interrupt-confirmed"
+	EventThreadTurnInterruptFailed       EventType = "thread.turn-interrupt-failed"
+	EventThreadApprovalResponseRequested EventType = "thread.approval-response-requested"
+	EventThreadSessionPrepareRequested   EventType = "thread.session-prepare-requested"
+	EventThreadSessionStopRequested      EventType = "thread.session-stop-requested"
+	EventThreadSessionStopFailed         EventType = "thread.session-stop-failed"
+	EventThreadConfigOptionSetRequested  EventType = "thread.config-option-set-requested"
+	EventThreadSessionStatusSet          EventType = "thread.session-status-set"
+	EventThreadItemUpserted              EventType = "thread.item-upserted"
+	EventThreadPlanUpdated               EventType = "thread.plan-updated"
+	EventThreadApprovalOpened            EventType = "thread.approval-opened"
+	EventThreadApprovalResolved          EventType = "thread.approval-resolved"
+	EventThreadConfigOptionsUpdated      EventType = "thread.config-options-updated"
+	EventThreadSlashCommandsUpdated      EventType = "thread.slash-commands-updated"
+	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
 )
 
 type ActorKind string
@@ -66,8 +63,6 @@ type EventPayload struct {
 	Title              string                   `json:"title,omitempty"`
 	ProviderInstanceID provider.InstanceID      `json:"providerInstanceId,omitempty"`
 	ModelSelection     *provider.ModelSelection `json:"modelSelection,omitempty"`
-	RuntimeMode        RuntimeMode              `json:"runtimeMode,omitempty"`
-	InteractionMode    ProviderInteractionMode  `json:"interactionMode,omitempty"`
 	Cwd                string                   `json:"cwd,omitempty"`
 	Session            *SessionBinding          `json:"session,omitempty"`
 	SessionCleared     bool                     `json:"sessionCleared,omitempty"`

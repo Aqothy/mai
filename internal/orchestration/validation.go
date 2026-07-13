@@ -24,20 +24,6 @@ func sessionPreparing(thread Thread) bool {
 	return thread.Session != nil && thread.Session.Status == SessionStatusStarting && thread.Session.ActiveTurnID == ""
 }
 
-func defaultRuntimeMode(mode RuntimeMode) RuntimeMode {
-	if mode == "" {
-		return RuntimeModeFullAccess
-	}
-	return mode
-}
-
-func defaultInteractionMode(mode ProviderInteractionMode) ProviderInteractionMode {
-	if mode == "" {
-		return ProviderInteractionModeDefault
-	}
-	return mode
-}
-
 func validateMetaCwdChange(thread Thread, cwd string) error {
 	if cwd == "" || cwd == thread.Cwd {
 		return nil
@@ -48,52 +34,11 @@ func validateMetaCwdChange(thread Thread, cwd string) error {
 	return fmt.Errorf("cannot change cwd while provider session is active; stop the session first")
 }
 
-func validateMetaInteractionModeChange(thread Thread, mode ProviderInteractionMode) error {
-	if mode == "" || mode == thread.InteractionMode {
-		return nil
-	}
-	if !providerSessionActive(thread.Session) {
-		return nil
-	}
-	return fmt.Errorf("cannot change interactionMode while provider session is active; use thread.interaction-mode.set")
-}
-
-func validateActiveRuntimeModeChange(thread Thread, mode RuntimeMode) error {
-	if mode == "" || mode == thread.RuntimeMode {
-		return nil
-	}
-	if activeTurnID(thread) == "" {
-		return nil
-	}
-	return fmt.Errorf("cannot change runtimeMode while a turn is active; wait for the turn to finish or interrupt it first")
-}
-
 func validateTurnStartBoundary(command Command) error {
 	if command.TurnID != "" {
 		return fmt.Errorf("thread.turn.start does not accept turnId; turnId is server-minted")
 	}
-	if command.RuntimeMode != "" {
-		return fmt.Errorf("thread.turn.start does not accept runtimeMode; use thread.runtime-mode.set")
-	}
-	if command.InteractionMode != "" {
-		return fmt.Errorf("thread.turn.start does not accept interactionMode; use thread.interaction-mode.set")
-	}
 	return nil
-}
-
-func validateRuntimeMode(commandType string, mode RuntimeMode, required bool) error {
-	if mode == "" {
-		if required {
-			return fmt.Errorf("%s requires runtimeMode", commandType)
-		}
-		return nil
-	}
-	switch mode {
-	case RuntimeModeApprovalRequired, RuntimeModeAutoAcceptEdits, RuntimeModeFullAccess:
-		return nil
-	default:
-		return fmt.Errorf("%s runtimeMode %q is not supported", commandType, mode)
-	}
 }
 
 func validateApprovalDecision(commandType string, decision provider.ApprovalDecision) error {

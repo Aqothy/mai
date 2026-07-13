@@ -424,27 +424,6 @@ func selectedOption(resp schema.RequestPermissionResponse) string {
 	return string(optionID)
 }
 
-func TestPermissionResponseDenySelectsRejectOption(t *testing.T) {
-	resp, ok := automaticPermissionResponse(schema.RequestPermissionRequest{Options: permissionOptions()}, provider.ApprovalPolicyDeny)
-	if !ok || selectedOption(resp) != "reject" {
-		t.Fatalf("permission response = %#v (automatic=%v), want selected reject", resp.Outcome, ok)
-	}
-}
-
-func TestPermissionResponseAllowPrefersAllowAlways(t *testing.T) {
-	resp, ok := automaticPermissionResponse(schema.RequestPermissionRequest{Options: permissionOptionsWithAllowAlways()}, provider.ApprovalPolicyAllow)
-	if !ok || selectedOption(resp) != "allow-always" {
-		t.Fatalf("permission response = %#v (automatic=%v), want selected allow-always", resp.Outcome, ok)
-	}
-}
-
-func TestPermissionResponseAllowWithoutAllowOptionCancels(t *testing.T) {
-	resp, ok := automaticPermissionResponse(schema.RequestPermissionRequest{Options: []schema.PermissionOption{{Kind: schema.PermissionOptionKindRejectOnce, Name: "Reject", OptionID: "reject"}}}, provider.ApprovalPolicyAllow)
-	if !ok || resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
-		t.Fatalf("permission response = %#v (automatic=%v), want cancelled", resp.Outcome, ok)
-	}
-}
-
 func TestAuthCapabilityOnlyCountsStableAgentAuthMethods(t *testing.T) {
 	var unstable []schema.AuthMethod
 	if err := json.Unmarshal([]byte(`[{"type":"env_var","id":"env-login","name":"Env","vars":[]},{"type":"terminal","id":"terminal-login","name":"Terminal"}]`), &unstable); err != nil {
@@ -628,30 +607,6 @@ func TestHandleSessionUpdateScopesACPItemIDsBySession(t *testing.T) {
 	}
 }
 
-func TestPermissionRequestIDsAreScopedBySession(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	bindTestSession(h, "thread-1", "sess-a").collector = &promptCollector{threadID: "thread-1", turnID: "turn-a", approvalPolicy: provider.ApprovalPolicyAllow}
-	bindTestSession(h, "thread-1", "sess-b").collector = &promptCollector{threadID: "thread-1", turnID: "turn-b", approvalPolicy: provider.ApprovalPolicyAllow}
-
-	for _, sessionID := range []string{"sess-a", "sess-b"} {
-		if _, err := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: schema.SessionId(sessionID), ToolCall: schema.ToolCallUpdate{ToolCallID: "tool-1"}, Options: permissionOptions()}); err != nil {
-			t.Fatalf("requestPermission(%s): %v", sessionID, err)
-		}
-	}
-	if len(events) != 4 {
-		t.Fatalf("events = %#v, want open/resolve for two permission requests", events)
-	}
-	firstID := events[0].RequestID
-	secondID := events[2].RequestID
-	if firstID == "" || secondID == "" || firstID == secondID {
-		t.Fatalf("permission request ids = %q, %q; want session-scoped distinct ids", firstID, secondID)
-	}
-	if strings.Contains(firstID, "sess-a") || strings.Contains(secondID, "sess-b") {
-		t.Fatalf("permission request ids leak native session ids: %q, %q", firstID, secondID)
-	}
-}
-
 // A settled tool keeps a tombstone (not a live in-progress entry): trailing
 // updates for it must still be enriched, but the state must be marked settled
 // so it is never treated as an open tool again.
@@ -712,127 +667,13 @@ func TestStrayUpdatesAfterUnbindDoNotRecreateSessionState(t *testing.T) {
 	}
 }
 
-func TestRequestPermissionAutoResponseEmitsResolvedEvent(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAllow}
-	resp, err := h.requestPermission(context.Background(), schema.RequestPermissionRequest{
-		SessionID: "sess",
-		ToolCall:  schema.ToolCallUpdate{ToolCallID: "tool_1"},
-		Options:   permissionOptions(),
-	})
-	if err != nil {
-		t.Fatalf("requestPermission: %v", err)
-	}
-	if selectedOption(resp) != "allow" {
-		t.Fatalf("permission outcome = %#v, want selected allow", resp.Outcome)
-	}
-	if len(events) != 2 || events[0].Type != provider.RuntimeEventRequestOpened || events[1].Type != provider.RuntimeEventRequestResolved {
-		t.Fatalf("events = %#v, want opened then resolved", events)
-	}
-	var resolution struct {
-		OptionID string `json:"optionId"`
-	}
-	_ = json.Unmarshal(events[1].Payload.Resolution, &resolution)
-	if events[1].Payload.Decision != "accept" || resolution.OptionID != "allow" || events[1].ThreadID != "thread-1" || events[1].TurnID != "turn-1" {
-		t.Fatalf("resolved event = %#v, want accepted allow for thread turn", events[1])
-	}
-}
-
-func TestRequestPermissionAutoAcceptEditsOnlyApprovesFileChanges(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAllowEdits}
-	kind := schema.ToolKindEdit
-	resp, err := h.requestPermission(context.Background(), schema.RequestPermissionRequest{
-		SessionID: "sess",
-		ToolCall:  schema.ToolCallUpdate{ToolCallID: "edit_1", Kind: &kind},
-		Options:   permissionOptions(),
-	})
-	if err != nil {
-		t.Fatalf("requestPermission edit: %v", err)
-	}
-	if selectedOption(resp) != "allow" {
-		t.Fatalf("edit permission outcome = %#v, want selected allow", resp.Outcome)
-	}
-	if len(events) != 2 || events[0].Payload.RequestType != provider.RuntimeRequestFileChange || events[1].Payload.Decision != "accept" {
-		t.Fatalf("events = %#v, want auto-resolved file-change approval", events)
-	}
-
-	opened := make(chan struct{}, 1)
-	done := make(chan schema.RequestPermissionResponse, 1)
-	terminalRequestID := ""
-	var eventsMu sync.Mutex
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		eventsMu.Lock()
-		events = append(events, event)
-		eventsMu.Unlock()
-		if event.Type == provider.RuntimeEventRequestOpened && event.Payload.RequestType == provider.RuntimeRequestCommandExecution {
-			terminalRequestID = event.RequestID
-			opened <- struct{}{}
-		}
-	}
-	kind = schema.ToolKindExecute
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "terminal_1", Kind: &kind}, Options: permissionOptions()})
-		done <- resp
-	}()
-	<-opened
-	select {
-	case resp := <-done:
-		t.Fatalf("terminal permission resolved without user response: %#v", resp.Outcome)
-	default:
-	}
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: terminalRequestID, Decision: provider.ApprovalDecisionDecline}); err != nil {
-		t.Fatalf("RespondToRequest terminal: %v", err)
-	}
-	resp = <-done
-	if selectedOption(resp) != "reject" {
-		t.Fatalf("terminal permission outcome = %#v, want selected reject after user decision", resp.Outcome)
-	}
-	eventsMu.Lock()
-	lastOpened := events[len(events)-2]
-	eventsMu.Unlock()
-	if lastOpened.Payload.RequestType != provider.RuntimeRequestCommandExecution {
-		t.Fatalf("terminal request type = %q, want command execution", lastOpened.Payload.RequestType)
-	}
-}
-
-func TestRequestPermissionAutoAcceptEditsPrefersAllowOnceWhenAllowAlwaysAvailable(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAllowEdits}
-	kind := schema.ToolKindEdit
-	resp, err := h.requestPermission(context.Background(), schema.RequestPermissionRequest{
-		SessionID: "sess",
-		ToolCall:  schema.ToolCallUpdate{ToolCallID: "edit_1", Kind: &kind},
-		Options:   permissionOptionsWithAllowAlways(),
-	})
-	if err != nil {
-		t.Fatalf("requestPermission edit: %v", err)
-	}
-	if selectedOption(resp) != "allow-once" {
-		t.Fatalf("edit permission outcome = %#v, want selected allow-once", resp.Outcome)
-	}
-	if len(events) != 2 || events[0].Type != provider.RuntimeEventRequestOpened || events[1].Type != provider.RuntimeEventRequestResolved {
-		t.Fatalf("events = %#v, want opened then resolved", events)
-	}
-	var resolution struct {
-		OptionID string `json:"optionId"`
-	}
-	_ = json.Unmarshal(events[1].Payload.Resolution, &resolution)
-	if events[1].Payload.Decision != provider.ApprovalDecisionAccept || resolution.OptionID != "allow-once" {
-		t.Fatalf("resolved event = %#v, want accept with allow-once", events[1])
-	}
-}
-
 func TestTerminalToolUpdateCancelsPendingPermission(t *testing.T) {
 	opened := make(chan string, 1)
 	terminalPublished := make(chan struct{}, 1)
 	releaseTerminal := make(chan struct{})
 	recorder := &eventRecorder{}
 	h := newInstance(nil)
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	h.runtimeEventListener = func(event provider.RuntimeEvent) {
 		recorder.listener(event)
 		if event.Type == provider.RuntimeEventRequestOpened {
@@ -887,7 +728,7 @@ func TestTerminalToolUpdateOverridesQueuedApproval(t *testing.T) {
 	terminalPublished := make(chan struct{}, 1)
 	releaseTerminal := make(chan struct{})
 	h := newInstance(nil)
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	h.runtimeEventListener = func(event provider.RuntimeEvent) {
 		switch {
 		case event.Type == provider.RuntimeEventRequestOpened:
@@ -932,7 +773,7 @@ func TestPermissionCancelsWhenToolSettledBeforeRequestRegistration(t *testing.T)
 			<-releaseOpened
 		}
 	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool_1","status":"completed"}}`))
 
 	done := make(chan schema.RequestPermissionResponse, 1)
@@ -966,7 +807,7 @@ func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
 			opened <- event.RequestID
 		}
 	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 
 	// Tool X runs and settles (declined) within the turn...
 	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call","toolCallId":"tool_1","title":"Edit","kind":"edit","status":"pending"}}`))
@@ -1013,7 +854,7 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 			opened <- event.RequestID
 		}
 	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 
 	firstCtx, cancelFirst := context.WithCancel(context.Background())
 	defer cancelFirst()
@@ -1073,7 +914,7 @@ func TestRespondToRequestHonorsExplicitOptionID(t *testing.T) {
 			opened <- struct{}{}
 		}
 	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	done := make(chan schema.RequestPermissionResponse, 1)
 	go func() {
 		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptionsWithAllowAlways()})
@@ -1096,7 +937,7 @@ func TestRespondToRequestHonorsExplicitOptionID(t *testing.T) {
 func TestCancelledPermissionRequestDoesNotInheritFollowUpTurn(t *testing.T) {
 	var events []provider.RuntimeEvent
 	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1", approvalPolicy: provider.ApprovalPolicyAsk}
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	if _, matched, _, _ := h.markPromptCancelled("sess", "turn-1"); !matched {
 		t.Fatal("expected active turn-1 collector to be cancelled")
 	}
@@ -1262,35 +1103,6 @@ func TestInterruptTurnCancelFailureLeavesTurnLive(t *testing.T) {
 	}
 }
 
-func TestStartSessionUsesStandardSessionModes(t *testing.T) {
-	modeCalls := make(chan wireSessionParams, 1)
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "code", "name": "Code"}, map[string]any{"id": "architect", "name": "Plan"}}}})
-		},
-		onSetMode: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			modeCalls <- params
-			a.respond(id, map[string]any{})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", InteractionMode: "plan"})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	select {
-	case call := <-modeCalls:
-		if call.ModeID != "architect" {
-			t.Fatalf("session/set_mode modeId = %q, want architect", call.ModeID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("session/set_mode was not called")
-	}
-	if len(session.ConfigOptions) != 1 || session.ConfigOptions[0].Category != provider.ConfigOptionCategoryMode || session.ConfigOptions[0].CurrentValue != "architect" {
-		t.Fatalf("session config options = %#v, want projected ACP session modes", session.ConfigOptions)
-	}
-}
-
 func TestCurrentModeUpdateRefreshesProjectedSessionMode(t *testing.T) {
 	agent := &fakeWireAgent{
 		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
@@ -1318,53 +1130,64 @@ func TestCurrentModeUpdateRefreshesProjectedSessionMode(t *testing.T) {
 	}
 }
 
-func TestStartSessionUsesModeConfigOptionForInteractionMode(t *testing.T) {
-	recorder := &callRecorder{}
+func TestLegacySessionModeUsesConfigOptionPath(t *testing.T) {
+	modeCalls := make(chan wireSessionParams, 1)
 	agent := &fakeWireAgent{
 		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModeConfigOptions("code")})
+			a.respond(id, map[string]any{"sessionId": "sess", "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "code", "name": "Code"}, map[string]any{"id": "architect", "name": "Plan"}}}})
 		},
-		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
+		onSetMode: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			modeCalls <- params
+			a.respond(id, map[string]any{})
 		},
 	}
 	h := newWireTestHandle(t, agent)
-
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", InteractionMode: "plan"})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	configCalls := recorder.configCalls()
-	if len(configCalls) != 1 || configCalls[0].ConfigID != "interaction-mode" || configCalls[0].Value != "architect" {
-		t.Fatalf("set_config_option calls = %#v, want interaction-mode=architect", configCalls)
-	}
-	if len(session.ConfigOptions) != 1 || session.ConfigOptions[0].ID != "interaction-mode" || session.ConfigOptions[0].CurrentValue != "architect" {
-		t.Fatalf("session config options = %#v, want real mode config option only", session.ConfigOptions)
-	}
-}
-
-func TestSetInteractionModeDoesNotAliasUnknownModeToDefault(t *testing.T) {
-	recorder := &callRecorder{}
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModeConfigOptions("code")})
-		},
-		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-
 	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if err := h.SetInteractionMode(context.Background(), provider.SetInteractionModeInput{ThreadID: "thread-1", Mode: "review"}); err == nil || !strings.Contains(err.Error(), "review") {
-		t.Fatalf("SetInteractionMode(review) err = %v, want unsupported mode error", err)
+	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: acpSessionModeOptionID, Value: "architect"}); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
 	}
-	if len(recorder.configCalls()) != 0 {
-		t.Fatalf("set_config_option calls = %#v, want none for unsupported mode", recorder.configCalls())
+	select {
+	case call := <-modeCalls:
+		if call.ModeID != "architect" {
+			t.Fatalf("session/set_mode modeId = %q, want architect", call.ModeID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("session/set_mode was not called")
+	}
+}
+
+func TestStartSessionRestoresLegacyModeConfigSelection(t *testing.T) {
+	modeCalls := make(chan wireSessionParams, 1)
+	agent := &fakeWireAgent{
+		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.respond(id, map[string]any{"sessionId": "sess", "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "code", "name": "Code"}, map[string]any{"id": "architect", "name": "Plan"}}}})
+		},
+		onSetMode: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			modeCalls <- params
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	_, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID: "thread-1",
+		ConfigSelections: []provider.ConfigOptionSelection{{
+			OptionID: acpSessionModeOptionID,
+			Value:    "architect",
+			Category: provider.ConfigOptionCategoryMode,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	select {
+	case call := <-modeCalls:
+		if call.ModeID != "architect" {
+			t.Fatalf("restored mode = %q, want architect", call.ModeID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("restored mode did not call session/set_mode")
 	}
 }
 
@@ -1445,66 +1268,6 @@ func TestStartSessionReuseWarnsWhenModelPreferenceCannotBeApplied(t *testing.T) 
 	events := recorder.snapshot()
 	if len(events) != 1 || events[0].Type != provider.RuntimeEventRuntimeWarning || !strings.Contains(events[0].Payload.Message, "model-b") {
 		t.Fatalf("events = %#v, want one model preference warning", events)
-	}
-}
-
-func TestRuntimeModeDoesNotChangeInteractionMode(t *testing.T) {
-	recorder := &callRecorder{}
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModeConfigOptions("architect")})
-		},
-		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", RuntimeMode: "full-access", InteractionMode: "default"})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if calls := recorder.configCalls(); len(calls) != 0 {
-		t.Fatalf("set_config_option calls = %#v, want runtime policy not to change interaction mode", calls)
-	}
-	if len(session.ConfigOptions) != 1 || session.ConfigOptions[0].CurrentValue != "architect" {
-		t.Fatalf("session config options = %#v, want architect preserved", session.ConfigOptions)
-	}
-}
-
-func TestStartSessionReusePreservesUserSelectedInteractionMode(t *testing.T) {
-	recorder := &callRecorder{}
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModeConfigOptions("code")})
-		},
-		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-
-	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", RuntimeMode: "full-access", InteractionMode: "default"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "interaction-mode", Value: "architect"}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
-	}
-	configCalls := recorder.configCalls()
-	if len(configCalls) != 1 || configCalls[0].Value != "architect" {
-		t.Fatalf("set_config_option calls after user mode selection = %#v, want one architect call", configCalls)
-	}
-
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", RuntimeMode: "full-access", InteractionMode: "default"})
-	if err != nil {
-		t.Fatalf("reused StartSession: %v", err)
-	}
-	if len(recorder.configCalls()) != 1 {
-		t.Fatalf("set_config_option calls after reused StartSession = %#v, want no runtime alias reapply", recorder.configCalls())
-	}
-	if len(session.ConfigOptions) != 1 || session.ConfigOptions[0].CurrentValue != "architect" {
-		t.Fatalf("session config options after reuse = %#v, want user-selected architect preserved", session.ConfigOptions)
 	}
 }
 

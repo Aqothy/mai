@@ -29,7 +29,6 @@ type ProviderInstance interface {
 	// events, so SendTurn returns once the turn is accepted/dispatched.
 	SendTurn(ctx context.Context, input provider.SendTurnInput) error
 	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
-	SetInteractionMode(ctx context.Context, input provider.SetInteractionModeInput) error
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
 	RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error
 	StopSession(ctx context.Context, input provider.StopSessionInput) error
@@ -622,39 +621,32 @@ func (s *Service) InterruptTurn(ctx context.Context, input provider.InterruptTur
 	})
 }
 
-func (s *Service) SetInteractionMode(ctx context.Context, input provider.SetInteractionModeInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, "set interaction mode", func(instance ProviderInstance) error {
-		if err := instance.SetInteractionMode(ctx, input); err != nil {
-			return err
-		}
-		s.updateRouteStartInput(input.ThreadID, instance.Info().InstanceID, func(start *provider.StartSessionInput) {
-			start.InteractionMode = input.Mode
-		})
-		return nil
-	})
-}
-
 func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
 	return s.withThreadInstance(ctx, input.ThreadID, true, "set config option", func(instance ProviderInstance) error {
 		if err := instance.SetConfigOption(ctx, input); err != nil {
 			return err
 		}
-		// Route recovery only persists string model choices.
-		if input.Category != provider.ConfigOptionCategoryModel {
-			return nil
-		}
-		model, ok := input.Value.(string)
-		if !ok || model == "" {
-			return nil
-		}
 		s.updateRouteStartInput(input.ThreadID, instance.Info().InstanceID, func(start *provider.StartSessionInput) {
-			selection := &provider.ModelSelection{Model: model}
-			if start.ModelSelection != nil {
-				cloned := *start.ModelSelection
-				cloned.Model = model
-				selection = &cloned
+			if input.Category == provider.ConfigOptionCategoryModel {
+				model, ok := input.Value.(string)
+				if !ok || model == "" {
+					return
+				}
+				if start.ModelSelection == nil {
+					start.ModelSelection = &provider.ModelSelection{}
+				}
+				start.ModelSelection.Model = model
+				return
 			}
-			start.ModelSelection = selection
+
+			selection := provider.ConfigOptionSelection{OptionID: input.OptionID, Value: input.Value, Category: input.Category}
+			for index := range start.ConfigSelections {
+				if start.ConfigSelections[index].OptionID == input.OptionID {
+					start.ConfigSelections[index] = selection
+					return
+				}
+			}
+			start.ConfigSelections = append(start.ConfigSelections, selection)
 		})
 		return nil
 	})
@@ -753,6 +745,7 @@ func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSess
 	cloned := input
 	cloned.ResumeCursor = append(json.RawMessage(nil), input.ResumeCursor...)
 	cloned.Options = append(json.RawMessage(nil), input.Options...)
+	cloned.ConfigSelections = append([]provider.ConfigOptionSelection(nil), input.ConfigSelections...)
 	if input.ModelSelection != nil {
 		model := *input.ModelSelection
 		model.Options = append(json.RawMessage(nil), input.ModelSelection.Options...)

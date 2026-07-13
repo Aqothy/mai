@@ -67,7 +67,6 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 		"threadId":           threadID,
 		"title":              "Fix the flaky login test",
 		"providerInstanceId": "claude-code",
-		"runtimeMode":        "approval-required",
 		"cwd":                demoCwd,
 	})
 
@@ -78,7 +77,6 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 		"threadId":           threadID,
 		"title":              "Fix the flaky login test",
 		"providerInstanceId": "claude-code",
-		"runtimeMode":        "approval-required",
 		"cwd":                demoCwd,
 	})
 	if string(created) != string(retried) {
@@ -132,7 +130,6 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 		"threadId":           approvalThreadID,
 		"title":              "Refactor session store",
 		"providerInstanceId": "codex",
-		"runtimeMode":        "approval-required",
 		"cwd":                demoCwd,
 	})
 	c.mustCall("orchestration.subscribeThread", map[string]any{"threadId": approvalThreadID})

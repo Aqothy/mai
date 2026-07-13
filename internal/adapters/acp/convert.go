@@ -48,8 +48,7 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		},
 		// ACP exposes in-session model/config switching via session/set_config_option
 		// (the actual model/mode lists, if any, arrive per session as ConfigOptions).
-		ModelSwitch:     provider.ModelSwitchInSession,
-		InteractionMode: true,
+		ModelSwitch: provider.ModelSwitchInSession,
 		MCP: provider.MCPCapabilities{
 			HTTP: boolValue(mcp.HTTP),
 			SSE:  boolValue(mcp.SSE),
@@ -148,43 +147,6 @@ func stringPtr(value string) *string {
 		return nil
 	}
 	return &value
-}
-
-func automaticPermissionResponse(req schema.RequestPermissionRequest, policy provider.ApprovalPolicy) (schema.RequestPermissionResponse, bool) {
-	switch policy {
-	case provider.ApprovalPolicyAllow:
-		return allowPermissionResponse(req.Options), true
-	case provider.ApprovalPolicyAllowEdits:
-		if isConfidentEditPermission(req.ToolCall) {
-			return allowOncePermissionResponse(req.Options)
-		}
-		return schema.RequestPermissionResponse{}, false
-	case provider.ApprovalPolicyAsk:
-		return schema.RequestPermissionResponse{}, false
-	default:
-		return rejectPermissionResponse(req.Options), true
-	}
-}
-
-func allowPermissionResponse(options []schema.PermissionOption) schema.RequestPermissionResponse {
-	if option, ok := choosePermissionOption(options, []schema.PermissionOptionKind{schema.PermissionOptionKindAllowAlways, schema.PermissionOptionKindAllowOnce}); ok {
-		return selectedPermissionResponse(option.OptionID)
-	}
-	return cancelledPermissionResponse()
-}
-
-func allowOncePermissionResponse(options []schema.PermissionOption) (schema.RequestPermissionResponse, bool) {
-	if option, ok := choosePermissionOption(options, []schema.PermissionOptionKind{schema.PermissionOptionKindAllowOnce}); ok {
-		return selectedPermissionResponse(option.OptionID), true
-	}
-	return schema.RequestPermissionResponse{}, false
-}
-
-func rejectPermissionResponse(options []schema.PermissionOption) schema.RequestPermissionResponse {
-	if option, ok := choosePermissionOption(options, []schema.PermissionOptionKind{schema.PermissionOptionKindRejectOnce, schema.PermissionOptionKindRejectAlways}); ok {
-		return selectedPermissionResponse(option.OptionID)
-	}
-	return cancelledPermissionResponse()
 }
 
 func permissionResponseForDecision(options []schema.PermissionOption, decision provider.ApprovalDecision) schema.RequestPermissionResponse {
@@ -469,20 +431,6 @@ func permissionRequestType(tool schema.ToolCallUpdate) provider.RuntimeRequestTy
 		return provider.RuntimeRequestFileChange
 	}
 	return provider.RuntimeRequestDynamicToolCall
-}
-
-func isConfidentEditPermission(tool schema.ToolCallUpdate) bool {
-	if hasTerminalContent(tool.Content) {
-		return false
-	}
-	kind := toolKindString(tool.Kind)
-	switch kind {
-	case "edit", "patch", "file_change":
-		return true
-	case "delete", "move", "execute", "terminal", "command", "shell", "read", "search", "fetch", "switch_mode", "think", "other":
-		return false
-	}
-	return kind == "" && hasDiffContent(tool.Content)
 }
 
 func toolKindString(kind *schema.ToolKind) string {

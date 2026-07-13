@@ -257,10 +257,6 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 		return e.dispatchSessionPrepare(command)
 	case CommandThreadSessionStop:
 		return e.dispatchSessionStop(command)
-	case CommandThreadRuntimeModeSet:
-		return e.dispatchRuntimeModeSet(command)
-	case CommandThreadInteractionModeSet:
-		return e.dispatchInteractionModeSet(command)
 	case CommandThreadConfigOptionSet:
 		return e.dispatchConfigOptionSet(command)
 	default:
@@ -468,22 +464,15 @@ func (e *Engine) dispatchThreadCreate(command Command) (DispatchResult, error) {
 	if title == "" {
 		title = "Untitled thread"
 	}
-	runtimeMode := defaultRuntimeMode(command.RuntimeMode)
-	if err := validateRuntimeMode(command.Type, runtimeMode, true); err != nil {
-		return DispatchResult{}, err
-	}
 	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
 	if err != nil {
 		return DispatchResult{}, err
 	}
-	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), RuntimeMode: runtimeMode, InteractionMode: defaultInteractionMode(command.InteractionMode), Cwd: cwd}})
+	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), Cwd: cwd}})
 	return DispatchResult{Sequence: appended.Sequence}, nil
 }
 
 func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, error) {
-	if err := validateRuntimeMode(command.Type, command.RuntimeMode, false); err != nil {
-		return DispatchResult{}, err
-	}
 	if command.Cwd != "" {
 		if _, err := e.resolveThreadCwd(command.Type, command.Cwd); err != nil {
 			return DispatchResult{}, err
@@ -493,17 +482,11 @@ func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, erro
 		if err := validateMetaCwdChange(*thread, command.Cwd); err != nil {
 			return Event{}, err
 		}
-		if err := validateMetaInteractionModeChange(*thread, command.InteractionMode); err != nil {
-			return Event{}, err
-		}
-		if err := validateActiveRuntimeModeChange(*thread, command.RuntimeMode); err != nil {
-			return Event{}, err
-		}
 		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
 		if err := selectionChange.validateMetaUpdate(*thread); err != nil {
 			return Event{}, err
 		}
-		return threadEvent(command, EventThreadMetaUpdated, ActorKindClient, EventPayload{Title: command.Title, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, RuntimeMode: command.RuntimeMode, InteractionMode: command.InteractionMode, Cwd: command.Cwd, SessionCleared: selectionChange.ClearsSession}), nil
+		return threadEvent(command, EventThreadMetaUpdated, ActorKindClient, EventPayload{Title: command.Title, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, Cwd: command.Cwd, SessionCleared: selectionChange.ClearsSession}), nil
 	})
 }
 
@@ -651,31 +634,6 @@ func (e *Engine) dispatchWithThread(command Command, build func(thread *Thread) 
 func threadEvent(command Command, eventType EventType, actor ActorKind, payload EventPayload) Event {
 	payload.ThreadID = command.ThreadID
 	return Event{Type: eventType, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: actor, Payload: payload}
-}
-
-func (e *Engine) dispatchRuntimeModeSet(command Command) (DispatchResult, error) {
-	if err := validateRuntimeMode(command.Type, command.RuntimeMode, true); err != nil {
-		return DispatchResult{}, err
-	}
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateActiveRuntimeModeChange(*thread, command.RuntimeMode); err != nil {
-			return Event{}, err
-		}
-		return threadEvent(command, EventThreadRuntimeModeSet, ActorKindClient, EventPayload{RuntimeMode: command.RuntimeMode}), nil
-	})
-}
-
-func (e *Engine) dispatchInteractionModeSet(command Command) (DispatchResult, error) {
-	if command.InteractionMode == "" {
-		return DispatchResult{}, fmt.Errorf("thread.interaction-mode.set requires interactionMode")
-	}
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		eventType := EventThreadInteractionModeSet
-		if providerSessionActive(thread.Session) {
-			eventType = EventThreadInteractionModeSetRequested
-		}
-		return threadEvent(command, eventType, ActorKindClient, EventPayload{InteractionMode: command.InteractionMode}), nil
-	})
 }
 
 func (e *Engine) dispatchConfigOptionSet(command Command) (DispatchResult, error) {

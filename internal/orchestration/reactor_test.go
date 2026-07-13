@@ -12,32 +12,29 @@ import (
 )
 
 type fakeProviderRuntime struct {
-	mu                    sync.Mutex
-	configSetCalls        int
-	configSetInputs       []provider.SetConfigOptionInput
-	configSetSignal       chan struct{}
-	interactionModeSignal chan struct{}
-	interactionModeErr    error
-	interactionModeInputs []provider.SetInteractionModeInput
-	startInputs           []provider.StartSessionInput
-	startSession          provider.Session
-	startErr              error
-	sendInputs            []provider.SendTurnInput
-	interruptCalls        int
-	interruptSignal       chan struct{}
-	interruptErr          error
-	stopCalls             int
-	stopSignal            chan struct{}
-	stopErr               error
-	startEntered          chan struct{}
-	startRelease          chan struct{}
-	configSetEntered      chan struct{}
-	configSetRelease      chan struct{}
-	sendSignal            chan struct{}
+	mu               sync.Mutex
+	configSetCalls   int
+	configSetInputs  []provider.SetConfigOptionInput
+	configSetSignal  chan struct{}
+	startInputs      []provider.StartSessionInput
+	startSession     provider.Session
+	startErr         error
+	sendInputs       []provider.SendTurnInput
+	interruptCalls   int
+	interruptSignal  chan struct{}
+	interruptErr     error
+	stopCalls        int
+	stopSignal       chan struct{}
+	stopErr          error
+	startEntered     chan struct{}
+	startRelease     chan struct{}
+	configSetEntered chan struct{}
+	configSetRelease chan struct{}
+	sendSignal       chan struct{}
 }
 
 func newFakeProviderRuntime() *fakeProviderRuntime {
-	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), interactionModeSignal: make(chan struct{}, 4), interruptSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4)}
+	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), interruptSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4)}
 }
 
 func (f *fakeProviderRuntime) StartSession(ctx context.Context, _ string, input provider.StartSessionInput) (provider.Session, error) {
@@ -90,21 +87,6 @@ func (f *fakeProviderRuntime) InterruptTurn(context.Context, provider.InterruptT
 	}
 	return err
 }
-func (f *fakeProviderRuntime) SetInteractionMode(ctx context.Context, input provider.SetInteractionModeInput) error {
-	if _, ok := ctx.Deadline(); !ok {
-		return context.Canceled
-	}
-	f.mu.Lock()
-	f.interactionModeInputs = append(f.interactionModeInputs, input)
-	err := f.interactionModeErr
-	f.mu.Unlock()
-	select {
-	case f.interactionModeSignal <- struct{}{}:
-	default:
-	}
-	return err
-}
-
 func (f *fakeProviderRuntime) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
 	if _, ok := ctx.Deadline(); !ok {
 		return context.Canceled
@@ -445,30 +427,39 @@ func TestReactorSuccessfulStopRecordsCancelledReasonForActiveTurn(t *testing.T) 
 	}
 }
 
-func TestReactorForwardsAttachmentsAndStartInteractionMode(t *testing.T) {
+func TestReactorRestoresConfirmedConfigOptionsAfterSessionStop(t *testing.T) {
 	engine := NewEngine()
+	defer engine.Close()
 	fake := newFakeProviderRuntime()
-	NewProviderEventReactor(context.Background(), engine, fake)
-	threadID := ThreadID("thread-attachments")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-attachments", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", InteractionMode: ProviderInteractionModePlan}); err != nil {
+	reactor := &ProviderEventReactor{engine: engine, provider: fake, providerRPCTimeout: time.Second}
+	threadID := ThreadID("thread-config-after-stop")
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-config-after-stop", ThreadID: threadID, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "fast"}}); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
-	attachment := provider.Attachment{Kind: "image", Data: "base64", MimeType: "image/png"}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-attachments", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-attachments", Text: "look", Attachments: []provider.Attachment{attachment}}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}}); err != nil {
+		t.Fatalf("thread.session.status.set: %v", err)
 	}
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SendTurn to be called")
+	options := []provider.ConfigOption{
+		{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"},
+		{ID: "mode", Category: provider.ConfigOptionCategoryMode, CurrentValue: "plan"},
 	}
-	start := fake.lastStartInput()
-	if start.InteractionMode != string(ProviderInteractionModePlan) {
-		t.Fatalf("start input interactionMode = %q, want plan", start.InteractionMode)
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: options}}); err != nil {
+		t.Fatalf("thread.config-options.update: %v", err)
 	}
-	sent := fake.lastSendInput()
-	if sent.Input != "look" || len(sent.Attachments) != 1 || sent.Attachments[0].Kind != "image" {
-		t.Fatalf("send input = %#v, want text plus image attachment", sent)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionStop, CommandID: "stop-config-after-stop", ThreadID: threadID}); err != nil {
+		t.Fatalf("thread.session.stop: %v", err)
+	}
+	reactor.handleStop(Event{Type: EventThreadSessionStopRequested, Payload: EventPayload{ThreadID: threadID}})
+
+	result, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-config-after-stop", ThreadID: threadID})
+	if err != nil {
+		t.Fatalf("thread.session.prepare: %v", err)
+	}
+	reactor.handleSessionPrepare(Event{Type: EventThreadSessionPrepareRequested, Sequence: result.Sequence, Payload: EventPayload{ThreadID: threadID}})
+
+	input := fake.lastStartInput()
+	if len(input.ConfigSelections) != 1 || input.ConfigSelections[0].OptionID != "mode" || input.ConfigSelections[0].Value != "plan" {
+		t.Fatalf("restored config selections = %#v, want mode=plan", input.ConfigSelections)
 	}
 }
 
@@ -522,73 +513,6 @@ func TestReactorRequeuesSteerWhenTurnSettlesBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestReactorProjectsInteractionModeOnlyAfterProviderAccepts(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	NewProviderEventReactor(context.Background(), engine, fake)
-	threadID := setupConfigOptionThread(t, engine)
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadInteractionModeSet, CommandID: "set-plan-mode", ThreadID: threadID, InteractionMode: ProviderInteractionModePlan}); err != nil {
-		t.Fatalf("interaction-mode.set: %v", err)
-	}
-	select {
-	case <-fake.interactionModeSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SetInteractionMode to be called")
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		thread, _ := engine.Thread(threadID)
-		if thread.InteractionMode == ProviderInteractionModePlan {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("thread interactionMode = %q, want plan after provider confirmation", thread.InteractionMode)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestReactorRoutesModeConfigOptionThroughInteractionMode(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	NewProviderEventReactor(context.Background(), engine, fake)
-	threadID := setupConfigOptionThread(t, engine)
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "session-mode", Category: provider.ConfigOptionCategoryMode, CurrentValue: "default"}}}}); err != nil {
-		t.Fatalf("thread.config-options.update: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "set-mode-option", ThreadID: threadID, OptionID: "session-mode", Value: "plan"}); err != nil {
-		t.Fatalf("config-option.set: %v", err)
-	}
-	select {
-	case <-fake.interactionModeSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("mode option did not call SetInteractionMode")
-	}
-	fake.mu.Lock()
-	configCalls := fake.configSetCalls
-	modeInput := fake.interactionModeInputs[len(fake.interactionModeInputs)-1]
-	fake.mu.Unlock()
-	if configCalls != 0 || modeInput.Mode != "plan" {
-		t.Fatalf("mode routing: config calls=%d interaction input=%#v", configCalls, modeInput)
-	}
-	deadline := time.After(2 * time.Second)
-	for {
-		thread, _ := engine.Thread(threadID)
-		if thread.InteractionMode == ProviderInteractionModePlan {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("thread interactionMode = %q, want plan", thread.InteractionMode)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
 func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -608,72 +532,6 @@ func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T
 	case <-fake.stopSignal:
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider switch did not release the old provider session")
-	}
-}
-
-func TestReactorDoesNotProjectRejectedInteractionMode(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	fake.interactionModeErr = errors.New("no matching ACP mode")
-	NewProviderEventReactor(context.Background(), engine, fake)
-	threadID := setupConfigOptionThread(t, engine)
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadInteractionModeSet, CommandID: "set-unsupported-plan-mode", ThreadID: threadID, InteractionMode: ProviderInteractionModePlan}); err != nil {
-		t.Fatalf("interaction-mode.set: %v", err)
-	}
-	select {
-	case <-fake.interactionModeSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SetInteractionMode to be called")
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		thread, _ := engine.Thread(threadID)
-		if len(thread.Timeline.Items()) > 0 {
-			if thread.InteractionMode == ProviderInteractionModePlan {
-				t.Fatalf("rejected interaction mode was projected: %#v", thread)
-			}
-			if thread.Timeline.Items()[0].Kind != provider.ItemKindError || !strings.Contains(thread.Timeline.Items()[0].Title, "no matching ACP mode") {
-				t.Fatalf("items = %#v, want provider rejection error item", thread.Timeline.Items())
-			}
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for provider rejection error item")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	for _, event := range engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID}) {
-		if event.Type == EventThreadInteractionModeSet && event.Payload.InteractionMode == ProviderInteractionModePlan {
-			t.Fatalf("confirmed interaction-mode-set event was appended despite provider rejection: %#v", event)
-		}
-	}
-}
-
-func TestReactorMapsAutoAcceptEditsToEditOnlyApprovalPolicy(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	NewProviderEventReactor(context.Background(), engine, fake)
-	threadID := ThreadID("thread-auto-accept-edits")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-auto-accept-edits", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", RuntimeMode: RuntimeModeAutoAcceptEdits}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-auto-accept-edits", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-auto-accept", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SendTurn to be called")
-	}
-	if got := fake.lastStartInput().ApprovalPolicy; got != provider.ApprovalPolicyAllowEdits {
-		t.Fatalf("start approval policy = %q, want allow-edits", got)
-	}
-	if got := fake.lastSendInput().ApprovalPolicy; got != provider.ApprovalPolicyAllowEdits {
-		t.Fatalf("send approval policy = %q, want allow-edits", got)
 	}
 }
 
@@ -934,11 +792,11 @@ func TestReactorInterruptNoopsAfterProviderAlreadyCompletedTurn(t *testing.T) {
 		t.Fatalf("thread after provider completion = %#v, want ready completed turn", thread)
 	}
 	close(fake.startRelease)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadInteractionModeSet, CommandID: "barrier-after-interrupt", ThreadID: threadID, InteractionMode: ProviderInteractionModeDefault}); err != nil {
-		t.Fatalf("interaction-mode barrier: %v", err)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "barrier", ThreadID: threadID, OptionID: "mode", Value: "default"}); err != nil {
+		t.Fatalf("config-option barrier: %v", err)
 	}
 	select {
-	case <-fake.interactionModeSignal:
+	case <-fake.configSetSignal:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for reactor queue barrier")
 	}
@@ -969,11 +827,11 @@ func TestReactorProviderCallTimeoutUnwedgesThreadQueue(t *testing.T) {
 		t.Fatal("expected SetConfigOption to be entered")
 	}
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadInteractionModeSet, CommandID: "interaction-after-hung-config", ThreadID: threadID, InteractionMode: ProviderInteractionModeDefault}); err != nil {
-		t.Fatalf("interaction-mode.set: %v", err)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "barrier", ThreadID: threadID, OptionID: "mode", Value: "default"}); err != nil {
+		t.Fatalf("config-option.set: %v", err)
 	}
 	select {
-	case <-fake.interactionModeSignal:
+	case <-fake.configSetEntered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subsequent command after provider RPC timeout")
 	}

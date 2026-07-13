@@ -40,10 +40,9 @@ type toolState struct {
 // promptCollector is one maiD turn on an ACP session. All fields are guarded
 // by Instance.mu.
 type promptCollector struct {
-	threadID       string
-	turnID         string
-	approvalPolicy provider.ApprovalPolicy
-	cancelled      bool
+	threadID  string
+	turnID    string
+	cancelled bool
 	// startEmitted records whether turn.started was emitted for this turn.
 	// Prompts queued behind another turn defer their start emission to the
 	// dispatch owner so it lands strictly after the previous turn's
@@ -87,11 +86,6 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if err != nil {
 		return err
 	}
-	approvalPolicy, err := provider.NormalizeApprovalPolicy(input.ApprovalPolicy)
-	if err != nil {
-		return err
-	}
-
 	h.mu.Lock()
 	session := h.sessionLocked(sessionID)
 	if session == nil || stream.closed {
@@ -109,12 +103,11 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if joins {
 		turnID = collector.turnID
 		collector.threadID = input.ThreadID
-		collector.approvalPolicy = approvalPolicy
 	} else {
 		if turnID == "" {
 			turnID = newID()
 		}
-		collector = &promptCollector{threadID: input.ThreadID, turnID: turnID, approvalPolicy: approvalPolicy}
+		collector = &promptCollector{threadID: input.ThreadID, turnID: turnID}
 		session.collector = collector
 	}
 	rec := &pendingPrompt{threadID: input.ThreadID, turnID: turnID, collector: collector, blocks: blocks}

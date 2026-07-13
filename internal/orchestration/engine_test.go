@@ -105,39 +105,6 @@ func TestEngineRejectsCwdMetaUpdateWhileProviderSessionBound(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsInteractionModeMetaUpdateWhileProviderSessionBound(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-interaction-mode-bound-session")
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-interaction-bound-session", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", InteractionMode: ProviderInteractionModeDefault}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-interaction-same-bound-session", ThreadID: threadID, InteractionMode: ProviderInteractionModeDefault}); err != nil {
-		t.Fatalf("same interactionMode thread.meta.update with bound session: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-interaction-change-bound-session", ThreadID: threadID, InteractionMode: ProviderInteractionModePlan}); err == nil || !strings.Contains(err.Error(), "thread.interaction-mode.set") {
-		t.Fatalf("interactionMode change with bound session err = %v, want thread.interaction-mode.set rejection", err)
-	}
-	if thread, ok := engine.Thread(threadID); !ok || thread.InteractionMode != ProviderInteractionModeDefault {
-		t.Fatalf("thread interactionMode after rejected update = %q, want default", thread.InteractionMode)
-	}
-
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusStopped, UpdatedAt: time.Now()}}}); err != nil {
-		t.Fatalf("thread.session.status.set stopped: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-interaction-change-stopped-session", ThreadID: threadID, InteractionMode: ProviderInteractionModePlan}); err != nil {
-		t.Fatalf("interactionMode change after session stop: %v", err)
-	}
-	if thread, ok := engine.Thread(threadID); !ok || thread.InteractionMode != ProviderInteractionModePlan {
-		t.Fatalf("thread interactionMode after stopped-session update = %q, want plan", thread.InteractionMode)
-	}
-}
-
 func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -297,100 +264,12 @@ func TestEngineRejectsProviderModelMetaUpdateDuringActiveTurn(t *testing.T) {
 func TestEngineRejectsNonCreateCommandForMissingThread(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadRuntimeModeSet, CommandID: "cmd-missing-runtime-mode", ThreadID: "missing-thread", RuntimeMode: RuntimeModeFullAccess})
+	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-missing-config", ThreadID: "missing-thread", OptionID: "mode", Value: "agent"})
 	if err == nil {
-		t.Fatal("runtime-mode set for missing thread err = nil, want rejection")
+		t.Fatal("config-option set for missing thread err = nil, want rejection")
 	}
 	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 0 {
 		t.Fatalf("replay events = %#v, want no ghost thread events", replay)
-	}
-}
-
-func TestEngineRejectsInvalidRuntimeModes(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-invalid-runtime", ThreadID: "thread-invalid-create-runtime", RuntimeMode: "danger"}); err == nil {
-		t.Fatal("thread.create invalid runtimeMode err = nil, want rejection")
-	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 0 {
-		t.Fatalf("events after invalid create = %#v, want none", replay)
-	}
-
-	threadID := ThreadID("thread-invalid-runtime")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-runtime-validation", ThreadID: threadID, Title: "Thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	commands := []Command{
-		{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-invalid-runtime", ThreadID: threadID, RuntimeMode: "danger"},
-		{Type: CommandThreadTurnStart, CommandID: "cmd-turn-invalid-runtime", ThreadID: threadID, RuntimeMode: "danger", Message: &CommandMessage{MessageID: "msg-invalid-runtime", Text: "hello"}},
-		{Type: CommandThreadRuntimeModeSet, CommandID: "cmd-set-invalid-runtime", ThreadID: threadID, RuntimeMode: "danger"},
-		{Type: CommandThreadRuntimeModeSet, CommandID: "cmd-set-empty-runtime", ThreadID: threadID},
-	}
-	for _, command := range commands {
-		if _, err := engine.Dispatch(context.Background(), command); err == nil {
-			t.Fatalf("%s invalid runtimeMode err = nil, want rejection", command.Type)
-		}
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.RuntimeMode != RuntimeModeFullAccess {
-		t.Fatalf("thread runtimeMode = %q, want %q", thread.RuntimeMode, RuntimeModeFullAccess)
-	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 1 {
-		t.Fatalf("events after invalid runtime modes = %#v, want only create", replay)
-	}
-}
-
-func TestEngineRejectsRuntimeModeChangesDuringActiveTurn(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-active-runtime-mode")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-active-runtime", ThreadID: threadID, Title: "Thread", RuntimeMode: RuntimeModeApprovalRequired}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-active-runtime", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-active-runtime", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadRuntimeModeSet, CommandID: "cmd-set-active-runtime", ThreadID: threadID, RuntimeMode: RuntimeModeFullAccess}); err == nil {
-		t.Fatal("thread.runtime-mode.set during active turn err = nil, want rejection")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-active-runtime", ThreadID: threadID, RuntimeMode: RuntimeModeFullAccess}); err == nil {
-		t.Fatal("thread.meta.update runtimeMode during active turn err = nil, want rejection")
-	}
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.RuntimeMode != RuntimeModeApprovalRequired {
-		t.Fatalf("thread runtimeMode = %q, want %q", thread.RuntimeMode, RuntimeModeApprovalRequired)
-	}
-}
-
-func TestEngineRejectsTurnStartModeChanges(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-turn-start-mode-boundary")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-turn-start-mode-boundary", ThreadID: threadID, Title: "Thread", RuntimeMode: RuntimeModeApprovalRequired, InteractionMode: ProviderInteractionModeDefault}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-start-mode-boundary", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-turn-start-mode-boundary", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-
-	for _, tc := range []struct {
-		name    string
-		command Command
-		want    string
-	}{
-		{name: "runtime", command: Command{Type: CommandThreadTurnStart, CommandID: "cmd-steer-runtime-boundary", ThreadID: threadID, RuntimeMode: RuntimeModeFullAccess, Message: &CommandMessage{MessageID: "msg-steer-runtime-boundary", Text: "escalate"}}, want: "runtimeMode"},
-		{name: "interaction", command: Command{Type: CommandThreadTurnStart, CommandID: "cmd-steer-interaction-boundary", ThreadID: threadID, InteractionMode: ProviderInteractionModePlan, Message: &CommandMessage{MessageID: "msg-steer-interaction-boundary", Text: "plan"}}, want: "interactionMode"},
-	} {
-		if _, err := engine.Dispatch(context.Background(), tc.command); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("%s steering err = %v, want %q", tc.name, err, tc.want)
-		}
-	}
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.RuntimeMode != RuntimeModeApprovalRequired || thread.InteractionMode != ProviderInteractionModeDefault || len(thread.Timeline.Messages()) != 1 {
-		t.Fatalf("thread after rejected steering mode changes = %#v, want original modes and one message", thread)
 	}
 }
 
@@ -1264,7 +1143,6 @@ func TestThreadListVisibleGatesHotStreamingEvents(t *testing.T) {
 		{"reasoning item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindReasoning}}}, false},
 		{"tool call item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindToolCall}}}, false},
 		{"plan update", Event{Type: EventThreadPlanUpdated}, false},
-		{"interaction mode request", Event{Type: EventThreadInteractionModeSetRequested}, false},
 		{"session status", Event{Type: EventThreadSessionStatusSet}, true},
 		{"thread created", Event{Type: EventThreadCreated}, true},
 	}

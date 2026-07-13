@@ -11,8 +11,6 @@ type ThreadListEntry struct {
 	Title               string                   `json:"title"`
 	ProviderInstanceID  provider.InstanceID      `json:"providerInstanceId,omitempty"`
 	ModelSelection      *provider.ModelSelection `json:"modelSelection,omitempty"`
-	RuntimeMode         RuntimeMode              `json:"runtimeMode"`
-	InteractionMode     ProviderInteractionMode  `json:"interactionMode"`
 	Cwd                 string                   `json:"cwd,omitempty"`
 	LatestTurn          *Turn                    `json:"latestTurn,omitempty"`
 	CreatedAt           time.Time                `json:"createdAt"`

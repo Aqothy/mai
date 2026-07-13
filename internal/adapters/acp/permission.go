@@ -59,12 +59,6 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 		return resp, nil
 	}
 
-	if resp, ok := automaticPermissionResponse(req, state.policy); ok {
-		h.recordPermissionRequest(req, state, requestID)
-		h.recordPermissionResolved(req, state, requestID, resp)
-		return resp, nil
-	}
-
 	permissionCtx, cancelPermission, pending := h.beginPermissionRequest(ctx, string(req.SessionID), requestID, req.Options)
 	defer cancelPermission()
 	defer h.endPermissionRequest(string(req.SessionID), requestID, pending)
@@ -108,7 +102,6 @@ type approvalResponse struct {
 }
 
 type permissionState struct {
-	policy    provider.ApprovalPolicy
 	threadID  string
 	turnID    string
 	cancelled bool
@@ -119,13 +112,13 @@ func (h *Instance) permissionRequestState(sessionID string) permissionState {
 	defer h.mu.Unlock()
 	collector := h.updateCollectorLocked(sessionID)
 	if collector == nil {
-		state := permissionState{policy: provider.ApprovalPolicyDeny}
+		state := permissionState{}
 		if session := h.sessionLocked(sessionID); session != nil {
 			state.threadID = session.threadID
 		}
 		return state
 	}
-	return permissionState{policy: collector.approvalPolicy, threadID: collector.threadID, turnID: collector.turnID, cancelled: collector.cancelled}
+	return permissionState{threadID: collector.threadID, turnID: collector.turnID, cancelled: collector.cancelled}
 }
 
 func (h *Instance) beginPermissionRequest(ctx context.Context, sessionID string, requestID string, options []schema.PermissionOption) (context.Context, context.CancelFunc, *pendingPermission) {

@@ -14,21 +14,6 @@ type ApprovalID string
 type EventID string
 type CommandID string
 
-type RuntimeMode string
-
-const (
-	RuntimeModeApprovalRequired RuntimeMode = "approval-required"
-	RuntimeModeAutoAcceptEdits  RuntimeMode = "auto-accept-edits"
-	RuntimeModeFullAccess       RuntimeMode = "full-access"
-)
-
-type ProviderInteractionMode string
-
-const (
-	ProviderInteractionModeDefault ProviderInteractionMode = "default"
-	ProviderInteractionModePlan    ProviderInteractionMode = "plan"
-)
-
 type MessageRole string
 
 const (
@@ -68,8 +53,6 @@ type Thread struct {
 	Title              string                   `json:"title"`
 	ProviderInstanceID provider.InstanceID      `json:"providerInstanceId,omitempty"`
 	ModelSelection     *provider.ModelSelection `json:"modelSelection,omitempty"`
-	RuntimeMode        RuntimeMode              `json:"runtimeMode"`
-	InteractionMode    ProviderInteractionMode  `json:"interactionMode"`
 	Cwd                string                   `json:"cwd,omitempty"`
 	Session            *SessionBinding          `json:"session,omitempty"`
 	LatestTurn         *Turn                    `json:"latestTurn,omitempty"`
@@ -126,7 +109,6 @@ type SessionBinding struct {
 	ProviderGeneration uint64              `json:"-"`
 	ProviderName       string              `json:"providerName,omitempty"`
 	Provider           provider.DriverKind `json:"provider,omitempty"`
-	RuntimeMode        RuntimeMode         `json:"runtimeMode,omitempty"`
 	Cwd                string              `json:"cwd,omitempty"`
 	Status             SessionStatus       `json:"status"`
 	ActiveTurnID       TurnID              `json:"activeTurnId,omitempty"`

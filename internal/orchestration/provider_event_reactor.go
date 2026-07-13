@@ -15,7 +15,6 @@ type ProviderRuntime interface {
 	StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.Session, error)
 	SendTurn(ctx context.Context, input provider.SendTurnInput) error
 	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
-	SetInteractionMode(ctx context.Context, input provider.SetInteractionModeInput) error
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
 	StopSession(ctx context.Context, input provider.StopSessionInput) error
 	ReleaseSession(ctx context.Context, input provider.StopSessionInput) error
@@ -79,8 +78,6 @@ func (r *ProviderEventReactor) handle(event Event) {
 		r.enqueueThread(event, func() { r.handleInterrupt(event) })
 	case EventThreadSessionStopRequested:
 		r.enqueueThread(event, func() { r.handleStop(event) })
-	case EventThreadInteractionModeSetRequested:
-		r.enqueueThread(event, func() { r.handleInteractionMode(event) })
 	case EventThreadConfigOptionSetRequested:
 		r.enqueueThread(event, func() { r.handleConfigOption(event) })
 	case EventThreadApprovalResponseRequested:
@@ -140,10 +137,29 @@ func startSessionInputFromThread(thread Thread) provider.StartSessionInput {
 		ProviderInstanceID: thread.ProviderInstanceID,
 		Cwd:                thread.Cwd,
 		ModelSelection:     cloneModelSelection(thread.ModelSelection),
-		ApprovalPolicy:     approvalPolicyForRuntime(thread.RuntimeMode),
-		RuntimeMode:        string(thread.RuntimeMode),
-		InteractionMode:    string(thread.InteractionMode),
+		ConfigSelections:   configSelectionsFromThread(thread),
 	}
+}
+
+func configSelectionsFromThread(thread Thread) []provider.ConfigOptionSelection {
+	if thread.Session == nil {
+		return nil
+	}
+	var selections []provider.ConfigOptionSelection
+	for _, option := range thread.Session.ConfigOptions {
+		if option.ID == "" || option.Category == provider.ConfigOptionCategoryModel {
+			continue
+		}
+		switch option.CurrentValue.(type) {
+		case string, bool:
+			selections = append(selections, provider.ConfigOptionSelection{
+				OptionID: option.ID,
+				Value:    option.CurrentValue,
+				Category: option.Category,
+			})
+		}
+	}
+	return selections
 }
 
 func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
@@ -224,7 +240,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(thread.ID), TurnID: string(turnID), Input: message.Text, Attachments: message.Attachments, ModelSelection: cloneModelSelection(thread.ModelSelection), InteractionMode: string(thread.InteractionMode), ApprovalPolicy: approvalPolicyForRuntime(thread.RuntimeMode)}); err != nil {
+	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(thread.ID), TurnID: string(turnID), Input: message.Text, Attachments: message.Attachments, ModelSelection: cloneModelSelection(thread.ModelSelection)}); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
 }
@@ -261,7 +277,7 @@ func (r *ProviderEventReactor) requeueSettledTurnStart(event Event, thread Threa
 }
 
 // bindingFromProviderSession extracts the identity fields of a provider
-// session for a bound update; status/turn/runtime-mode fields are derived by
+// session for a bound update; status and turn fields are derived by
 // the engine against the live thread.
 func bindingFromProviderSession(providerInstanceID provider.InstanceID, session provider.Session) SessionBinding {
 	if providerInstanceID == "" {
@@ -326,42 +342,12 @@ func (r *ProviderEventReactor) handleStop(event Event) {
 	r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateStopped, StopReason: stopReason})
 }
 
-func (r *ProviderEventReactor) handleInteractionMode(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
-	if !ok || thread.Session == nil {
-		return
-	}
-	r.setInteractionMode(thread, event.Payload.InteractionMode)
-}
-
-func (r *ProviderEventReactor) setInteractionMode(thread Thread, mode ProviderInteractionMode) {
-	if mode == "" {
-		return
-	}
-	ctx, cancel := r.providerRPCContext()
-	defer cancel()
-	if err := r.provider.SetInteractionMode(ctx, provider.SetInteractionModeInput{ThreadID: string(thread.ID), Mode: string(mode)}); err != nil {
-		r.appendErrorItem(thread.ID, "", err.Error())
-		return
-	}
-	r.record(EventInput{Type: EventThreadInteractionModeSet, ThreadID: thread.ID, Actor: ActorKindServer, Payload: EventPayload{InteractionMode: mode}})
-}
-
 func (r *ProviderEventReactor) handleConfigOption(event Event) {
 	thread, ok := r.engine.Thread(event.ThreadID())
 	if !ok || thread.Session == nil {
 		return
 	}
 	category := configOptionCategory(thread, event.Payload.OptionID)
-	if category == provider.ConfigOptionCategoryMode {
-		mode, ok := event.Payload.Value.(string)
-		if !ok {
-			r.appendErrorItem(thread.ID, "", "mode config option requires a string value")
-			return
-		}
-		r.setInteractionMode(thread, ProviderInteractionMode(mode))
-		return
-	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 	if err := r.provider.SetConfigOption(ctx, provider.SetConfigOptionInput{ThreadID: string(thread.ID), OptionID: event.Payload.OptionID, Value: event.Payload.Value, Category: category}); err != nil {
@@ -457,17 +443,4 @@ func findApproval(thread Thread, id ApprovalID) (Approval, bool) {
 		return *approval, true
 	}
 	return Approval{}, false
-}
-
-func approvalPolicyForRuntime(mode RuntimeMode) provider.ApprovalPolicy {
-	switch mode {
-	case RuntimeModeApprovalRequired:
-		return provider.ApprovalPolicyAsk
-	case RuntimeModeAutoAcceptEdits:
-		return provider.ApprovalPolicyAllowEdits
-	case RuntimeModeFullAccess:
-		return provider.ApprovalPolicyAllow
-	default:
-		return provider.ApprovalPolicyAsk
-	}
 }

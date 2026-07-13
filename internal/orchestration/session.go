@@ -121,7 +121,6 @@ func deriveSessionBound(thread *Thread, update sessionUpdate, occurredAt time.Ti
 	}
 	session.ThreadID = thread.ID
 	session.ProviderInstanceID = providerInstanceID
-	session.RuntimeMode = thread.RuntimeMode
 	if session.Cwd == "" {
 		session.Cwd = thread.Cwd
 	}
@@ -215,7 +214,7 @@ func deriveSessionError(thread *Thread, update sessionUpdate, occurredAt time.Ti
 }
 
 func sessionScaffold(thread *Thread, providerInstanceID provider.InstanceID, occurredAt time.Time) *SessionBinding {
-	return &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, RuntimeMode: thread.RuntimeMode, Cwd: thread.Cwd, UpdatedAt: occurredAt}
+	return &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, UpdatedAt: occurredAt}
 }
 
 // overlaySessionIdentity applies the provider-session identity fields of a

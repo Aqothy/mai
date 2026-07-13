@@ -97,10 +97,6 @@ func (i *fakeProviderInstance) InterruptTurn(context.Context, provider.Interrupt
 	i.recordCall("InterruptTurn")
 	return nil
 }
-func (i *fakeProviderInstance) SetInteractionMode(context.Context, provider.SetInteractionModeInput) error {
-	i.recordCall("SetInteractionMode")
-	return nil
-}
 func (i *fakeProviderInstance) SetConfigOption(context.Context, provider.SetConfigOptionInput) error {
 	i.recordCall("SetConfigOption")
 	return nil
@@ -1203,13 +1199,6 @@ func TestThreadScopedOperationsRecoverStaleRouteBeforeAdapterCall(t *testing.T) 
 			want: "InterruptTurn",
 		},
 		{
-			name: "set interaction mode",
-			call: func(s *Service) error {
-				return s.SetInteractionMode(context.Background(), provider.SetInteractionModeInput{ThreadID: "thread-1", Mode: "plan"})
-			},
-			want: "SetInteractionMode",
-		},
-		{
 			name: "set config option",
 			call: func(s *Service) error {
 				return s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast"})
@@ -1273,16 +1262,16 @@ func TestPreferenceChangesSurviveProviderRestart(t *testing.T) {
 		t.Fatalf("initial StartInstance: %v", err)
 	}
 	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
-		ThreadID: "thread-1", ProviderInstanceID: "codex", InteractionMode: "default",
+		ThreadID: "thread-1", ProviderInstanceID: "codex",
 		ModelSelection: &provider.ModelSelection{Model: "slow"},
 	}); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if err := s.SetInteractionMode(context.Background(), provider.SetInteractionModeInput{ThreadID: "thread-1", Mode: "plan"}); err != nil {
-		t.Fatalf("SetInteractionMode: %v", err)
-	}
 	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast", Category: provider.ConfigOptionCategoryModel}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
+		t.Fatalf("SetConfigOption model: %v", err)
+	}
+	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "reasoning", Value: "high"}); err != nil {
+		t.Fatalf("SetConfigOption reasoning: %v", err)
 	}
 	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
 		t.Fatalf("restart StartInstance: %v", err)
@@ -1292,11 +1281,11 @@ func TestPreferenceChangesSurviveProviderRestart(t *testing.T) {
 	}
 
 	input := adapter.instance(1).lastStartInput()
-	if input.InteractionMode != "plan" {
-		t.Fatalf("recovered interaction mode = %q, want plan", input.InteractionMode)
-	}
 	if input.ModelSelection == nil || input.ModelSelection.Model != "fast" {
 		t.Fatalf("recovered model selection = %#v, want fast", input.ModelSelection)
+	}
+	if len(input.ConfigSelections) != 1 || input.ConfigSelections[0].OptionID != "reasoning" || input.ConfigSelections[0].Value != "high" {
+		t.Fatalf("recovered config selections = %#v, want reasoning=high", input.ConfigSelections)
 	}
 }
 

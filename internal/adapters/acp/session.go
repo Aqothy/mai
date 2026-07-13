@@ -238,7 +238,6 @@ func (h *Instance) sessionProjection(input provider.StartSessionInput, sessionID
 		ProviderInstanceID: info.InstanceID,
 		ProviderSessionID:  sessionID,
 		ProviderName:       info.Name,
-		RuntimeMode:        input.RuntimeMode,
 		Cwd:                input.Cwd,
 		ThreadID:           input.ThreadID,
 		ResumeCursor:       marshalRaw(map[string]string{"sessionId": sessionID}),
@@ -404,46 +403,22 @@ func (h *Instance) unbindSessionID(sessionID string) {
 	}
 }
 
-// SetInteractionMode maps the provider-neutral interaction mode (e.g. "plan",
-// "default") to ACP's category=mode config option.
-func (h *Instance) SetInteractionMode(ctx context.Context, input provider.SetInteractionModeInput) error {
-	if input.ThreadID == "" {
-		return fmt.Errorf("provider set interaction mode requires threadId")
-	}
-	sessionID := h.sessionIDForThread(input.ThreadID)
-	if sessionID == "" {
-		return fmt.Errorf("thread %q has no ACP session", input.ThreadID)
-	}
-	return h.setInteractionMode(ctx, sessionID, input.Mode, true)
-}
-
-// applyInteractionModePreference applies the thread's draft interaction mode to
-// a newly materialized session. Best-effort: a stored preference the
-// agent cannot satisfy (e.g. "plan" recorded on the thread while the agent
-// advertises no plan mode) must not fail session materialization — otherwise
-// the thread is bricked with the same error on every prompt after a provider
-// restart. The session continues in the agent's default mode and the mismatch
-// surfaces as a runtime warning; the explicit SetInteractionMode command path
-// still fails loudly.
-func (h *Instance) applyInteractionModePreference(ctx context.Context, sessionID string, input provider.StartSessionInput) {
-	if input.InteractionMode == "" || strings.EqualFold(input.InteractionMode, "default") {
-		return
-	}
-	if err := h.setInteractionMode(ctx, sessionID, input.InteractionMode, false); err != nil {
-		h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-			EventID:   provider.RuntimeEventID(newID()),
-			Type:      provider.RuntimeEventRuntimeWarning,
-			Provider:  DriverKind,
-			ThreadID:  input.ThreadID,
-			CreatedAt: time.Now(),
-			Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("interaction mode %q not applied to new session: %v", input.InteractionMode, err)},
-		})
-	}
-}
-
 func (h *Instance) applyInitialSessionPreferences(ctx context.Context, sessionID string, input provider.StartSessionInput) {
+	// Model changes may replace the provider's advertised option set, so resolve
+	// and apply the model before replaying selections against the refreshed set.
 	h.applyModelSelectionPreference(ctx, sessionID, input)
-	h.applyInteractionModePreference(ctx, sessionID, input)
+	for _, selection := range input.ConfigSelections {
+		if err := h.setSessionConfigOptionValue(ctx, sessionID, selection.OptionID, selection.Value); err != nil {
+			h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
+				EventID:   provider.RuntimeEventID(newID()),
+				Type:      provider.RuntimeEventRuntimeWarning,
+				Provider:  DriverKind,
+				ThreadID:  input.ThreadID,
+				CreatedAt: time.Now(),
+				Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("config option %q not restored: %v", selection.OptionID, err)},
+			})
+		}
+	}
 }
 
 // applyModelSelectionPreference applies the thread's stored model preference
@@ -480,29 +455,6 @@ func (h *Instance) applyModelSelection(ctx context.Context, sessionID string, se
 		return nil
 	}
 	return h.setSessionConfigOptionValue(ctx, sessionID, optionID, value)
-}
-
-func (h *Instance) setInteractionMode(ctx context.Context, sessionID string, mode string, emit bool) error {
-	if modeID, ok := h.resolveSessionMode(sessionID, mode); ok {
-		if err := h.setSessionModeValue(ctx, sessionID, modeID); err != nil {
-			return err
-		}
-		if emit {
-			h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
-		}
-		return nil
-	}
-	optionID, value, ok := h.resolveInteractionModeConfigChoice(sessionID, mode)
-	if !ok {
-		return fmt.Errorf("no ACP session mode or mode config option matches interaction mode %q", mode)
-	}
-	if err := h.setSessionConfigOptionValue(ctx, sessionID, optionID, value); err != nil {
-		return err
-	}
-	if emit {
-		h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
-	}
-	return nil
 }
 
 // SetConfigOption sets a session configuration option (model, reasoning level,
@@ -564,32 +516,6 @@ func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, mo
 	return nil
 }
 
-func (h *Instance) resolveSessionMode(sessionID string, mode string) (schema.SessionModeId, bool) {
-	aliases := append([]string{mode}, interactionModeAliases(mode)...)
-	var state schema.SessionModeState
-	ok := false
-	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil && session.modes != nil {
-		state, ok = *session.modes, true
-	}
-	h.mu.Unlock()
-	if !ok {
-		return "", false
-	}
-	for _, alias := range aliases {
-		for _, available := range state.AvailableModes {
-			if strings.EqualFold(string(available.ID), alias) || strings.EqualFold(available.Name, alias) {
-				return available.ID, true
-			}
-		}
-	}
-	return "", false
-}
-
-func (h *Instance) resolveInteractionModeConfigChoice(sessionID string, mode string) (string, string, bool) {
-	return h.resolveConfigChoice(sessionID, provider.ConfigOptionCategoryMode, append([]string{mode}, interactionModeAliases(mode)...))
-}
-
 func (h *Instance) resolveModelConfigChoice(sessionID string, model string) (string, string, bool) {
 	return h.resolveConfigChoice(sessionID, provider.ConfigOptionCategoryModel, []string{model})
 }
@@ -642,19 +568,6 @@ func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID 
 		}
 	}
 	return false
-}
-
-func interactionModeAliases(mode string) []string {
-	switch {
-	case strings.EqualFold(mode, "default"):
-		return []string{"code", "agent", "chat", "implement"}
-	case strings.EqualFold(mode, "plan"):
-		return []string{"architect"}
-	default:
-		// Agent-defined modes must match exactly. Falling back to generic code/default
-		// aliases would silently confirm a different mode than the caller requested.
-		return nil
-	}
 }
 
 func (h *Instance) emitConfigOptions(sessionID string, options []provider.ConfigOption) {

@@ -86,13 +86,12 @@ type MCPCapabilities struct {
 // assumed of every provider and are not listed here. UI clients use these to
 // show/hide controls and the server uses them to gate commands.
 type Capabilities struct {
-	Resume          bool                      `json:"resume,omitempty"`
-	Auth            bool                      `json:"auth,omitempty"`
-	Logout          bool                      `json:"logout,omitempty"`
-	PromptContent   PromptContentCapabilities `json:"promptContent,omitzero"`
-	ModelSwitch     ModelSwitchSupport        `json:"modelSwitch,omitempty"`
-	InteractionMode bool                      `json:"interactionMode,omitempty"`
-	MCP             MCPCapabilities           `json:"mcp,omitzero"`
+	Resume        bool                      `json:"resume,omitempty"`
+	Auth          bool                      `json:"auth,omitempty"`
+	Logout        bool                      `json:"logout,omitempty"`
+	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
+	ModelSwitch   ModelSwitchSupport        `json:"modelSwitch,omitempty"`
+	MCP           MCPCapabilities           `json:"mcp,omitzero"`
 }
 
 type AuthStatus string
@@ -153,28 +152,6 @@ type SessionSummary struct {
 	Title     string `json:"title,omitempty"`
 	Cwd       string `json:"cwd,omitempty"`
 	UpdatedAt string `json:"updatedAt,omitempty"`
-}
-
-// ApprovalPolicy is the server's provider-neutral policy for tool/permission
-// prompts. Adapters map it to their native approval mechanism.
-type ApprovalPolicy string
-
-const (
-	ApprovalPolicyDeny       ApprovalPolicy = "deny"
-	ApprovalPolicyAllow      ApprovalPolicy = "allow"
-	ApprovalPolicyAllowEdits ApprovalPolicy = "allow-edits"
-	ApprovalPolicyAsk        ApprovalPolicy = "ask"
-)
-
-func NormalizeApprovalPolicy(policy ApprovalPolicy) (ApprovalPolicy, error) {
-	switch policy {
-	case "", ApprovalPolicyDeny:
-		return ApprovalPolicyDeny, nil
-	case ApprovalPolicyAllow, ApprovalPolicyAllowEdits, ApprovalPolicyAsk:
-		return policy, nil
-	default:
-		return "", fmt.Errorf("unsupported approval policy %q", policy)
-	}
 }
 
 // ModelSelection is WHAT a provider instance runs (model + provider-shaped
@@ -240,7 +217,6 @@ type Session struct {
 	// exposed in the thread/session projection.
 	ProviderSessionID string          `json:"-"`
 	ProviderName      string          `json:"providerName,omitempty"`
-	RuntimeMode       string          `json:"runtimeMode,omitempty"`
 	Cwd               string          `json:"cwd,omitempty"`
 	ThreadID          string          `json:"threadId"`
 	ResumeCursor      json.RawMessage `json:"resumeCursor,omitempty"`
@@ -249,17 +225,21 @@ type Session struct {
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
 }
 
+type ConfigOptionSelection struct {
+	OptionID string               `json:"optionId"`
+	Value    any                  `json:"value"`
+	Category ConfigOptionCategory `json:"category,omitempty"`
+}
+
 type StartSessionInput struct {
-	ThreadID           string          `json:"threadId"`
-	Provider           DriverKind      `json:"provider,omitempty"`
-	ProviderInstanceID InstanceID      `json:"providerInstanceId,omitempty"`
-	Cwd                string          `json:"cwd,omitempty"`
-	ModelSelection     *ModelSelection `json:"modelSelection,omitempty"`
-	ResumeCursor       json.RawMessage `json:"resumeCursor,omitempty"`
-	ApprovalPolicy     ApprovalPolicy  `json:"approvalPolicy,omitempty"`
-	RuntimeMode        string          `json:"runtimeMode,omitempty"`
-	InteractionMode    string          `json:"interactionMode,omitempty"`
-	Options            json.RawMessage `json:"options,omitempty"`
+	ThreadID           string                  `json:"threadId"`
+	Provider           DriverKind              `json:"provider,omitempty"`
+	ProviderInstanceID InstanceID              `json:"providerInstanceId,omitempty"`
+	Cwd                string                  `json:"cwd,omitempty"`
+	ModelSelection     *ModelSelection         `json:"modelSelection,omitempty"`
+	ConfigSelections   []ConfigOptionSelection `json:"configSelections,omitempty"`
+	ResumeCursor       json.RawMessage         `json:"resumeCursor,omitempty"`
+	Options            json.RawMessage         `json:"options,omitempty"`
 }
 
 type Attachment struct {
@@ -273,14 +253,12 @@ type Attachment struct {
 }
 
 type SendTurnInput struct {
-	ThreadID        string          `json:"threadId"`
-	TurnID          string          `json:"turnId,omitempty"`
-	Input           string          `json:"input,omitempty"`
-	Attachments     []Attachment    `json:"attachments,omitempty"`
-	ModelSelection  *ModelSelection `json:"modelSelection,omitempty"`
-	InteractionMode string          `json:"interactionMode,omitempty"`
-	ApprovalPolicy  ApprovalPolicy  `json:"approvalPolicy,omitempty"`
-	Options         json.RawMessage `json:"options,omitempty"`
+	ThreadID       string          `json:"threadId"`
+	TurnID         string          `json:"turnId,omitempty"`
+	Input          string          `json:"input,omitempty"`
+	Attachments    []Attachment    `json:"attachments,omitempty"`
+	ModelSelection *ModelSelection `json:"modelSelection,omitempty"`
+	Options        json.RawMessage `json:"options,omitempty"`
 }
 
 type InterruptTurnInput struct {
@@ -290,11 +268,6 @@ type InterruptTurnInput struct {
 
 type StopSessionInput struct {
 	ThreadID string `json:"threadId"`
-}
-
-type SetInteractionModeInput struct {
-	ThreadID string `json:"threadId"`
-	Mode     string `json:"mode"`
 }
 
 type SetConfigOptionInput struct {

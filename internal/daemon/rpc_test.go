@@ -279,7 +279,7 @@ func TestRPCOrchestrationApprovalRespondResolvesProviderPermission(t *testing.T)
 	threadID := orchestration.ThreadID("thread-permission")
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm", ThreadID: threadID, Title: "Permission thread", ProviderInstanceID: "codex", RuntimeMode: orchestration.RuntimeModeApprovalRequired, Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm", ThreadID: threadID, Title: "Permission thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
@@ -342,7 +342,7 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-permission-option")
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", RuntimeMode: orchestration.RuntimeModeApprovalRequired, Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
@@ -558,7 +558,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 // TestRPCSessionMetadataProjectionsReachClient locks in the projections real
 // agents emit during a prompt: slash commands, an
 // agent-set title, token usage, session config options, and provider-owned
-// interaction-mode / config-option switching round-trips.
+// Provider mode and other config-option switching round-trip.
 func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	s := NewServer()
 	defer s.Close()
@@ -571,7 +571,7 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-metadata")
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", RuntimeMode: orchestration.RuntimeModeApprovalRequired, Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
@@ -616,9 +616,9 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		return event.Type == orchestration.EventThreadMessageSent && event.Payload.Role == orchestration.MessageRoleAssistant
 	})
 
-	// Interaction mode maps onto the agent's category=mode config option.
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadInteractionModeSet, CommandID: "cmd-imode-metadata", ThreadID: threadID, InteractionMode: orchestration.ProviderInteractionModePlan}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.interaction-mode.set: %v", err)
+	// Provider modes use the same config-option path as every other session option.
+	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-mode-metadata", ThreadID: threadID, OptionID: "mode", Value: "plan"}).Await(ctx, &receipt); err != nil {
+		t.Fatalf("set mode config option: %v", err)
 	}
 	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
 		if event.Type != orchestration.EventThreadConfigOptionsUpdated {
@@ -647,9 +647,6 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	}
 	if thread.Title != "Agent set title" {
 		t.Fatalf("thread title = %q, want agent-set title", thread.Title)
-	}
-	if thread.InteractionMode != orchestration.ProviderInteractionModePlan {
-		t.Fatalf("interaction mode = %q, want plan", thread.InteractionMode)
 	}
 	if thread.Session == nil {
 		t.Fatal("thread session missing after turn")

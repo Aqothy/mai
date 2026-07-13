@@ -272,7 +272,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	threadOne := orchestration.ThreadID("thread-multi-1")
 	threadTwo := orchestration.ThreadID("thread-multi-2")
 	cwd := t.TempDir()
-	createOne := orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-multi-create-1", ThreadID: threadOne, Title: "Multi one", ProviderInstanceID: "codex", RuntimeMode: orchestration.RuntimeModeApprovalRequired, Cwd: cwd}
+	createOne := orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-multi-create-1", ThreadID: threadOne, Title: "Multi one", ProviderInstanceID: "codex", Cwd: cwd}
 	createTwo := orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-multi-create-2", ThreadID: threadTwo, Title: "Multi two", ProviderInstanceID: "codex", Cwd: cwd}
 
 	// Simultaneous thread creation, one from each client.
