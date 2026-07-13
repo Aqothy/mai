@@ -204,16 +204,24 @@ type ConfigChoice struct {
 	Label string `json:"label,omitempty"`
 }
 
-// ConfigOption is a provider-neutral, settable session configuration option
-// (model, interaction mode, reasoning level, ...). Model selection is just an
-// option with Category == ConfigOptionCategoryModel.
+type ConfigOptionType string
+
+const (
+	ConfigOptionTypeSelect  ConfigOptionType = "select"
+	ConfigOptionTypeBoolean ConfigOptionType = "boolean"
+)
+
+// ConfigOption is a provider-neutral, settable session configuration option.
+// CurrentValue is a string for select options and a bool for boolean options.
+// Category is only a UX hint.
 type ConfigOption struct {
 	ID           string               `json:"id"`
+	Type         ConfigOptionType     `json:"type"`
 	Category     ConfigOptionCategory `json:"category,omitempty"`
 	Label        string               `json:"label,omitempty"`
 	Description  string               `json:"description,omitempty"`
 	Choices      []ConfigChoice       `json:"choices,omitempty"`
-	CurrentValue string               `json:"currentValue,omitempty"`
+	CurrentValue any                  `json:"currentValue,omitempty"`
 }
 
 // Session is the provider-neutral session projection returned by a provider
@@ -292,7 +300,7 @@ type SetInteractionModeInput struct {
 type SetConfigOptionInput struct {
 	ThreadID string               `json:"threadId"`
 	OptionID string               `json:"optionId"`
-	Value    string               `json:"value"`
+	Value    any                  `json:"value"`
 	Category ConfigOptionCategory `json:"category,omitempty"`
 }
 

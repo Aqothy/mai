@@ -330,7 +330,12 @@ func (r *ProviderEventReactor) handleConfigOption(event Event) {
 	}
 	category := configOptionCategory(thread, event.Payload.OptionID)
 	if category == provider.ConfigOptionCategoryMode {
-		r.setInteractionMode(thread, ProviderInteractionMode(event.Payload.Value))
+		mode, ok := event.Payload.Value.(string)
+		if !ok {
+			r.appendErrorItem(thread.ID, "", "mode config option requires a string value")
+			return
+		}
+		r.setInteractionMode(thread, ProviderInteractionMode(mode))
 		return
 	}
 	ctx, cancel := r.providerRPCContext()

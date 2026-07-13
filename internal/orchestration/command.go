@@ -37,7 +37,7 @@ type Command struct {
 	RequestID          ApprovalID                `json:"requestId,omitempty"`
 	Decision           provider.ApprovalDecision `json:"decision,omitempty"`
 	OptionID           string                    `json:"optionId,omitempty"`
-	Value              string                    `json:"value,omitempty"`
+	Value              any                       `json:"value,omitempty"`
 	CreatedAt          time.Time                 `json:"createdAt,omitzero"`
 }
 

@@ -660,8 +660,8 @@ func (e *Engine) dispatchConfigOptionSet(command Command) (DispatchResult, error
 		return DispatchResult{}, fmt.Errorf("thread.config-option.set requires optionId")
 	}
 	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateConfigOptionSet(*thread, command.OptionID); err != nil {
-			return Event{}, err
+		if !providerSessionActive(thread.Session) {
+			return Event{}, fmt.Errorf("thread.config-option.set requires an active provider session")
 		}
 		return threadEvent(command, EventThreadConfigOptionSetRequested, ActorKindClient, EventPayload{OptionID: command.OptionID, Value: command.Value}), nil
 	})

@@ -60,7 +60,11 @@ type fakeProviderInstance struct {
 	deleteSess   func(context.Context, string) error
 }
 
-func (i *fakeProviderInstance) Info() provider.InstanceInfo { return i.info }
+func (i *fakeProviderInstance) Info() provider.InstanceInfo {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.info
+}
 func (i *fakeProviderInstance) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -1324,6 +1328,42 @@ func TestStopSessionDoesNotRecoverStaleRouteAfterRestart(t *testing.T) {
 	}
 	if got := second.operationCount("StopSession"); got != 1 {
 		t.Fatalf("restart instance StopSession calls = %d, want 1", got)
+	}
+}
+
+func TestSetConfigOptionWithNonModelValueDoesNotFailAfterProviderApplied(t *testing.T) {
+	adapter := &resumeCursorAdapter{}
+	s := New(adapter.StartInstance)
+	defer s.Close()
+
+	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
+		ThreadID: "thread-1", ProviderInstanceID: "codex",
+		ModelSelection: &provider.ModelSelection{Model: "slow"},
+	}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	// A boolean option can carry the model category; the provider applies it,
+	// so the service must not report a failure — it only skips recording a
+	// model preference.
+	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel}); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	if got := adapter.instance(0).operationCount("SetConfigOption"); got != 1 {
+		t.Fatalf("SetConfigOption calls = %d, want 1", got)
+	}
+	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
+		t.Fatalf("restart StartInstance: %v", err)
+	}
+	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	input := adapter.instance(1).lastStartInput()
+	if input.ModelSelection == nil || input.ModelSelection.Model != "slow" {
+		t.Fatalf("recovered model selection = %#v, want unchanged slow", input.ModelSelection)
 	}
 }
 

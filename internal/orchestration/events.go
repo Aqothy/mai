@@ -87,7 +87,7 @@ type EventPayload struct {
 	RequestID ApprovalID                `json:"requestId,omitempty"`
 	Decision  provider.ApprovalDecision `json:"decision,omitempty"`
 	OptionID  string                    `json:"optionId,omitempty"`
-	Value     string                    `json:"value,omitempty"`
+	Value     any                       `json:"value,omitempty"`
 	Item      *Item                     `json:"item,omitempty"`
 	Plan      *Plan                     `json:"plan,omitempty"`
 	Approval  *ApprovalEvent            `json:"approval,omitempty"`

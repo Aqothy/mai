@@ -133,14 +133,15 @@ func sessionBindingStaleFor(desiredInstanceID provider.InstanceID, session *Sess
 // already bound.
 func modelSelectionFromConfigOptions(thread Thread, options []provider.ConfigOption) *provider.ModelSelection {
 	for _, option := range options {
-		if option.Category != provider.ConfigOptionCategoryModel || option.CurrentValue == "" {
+		model, ok := option.CurrentValue.(string)
+		if option.Category != provider.ConfigOptionCategoryModel || !ok || model == "" {
 			continue
 		}
 		selection := cloneModelSelection(thread.ModelSelection)
 		if selection == nil {
 			selection = &provider.ModelSelection{}
 		}
-		selection.Model = option.CurrentValue
+		selection.Model = model
 		return selection
 	}
 	return nil

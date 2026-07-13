@@ -77,18 +77,6 @@ func validateTurnStartBoundary(command Command) error {
 	return nil
 }
 
-func validateConfigOptionSet(thread Thread, optionID string) error {
-	if !providerSessionActive(thread.Session) {
-		return fmt.Errorf("thread.config-option.set requires an active provider session")
-	}
-	for _, option := range thread.Session.ConfigOptions {
-		if option.ID == optionID {
-			return nil
-		}
-	}
-	return fmt.Errorf("thread.config-option.set optionId %q is not available on the current session", optionID)
-}
-
 func validateRuntimeMode(commandType string, mode RuntimeMode, required bool) error {
 	if mode == "" {
 		if required {

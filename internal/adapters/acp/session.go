@@ -228,7 +228,7 @@ func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOpti
 	for _, mode := range modes.AvailableModes {
 		choices = append(choices, provider.ConfigChoice{Value: string(mode.ID), Label: mode.Name})
 	}
-	return []provider.ConfigOption{{ID: acpSessionModeOptionID, Category: provider.ConfigOptionCategoryMode, Label: "Mode", Choices: choices, CurrentValue: string(modes.CurrentModeID)}}
+	return []provider.ConfigOption{{ID: acpSessionModeOptionID, Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryMode, Label: "Mode", Choices: choices, CurrentValue: string(modes.CurrentModeID)}}
 }
 
 func (h *Instance) sessionProjection(input provider.StartSessionInput, sessionID string) provider.Session {
@@ -523,15 +523,28 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 	return nil
 }
 
-func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID string, optionID string, value string) error {
+func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID string, optionID string, value any) error {
 	if optionID == acpSessionModeOptionID {
-		return h.setSessionModeValue(ctx, sessionID, schema.SessionModeId(value))
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("ACP session mode %q requires a string value", optionID)
+		}
+		return h.setSessionModeValue(ctx, sessionID, schema.SessionModeId(text))
 	}
-	resp, err := h.agent().SetSessionConfigOption(ctx, schema.SetSessionConfigOptionRequest{
+	request := schema.SetSessionConfigOptionRequest{
 		SessionID: schema.SessionId(sessionID),
 		ConfigID:  schema.SessionConfigId(optionID),
 		Value:     value,
-	})
+	}
+	switch value.(type) {
+	case string:
+	case bool:
+		optionType := schema.SetSessionConfigOptionRequestTypeBoolean
+		request.Type = &optionType
+	default:
+		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
+	}
+	resp, err := h.agent().SetSessionConfigOption(ctx, request)
 	if err != nil {
 		return acpRequestError(err)
 	}
@@ -609,14 +622,14 @@ func configChoiceValue(option provider.ConfigOption, aliases []string) (string, 
 				return choice.Value, true
 			}
 		}
-		if strings.EqualFold(option.CurrentValue, alias) {
-			return option.CurrentValue, true
+		if current, ok := option.CurrentValue.(string); ok && strings.EqualFold(current, alias) {
+			return current, true
 		}
 	}
 	return "", false
 }
 
-func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID string, value string) bool {
+func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID string, value any) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	session := h.sessionLocked(sessionID)

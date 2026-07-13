@@ -423,7 +423,7 @@ func TestEngineRejectsClientSuppliedTurnIDOnTurnStart(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsConfigOptionSetWithoutActiveSessionOption(t *testing.T) {
+func TestEngineRequiresActiveSessionForConfigOptionSet(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	threadID := ThreadID("thread-config-option-boundary")
@@ -436,14 +436,8 @@ func TestEngineRejectsConfigOptionSetWithoutActiveSessionOption(t *testing.T) {
 	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}}); err != nil {
 		t.Fatalf("thread.session.status.set: %v", err)
 	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-config-option-unknown", ThreadID: threadID, OptionID: "model", Value: "slow"}); err == nil || !strings.Contains(err.Error(), "not available") {
-		t.Fatalf("unknown config option err = %v, want unavailable-option rejection", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}}); err != nil {
-		t.Fatalf("thread.config-options.update: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-config-option-known", ThreadID: threadID, OptionID: "model", Value: "slow"}); err != nil {
-		t.Fatalf("known config option set: %v", err)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-config-option-forward", ThreadID: threadID, OptionID: "provider-option", Value: false}); err != nil {
+		t.Fatalf("config option should be forwarded to the provider: %v", err)
 	}
 }
 

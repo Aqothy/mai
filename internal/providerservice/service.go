@@ -639,14 +639,19 @@ func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigO
 		if err := instance.SetConfigOption(ctx, input); err != nil {
 			return err
 		}
+		// Route recovery only persists string model choices.
 		if input.Category != provider.ConfigOptionCategoryModel {
 			return nil
 		}
+		model, ok := input.Value.(string)
+		if !ok || model == "" {
+			return nil
+		}
 		s.updateRouteStartInput(input.ThreadID, instance.Info().InstanceID, func(start *provider.StartSessionInput) {
-			selection := &provider.ModelSelection{Model: input.Value}
+			selection := &provider.ModelSelection{Model: model}
 			if start.ModelSelection != nil {
 				cloned := *start.ModelSelection
-				cloned.Model = input.Value
+				cloned.Model = model
 				selection = &cloned
 			}
 			start.ModelSelection = selection

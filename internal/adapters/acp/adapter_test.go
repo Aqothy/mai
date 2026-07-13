@@ -38,13 +38,21 @@ type wireSessionParams struct {
 	Cwd       string `json:"cwd"`
 	Cursor    string `json:"cursor"`
 	ConfigID  string `json:"configId"`
-	Value     string `json:"value"`
+	Type      string `json:"type"`
+	Value     any    `json:"value"`
 	ModeID    string `json:"modeId"`
 	MethodID  string `json:"methodId"`
 	Prompt    []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"prompt"`
+}
+
+// stringValue returns the wire value as a string ("" for non-strings), for
+// hooks that echo a select value back into a config-options payload.
+func (p wireSessionParams) stringValue() string {
+	s, _ := p.Value.(string)
+	return s
 }
 
 type fakeWireAgent struct {
@@ -1318,7 +1326,7 @@ func TestStartSessionUsesModeConfigOptionForInteractionMode(t *testing.T) {
 		},
 		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.Value)})
+			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
 		},
 	}
 	h := newWireTestHandle(t, agent)
@@ -1344,7 +1352,7 @@ func TestSetInteractionModeDoesNotAliasUnknownModeToDefault(t *testing.T) {
 		},
 		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.Value)})
+			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
 		},
 	}
 	h := newWireTestHandle(t, agent)
@@ -1368,7 +1376,7 @@ func TestStartSessionAppliesModelSelectionConfigOption(t *testing.T) {
 		},
 		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModelConfigOptions(params.Value)})
+			a.respond(id, map[string]any{"configOptions": wireModelConfigOptions(params.stringValue())})
 		},
 	}
 	h := newWireTestHandle(t, agent)
@@ -1448,7 +1456,7 @@ func TestRuntimeModeDoesNotChangeInteractionMode(t *testing.T) {
 		},
 		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.Value)})
+			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
 		},
 	}
 	h := newWireTestHandle(t, agent)
@@ -1472,7 +1480,7 @@ func TestStartSessionReusePreservesUserSelectedInteractionMode(t *testing.T) {
 		},
 		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			recorder.recordConfig(params)
-			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.Value)})
+			a.respond(id, map[string]any{"configOptions": wireModeConfigOptions(params.stringValue())})
 		},
 	}
 	h := newWireTestHandle(t, agent)

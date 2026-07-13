@@ -550,25 +550,38 @@ func acpRequestError(err error) error {
 }
 
 // configOptionsFromACP maps ACP session config options into the generic
-// provider vocabulary. Only the stable select variant is mapped; the unstable
-// boolean variant is skipped.
+// provider vocabulary. Malformed and unsupported descriptors are skipped.
 func configOptionsFromACP(options []schema.SessionConfigOption) []provider.ConfigOption {
 	if options == nil {
 		return nil
 	}
 	converted := make([]provider.ConfigOption, 0, len(options))
 	for _, option := range options {
-		if option.Type != schema.SessionConfigOptionTypeSelect {
+		convertedOption := provider.ConfigOption{
+			ID:          string(option.ID),
+			Type:        provider.ConfigOptionType(option.Type),
+			Category:    configOptionCategory(option.Category),
+			Label:       option.Name,
+			Description: stringValue(option.Description),
+		}
+		switch option.Type {
+		case schema.SessionConfigOptionTypeSelect:
+			current, ok := configStringValue(option.CurrentValue)
+			if !ok {
+				continue
+			}
+			convertedOption.CurrentValue = current
+			convertedOption.Choices = configChoices(option.Options)
+		case schema.SessionConfigOptionTypeBoolean:
+			current, ok := option.CurrentValue.(bool)
+			if !ok {
+				continue
+			}
+			convertedOption.CurrentValue = current
+		default:
 			continue
 		}
-		converted = append(converted, provider.ConfigOption{
-			ID:           string(option.ID),
-			Category:     configOptionCategory(option.Category),
-			Label:        option.Name,
-			Description:  stringValue(option.Description),
-			Choices:      configChoices(option.Options),
-			CurrentValue: configValueString(option.CurrentValue),
-		})
+		converted = append(converted, convertedOption)
 	}
 	if len(converted) == 0 {
 		return []provider.ConfigOption{}
@@ -729,16 +742,18 @@ func configChoicesFromOptions(options []schema.SessionConfigSelectOption) []prov
 	return choices
 }
 
-func configValueString(value any) string {
+func configStringValue(value any) (string, bool) {
 	switch v := value.(type) {
 	case nil:
-		return ""
+		// An agent may omit currentValue entirely; keep the option with no
+		// selection instead of hiding the whole control.
+		return "", true
 	case string:
-		return v
+		return v, true
 	case schema.SessionConfigValueId:
-		return string(v)
+		return string(v), true
 	default:
-		return ""
+		return "", false
 	}
 }
 

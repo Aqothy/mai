@@ -671,7 +671,8 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 func configOptionValue(options []provider.ConfigOption, optionID string) (string, bool) {
 	for _, option := range options {
 		if option.ID == optionID {
-			return option.CurrentValue, true
+			value, ok := option.CurrentValue.(string)
+			return value, ok
 		}
 	}
 	return "", false
