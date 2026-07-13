@@ -34,6 +34,7 @@ type Engine struct {
 	requestQueue chan engineRequest
 	closed       chan struct{}
 	closeOnce    sync.Once
+	stopped      chan struct{}
 
 	// defaultCwd is the daemon's working directory, captured at construction.
 	// It is the fallback when thread.create carries no cwd.
@@ -92,6 +93,7 @@ func NewEngine() *Engine {
 		receipts:     make(map[CommandID]commandReceipt),
 		requestQueue: make(chan engineRequest, engineQueueSize),
 		closed:       make(chan struct{}),
+		stopped:      make(chan struct{}),
 		defaultCwd:   defaultCwd,
 	}
 	go e.worker()
@@ -103,9 +105,28 @@ func (e *Engine) Close() {
 	e.closeOnce.Do(func() { close(e.closed) })
 }
 
+// Stopped closes after the worker exits.
+func (e *Engine) Stopped() <-chan struct{} {
+	return e.stopped
+}
+
 // worker is the single serial command processor. Event listeners also run on
 // this goroutine and must hand off any engine work rather than awaiting it here.
 func (e *Engine) worker() {
+	var violation *InvariantViolationError
+	defer func() {
+		close(e.stopped)
+		if violation == nil {
+			return
+		}
+		e.mu.Lock()
+		handler := e.onInvariant
+		e.mu.Unlock()
+		if handler != nil {
+			handler(violation)
+		}
+	}()
+
 	for {
 		select {
 		case <-e.closed:
@@ -124,14 +145,9 @@ func (e *Engine) worker() {
 			// Escalate an invariant violation AFTER replying, so the in-flight
 			// caller deterministically receives the typed error before the
 			// engine closes and the handler (the daemon's shutdown) runs.
-			if violation, ok := errors.AsType[*InvariantViolationError](err); ok {
+			if fatal, ok := errors.AsType[*InvariantViolationError](err); ok {
 				e.Close()
-				e.mu.Lock()
-				handler := e.onInvariant
-				e.mu.Unlock()
-				if handler != nil {
-					handler(violation)
-				}
+				violation = fatal
 				return
 			}
 		}

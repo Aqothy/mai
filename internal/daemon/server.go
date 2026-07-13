@@ -14,6 +14,7 @@ import (
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
+	"github.com/Aqothy/maiD/internal/store"
 )
 
 // openProviderInstance maps a configured provider driver to its adapter.
@@ -41,6 +42,9 @@ type Server struct {
 	ingestion       *orchestration.ProviderRuntimeIngestion
 	reactor         *orchestration.ProviderEventReactor
 
+	metadataStore    *store.SQLite
+	threadMetaWriter *threadMetaWriter
+
 	rpcMu      sync.Mutex
 	rpcClients map[string]*rpcClient
 
@@ -52,20 +56,29 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	return newServer(newLoggerFromEnv())
+	logger := newLoggerFromEnv()
+	return newServer(logger, openMetadataStore(logger))
 }
 
-func newServer(logger *slog.Logger) *Server {
+func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel}
+	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata}
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
-	s.providerService = providerservice.New(openProviderInstance)
+	var providerOptions []providerservice.Option
+	if metadata != nil {
+		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
+		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
+	}
+	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
 	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService)
 	go s.ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
 		s.logEvent(event)
+		if s.threadMetaWriter != nil && orchestration.ThreadListVisible(event) {
+			s.threadMetaWriter.markDirty(event.ThreadID())
+		}
 		s.publishOrchestrationEvent(event)
 	})
 	return s
@@ -191,6 +204,14 @@ func (s *Server) doClose() error {
 	for _, client := range clients {
 		_ = client.conn.Close()
 		client.closeOutbound()
+	}
+
+	if s.threadMetaWriter != nil {
+		<-s.orchestration.Stopped()
+		s.threadMetaWriter.Close()
+	}
+	if s.metadataStore != nil {
+		_ = s.metadataStore.Close()
 	}
 	return err
 }

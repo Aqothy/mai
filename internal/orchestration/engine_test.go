@@ -1459,3 +1459,20 @@ func TestProviderSelectionEventsCarryTheCompleteAggregate(t *testing.T) {
 		t.Fatalf("client fold after switch = (%q, %#v), want provider-b with the old model cleared", clientInstance, clientSelection)
 	}
 }
+
+func TestEngineStoppedAcknowledgesWorkerExit(t *testing.T) {
+	e := NewEngine()
+
+	select {
+	case <-e.Stopped():
+		t.Fatal("Stopped must not be closed while the engine runs")
+	default:
+	}
+
+	e.Close()
+	select {
+	case <-e.Stopped():
+	case <-time.After(2 * time.Second):
+		t.Fatal("engine worker did not acknowledge stop after Close")
+	}
+}
