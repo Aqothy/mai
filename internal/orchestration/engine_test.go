@@ -1084,6 +1084,41 @@ func TestEngineTracksReceiptsOnlyForClientCommands(t *testing.T) {
 	}
 }
 
+func TestEngineCloseRejectsQueuedRequests(t *testing.T) {
+	engine := NewEngine()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	engine.OnEvent(func(event Event) {
+		if event.Type == EventThreadCreated && event.ThreadID() == "thread-blocking" {
+			close(entered)
+			<-release
+		}
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, ThreadID: "thread-blocking"})
+		firstDone <- err
+	}()
+	<-entered
+	queuedDone := make(chan error, 1)
+	go func() {
+		_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, ThreadID: "thread-queued"})
+		queuedDone <- err
+	}()
+	engine.Close()
+	close(release)
+	if err := <-firstDone; err != nil && !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("in-flight dispatch error = %v, want success or shutdown error", err)
+	}
+	if err := <-queuedDone; err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("queued dispatch error = %v, want engine closed", err)
+	}
+	if _, ok := engine.Thread("thread-queued"); ok {
+		t.Fatal("queued request mutated projection after Close")
+	}
+}
+
 func TestEngineSurvivesPanickingListenerAndDecider(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

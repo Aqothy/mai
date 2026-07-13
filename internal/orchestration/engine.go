@@ -132,6 +132,15 @@ func (e *Engine) worker() {
 		case <-e.closed:
 			return
 		case env := <-e.requestQueue:
+			// Close is the worker's stop boundary. If shutdown raced with a queued
+			// request, reject it rather than mutating state after Close returned to
+			// another goroutine.
+			select {
+			case <-e.closed:
+				env.done <- dispatchOutcome{err: fmt.Errorf("orchestration engine is closed")}
+				return
+			default:
+			}
 			var result DispatchResult
 			var err error
 			if env.sessionUpdate != nil {
