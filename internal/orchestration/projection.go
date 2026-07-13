@@ -44,6 +44,8 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadTurnInterruptConfirmed(event)
 	case EventThreadTurnInterruptFailed:
 		p.applyThreadTurnInterruptFailed(event)
+	case EventThreadSessionPrepareRequested:
+		p.applyThreadSessionPrepareRequested(event)
 	case EventThreadSessionStopRequested:
 		p.applyThreadSessionStopRequested(event)
 	case EventThreadSessionStopFailed:
@@ -523,6 +525,19 @@ func (p *Projection) ensureThread(event Event) *Thread {
 	}
 	p.applyThreadCreated(Event{OccurredAt: event.OccurredAt, Payload: EventPayload{ThreadID: threadID, Title: "Untitled thread"}})
 	return p.threads[threadID]
+}
+
+func (p *Projection) applyThreadSessionPrepareRequested(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	session := ensureSessionBinding(thread, event)
+	session.Status = SessionStatusStarting
+	session.ActiveTurnID = ""
+	session.LastError = ""
+	session.UpdatedAt = event.OccurredAt
+	thread.UpdatedAt = event.OccurredAt
 }
 
 func ensureSessionBinding(thread *Thread, event Event) *SessionBinding {

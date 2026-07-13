@@ -71,6 +71,8 @@ func (r *ProviderEventReactor) handle(event Event) {
 		if event.Payload.SessionCleared {
 			r.enqueueThread(event, func() { r.handleSessionRelease(event) })
 		}
+	case EventThreadSessionPrepareRequested:
+		r.enqueueThread(event, func() { r.handleSessionPrepare(event) })
 	case EventThreadTurnStartRequested:
 		r.enqueueThread(event, func() { r.handleTurnStart(event) })
 	case EventThreadTurnInterruptRequested:
@@ -132,6 +134,36 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 	}()
 }
 
+func startSessionInputFromThread(thread Thread) provider.StartSessionInput {
+	return provider.StartSessionInput{
+		ThreadID:           string(thread.ID),
+		ProviderInstanceID: thread.ProviderInstanceID,
+		Cwd:                thread.Cwd,
+		ModelSelection:     cloneModelSelection(thread.ModelSelection),
+		ApprovalPolicy:     approvalPolicyForRuntime(thread.RuntimeMode),
+		RuntimeMode:        string(thread.RuntimeMode),
+		InteractionMode:    string(thread.InteractionMode),
+	}
+}
+
+func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
+	thread, ok := r.engine.Thread(event.ThreadID())
+	if !ok {
+		return
+	}
+	ctx, cancel := r.providerRPCContext()
+	defer cancel()
+	session, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
+	if err != nil {
+		r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateError, Error: err.Error()})
+		return
+	}
+	binding := bindingFromProviderSession(thread.ProviderInstanceID, session)
+	if r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding}) {
+		r.dispatchProviderSessionMetadata(thread.ID, session, time.Now())
+	}
+}
+
 func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	threadID := event.ThreadID()
 	turnID := event.Payload.TurnID
@@ -168,15 +200,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 
-	providerSession, err := r.provider.StartSession(ctx, string(thread.ID), provider.StartSessionInput{
-		ThreadID:           string(thread.ID),
-		ProviderInstanceID: providerInstanceID,
-		Cwd:                thread.Cwd,
-		ModelSelection:     cloneModelSelection(thread.ModelSelection),
-		ApprovalPolicy:     approvalPolicyForRuntime(thread.RuntimeMode),
-		RuntimeMode:        string(thread.RuntimeMode),
-		InteractionMode:    string(thread.InteractionMode),
-	})
+	providerSession, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
 	if err != nil {
 		r.failThread(threadID, turnID, err.Error())
 		return

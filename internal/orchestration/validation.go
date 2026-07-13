@@ -20,6 +20,10 @@ func providerSessionActive(session *SessionBinding) bool {
 	return session != nil && session.Status != SessionStatusStopped
 }
 
+func sessionPreparing(thread Thread) bool {
+	return thread.Session != nil && thread.Session.Status == SessionStatusStarting && thread.Session.ActiveTurnID == ""
+}
+
 func defaultRuntimeMode(mode RuntimeMode) RuntimeMode {
 	if mode == "" {
 		return RuntimeModeFullAccess

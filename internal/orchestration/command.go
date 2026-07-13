@@ -16,6 +16,7 @@ const (
 	CommandThreadTurnStart          = "thread.turn.start"
 	CommandThreadTurnInterrupt      = "thread.turn.interrupt"
 	CommandThreadApprovalRespond    = "thread.approval.respond"
+	CommandThreadSessionPrepare     = "thread.session.prepare"
 	CommandThreadSessionStop        = "thread.session.stop"
 	CommandThreadRuntimeModeSet     = "thread.runtime-mode.set"
 	CommandThreadInteractionModeSet = "thread.interaction-mode.set"

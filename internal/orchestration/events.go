@@ -18,6 +18,7 @@ const (
 	EventThreadTurnInterruptConfirmed      EventType = "thread.turn-interrupt-confirmed"
 	EventThreadTurnInterruptFailed         EventType = "thread.turn-interrupt-failed"
 	EventThreadApprovalResponseRequested   EventType = "thread.approval-response-requested"
+	EventThreadSessionPrepareRequested     EventType = "thread.session-prepare-requested"
 	EventThreadSessionStopRequested        EventType = "thread.session-stop-requested"
 	EventThreadSessionStopFailed           EventType = "thread.session-stop-failed"
 	EventThreadRuntimeModeSet              EventType = "thread.runtime-mode-set"

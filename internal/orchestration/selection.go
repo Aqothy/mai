@@ -58,6 +58,9 @@ func (change providerSelectionChange) changes(thread Thread) bool {
 }
 
 func (change providerSelectionChange) validateMetaUpdate(thread Thread) error {
+	if sessionPreparing(thread) && change.specified && change.changes(thread) {
+		return fmt.Errorf("cannot change provider/model selection while thread %q is preparing its provider session", thread.ID)
+	}
 	turnID := activeTurnID(thread)
 	if turnID == "" || !change.specified || !change.changes(thread) {
 		return nil

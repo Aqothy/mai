@@ -253,6 +253,8 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 		return e.dispatchThreadTurnInterrupt(command)
 	case CommandThreadApprovalRespond:
 		return e.dispatchApprovalRespond(command)
+	case CommandThreadSessionPrepare:
+		return e.dispatchSessionPrepare(command)
 	case CommandThreadSessionStop:
 		return e.dispatchSessionStop(command)
 	case CommandThreadRuntimeModeSet:
@@ -529,6 +531,9 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 		if !ok {
 			return fmt.Errorf("thread %q not found", command.ThreadID)
 		}
+		if sessionPreparing(thread) {
+			return fmt.Errorf("cannot start a turn while thread %q is preparing its provider session", command.ThreadID)
+		}
 		active := activeTurnID(thread)
 		steering := active != ""
 		turnID := active
@@ -591,8 +596,26 @@ func (e *Engine) dispatchThreadTurnInterrupt(command Command) (DispatchResult, e
 	})
 }
 
+func (e *Engine) dispatchSessionPrepare(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		if thread.ProviderInstanceID == "" {
+			return Event{}, fmt.Errorf("thread %q has no provider instance", command.ThreadID)
+		}
+		if activeTurnID(*thread) != "" {
+			return Event{}, fmt.Errorf("cannot prepare session while thread %q has an active turn", command.ThreadID)
+		}
+		if sessionPreparing(*thread) {
+			return Event{}, fmt.Errorf("thread %q is already preparing its provider session", command.ThreadID)
+		}
+		return threadEvent(command, EventThreadSessionPrepareRequested, ActorKindClient, EventPayload{}), nil
+	})
+}
+
 func (e *Engine) dispatchSessionStop(command Command) (DispatchResult, error) {
-	return e.dispatchWithThread(command, func(*Thread) (Event, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		if sessionPreparing(*thread) {
+			return Event{}, fmt.Errorf("cannot stop thread %q while its provider session is preparing", command.ThreadID)
+		}
 		return threadEvent(command, EventThreadSessionStopRequested, ActorKindClient, EventPayload{TurnID: command.TurnID}), nil
 	})
 }
