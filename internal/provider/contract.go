@@ -86,6 +86,10 @@ type MCPCapabilities struct {
 // assumed of every provider and are not listed here. UI clients use these to
 // show/hide controls and the server uses them to gate commands.
 type Capabilities struct {
+	// LoadReplay reports whether the provider can rebuild display history for a stored session.
+	LoadReplay bool `json:"loadReplay,omitempty"`
+	// Resume reports whether the provider can restore agent context without
+	// replaying display history.
 	Resume        bool                      `json:"resume,omitempty"`
 	Auth          bool                      `json:"auth,omitempty"`
 	Logout        bool                      `json:"logout,omitempty"`

@@ -38,9 +38,10 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		mcp = *capabilities.MCPCapabilities
 	}
 	return provider.Capabilities{
-		Resume: boolValue(capabilities.LoadSession) || sessionResumeSupported(capabilities),
-		Auth:   hasStableAuthMethod(initResp.AuthMethods),
-		Logout: capabilities.Auth != nil && capabilities.Auth.Logout != nil,
+		LoadReplay: boolValue(capabilities.LoadSession),
+		Resume:     sessionResumeSupported(capabilities),
+		Auth:       hasStableAuthMethod(initResp.AuthMethods),
+		Logout:     capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
 			Audio:           boolValue(prompt.Audio),
