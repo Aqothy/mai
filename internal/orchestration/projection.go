@@ -160,7 +160,6 @@ func (p *Projection) applyThreadMetaUpdated(event Event) {
 	if payload.Cwd != "" {
 		thread.Cwd = payload.Cwd
 	}
-	thread.UpdatedAt = event.OccurredAt
 }
 
 // applyThreadSessionStatusSet REPLACES the thread's session binding: the
@@ -181,8 +180,9 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 	session.UpdatedAt = event.OccurredAt
 	thread.Session = session
 	p.applySessionBindingFields(thread, session)
-	p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt)
-	thread.UpdatedAt = event.OccurredAt
+	if p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt) {
+		thread.UpdatedAt = event.OccurredAt
+	}
 }
 
 func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionBinding) {
@@ -196,13 +196,16 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 	}
 }
 
-func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) {
+// applySessionTurnState reports whether the event was a turn boundary (a turn
+// started or settled) — the only session-status changes that count as
+// conversation activity.
+func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) bool {
 	if session.ActiveTurnID != "" {
 		if thread.LatestTurn == nil || thread.LatestTurn.ID != session.ActiveTurnID {
 			thread.LatestTurn = &Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt}
-		} else {
-			thread.LatestTurn.State = TurnStateRunning
+			return true
 		}
+		thread.LatestTurn.State = TurnStateRunning
 	} else if thread.LatestTurn != nil && thread.LatestTurn.CompletedAt == nil {
 		completed := occurredAt
 		thread.LatestTurn.InterruptRequested = false
@@ -217,7 +220,9 @@ func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBindi
 			thread.LatestTurn.State = TurnStateCompleted
 		}
 		thread.LatestTurn.CompletedAt = &completed
+		return true
 	}
+	return false
 }
 
 func (p *Projection) applyThreadMessageSent(event Event) {
@@ -233,11 +238,15 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 			existing.TurnID = message.TurnID
 		}
 		existing.UpdatedAt = event.OccurredAt
-		thread.UpdatedAt = event.OccurredAt
+		if message.Role == MessageRoleUser {
+			thread.UpdatedAt = event.OccurredAt
+		}
 		return
 	}
 	thread.Timeline.AppendMessage(message)
-	thread.UpdatedAt = event.OccurredAt
+	if message.Role == MessageRoleUser {
+		thread.UpdatedAt = event.OccurredAt
+	}
 }
 
 func (p *Projection) applyThreadTurnStartRequested(event Event) {
@@ -281,7 +290,6 @@ func (p *Projection) applyThreadTurnInterruptRequested(event Event) {
 	if thread.LatestTurn != nil {
 		thread.LatestTurn.InterruptRequested = true
 	}
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadTurnInterruptConfirmed(event Event) {
@@ -302,7 +310,6 @@ func (p *Projection) applyThreadTurnInterruptFailed(event Event) {
 		return
 	}
 	thread.LatestTurn.InterruptRequested = false
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadSessionStopRequested(event Event) {
@@ -314,7 +321,6 @@ func (p *Projection) applyThreadSessionStopRequested(event Event) {
 	// the current binding here prevents a failed provider RPC from lying about
 	// session and turn completion.
 	thread.Session.StopRequested = true
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadSessionStopFailed(event Event) {
@@ -323,7 +329,6 @@ func (p *Projection) applyThreadSessionStopFailed(event Event) {
 		return
 	}
 	thread.Session.StopRequested = false
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadApprovalResponseRequested(event Event) {
@@ -336,7 +341,6 @@ func (p *Projection) applyThreadApprovalResponseRequested(event Event) {
 		approval.OptionID = event.Payload.OptionID
 		approval.UpdatedAt = event.OccurredAt
 	}
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadItemUpserted(event Event) {
@@ -366,7 +370,6 @@ func (p *Projection) applyThreadItemUpserted(event Event) {
 		}
 		item.CreatedAt = existing.CreatedAt
 		*existing = item
-		thread.UpdatedAt = event.OccurredAt
 		return
 	}
 	if item.Status == "" {
@@ -375,7 +378,6 @@ func (p *Projection) applyThreadItemUpserted(event Event) {
 	item.Payload = applyItemPayload(nil, item.Payload, item.TextDelta)
 	item.TextDelta = ""
 	thread.Timeline.AppendItem(item)
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadPlanUpdated(event Event) {
@@ -387,7 +389,6 @@ func (p *Projection) applyThreadPlanUpdated(event Event) {
 	plan.Entries = append([]provider.PlanEntry(nil), plan.Entries...)
 	plan.UpdatedAt = event.OccurredAt
 	thread.Plan = &plan
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadApprovalOpened(event Event) {
@@ -404,12 +405,10 @@ func (p *Projection) applyThreadApprovalOpened(event Event) {
 		existing.Decision = ""
 		existing.OptionID = ""
 		existing.UpdatedAt = event.OccurredAt
-		thread.UpdatedAt = event.OccurredAt
 		return
 	}
 	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Args: append(json.RawMessage(nil), approval.Args...), Options: approval.Options, Status: ApprovalStatusPending, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
 	thread.Timeline.AppendApproval(value)
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadApprovalResolved(event Event) {
@@ -423,12 +422,10 @@ func (p *Projection) applyThreadApprovalResolved(event Event) {
 		existing.Decision = approval.Decision
 		existing.OptionID = approval.OptionID
 		existing.UpdatedAt = event.OccurredAt
-		thread.UpdatedAt = event.OccurredAt
 		return
 	}
 	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Status: ApprovalStatusResolved, Decision: approval.Decision, OptionID: approval.OptionID, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
 	thread.Timeline.AppendApproval(value)
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadConfigOptionsUpdated(event Event) {
@@ -442,7 +439,6 @@ func (p *Projection) applyThreadConfigOptionsUpdated(event Event) {
 		thread.ModelSelection = cloneModelSelection(event.Payload.ModelSelection)
 	}
 	session.UpdatedAt = event.OccurredAt
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadSlashCommandsUpdated(event Event) {
@@ -453,7 +449,6 @@ func (p *Projection) applyThreadSlashCommandsUpdated(event Event) {
 	session := ensureSessionBinding(thread, event)
 	session.SlashCommands = cloneSlashCommands(event.Payload.SlashCommands)
 	session.UpdatedAt = event.OccurredAt
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadTokenUsageUpdated(event Event) {
@@ -469,7 +464,6 @@ func (p *Projection) applyThreadTokenUsageUpdated(event Event) {
 		session.TokenUsage = nil
 	}
 	session.UpdatedAt = event.OccurredAt
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) ensureThread(event Event) *Thread {
@@ -495,7 +489,6 @@ func (p *Projection) applyThreadSessionPrepareRequested(event Event) {
 	session.ActiveTurnID = ""
 	session.LastError = ""
 	session.UpdatedAt = event.OccurredAt
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func ensureSessionBinding(thread *Thread, event Event) *SessionBinding {
