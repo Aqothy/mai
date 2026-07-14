@@ -1167,24 +1167,42 @@ func TestEngineSessionViewMatchesThreadWithoutTimeline(t *testing.T) {
 	}
 }
 
-func TestThreadListVisibleGatesHotStreamingEvents(t *testing.T) {
+func TestThreadListVisibleIncludesOnlySidebarState(t *testing.T) {
 	cases := []struct {
 		name    string
 		event   Event
 		visible bool
 	}{
-		{"assistant delta", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
+		{"thread created", Event{Type: EventThreadCreated}, true},
+		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
 		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
+		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
+		{"turn started", Event{Type: EventThreadTurnStartRequested}, true},
+		{"interrupt requested", Event{Type: EventThreadTurnInterruptRequested}, false},
+		{"interrupt confirmed", Event{Type: EventThreadTurnInterruptConfirmed}, true},
+		{"interrupt failed", Event{Type: EventThreadTurnInterruptFailed}, false},
+		{"session preparing", Event{Type: EventThreadSessionPrepareRequested}, true},
+		{"session stop requested", Event{Type: EventThreadSessionStopRequested}, false},
+		{"session stop failed", Event{Type: EventThreadSessionStopFailed}, false},
+		{"session status", Event{Type: EventThreadSessionStatusSet}, true},
+		{"approval response requested", Event{Type: EventThreadApprovalResponseRequested}, false},
+		{"approval opened", Event{Type: EventThreadApprovalOpened}, true},
+		{"approval resolved", Event{Type: EventThreadApprovalResolved}, true},
+		{"config set requested", Event{Type: EventThreadConfigOptionSetRequested}, false},
+		{"config options", Event{Type: EventThreadConfigOptionsUpdated}, false},
+		{"slash commands", Event{Type: EventThreadSlashCommandsUpdated}, false},
+		{"token usage", Event{Type: EventThreadTokenUsageUpdated}, false},
 		{"reasoning item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindReasoning}}}, false},
 		{"tool call item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindToolCall}}}, false},
 		{"plan update", Event{Type: EventThreadPlanUpdated}, false},
-		{"session status", Event{Type: EventThreadSessionStatusSet}, true},
-		{"thread created", Event{Type: EventThreadCreated}, true},
+		{"unknown event", Event{Type: EventType("thread.unknown")}, false},
 	}
 	for _, tc := range cases {
-		if got := ThreadListVisible(tc.event); got != tc.visible {
-			t.Errorf("ThreadListVisible(%s) = %v, want %v", tc.name, got, tc.visible)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ThreadListVisible(tc.event); got != tc.visible {
+				t.Errorf("ThreadListVisible() = %v, want %v", got, tc.visible)
+			}
+		})
 	}
 }
 

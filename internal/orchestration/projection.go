@@ -541,20 +541,25 @@ func appendPayloadText(existing json.RawMessage, delta string) json.RawMessage {
 	return marshalEventPayload(base)
 }
 
-// ThreadListVisible reports whether an event can change a thread-list/sidebar
-// projection. The hot streaming events — assistant/reasoning deltas, tool-call
-// item updates, plan updates — never do, so the daemon skips thread-list fan-out
-// (which clones the full thread) for them. Anything not explicitly excluded is
-// treated as thread-list-visible.
+// ThreadListVisible reports whether an event changes state presented in the
+// thread-list/sidebar: identity, activity time, live run/stop/interrupt state,
+// or pending approvals. Conversation-detail state is intentionally excluded.
 func ThreadListVisible(event Event) bool {
 	switch event.Type {
+	case EventThreadCreated,
+		EventThreadMetaUpdated,
+		EventThreadTurnStartRequested,
+		EventThreadTurnInterruptConfirmed,
+		EventThreadSessionPrepareRequested,
+		EventThreadSessionStatusSet,
+		EventThreadApprovalOpened,
+		EventThreadApprovalResolved:
+		return true
 	case EventThreadMessageSent:
-		// Only user messages surface in the thread list (LatestUserMessageAt).
 		return event.Payload.Role == MessageRoleUser
-	case EventThreadItemUpserted, EventThreadPlanUpdated:
+	default:
 		return false
 	}
-	return true
 }
 
 // ThreadMetadataMayChange reports whether an event can alter metadata stored in
