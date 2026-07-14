@@ -557,6 +557,26 @@ func ThreadListVisible(event Event) bool {
 	return true
 }
 
+// ThreadMetadataMayChange reports whether an event can alter metadata stored in
+// the threads table. It is intentionally separate from ThreadListVisible:
+// session and approval state belong in the live sidebar but not in that table.
+func ThreadMetadataMayChange(event Event) bool {
+	switch event.Type {
+	case EventThreadCreated,
+		EventThreadMetaUpdated,
+		EventThreadTurnStartRequested,
+		EventThreadTurnInterruptConfirmed,
+		EventThreadSessionStatusSet:
+		return true
+	case EventThreadMessageSent:
+		return event.Payload.Role == MessageRoleUser
+	case EventThreadConfigOptionsUpdated:
+		return event.Payload.ModelSelection != nil
+	default:
+		return false
+	}
+}
+
 func threadListEntryFromThread(thread Thread) ThreadListEntry {
 	var latestUserMessageAt *time.Time
 	pendingApprovals := false

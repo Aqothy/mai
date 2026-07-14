@@ -84,7 +84,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	go s.ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
 		s.logEvent(event)
-		if s.threadMetaWriter != nil && orchestration.ThreadListVisible(event) {
+		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
 			s.threadMetaWriter.markDirty(event.ThreadID())
 		}
 		s.publishOrchestrationEvent(event)
