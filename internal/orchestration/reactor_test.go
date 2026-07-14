@@ -24,6 +24,7 @@ type fakeProviderRuntime struct {
 	interruptSignal  chan struct{}
 	interruptErr     error
 	stopCalls        int
+	releaseCalls     int
 	stopSignal       chan struct{}
 	stopErr          error
 	startEntered     chan struct{}
@@ -127,8 +128,16 @@ func (f *fakeProviderRuntime) StopSession(context.Context, provider.StopSessionI
 	}
 	return err
 }
-func (f *fakeProviderRuntime) ReleaseSession(ctx context.Context, input provider.StopSessionInput) error {
-	return f.StopSession(ctx, input)
+func (f *fakeProviderRuntime) ReleaseSession(context.Context, provider.StopSessionInput) error {
+	f.mu.Lock()
+	f.releaseCalls++
+	err := f.stopErr
+	f.mu.Unlock()
+	select {
+	case f.stopSignal <- struct{}{}:
+	default:
+	}
+	return err
 }
 func (f *fakeProviderRuntime) RespondToRequest(context.Context, provider.RespondToRequestInput) error {
 	return nil
@@ -138,6 +147,12 @@ func (f *fakeProviderRuntime) interruptCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.interruptCalls
+}
+
+func (f *fakeProviderRuntime) releaseCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.releaseCalls
 }
 
 func (f *fakeProviderRuntime) lastStartInput() provider.StartSessionInput {
@@ -392,6 +407,37 @@ func TestReactorClearsPendingIntentWhenProviderRejectsInterruptOrStop(t *testing
 	}
 	if len(thread.Timeline.Items()) != 2 || thread.Timeline.Items()[0].Kind != provider.ItemKindError || thread.Timeline.Items()[1].Kind != provider.ItemKindError {
 		t.Fatalf("items = %#v, want one error for each rejected operation", thread.Timeline.Items())
+	}
+}
+
+func TestReactorStopReleasesRestoredIdleRoute(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	NewProviderEventReactor(context.Background(), engine, fake)
+	threadID := ThreadID("thread-restored-stop")
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{
+		ThreadID:           threadID,
+		ProviderInstanceID: "codex",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}})
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadSessionStop,
+		CommandID: "stop-restored-idle",
+		ThreadID:  threadID,
+	}); err != nil {
+		t.Fatalf("thread.session.stop: %v", err)
+	}
+	select {
+	case <-fake.stopSignal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not release the restored provider route")
+	}
+	if fake.releaseCallCount() != 1 {
+		t.Fatalf("ReleaseSession calls = %d, want 1", fake.releaseCallCount())
 	}
 }
 

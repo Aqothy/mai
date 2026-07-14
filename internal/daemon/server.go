@@ -65,6 +65,14 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata}
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
+	if metadata != nil {
+		count, err := restorePersistedThreads(s.orchestration, metadata, metadata, logger)
+		if err != nil {
+			logger.Warn("restore persisted threads", "error", err)
+		} else {
+			logger.Info("restored persisted threads", "count", count)
+		}
+	}
 	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
 	var providerOptions []providerservice.Option
 	if metadata != nil {

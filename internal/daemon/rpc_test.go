@@ -55,7 +55,7 @@ func newRPCTestClient(t *testing.T, s *Server, handler jsonrpc2.Handler) *jsonrp
 }
 
 func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 }
 
 func TestRPCOrchestrationDispatchStreamsThreadEvents(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("streaming-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -128,7 +128,7 @@ func TestRPCOrchestrationDispatchStreamsThreadEvents(t *testing.T) {
 }
 
 func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	threadID := orchestration.ThreadID("missing-thread")
 	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
@@ -147,7 +147,7 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 }
 
 func TestRPCSubscribeThreadStreamsEventsAppendedAfterSnapshot(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	threadID := orchestration.ThreadID("thread-subscribe-race")
 	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create-subscribe-race", ThreadID: threadID, Title: "before"}); err != nil {
 		t.Fatalf("thread.create: %v", err)
@@ -206,7 +206,7 @@ func TestRPCSubscribeThreadStreamsEventsAppendedAfterSnapshot(t *testing.T) {
 }
 
 func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	threadID := orchestration.ThreadID("thread-unsubscribe")
 	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create-unsubscribe", ThreadID: threadID, Title: "before"}); err != nil {
@@ -267,7 +267,7 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 }
 
 func TestRPCOrchestrationApprovalRespondResolvesProviderPermission(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("permission-deny-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -330,7 +330,7 @@ func TestRPCOrchestrationApprovalRespondResolvesProviderPermission(t *testing.T)
 // agent (deny mode) fails unless it receives exactly "reject", proving the
 // selected option — not the kind-mapped decision — reaches the agent.
 func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("permission-deny-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -371,7 +371,7 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 }
 
 func TestRPCFailedDispatchReturnsNilResult(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
 	handler := &rpcHandler{server: s, client: client}
@@ -390,7 +390,7 @@ func TestRPCFailedDispatchReturnsNilResult(t *testing.T) {
 }
 
 func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	client := newRPCTestClient(t, s, rpcTestClientHandler{})
 	ctx := context.Background()
@@ -433,7 +433,7 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 }
 
 func TestRPCProviderStartAndList(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	client := newRPCTestClient(t, s, rpcTestClientHandler{})
 	ctx := context.Background()
@@ -464,7 +464,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 }
 
 func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	client := newRPCTestClient(t, s, rpcTestClientHandler{})
 	ctx := context.Background()
@@ -500,7 +500,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 }
 
 func TestRPCProviderSessionManagement(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -560,7 +560,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 // agent-set title, token usage, session config options, and provider-owned
 // Provider mode and other config-option switching round-trip.
 func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("rich-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)

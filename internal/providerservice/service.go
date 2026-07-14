@@ -74,7 +74,8 @@ type threadRoute struct {
 // instances of the same driver can coexist.
 type Service struct {
 	mu            sync.Mutex
-	instances     map[provider.InstanceID]ProviderInstance
+	instances map[provider.InstanceID]ProviderInstance // live processes only
+	// instanceSpecs includes persisted specs for instances that are still cold.
 	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
 	threadRoutes  map[string]threadRoute
 	startLocks    map[provider.InstanceID]*sync.RWMutex
@@ -126,10 +127,69 @@ func New(openInstance InstanceFactory, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(s)
 	}
+	if s.routeStore != nil {
+		s.restorePersistedState()
+	}
 
 	s.wg.Add(1)
 	go s.runHub()
 	return s
+}
+
+// restorePersistedState rehydrates thread routes and instance specs from the
+// route store. It runs inside New, before the service is shared with any other
+// goroutine, so the map writes need no locking. Instances stay cold — they
+// respawn lazily on first use of a routed thread (ensureInstanceStarted). All
+// restored routes share one generation that is never assigned to an instance,
+// so withThreadInstance's stale-generation recovery re-runs StartSession with
+// the stored start input and resume cursor before the first operation on the
+// thread.
+func (s *Service) restorePersistedState() {
+	specs, err := s.routeStore.LoadInstances()
+	if err != nil {
+		log.Printf("providerservice: load persisted instance specs: %v", err)
+	}
+	for _, spec := range specs {
+		s.instanceSpecs[spec.InstanceID] = cloneInstanceSpec(spec)
+	}
+
+	routes, err := s.routeStore.LoadRoutes()
+	if err != nil {
+		log.Printf("providerservice: load persisted thread routes: %v; route persistence disabled for this run", err)
+		// A failed read is not proof that no routes exist. Freeze the durable
+		// route table so live in-memory sessions cannot overwrite resumable state
+		// that may become readable again on the next boot.
+		s.routeStore = nil
+		return
+	}
+	if len(routes) == 0 {
+		return
+	}
+	restoredGeneration := s.allocateEventGeneration()
+	for threadID, record := range routes {
+		s.threadRoutes[threadID] = threadRoute{
+			InstanceID:        record.InstanceID,
+			Generation:        restoredGeneration,
+			ProviderSessionID: record.ProviderSessionID,
+			ResumeCursor:      append(json.RawMessage(nil), record.ResumeCursor...),
+			StartInput:        cloneStartSessionInput(record.StartInput),
+		}
+	}
+}
+
+// ensureInstanceStarted lazily respawns a persisted provider instance on its
+// first use after a daemon restart. A missing restored spec is not an error;
+// the instance lookup downstream reports "not initialized" as before.
+func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider.InstanceID) error {
+	s.mu.Lock()
+	_, live := s.instances[instanceID]
+	spec, restorable := s.instanceSpecs[instanceID]
+	s.mu.Unlock()
+	if live || !restorable {
+		return nil
+	}
+	_, err := s.StartInstance(ctx, spec, false)
+	return err
 }
 
 func (s *Service) persistThreadRoute(threadID string) {
@@ -555,6 +615,9 @@ func (s *Service) StartSession(ctx context.Context, threadID string, input provi
 	if input.ProviderInstanceID == "" {
 		return provider.Session{}, fmt.Errorf("provider start session requires providerInstanceId")
 	}
+	if err := s.ensureInstanceStarted(ctx, input.ProviderInstanceID); err != nil {
+		return provider.Session{}, err
+	}
 	if route := s.routeForThread(threadID); route.InstanceID != "" && route.InstanceID != input.ProviderInstanceID {
 		_ = s.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: threadID})
 	}
@@ -614,9 +677,23 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 	if err != nil {
 		return provider.Session{}, nil, 0, err
 	}
-	if len(input.ResumeCursor) == 0 {
-		if cursor := s.resumeCursorForThread(threadID, input.ProviderInstanceID); len(cursor) > 0 {
-			input.ResumeCursor = cursor
+	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
+		// Only a stale route needs its provider-owned preferences restored. Once
+		// rebound to this generation, each new input remains authoritative.
+		if route.Generation != generation {
+			stored := route.StartInput
+			if input.ModelSelection == nil {
+				input.ModelSelection = stored.ModelSelection
+			}
+			if len(input.ConfigSelections) == 0 {
+				input.ConfigSelections = stored.ConfigSelections
+			}
+			if len(input.Options) == 0 {
+				input.Options = stored.Options
+			}
+		}
+		if len(input.ResumeCursor) == 0 {
+			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 		}
 	}
 	session, err := instance.StartSession(ctx, input)
@@ -817,16 +894,6 @@ func (s *Service) routeForThread(threadID string) threadRoute {
 	route.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 	route.StartInput = cloneStartSessionInput(route.StartInput)
 	return route
-}
-
-func (s *Service) resumeCursorForThread(threadID string, instanceID provider.InstanceID) json.RawMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	route := s.threadRoutes[threadID]
-	if route.InstanceID != instanceID || len(route.ResumeCursor) == 0 {
-		return nil
-	}
-	return append(json.RawMessage(nil), route.ResumeCursor...)
 }
 
 func (s *Service) instance(instanceID provider.InstanceID) (ProviderInstance, error) {

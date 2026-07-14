@@ -33,7 +33,7 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 		t.Fatalf("create demo cwd: %v", err)
 	}
 
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	server := httptest.NewServer(s.WebSocketHandler())
 	defer server.Close()

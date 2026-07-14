@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Aqothy/maiD/internal/orchestration"
+	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/store"
 )
 
@@ -24,6 +26,19 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(dataDir)
 	os.Exit(code)
+}
+
+// newTestServer builds a server with a test-scoped metadata store. Servers
+// read the store at boot (thread/route rehydration), so tests sharing the
+// package-wide MAID_DATA_DIR would leak persisted threads and routes into
+// each other's daemons.
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	metadata, err := store.Open(filepath.Join(t.TempDir(), "maid.db"))
+	if err != nil {
+		t.Fatalf("open metadata store: %v", err)
+	}
+	return newServer(newLoggerFromEnv(), metadata)
 }
 
 func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
@@ -72,6 +87,105 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 	}
 	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
 		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
+	}
+}
+
+func TestServerRestartRehydratesThreadStubs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maid.db")
+	metadata, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	s := newServer(newLoggerFromEnv(), metadata)
+
+	cwd := t.TempDir()
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
+		Type:     orchestration.CommandThreadCreate,
+		ThreadID: "thread-1",
+		Title:    "Survives restarts",
+		Cwd:      cwd,
+	}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("server close: %v", err)
+	}
+
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restarted := newServer(newLoggerFromEnv(), reopened)
+	defer restarted.Close()
+
+	list := restarted.orchestration.ThreadListSnapshot()
+	if len(list.Snapshot.Threads) != 1 {
+		t.Fatalf("thread list after restart = %#v, want the rehydrated stub", list.Snapshot.Threads)
+	}
+	entry := list.Snapshot.Threads[0]
+	if entry.ID != "thread-1" || entry.Title != "Survives restarts" || entry.Cwd != cwd {
+		t.Fatalf("rehydrated entry = %#v", entry)
+	}
+	if entry.Session != nil {
+		t.Fatalf("rehydrated stub must be idle (no session binding), got %#v", entry.Session)
+	}
+	snapshot, err := restarted.orchestration.ThreadSnapshot("thread-1")
+	if err != nil {
+		t.Fatalf("ThreadSnapshot after restart: %v", err)
+	}
+	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
+		t.Fatalf("rehydrated timeline = %#v, want empty", snapshot.Snapshot.Thread.Timeline)
+	}
+	// New epoch: nothing to replay; clients resnapshot.
+	if replay := restarted.orchestration.ReplayEvents(orchestration.ReplayEventsInput{}); len(replay) != 0 {
+		t.Fatalf("restart replayed events: %#v", replay)
+	}
+}
+
+func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
+	metadata, err := store.Open(filepath.Join(t.TempDir(), "maid.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	spec := provider.InstanceSpec{InstanceID: "codex", Driver: "acp"}
+	if err := metadata.SaveInstance(spec); err != nil {
+		t.Fatalf("SaveInstance: %v", err)
+	}
+	if err := metadata.SaveRoute("orphan", store.RouteRecord{InstanceID: spec.InstanceID, ProviderSessionID: "session-orphan"}); err != nil {
+		t.Fatalf("SaveRoute orphan: %v", err)
+	}
+	now := time.Now()
+	// Simulate a crash after the synchronous route write but before the
+	// debounced thread row caught up with the selected instance.
+	if err := metadata.UpsertThread(store.ThreadMeta{ThreadID: "visible", ProviderInstanceID: "stale-instance", ModelSelection: &provider.ModelSelection{Model: "stale-model"}, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("UpsertThread visible: %v", err)
+	}
+	if err := metadata.SaveRoute("visible", store.RouteRecord{
+		InstanceID:        spec.InstanceID,
+		ProviderSessionID: "session-visible",
+		StartInput:        provider.StartSessionInput{ModelSelection: &provider.ModelSelection{Model: "route-model"}},
+	}); err != nil {
+		t.Fatalf("SaveRoute visible: %v", err)
+	}
+
+	s := newServer(newLoggerFromEnv(), metadata)
+	defer s.Close()
+	routes, err := metadata.LoadRoutes()
+	if err != nil {
+		t.Fatalf("LoadRoutes: %v", err)
+	}
+	if _, ok := routes["orphan"]; ok {
+		t.Fatalf("orphaned route survived boot reconciliation: %+v", routes)
+	}
+	if route, ok := routes["visible"]; !ok || route.ProviderSessionID != "session-visible" {
+		t.Fatalf("visible thread route was pruned: %+v", routes)
+	}
+	entry, ok := s.orchestration.ThreadListEntry("visible")
+	if !ok || entry.ProviderInstanceID != spec.InstanceID {
+		t.Fatalf("restored provider instance = %q, want newer route instance %q", entry.ProviderInstanceID, spec.InstanceID)
+	}
+	if entry.ModelSelection == nil || entry.ModelSelection.Model != "route-model" {
+		t.Fatalf("restored model selection = %#v, want newer route selection", entry.ModelSelection)
 	}
 }
 

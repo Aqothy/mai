@@ -19,7 +19,8 @@ import (
 const engineQueueSize = 256
 
 // Engine locking: the worker goroutine is the ONLY writer to the projection and
-// receipts, so writes need no coordination with each other. mu exists for
+// receipts (except boot-time RestoreThreads, which seeds stubs under mu before
+// any dispatch), so writes need no coordination with each other. mu exists for
 // cross-goroutine readers (snapshots, SessionView) racing the worker's
 // projection writes; the EventStore carries its own lock so Replay can serve
 // reads without holding mu.

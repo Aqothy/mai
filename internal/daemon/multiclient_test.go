@@ -258,7 +258,7 @@ type dispatchOutcome struct {
 // client, and an interrupt from the other client. Both clients must end with
 // identical event streams and snapshots with no manual refresh.
 func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -453,7 +453,7 @@ func applyLive(merged []orchestration.Event, live []orchestration.Event) []orche
 // the live stream, and must converge to exactly what a never-disconnected
 // observer saw.
 func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
@@ -533,7 +533,7 @@ func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
 // keep streaming unaffected, and the slow client recovers to full consistency
 // with mobile-sized per-thread replay pages.
 func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)

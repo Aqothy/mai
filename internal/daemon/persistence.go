@@ -38,6 +38,53 @@ func openMetadataStore(logger *slog.Logger) *store.SQLite {
 	return nil
 }
 
+// restorePersistedThreads seeds the projection with thread stubs and reconciles
+// their routes before the daemon serves connections. Route writes are
+// synchronous while thread metadata is debounced, so a conflicting route is
+// the newer provider selection after a crash.
+func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadStore, routes store.RouteStore, logger *slog.Logger) (int, error) {
+	metas, err := threads.ListThreads()
+	if err != nil {
+		return 0, err
+	}
+	restored := make([]orchestration.RestoredThread, 0, len(metas))
+	threadIndexes := make(map[string]int, len(metas))
+	for _, meta := range metas {
+		threadIndexes[meta.ThreadID] = len(restored)
+		restored = append(restored, orchestration.RestoredThread{
+			ThreadID:           orchestration.ThreadID(meta.ThreadID),
+			Title:              meta.Title,
+			Cwd:                meta.Cwd,
+			ProviderInstanceID: meta.ProviderInstanceID,
+			ModelSelection:     meta.ModelSelection,
+			CreatedAt:          meta.CreatedAt,
+			UpdatedAt:          meta.UpdatedAt,
+		})
+	}
+
+	persistedRoutes, routeErr := routes.LoadRoutes()
+	if routeErr != nil {
+		logger.Warn("reconcile persisted routes", "error", routeErr)
+	} else {
+		for threadID, route := range persistedRoutes {
+			index, ok := threadIndexes[threadID]
+			if ok {
+				if restored[index].ProviderInstanceID != route.InstanceID {
+					restored[index].ProviderInstanceID = route.InstanceID
+					restored[index].ModelSelection = route.StartInput.ModelSelection
+				}
+				continue
+			}
+			if err := routes.DeleteRoute(threadID); err != nil {
+				logger.Warn("delete orphaned persisted route", "thread", threadID, "error", err)
+			}
+		}
+	}
+
+	engine.RestoreThreads(restored)
+	return len(restored), nil
+}
+
 const threadMetaFlushDebounce = 250 * time.Millisecond
 
 // threadMetaWriter persists projection metadata without blocking the engine worker.

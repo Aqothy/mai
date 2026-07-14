@@ -325,16 +325,23 @@ func (r *ProviderEventReactor) handleInterrupt(event Event) {
 
 func (r *ProviderEventReactor) handleStop(event Event) {
 	thread, ok := r.engine.Thread(event.ThreadID())
-	if !ok || thread.Session == nil {
+	if !ok {
+		return
+	}
+	ctx, cancel := r.providerRPCContext()
+	defer cancel()
+	input := provider.StopSessionInput{ThreadID: string(thread.ID)}
+	if thread.Session == nil {
+		if err := r.provider.ReleaseSession(ctx, input); err != nil {
+			log.Printf("orchestration: release stopped idle thread %q: %v", thread.ID, err)
+		}
 		return
 	}
 	stopReason := ""
 	if activeTurnID(thread) != "" {
 		stopReason = "cancelled"
 	}
-	ctx, cancel := r.providerRPCContext()
-	defer cancel()
-	if err := r.provider.StopSession(ctx, provider.StopSessionInput{ThreadID: string(thread.ID)}); err != nil {
+	if err := r.provider.StopSession(ctx, input); err != nil {
 		r.record(EventInput{Type: EventThreadSessionStopFailed, ThreadID: thread.ID, Actor: ActorKindServer})
 		r.appendErrorItem(thread.ID, event.Payload.TurnID, err.Error())
 		return
