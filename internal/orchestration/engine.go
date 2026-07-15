@@ -543,6 +543,9 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 		if sessionPreparing(thread) {
 			return fmt.Errorf("cannot start a turn while thread %q is preparing its provider session", command.ThreadID)
 		}
+		if thread.ReplayHistoryPending {
+			return fmt.Errorf("cannot start a turn on restored thread %q before preparing its provider session", command.ThreadID)
+		}
 		active := activeTurnID(thread)
 		steering := active != ""
 		turnID := active

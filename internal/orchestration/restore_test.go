@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,5 +92,72 @@ func TestRestoreThreadsNeverOverwritesAndCreateStaysIdempotent(t *testing.T) {
 	engine.RestoreThreads([]RestoredThread{{ThreadID: "thread-1", Title: "Stale copy", CreatedAt: now, UpdatedAt: now}})
 	if entry, _ := engine.ThreadListEntry("thread-1"); entry.Title != "Restored" {
 		t.Fatalf("restore overwrote a live thread: %#v", entry)
+	}
+}
+
+func TestRestoredThreadRequiresPreparationBeforeTurnStart(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{
+		ThreadID:           "thread-restored",
+		ProviderInstanceID: "codex",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}})
+
+	_, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadTurnStart,
+		CommandID: "turn-before-prepare",
+		ThreadID:  "thread-restored",
+		Message:   &CommandMessage{MessageID: "message-before-prepare", Text: "hello"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "before preparing") {
+		t.Fatalf("thread.turn.start err = %v, want preparation requirement", err)
+	}
+	thread, _ := engine.Thread("thread-restored")
+	if len(thread.Timeline) != 0 || thread.LatestTurn != nil {
+		t.Fatalf("rejected turn mutated restored thread: %#v", thread)
+	}
+}
+
+func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
+	tests := []struct {
+		name   string
+		status SessionStatus
+	}{
+		{name: "starting", status: SessionStatusStarting},
+		{name: "error", status: SessionStatusError},
+		{name: "stopped", status: SessionStatusStopped},
+		{name: "interrupted", status: SessionStatusInterrupted},
+		{name: "ready", status: SessionStatusReady},
+		{name: "running", status: SessionStatusRunning},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			now := time.Now()
+			engine.RestoreThreads([]RestoredThread{{ThreadID: "thread-restored", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+
+			if _, err := engine.AppendEvent(context.Background(), EventInput{
+				Type:     EventThreadSessionStatusSet,
+				ThreadID: "thread-restored",
+				Payload:  EventPayload{Session: &SessionBinding{Status: tt.status}},
+			}); err != nil {
+				t.Fatalf("append session status: %v", err)
+			}
+			thread, _ := engine.Thread("thread-restored")
+			if !thread.ReplayHistoryPending {
+				t.Fatalf("session status %s consumed replay intent", tt.status)
+			}
+			if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
+				t.Fatalf("append replay completion: %v", err)
+			}
+			thread, _ = engine.Thread("thread-restored")
+			if thread.ReplayHistoryPending {
+				t.Fatal("replay completion did not consume replay intent")
+			}
+		})
 	}
 }

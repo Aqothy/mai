@@ -382,19 +382,15 @@ func (h *Instance) handleACPSessionUpdate(notification schema.SessionNotificatio
 		return
 	}
 	update := sessionRuntimeEvent(notification)
-	var listener provider.RuntimeEventListener
 	drop := false
 	h.mu.Lock()
 	session := h.sessionLocked(sessionID)
 	h.scopeRuntimeEventIDsLocked(sessionID, &update)
-	if session != nil && session.loading {
-		// session/load replay: orchestration already has the thread projection.
-		drop = true
-	} else if collector := h.updateCollectorLocked(sessionID); collector != nil {
+	if collector := h.updateCollectorLocked(sessionID); collector != nil {
 		if collector.cancelled || update.Payload.ItemType == provider.ItemKindUserMessage {
 			// The optimistic user message is already in orchestration. ACP
-			// user_message_chunk updates during a live prompt are its echo; replay
-			// updates remain preserved by the loading branch above.
+			// user_message_chunk updates during a live prompt are its echo. Display
+			// replay has no collector and routes through the session branch below.
 			drop = true
 		} else {
 			update.ThreadID = collector.threadID
@@ -403,7 +399,6 @@ func (h *Instance) handleACPSessionUpdate(notification schema.SessionNotificatio
 	} else if session != nil && session.threadID != "" {
 		update.ThreadID = session.threadID
 	}
-	listener = h.runtimeEventListener
 	h.mu.Unlock()
 	if drop {
 		return
@@ -413,9 +408,7 @@ func (h *Instance) handleACPSessionUpdate(notification schema.SessionNotificatio
 	if update.Type == provider.RuntimeEventItemCompleted || itemStatusSettled(update.Payload.ItemStatus) {
 		cancelPermission = h.markPermissionToolSettled(sessionID, update.ThreadID, update.ItemID)
 	}
-	if listener != nil && update.ThreadID != "" {
-		listener(update)
-	}
+	h.emitOrBufferRuntimeEvent(sessionID, update, true)
 	if cancelPermission != nil {
 		cancelPermission()
 	}
@@ -574,7 +567,14 @@ func itemStatusSettled(status provider.ItemStatus) bool {
 }
 
 func (h *Instance) emitRuntimeEventForSession(sessionID string, update provider.RuntimeEvent) {
-	var listener provider.RuntimeEventListener
+	h.emitRuntimeEventForSessionState(sessionID, update, false)
+}
+
+func (h *Instance) emitBoundRuntimeEventForSession(sessionID string, update provider.RuntimeEvent) {
+	h.emitRuntimeEventForSessionState(sessionID, update, true)
+}
+
+func (h *Instance) emitRuntimeEventForSessionState(sessionID string, update provider.RuntimeEvent, requireSession bool) {
 	h.mu.Lock()
 	session := h.sessionLocked(sessionID)
 	var collector *promptCollector
@@ -591,7 +591,27 @@ func (h *Instance) emitRuntimeEventForSession(sessionID string, update provider.
 	} else if update.ThreadID == "" && session != nil {
 		update.ThreadID = session.threadID
 	}
-	listener = h.runtimeEventListener
+	h.mu.Unlock()
+	h.emitOrBufferRuntimeEvent(sessionID, update, requireSession)
+}
+
+// emitOrBufferRuntimeEvent is the publication boundary for session/load. Load
+// replay stays private until StartSession returns the complete ordered batch.
+func (h *Instance) emitOrBufferRuntimeEvent(sessionID string, update provider.RuntimeEvent, requireSession bool) {
+	h.mu.Lock()
+	session := h.sessionLocked(sessionID)
+	if session == nil && requireSession {
+		h.mu.Unlock()
+		return
+	}
+	if session != nil {
+		if session.replayEvents != nil {
+			session.replayEvents = append(session.replayEvents, update)
+			h.mu.Unlock()
+			return
+		}
+	}
+	listener := h.runtimeEventListener
 	h.mu.Unlock()
 	if listener != nil && update.ThreadID != "" {
 		listener(update)

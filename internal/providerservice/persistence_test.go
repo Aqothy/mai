@@ -41,9 +41,12 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 		t.Fatalf("instance spec not persisted: %+v", specs)
 	}
 
-	input := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "gpt"}}
+	input := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "gpt"}, ReplayHistory: true}
 	if _, err := s.StartSession(context.Background(), "thread-1", input); err != nil {
 		t.Fatalf("StartSession: %v", err)
+	}
+	if started := adapter.instance(0).lastStartInput(); !started.ReplayHistory {
+		t.Fatalf("adapter start input = %#v, want one-shot replay intent", started)
 	}
 	routes, err := st.LoadRoutes()
 	if err != nil {
@@ -61,6 +64,9 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 	}
 	if route.StartInput.ModelSelection == nil || route.StartInput.ModelSelection.Model != "gpt" {
 		t.Fatalf("start input not persisted: %+v", route.StartInput)
+	}
+	if route.StartInput.ReplayHistory {
+		t.Fatalf("one-shot replay intent persisted in route: %+v", route.StartInput)
 	}
 
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
@@ -106,7 +112,7 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	second := &resumeCursorAdapter{}
 	after := New(second.StartInstance, WithRouteStore(st))
 	defer after.Close()
-	session, err := after.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
+	result, err := after.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	if err != nil {
 		t.Fatalf("StartSession after restart: %v", err)
 	}
@@ -127,8 +133,8 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	if string(input.Options) != `{"mode":"careful"}` {
 		t.Fatalf("options after restart = %s, want persisted options", input.Options)
 	}
-	if session.ProviderSessionID != "sess-1" {
-		t.Fatalf("session after restart = %#v, want the resumed provider session", session)
+	if result.Session.ProviderSessionID != "sess-1" {
+		t.Fatalf("session after restart = %#v, want the resumed provider session", result.Session)
 	}
 
 	routes, err := st.LoadRoutes()

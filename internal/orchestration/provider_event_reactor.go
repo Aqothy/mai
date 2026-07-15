@@ -12,7 +12,7 @@ import (
 )
 
 type ProviderRuntime interface {
-	StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.Session, error)
+	StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, error)
 	SendTurn(ctx context.Context, input provider.SendTurnInput) error
 	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
@@ -24,8 +24,9 @@ type ProviderRuntime interface {
 const defaultProviderRPCTimeout = 60 * time.Second
 
 type ProviderEventReactor struct {
-	engine   *Engine
-	provider ProviderRuntime
+	engine    *Engine
+	provider  ProviderRuntime
+	ingestion *ProviderRuntimeIngestion
 
 	// baseCtx scopes every provider RPC to the owning server's lifecycle:
 	// when the server closes, in-flight RPC chains are cancelled immediately
@@ -43,11 +44,11 @@ type ProviderEventReactor struct {
 // NewProviderEventReactor wires the reactor to the engine's event stream. ctx
 // is the reactor's base context (typically the daemon server's lifecycle
 // context); cancelling it cancels all in-flight provider RPCs.
-func NewProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime) *ProviderEventReactor {
+func NewProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime, ingestion *ProviderRuntimeIngestion) *ProviderEventReactor {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	r := &ProviderEventReactor{engine: engine, provider: providerRuntime, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
+	r := &ProviderEventReactor{engine: engine, provider: providerRuntime, ingestion: ingestion, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
 	engine.OnEvent(r.handle)
 	return r
 }
@@ -169,14 +170,29 @@ func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	session, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
+	input := startSessionInputFromThread(thread)
+	input.ReplayHistory = thread.ReplayHistoryPending
+	start := func() (provider.StartSessionResult, error) {
+		return r.provider.StartSession(ctx, string(thread.ID), input)
+	}
+	ready := func(session provider.Session) {
+		binding := bindingFromProviderSession(thread.ProviderInstanceID, session)
+		if r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding}) {
+			r.dispatchProviderSessionMetadata(thread.ID, session, time.Now())
+		}
+	}
+	var err error
+	if input.ReplayHistory {
+		err = r.ingestion.RestoreHistory(string(thread.ID), start, ready)
+	} else {
+		var result provider.StartSessionResult
+		result, err = start()
+		if err == nil {
+			ready(result.Session)
+		}
+	}
 	if err != nil {
 		r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateError, Error: err.Error()})
-		return
-	}
-	binding := bindingFromProviderSession(thread.ProviderInstanceID, session)
-	if r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding}) {
-		r.dispatchProviderSessionMetadata(thread.ID, session, time.Now())
 	}
 }
 
@@ -216,11 +232,12 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 
-	providerSession, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
+	result, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
 	if err != nil {
 		r.failThread(threadID, turnID, err.Error())
 		return
 	}
+	providerSession := result.Session
 	// The engine accepts the running binding only while this turn is STILL
 	// the thread's running turn; an interrupt that landed during StartSession
 	// drops the update, and the interrupt is confirmed instead of dispatching.

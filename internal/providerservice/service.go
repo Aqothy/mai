@@ -24,7 +24,7 @@ import (
 type ProviderInstance interface {
 	Info() provider.InstanceInfo
 	Close() error
-	StartSession(ctx context.Context, input provider.StartSessionInput) (provider.Session, error)
+	StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error)
 	// SendTurn dispatches a turn. It is asynchronous: the turn lifecycle
 	// (turn.started/turn.completed) and all content are reported through runtime
 	// events, so SendTurn returns once the turn is accepted/dispatched.
@@ -73,7 +73,7 @@ type threadRoute struct {
 // the runtime-event fan-in hub. Instances are keyed by InstanceID, so multiple
 // instances of the same driver can coexist.
 type Service struct {
-	mu            sync.Mutex
+	mu        sync.Mutex
 	instances map[provider.InstanceID]ProviderInstance // live processes only
 	// instanceSpecs includes persisted specs for instances that are still cold.
 	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
@@ -172,7 +172,7 @@ func (s *Service) restorePersistedState() {
 			Generation:        restoredGeneration,
 			ProviderSessionID: record.ProviderSessionID,
 			ResumeCursor:      append(json.RawMessage(nil), record.ResumeCursor...),
-			StartInput:        cloneStartSessionInput(record.StartInput),
+			StartInput:        persistentStartSessionInput(record.StartInput),
 		}
 	}
 }
@@ -602,21 +602,21 @@ func (s *Service) ListInstances() []provider.InstanceInfo {
 	return infos
 }
 
-func (s *Service) StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.Session, error) {
+func (s *Service) StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, error) {
 	if threadID == "" {
 		threadID = input.ThreadID
 	}
 	if threadID == "" {
-		return provider.Session{}, fmt.Errorf("provider start session requires threadId")
+		return provider.StartSessionResult{}, fmt.Errorf("provider start session requires threadId")
 	}
 	if input.ThreadID == "" {
 		input.ThreadID = threadID
 	}
 	if input.ProviderInstanceID == "" {
-		return provider.Session{}, fmt.Errorf("provider start session requires providerInstanceId")
+		return provider.StartSessionResult{}, fmt.Errorf("provider start session requires providerInstanceId")
 	}
 	if err := s.ensureInstanceStarted(ctx, input.ProviderInstanceID); err != nil {
-		return provider.Session{}, err
+		return provider.StartSessionResult{}, err
 	}
 	if route := s.routeForThread(threadID); route.InstanceID != "" && route.InstanceID != input.ProviderInstanceID {
 		_ = s.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: threadID})
@@ -625,8 +625,8 @@ func (s *Service) StartSession(ctx context.Context, threadID string, input provi
 	lock.RLock()
 	defer lock.RUnlock()
 
-	session, _, _, err := s.startSessionOnCurrentInstance(ctx, threadID, input)
-	return session, err
+	result, _, _, err := s.startSessionOnCurrentInstance(ctx, threadID, input)
+	return result, err
 }
 
 // Provider switching drops the old route before best-effort StopSession. A
@@ -672,10 +672,10 @@ func (s *Service) ReleaseSession(ctx context.Context, input provider.StopSession
 	return nil
 }
 
-func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.Session, ProviderInstance, uint64, error) {
+func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, ProviderInstance, uint64, error) {
 	instance, generation, err := s.instanceWithGeneration(input.ProviderInstanceID)
 	if err != nil {
-		return provider.Session{}, nil, 0, err
+		return provider.StartSessionResult{}, nil, 0, err
 	}
 	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
 		// Only a stale route needs its provider-owned preferences restored. Once
@@ -696,23 +696,30 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 		}
 	}
-	session, err := instance.StartSession(ctx, input)
+	result, err := instance.StartSession(ctx, input)
 	if err != nil {
-		return provider.Session{}, nil, 0, err
+		return provider.StartSessionResult{}, nil, 0, err
 	}
 	info := instance.Info()
+	for index := range result.Replay {
+		result.Replay[index].Provider = info.Driver
+		result.Replay[index].ProviderInstanceID = input.ProviderInstanceID
+		result.Replay[index].ProviderName = info.Name
+		result.Replay[index].Generation = generation
+		result.Replay[index].ThreadID = threadID
+	}
 	// The requested/selected provider instance is the authoritative routing
 	// identity. Adapter-returned sessions may be resumed from stale native state,
 	// so never let their ProviderInstanceID rebind the thread route.
-	session.Provider = info.Driver
-	session.ProviderInstanceID = input.ProviderInstanceID
-	session.ProviderName = info.Name
-	session.Generation = generation
-	if session.ThreadID == "" {
-		session.ThreadID = threadID
+	result.Session.Provider = info.Driver
+	result.Session.ProviderInstanceID = input.ProviderInstanceID
+	result.Session.ProviderName = info.Name
+	result.Session.Generation = generation
+	if result.Session.ThreadID == "" {
+		result.Session.ThreadID = threadID
 	}
-	s.bindThreadSession(threadID, input.ProviderInstanceID, generation, session.ProviderSessionID, session.ResumeCursor, input)
-	return session, instance, generation, nil
+	s.bindThreadSession(threadID, input.ProviderInstanceID, generation, result.Session.ProviderSessionID, result.Session.ResumeCursor, input)
+	return result, instance, generation, nil
 }
 
 func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
@@ -881,7 +888,7 @@ func (s *Service) bindThreadSession(threadID string, instanceID provider.Instanc
 		Generation:        generation,
 		ProviderSessionID: providerSessionID,
 		ResumeCursor:      append(json.RawMessage(nil), resumeCursor...),
-		StartInput:        cloneStartSessionInput(startInput),
+		StartInput:        persistentStartSessionInput(startInput),
 	}
 	s.mu.Unlock()
 	s.persistThreadRoute(threadID)
@@ -924,5 +931,11 @@ func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSess
 		model.Options = append(json.RawMessage(nil), input.ModelSelection.Options...)
 		cloned.ModelSelection = &model
 	}
+	return cloned
+}
+
+func persistentStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
+	cloned := cloneStartSessionInput(input)
+	cloned.ReplayHistory = false
 	return cloned
 }

@@ -48,16 +48,18 @@ func (a *fakeStartAdapter) startCount() int {
 }
 
 type fakeProviderInstance struct {
-	mu           sync.Mutex
-	info         provider.InstanceInfo
-	closed       bool
-	startInputs  []provider.StartSessionInput
-	sendTurns    []provider.SendTurnInput
-	calls        []string
-	startSession func(provider.StartSessionInput) (provider.Session, error)
-	sendTurn     func(context.Context, provider.SendTurnInput) error
-	stopSession  func(context.Context, provider.StopSessionInput) error
-	deleteSess   func(context.Context, string) error
+	mu                 sync.Mutex
+	info               provider.InstanceInfo
+	closed             bool
+	startInputs        []provider.StartSessionInput
+	sendTurns          []provider.SendTurnInput
+	calls              []string
+	startSession       func(provider.StartSessionInput) (provider.Session, error)
+	startReplay        []provider.RuntimeEvent
+	historyUnavailable bool
+	sendTurn           func(context.Context, provider.SendTurnInput) error
+	stopSession        func(context.Context, provider.StopSessionInput) error
+	deleteSess         func(context.Context, string) error
 }
 
 func (i *fakeProviderInstance) Info() provider.InstanceInfo {
@@ -71,16 +73,19 @@ func (i *fakeProviderInstance) Close() error {
 	i.closed = true
 	return nil
 }
-func (i *fakeProviderInstance) StartSession(_ context.Context, input provider.StartSessionInput) (provider.Session, error) {
+func (i *fakeProviderInstance) StartSession(_ context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
 	i.mu.Lock()
 	i.startInputs = append(i.startInputs, input)
 	i.calls = append(i.calls, "StartSession")
 	start := i.startSession
+	replay := append([]provider.RuntimeEvent(nil), i.startReplay...)
+	historyUnavailable := i.historyUnavailable
 	i.mu.Unlock()
 	if start != nil {
-		return start(input)
+		session, err := start(input)
+		return provider.StartSessionResult{Session: session, Replay: replay, HistoryUnavailable: historyUnavailable}, err
 	}
-	return provider.Session{ProviderInstanceID: input.ProviderInstanceID, ThreadID: input.ThreadID}, nil
+	return provider.StartSessionResult{Session: provider.Session{ProviderInstanceID: input.ProviderInstanceID, ThreadID: input.ThreadID}, Replay: replay, HistoryUnavailable: historyUnavailable}, nil
 }
 func (i *fakeProviderInstance) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
 	i.mu.Lock()
@@ -554,12 +559,12 @@ func TestStartSessionNormalizesAdapterReturnedInstanceIDToRequestedInstance(t *t
 	}
 	newInstance.mu.Unlock()
 
-	session, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"})
+	result, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if session.ProviderInstanceID != "new" || session.ProviderName != "New Provider" || session.Provider != "fake" {
-		t.Fatalf("session identity = (%q,%q,%q), want selected new provider identity", session.ProviderInstanceID, session.ProviderName, session.Provider)
+	if result.Session.ProviderInstanceID != "new" || result.Session.ProviderName != "New Provider" || result.Session.Provider != "fake" {
+		t.Fatalf("session identity = (%q,%q,%q), want selected new provider identity", result.Session.ProviderInstanceID, result.Session.ProviderName, result.Session.Provider)
 	}
 	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
 		t.Fatalf("second StartSession: %v", err)
@@ -696,6 +701,52 @@ func TestRestartAdmitsTurnScopedRuntimeErrorFromReplacedGeneration(t *testing.T)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for late runtime error")
+	}
+}
+
+func TestStartSessionReturnsStampedReplayBatch(t *testing.T) {
+	adapter := &restartingEventingAdapter{}
+	s := New(adapter.StartInstance)
+	defer s.Close()
+	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
+		t.Fatalf("initial StartInstance: %v", err)
+	}
+
+	adapter.mu.Lock()
+	instance := adapter.instances[0]
+	adapter.mu.Unlock()
+	instance.mu.Lock()
+	instance.startReplay = []provider.RuntimeEvent{{
+		EventID:            "replayed",
+		Type:               provider.RuntimeEventContentDelta,
+		Provider:           "spoofed",
+		ProviderInstanceID: "spoofed",
+		ProviderName:       "spoofed",
+		ThreadID:           "spoofed",
+		Payload: provider.RuntimeEventPayload{
+			StreamKind: provider.RuntimeContentAssistantText,
+			Delta:      "history",
+		},
+	}}
+	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		return provider.Session{ProviderInstanceID: input.ProviderInstanceID, ThreadID: input.ThreadID}, nil
+	}
+	instance.mu.Unlock()
+
+	result, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex", ReplayHistory: true})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if len(result.Replay) != 1 {
+		t.Fatalf("replay = %#v, want one returned event", result.Replay)
+	}
+	replay := result.Replay[0]
+	if replay.ThreadID != "thread-1" || replay.ProviderInstanceID != "codex" || replay.ProviderName != "Codex" || replay.Provider != "fake" || replay.Generation == 0 {
+		t.Fatalf("replay identity = %#v, want authoritative service identity", replay)
+	}
+	if replay.Generation != result.Session.Generation {
+		t.Fatalf("replay/session generations = %d/%d, want equal", replay.Generation, result.Session.Generation)
 	}
 }
 
@@ -994,19 +1045,19 @@ func TestStartSessionReusesStoredResumeCursorAfterRestart(t *testing.T) {
 	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
 		t.Fatalf("initial StartInstance: %v", err)
 	}
-	firstSession, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
+	firstResult, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
 	if err != nil {
 		t.Fatalf("initial StartSession: %v", err)
 	}
 	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
 		t.Fatalf("restart StartInstance: %v", err)
 	}
-	secondSession, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
+	secondResult, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
 	if err != nil {
 		t.Fatalf("restart StartSession: %v", err)
 	}
-	if firstSession.Generation == 0 || secondSession.Generation == 0 || firstSession.Generation == secondSession.Generation {
-		t.Fatalf("session generations before/after restart = %d/%d, want distinct non-zero generations", firstSession.Generation, secondSession.Generation)
+	if firstResult.Session.Generation == 0 || secondResult.Session.Generation == 0 || firstResult.Session.Generation == secondResult.Session.Generation {
+		t.Fatalf("session generations before/after restart = %d/%d, want distinct non-zero generations", firstResult.Session.Generation, secondResult.Session.Generation)
 	}
 
 	second := adapter.instance(1)

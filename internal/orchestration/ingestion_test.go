@@ -52,6 +52,390 @@ func newThreadWithSession(t *testing.T, engine *Engine, threadID ThreadID) {
 	}
 }
 
+func TestRestoreHistoryDoesNotBlockOtherThreads(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{
+		{ThreadID: "restoring", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now},
+		{ThreadID: "active", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now},
+	})
+
+	loadEntered := make(chan struct{})
+	releaseLoad := make(chan struct{})
+	readyEntered := make(chan struct{})
+	releaseReady := make(chan struct{})
+	restoreDone := make(chan error, 1)
+	go func() {
+		restoreDone <- ingestion.RestoreHistory("restoring", func() (provider.StartSessionResult, error) {
+			close(loadEntered)
+			<-releaseLoad
+			return provider.StartSessionResult{
+				Session: provider.Session{ThreadID: "restoring", ProviderInstanceID: "codex"},
+				Replay: []provider.RuntimeEvent{{
+					Type:     provider.RuntimeEventContentDelta,
+					ThreadID: "restoring",
+					Payload:  provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "restored answer"},
+				}},
+			}, nil
+		}, func(session provider.Session) {
+			binding := bindingFromProviderSession("codex", session)
+			binding.Status = SessionStatusReady
+			if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: "restoring", Payload: EventPayload{Session: &binding}}); err != nil {
+				t.Errorf("record ready session: %v", err)
+			}
+			close(readyEntered)
+			<-releaseReady
+		})
+	}()
+	<-loadEntered
+
+	otherThreadDone := make(chan struct{})
+	go func() {
+		ingestion.Ingest(provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, ThreadID: "active", Payload: provider.RuntimeEventPayload{Message: "other warning"}})
+		close(otherThreadDone)
+	}()
+
+	select {
+	case <-otherThreadDone:
+	case <-time.After(time.Second):
+		t.Fatal("unrelated thread was blocked by provider load")
+	}
+	ingestion.Ingest(provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, ThreadID: "restoring", Payload: provider.RuntimeEventPayload{Message: "live warning"}})
+
+	close(releaseLoad)
+	<-readyEntered
+	commitOtherDone := make(chan struct{})
+	go func() {
+		ingestion.Ingest(provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, ThreadID: "active", Payload: provider.RuntimeEventPayload{Message: "other commit warning"}})
+		close(commitOtherDone)
+	}()
+	select {
+	case <-commitOtherDone:
+	case <-time.After(time.Second):
+		t.Fatal("unrelated thread was blocked by ready handoff")
+	}
+	afterReadyDone := make(chan struct{})
+	go func() {
+		ingestion.Ingest(provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, ThreadID: "restoring", Payload: provider.RuntimeEventPayload{Message: "after ready"}})
+		close(afterReadyDone)
+	}()
+	select {
+	case <-afterReadyDone:
+		t.Fatal("same-thread event crossed the ready handoff")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseReady)
+	if err := <-restoreDone; err != nil {
+		t.Fatalf("RestoreHistory: %v", err)
+	}
+	select {
+	case <-afterReadyDone:
+	case <-time.After(time.Second):
+		t.Fatal("same-thread event remained blocked after ready")
+	}
+
+	events := engine.ReplayEvents(ReplayEventsInput{ThreadID: "restoring"})
+	var messageSequence, queuedSequence, completionSequence, readySequence, afterReadySequence uint64
+	for _, event := range events {
+		switch event.Type {
+		case EventThreadMessageSent:
+			messageSequence = event.Sequence
+		case EventThreadHistoryReplayCompleted:
+			completionSequence = event.Sequence
+		case EventThreadSessionStatusSet:
+			readySequence = event.Sequence
+		case EventThreadItemUpserted:
+			if event.Payload.Item != nil && event.Payload.Item.Title == "live warning" {
+				queuedSequence = event.Sequence
+			} else if event.Payload.Item != nil && event.Payload.Item.Title == "after ready" {
+				afterReadySequence = event.Sequence
+			}
+		}
+	}
+	if messageSequence == 0 || !(messageSequence < queuedSequence && queuedSequence < completionSequence && completionSequence < readySequence && readySequence < afterReadySequence) {
+		t.Fatalf("message/queued/completion/ready/after sequences = %d/%d/%d/%d/%d", messageSequence, queuedSequence, completionSequence, readySequence, afterReadySequence)
+	}
+}
+
+func TestTickerDoesNotFlushThreadDuringHistoryReplay(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("restoring")
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+
+	gate := &historyReplayGate{}
+	ingestion.replayMu.Lock()
+	ingestion.replaying[string(threadID)] = gate
+	ingestion.replayMu.Unlock()
+	ingestion.ingest(provider.RuntimeEvent{
+		Type:     provider.RuntimeEventContentDelta,
+		ThreadID: string(threadID),
+		Payload:  provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "restored answer"},
+	})
+	ingestion.flushPendingText(time.Now())
+	thread, _ := engine.Thread(threadID)
+	if len(thread.Timeline) != 0 {
+		t.Fatalf("ticker exposed partial replay: %#v", thread.Timeline)
+	}
+
+	ingestion.completeHistoryReplay(string(threadID))
+	gate.mu.Lock()
+	gate.closed = true
+	gate.mu.Unlock()
+	ingestion.replayMu.Lock()
+	delete(ingestion.replaying, string(threadID))
+	ingestion.replayMu.Unlock()
+	thread, _ = engine.Thread(threadID)
+	if len(thread.Timeline) != 1 || thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "restored answer" {
+		t.Fatalf("completed replay timeline = %#v, want restored answer", thread.Timeline)
+	}
+}
+
+func TestReplayWarningsAndErrorsFollowBufferedText(t *testing.T) {
+	tests := []struct {
+		name      string
+		textEvent provider.RuntimeEvent
+		lastType  provider.RuntimeEventType
+		lastKind  provider.ItemKind
+	}{
+		{
+			name:      "assistant then warning",
+			textEvent: provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
+			lastType:  provider.RuntimeEventRuntimeWarning,
+			lastKind:  provider.ItemKindWarning,
+		},
+		{
+			name:      "assistant then error",
+			textEvent: provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
+			lastType:  provider.RuntimeEventRuntimeError,
+			lastKind:  provider.ItemKindError,
+		},
+		{
+			name:      "reasoning then warning",
+			textEvent: provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "thought"}},
+			lastType:  provider.RuntimeEventRuntimeWarning,
+			lastKind:  provider.ItemKindWarning,
+		},
+		{
+			name:      "reasoning then error",
+			textEvent: provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "thought"}},
+			lastType:  provider.RuntimeEventRuntimeError,
+			lastKind:  provider.ItemKindError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("restoring")
+			now := time.Now()
+			engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+			textEvent := tt.textEvent
+			textEvent.ThreadID = string(threadID)
+			lastEvent := provider.RuntimeEvent{Type: tt.lastType, ThreadID: string(threadID), Payload: provider.RuntimeEventPayload{Message: "after text"}}
+
+			err := ingestion.RestoreHistory(string(threadID), func() (provider.StartSessionResult, error) {
+				return provider.StartSessionResult{Session: provider.Session{ThreadID: string(threadID), ProviderInstanceID: "codex"}, Replay: []provider.RuntimeEvent{textEvent, lastEvent}}, nil
+			}, func(provider.Session) {})
+			if err != nil {
+				t.Fatalf("RestoreHistory: %v", err)
+			}
+
+			thread, _ := engine.Thread(threadID)
+			if len(thread.Timeline) != 2 {
+				t.Fatalf("timeline = %#v, want text then warning/error", thread.Timeline)
+			}
+			if thread.Timeline[1].Item == nil || thread.Timeline[1].Item.Kind != tt.lastKind {
+				t.Fatalf("timeline[1] = %#v, want %s", thread.Timeline[1], tt.lastKind)
+			}
+			if tt.textEvent.Payload.StreamKind == provider.RuntimeContentAssistantText {
+				if thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "answer" {
+					t.Fatalf("timeline[0] = %#v, want assistant answer", thread.Timeline[0])
+				}
+			} else if thread.Timeline[0].Item == nil || thread.Timeline[0].Item.Kind != provider.ItemKindReasoning {
+				t.Fatalf("timeline[0] = %#v, want reasoning thought", thread.Timeline[0])
+			}
+		})
+	}
+}
+
+func TestIngestionPreservesReplayedConversationOrderWithoutTurnIDs(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-replayed-order")
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+
+	events := []provider.RuntimeEvent{
+		{EventID: "user-1", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), ItemID: "user-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first question"}},
+		{EventID: "assistant-1", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), ItemID: "assistant-1", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first answer"}},
+		{EventID: "user-2", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), ItemID: "user-2", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second question"}},
+		{EventID: "assistant-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), ItemID: "assistant-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second answer"}},
+	}
+	for _, event := range events {
+		ingestion.Ingest(event)
+	}
+	ingestion.completeHistoryReplay(string(threadID))
+
+	thread, _ := engine.Thread(threadID)
+	want := []string{"first question", "first answer", "second question", "second answer"}
+	if len(thread.Timeline) != len(want) {
+		t.Fatalf("timeline = %#v, want %d messages", thread.Timeline, len(want))
+	}
+	for index, entry := range thread.Timeline {
+		if entry.Message == nil || entry.Message.Text != want[index] {
+			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want[index])
+		}
+	}
+	if thread.ReplayHistoryPending {
+		t.Fatal("replay completion left restored history pending")
+	}
+}
+
+func TestIngestionPreservesReplayedConversationOrderWithTurnIDs(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-replayed-turn-order")
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+
+	events := []provider.RuntimeEvent{
+		{EventID: "user-1", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), TurnID: "turn-1", ItemID: "user-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first question"}},
+		{EventID: "assistant-1", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-1", ItemID: "assistant-1", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first answer"}},
+		{EventID: "user-2", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), TurnID: "turn-2", ItemID: "user-2", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second question"}},
+		{EventID: "assistant-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-2", ItemID: "assistant-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second answer"}},
+		{EventID: "reasoning-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "second thought"}},
+	}
+	for _, event := range events {
+		ingestion.Ingest(event)
+	}
+	ingestion.completeHistoryReplay(string(threadID))
+
+	thread, _ := engine.Thread(threadID)
+	if len(thread.Timeline) != 5 {
+		t.Fatalf("timeline = %#v, want four messages followed by reasoning", thread.Timeline)
+	}
+	wantMessages := []string{"first question", "first answer", "second question", "second answer"}
+	for index, want := range wantMessages {
+		entry := thread.Timeline[index]
+		if entry.Message == nil || entry.Message.Text != want {
+			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want)
+		}
+	}
+	reasoning := thread.Timeline[4].Item
+	if reasoning == nil || reasoning.Kind != provider.ItemKindReasoning || reasoning.Status != provider.ItemStatusCompleted || reasoning.TurnID != "turn-2" {
+		t.Fatalf("timeline[4] = %#v, want completed reasoning for turn-2", thread.Timeline[4])
+	}
+	ingestion.mu.Lock()
+	defer ingestion.mu.Unlock()
+	if len(ingestion.turns) != 0 {
+		t.Fatalf("replay completion left turn buffers: %#v", ingestion.turns)
+	}
+	if len(ingestion.turnOrder) != 0 {
+		t.Fatalf("replay completion left turn order: %#v", ingestion.turnOrder)
+	}
+}
+
+func TestIngestionPreservesRestoredThreadRecencyDuringReplay(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-replayed-recency")
+	restoredAt := time.Now().Add(-24 * time.Hour).UTC()
+	replayedAt := restoredAt.Add(2 * time.Hour)
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: restoredAt, UpdatedAt: restoredAt}})
+
+	ingestion.Ingest(provider.RuntimeEvent{
+		EventID:   "replayed-user",
+		Type:      provider.RuntimeEventItemCompleted,
+		ThreadID:  string(threadID),
+		ItemID:    "replayed-user",
+		CreatedAt: replayedAt,
+		Payload: provider.RuntimeEventPayload{
+			ItemType: provider.ItemKindUserMessage,
+			Detail:   "old question",
+		},
+	})
+
+	thread, _ := engine.Thread(threadID)
+	if !thread.UpdatedAt.Equal(restoredAt) {
+		t.Fatalf("replay changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
+	}
+
+	ingestion.completeHistoryReplay(string(threadID))
+	thread, _ = engine.Thread(threadID)
+	if !thread.UpdatedAt.Equal(restoredAt) {
+		t.Fatalf("replay completion changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
+	}
+
+	liveAt := replayedAt.Add(2 * time.Minute)
+	if _, err := engine.AppendEvent(context.Background(), EventInput{
+		Type:       EventThreadMessageSent,
+		ThreadID:   threadID,
+		Actor:      ActorKindClient,
+		OccurredAt: liveAt,
+		Payload: EventPayload{
+			MessageID: "live-user",
+			Role:      MessageRoleUser,
+			Text:      "new question",
+		},
+	}); err != nil {
+		t.Fatalf("append live user message: %v", err)
+	}
+	thread, _ = engine.Thread(threadID)
+	if !thread.UpdatedAt.Equal(liveAt) {
+		t.Fatalf("live message left recency at %v, want %v", thread.UpdatedAt, liveAt)
+	}
+}
+
+func TestIngestionCoalescesIDLessReplayChunks(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-idless-replay")
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+
+	events := []provider.RuntimeEvent{
+		{EventID: "event-1", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first "}},
+		{EventID: "event-2", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "question"}},
+		{EventID: "event-3", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first "}},
+		{EventID: "event-4", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
+		{EventID: "event-5", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second "}},
+		{EventID: "event-6", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "question"}},
+		{EventID: "event-7", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second "}},
+		{EventID: "event-8", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
+	}
+	for _, event := range events {
+		ingestion.Ingest(event)
+	}
+	ingestion.completeHistoryReplay(string(threadID))
+
+	thread, _ := engine.Thread(threadID)
+	want := []string{"first question", "first answer", "second question", "second answer"}
+	if len(thread.Timeline) != len(want) {
+		t.Fatalf("timeline = %#v, want %d messages", thread.Timeline, len(want))
+	}
+	for index, entry := range thread.Timeline {
+		if entry.Message == nil || entry.Message.Text != want[index] {
+			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want[index])
+		}
+	}
+	ingestion.mu.Lock()
+	defer ingestion.mu.Unlock()
+	if len(ingestion.turns) != 0 {
+		t.Fatalf("replay completion left turn buffers: %#v", ingestion.turns)
+	}
+}
+
 func TestIngestionDropsRuntimeEventsFromStaleProviderInstance(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

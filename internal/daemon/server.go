@@ -80,7 +80,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
 	}
 	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
-	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService)
+	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
 	go s.ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
 		s.logEvent(event)

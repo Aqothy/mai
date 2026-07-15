@@ -30,6 +30,7 @@ const (
 	EventThreadConfigOptionsUpdated      EventType = "thread.config-options-updated"
 	EventThreadSlashCommandsUpdated      EventType = "thread.slash-commands-updated"
 	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
+	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
 )
 
 type ActorKind string

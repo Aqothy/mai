@@ -243,7 +243,23 @@ type StartSessionInput struct {
 	ModelSelection     *ModelSelection         `json:"modelSelection,omitempty"`
 	ConfigSelections   []ConfigOptionSelection `json:"configSelections,omitempty"`
 	ResumeCursor       json.RawMessage         `json:"resumeCursor,omitempty"`
-	Options            json.RawMessage         `json:"options,omitempty"`
+	// ReplayHistory asks the provider to rebuild display history while restoring
+	// the session. On success, StartSessionResult.Replay contains the complete
+	// ordered replay batch. A failed start must not expose partial replay events.
+	ReplayHistory bool            `json:"replayHistory,omitempty"`
+	Options       json.RawMessage `json:"options,omitempty"`
+}
+
+// StartSessionResult is the atomic result of preparing a provider session.
+// Replay is populated only when ReplayHistory was requested and the provider
+// can restore display history. HistoryUnavailable lets orchestration finish a
+// degraded restore without confusing an empty history with an unsupported one.
+// During a replay start, adapters must include same-thread setup events in
+// Replay rather than publishing them to the live event sink before returning.
+type StartSessionResult struct {
+	Session            Session
+	Replay             []RuntimeEvent
+	HistoryUnavailable bool
 }
 
 type Attachment struct {

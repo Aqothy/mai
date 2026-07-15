@@ -18,8 +18,18 @@ import (
 // keyed by thread+turn.
 type ProviderRuntimeIngestion struct {
 	engine *Engine
+
+	replayMu  sync.Mutex
+	replaying map[string]*historyReplayGate
+	mu        sync.Mutex
+	turns     map[turnKey]*turnState
+	turnOrder []turnKey
+}
+
+type historyReplayGate struct {
 	mu     sync.Mutex
-	turns  map[turnKey]*turnState
+	queued []provider.RuntimeEvent
+	closed bool
 }
 
 type turnKey struct {
@@ -39,6 +49,7 @@ type turnState struct {
 	// session/load replay don't collapse messages) or by turn/event id otherwise.
 	assistants        []*assistantStream
 	assistantSegments map[string]uint64
+	idlessUserMessage MessageID
 	reasoning         string
 	// reasoningPending is the slice of reasoning not yet flushed as a textDelta
 	// event; reasoning above keeps the segment's FULL text for the settle
@@ -94,8 +105,9 @@ func (t *turnState) streamByKey(key string) *assistantStream {
 
 func NewProviderRuntimeIngestion(engine *Engine) *ProviderRuntimeIngestion {
 	return &ProviderRuntimeIngestion{
-		engine: engine,
-		turns:  make(map[turnKey]*turnState),
+		engine:    engine,
+		turns:     make(map[turnKey]*turnState),
+		replaying: make(map[string]*historyReplayGate),
 	}
 }
 
@@ -104,6 +116,7 @@ func (i *ProviderRuntimeIngestion) ensureTurnLocked(key turnKey) *turnState {
 	if ts == nil {
 		ts = &turnState{}
 		i.turns[key] = ts
+		i.turnOrder = append(i.turnOrder, key)
 	}
 	return ts
 }
@@ -146,8 +159,27 @@ func (i *ProviderRuntimeIngestion) Ingest(event provider.RuntimeEvent) {
 	if event.ThreadID == "" {
 		return
 	}
+	i.replayMu.Lock()
+	gate := i.replaying[event.ThreadID]
+	i.replayMu.Unlock()
+	if gate != nil {
+		gate.mu.Lock()
+		if !gate.closed {
+			gate.queued = append(gate.queued, event)
+			gate.mu.Unlock()
+			return
+		}
+		gate.mu.Unlock()
+	}
+	i.ingest(event)
+}
+
+func (i *ProviderRuntimeIngestion) ingest(event provider.RuntimeEvent) {
 	if i.eventFromStaleProviderInstance(event) {
 		return
+	}
+	if event.Payload.ItemType != provider.ItemKindUserMessage {
+		i.endIDLessUserMessage(event)
 	}
 	createdAt := event.CreatedAt
 	if createdAt.IsZero() {
@@ -184,6 +216,78 @@ func (i *ProviderRuntimeIngestion) Ingest(event provider.RuntimeEvent) {
 	case provider.RuntimeEventRuntimeError:
 		i.ingestRuntimeError(event, createdAt)
 	}
+}
+
+// RestoreHistory loads without blocking live ingestion, then suppresses ticker
+// flushes for only this thread while committing replay, completion, and ready.
+// The provider contract keeps same-thread setup events in the returned batch.
+func (i *ProviderRuntimeIngestion) RestoreHistory(
+	threadID string,
+	load func() (provider.StartSessionResult, error),
+	ready func(provider.Session),
+) error {
+	gate := &historyReplayGate{}
+	i.replayMu.Lock()
+	i.replaying[threadID] = gate
+	i.replayMu.Unlock()
+	result, err := load()
+	if err != nil {
+		gate.mu.Lock()
+		gate.closed = true
+		gate.queued = nil
+		gate.mu.Unlock()
+		i.replayMu.Lock()
+		delete(i.replaying, threadID)
+		i.replayMu.Unlock()
+		return err
+	}
+	for _, event := range result.Replay {
+		i.ingest(event)
+	}
+	if result.HistoryUnavailable {
+		i.ingest(provider.RuntimeEvent{
+			Type:               provider.RuntimeEventRuntimeWarning,
+			Provider:           result.Session.Provider,
+			ProviderName:       result.Session.ProviderName,
+			ProviderInstanceID: result.Session.ProviderInstanceID,
+			Generation:         result.Session.Generation,
+			ThreadID:           threadID,
+			Payload: provider.RuntimeEventPayload{
+				Message: "history unavailable for this agent",
+			},
+		})
+	}
+	for {
+		gate.mu.Lock()
+		queued := gate.queued
+		if len(queued) == 0 {
+			i.completeHistoryReplay(threadID)
+			ready(result.Session)
+			gate.closed = true
+			gate.mu.Unlock()
+			break
+		}
+		gate.queued = nil
+		gate.mu.Unlock()
+		for _, event := range queued {
+			i.ingest(event)
+		}
+	}
+	i.replayMu.Lock()
+	delete(i.replaying, threadID)
+	i.replayMu.Unlock()
+	return nil
+}
+
+func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string) {
+	createdAt := time.Now()
+	i.completeThreadText(threadID, createdAt)
+	i.clearThreadBuffers(threadID)
+	i.record(EventInput{
+		Type:       EventThreadHistoryReplayCompleted,
+		ThreadID:   ThreadID(threadID),
+		OccurredAt: createdAt,
+	})
 }
 
 func (i *ProviderRuntimeIngestion) ingestContentDelta(event provider.RuntimeEvent, createdAt time.Time) {
@@ -240,9 +344,6 @@ type reasoningPayload struct {
 }
 
 func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time) {
-	if event.TurnID == "" {
-		return
-	}
 	i.mu.Lock()
 	ts := i.turns[turnKeyOf(event)]
 	var checkpoint reasoningPayload
@@ -355,9 +456,36 @@ func (i *ProviderRuntimeIngestion) settleOpenItems(event provider.RuntimeEvent, 
 }
 
 func (i *ProviderRuntimeIngestion) ingestUserMessage(event provider.RuntimeEvent, createdAt time.Time) {
-	messageID := MessageID("user:" + firstNonEmpty(event.ItemID, event.TurnID, string(event.EventID), newID("user")))
+	// A provider-replayed user message starts the next chronological turn. Flush
+	// any preceding assistant/reasoning content first. Replay boundary events do
+	// not necessarily carry the preceding turn id, so flush the whole thread in
+	// provider encounter order.
+	i.completeThreadText(event.ThreadID, createdAt)
+	messageID := i.userMessageID(event)
 	text := firstNonEmpty(event.Payload.Detail, event.Payload.Message, event.Payload.Delta)
 	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
+}
+
+func (i *ProviderRuntimeIngestion) userMessageID(event provider.RuntimeEvent) MessageID {
+	if id := firstNonEmpty(event.ItemID, event.TurnID); id != "" {
+		i.endIDLessUserMessage(event)
+		return MessageID("user:" + id)
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	ts := i.ensureTurnLocked(turnKeyOf(event))
+	if ts.idlessUserMessage == "" {
+		ts.idlessUserMessage = MessageID("user:" + newID("replay"))
+	}
+	return ts.idlessUserMessage
+}
+
+func (i *ProviderRuntimeIngestion) endIDLessUserMessage(event provider.RuntimeEvent) {
+	i.mu.Lock()
+	if ts := i.turns[turnKeyOf(event)]; ts != nil {
+		ts.idlessUserMessage = ""
+	}
+	i.mu.Unlock()
 }
 
 func (i *ProviderRuntimeIngestion) ingestAssistantMessageStatus(event provider.RuntimeEvent, createdAt time.Time, status provider.ItemStatus) {
@@ -431,6 +559,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 }
 
 func (i *ProviderRuntimeIngestion) ingestRuntimeWarning(event provider.RuntimeEvent, createdAt time.Time) {
+	i.completeThreadText(event.ThreadID, createdAt)
 	message := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Runtime warning")
 	item := &Item{ID: firstNonEmpty(string(event.EventID), newID("warning")), Kind: provider.ItemKindWarning, Title: message, Status: provider.ItemStatusCompleted, Payload: marshalEventPayload(map[string]any{"detail": message, "level": "warning"}), TurnID: TurnID(event.TurnID)}
 	i.recordItem(event, item, createdAt)
@@ -439,7 +568,6 @@ func (i *ProviderRuntimeIngestion) ingestRuntimeWarning(event provider.RuntimeEv
 func (i *ProviderRuntimeIngestion) ingestRuntimeError(event provider.RuntimeEvent, createdAt time.Time) {
 	message := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Runtime error")
 	item := &Item{ID: firstNonEmpty(string(event.EventID), newID("error")), Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: TurnID(event.TurnID)}
-	i.recordItem(event, item, createdAt)
 	// A turn-less error settles the streams of the thread's active turn. This
 	// read only steers local buffer cleanup — the authoritative staleness
 	// decision for the session status happens in the engine below.
@@ -450,6 +578,7 @@ func (i *ProviderRuntimeIngestion) ingestRuntimeError(event provider.RuntimeEven
 		}
 	}
 	i.settleTurn(cleanupEvent, provider.ItemStatusFailed, createdAt)
+	i.recordItem(event, item, createdAt)
 	// The update carries the ORIGINAL turn id: a stale turn-scoped error is
 	// dropped by the engine instead of failing the current turn; an empty
 	// turn id fails the thread's current session state.
@@ -485,8 +614,54 @@ func (i *ProviderRuntimeIngestion) eventFromStaleProviderInstance(event provider
 
 func (i *ProviderRuntimeIngestion) clearTurnBuffers(event provider.RuntimeEvent) {
 	i.mu.Lock()
-	delete(i.turns, turnKeyOf(event))
+	i.removeTurnLocked(turnKeyOf(event))
 	i.mu.Unlock()
+}
+
+func (i *ProviderRuntimeIngestion) clearThreadBuffers(threadID string) {
+	i.mu.Lock()
+	kept := i.turnOrder[:0]
+	for _, key := range i.turnOrder {
+		if key.threadID == threadID {
+			delete(i.turns, key)
+			continue
+		}
+		kept = append(kept, key)
+	}
+	i.turnOrder = kept
+	i.mu.Unlock()
+}
+
+func (i *ProviderRuntimeIngestion) removeTurnLocked(target turnKey) {
+	delete(i.turns, target)
+	for index, key := range i.turnOrder {
+		if key != target {
+			continue
+		}
+		copy(i.turnOrder[index:], i.turnOrder[index+1:])
+		i.turnOrder = i.turnOrder[:len(i.turnOrder)-1]
+		return
+	}
+}
+
+func (i *ProviderRuntimeIngestion) threadTurnKeys(threadID string) []turnKey {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	keys := make([]turnKey, 0)
+	for _, key := range i.turnOrder {
+		if key.threadID == threadID {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+func (i *ProviderRuntimeIngestion) completeThreadText(threadID string, createdAt time.Time) {
+	for _, key := range i.threadTurnKeys(threadID) {
+		event := provider.RuntimeEvent{ThreadID: key.threadID, TurnID: key.turnID}
+		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+		i.completeOpenAssistantMessages(event, createdAt)
+	}
 }
 
 // settleTurn closes out ingestion's local streaming state for the event's
@@ -510,15 +685,10 @@ func (i *ProviderRuntimeIngestion) settleTurn(event provider.RuntimeEvent, statu
 // superseded), so their streams settle as interrupted here instead of
 // leaking.
 func (i *ProviderRuntimeIngestion) settleSiblingTurns(event provider.RuntimeEvent, createdAt time.Time) {
-	i.mu.Lock()
-	var stale []turnKey
-	for key := range i.turns {
-		if key.threadID == event.ThreadID && key.turnID != event.TurnID {
-			stale = append(stale, key)
+	for _, key := range i.threadTurnKeys(event.ThreadID) {
+		if key.turnID == event.TurnID {
+			continue
 		}
-	}
-	i.mu.Unlock()
-	for _, key := range stale {
 		i.settleTurn(provider.RuntimeEvent{ThreadID: key.threadID, TurnID: key.turnID}, provider.ItemStatusInterrupted, createdAt)
 	}
 }
@@ -571,9 +741,24 @@ type pendingTextFlush struct {
 // provider stream under the ingestion lock, then releases the lock before
 // entering the engine's serialized append queue.
 func (i *ProviderRuntimeIngestion) flushPendingText(now time.Time) {
+	i.replayMu.Lock()
+	replaying := make(map[string]struct{}, len(i.replaying))
+	for threadID, gate := range i.replaying {
+		gate.mu.Lock()
+		if !gate.closed {
+			replaying[threadID] = struct{}{}
+		}
+		gate.mu.Unlock()
+	}
+	i.replayMu.Unlock()
+
 	i.mu.Lock()
 	var pending []pendingTextFlush
-	for key, ts := range i.turns {
+	for _, key := range i.turnOrder {
+		if _, replaying := replaying[key.threadID]; replaying {
+			continue
+		}
+		ts := i.turns[key]
 		event := provider.RuntimeEvent{ThreadID: key.threadID, TurnID: key.turnID}
 		for _, stream := range ts.assistants {
 			if stream.text == "" && len(stream.attachments) == 0 {
@@ -622,7 +807,7 @@ func (i *ProviderRuntimeIngestion) takeAssistantMessages(event provider.RuntimeE
 		return nil
 	}
 	var streams []*assistantStream
-	if event.ItemID != "" || event.TurnID == "" {
+	if event.ItemID != "" {
 		if stream := ts.streamByKey(assistantStreamDiscriminator(event)); stream != nil {
 			streams = []*assistantStream{stream}
 		}
@@ -650,13 +835,14 @@ func (i *ProviderRuntimeIngestion) takeAssistantMessages(event provider.RuntimeE
 
 // assistantStreamDiscriminator distinguishes assistant messages WITHIN a turn:
 // the provider message/item id when present, else the turn (one message per
-// turn), else the event id (each chunk its own message).
+// turn), else one contiguous ID-less stream. The "replay" fallback is retained
+// because it is part of the persisted message ID namespace.
 func assistantStreamDiscriminator(event provider.RuntimeEvent) string {
-	return firstNonEmpty(event.ItemID, event.TurnID, string(event.EventID))
+	return firstNonEmpty(event.ItemID, event.TurnID, "replay")
 }
 
 func assistantMessageBase(event provider.RuntimeEvent) string {
-	return firstNonEmpty(event.ItemID, event.TurnID, string(event.EventID), newID("assistant"))
+	return firstNonEmpty(event.ItemID, event.TurnID, "replay:"+event.ThreadID)
 }
 
 func (i *ProviderRuntimeIngestion) record(input EventInput) {

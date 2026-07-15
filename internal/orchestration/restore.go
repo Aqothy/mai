@@ -43,15 +43,16 @@ func (p *Projection) restoreThread(stub RestoredThread) {
 		title = "Untitled thread"
 	}
 	p.threads[stub.ThreadID] = &Thread{
-		ID:                 stub.ThreadID,
-		Draft:              false,
-		Title:              title,
-		ProviderInstanceID: stub.ProviderInstanceID,
-		ModelSelection:     cloneModelSelection(stub.ModelSelection),
-		Cwd:                stub.Cwd,
-		Timeline:           Timeline{},
-		CreatedAt:          stub.CreatedAt,
-		UpdatedAt:          stub.UpdatedAt,
+		ID:                   stub.ThreadID,
+		Draft:                false,
+		ReplayHistoryPending: true,
+		Title:                title,
+		ProviderInstanceID:   stub.ProviderInstanceID,
+		ModelSelection:       cloneModelSelection(stub.ModelSelection),
+		Cwd:                  stub.Cwd,
+		Timeline:             Timeline{},
+		CreatedAt:            stub.CreatedAt,
+		UpdatedAt:            stub.UpdatedAt,
 	}
 	if stub.UpdatedAt.After(p.updatedAt) {
 		p.updatedAt = stub.UpdatedAt

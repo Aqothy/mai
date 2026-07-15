@@ -34,6 +34,8 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadMetaUpdated(event)
 	case EventThreadSessionStatusSet:
 		p.applyThreadSessionStatusSet(event)
+	case EventThreadHistoryReplayCompleted:
+		p.applyThreadHistoryReplayCompleted(event)
 	case EventThreadMessageSent:
 		p.applyThreadMessageSent(event)
 	case EventThreadTurnStartRequested:
@@ -184,6 +186,12 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 	p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt)
 }
 
+func (p *Projection) applyThreadHistoryReplayCompleted(event Event) {
+	if thread := p.threads[event.ThreadID()]; thread != nil {
+		thread.ReplayHistoryPending = false
+	}
+}
+
 func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionBinding) {
 	if session.ProviderInstanceID != "" && thread.ProviderInstanceID == "" {
 		// Backfill the identity of a thread whose first binding arrived before
@@ -238,7 +246,7 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 	} else {
 		thread.Timeline.AppendMessage(message)
 	}
-	if message.Role == MessageRoleUser && event.OccurredAt.After(thread.UpdatedAt) {
+	if message.Role == MessageRoleUser && !thread.ReplayHistoryPending && event.OccurredAt.After(thread.UpdatedAt) {
 		thread.UpdatedAt = event.OccurredAt
 	}
 }

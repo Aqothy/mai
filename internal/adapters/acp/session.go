@@ -40,9 +40,10 @@ type acpSession struct {
 	config    []provider.ConfigOption
 	hasConfig bool
 	modes     *schema.SessionModeState
-	// loading marks a session whose session/load replay is still draining;
-	// its session/update notifications are dropped.
-	loading            bool
+	// replayEvents is non-nil while session/load is collecting its ordered
+	// update stream. StartSession returns the complete batch for display restore
+	// and discards it for ordinary process recovery.
+	replayEvents       []provider.RuntimeEvent
 	toolStates         map[string]toolState
 	pendingPermissions map[string]*pendingPermission
 }
@@ -63,21 +64,19 @@ func (h *Instance) sessionForThreadLocked(threadID string) *acpSession {
 	return h.sessions[sessionID]
 }
 
-// StartSession resolves the ACP session backing a thread, preferring resume over
-// a fresh session so the agent keeps its context:
+// StartSession resolves the ACP session backing a thread:
 //
 //  1. In-process resume — if this thread already has a live ACP session on this
 //     connection, reuse it. An ACP session lives for the whole connection, so a
 //     turn error/interrupt/re-start does NOT need a new session; only StopSession
 //     unbinds.
-//  2. Cursor resume — if a resume cursor names a prior ACP session, use
-//     session/resume when the agent advertises the no-replay method, otherwise
-//     session/load (dropping the replayed updates — orchestration already has
-//     the thread projection).
-//  3. Otherwise create a new session.
-func (h *Instance) StartSession(ctx context.Context, input provider.StartSessionInput) (provider.Session, error) {
+//  2. Display restore — ReplayHistory prefers session/load and returns its replay.
+//  3. Ordinary recovery — prefer session/resume, otherwise session/load while
+//     dropping replay because orchestration already has the projection.
+//  4. Otherwise create a new session.
+func (h *Instance) StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
 	if input.ThreadID == "" {
-		return provider.Session{}, fmt.Errorf("provider session start requires threadId")
+		return provider.StartSessionResult{}, fmt.Errorf("provider session start requires threadId")
 	}
 
 	if existing := h.sessionIDForThread(input.ThreadID); existing != "" {
@@ -88,22 +87,40 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		// new/load/resume paths downgrade it to a warning: failing hard would
 		// brick the thread with the same error on every subsequent prompt.
 		h.applyModelSelectionPreference(ctx, existing, input)
-		return h.sessionProjection(input, existing), nil
+		return h.startWithoutHistory(input, h.sessionProjection(input, existing)), nil
 	}
 
 	if sessionID := resumeSessionID(input.ResumeCursor); sessionID != "" {
-		if h.supportsResumeSession() {
-			if session, err := h.resumeSession(ctx, input, sessionID); err == nil {
-				return session, nil
-			} else if !sessionNotFoundError(err) {
-				return provider.Session{}, err
+		if input.ReplayHistory {
+			if h.supportsLoadSession() {
+				if result, err := h.loadSession(ctx, input, sessionID); err == nil {
+					return result, nil
+				} else if !sessionNotFoundError(err) {
+					return provider.StartSessionResult{}, err
+				}
 			}
-		}
-		if h.supportsLoadSession() {
-			if session, err := h.loadSession(ctx, input, sessionID); err == nil {
-				return session, nil
-			} else if !sessionNotFoundError(err) {
-				return provider.Session{}, err
+			if h.supportsResumeSession() {
+				if session, err := h.resumeSession(ctx, input, sessionID); err == nil {
+					return h.startWithoutHistory(input, session), nil
+				} else if !sessionNotFoundError(err) {
+					return provider.StartSessionResult{}, err
+				}
+			}
+		} else {
+			if h.supportsResumeSession() {
+				if session, err := h.resumeSession(ctx, input, sessionID); err == nil {
+					return provider.StartSessionResult{Session: session}, nil
+				} else if !sessionNotFoundError(err) {
+					return provider.StartSessionResult{}, err
+				}
+			}
+			if h.supportsLoadSession() {
+				if result, err := h.loadSession(ctx, input, sessionID); err == nil {
+					result.Replay = nil
+					return result, nil
+				} else if !sessionNotFoundError(err) {
+					return provider.StartSessionResult{}, err
+				}
 			}
 		}
 		// Prior session is gone: fall through and create a fresh one. Other
@@ -113,58 +130,70 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 
 	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
-		return provider.Session{}, acpRequestError(err)
+		return provider.StartSessionResult{}, acpRequestError(err)
 	}
 	if resp.SessionID == "" {
-		return provider.Session{}, fmt.Errorf("ACP session/new returned an empty session id")
+		return provider.StartSessionResult{}, fmt.Errorf("ACP session/new returned an empty session id")
 	}
 	sessionID := string(resp.SessionID)
 	h.bindSession(input.ThreadID, sessionID)
 	h.ensureSessionStream(sessionID)
 	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
 	h.applyInitialSessionPreferences(ctx, sessionID, input)
-	return h.sessionProjection(input, sessionID), nil
+	return h.startWithoutHistory(input, h.sessionProjection(input, sessionID)), nil
+}
+
+func (h *Instance) startWithoutHistory(input provider.StartSessionInput, session provider.Session) provider.StartSessionResult {
+	return provider.StartSessionResult{Session: session, HistoryUnavailable: input.ReplayHistory}
 }
 
 // loadSession resumes a prior ACP session via session/load. The thread->session
 // route is bound and the session stream attached BEFORE awaiting the load so
-// replayed session/update notifications resolve to this session (and are
-// dropped — orchestration already holds the thread projection); a barrier
+// replayed session/update notifications resolve to this session. A barrier
 // marker pushed after the load resolves marks the end of replay in-stream.
-func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionInput, sessionID string) (provider.Session, error) {
+func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionInput, sessionID string) (provider.StartSessionResult, error) {
 	h.bindSession(input.ThreadID, sessionID)
 	stream, _ := h.ensureSessionStream(sessionID)
 	h.beginSessionLoad(sessionID)
 	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		h.unbindSessionID(sessionID)
-		return provider.Session{}, acpRequestError(err)
+		return provider.StartSessionResult{}, acpRequestError(err)
 	}
-	// All replayed updates were routed to the stream before the load response;
-	// the barrier drains (and drops) them before the session is reported ready.
-	if err := h.awaitSessionBarrier(ctx, stream, func() { h.finishSessionLoad(sessionID) }); err != nil {
+	// Drain load replay before applying preferences, but keep capture active:
+	// preference requests can themselves emit config updates or warnings and
+	// those setup events must not overtake the returned history batch.
+	if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
 		h.unbindSessionID(sessionID)
-		return provider.Session{}, fmt.Errorf("await ACP session/load replay drain: %w", err)
+		return provider.StartSessionResult{}, fmt.Errorf("await ACP session/load replay drain: %w", err)
 	}
 	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
 	h.applyInitialSessionPreferences(ctx, sessionID, input)
-	return h.sessionProjection(input, sessionID), nil
+	var replay []provider.RuntimeEvent
+	if err := h.awaitSessionBarrier(ctx, stream, func() { replay = h.finishSessionLoad(sessionID) }); err != nil {
+		h.unbindSessionID(sessionID)
+		return provider.StartSessionResult{}, fmt.Errorf("await ACP session setup drain: %w", err)
+	}
+	return provider.StartSessionResult{Session: h.sessionProjection(input, sessionID), Replay: replay}, nil
 }
 
 func (h *Instance) beginSessionLoad(sessionID string) {
 	h.mu.Lock()
 	if session := h.sessionLocked(sessionID); session != nil {
-		session.loading = true
+		session.replayEvents = make([]provider.RuntimeEvent, 0)
 	}
 	h.mu.Unlock()
 }
 
-func (h *Instance) finishSessionLoad(sessionID string) {
+func (h *Instance) finishSessionLoad(sessionID string) []provider.RuntimeEvent {
+	var events []provider.RuntimeEvent
 	h.mu.Lock()
 	if session := h.sessionLocked(sessionID); session != nil {
-		session.loading = false
+		events = session.replayEvents
+		session.replayEvents = nil
 	}
 	h.mu.Unlock()
+	return events
 }
 
 // sessionNotFoundError reports whether the agent said the session no longer
@@ -587,7 +616,7 @@ func (h *Instance) emitConfigOptions(sessionID string, options []provider.Config
 	if options == nil {
 		options = []provider.ConfigOption{}
 	}
-	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
+	h.emitBoundRuntimeEventForSession(sessionID, provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Type:      provider.RuntimeEventConfigOptionsUpdated,
 		Provider:  DriverKind,

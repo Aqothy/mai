@@ -1240,7 +1240,7 @@ func TestStartSessionAppliesModelSelectionConfigOption(t *testing.T) {
 	}
 	h := newWireTestHandle(t, agent)
 
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -1248,8 +1248,8 @@ func TestStartSessionAppliesModelSelectionConfigOption(t *testing.T) {
 	if len(configCalls) != 1 || configCalls[0].ConfigID != "model" || configCalls[0].Value != "model-b" {
 		t.Fatalf("set_config_option calls = %#v, want model=model-b", configCalls)
 	}
-	if len(session.ConfigOptions) != 1 || session.ConfigOptions[0].CurrentValue != "model-b" {
-		t.Fatalf("session config options = %#v, want current model-b", session.ConfigOptions)
+	if len(result.Session.ConfigOptions) != 1 || result.Session.ConfigOptions[0].CurrentValue != "model-b" {
+		t.Fatalf("session config options = %#v, want current model-b", result.Session.ConfigOptions)
 	}
 }
 
@@ -1294,12 +1294,12 @@ func TestStartSessionReuseWarnsWhenModelPreferenceCannotBeApplied(t *testing.T) 
 	recorder := &eventRecorder{}
 	h.runtimeEventListener = recorder.listener
 
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
 	if err != nil {
 		t.Fatalf("reused StartSession with stale model preference err = %v, want warning instead of failure", err)
 	}
-	if session.ProviderSessionID != "sess" || h.sessionIDForThread("thread-1") != "sess" {
-		t.Fatalf("reused session = %#v, want existing sess binding preserved", session)
+	if result.Session.ProviderSessionID != "sess" || h.sessionIDForThread("thread-1") != "sess" {
+		t.Fatalf("reused session = %#v, want existing sess binding preserved", result.Session)
 	}
 	events := recorder.snapshot()
 	if len(events) != 1 || events[0].Type != provider.RuntimeEventRuntimeWarning || !strings.Contains(events[0].Payload.Message, "model-b") {
@@ -1315,12 +1315,12 @@ func TestStartSessionPreservesExplicitEmptyConfigOptions(t *testing.T) {
 	}
 	h := newWireTestHandle(t, agent)
 
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"})
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if session.ConfigOptions == nil || len(session.ConfigOptions) != 0 {
-		t.Fatalf("session config options = %#v, want explicit empty list", session.ConfigOptions)
+	if result.Session.ConfigOptions == nil || len(result.Session.ConfigOptions) != 0 {
+		t.Fatalf("session config options = %#v, want explicit empty list", result.Session.ConfigOptions)
 	}
 }
 
@@ -1413,7 +1413,7 @@ func TestStartSessionFallsBackToNewSessionWhenLoadSessionResourceNotFound(t *tes
 	}
 	h := newWireTestHandle(t, agent)
 
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: "/tmp", ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"})})
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: "/tmp", ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"})})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -1423,7 +1423,7 @@ func TestStartSessionFallsBackToNewSessionWhenLoadSessionResourceNotFound(t *tes
 	if got := h.sessionIDForThread("thread-1"); got != "fresh" {
 		t.Fatalf("thread bound to %q, want fresh", got)
 	}
-	if got := resumeSessionID(session.ResumeCursor); got != "fresh" {
+	if got := resumeSessionID(result.Session.ResumeCursor); got != "fresh" {
 		t.Fatalf("resume cursor session = %q, want fresh", got)
 	}
 }
@@ -1451,6 +1451,144 @@ func TestLoadSessionDropsReplayedUpdates(t *testing.T) {
 	}
 }
 
+func TestReplayHistoryLoadsAndReturnsReplayedUpdates(t *testing.T) {
+	loads := &callRecorder{}
+	resumes := &callRecorder{}
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"loadSession": true, "sessionCapabilities": map[string]any{"resume": map[string]any{}}},
+		onLoadSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			loads.recordConfig(params)
+			a.sendUpdate("old", agentMessageUpdate("msg-1", "restored"))
+			a.respond(id, map[string]any{})
+		},
+		onResumeSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			resumes.recordConfig(params)
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	recorder := &eventRecorder{}
+	h.runtimeEventListener = recorder.listener
+
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID:      "thread-1",
+		ResumeCursor:  marshalRaw(map[string]string{"sessionId": "old"}),
+		ReplayHistory: true,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if len(loads.configCalls()) != 1 || len(resumes.configCalls()) != 0 {
+		t.Fatalf("load/resume calls = %d/%d, want 1/0", len(loads.configCalls()), len(resumes.configCalls()))
+	}
+	events := result.Replay
+	if len(events) != 1 || events[0].ThreadID != "thread-1" || events[0].Payload.Delta != "restored" {
+		t.Fatalf("replay = %#v, want history routed to thread-1", events)
+	}
+	if live := recorder.snapshot(); len(live) != 0 {
+		t.Fatalf("live events = %#v, want replay returned atomically", live)
+	}
+}
+
+func TestReplayHistoryDiscardsFailedLoadBeforeRetry(t *testing.T) {
+	var h *Instance
+	var attemptsMu sync.Mutex
+	attempts := 0
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"loadSession": true},
+		onLoadSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			attemptsMu.Lock()
+			attempts++
+			attempt := attempts
+			attemptsMu.Unlock()
+
+			a.sendUpdate("old", agentMessageUpdate("msg-1", "first"))
+			a.sendUpdate("old", agentMessageUpdate("msg-2", "second"))
+			if attempt == 1 {
+				deadline := time.Now().Add(2 * time.Second)
+				buffered := false
+				for time.Now().Before(deadline) {
+					h.mu.Lock()
+					session := h.sessions["old"]
+					buffered = session != nil && len(session.replayEvents) == 2
+					h.mu.Unlock()
+					if buffered {
+						break
+					}
+					time.Sleep(time.Millisecond)
+				}
+				if !buffered {
+					a.t.Error("timed out waiting for replay updates to be buffered")
+				}
+				a.respondError(id, -32000, "load failed")
+				return
+			}
+			a.respond(id, map[string]any{})
+		},
+	}
+	h = newWireTestHandle(t, agent)
+	recorder := &eventRecorder{}
+	h.runtimeEventListener = recorder.listener
+	input := provider.StartSessionInput{
+		ThreadID:      "thread-1",
+		ResumeCursor:  marshalRaw(map[string]string{"sessionId": "old"}),
+		ReplayHistory: true,
+	}
+
+	if _, err := h.StartSession(context.Background(), input); err == nil {
+		t.Fatal("first StartSession err = nil, want failed load")
+	}
+	if events := recorder.snapshot(); len(events) != 0 {
+		t.Fatalf("events after failed load = %#v, want replay discarded", events)
+	}
+	result, err := h.StartSession(context.Background(), input)
+	if err != nil {
+		t.Fatalf("retry StartSession: %v", err)
+	}
+	events := result.Replay
+	if len(events) != 2 || events[0].Payload.Delta != "first" || events[1].Payload.Delta != "second" {
+		t.Fatalf("replay after retry = %#v, want complete history in order", events)
+	}
+}
+
+func TestReplayHistoryReportsUnavailable(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities map[string]any
+		wantResume   bool
+	}{
+		{name: "resume without display replay", capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}}, wantResume: true},
+		{name: "fresh session without recovery", capabilities: map[string]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resumes := &callRecorder{}
+			agent := &fakeWireAgent{
+				capabilities: tt.capabilities,
+				onResumeSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+					resumes.recordConfig(params)
+					a.respond(id, map[string]any{})
+				},
+			}
+			h := newWireTestHandle(t, agent)
+			result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+				ThreadID:      "thread-1",
+				ResumeCursor:  marshalRaw(map[string]string{"sessionId": "old"}),
+				ReplayHistory: true,
+			})
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			if got := len(resumes.configCalls()) > 0; got != tt.wantResume {
+				t.Fatalf("resume called = %v, want %v", got, tt.wantResume)
+			}
+			if !result.HistoryUnavailable || len(result.Replay) != 0 {
+				t.Fatalf("result = %#v, want unavailable history without replay", result)
+			}
+		})
+	}
+}
+
 func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 	loads := &callRecorder{}
 	resumes := &callRecorder{}
@@ -1467,7 +1605,7 @@ func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 	}
 	h := newWireTestHandle(t, agent)
 
-	session, err := h.StartSession(context.Background(), provider.StartSessionInput{
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
 		ThreadID:     "thread-1",
 		Cwd:          "/tmp",
 		ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"}),
@@ -1481,7 +1619,7 @@ func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 	if got := h.sessionIDForThread("thread-1"); got != "old" {
 		t.Fatalf("thread bound to %q, want old", got)
 	}
-	if got := resumeSessionID(session.ResumeCursor); got != "old" {
+	if got := resumeSessionID(result.Session.ResumeCursor); got != "old" {
 		t.Fatalf("resume cursor session = %q, want old", got)
 	}
 }

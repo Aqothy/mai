@@ -49,14 +49,17 @@ const (
 )
 
 type Thread struct {
-	ID                 ThreadID                 `json:"id"`
-	Draft              bool                     `json:"draft"`
-	Title              string                   `json:"title"`
-	ProviderInstanceID provider.InstanceID      `json:"providerInstanceId,omitempty"`
-	ModelSelection     *provider.ModelSelection `json:"modelSelection,omitempty"`
-	Cwd                string                   `json:"cwd,omitempty"`
-	Session            *SessionBinding          `json:"session,omitempty"`
-	LatestTurn         *Turn                    `json:"latestTurn,omitempty"`
+	ID    ThreadID `json:"id"`
+	Draft bool     `json:"draft"`
+	// ReplayHistoryPending is internal restart state. Restored threads consume
+	// it only after the provider's history replay has been fully ingested.
+	ReplayHistoryPending bool                     `json:"-"`
+	Title                string                   `json:"title"`
+	ProviderInstanceID   provider.InstanceID      `json:"providerInstanceId,omitempty"`
+	ModelSelection       *provider.ModelSelection `json:"modelSelection,omitempty"`
+	Cwd                  string                   `json:"cwd,omitempty"`
+	Session              *SessionBinding          `json:"session,omitempty"`
+	LatestTurn           *Turn                    `json:"latestTurn,omitempty"`
 	// Timeline is the canonical conversation order. New entries append; updates
 	// mutate their existing entry without moving it.
 	Timeline  Timeline  `json:"timeline"`
