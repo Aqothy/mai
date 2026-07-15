@@ -47,6 +47,9 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	if entry.Session != nil {
 		t.Fatalf("restored stub must have no session binding, got %#v", entry.Session)
 	}
+	if entry.Draft {
+		t.Fatalf("restored entry = %#v, want non-draft", entry)
+	}
 	if untitled, _ := engine.ThreadListEntry("thread-untitled"); untitled.Title != "Untitled thread" {
 		t.Fatalf("empty title = %q, want default", untitled.Title)
 	}
@@ -57,6 +60,9 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	}
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("restored timeline = %#v, want empty (history is provider-owned)", snapshot.Snapshot.Thread.Timeline)
+	}
+	if snapshot.Snapshot.Thread.Draft {
+		t.Fatalf("restored thread = %#v, want non-draft", snapshot.Snapshot.Thread)
 	}
 
 	// A restart is a new epoch: restore appends nothing to the event log, so

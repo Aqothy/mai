@@ -65,6 +65,9 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("thread.meta-update: %v", err)
 	}
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
 
 	if err := s.Close(); err != nil {
 		t.Fatalf("server close: %v", err)
@@ -106,6 +109,9 @@ func TestServerRestartRehydratesThreadStubs(t *testing.T) {
 		Cwd:      cwd,
 	}); err != nil {
 		t.Fatalf("thread.create: %v", err)
+	}
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("server close: %v", err)
@@ -219,6 +225,9 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
 
 	flaky := &flakyThreadStore{failures: 1}
 	w := &threadMetaWriter{
@@ -241,6 +250,32 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	w.flush() // nothing left dirty; no duplicate write
 	if len(flaky.saved) != 1 {
 		t.Fatalf("clean flush must not rewrite: %+v", flaky.saved)
+	}
+}
+
+func TestThreadMetaWriterSkipsDraftUntilFirstTurn(t *testing.T) {
+	engine := orchestration.NewEngine()
+	defer engine.Close()
+	threadID := orchestration.ThreadID("thread-draft-persistence")
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+
+	stored := &flakyThreadStore{}
+	w := &threadMetaWriter{engine: engine, threads: stored, logger: newLoggerFromEnv(), dirty: make(map[orchestration.ThreadID]struct{})}
+	w.markDirty(threadID)
+	w.flush()
+	if len(stored.saved) != 0 {
+		t.Fatalf("draft metadata was persisted: %+v", stored.saved)
+	}
+
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: threadID, Title: "Promoted title", Message: &orchestration.CommandMessage{Text: "hello"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
+	w.markDirty(threadID)
+	w.flush()
+	if len(stored.saved) != 1 || stored.saved[0].Title != "Promoted title" {
+		t.Fatalf("promoted metadata = %+v, want one row with final title", stored.saved)
 	}
 }
 

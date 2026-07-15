@@ -75,6 +75,7 @@ type fakeWireAgent struct {
 	onSetConfigOption func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
 	onSetMode         func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
 	onListSessions    func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
+	onCloseSession    func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
 }
 
 func (a *fakeWireAgent) write(msg map[string]any) {
@@ -197,7 +198,13 @@ func (a *fakeWireAgent) dispatch(msg wireMsg) {
 			return
 		}
 		a.respond(msg.ID, map[string]any{})
-	case "authenticate", "logout", "session/close", "session/delete":
+	case "session/close":
+		if a.onCloseSession != nil {
+			a.onCloseSession(a, msg.ID, params)
+			return
+		}
+		a.respond(msg.ID, map[string]any{})
+	case "authenticate", "logout", "session/delete":
 		a.respond(msg.ID, map[string]any{})
 	case "session/list":
 		if a.onListSessions != nil {
@@ -1049,6 +1056,35 @@ func TestStopSessionReturnsCancelFailureAndKeepsBinding(t *testing.T) {
 	}
 	if collector.cancelled {
 		t.Fatal("failed StopSession poisoned the live turn collector")
+	}
+}
+
+func TestStopSessionClosesNeverUsedSessionWhenSupported(t *testing.T) {
+	closed := make(chan string, 1)
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"close": map[string]any{}}},
+		onCloseSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			closed <- params.SessionID
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-draft"}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := h.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-draft"}); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	select {
+	case sessionID := <-closed:
+		if sessionID != "sess" {
+			t.Fatalf("closed session = %q, want sess", sessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("never-used session did not call session/close")
+	}
+	if got := h.sessionIDForThread("thread-draft"); got != "" {
+		t.Fatalf("thread binding after close = %q, want unbound", got)
 	}
 }
 

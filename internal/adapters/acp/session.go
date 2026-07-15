@@ -250,6 +250,19 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 	if sessionID == "" {
 		return nil
 	}
+	h.mu.Lock()
+	session := h.sessionLocked(sessionID)
+	idle := session != nil && session.collector == nil && (session.stream == nil || (session.stream.active == nil && len(session.stream.queued) == 0))
+	h.mu.Unlock()
+	if idle {
+		if h.sessionCapabilities().Close != nil {
+			if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+				return acpRequestError(err)
+			}
+		}
+		h.unbindSessionID(sessionID)
+		return nil
+	}
 	if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 		// Keep both the binding and live turn state so callers can retry
 		// cancellation without the adapter reporting a cancellation that the

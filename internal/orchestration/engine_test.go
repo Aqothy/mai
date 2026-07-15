@@ -70,6 +70,54 @@ func TestThreadCwdDefaultsToDaemonCwdAndRejectsBadPaths(t *testing.T) {
 	}
 }
 
+func TestDraftThreadPromotesOnFirstTurn(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	threadID := ThreadID("thread-draft-promotion")
+
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-draft-promotion", ThreadID: threadID, Title: "New thread"}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	thread, ok := engine.Thread(threadID)
+	if !ok || !thread.Draft {
+		t.Fatalf("created thread = %#v, want draft", thread)
+	}
+	entry, ok := engine.ThreadListEntry(threadID)
+	if !ok || !entry.Draft {
+		t.Fatalf("created list entry = %#v, want draft", entry)
+	}
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadTurnStart,
+		CommandID: "cmd-turn-draft-promotion",
+		ThreadID:  threadID,
+		Title:     "First prompt becomes the title",
+		Message:   &CommandMessage{MessageID: "message-draft-promotion", Text: "First prompt becomes the title"},
+	}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
+	thread, ok = engine.Thread(threadID)
+	if !ok || thread.Draft || thread.Title != "First prompt becomes the title" {
+		t.Fatalf("promoted thread = %#v, want non-draft with first-prompt title", thread)
+	}
+	entry, ok = engine.ThreadListEntry(threadID)
+	if !ok || entry.Draft {
+		t.Fatalf("promoted list entry = %#v, want non-draft", entry)
+	}
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadTurnStart,
+		CommandID: "cmd-steer-draft-promotion",
+		ThreadID:  threadID,
+		Title:     "A later turn must not retitle",
+		Message:   &CommandMessage{MessageID: "message-steer-draft-promotion", Text: "follow up"},
+	}); err != nil {
+		t.Fatalf("steering thread.turn.start: %v", err)
+	}
+	if thread, _ := engine.Thread(threadID); thread.Title != "First prompt becomes the title" {
+		t.Fatalf("title after later turn = %q, want first-prompt title", thread.Title)
+	}
+}
+
 func TestEngineRejectsCwdMetaUpdateWhileProviderSessionBound(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

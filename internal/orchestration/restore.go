@@ -44,6 +44,7 @@ func (p *Projection) restoreThread(stub RestoredThread) {
 	}
 	p.threads[stub.ThreadID] = &Thread{
 		ID:                 stub.ThreadID,
+		Draft:              false,
 		Title:              title,
 		ProviderInstanceID: stub.ProviderInstanceID,
 		ModelSelection:     cloneModelSelection(stub.ModelSelection),

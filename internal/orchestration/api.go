@@ -8,6 +8,7 @@ import (
 
 type ThreadListEntry struct {
 	ID                  ThreadID                 `json:"id"`
+	Draft               bool                     `json:"draft"`
 	Title               string                   `json:"title"`
 	ProviderInstanceID  provider.InstanceID      `json:"providerInstanceId,omitempty"`
 	ModelSelection      *provider.ModelSelection `json:"modelSelection,omitempty"`

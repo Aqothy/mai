@@ -557,7 +557,7 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 			selectionChange = providerSelectionChange{}
 		}
 		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text, Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt}})
-		turnEvent := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, TurnID: turnID, Steering: steering, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}})
+		turnEvent := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: command.Title, MessageID: messageID, TurnID: turnID, Steering: steering, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}})
 		sequence = turnEvent.Sequence
 		return nil
 	})
