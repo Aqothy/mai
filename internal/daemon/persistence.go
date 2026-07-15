@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/store"
@@ -40,8 +39,8 @@ func openMetadataStore(logger *slog.Logger) *store.SQLite {
 
 // restorePersistedThreads seeds the projection with thread stubs and reconciles
 // their routes before the daemon serves connections. Route writes are
-// synchronous while thread metadata is debounced, so a conflicting route is
-// the newer provider selection after a crash.
+// synchronous while thread metadata is written asynchronously, so a
+// conflicting route is the newer provider selection after a crash.
 func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadStore, routes store.RouteStore, logger *slog.Logger) (int, error) {
 	metas, err := threads.ListThreads()
 	if err != nil {
@@ -84,8 +83,6 @@ func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadS
 	engine.RestoreThreads(restored)
 	return len(restored), nil
 }
-
-const threadMetaFlushDebounce = 250 * time.Millisecond
 
 // threadMetaWriter persists projection metadata without blocking the engine worker.
 type threadMetaWriter struct {
@@ -142,14 +139,6 @@ func (w *threadMetaWriter) run() {
 			w.flush()
 			return
 		case <-w.wake:
-			timer := time.NewTimer(threadMetaFlushDebounce)
-			select {
-			case <-w.closing:
-				timer.Stop()
-				w.flush()
-				return
-			case <-timer.C:
-			}
 			w.flush()
 		}
 	}

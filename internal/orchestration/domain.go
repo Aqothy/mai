@@ -62,6 +62,8 @@ type Thread struct {
 	Timeline  Timeline  `json:"timeline"`
 	Plan      *Plan     `json:"plan,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
+	// UpdatedAt is the sidebar recency timestamp: the latest user-message time,
+	// or CreatedAt before the first user message.
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

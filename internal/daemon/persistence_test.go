@@ -65,7 +65,13 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("thread.meta-update: %v", err)
 	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
+		Type:               orchestration.CommandThreadTurnStart,
+		ThreadID:           "thread-1",
+		ProviderInstanceID: "provider-1",
+		ModelSelection:     &provider.ModelSelection{Model: "model-1"},
+		Message:            &orchestration.CommandMessage{Text: "persist this thread"},
+	}); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
 
@@ -87,6 +93,9 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 	}
 	if threads[0].ThreadID != "thread-1" || threads[0].Title != "Renamed thread" || threads[0].Cwd != cwd {
 		t.Fatalf("unexpected persisted thread meta: %+v", threads[0])
+	}
+	if threads[0].ProviderInstanceID != "provider-1" || threads[0].ModelSelection == nil || threads[0].ModelSelection.Model != "model-1" {
+		t.Fatalf("draft selection was not persisted on promotion: %+v", threads[0])
 	}
 	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
 		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
@@ -162,7 +171,7 @@ func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
 	}
 	now := time.Now()
 	// Simulate a crash after the synchronous route write but before the
-	// debounced thread row caught up with the selected instance.
+	// asynchronous thread row caught up with the selected instance.
 	if err := metadata.UpsertThread(store.ThreadMeta{ThreadID: "visible", ProviderInstanceID: "stale-instance", ModelSelection: &provider.ModelSelection{Model: "stale-model"}, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("UpsertThread visible: %v", err)
 	}
@@ -213,6 +222,43 @@ func (s *flakyThreadStore) UpsertThread(meta store.ThreadMeta) error {
 }
 
 func (s *flakyThreadStore) ListThreads() ([]store.ThreadMeta, error) { return nil, nil }
+
+type notifyingThreadStore struct {
+	saved chan store.ThreadMeta
+}
+
+func (s *notifyingThreadStore) UpsertThread(meta store.ThreadMeta) error {
+	s.saved <- meta
+	return nil
+}
+
+func (s *notifyingThreadStore) ListThreads() ([]store.ThreadMeta, error) { return nil, nil }
+
+func TestThreadMetaWriterWritesAfterMarkDirty(t *testing.T) {
+	engine := orchestration.NewEngine()
+	defer engine.Close()
+	threadID := orchestration.ThreadID("thread-async-persistence")
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: threadID, Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
+
+	stored := &notifyingThreadStore{saved: make(chan store.ThreadMeta, 1)}
+	writer := newThreadMetaWriter(engine, stored, newLoggerFromEnv())
+	defer writer.Close()
+	writer.markDirty(threadID)
+
+	select {
+	case meta := <-stored.saved:
+		if meta.ThreadID != string(threadID) {
+			t.Fatalf("persisted thread = %q, want %q", meta.ThreadID, threadID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("metadata writer did not persist after markDirty")
+	}
+}
 
 func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	engine := orchestration.NewEngine()

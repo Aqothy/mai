@@ -181,9 +181,7 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 	session.UpdatedAt = event.OccurredAt
 	thread.Session = session
 	p.applySessionBindingFields(thread, session)
-	if p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt) {
-		thread.UpdatedAt = event.OccurredAt
-	}
+	p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt)
 }
 
 func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionBinding) {
@@ -197,33 +195,31 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 	}
 }
 
-// applySessionTurnState reports whether the event was a turn boundary (a turn
-// started or settled) — the only session-status changes that count as
-// conversation activity.
-func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) bool {
+func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) {
 	if session.ActiveTurnID != "" {
 		if thread.LatestTurn == nil || thread.LatestTurn.ID != session.ActiveTurnID {
 			thread.LatestTurn = &Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt}
-			return true
+			return
 		}
 		thread.LatestTurn.State = TurnStateRunning
-	} else if thread.LatestTurn != nil && thread.LatestTurn.CompletedAt == nil {
-		completed := occurredAt
-		thread.LatestTurn.InterruptRequested = false
-		thread.LatestTurn.StopReason = stopReason
-		switch session.Status {
-		case SessionStatusError:
-			thread.LatestTurn.State = TurnStateError
-			thread.LatestTurn.Error = session.LastError
-		case SessionStatusInterrupted, SessionStatusStopped:
-			thread.LatestTurn.State = TurnStateInterrupted
-		default:
-			thread.LatestTurn.State = TurnStateCompleted
-		}
-		thread.LatestTurn.CompletedAt = &completed
-		return true
+		return
 	}
-	return false
+	if thread.LatestTurn == nil || thread.LatestTurn.CompletedAt != nil {
+		return
+	}
+	completed := occurredAt
+	thread.LatestTurn.InterruptRequested = false
+	thread.LatestTurn.StopReason = stopReason
+	switch session.Status {
+	case SessionStatusError:
+		thread.LatestTurn.State = TurnStateError
+		thread.LatestTurn.Error = session.LastError
+	case SessionStatusInterrupted, SessionStatusStopped:
+		thread.LatestTurn.State = TurnStateInterrupted
+	default:
+		thread.LatestTurn.State = TurnStateCompleted
+	}
+	thread.LatestTurn.CompletedAt = &completed
 }
 
 func (p *Projection) applyThreadMessageSent(event Event) {
@@ -239,13 +235,10 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 			existing.TurnID = message.TurnID
 		}
 		existing.UpdatedAt = event.OccurredAt
-		if message.Role == MessageRoleUser {
-			thread.UpdatedAt = event.OccurredAt
-		}
-		return
+	} else {
+		thread.Timeline.AppendMessage(message)
 	}
-	thread.Timeline.AppendMessage(message)
-	if message.Role == MessageRoleUser {
+	if message.Role == MessageRoleUser && event.OccurredAt.After(thread.UpdatedAt) {
 		thread.UpdatedAt = event.OccurredAt
 	}
 }
@@ -284,7 +277,6 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 		thread.Session.ActiveTurnID = turnID
 		thread.Session.UpdatedAt = event.OccurredAt
 	}
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadTurnInterruptRequested(event Event) {
@@ -308,7 +300,6 @@ func (p *Projection) applyThreadTurnInterruptConfirmed(event Event) {
 	thread.LatestTurn.State = TurnStateInterrupted
 	thread.LatestTurn.InterruptRequested = false
 	thread.LatestTurn.CompletedAt = &completed
-	thread.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) applyThreadTurnInterruptFailed(event Event) {
@@ -574,11 +565,7 @@ func ThreadListVisible(event Event) bool {
 // session and approval state belong in the live sidebar but not in that table.
 func ThreadMetadataMayChange(event Event) bool {
 	switch event.Type {
-	case EventThreadCreated,
-		EventThreadMetaUpdated,
-		EventThreadTurnStartRequested,
-		EventThreadTurnInterruptConfirmed,
-		EventThreadSessionStatusSet:
+	case EventThreadMetaUpdated:
 		return true
 	case EventThreadMessageSent:
 		return event.Payload.Role == MessageRoleUser
@@ -590,18 +577,11 @@ func ThreadMetadataMayChange(event Event) bool {
 }
 
 func threadListEntryFromThread(thread Thread) ThreadListEntry {
-	var latestUserMessageAt *time.Time
 	pendingApprovals := false
 	for _, entry := range thread.Timeline {
-		if message := entry.Message; message != nil && message.Role == MessageRoleUser {
-			updated := message.UpdatedAt
-			if latestUserMessageAt == nil || updated.After(*latestUserMessageAt) {
-				latestUserMessageAt = &updated
-			}
-		}
 		if approval := entry.Approval; approval != nil && approval.Status == ApprovalStatusPending {
 			pendingApprovals = true
 		}
 	}
-	return ThreadListEntry{ID: thread.ID, Draft: thread.Draft, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), LatestUserMessageAt: latestUserMessageAt, HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Draft: thread.Draft, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
 }

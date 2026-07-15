@@ -17,7 +17,6 @@ type ThreadListEntry struct {
 	CreatedAt           time.Time                `json:"createdAt"`
 	UpdatedAt           time.Time                `json:"updatedAt"`
 	Session             *SessionBinding          `json:"session,omitempty"`
-	LatestUserMessageAt *time.Time               `json:"latestUserMessageAt,omitempty"`
 	HasPendingApprovals bool                     `json:"hasPendingApprovals"`
 }
 

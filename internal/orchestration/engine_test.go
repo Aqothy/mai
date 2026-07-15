@@ -1254,6 +1254,81 @@ func TestThreadListVisibleIncludesOnlySidebarState(t *testing.T) {
 	}
 }
 
+func TestThreadMetadataMayChangeIncludesOnlyDurableChanges(t *testing.T) {
+	cases := []struct {
+		name  string
+		event Event
+		want  bool
+	}{
+		{"draft created", Event{Type: EventThreadCreated}, false},
+		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
+		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
+		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
+		{"turn start", Event{Type: EventThreadTurnStartRequested}, false},
+		{"interrupt confirmed", Event{Type: EventThreadTurnInterruptConfirmed}, false},
+		{"active session", Event{Type: EventThreadSessionStatusSet, Payload: EventPayload{Session: &SessionBinding{Status: SessionStatusRunning, ActiveTurnID: "turn-1"}}}, false},
+		{"settled session", Event{Type: EventThreadSessionStatusSet, Payload: EventPayload{Session: &SessionBinding{Status: SessionStatusReady}}}, false},
+		{"config model", Event{Type: EventThreadConfigOptionsUpdated, Payload: EventPayload{ModelSelection: &provider.ModelSelection{Model: "model-1"}}}, true},
+		{"config without model", Event{Type: EventThreadConfigOptionsUpdated}, false},
+		{"approval", Event{Type: EventThreadApprovalOpened}, false},
+		{"token usage", Event{Type: EventThreadTokenUsageUpdated}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ThreadMetadataMayChange(tc.event); got != tc.want {
+				t.Fatalf("ThreadMetadataMayChange() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProjectionUpdatedAtTracksUserMessageActivity(t *testing.T) {
+	projection := NewProjection()
+	threadID := ThreadID("thread-recency")
+	base := time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC)
+	projection.Apply(Event{Type: EventThreadCreated, OccurredAt: base, Payload: EventPayload{ThreadID: threadID}})
+	assertThreadUpdatedAt(t, projection, threadID, base)
+
+	userMessageAt := base.Add(time.Second)
+	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: userMessageAt, Payload: EventPayload{ThreadID: threadID, MessageID: "message-1", Role: MessageRoleUser}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	// Out-of-order user-message events must never move recency backwards.
+	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: base.Add(500 * time.Millisecond), Payload: EventPayload{ThreadID: threadID, MessageID: "message-older", Role: MessageRoleUser}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	turnStartedAt := base.Add(2 * time.Second)
+	projection.Apply(Event{Type: EventThreadTurnStartRequested, OccurredAt: turnStartedAt, Payload: EventPayload{ThreadID: threadID, TurnID: "turn-1"}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	sessionStartedAt := base.Add(3 * time.Second)
+	projection.Apply(Event{Type: EventThreadSessionStatusSet, OccurredAt: sessionStartedAt, Payload: EventPayload{ThreadID: threadID, Session: &SessionBinding{Status: SessionStatusRunning, ActiveTurnID: "turn-1"}}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	settledAt := base.Add(4 * time.Second)
+	projection.Apply(Event{Type: EventThreadSessionStatusSet, OccurredAt: settledAt, Payload: EventPayload{ThreadID: threadID, Session: &SessionBinding{Status: SessionStatusReady}}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	projection.Apply(Event{Type: EventThreadMetaUpdated, OccurredAt: base.Add(5 * time.Second), Payload: EventPayload{ThreadID: threadID, Title: "Renamed"}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	projection.Apply(Event{Type: EventThreadTurnStartRequested, OccurredAt: base.Add(6 * time.Second), Payload: EventPayload{ThreadID: threadID, TurnID: "turn-2"}})
+	projection.Apply(Event{Type: EventThreadTurnInterruptConfirmed, OccurredAt: base.Add(7 * time.Second), Payload: EventPayload{ThreadID: threadID, TurnID: "turn-2"}})
+	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
+
+	laterUserMessageAt := base.Add(8 * time.Second)
+	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: laterUserMessageAt, Payload: EventPayload{ThreadID: threadID, MessageID: "message-2", Role: MessageRoleUser}})
+	assertThreadUpdatedAt(t, projection, threadID, laterUserMessageAt)
+}
+
+func assertThreadUpdatedAt(t *testing.T, projection *Projection, threadID ThreadID, want time.Time) {
+	t.Helper()
+	thread, ok := projection.Thread(threadID)
+	if !ok || !thread.UpdatedAt.Equal(want) {
+		t.Fatalf("UpdatedAt = %v, want %v", thread.UpdatedAt, want)
+	}
+}
+
 // recordInvariantViolations installs a recording handler. The worker replies
 // to the in-flight caller BEFORE notifying, so tests must receive from the
 // channel (not read shared state) to synchronize with the handler.
