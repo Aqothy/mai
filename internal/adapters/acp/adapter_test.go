@@ -674,6 +674,83 @@ func TestStrayUpdatesAfterUnbindDoNotRecreateSessionState(t *testing.T) {
 	}
 }
 
+func TestPermissionOpenWaitsForPriorSessionUpdates(t *testing.T) {
+	agent := &fakeWireAgent{}
+	h := newWireTestHandle(t, agent)
+	recorder := &eventRecorder{}
+	updateEntered := make(chan struct{})
+	releaseUpdate := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseUpdate:
+		default:
+			close(releaseUpdate)
+		}
+	}()
+	opened := make(chan string, 1)
+	h.runtimeEventListener = func(event provider.RuntimeEvent) {
+		recorder.listener(event)
+		switch event.Type {
+		case provider.RuntimeEventContentDelta:
+			close(updateEntered)
+			<-releaseUpdate
+		case provider.RuntimeEventRequestOpened:
+			opened <- event.RequestID
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := h.StartSession(ctx, provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	h.mu.Lock()
+	h.sessionForThreadLocked("thread-1").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	h.mu.Unlock()
+
+	agent.sendUpdate("sess", agentMessageUpdate("msg-1", "explanation"))
+	select {
+	case <-updateEntered:
+	case <-time.After(time.Second):
+		t.Fatal("prior session update did not enter the stream consumer")
+	}
+
+	permissionDone := make(chan schema.RequestPermissionResponse, 1)
+	go func() {
+		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool-1"}, Options: permissionOptions()})
+		permissionDone <- resp
+	}()
+	select {
+	case requestID := <-opened:
+		t.Fatalf("approval %q overtook the blocked prior session update", requestID)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseUpdate)
+	var requestID string
+	select {
+	case requestID = <-opened:
+	case <-time.After(time.Second):
+		t.Fatal("approval was not published after the prior update drained")
+	}
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+		t.Fatalf("RespondToRequest: %v", err)
+	}
+	select {
+	case resp := <-permissionDone:
+		if selectedOption(resp) != "allow" {
+			t.Fatalf("permission outcome = %#v, want allow", resp.Outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("permission response did not complete")
+	}
+
+	events := recorder.snapshot()
+	if len(events) < 2 || events[0].Type != provider.RuntimeEventContentDelta || events[1].Type != provider.RuntimeEventRequestOpened {
+		t.Fatalf("events = %#v, want session update before permission open", events)
+	}
+}
+
 func TestTerminalToolUpdateCancelsPendingPermission(t *testing.T) {
 	opened := make(chan string, 1)
 	terminalPublished := make(chan struct{}, 1)

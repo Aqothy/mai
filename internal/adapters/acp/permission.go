@@ -50,8 +50,18 @@ func (h *Instance) permissionRequestID(sessionID string, threadID string, toolCa
 // $/cancel_request (go-acp relays it into the running handler), which resolves
 // the wait with the cancelled outcome — same as an interrupt-driven cancel.
 func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPermissionRequest) (schema.RequestPermissionResponse, error) {
-	state := h.permissionRequestState(string(req.SessionID))
-	requestID := h.permissionRequestID(string(req.SessionID), state.threadID, string(req.ToolCall.ToolCallID))
+	sessionID := string(req.SessionID)
+	// Permission requests are handled on jsonrpc's callback goroutine, while
+	// session/update notifications are consumed by the per-session stream.
+	// Re-enter that ordered stream before deriving request state or publishing
+	// the approval so every update the agent sent first remains first.
+	if stream := h.sessionStreamFor(sessionID); stream != nil {
+		if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
+			return cancelledPermissionResponse(), nil
+		}
+	}
+	state := h.permissionRequestState(sessionID)
+	requestID := h.permissionRequestID(sessionID, state.threadID, string(req.ToolCall.ToolCallID))
 	if state.cancelled || ctx.Err() != nil {
 		resp := cancelledPermissionResponse()
 		h.recordPermissionRequest(req, state, requestID)
@@ -59,9 +69,9 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 		return resp, nil
 	}
 
-	permissionCtx, cancelPermission, pending := h.beginPermissionRequest(ctx, string(req.SessionID), requestID, req.Options)
+	permissionCtx, cancelPermission, pending := h.beginPermissionRequest(ctx, sessionID, requestID, req.Options)
 	defer cancelPermission()
-	defer h.endPermissionRequest(string(req.SessionID), requestID, pending)
+	defer h.endPermissionRequest(sessionID, requestID, pending)
 	h.recordPermissionRequest(req, state, requestID)
 	var response approvalResponse
 	select {

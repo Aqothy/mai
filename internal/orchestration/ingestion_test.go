@@ -265,6 +265,50 @@ func TestReplayWarningsAndErrorsFollowBufferedText(t *testing.T) {
 	}
 }
 
+func TestApprovalOpenSplitsBufferedAssistantTextInEncounterOrder(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-approval-boundary")
+	newThreadWithSession(t, engine, threadID)
+
+	base := provider.RuntimeEvent{ThreadID: string(threadID), TurnID: "turn-1"}
+	before := base
+	before.Type = provider.RuntimeEventContentDelta
+	before.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "before approval"}
+	ingestion.Ingest(before)
+
+	opened := base
+	opened.Type = provider.RuntimeEventRequestOpened
+	opened.RequestID = "approval-1"
+	opened.Payload = provider.RuntimeEventPayload{RequestType: provider.RuntimeRequestCommandExecution}
+	ingestion.Ingest(opened)
+
+	after := base
+	after.Type = provider.RuntimeEventContentDelta
+	after.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "after approval"}
+	ingestion.Ingest(after)
+	ingestion.completeThreadText(string(threadID), time.Now())
+
+	thread, _ := engine.Thread(threadID)
+	if len(thread.Timeline) != 3 {
+		t.Fatalf("timeline = %#v, want message/approval/message", thread.Timeline)
+	}
+	first, approval, last := thread.Timeline[0], thread.Timeline[1], thread.Timeline[2]
+	if first.Message == nil || first.Message.Text != "before approval" {
+		t.Fatalf("timeline[0] = %#v, want pre-approval message", first)
+	}
+	if approval.Approval == nil || approval.Approval.RequestID != "approval-1" {
+		t.Fatalf("timeline[1] = %#v, want approval", approval)
+	}
+	if last.Message == nil || last.Message.Text != "after approval" {
+		t.Fatalf("timeline[2] = %#v, want post-approval message", last)
+	}
+	if first.Message.ID == last.Message.ID {
+		t.Fatalf("messages share id %q across approval boundary", first.Message.ID)
+	}
+}
+
 func TestIngestionPreservesReplayedConversationOrderWithoutTurnIDs(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

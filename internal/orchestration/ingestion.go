@@ -391,8 +391,7 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	// item; updates/completion of an existing item stay anchored and do not
 	// split later content.
 	if event.Type == provider.RuntimeEventItemStarted {
-		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
-		i.completeOpenAssistantMessages(event, createdAt)
+		i.completeTurnText(event, createdAt)
 	}
 	itemID := firstNonEmpty(event.ItemID, string(event.EventID))
 	i.trackOpenItem(event, itemID, status)
@@ -506,6 +505,7 @@ func (i *ProviderRuntimeIngestion) ingestPlanUpdated(event provider.RuntimeEvent
 }
 
 func (i *ProviderRuntimeIngestion) ingestRequestOpened(event provider.RuntimeEvent, createdAt time.Time) {
+	i.completeTurnText(event, createdAt)
 	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Args: append(json.RawMessage(nil), event.Payload.Args...), Options: event.Payload.Options, Detail: event.Payload.Detail}
 	i.record(EventInput{Type: EventThreadApprovalOpened, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Approval: approval}})
 }
@@ -658,10 +658,16 @@ func (i *ProviderRuntimeIngestion) threadTurnKeys(threadID string) []turnKey {
 
 func (i *ProviderRuntimeIngestion) completeThreadText(threadID string, createdAt time.Time) {
 	for _, key := range i.threadTurnKeys(threadID) {
-		event := provider.RuntimeEvent{ThreadID: key.threadID, TurnID: key.turnID}
-		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
-		i.completeOpenAssistantMessages(event, createdAt)
+		i.completeTurnText(provider.RuntimeEvent{ThreadID: key.threadID, TurnID: key.turnID}, createdAt)
 	}
+}
+
+// completeTurnText closes the active text segments at a chronological
+// boundary. Content that resumes after the boundary receives new timeline
+// identities instead of mutating entries anchored before it.
+func (i *ProviderRuntimeIngestion) completeTurnText(event provider.RuntimeEvent, createdAt time.Time) {
+	i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+	i.completeOpenAssistantMessages(event, createdAt)
 }
 
 // settleTurn closes out ingestion's local streaming state for the event's
