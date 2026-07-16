@@ -179,15 +179,21 @@ func (s *Service) restorePersistedState() {
 	}
 }
 
-// ensureInstanceStarted lazily respawns a persisted provider instance on its
-// first use after a daemon restart. A missing restored spec is not an error;
-// the instance lookup downstream reports "not initialized" as before.
+// ensureInstanceStarted lazily spawns a persisted provider instance on first
+// use after a daemon restart and replaces an exited provider process on its
+// next session start. A missing restored spec is not an error; the instance
+// lookup downstream reports "not initialized" as before.
 func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider.InstanceID) error {
 	s.mu.Lock()
-	_, live := s.instances[instanceID]
+	instance := s.instances[instanceID]
 	spec, restorable := s.instanceSpecs[instanceID]
 	s.mu.Unlock()
-	if live || !restorable {
+
+	needsStart := instance == nil
+	if instance != nil {
+		needsStart = instance.Info().Status == provider.InstanceStatusExited
+	}
+	if !needsStart || !restorable {
 		return nil
 	}
 	_, err := s.StartInstance(ctx, spec, false)

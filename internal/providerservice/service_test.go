@@ -457,6 +457,45 @@ func TestStartInstanceReusesSemanticallyEqualConfiguration(t *testing.T) {
 	}
 }
 
+func TestStartSessionRespawnsExitedProviderInstance(t *testing.T) {
+	adapter := &fakeStartAdapter{}
+	s := New(adapter.StartInstance)
+	defer s.Close()
+
+	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
+		t.Fatalf("initial StartSession: %v", err)
+	}
+	first, err := s.instance("codex")
+	if err != nil {
+		t.Fatalf("first instance: %v", err)
+	}
+	firstFake := first.(*fakeProviderInstance)
+	firstFake.mu.Lock()
+	firstFake.info.Status = provider.InstanceStatusExited
+	firstFake.mu.Unlock()
+
+	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
+		t.Fatalf("StartSession after provider exit: %v", err)
+	}
+	second, err := s.instance("codex")
+	if err != nil {
+		t.Fatalf("replacement instance: %v", err)
+	}
+	if second == first {
+		t.Fatal("exited provider instance was reused instead of respawned")
+	}
+	if got := adapter.startCount(); got != 2 {
+		t.Fatalf("adapter starts = %d, want 2", got)
+	}
+	if got := firstFake.startInputCount(); got != 1 {
+		t.Fatalf("exited instance StartSession calls = %d, want only the initial call", got)
+	}
+}
+
 func TestStartInstanceConfigurationChangeRequiresRestart(t *testing.T) {
 	adapter := &fakeStartAdapter{}
 	s := New(adapter.StartInstance)
