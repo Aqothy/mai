@@ -236,13 +236,16 @@ type ConfigOptionSelection struct {
 }
 
 type StartSessionInput struct {
-	ThreadID           string                  `json:"threadId"`
-	Provider           DriverKind              `json:"provider,omitempty"`
-	ProviderInstanceID InstanceID              `json:"providerInstanceId,omitempty"`
-	Cwd                string                  `json:"cwd,omitempty"`
-	ModelSelection     *ModelSelection         `json:"modelSelection,omitempty"`
-	ConfigSelections   []ConfigOptionSelection `json:"configSelections,omitempty"`
-	ResumeCursor       json.RawMessage         `json:"resumeCursor,omitempty"`
+	ThreadID           string     `json:"threadId"`
+	Provider           DriverKind `json:"provider,omitempty"`
+	ProviderInstanceID InstanceID `json:"providerInstanceId,omitempty"`
+	// ProviderSessionID is supplied internally when an external session was
+	// imported. It is adapter-owned routing data and is never exposed to clients.
+	ProviderSessionID string                  `json:"-"`
+	Cwd               string                  `json:"cwd,omitempty"`
+	ModelSelection    *ModelSelection         `json:"modelSelection,omitempty"`
+	ConfigSelections  []ConfigOptionSelection `json:"configSelections,omitempty"`
+	ResumeCursor      json.RawMessage         `json:"resumeCursor,omitempty"`
 	// ReplayHistory asks the provider to rebuild display history while restoring
 	// the session. On success, StartSessionResult.Replay contains the complete
 	// ordered replay batch. A failed start must not expose partial replay events.

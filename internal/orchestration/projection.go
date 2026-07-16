@@ -30,6 +30,8 @@ func (p *Projection) Apply(event Event) {
 	switch event.Type {
 	case EventThreadCreated:
 		p.applyThreadCreated(event)
+	case EventThreadImported:
+		p.applyThreadImported(event)
 	case EventThreadMetaUpdated:
 		p.applyThreadMetaUpdated(event)
 	case EventThreadSessionStatusSet:
@@ -147,6 +149,30 @@ func (p *Projection) applyThreadCreated(event Event) {
 		Timeline:           Timeline{},
 		CreatedAt:          event.OccurredAt,
 		UpdatedAt:          event.OccurredAt,
+	}
+}
+
+func (p *Projection) applyThreadImported(event Event) {
+	payload := event.Payload
+	createdAt := payload.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = event.OccurredAt
+	}
+	updatedAt := payload.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+	p.restoreThread(RestoredThread{
+		ThreadID:           payload.ThreadID,
+		Title:              payload.Title,
+		Cwd:                payload.Cwd,
+		ProviderInstanceID: payload.ProviderInstanceID,
+		ModelSelection:     payload.ModelSelection,
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
+	})
+	if p.threads[payload.ThreadID] != nil {
+		p.createSequences[payload.ThreadID] = event.Sequence
 	}
 }
 
@@ -553,6 +579,7 @@ func appendPayloadText(existing json.RawMessage, delta string) json.RawMessage {
 func ThreadListVisible(event Event) bool {
 	switch event.Type {
 	case EventThreadCreated,
+		EventThreadImported,
 		EventThreadMetaUpdated,
 		EventThreadTurnStartRequested,
 		EventThreadTurnInterruptConfirmed,

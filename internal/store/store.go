@@ -4,10 +4,15 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
+
+// ErrProviderSessionBound reports an attempt to bind one provider session to
+// more than one maiD thread.
+var ErrProviderSessionBound = errors.New("provider session is already bound")
 
 // RouteRecord contains the metadata needed to restore a provider session route.
 type RouteRecord struct {
@@ -42,4 +47,11 @@ type ThreadMeta struct {
 type ThreadStore interface {
 	UpsertThread(meta ThreadMeta) error
 	ListThreads() ([]ThreadMeta, error)
+}
+
+// ImportStore atomically persists one externally owned provider session as a
+// maiD thread. If the provider session was already imported, ImportThread
+// returns its existing thread id and imported=false.
+type ImportStore interface {
+	ImportThread(meta ThreadMeta, route RouteRecord) (threadID string, imported bool, err error)
 }

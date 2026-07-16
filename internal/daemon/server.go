@@ -44,6 +44,7 @@ type Server struct {
 
 	metadataStore    *store.SQLite
 	threadMetaWriter *threadMetaWriter
+	importMu         sync.Mutex
 
 	rpcMu      sync.Mutex
 	rpcClients map[string]*rpcClient
@@ -225,6 +226,109 @@ func (s *Server) doClose() error {
 }
 
 // StartProvider brings a provider instance online or restarts it.
+// ImportProviderSession persists an explicitly selected provider session and
+// installs its empty, replay-pending thread stub in the live engine. Import is
+// serialized so duplicate requests always observe the first completed stub.
+func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
+	if s.metadataStore == nil {
+		return "", false, fmt.Errorf("provider session import requires metadata persistence")
+	}
+	if instanceID == "" || summary.SessionID == "" {
+		return "", false, fmt.Errorf("provider session import requires instanceId and session.sessionId")
+	}
+	if _, err := s.providerService.Info(instanceID); err != nil {
+		return "", false, err
+	}
+
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
+	cwd, err := s.orchestration.ResolveThreadCwd(summary.Cwd)
+	if err != nil {
+		return "", false, err
+	}
+	summary.Cwd = cwd
+
+	now := time.Now()
+	updatedAt := now
+	if summary.UpdatedAt != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, summary.UpdatedAt); err == nil {
+			updatedAt = parsed
+		}
+	}
+	threadID := orchestration.NewThreadID()
+	startInput := provider.StartSessionInput{
+		ThreadID:           string(threadID),
+		ProviderInstanceID: instanceID,
+		Cwd:                summary.Cwd,
+	}
+	meta := store.ThreadMeta{
+		ThreadID:           string(threadID),
+		Title:              summary.Title,
+		Cwd:                summary.Cwd,
+		ProviderInstanceID: instanceID,
+		CreatedAt:          updatedAt,
+		UpdatedAt:          updatedAt,
+	}
+	route := store.RouteRecord{
+		InstanceID:        instanceID,
+		ProviderSessionID: summary.SessionID,
+		StartInput:        startInput,
+	}
+	persistedThreadID, imported, err := s.metadataStore.ImportThread(meta, route)
+	if err != nil {
+		return "", false, err
+	}
+	threadID = orchestration.ThreadID(persistedThreadID)
+	if !imported {
+		// Use the committed row rather than caller-supplied duplicate metadata.
+		// This also repairs live state after a prior import committed just as the
+		// daemon shut down.
+		metas, err := s.metadataStore.ListThreads()
+		if err != nil {
+			return "", false, err
+		}
+		foundMeta := false
+		for _, stored := range metas {
+			if stored.ThreadID == persistedThreadID {
+				meta = stored
+				foundMeta = true
+				break
+			}
+		}
+		routes, err := s.metadataStore.LoadRoutes()
+		if err != nil {
+			return "", false, err
+		}
+		var foundRoute bool
+		route, foundRoute = routes[persistedThreadID]
+		if !foundMeta || !foundRoute {
+			return "", false, fmt.Errorf("imported thread %q has incomplete persisted metadata", persistedThreadID)
+		}
+	}
+	startInput = route.StartInput
+	startInput.ThreadID = persistedThreadID
+	startInput.ProviderInstanceID = route.InstanceID
+	if err := s.providerService.RegisterImportedSession(persistedThreadID, route.InstanceID, route.ProviderSessionID, startInput); err != nil {
+		return "", false, err
+	}
+	// Once SQLite commits, finish live reconciliation even if the requesting
+	// client disconnects. A canceled RPC must not leave the durable import
+	// invisible until the next daemon restart.
+	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
+		ThreadID:           threadID,
+		Title:              meta.Title,
+		Cwd:                meta.Cwd,
+		ProviderInstanceID: meta.ProviderInstanceID,
+		ModelSelection:     meta.ModelSelection,
+		CreatedAt:          meta.CreatedAt,
+		UpdatedAt:          meta.UpdatedAt,
+	}); err != nil {
+		return "", false, err
+	}
+	return threadID, imported, nil
+}
+
 func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")

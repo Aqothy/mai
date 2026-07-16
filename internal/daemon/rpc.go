@@ -30,6 +30,7 @@ const (
 	RPCMethodProviderAuthenticate  = "provider.authenticate"
 	RPCMethodProviderLogout        = "provider.logout"
 	RPCMethodProviderListSessions  = "provider.listSessions"
+	RPCMethodProviderImportSession = "provider.importSession"
 	RPCMethodProviderDeleteSession = "provider.deleteSession"
 	RPCMethodProviderCloseSession  = "provider.closeSession"
 )
@@ -56,6 +57,16 @@ type providerListSessionsParams struct {
 type providerSessionParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	SessionID  string              `json:"sessionId"`
+}
+
+type providerImportSessionParams struct {
+	InstanceID provider.InstanceID     `json:"instanceId"`
+	Session    provider.SessionSummary `json:"session"`
+}
+
+type providerImportSessionResult struct {
+	ThreadID orchestration.ThreadID `json:"threadId"`
+	Imported bool                   `json:"imported"`
 }
 
 var nextRPCClientID atomic.Uint64
@@ -377,6 +388,16 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.server.providerService.ListSessions(ctx, params.InstanceID, params.Cwd)
+	case RPCMethodProviderImportSession:
+		var params providerImportSessionParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		threadID, imported, err := h.server.ImportProviderSession(ctx, params.InstanceID, params.Session)
+		if err != nil {
+			return nil, err
+		}
+		return providerImportSessionResult{ThreadID: threadID, Imported: imported}, nil
 	case RPCMethodProviderDeleteSession:
 		var params providerSessionParams
 		if err := decodeRPCParams(req, &params); err != nil {

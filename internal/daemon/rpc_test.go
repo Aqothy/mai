@@ -499,6 +499,65 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	}
 }
 
+func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
+		t.Fatalf("provider start: %v", err)
+	}
+	threadItems := make(chan orchestration.ThreadStreamItem, 64)
+	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
+	ctx := context.Background()
+	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", UpdatedAt: "2026-07-15T12:00:00Z"}
+	invalid := summary
+	invalid.Cwd = "relative/project"
+	var rejected providerImportSessionResult
+	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: invalid}).Await(ctx, &rejected); err == nil {
+		t.Fatal("provider.importSession with relative cwd err = nil")
+	}
+
+	var first providerImportSessionResult
+	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &first); err != nil {
+		t.Fatalf("provider.importSession: %v", err)
+	}
+	if first.ThreadID == "" || !first.Imported {
+		t.Fatalf("first import = %+v, want a newly imported thread", first)
+	}
+	var duplicate providerImportSessionResult
+	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &duplicate); err != nil {
+		t.Fatalf("duplicate provider.importSession: %v", err)
+	}
+	if duplicate.ThreadID != first.ThreadID || duplicate.Imported {
+		t.Fatalf("duplicate import = %+v, want existing thread %q", duplicate, first.ThreadID)
+	}
+
+	var subscribed orchestration.ThreadStreamItem
+	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
+		t.Fatalf("subscribe imported thread: %v", err)
+	}
+	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Draft || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd == "" {
+		t.Fatalf("imported snapshot = %+v", subscribed.Snapshot)
+	}
+	var receipt orchestration.DispatchResult
+	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID}).Await(ctx, &receipt); err != nil {
+		t.Fatalf("prepare imported thread: %v", err)
+	}
+	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+		return event.Type == orchestration.EventThreadHistoryReplayCompleted
+	})
+	var replayed orchestration.ThreadStreamItem
+	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &replayed); err != nil {
+		t.Fatalf("resubscribe imported thread: %v", err)
+	}
+	encoded, err := json.Marshal(replayed.Snapshot.Thread.Timeline)
+	if err != nil {
+		t.Fatalf("encode replayed timeline: %v", err)
+	}
+	if !strings.Contains(string(encoded), "replayed") {
+		t.Fatalf("imported timeline = %s, want provider replay", encoded)
+	}
+}
+
 func TestRPCProviderSessionManagement(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()

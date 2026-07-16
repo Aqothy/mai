@@ -1,6 +1,8 @@
 package orchestration
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -30,6 +32,52 @@ func (e *Engine) RestoreThreads(threads []RestoredThread) {
 	for _, thread := range threads {
 		e.projection.restoreThread(thread)
 	}
+}
+
+// ImportThread installs a committed external-session thread through the engine
+// worker and publishes one thread.imported event to live clients. Like boot
+// restoration, the imported thread is non-draft, starts with an empty timeline,
+// and requests provider history on its first session preparation.
+func (e *Engine) ImportThread(ctx context.Context, thread RestoredThread) (DispatchResult, error) {
+	return e.await(ctx, engineRequest{importedThread: &thread, done: make(chan dispatchOutcome, 1)})
+}
+
+func (e *Engine) importThreadRecovered(thread RestoredThread) (DispatchResult, error) {
+	return recoverEngineOperation("importing thread", func() (DispatchResult, error) {
+		if thread.ThreadID == "" {
+			return DispatchResult{}, fmt.Errorf("thread import requires threadId")
+		}
+		cwd, err := e.ResolveThreadCwd(thread.Cwd)
+		if err != nil {
+			return DispatchResult{}, err
+		}
+		thread.Cwd = cwd
+		if sequence, exists := e.existingThreadSequence(thread.ThreadID); exists {
+			return DispatchResult{Sequence: sequence}, nil
+		}
+		var appended Event
+		err = e.withLockNotify(func(appendEvent func(Event) Event) error {
+			appended = appendEvent(Event{
+				Type:       EventThreadImported,
+				OccurredAt: time.Now(),
+				Actor:      ActorKindServer,
+				Payload: EventPayload{
+					ThreadID:           thread.ThreadID,
+					Title:              thread.Title,
+					Cwd:                thread.Cwd,
+					ProviderInstanceID: thread.ProviderInstanceID,
+					ModelSelection:     cloneModelSelection(thread.ModelSelection),
+					CreatedAt:          thread.CreatedAt,
+					UpdatedAt:          thread.UpdatedAt,
+				},
+			})
+			return nil
+		})
+		if err != nil {
+			return DispatchResult{}, err
+		}
+		return DispatchResult{Sequence: appended.Sequence}, nil
+	})
 }
 
 // restoreThread installs a stub with no session binding (idle) and an empty

@@ -14,6 +14,9 @@ type ApprovalID string
 type EventID string
 type CommandID string
 
+// NewThreadID mints a server-owned thread id for imported provider sessions.
+func NewThreadID() ThreadID { return ThreadID(newID("thread")) }
+
 type MessageRole string
 
 const (

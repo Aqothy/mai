@@ -11,6 +11,7 @@ type EventType string
 
 const (
 	EventThreadCreated                   EventType = "thread.created"
+	EventThreadImported                  EventType = "thread.imported"
 	EventThreadMetaUpdated               EventType = "thread.meta-updated"
 	EventThreadMessageSent               EventType = "thread.message-sent"
 	EventThreadTurnStartRequested        EventType = "thread.turn-start-requested"

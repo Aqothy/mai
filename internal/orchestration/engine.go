@@ -57,10 +57,11 @@ type commandReceipt struct {
 }
 
 type engineRequest struct {
-	command       Command
-	eventInput    *EventInput
-	sessionUpdate *sessionUpdate
-	done          chan dispatchOutcome
+	command        Command
+	eventInput     *EventInput
+	sessionUpdate  *sessionUpdate
+	importedThread *RestoredThread
+	done           chan dispatchOutcome
 }
 
 // EventInput is the parameter of AppendEvent: the caller-supplied fields of an
@@ -148,6 +149,8 @@ func (e *Engine) worker() {
 				result, err = e.sessionUpdateRecovered(*env.sessionUpdate)
 			} else if env.eventInput != nil {
 				result, err = e.appendRecovered(*env.eventInput)
+			} else if env.importedThread != nil {
+				result, err = e.importThreadRecovered(*env.importedThread)
 			} else {
 				result, err = e.process(env.command)
 			}
@@ -452,6 +455,12 @@ func (e *Engine) existingThreadSequence(threadID ThreadID) (uint64, bool) {
 		return sequence, true
 	}
 	return e.projection.appliedSequence(), true
+}
+
+// ResolveThreadCwd applies the engine's cwd default and validation policy to
+// thread state installed outside the command path, such as imported sessions.
+func (e *Engine) ResolveThreadCwd(cwd string) (string, error) {
+	return e.resolveThreadCwd("thread import", cwd)
 }
 
 // resolveThreadCwd enforces the daemon-wide cwd rule in one place: a thread's

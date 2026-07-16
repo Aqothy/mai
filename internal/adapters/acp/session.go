@@ -90,7 +90,11 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		return h.startWithoutHistory(input, h.sessionProjection(input, existing)), nil
 	}
 
-	if sessionID := resumeSessionID(input.ResumeCursor); sessionID != "" {
+	sessionID := resumeSessionID(input.ResumeCursor)
+	if sessionID == "" {
+		sessionID = input.ProviderSessionID
+	}
+	if sessionID != "" {
 		if input.ReplayHistory {
 			if h.supportsLoadSession() {
 				if result, err := h.loadSession(ctx, input, sessionID); err == nil {
@@ -135,8 +139,10 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	if resp.SessionID == "" {
 		return provider.StartSessionResult{}, fmt.Errorf("ACP session/new returned an empty session id")
 	}
-	sessionID := string(resp.SessionID)
-	h.bindSession(input.ThreadID, sessionID)
+	sessionID = string(resp.SessionID)
+	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
+		return provider.StartSessionResult{}, err
+	}
 	h.ensureSessionStream(sessionID)
 	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
 	h.applyInitialSessionPreferences(ctx, sessionID, input)
@@ -152,7 +158,9 @@ func (h *Instance) startWithoutHistory(input provider.StartSessionInput, session
 // replayed session/update notifications resolve to this session. A barrier
 // marker pushed after the load resolves marks the end of replay in-stream.
 func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionInput, sessionID string) (provider.StartSessionResult, error) {
-	h.bindSession(input.ThreadID, sessionID)
+	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
+		return provider.StartSessionResult{}, err
+	}
 	stream, _ := h.ensureSessionStream(sessionID)
 	h.beginSessionLoad(sessionID)
 	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
@@ -374,7 +382,9 @@ func (h *Instance) resumeSession(ctx context.Context, input provider.StartSessio
 	// Bind and attach the session stream before awaiting session/resume so any
 	// in-flight session/update notifications can be routed to the thread,
 	// matching the session/load replay barrier.
-	h.bindSession(input.ThreadID, sessionID)
+	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
+		return provider.Session{}, err
+	}
 	stream, _ := h.ensureSessionStream(sessionID)
 	resp, err := h.agent().ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
@@ -625,12 +635,20 @@ func (h *Instance) emitConfigOptions(sessionID string, options []provider.Config
 	})
 }
 
-// bindSession materializes (or re-routes) the session struct for a
-// thread↔session binding. Per-session state (scope, tool states, pending
-// permissions) lives on the struct, so a fresh binding always starts clean.
-func (h *Instance) bindSession(threadID string, sessionID string) {
+// bindSession materializes a thread↔session binding without stealing a native
+// session from another thread. Per-session state (scope, tool states, pending
+// permissions) lives on the struct, so cross-thread rebinding would also move
+// live state away from the route that still owns it.
+func (h *Instance) bindSession(threadID string, sessionID string) error {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	if existingSessionID := h.sessionsByThread[threadID]; existingSessionID != "" && existingSessionID != sessionID {
+		return fmt.Errorf("thread %q is already bound to ACP session %q", threadID, existingSessionID)
+	}
 	session := h.sessionLocked(sessionID)
+	if session != nil && session.threadID != "" && session.threadID != threadID {
+		return fmt.Errorf("ACP session %q is already bound to thread %q", sessionID, session.threadID)
+	}
 	if session == nil {
 		session = &acpSession{
 			id:                 sessionID,
@@ -639,12 +657,9 @@ func (h *Instance) bindSession(threadID string, sessionID string) {
 		}
 		h.sessions[sessionID] = session
 	}
-	if session.threadID != "" && session.threadID != threadID && h.sessionsByThread[session.threadID] == sessionID {
-		delete(h.sessionsByThread, session.threadID)
-	}
 	session.threadID = threadID
 	h.sessionsByThread[threadID] = sessionID
-	h.mu.Unlock()
+	return nil
 }
 
 func (h *Instance) sessionIDForThread(threadID string) string {

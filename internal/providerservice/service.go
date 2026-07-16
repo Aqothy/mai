@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -86,6 +87,7 @@ type Service struct {
 
 	routeStore     store.RouteStore
 	storeMu        sync.Mutex
+	routeBindMu    sync.Mutex
 	dirtyInstances map[provider.InstanceID]struct{}
 	dirtyRoutes    map[string]struct{}
 
@@ -535,6 +537,41 @@ func (s *Service) ListSessions(ctx context.Context, instanceID provider.Instance
 	return manager.ListSessions(ctx, cwd)
 }
 
+// RegisterImportedSession installs an already-persisted external session route
+// in the live registry. The metadata store owns the atomic thread+route write;
+// this method only makes that committed route usable without a daemon restart.
+func (s *Service) RegisterImportedSession(threadID string, instanceID provider.InstanceID, sessionID string, startInput provider.StartSessionInput) error {
+	if threadID == "" || instanceID == "" || sessionID == "" {
+		return fmt.Errorf("register imported provider session requires threadId, instanceId, and sessionId")
+	}
+	s.routeBindMu.Lock()
+	defer s.routeBindMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	generation, ok := s.activeEventGenerations[instanceID]
+	if !ok || s.instances[instanceID] == nil {
+		return fmt.Errorf("provider instance %q is not initialized", instanceID)
+	}
+	if existing, ok := s.threadRoutes[threadID]; ok {
+		if existing.InstanceID == instanceID && existing.ProviderSessionID == sessionID {
+			return nil
+		}
+		return fmt.Errorf("thread %q already has a different provider session route", threadID)
+	}
+	for existingThreadID, route := range s.threadRoutes {
+		if route.InstanceID == instanceID && route.ProviderSessionID == sessionID {
+			return fmt.Errorf("provider session %q is already bound to thread %q", sessionID, existingThreadID)
+		}
+	}
+	s.threadRoutes[threadID] = threadRoute{
+		InstanceID:        instanceID,
+		Generation:        generation,
+		ProviderSessionID: sessionID,
+		StartInput:        persistentStartSessionInput(startInput),
+	}
+	return nil
+}
+
 // sessionManageRPCTimeout prevents a hung agent from pinning daemon resources.
 const sessionManageRPCTimeout = 60 * time.Second
 
@@ -678,6 +715,9 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 		return provider.StartSessionResult{}, nil, 0, err
 	}
 	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
+		if input.ProviderSessionID == "" {
+			input.ProviderSessionID = route.ProviderSessionID
+		}
 		// Only a stale route needs its provider-owned preferences restored. Once
 		// rebound to this generation, each new input remains authoritative.
 		if route.Generation != generation {
@@ -718,7 +758,9 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 	if result.Session.ThreadID == "" {
 		result.Session.ThreadID = threadID
 	}
-	s.bindThreadSession(threadID, input.ProviderInstanceID, generation, result.Session.ProviderSessionID, result.Session.ResumeCursor, input)
+	if err := s.bindThreadSession(threadID, input.ProviderInstanceID, generation, result.Session.ProviderSessionID, result.Session.ResumeCursor, input); err != nil {
+		return provider.StartSessionResult{}, nil, 0, err
+	}
 	return result, instance, generation, nil
 }
 
@@ -878,20 +920,66 @@ func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondTo
 	})
 }
 
-func (s *Service) bindThreadSession(threadID string, instanceID provider.InstanceID, generation uint64, providerSessionID string, resumeCursor json.RawMessage, startInput provider.StartSessionInput) {
+func (s *Service) bindThreadSession(threadID string, instanceID provider.InstanceID, generation uint64, providerSessionID string, resumeCursor json.RawMessage, startInput provider.StartSessionInput) error {
 	if threadID == "" || instanceID == "" {
-		return
+		return nil
 	}
-	s.mu.Lock()
-	s.threadRoutes[threadID] = threadRoute{
+	route := threadRoute{
 		InstanceID:        instanceID,
 		Generation:        generation,
 		ProviderSessionID: providerSessionID,
 		ResumeCursor:      append(json.RawMessage(nil), resumeCursor...),
 		StartInput:        persistentStartSessionInput(startInput),
 	}
+
+	s.routeBindMu.Lock()
+	defer s.routeBindMu.Unlock()
+	s.mu.Lock()
+	for existingThreadID, existing := range s.threadRoutes {
+		if existingThreadID != threadID && existing.InstanceID == instanceID && existing.ProviderSessionID == providerSessionID && providerSessionID != "" {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: provider session %q belongs to thread %q", store.ErrProviderSessionBound, providerSessionID, existingThreadID)
+		}
+	}
 	s.mu.Unlock()
-	s.persistThreadRoute(threadID)
+
+	return s.persistNewThreadRoute(threadID, route)
+}
+
+// persistNewThreadRoute reserves a provider session durably before publishing
+// its live binding. Transient store failures retain the existing best-effort
+// retry behavior; a uniqueness conflict must reject the second live owner.
+func (s *Service) persistNewThreadRoute(threadID string, route threadRoute) error {
+	publish := func() {
+		s.mu.Lock()
+		s.threadRoutes[threadID] = route
+		s.mu.Unlock()
+	}
+	if s.routeStore == nil {
+		publish()
+		return nil
+	}
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	s.flushPersistenceLocked()
+	err := s.routeStore.SaveRoute(threadID, store.RouteRecord{
+		InstanceID:        route.InstanceID,
+		ProviderSessionID: route.ProviderSessionID,
+		ResumeCursor:      route.ResumeCursor,
+		StartInput:        route.StartInput,
+	})
+	if errors.Is(err, store.ErrProviderSessionBound) {
+		return err
+	}
+	if err != nil {
+		log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
+		s.dirtyRoutes[threadID] = struct{}{}
+		publish()
+		return nil
+	}
+	delete(s.dirtyRoutes, threadID)
+	publish()
+	return nil
 }
 
 func (s *Service) routeForThread(threadID string) threadRoute {
@@ -936,6 +1024,7 @@ func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSess
 
 func persistentStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
 	cloned := cloneStartSessionInput(input)
+	cloned.ProviderSessionID = ""
 	cloned.ReplayHistory = false
 	return cloned
 }

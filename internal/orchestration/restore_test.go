@@ -9,6 +9,36 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
+func TestImportThreadPublishesNonDraftReplayPendingStub(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	var events []Event
+	engine.OnEvent(func(event Event) { events = append(events, event) })
+
+	result, err := engine.ImportThread(context.Background(), RestoredThread{
+		ThreadID:           "thread-imported",
+		Title:              "Imported session",
+		Cwd:                t.TempDir(),
+		ProviderInstanceID: "codex",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
+	if err != nil {
+		t.Fatalf("ImportThread: %v", err)
+	}
+	thread, ok := engine.projection.Thread("thread-imported")
+	if !ok || thread.Draft || !thread.ReplayHistoryPending || len(thread.Timeline) != 0 {
+		t.Fatalf("imported thread = %+v, want non-draft empty replay-pending stub", thread)
+	}
+	if !thread.CreatedAt.Equal(now) || !thread.UpdatedAt.Equal(now) {
+		t.Fatalf("imported timestamps = (%v, %v), want %v", thread.CreatedAt, thread.UpdatedAt, now)
+	}
+	if len(events) != 1 || events[0].Type != EventThreadImported || events[0].Sequence != result.Sequence {
+		t.Fatalf("import events = %+v, want one thread.imported event", events)
+	}
+}
+
 func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

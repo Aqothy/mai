@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/store"
@@ -157,6 +158,67 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	}
 	if cursor := string(input.ResumeCursor); cursor != `{"sessionId":"sess-1"}` {
 		t.Fatalf("live session resume cursor = %q, want the bound session cursor", cursor)
+	}
+}
+
+func TestDuplicateProviderSessionBindingDoesNotPublishLiveRoute(t *testing.T) {
+	st := openRouteStore(t)
+	adapter := &resumeCursorAdapter{}
+	service := New(adapter.StartInstance, WithRouteStore(st))
+	defer service.Close()
+	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if _, err := service.StartInstance(context.Background(), spec, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+	if _, err := service.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
+		t.Fatalf("StartSession thread-1: %v", err)
+	}
+	if _, err := service.StartSession(context.Background(), "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"}); !errors.Is(err, store.ErrProviderSessionBound) {
+		t.Fatalf("StartSession thread-2 err = %v, want ErrProviderSessionBound", err)
+	}
+	if route := service.routeForThread("thread-2"); route.InstanceID != "" {
+		t.Fatalf("duplicate live route = %+v", route)
+	}
+	routes, err := st.LoadRoutes()
+	if err != nil {
+		t.Fatalf("LoadRoutes: %v", err)
+	}
+	if len(routes) != 1 || routes["thread-1"].ProviderSessionID != "sess-1" {
+		t.Fatalf("durable routes = %+v", routes)
+	}
+}
+
+func TestImportedRoutePassesProviderSessionIDAfterRestart(t *testing.T) {
+	st := openRouteStore(t)
+	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if err := st.SaveInstance(spec); err != nil {
+		t.Fatalf("SaveInstance: %v", err)
+	}
+	now := time.Now()
+	_, imported, err := st.ImportThread(
+		store.ThreadMeta{ThreadID: "thread-imported", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now},
+		store.RouteRecord{
+			InstanceID:        "codex",
+			ProviderSessionID: "external-session",
+			StartInput:        provider.StartSessionInput{ThreadID: "thread-imported", ProviderInstanceID: "codex"},
+		},
+	)
+	if err != nil || !imported {
+		t.Fatalf("ImportThread = imported %v, err %v", imported, err)
+	}
+
+	adapter := &resumeCursorAdapter{}
+	service := New(adapter.StartInstance, WithRouteStore(st))
+	defer service.Close()
+	if _, err := service.StartSession(context.Background(), "thread-imported", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true}); err != nil {
+		t.Fatalf("StartSession imported route: %v", err)
+	}
+	input := adapter.instance(0).lastStartInput()
+	if input.ProviderSessionID != "external-session" {
+		t.Fatalf("provider session id = %q, want external-session", input.ProviderSessionID)
+	}
+	if !input.ReplayHistory {
+		t.Fatalf("imported start input = %#v, want replay intent", input)
 	}
 }
 
@@ -381,6 +443,12 @@ func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
 	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
 		t.Fatalf("StartSession thread-1: %v", err)
 	}
+	instance := adapter.instance(0)
+	instance.mu.Lock()
+	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		return provider.Session{ProviderInstanceID: "codex", ProviderSessionID: "sess-2", ThreadID: input.ThreadID}, nil
+	}
+	instance.mu.Unlock()
 	if _, err := s.StartSession(context.Background(), "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
 		t.Fatalf("StartSession thread-2: %v", err)
 	}

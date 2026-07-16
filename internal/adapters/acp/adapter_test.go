@@ -587,7 +587,7 @@ func TestHandleSessionUpdateScopesACPItemIDsBySession(t *testing.T) {
 	var events []provider.RuntimeEvent
 	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
 	bindTestSession(h, "thread-1", "sess-a")
-	bindTestSession(h, "thread-1", "sess-b")
+	bindTestSession(h, "thread-2", "sess-b")
 
 	for _, sessionID := range []string{"sess-a", "sess-b"} {
 		notification := testSessionNotification(t, fmt.Sprintf(`{"sessionId":%q,"update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Run tests","kind":"execute","status":"pending"}}`, sessionID))
@@ -1037,6 +1037,22 @@ func TestCloseIsSafeOnPartiallyBuiltInstance(t *testing.T) {
 }
 
 // --- wire-connected handle tests --------------------------------------------
+
+func TestBindSessionRejectsCrossThreadRebinding(t *testing.T) {
+	h := newWireTestHandle(t, &fakeWireAgent{})
+	if err := h.bindSession("thread-1", "sess"); err != nil {
+		t.Fatalf("first bindSession: %v", err)
+	}
+	if err := h.bindSession("thread-2", "sess"); err == nil {
+		t.Fatal("cross-thread bindSession err = nil")
+	}
+	if got := h.sessionIDForThread("thread-1"); got != "sess" {
+		t.Fatalf("original thread binding = %q, want sess", got)
+	}
+	if got := h.sessionIDForThread("thread-2"); got != "" {
+		t.Fatalf("rejected thread binding = %q, want empty", got)
+	}
+}
 
 func TestStopSessionReturnsCancelFailureAndKeepsBinding(t *testing.T) {
 	h := newWireTestHandle(t, &fakeWireAgent{})
