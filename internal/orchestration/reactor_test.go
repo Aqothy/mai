@@ -27,8 +27,12 @@ type fakeProviderRuntime struct {
 	interruptErr       error
 	stopCalls          int
 	releaseCalls       int
+	releaseInputs      []provider.StopSessionInput
 	stopSignal         chan struct{}
 	stopErr            error
+	respondInputs      []provider.RespondToRequestInput
+	respondSignal      chan struct{}
+	respondErr         error
 	startEntered       chan struct{}
 	startRelease       chan struct{}
 	configSetEntered   chan struct{}
@@ -37,7 +41,7 @@ type fakeProviderRuntime struct {
 }
 
 func newFakeProviderRuntime() *fakeProviderRuntime {
-	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), interruptSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4)}
+	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), interruptSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4), respondSignal: make(chan struct{}, 4)}
 }
 
 func newTestReactor(engine *Engine, runtime ProviderRuntime) *ProviderEventReactor {
@@ -136,9 +140,10 @@ func (f *fakeProviderRuntime) StopSession(context.Context, provider.StopSessionI
 	}
 	return err
 }
-func (f *fakeProviderRuntime) ReleaseSession(context.Context, provider.StopSessionInput) error {
+func (f *fakeProviderRuntime) ReleaseSession(_ context.Context, input provider.StopSessionInput) error {
 	f.mu.Lock()
 	f.releaseCalls++
+	f.releaseInputs = append(f.releaseInputs, input)
 	err := f.stopErr
 	f.mu.Unlock()
 	select {
@@ -147,8 +152,16 @@ func (f *fakeProviderRuntime) ReleaseSession(context.Context, provider.StopSessi
 	}
 	return err
 }
-func (f *fakeProviderRuntime) RespondToRequest(context.Context, provider.RespondToRequestInput) error {
-	return nil
+func (f *fakeProviderRuntime) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {
+	f.mu.Lock()
+	f.respondInputs = append(f.respondInputs, input)
+	err := f.respondErr
+	f.mu.Unlock()
+	select {
+	case f.respondSignal <- struct{}{}:
+	default:
+	}
+	return err
 }
 
 func (f *fakeProviderRuntime) interruptCallCount() int {
@@ -161,6 +174,30 @@ func (f *fakeProviderRuntime) releaseCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.releaseCalls
+}
+
+func (f *fakeProviderRuntime) lastReleaseInput() provider.StopSessionInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.releaseInputs) == 0 {
+		return provider.StopSessionInput{}
+	}
+	return f.releaseInputs[len(f.releaseInputs)-1]
+}
+
+func (f *fakeProviderRuntime) respondCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.respondInputs)
+}
+
+func (f *fakeProviderRuntime) lastRespondInput() provider.RespondToRequestInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.respondInputs) == 0 {
+		return provider.RespondToRequestInput{}
+	}
+	return f.respondInputs[len(f.respondInputs)-1]
 }
 
 func (f *fakeProviderRuntime) lastStartInput() provider.StartSessionInput {
@@ -207,6 +244,36 @@ func setupConfigOptionThread(t *testing.T, engine *Engine) ThreadID {
 		t.Fatalf("thread.config-options.update: %v", err)
 	}
 	return threadID
+}
+
+func setupApprovalThread(t *testing.T, engine *Engine, threadID ThreadID, withSession bool) {
+	t.Helper()
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: CommandID("create-" + string(threadID)), ThreadID: threadID, ProviderInstanceID: "codex"}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	if withSession {
+		if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ProviderInstanceID: "codex", Status: SessionStatusRunning, ActiveTurnID: "turn-approval"}}}); err != nil {
+			t.Fatalf("thread.session.status.set: %v", err)
+		}
+	}
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1", TurnID: "turn-approval", Options: []provider.ApprovalOption{{ID: "allow"}, {ID: "reject"}}}}}); err != nil {
+		t.Fatalf("thread.approval.open: %v", err)
+	}
+}
+
+func waitForReactorIdle(t *testing.T, reactor *ProviderEventReactor, threadID ThreadID) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		reactor.mu.Lock()
+		_, pending := reactor.threadTails[threadID]
+		reactor.mu.Unlock()
+		if !pending {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("reactor queue for %q did not drain", threadID)
 }
 
 func TestReactorPreparesSessionBeforeFirstTurn(t *testing.T) {
@@ -345,6 +412,13 @@ func TestReactorRetriesPendingReplayWithTimelineContent(t *testing.T) {
 	if input := fake.lastStartInput(); !input.ReplayHistory {
 		t.Fatalf("start input = %#v, want pending replay retried", input)
 	}
+	thread, _ := engine.Thread(threadID)
+	if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady {
+		t.Fatalf("thread after replay retry = %#v, want replay completed and ready", thread)
+	}
+	if len(thread.Timeline) != 1 || thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "already restored" {
+		t.Fatalf("timeline after replay retry = %#v, want existing history preserved without duplication", thread.Timeline)
+	}
 }
 
 func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
@@ -381,63 +455,61 @@ func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	if input := fake.lastStartInput(); !input.ReplayHistory {
 		t.Fatalf("retry start input = %#v, want replay history", input)
 	}
+	thread, _ = engine.Thread(threadID)
+	if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady || thread.Session.LastError != "" {
+		t.Fatalf("thread after successful replay retry = %#v, want ready with consumed replay intent", thread)
+	}
 }
 
-func TestReactorRejectsProviderSwitchDuringPreparation(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "provider-a"}
-	fake.startEntered = make(chan struct{}, 1)
-	fake.startRelease = make(chan struct{})
-	newTestReactor(engine, fake)
+func TestReactorRejectsProviderOrModelChangeDuringPreparation(t *testing.T) {
+	tests := []struct {
+		name   string
+		change Command
+	}{
+		{name: "provider", change: Command{ProviderInstanceID: "provider-b"}},
+		{name: "model", change: Command{ModelSelection: &provider.ModelSelection{Model: "model-b"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			fake := newFakeProviderRuntime()
+			fake.startSession = provider.Session{ProviderInstanceID: "provider-a"}
+			fake.startEntered = make(chan struct{}, 1)
+			fake.startRelease = make(chan struct{})
+			newTestReactor(engine, fake)
 
-	threadID := ThreadID("thread-stale-prepare")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-stale-prepare", ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a"}}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-a", ThreadID: threadID}); err != nil {
-		t.Fatalf("thread.session.prepare: %v", err)
-	}
-	select {
-	case <-fake.startEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("preparation did not start")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "rename-during-prepare", ThreadID: threadID, Title: "Renamed"}); err != nil {
-		t.Fatalf("title-only thread.meta.update: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "switch-provider", ThreadID: threadID, ProviderInstanceID: "provider-b"}); err == nil {
-		t.Fatal("thread.meta.update succeeded during preparation")
-	}
-	close(fake.startRelease)
-}
+			threadID := ThreadID("thread-prepare-selection-" + tt.name)
+			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: CommandID("create-prepare-selection-" + tt.name), ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a"}}); err != nil {
+				t.Fatalf("thread.create: %v", err)
+			}
+			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionPrepare, CommandID: CommandID("prepare-selection-" + tt.name), ThreadID: threadID}); err != nil {
+				t.Fatalf("thread.session.prepare: %v", err)
+			}
+			select {
+			case <-fake.startEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("preparation did not start")
+			}
+			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: CommandID("rename-during-prepare-" + tt.name), ThreadID: threadID, Title: "Renamed"}); err != nil {
+				t.Fatalf("title-only thread.meta.update: %v", err)
+			}
+			change := tt.change
+			change.Type = CommandThreadMetaUpdate
+			change.CommandID = CommandID("change-during-prepare-" + tt.name)
+			change.ThreadID = threadID
+			if _, err := engine.Dispatch(context.Background(), change); err == nil || !strings.Contains(err.Error(), "preparing") {
+				t.Fatalf("selection change during preparation err = %v, want preparing rejection", err)
+			}
+			thread, _ := engine.Thread(threadID)
+			if thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection == nil || thread.ModelSelection.Model != "model-a" {
+				t.Fatalf("thread after rejected selection change = %#v, want renamed with original selection", thread)
+			}
 
-func TestReactorRejectsModelChangeDuringPreparation(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "provider-a"}
-	fake.startEntered = make(chan struct{}, 2)
-	fake.startRelease = make(chan struct{})
-	newTestReactor(engine, fake)
-
-	threadID := ThreadID("thread-reprepare")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-reprepare", ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a"}}); err != nil {
-		t.Fatalf("thread.create: %v", err)
+			close(fake.startRelease)
+			waitForSessionStatus(t, engine, threadID, SessionStatusReady)
+		})
 	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-model-a", ThreadID: threadID}); err != nil {
-		t.Fatalf("thread.session.prepare: %v", err)
-	}
-	select {
-	case <-fake.startEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first preparation did not start")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "select-model-b", ThreadID: threadID, ModelSelection: &provider.ModelSelection{Model: "model-b"}}); err == nil {
-		t.Fatal("model change succeeded during preparation")
-	}
-	close(fake.startRelease)
 }
 
 func TestReactorRejectsTurnStartDuringPreparation(t *testing.T) {
@@ -730,33 +802,8 @@ func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider switch did not release the old provider session")
 	}
-}
-
-func TestReactorInitialSessionBindingDoesNotCompleteTurn(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	newTestReactor(engine, fake)
-	threadID := ThreadID("thread-initial-binding-running")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-initial-binding-running", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-initial-binding-running", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-initial", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SendTurn to be called")
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.LatestTurn == nil || thread.Session == nil {
-		t.Fatalf("thread/session missing: %#v", thread)
-	}
-	if thread.LatestTurn.CompletedAt != nil || thread.LatestTurn.State != TurnStateRunning {
-		t.Fatalf("latest turn = %#v, want still running without completedAt", thread.LatestTurn)
-	}
-	if thread.Session.ActiveTurnID != thread.LatestTurn.ID || thread.Session.Status != SessionStatusRunning {
-		t.Fatalf("session = %#v, want active running turn", thread.Session)
+	if fake.releaseCallCount() != 1 || fake.lastReleaseInput().ThreadID != string(threadID) {
+		t.Fatalf("release calls/input = %d/%#v, want one release for %q", fake.releaseCallCount(), fake.lastReleaseInput(), threadID)
 	}
 }
 
@@ -790,6 +837,9 @@ func TestReactorProjectsProviderSessionReturnedFromStartSession(t *testing.T) {
 	}
 	if thread.Session.Status != SessionStatusRunning || thread.Session.ActiveTurnID == "" {
 		t.Fatalf("session = %#v, want running returned session", thread.Session)
+	}
+	if thread.LatestTurn == nil || thread.LatestTurn.ID != thread.Session.ActiveTurnID || thread.LatestTurn.State != TurnStateRunning || thread.LatestTurn.CompletedAt != nil {
+		t.Fatalf("latest turn = %#v, want initial binding to leave the active turn running", thread.LatestTurn)
 	}
 }
 
@@ -923,7 +973,7 @@ func TestReactorDoesNotSendTurnInterruptedBeforeSessionBinding(t *testing.T) {
 	fake := newFakeProviderRuntime()
 	fake.startEntered = make(chan struct{}, 1)
 	fake.startRelease = make(chan struct{})
-	newTestReactor(engine, fake)
+	reactor := newTestReactor(engine, fake)
 	threadID := ThreadID("thread-interrupt-before-session")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-interrupt-before-session", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
 		t.Fatalf("thread.create: %v", err)
@@ -944,7 +994,7 @@ func TestReactorDoesNotSendTurnInterruptedBeforeSessionBinding(t *testing.T) {
 		t.Fatalf("thread.turn.interrupt: %v", err)
 	}
 	close(fake.startRelease)
-	time.Sleep(100 * time.Millisecond)
+	waitForReactorIdle(t, reactor, threadID)
 	if calls := fake.sendCalls(); calls != 0 {
 		t.Fatalf("SendTurn called %d times, want 0 after pre-session interrupt", calls)
 	}
@@ -1032,9 +1082,20 @@ func TestReactorProviderCallTimeoutUnwedgesThreadQueue(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subsequent command after provider RPC timeout")
 	}
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ := engine.Thread(threadID)
+	foundTimeout := false
+	for _, item := range thread.Timeline.Items() {
+		if item.Kind == provider.ItemKindError && strings.Contains(item.Title, context.DeadlineExceeded.Error()) {
+			foundTimeout = true
+		}
+	}
+	if !foundTimeout {
+		t.Fatalf("items = %#v, want visible provider RPC timeout", thread.Timeline.Items())
+	}
 }
 
-func TestReactorAppliesModelChangeWhenSwitchInSession(t *testing.T) {
+func TestReactorForwardsConfigOptionWithDerivedCategory(t *testing.T) {
 	engine := NewEngine()
 	fake := newFakeProviderRuntime()
 	newTestReactor(engine, fake)
@@ -1052,7 +1113,107 @@ func TestReactorAppliesModelChangeWhenSwitchInSession(t *testing.T) {
 	fake.mu.Lock()
 	input := fake.configSetInputs[len(fake.configSetInputs)-1]
 	fake.mu.Unlock()
-	if input.Category != provider.ConfigOptionCategoryModel {
-		t.Fatalf("config option category = %q, want model", input.Category)
+	if input.ThreadID != string(threadID) || input.OptionID != "model" || input.Value != "slow" || input.Category != provider.ConfigOptionCategoryModel {
+		t.Fatalf("config option input = %#v, want thread/model/slow with model category", input)
 	}
+}
+
+func TestReactorForwardsApprovalResponse(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	reactor := newTestReactor(engine, fake)
+	threadID := ThreadID("thread-forward-approval")
+	setupApprovalThread(t, engine, threadID, true)
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadApprovalRespond,
+		CommandID: "respond-forward-approval",
+		ThreadID:  threadID,
+		RequestID: "approval-1",
+		Decision:  provider.ApprovalDecisionAccept,
+		OptionID:  "allow",
+	}); err != nil {
+		t.Fatalf("thread.approval.respond: %v", err)
+	}
+	select {
+	case <-fake.respondSignal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval response was not forwarded")
+	}
+	waitForReactorIdle(t, reactor, threadID)
+	input := fake.lastRespondInput()
+	if input.ThreadID != string(threadID) || input.RequestID != "approval-1" || input.Decision != provider.ApprovalDecisionAccept || input.OptionID != "allow" {
+		t.Fatalf("RespondToRequest input = %#v, want exact approved option response", input)
+	}
+}
+
+func TestReactorApprovalResponseFailureCreatesTurnScopedError(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	fake.respondErr = errors.New("approval transport failed")
+	reactor := newTestReactor(engine, fake)
+	threadID := ThreadID("thread-failed-approval")
+	setupApprovalThread(t, engine, threadID, true)
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type:      CommandThreadApprovalRespond,
+		CommandID: "respond-failed-approval",
+		ThreadID:  threadID,
+		RequestID: "approval-1",
+		Decision:  provider.ApprovalDecisionDecline,
+		OptionID:  "reject",
+	}); err != nil {
+		t.Fatalf("thread.approval.respond: %v", err)
+	}
+	select {
+	case <-fake.respondSignal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval response was not attempted")
+	}
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ := engine.Thread(threadID)
+	items := thread.Timeline.Items()
+	if len(items) != 1 || items[0].Kind != provider.ItemKindError || items[0].Title != "approval transport failed" || items[0].TurnID != "turn-approval" {
+		t.Fatalf("items = %#v, want turn-scoped approval forwarding error", items)
+	}
+}
+
+func TestReactorDoesNotForwardStaleApprovalResponse(t *testing.T) {
+	t.Run("sessionless", func(t *testing.T) {
+		engine := NewEngine()
+		defer engine.Close()
+		fake := newFakeProviderRuntime()
+		reactor := newTestReactor(engine, fake)
+		threadID := ThreadID("thread-sessionless-approval")
+		setupApprovalThread(t, engine, threadID, false)
+
+		if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "respond-sessionless-approval", ThreadID: threadID, RequestID: "approval-1", Decision: provider.ApprovalDecisionAccept, OptionID: "allow"}); err != nil {
+			t.Fatalf("thread.approval.respond: %v", err)
+		}
+		waitForReactorIdle(t, reactor, threadID)
+		if calls := fake.respondCallCount(); calls != 0 {
+			t.Fatalf("RespondToRequest calls = %d, want none without a provider session", calls)
+		}
+	})
+
+	t.Run("unknown request", func(t *testing.T) {
+		engine := NewEngine()
+		defer engine.Close()
+		fake := newFakeProviderRuntime()
+		reactor := newTestReactor(engine, fake)
+		threadID := ThreadID("thread-unknown-approval")
+		setupApprovalThread(t, engine, threadID, true)
+
+		reactor.handleApprovalResponse(Event{Type: EventThreadApprovalResponseRequested, Payload: EventPayload{ThreadID: threadID, RequestID: "missing", Decision: provider.ApprovalDecisionAccept}})
+		if calls := fake.respondCallCount(); calls != 0 {
+			t.Fatalf("RespondToRequest calls = %d, want none for an unknown request", calls)
+		}
+		thread, _ := engine.Thread(threadID)
+		items := thread.Timeline.Items()
+		if len(items) != 1 || items[0].Kind != provider.ItemKindError || !strings.Contains(items[0].Title, "unknown approval request") {
+			t.Fatalf("items = %#v, want visible unknown-request error", items)
+		}
+	})
 }

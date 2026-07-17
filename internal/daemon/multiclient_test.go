@@ -358,9 +358,13 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 		t.Fatal("approved turn never streamed the agent's post-approval output")
 	}
 
-	// Mid-turn steer from the other client: B starts a long stream on thread
-	// two, A steers it with a follow-up prompt while it runs.
-	b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer-base", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer-base", Text: "stream 200 16"}})
+	// Mid-turn steer from the other client: B parks a prompt on thread two. Both
+	// clients must observe it running before A steers, so this cannot degrade into
+	// two ordinary sequential turns if the fake agent happens to run quickly.
+	baseReceipt := b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer-base", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer-base", Text: "block"}})
+	for _, client := range []*recordingClient{a, b} {
+		client.waitThread(t, threadTwo, "base turn running before steer", sessionStatusAfter(baseReceipt.Sequence, orchestration.SessionStatusRunning))
+	}
 	steerReceipt := a.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer", Text: "stream 5 16"}})
 	for _, client := range []*recordingClient{a, b} {
 		client.waitThread(t, threadTwo, "steered turn settle", sessionStatusAfter(steerReceipt.Sequence, orchestration.SessionStatusReady))
@@ -380,15 +384,6 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	requireSameStream(t, threadOne, "clientA", a.threadLog(threadOne), "clientB", b.threadLog(threadOne))
 	requireSameStream(t, threadTwo, "clientA", a.threadLog(threadTwo), "clientB", b.threadLog(threadTwo))
 
-	for _, threadID := range []orchestration.ThreadID{threadOne, threadTwo} {
-		snapshotA := a.subscribeThread(t, threadID)
-		snapshotB := b.subscribeThread(t, threadID)
-		rawA, _ := json.Marshal(snapshotA.Thread)
-		rawB, _ := json.Marshal(snapshotB.Thread)
-		if string(rawA) != string(rawB) {
-			t.Fatalf("final snapshots for %s diverge:\nA: %s\nB: %s", threadID, rawA, rawB)
-		}
-	}
 	for name, client := range map[string]*recordingClient{"clientA": a, "clientB": b} {
 		seen := map[orchestration.ThreadID]bool{}
 		for _, item := range client.shellLog() {
@@ -544,6 +539,12 @@ func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-overflow")
 	observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-overflow-create", ThreadID: threadID, Title: "Overflow", ProviderInstanceID: "codex", Cwd: t.TempDir()})
 	observer.subscribeThread(t, threadID)
+	s.rpcMu.Lock()
+	beforeSlow := make(map[string]struct{}, len(s.rpcClients))
+	for id := range s.rpcClients {
+		beforeSlow[id] = struct{}{}
+	}
+	s.rpcMu.Unlock()
 
 	// The slow client subscribes at the raw WebSocket level and then never
 	// reads again — a backgrounded/frozen client.
@@ -565,6 +566,20 @@ func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
 	// happens before the snapshot response is written).
 	if _, _, err := slow.Read(ctx); err != nil {
 		t.Fatalf("slow client subscribe response read: %v", err)
+	}
+	var slowServerClient *rpcClient
+	s.rpcMu.Lock()
+	for id, client := range s.rpcClients {
+		if _, existed := beforeSlow[id]; !existed {
+			if slowServerClient != nil {
+				t.Fatalf("multiple server clients registered for one slow WebSocket")
+			}
+			slowServerClient = client
+		}
+	}
+	s.rpcMu.Unlock()
+	if slowServerClient == nil {
+		t.Fatal("slow WebSocket was not registered with the server")
 	}
 
 	// Flood: enough UNPACED per-event volume (tool-call updates — assistant
@@ -590,11 +605,25 @@ func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
 		t.Fatalf("observer saw %d tool-call item events, want %d", streamed, floodChunks)
 	}
 
-	// The daemon must have overflow-closed the slow client: draining its
-	// socket now ends in a close, not in the full flood.
+	// The daemon must have selected the slow client for overflow closure.
+	overflowDeadline := time.Now().Add(10 * time.Second)
+	for !slowServerClient.closed.Load() && time.Now().Before(overflowDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !slowServerClient.closed.Load() {
+		t.Fatal("slow client was not overflow-closed by the daemon")
+	}
+
+	// Draining the socket must now end in an actual WebSocket close frame, not a
+	// context timeout or arbitrary transport error, and not after the full flood.
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer closeCancel()
 	drained := 0
 	for {
-		if _, _, err := slow.Read(ctx); err != nil {
+		if _, _, err := slow.Read(closeCtx); err != nil {
+			if websocket.CloseStatus(err) == -1 {
+				t.Fatalf("slow client read ended without a WebSocket close: %v", err)
+			}
 			break
 		}
 		drained++

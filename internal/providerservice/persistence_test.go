@@ -455,8 +455,10 @@ func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
 
 	flaky.mu.Lock()
 	defer flaky.mu.Unlock()
-	if len(flaky.routes) != 2 {
-		t.Fatalf("expected both routes persisted after retry, got %+v", flaky.routes)
+	first, firstOK := flaky.routes["thread-1"]
+	second, secondOK := flaky.routes["thread-2"]
+	if len(flaky.routes) != 2 || !firstOK || !secondOK || first.ProviderSessionID != "sess-1" || second.ProviderSessionID != "sess-2" {
+		t.Fatalf("routes after retry = %+v, want thread-1/sess-1 and thread-2/sess-2", flaky.routes)
 	}
 }
 

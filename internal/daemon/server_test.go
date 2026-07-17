@@ -28,6 +28,7 @@ func TestProviderStartValidation(t *testing.T) {
 		{name: "config", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "acp"}, want: "missing ACP config"},
 		{name: "command", spec: acpInstanceSpec("codex", "codex", nil), want: "ACP config requires command"},
 		{name: "malformed config", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "acp", Config: json.RawMessage(`{"command":`)}, want: "decode ACP config"},
+		{name: "unsupported driver", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "unknown"}, want: `unsupported provider driver "unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := NewServer()
@@ -40,19 +41,8 @@ func TestProviderStartValidation(t *testing.T) {
 	}
 }
 
-func TestProviderStartReusesSameInstance(t *testing.T) {
-	s := NewServer()
-	defer s.Close()
-
-	first := startProvider(t, s, "codex", helperCommand())
-	second := startProvider(t, s, "codex", helperCommand())
-	if second.PID != first.PID {
-		t.Fatalf("same provider instance should reuse process; pid %d != %d", second.PID, first.PID)
-	}
-}
-
 func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
-	s := NewServer()
+	s := newTestServer(t)
 	defer s.Close()
 
 	dir := t.TempDir()
@@ -131,17 +121,6 @@ func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
 	_ = syscall.Kill(pid, 9)
 	t.Fatalf("wrapped agent process %d survived server close (leaked agent)", pid)
 }
-
-func startProvider(t *testing.T, s *Server, id string, command []string) providerConnectionForTest {
-	t.Helper()
-	conn, err := s.StartProvider(context.Background(), acpInstanceSpec(provider.InstanceID(id), id, command), false)
-	if err != nil {
-		t.Fatalf("provider start failed: %v", err)
-	}
-	return providerConnectionForTest{PID: conn.PID}
-}
-
-type providerConnectionForTest struct{ PID int }
 
 func acpInstanceSpec(id provider.InstanceID, name string, command []string) provider.InstanceSpec {
 	config, err := json.Marshal(map[string]any{"command": command})
@@ -224,62 +203,6 @@ func assertPermissionResponse(reader *bufio.Reader, expectedOption string) {
 	}
 }
 
-// requestPermissionThenExpectCancelled emits a session/request_permission and
-// waits for the client (via the daemon) to answer it. It asserts the outcome is
-// "cancelled", which is what the daemon must return once a session/cancel
-// cancels the pending permission wait. A session/cancel notification may arrive
-// before or after the permission response, so it is skipped here.
-func requestPermissionThenExpectCancelled(reader *bufio.Reader) {
-	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "perm_1",
-		"method":  "session/request_permission",
-		"params": map[string]any{
-			"sessionId": "sess_new",
-			"toolCall":  map[string]any{"toolCallId": "tool_1", "title": "Edit file"},
-			"options": []any{
-				map[string]any{"kind": "allow_once", "name": "Allow", "optionId": "allow"},
-				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
-			},
-		},
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(request); err != nil {
-		fmt.Fprintf(os.Stderr, "write permission request: %v", err)
-		os.Exit(1)
-	}
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read permission response: %v", err)
-			os.Exit(1)
-		}
-		var msg struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Result struct {
-				Outcome struct {
-					Outcome string `json:"outcome"`
-				} `json:"outcome"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintf(os.Stderr, "decode permission response: %v", err)
-			os.Exit(1)
-		}
-		if msg.Method == "session/cancel" {
-			continue
-		}
-		if len(msg.ID) == 0 {
-			continue
-		}
-		if msg.Result.Outcome.Outcome != "cancelled" {
-			fmt.Fprintf(os.Stderr, "permission outcome = %s, want cancelled", line)
-			os.Exit(1)
-		}
-		return
-	}
-}
-
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("MAID_DAEMON_ACP_HELPER") != "1" {
 		return
@@ -324,7 +247,7 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	authMethods := []any{}
-	if mode == "auth" || mode == "rich-sessions" {
+	if mode == "rich-sessions" {
 		authMethods = []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
 	}
 	sessionCapabilities := map[string]any{}
@@ -353,56 +276,23 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	if isSessionMode(mode) {
-		var readyPath, releasePath, cancelPath string
-		if mode == "blocked-sessions" || mode == "cancelable-blocked-sessions" {
+		var readyPath, releasePath string
+		if mode == "blocked-sessions" {
 			if len(helperArgs) < 3 {
-				fmt.Fprintf(os.Stderr, "%s requires ready and release/cancel paths\n", mode)
+				fmt.Fprintln(os.Stderr, "blocked-sessions requires ready and release paths")
 				os.Exit(1)
 			}
 			readyPath = helperArgs[1]
-			if mode == "blocked-sessions" {
-				releasePath = helperArgs[2]
-			} else {
-				cancelPath = helperArgs[2]
-			}
+			releasePath = helperArgs[2]
 		}
-		serveDaemonSessionRequests(reader, mode, readyPath, releasePath, cancelPath)
+		serveDaemonSessionRequests(reader, mode, readyPath, releasePath)
 		return
-	}
-
-	line, err = reader.ReadBytes('\n')
-	if err != nil {
-		return
-	}
-	if mode != "auth" {
-		return
-	}
-	var authReq struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
-		Params struct {
-			MethodID string `json:"methodId"`
-		} `json:"params"`
-	}
-	if err := json.Unmarshal(line, &authReq); err != nil {
-		fmt.Fprintf(os.Stderr, "decode auth request: %v", err)
-		os.Exit(1)
-	}
-	if authReq.Method != "authenticate" || authReq.Params.MethodID != "agent-login" {
-		fmt.Fprintf(os.Stderr, "unexpected auth request: %s", line)
-		os.Exit(1)
-	}
-	resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(authReq.ID), "result": map[string]any{}}
-	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-		fmt.Fprintf(os.Stderr, "write auth response: %v", err)
-		os.Exit(1)
 	}
 }
 
 func isSessionMode(mode string) bool {
 	switch mode {
-	case "sessions", "slow-sessions", "streaming-sessions", "blocked-sessions", "cancelable-blocked-sessions",
-		"permission-deny-sessions", "permission-allow-sessions", "cancel-permission-sessions", "lingering-sessions",
+	case "sessions", "blocked-sessions", "permission-deny-sessions", "permission-allow-sessions", "lingering-sessions",
 		"rich-sessions", "scripted-sessions":
 		return true
 	}
@@ -425,10 +315,7 @@ func fakeSessionConfigOptions(modeValue string, modelValue string) []any {
 	}
 }
 
-func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath string, releasePath string, cancelPath string) {
-	slowPrompt := mode == "slow-sessions"
-	delayAfterUpdate := mode == "streaming-sessions"
-	cancelPermission := mode == "cancel-permission-sessions"
+func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath string, releasePath string) {
 	linger := mode == "lingering-sessions"
 	rich := mode == "rich-sessions"
 	expectedPermissionOption := ""
@@ -440,7 +327,6 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 	}
 
 	cwdBySession := map[string]string{}
-	var blockedPromptID json.RawMessage
 	modeValue := "ask"
 	modelValue := "test-model-1"
 	for {
@@ -480,21 +366,6 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 			// agent treats a cancel for an already-completed request as a no-op.
 			continue
 		case "session/cancel":
-			if len(blockedPromptID) > 0 {
-				if cancelPath != "" {
-					if err := os.WriteFile(cancelPath, []byte("cancelled"), 0o644); err != nil {
-						fmt.Fprintf(os.Stderr, "write prompt cancelled marker: %v", err)
-						os.Exit(1)
-					}
-				}
-				resp := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(blockedPromptID), "result": map[string]any{"stopReason": "cancelled"}}
-				if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-					fmt.Fprintf(os.Stderr, "write cancelled prompt response: %v", err)
-					os.Exit(1)
-				}
-
-				blockedPromptID = nil
-			}
 			// Cancellation is a notification; there is no response to write.
 			continue
 		case "authenticate":
@@ -535,15 +406,6 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 				os.Exit(1)
 			}
 		case "session/prompt":
-			if cancelPermission {
-				requestPermissionThenExpectCancelled(reader)
-				resp := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": map[string]any{"stopReason": "cancelled"}}
-				if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-					fmt.Fprintf(os.Stderr, "write cancelled prompt response: %v", err)
-					os.Exit(1)
-				}
-				continue
-			}
 			if expectedPermissionOption != "" {
 				assertPermissionResponse(reader, expectedPermissionOption)
 			}
@@ -553,15 +415,8 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 					os.Exit(1)
 				}
 			}
-			if cancelPath != "" {
-				blockedPromptID = append(json.RawMessage(nil), req.ID...)
-				continue
-			}
 			if releasePath != "" {
 				waitForHelperFile(releasePath)
-			}
-			if slowPrompt {
-				time.Sleep(500 * time.Millisecond)
 			}
 			if rich {
 				for _, update := range []map[string]any{
@@ -580,9 +435,6 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 			if err := json.NewEncoder(os.Stdout).Encode(notification); err != nil {
 				fmt.Fprintf(os.Stderr, "write session update: %v", err)
 				os.Exit(1)
-			}
-			if delayAfterUpdate {
-				time.Sleep(200 * time.Millisecond)
 			}
 			result = map[string]any{"stopReason": "end_turn"}
 		default:
@@ -779,17 +631,11 @@ func serveScriptedSessionRequests(reader *bufio.Reader) {
 	}
 }
 
-// TestInvariantViolationShutsServerDownAndSurfacesFromRunWebSocket pins the
-// fatal-path ownership: an orchestration invariant violation records the
-// typed error, runs the full server shutdown (so group-isolated agent
-// processes are killed, not orphaned), and surfaces the error from
-// RunWebSocket — main is the sole owner of process exit; neither the engine
-// nor the server calls os.Exit.
-func TestInvariantViolationShutsServerDownAndSurfacesFromRunWebSocket(t *testing.T) {
+// TestInvariantViolationClosesServerAndSurfacesFromRunWebSocket pins fatal-path
+// ownership: the server records the typed error, shuts down its listener, and
+// returns the error to main, which remains the sole owner of process exit.
+func TestInvariantViolationClosesServerAndSurfacesFromRunWebSocket(t *testing.T) {
 	s := NewServer()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("streaming-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
 
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.RunWebSocket("127.0.0.1:0") }()
@@ -808,7 +654,7 @@ func TestInvariantViolationShutsServerDownAndSurfacesFromRunWebSocket(t *testing
 	case <-time.After(5 * time.Second):
 		t.Fatal("RunWebSocket did not return after an invariant violation")
 	}
-	// The shutdown ran: a second Close is idempotent and providers are gone.
+	// The shutdown ran: a second Close is idempotent.
 	if err := s.Close(); err != nil {
 		t.Fatalf("second Close err = %v, want idempotent nil", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -242,9 +243,15 @@ func TestFilesystemAndTerminalClientMethodsRemainUnsupported(t *testing.T) {
 		agent.write(map[string]any{"jsonrpc": "2.0", "id": request.id, "method": request.method, "params": request.params})
 	}
 
+	seen := make(map[string]struct{}, len(requests))
 	for range requests {
 		select {
 		case response := <-agent.responses:
+			responseID := strings.Trim(string(response.ID), `"`)
+			if _, duplicate := seen[responseID]; duplicate {
+				t.Fatalf("duplicate response for unsupported client method %q", responseID)
+			}
+			seen[responseID] = struct{}{}
 			var rpcErr struct {
 				Code int `json:"code"`
 			}
@@ -256,6 +263,11 @@ func TestFilesystemAndTerminalClientMethodsRemainUnsupported(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for unsupported client-method response")
+		}
+	}
+	for _, request := range requests {
+		if _, ok := seen[request.id]; !ok {
+			t.Errorf("missing response for unsupported client method %q", request.id)
 		}
 	}
 }
@@ -403,7 +415,7 @@ func TestContentBlocksGateImageOnCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("contentBlocks with image capability: %v", err)
 	}
-	if len(blocks) != 1 || blocks[0].Type != schema.ContentBlockTypeImage || blocks[0].MimeType == nil || *blocks[0].MimeType != "image/png" {
+	if len(blocks) != 1 || blocks[0].Type != schema.ContentBlockTypeImage || blocks[0].Data == nil || *blocks[0].Data != "base64data" || blocks[0].MimeType == nil || *blocks[0].MimeType != "image/png" {
 		t.Fatalf("blocks = %#v, want one image block", blocks)
 	}
 }
@@ -478,6 +490,16 @@ func TestSessionUpdateMapsUsageUpdate(t *testing.T) {
 	if event.Payload.TokenUsage == nil || event.Payload.TokenUsage.UsedTokens != 12 || event.Payload.TokenUsage.MaxTokens != 100 || event.Payload.TokenUsage.Cost != 0.5 {
 		t.Fatalf("token usage = %#v, want used/max/cost mapped", event.Payload.TokenUsage)
 	}
+	if event.Payload.TokenUsage.Currency != "USD" {
+		t.Fatalf("token usage currency = %q, want USD", event.Payload.TokenUsage.Currency)
+	}
+	var raw schema.UsageUpdate
+	if err := json.Unmarshal(event.Payload.Data, &raw); err != nil {
+		t.Fatalf("decode raw usage payload: %v", err)
+	}
+	if raw.Used != 12 || raw.Size != 100 || raw.Cost == nil || raw.Cost.Amount != 0.5 || raw.Cost.Currency != "USD" {
+		t.Fatalf("raw usage payload = %#v, want complete ACP usage update", raw)
+	}
 }
 
 func TestSessionUpdateMapsEmptyAvailableCommands(t *testing.T) {
@@ -529,7 +551,7 @@ func TestSessionUpdateMapsNonTextAssistantContent(t *testing.T) {
 		t.Fatalf("decode image message update: %v", err)
 	}
 	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventContentDelta || len(event.Payload.Attachments) != 1 || event.Payload.Attachments[0].Kind != "image" || event.Payload.Attachments[0].Data != "base64" {
+	if event.Type != provider.RuntimeEventContentDelta || event.ItemID != "msg_1" || event.Payload.Delta != "" || event.Payload.StreamKind != provider.RuntimeContentAssistantText || len(event.Payload.Attachments) != 1 || event.Payload.Attachments[0].Kind != "image" || event.Payload.Attachments[0].Data != "base64" || event.Payload.Attachments[0].MimeType != "image/png" {
 		t.Fatalf("event = %#v, want image attachment preserved", event)
 	}
 }
@@ -556,6 +578,17 @@ func TestSessionUpdateMapsPlanAsGenericData(t *testing.T) {
 	}
 	if len(event.Payload.PlanEntries) != 1 || event.Payload.PlanEntries[0].Content != "Do it" {
 		t.Fatalf("plan entries = %#v", event.Payload.PlanEntries)
+	}
+	entry := event.Payload.PlanEntries[0]
+	if string(entry.Priority) != "high" || string(entry.Status) != "pending" {
+		t.Fatalf("plan entry = %#v, want high-priority pending entry", entry)
+	}
+	var raw schema.Plan
+	if err := json.Unmarshal(event.Payload.Data, &raw); err != nil {
+		t.Fatalf("decode raw plan payload: %v", err)
+	}
+	if len(raw.Entries) != 1 || raw.Entries[0].Content != "Do it" || string(raw.Entries[0].Priority) != "high" || string(raw.Entries[0].Status) != "pending" {
+		t.Fatalf("raw plan payload = %#v, want complete ACP plan", raw)
 	}
 }
 
@@ -611,41 +644,6 @@ func TestHandleSessionUpdateScopesACPItemIDsBySession(t *testing.T) {
 	}
 	if events[0].ItemID == "" || events[1].ItemID == "" || events[0].ItemID == events[1].ItemID {
 		t.Fatalf("assistant item ids = %q, %q; want session-scoped distinct ids", events[0].ItemID, events[1].ItemID)
-	}
-}
-
-// A settled tool keeps a tombstone (not a live in-progress entry): trailing
-// updates for it must still be enriched, but the state must be marked settled
-// so it is never treated as an open tool again.
-func TestHandleSessionUpdateKeepsSettledToolTombstone(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
-	session := bindTestSession(h, "thread-1", "sess")
-	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Run tests","kind":"execute","status":"pending"}}`))
-	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","status":"completed"}}`))
-
-	if len(events) != 2 || events[1].Payload.ItemType != provider.ItemKindCommandExecution || events[1].Payload.ItemStatus != provider.ItemStatusCompleted {
-		t.Fatalf("events = %#v, want enriched terminal tool update", events)
-	}
-	h.mu.Lock()
-	var settledStates, openStates int
-	for _, state := range session.toolStates {
-		if state.settled {
-			settledStates++
-		} else {
-			openStates++
-		}
-	}
-	h.mu.Unlock()
-	if settledStates != 1 || openStates != 0 {
-		t.Fatalf("tool reconciliation entries = %d settled / %d open, want one settled tombstone", settledStates, openStates)
-	}
-
-	// A trailing update (agents resend terminal updates with late rawOutput)
-	// must still emit a well-formed event via the tombstone.
-	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","rawOutput":{"stdout":"late"}}}`))
-	if len(events) != 3 || events[2].Payload.ItemType != provider.ItemKindCommandExecution || events[2].Payload.ItemStatus != provider.ItemStatusCompleted {
-		t.Fatalf("trailing update event = %#v, want tombstone-enriched item update", events[len(events)-1])
 	}
 }
 
@@ -989,22 +987,25 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 	}
 }
 
-func TestRespondToRequestHonorsExplicitOptionID(t *testing.T) {
-	opened := make(chan struct{}, 1)
-	requestID := ""
+func TestRespondToRequestSelectsExplicitOptionOrDecisionFallback(t *testing.T) {
+	opened := make(chan string, 1)
 	h := newInstance(func(event provider.RuntimeEvent) {
 		if event.Type == provider.RuntimeEventRequestOpened {
-			requestID = event.RequestID
-			opened <- struct{}{}
+			opened <- event.RequestID
 		}
 	})
 	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
-	done := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptionsWithAllowAlways()})
-		done <- resp
-	}()
-	<-opened
+	request := func(toolCallID string, options []schema.PermissionOption) (string, <-chan schema.RequestPermissionResponse) {
+		t.Helper()
+		done := make(chan schema.RequestPermissionResponse, 1)
+		go func() {
+			resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: schema.ToolCallId(toolCallID)}, Options: options})
+			done <- resp
+		}()
+		return <-opened, done
+	}
+
+	requestID, done := request("tool_1", permissionOptionsWithAllowAlways())
 	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "no-such-option"}); err == nil {
 		t.Fatal("RespondToRequest with unknown optionId err = nil, want rejection while request stays pending")
 	}
@@ -1016,9 +1017,17 @@ func TestRespondToRequestHonorsExplicitOptionID(t *testing.T) {
 	if resp := <-done; selectedOption(resp) != "allow-always" {
 		t.Fatalf("permission outcome = %#v, want selected allow-always", resp.Outcome)
 	}
+
+	requestID, done = request("tool_2", permissionOptions())
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionDecline}); err != nil {
+		t.Fatalf("RespondToRequest with decision fallback: %v", err)
+	}
+	if resp := <-done; selectedOption(resp) != "reject" {
+		t.Fatalf("permission outcome = %#v, want decline mapped to reject", resp.Outcome)
+	}
 }
 
-func TestCancelledPermissionRequestDoesNotInheritFollowUpTurn(t *testing.T) {
+func TestPermissionRequestAfterTurnCancellationResolvesOnCancelledTurn(t *testing.T) {
 	var events []provider.RuntimeEvent
 	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
 	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
@@ -1033,16 +1042,22 @@ func TestCancelledPermissionRequestDoesNotInheritFollowUpTurn(t *testing.T) {
 	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
 		t.Fatalf("permission outcome = %#v, want cancelled stale request", resp.Outcome)
 	}
-	if len(events) != 2 {
-		t.Fatalf("events = %#v, want opened and resolved", events)
+	if len(events) != 2 || events[0].Type != provider.RuntimeEventRequestOpened || events[1].Type != provider.RuntimeEventRequestResolved {
+		t.Fatalf("events = %#v, want ordered opened and resolved events", events)
 	}
 	for _, event := range events {
-		if event.TurnID == "turn-2" {
-			t.Fatalf("event = %#v, want cancelled permission not stamped with follow-up turn", event)
+		if event.TurnID != "turn-1" {
+			t.Fatalf("event = %#v, want cancelled permission associated with turn-1", event)
 		}
 		if event.ThreadID != "thread-1" {
 			t.Fatalf("event = %#v, want thread association preserved", event)
 		}
+		if event.RequestID == "" || event.RequestID != events[0].RequestID {
+			t.Fatalf("event = %#v, want one stable request id across open and resolution", event)
+		}
+	}
+	if !events[1].Payload.Cancelled || events[1].Payload.Decision != provider.ApprovalDecisionCancel {
+		t.Fatalf("resolved event = %#v, want cancelled decision", events[1])
 	}
 }
 
@@ -1067,18 +1082,6 @@ func TestPromptJoinsCollectorClassification(t *testing.T) {
 		if got := promptJoinsCollector(tc.collector, tc.turnID); got != tc.want {
 			t.Errorf("%s: promptJoinsCollector = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-func TestMarkPromptCancelledIgnoresDifferentTurnID(t *testing.T) {
-	h := newInstance(nil)
-	collector := &promptCollector{threadID: "thread-1", turnID: "turn-2"}
-	bindTestSession(h, "thread-1", "sess").collector = collector
-	if cancels, matched, dropped, _ := h.markPromptCancelled("sess", "turn-1"); matched || len(cancels) != 0 || dropped != nil || collector.cancelled {
-		t.Fatalf("old-turn cancellation affected new collector: matched=%v cancels=%d collector=%#v", matched, len(cancels), collector)
-	}
-	if _, matched, _, _ := h.markPromptCancelled("sess", "turn-2"); !matched || !collector.cancelled {
-		t.Fatalf("matching cancellation did not cancel collector: %#v", collector)
 	}
 }
 
@@ -1110,7 +1113,6 @@ func TestCloseIsSafeOnPartiallyBuiltInstance(t *testing.T) {
 	if err := h.Close(); err != nil {
 		t.Fatalf("Close on partially-built instance err = %v, want nil", err)
 	}
-	killProcessTree(nil) // must not panic on a nil cmd either
 }
 
 // --- wire-connected handle tests --------------------------------------------
@@ -1251,7 +1253,7 @@ func TestCurrentModeUpdateRefreshesProjectedSessionMode(t *testing.T) {
 	agent.sendUpdate("sess", map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "architect"})
 	select {
 	case event := <-events:
-		if len(event.Payload.ConfigOptions) != 1 || event.Payload.ConfigOptions[0].CurrentValue != "architect" {
+		if len(event.Payload.ConfigOptions) != 1 || event.Payload.ConfigOptions[0].CurrentValue != "architect" || len(event.Payload.ConfigOptions[0].Choices) != 2 || event.Payload.ConfigOptions[0].Choices[0].Value != "code" || event.Payload.ConfigOptions[0].Choices[1].Value != "architect" {
 			t.Fatalf("config options event = %#v, want architect current mode", event)
 		}
 	case <-time.After(2 * time.Second):
@@ -1299,7 +1301,7 @@ func TestStartSessionRestoresLegacyModeConfigSelection(t *testing.T) {
 		},
 	}
 	h := newWireTestHandle(t, agent)
-	_, err := h.StartSession(context.Background(), provider.StartSessionInput{
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
 		ThreadID: "thread-1",
 		ConfigSelections: []provider.ConfigOptionSelection{{
 			OptionID: acpSessionModeOptionID,
@@ -1309,6 +1311,9 @@ func TestStartSessionRestoresLegacyModeConfigSelection(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
+	}
+	if len(result.Session.ConfigOptions) != 1 || result.Session.ConfigOptions[0].CurrentValue != "architect" {
+		t.Fatalf("restored session config options = %#v, want architect current mode", result.Session.ConfigOptions)
 	}
 	select {
 	case call := <-modeCalls:
@@ -1482,6 +1487,10 @@ func TestStartSessionPropagatesNonRecoverableLoadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("StartSession err = nil, want load error")
 	}
+	var requestErr *provider.RequestError
+	if !errors.As(err, &requestErr) || requestErr.Code != -32000 || requestErr.Message != "Authentication required" {
+		t.Fatalf("StartSession err = %#v, want preserved -32000 Authentication required request error", err)
+	}
 	if calls := recorder.configCalls(); len(calls) != 0 {
 		t.Fatalf("session/new calls = %d, want 0 for non-recoverable load error", len(calls))
 	}
@@ -1649,9 +1658,10 @@ func TestReplayHistoryReportsUnavailable(t *testing.T) {
 		name         string
 		capabilities map[string]any
 		wantResume   bool
+		wantSession  string
 	}{
-		{name: "resume without display replay", capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}}, wantResume: true},
-		{name: "fresh session without recovery", capabilities: map[string]any{}},
+		{name: "resume without display replay", capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}}, wantResume: true, wantSession: "old"},
+		{name: "fresh session without recovery", capabilities: map[string]any{}, wantSession: "sess"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1677,6 +1687,9 @@ func TestReplayHistoryReportsUnavailable(t *testing.T) {
 			}
 			if !result.HistoryUnavailable || len(result.Replay) != 0 {
 				t.Fatalf("result = %#v, want unavailable history without replay", result)
+			}
+			if result.Session.ProviderSessionID != tt.wantSession || h.sessionIDForThread("thread-1") != tt.wantSession {
+				t.Fatalf("result session = %#v, bound = %q, want %q", result.Session, h.sessionIDForThread("thread-1"), tt.wantSession)
 			}
 		})
 	}

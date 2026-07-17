@@ -82,48 +82,15 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func TestRPCOrchestrationDispatchStreamsThreadEvents(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("streaming-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+func TestWebClientHandlerServesEmbeddedIndex(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	webClientHandler().ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
 
-	threadItems := make(chan orchestration.ThreadStreamItem, 16)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
-
-	threadID := orchestration.ThreadID("thread-stream")
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create", ThreadID: threadID, Title: "Test thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
+	if recorder.Code != 200 {
+		t.Fatalf("GET / status = %d, want 200", recorder.Code)
 	}
-
-	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-	if snapshot.Kind != "snapshot" || snapshot.Snapshot == nil || snapshot.Snapshot.Thread.ID != threadID {
-		t.Fatalf("snapshot = %#v, want thread snapshot", snapshot)
-	}
-
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-user", Text: "hello"}}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-
-	assistant := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
-		return event.Type == orchestration.EventThreadMessageSent && event.Payload.Role == orchestration.MessageRoleAssistant
-	})
-	if assistant.Payload.Text != "hi" {
-		t.Fatalf("assistant event = %#v, want hi", assistant)
-	}
-
-	var replay []orchestration.Event
-	if err := client.Call(ctx, RPCMethodOrchestrationReplayEvents, orchestration.ReplayEventsInput{}).Await(ctx, &replay); err != nil {
-		t.Fatalf("replayEvents: %v", err)
-	}
-	if len(replay) < 4 || replay[0].Sequence == 0 {
-		t.Fatalf("replay = %#v, want orchestration events", replay)
+	if body := recorder.Body.String(); !strings.Contains(body, "<title>maiD</title>") || !strings.Contains(body, `<div id="root"></div>`) {
+		t.Fatalf("GET / body = %q, want embedded maiD index", body)
 	}
 }
 
@@ -266,65 +233,6 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 	}
 }
 
-func TestRPCOrchestrationApprovalRespondResolvesProviderPermission(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("permission-deny-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
-
-	threadItems := make(chan orchestration.ThreadStreamItem, 16)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
-	threadID := orchestration.ThreadID("thread-permission")
-
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm", ThreadID: threadID, Title: "Permission thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm", Text: "hello"}}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-
-	approvalEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
-		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
-	})
-	approvalPayload := approvalEvent.Payload.Approval
-	if approvalPayload.RequestID == "" || len(approvalPayload.Options) == 0 {
-		t.Fatalf("approval payload = %#v, want request with options", approvalPayload)
-	}
-
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalPayload.RequestID), Decision: provider.ApprovalDecisionDecline}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.approval.respond: %v", err)
-	}
-
-	resolved := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
-		return event.Type == orchestration.EventThreadApprovalResolved && event.Payload.Approval != nil
-	})
-	resolvedPayload := resolved.Payload.Approval
-	if resolvedPayload.Decision != provider.ApprovalDecisionDecline || resolvedPayload.OptionID != "reject" {
-		t.Fatalf("resolved = %#v, want reject decline", resolvedPayload)
-	}
-
-	// The approval projection should also reflect the resolution on the thread.
-	threadSnapshot, err := s.orchestration.ThreadSnapshot(threadID)
-	if err != nil {
-		t.Fatalf("thread snapshot: %v", err)
-	}
-	if len(threadSnapshot.Snapshot.Thread.Timeline.Approvals()) == 0 {
-		t.Fatalf("thread approvals empty, want resolved approval projection")
-	}
-	approval := threadSnapshot.Snapshot.Thread.Timeline.Approvals()[0]
-	if approval.Status != orchestration.ApprovalStatusResolved || approval.Decision != provider.ApprovalDecisionDecline {
-		t.Fatalf("approval projection = %#v, want resolved decline", approval)
-	}
-}
-
 // TestRPCOrchestrationApprovalRespondHonorsExplicitOption sends an accept
 // decision together with an explicit optionId for a reject option. The helper
 // agent (deny mode) fails unless it receives exactly "reject", proving the
@@ -443,7 +351,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 		"instanceId": "codex",
 		"name":       "codex",
 		"driver":     "acp",
-		"config":     map[string]any{"command": helperCommand("streaming-sessions")},
+		"config":     map[string]any{"command": helperCommand("sessions")},
 	}).Await(ctx, &started); err != nil {
 		t.Fatalf("provider.start: %v", err)
 	}
@@ -508,7 +416,8 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	threadItems := make(chan orchestration.ThreadStreamItem, 64)
 	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
 	ctx := context.Background()
-	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", UpdatedAt: "2026-07-15T12:00:00Z"}
+	importCwd := t.TempDir()
+	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", Cwd: importCwd, UpdatedAt: "2026-07-15T12:00:00Z"}
 	invalid := summary
 	invalid.Cwd = "relative/project"
 	var rejected providerImportSessionResult
@@ -535,7 +444,7 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
 		t.Fatalf("subscribe imported thread: %v", err)
 	}
-	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Draft || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd == "" {
+	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Draft || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd != importCwd || subscribed.Snapshot.Thread.ProviderInstanceID != "codex" {
 		t.Fatalf("imported snapshot = %+v", subscribed.Snapshot)
 	}
 	var receipt orchestration.DispatchResult
@@ -549,12 +458,18 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &replayed); err != nil {
 		t.Fatalf("resubscribe imported thread: %v", err)
 	}
+	if replayed.Snapshot == nil {
+		t.Fatalf("resubscribe imported thread = %#v, want snapshot", replayed)
+	}
 	encoded, err := json.Marshal(replayed.Snapshot.Thread.Timeline)
 	if err != nil {
 		t.Fatalf("encode replayed timeline: %v", err)
 	}
 	if !strings.Contains(string(encoded), "replayed") {
 		t.Fatalf("imported timeline = %s, want provider replay", encoded)
+	}
+	if replayed.Snapshot.Thread.Session == nil || replayed.Snapshot.Thread.Session.ProviderInstanceID != "codex" || replayed.Snapshot.Thread.Session.Cwd != importCwd {
+		t.Fatalf("prepared imported session = %+v, want codex binding in %q", replayed.Snapshot.Thread.Session, importCwd)
 	}
 }
 
@@ -615,9 +530,9 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 }
 
 // TestRPCSessionMetadataProjectionsReachClient locks in the projections real
-// agents emit during a prompt: slash commands, an
-// agent-set title, token usage, session config options, and provider-owned
-// Provider mode and other config-option switching round-trip.
+// agents emit during a prompt: slash commands, an agent-set title, token usage,
+// and session config options. Config-option switching round-trips, and a late
+// subscriber receives the fully projected state.
 func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
@@ -675,19 +590,8 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		return event.Type == orchestration.EventThreadMessageSent && event.Payload.Role == orchestration.MessageRoleAssistant
 	})
 
-	// Provider modes use the same config-option path as every other session option.
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-mode-metadata", ThreadID: threadID, OptionID: "mode", Value: "plan"}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("set mode config option: %v", err)
-	}
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
-		if event.Type != orchestration.EventThreadConfigOptionsUpdated {
-			return false
-		}
-		value, ok := configOptionValue(event.Payload.ConfigOptions, "mode")
-		return ok && value == "plan"
-	})
-
-	// Config-option switching round-trips through session/set_config_option.
+	// Model switching round-trips through session/set_config_option. Keeping the
+	// category-specific case also verifies the thread's model projection.
 	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-model-metadata", ThreadID: threadID, OptionID: "model", Value: "test-model-2"}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.config-option.set: %v", err)
 	}
@@ -699,11 +603,15 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		return ok && value == "test-model-2"
 	})
 
-	// The same state must be projected onto the thread for late subscribers.
-	thread, ok := s.orchestration.Thread(threadID)
-	if !ok {
-		t.Fatalf("thread %q missing after turn", threadID)
+	lateClient := newRPCTestClient(t, s, rpcTestClientHandler{})
+	var late orchestration.ThreadStreamItem
+	if err := lateClient.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &late); err != nil {
+		t.Fatalf("late subscribeThread: %v", err)
 	}
+	if late.Kind != "snapshot" || late.Snapshot == nil {
+		t.Fatalf("late subscription = %#v, want snapshot", late)
+	}
+	thread := late.Snapshot.Thread
 	if thread.Title != "Agent set title" {
 		t.Fatalf("thread title = %q, want agent-set title", thread.Title)
 	}
@@ -716,11 +624,14 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	if thread.Session.TokenUsage == nil || thread.Session.TokenUsage.UsedTokens != 1200 {
 		t.Fatalf("session token usage = %#v, want used 1200", thread.Session.TokenUsage)
 	}
-	if value, ok := configOptionValue(thread.Session.ConfigOptions, "mode"); !ok || value != "plan" {
-		t.Fatalf("session config options = %#v, want mode plan", thread.Session.ConfigOptions)
+	if value, ok := configOptionValue(thread.Session.ConfigOptions, "mode"); !ok || value != "ask" {
+		t.Fatalf("session config options = %#v, want unchanged mode ask", thread.Session.ConfigOptions)
 	}
 	if value, ok := configOptionValue(thread.Session.ConfigOptions, "model"); !ok || value != "test-model-2" {
 		t.Fatalf("session config options = %#v, want model test-model-2", thread.Session.ConfigOptions)
+	}
+	if thread.ModelSelection == nil || thread.ModelSelection.Model != "test-model-2" {
+		t.Fatalf("thread model selection = %#v, want test-model-2", thread.ModelSelection)
 	}
 }
 

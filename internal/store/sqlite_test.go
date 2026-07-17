@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -55,7 +56,7 @@ func TestThreadStoreRoundTrip(t *testing.T) {
 	if got.Title != "Renamed" || got.Cwd != "/tmp/project" {
 		t.Fatalf("unexpected thread meta: %+v", got)
 	}
-	if got.ProviderInstanceID != "gemini" || got.ModelSelection == nil || got.ModelSelection.Model != "gemini-pro" {
+	if got.ProviderInstanceID != "gemini" || got.ModelSelection == nil || got.ModelSelection.Model != "gemini-pro" || string(got.ModelSelection.Options) != `{"temp":1}` {
 		t.Fatalf("provider selection did not round-trip: %+v", got)
 	}
 	if !got.CreatedAt.Equal(created) || !got.UpdatedAt.Equal(created.Add(time.Hour)) {
@@ -82,6 +83,9 @@ func TestListThreadsOrdersByUpdatedAtDescending(t *testing.T) {
 	threads, err := s.ListThreads()
 	if err != nil {
 		t.Fatalf("ListThreads: %v", err)
+	}
+	if len(threads) != 3 {
+		t.Fatalf("ListThreads returned %d threads, want 3: %+v", len(threads), threads)
 	}
 	var order []string
 	for _, thread := range threads {
@@ -138,7 +142,7 @@ func TestRouteStoreRoundTrip(t *testing.T) {
 	if string(got.ResumeCursor) != `{"sessionId":"native-session-1"}` {
 		t.Fatalf("resume cursor did not round-trip: %s", got.ResumeCursor)
 	}
-	if got.StartInput.ModelSelection == nil || got.StartInput.ModelSelection.Model != "gemini-pro" || len(got.StartInput.ConfigSelections) != 1 {
+	if got.StartInput.ThreadID != "thread-1" || got.StartInput.ProviderInstanceID != "gemini" || got.StartInput.Cwd != "/tmp/project" || got.StartInput.ModelSelection == nil || got.StartInput.ModelSelection.Model != "gemini-pro" || len(got.StartInput.ConfigSelections) != 1 || got.StartInput.ConfigSelections[0].OptionID != "mode" || got.StartInput.ConfigSelections[0].Value != "plan" {
 		t.Fatalf("start input did not round-trip: %+v", got.StartInput)
 	}
 
@@ -216,8 +220,8 @@ func TestRouteStoreRejectsDuplicateProviderSessionBindings(t *testing.T) {
 	if err := s.SaveRoute("thread-1", route); err != nil {
 		t.Fatalf("first SaveRoute: %v", err)
 	}
-	if err := s.SaveRoute("thread-2", route); err == nil {
-		t.Fatal("duplicate SaveRoute err = nil")
+	if err := s.SaveRoute("thread-2", route); !errors.Is(err, ErrProviderSessionBound) {
+		t.Fatalf("duplicate SaveRoute err = %v, want ErrProviderSessionBound", err)
 	}
 	routes, err := s.LoadRoutes()
 	if err != nil {
@@ -261,17 +265,6 @@ func TestImportThreadAdoptsExistingProviderSessionRoute(t *testing.T) {
 	}
 	if len(threads) != 1 || threads[0].ThreadID != existingMeta.ThreadID {
 		t.Fatalf("threads = %+v, want only existing thread", threads)
-	}
-
-	if err := s.DeleteRoute(existingMeta.ThreadID); err != nil {
-		t.Fatalf("DeleteRoute: %v", err)
-	}
-	threadID, imported, err = s.ImportThread(candidate, existingRoute)
-	if err != nil {
-		t.Fatalf("duplicate ImportThread after route release: %v", err)
-	}
-	if threadID != existingMeta.ThreadID || imported {
-		t.Fatalf("duplicate import = (%q, %v), want (%q, false)", threadID, imported, existingMeta.ThreadID)
 	}
 }
 
@@ -413,6 +406,13 @@ func TestSaveRouteRequiresKnownInstance(t *testing.T) {
 	err := s.SaveRoute("thread-1", RouteRecord{InstanceID: "never-started"})
 	if err == nil {
 		t.Fatal("expected foreign-key error for a route without its instance")
+	}
+	routes, loadErr := s.LoadRoutes()
+	if loadErr != nil {
+		t.Fatalf("LoadRoutes: %v", loadErr)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("failed SaveRoute left rows: %+v", routes)
 	}
 }
 

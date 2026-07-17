@@ -23,16 +23,10 @@ func fakeInstanceConfig(command []string) json.RawMessage {
 type fakeStartAdapter struct {
 	mu          sync.Mutex
 	starts      int
-	startDelay  time.Duration
 	instanceSeq int
 }
 
-func (a *fakeStartAdapter) StartInstance(ctx context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
-	select {
-	case <-time.After(a.startDelay):
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+func (a *fakeStartAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
 	a.mu.Lock()
 	a.starts++
 	a.instanceSeq++
@@ -400,16 +394,31 @@ func (a *blockingRestartAdapter) instance(index int) *fakeProviderInstance {
 	return a.instances[index]
 }
 
-func TestStartConnectionSerializesConcurrentStartsForSameInstance(t *testing.T) {
-	adapter := &fakeStartAdapter{startDelay: 50 * time.Millisecond}
-	s := New(adapter.StartInstance)
+func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	starts := 0
+	s := New(func(ctx context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
+		mu.Lock()
+		starts++
+		pid := starts
+		mu.Unlock()
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: pid}}, nil
+	})
 	defer s.Close()
 
 	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
 	var wg sync.WaitGroup
 	results := make(chan provider.InstanceInfo, 2)
 	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
+	start := func() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -421,14 +430,34 @@ func TestStartConnectionSerializesConcurrentStartsForSameInstance(t *testing.T) 
 			results <- conn
 		}()
 	}
+	start()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first start did not enter the provider factory")
+	}
+	start()
+	secondFactoryCall := false
+	select {
+	case <-entered:
+		secondFactoryCall = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
 	wg.Wait()
 	close(results)
 	close(errs)
 	for err := range errs {
 		t.Fatalf("StartInstance error: %v", err)
 	}
-	if starts := adapter.startCount(); starts != 1 {
-		t.Fatalf("adapter starts = %d, want 1", starts)
+	if secondFactoryCall {
+		t.Fatal("concurrent start entered the provider factory instead of waiting for and reusing the first instance")
+	}
+	mu.Lock()
+	startCount := starts
+	mu.Unlock()
+	if startCount != 1 {
+		t.Fatalf("adapter starts = %d, want 1", startCount)
 	}
 	for conn := range results {
 		if conn.PID != 1 {
@@ -823,6 +852,16 @@ func TestFailedRestartKeepsPreviousProviderProcessEventsActive(t *testing.T) {
 	close(adapter.release)
 	if err := <-errs; err == nil {
 		t.Fatal("restart error = nil, want failure")
+	}
+
+	adapter.emit(0, provider.RuntimeEvent{EventID: "old-process-after-failed-restart", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "still live"}})
+	select {
+	case event := <-events:
+		if event.EventID != "old-process-after-failed-restart" {
+			t.Fatalf("event after failed restart = %q, want old-process-after-failed-restart", event.EventID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for old provider process event after failed restart")
 	}
 }
 

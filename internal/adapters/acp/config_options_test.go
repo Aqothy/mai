@@ -10,30 +10,9 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestConfigOptionsFromACPIncludesBooleanOptions(t *testing.T) {
-	category := schema.SessionConfigOptionCategoryModelConfig
-	options := configOptionsFromACP([]schema.SessionConfigOption{{
-		ID:           "fast",
-		Type:         schema.SessionConfigOptionTypeBoolean,
-		Name:         "Fast mode",
-		Category:     &category,
-		CurrentValue: true,
-	}})
-	if len(options) != 1 {
-		t.Fatalf("options = %#v, want one boolean option", options)
-	}
-	option := options[0]
-	if option.Type != provider.ConfigOptionTypeBoolean || option.Category != provider.ConfigOptionCategoryModelConfig || option.CurrentValue != true {
-		t.Fatalf("option = %#v", option)
-	}
-	if len(option.Choices) != 0 {
-		t.Fatalf("boolean choices = %#v, want none", option.Choices)
-	}
-}
-
 func TestSetConfigOptionSendsBooleanWireValue(t *testing.T) {
 	wireBooleanOptions := func(current bool) []any {
-		return []any{map[string]any{"type": "boolean", "id": "fast", "name": "Fast mode", "currentValue": current}}
+		return []any{map[string]any{"type": "boolean", "id": "fast", "name": "Fast mode", "category": "model_config", "currentValue": current}}
 	}
 	requests := make(chan wireSessionParams, 1)
 	agent := &fakeWireAgent{
@@ -47,8 +26,16 @@ func TestSetConfigOptionSendsBooleanWireValue(t *testing.T) {
 	}
 	instance := newWireTestHandle(t, agent)
 
-	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
+	result, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"})
+	if err != nil {
 		t.Fatalf("StartSession: %v", err)
+	}
+	if len(result.Session.ConfigOptions) != 1 {
+		t.Fatalf("initial config options = %#v, want one boolean option", result.Session.ConfigOptions)
+	}
+	initial := result.Session.ConfigOptions[0]
+	if initial.ID != "fast" || initial.Type != provider.ConfigOptionTypeBoolean || initial.Category != provider.ConfigOptionCategoryModelConfig || initial.CurrentValue != false || len(initial.Choices) != 0 {
+		t.Fatalf("initial boolean option = %#v, want false model-config option without choices", initial)
 	}
 	if err := instance.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "fast", Value: true}); err != nil {
 		t.Fatalf("SetConfigOption: %v", err)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -982,56 +981,6 @@ func TestProviderCommandFailureCompletesTurnWithoutSession(t *testing.T) {
 	}
 }
 
-func TestEngineProjectsProviderRuntimeIntoThreadSnapshot(t *testing.T) {
-	engine := NewEngine()
-	ingestion := NewProviderRuntimeIngestion(engine)
-
-	threadID := ThreadID("thread-1")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-
-	snapshotItem, err := engine.ThreadSnapshot(threadID)
-	if err != nil {
-		t.Fatalf("snapshot before runtime: %v", err)
-	}
-	turnID := snapshotItem.Snapshot.Thread.LatestTurn.ID
-	if turnID == "" {
-		t.Fatal("turn id missing")
-	}
-	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "codex"}}); err != nil {
-		t.Fatalf("bind provider session: %v", err)
-	}
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-runtime", Type: provider.RuntimeEventContentDelta, Provider: provider.DriverKind("test"), ProviderInstanceID: "codex", ThreadID: string(threadID), TurnID: string(turnID), ItemID: "msg-assistant", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "hi"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-complete", Type: provider.RuntimeEventTurnCompleted, Provider: provider.DriverKind("test"), ProviderInstanceID: "codex", ThreadID: string(threadID), TurnID: string(turnID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted, StopReason: "end_turn"}})
-
-	snapshotItem, err = engine.ThreadSnapshot(threadID)
-	if err != nil {
-		t.Fatalf("snapshot: %v", err)
-	}
-	messages := snapshotItem.Snapshot.Thread.Timeline.Messages()
-	if len(messages) != 2 || messages[0].Text != "hello" || messages[1].Text != "hi" {
-		t.Fatalf("messages = %#v, want user and completed assistant messages", messages)
-	}
-	if turn := snapshotItem.Snapshot.Thread.LatestTurn; turn == nil || turn.StopReason != "end_turn" {
-		t.Fatalf("latest turn = %#v, want ACP stop reason projected through runtime ingestion", turn)
-	}
-
-	replay := engine.ReplayEvents(ReplayEventsInput{})
-	if len(replay) < 4 {
-		t.Fatalf("replay = %#v, want event history", replay)
-	}
-	for i := 1; i < len(replay); i++ {
-		if replay[i].Sequence <= replay[i-1].Sequence {
-			t.Fatalf("replay sequences not monotonic: %#v", replay)
-		}
-	}
-}
-
 func TestEngineReplayFiltersByThreadAndLimit(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -1167,7 +1116,7 @@ func TestEngineCloseRejectsQueuedRequests(t *testing.T) {
 	}
 }
 
-func TestEngineSurvivesPanickingListenerAndDecider(t *testing.T) {
+func TestEngineSurvivesPanickingListener(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	engine.OnEvent(func(Event) { panic("listener boom") })
@@ -1222,6 +1171,7 @@ func TestThreadListVisibleIncludesOnlySidebarState(t *testing.T) {
 		visible bool
 	}{
 		{"thread created", Event{Type: EventThreadCreated}, true},
+		{"thread imported", Event{Type: EventThreadImported}, true},
 		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
 		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
 		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
@@ -1233,6 +1183,7 @@ func TestThreadListVisibleIncludesOnlySidebarState(t *testing.T) {
 		{"session stop requested", Event{Type: EventThreadSessionStopRequested}, false},
 		{"session stop failed", Event{Type: EventThreadSessionStopFailed}, false},
 		{"session status", Event{Type: EventThreadSessionStatusSet}, true},
+		{"history replay completed", Event{Type: EventThreadHistoryReplayCompleted}, false},
 		{"approval response requested", Event{Type: EventThreadApprovalResponseRequested}, false},
 		{"approval opened", Event{Type: EventThreadApprovalOpened}, true},
 		{"approval resolved", Event{Type: EventThreadApprovalResolved}, true},
@@ -1455,16 +1406,11 @@ func TestEnginePreMutationPanicIsRecoverableWithoutFatal(t *testing.T) {
 	defer engine.Close()
 	violations := recordInvariantViolations(t, engine)
 
-	err := func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("recovered: %v", rec)
-			}
-		}()
-		return engine.withLockNotify(func(appendEvent func(Event) Event) error {
+	_, err := recoverEngineOperation("test pre-mutation decider", func() (DispatchResult, error) {
+		return DispatchResult{}, engine.withLockNotify(func(appendEvent func(Event) Event) error {
 			panic("decider boom")
 		})
-	}()
+	})
 	if err == nil || !strings.Contains(err.Error(), "decider boom") {
 		t.Fatalf("pre-mutation panic err = %v, want recovered decider boom", err)
 	}

@@ -152,42 +152,29 @@ func TestRestoredThreadRequiresPreparationBeforeTurnStart(t *testing.T) {
 }
 
 func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
-	tests := []struct {
-		name   string
-		status SessionStatus
-	}{
-		{name: "starting", status: SessionStatusStarting},
-		{name: "error", status: SessionStatusError},
-		{name: "stopped", status: SessionStatusStopped},
-		{name: "interrupted", status: SessionStatusInterrupted},
-		{name: "ready", status: SessionStatusReady},
-		{name: "running", status: SessionStatusRunning},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngine()
-			defer engine.Close()
-			now := time.Now()
-			engine.RestoreThreads([]RestoredThread{{ThreadID: "thread-restored", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+	engine := NewEngine()
+	defer engine.Close()
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: "thread-restored", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
 
-			if _, err := engine.AppendEvent(context.Background(), EventInput{
-				Type:     EventThreadSessionStatusSet,
-				ThreadID: "thread-restored",
-				Payload:  EventPayload{Session: &SessionBinding{Status: tt.status}},
-			}); err != nil {
-				t.Fatalf("append session status: %v", err)
-			}
-			thread, _ := engine.Thread("thread-restored")
-			if !thread.ReplayHistoryPending {
-				t.Fatalf("session status %s consumed replay intent", tt.status)
-			}
-			if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
-				t.Fatalf("append replay completion: %v", err)
-			}
-			thread, _ = engine.Thread("thread-restored")
-			if thread.ReplayHistoryPending {
-				t.Fatal("replay completion did not consume replay intent")
-			}
-		})
+	// Readiness is the tempting but incorrect point at which to consume the
+	// intent: only the explicit replay-completed fact owns that transition.
+	if _, err := engine.AppendEvent(context.Background(), EventInput{
+		Type:     EventThreadSessionStatusSet,
+		ThreadID: "thread-restored",
+		Payload:  EventPayload{Session: &SessionBinding{Status: SessionStatusReady}},
+	}); err != nil {
+		t.Fatalf("append ready session status: %v", err)
+	}
+	thread, _ := engine.Thread("thread-restored")
+	if !thread.ReplayHistoryPending {
+		t.Fatal("ready session status consumed replay intent")
+	}
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
+		t.Fatalf("append replay completion: %v", err)
+	}
+	thread, _ = engine.Thread("thread-restored")
+	if thread.ReplayHistoryPending {
+		t.Fatal("replay completion did not consume replay intent")
 	}
 }

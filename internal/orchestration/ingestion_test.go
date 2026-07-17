@@ -309,6 +309,73 @@ func TestApprovalOpenSplitsBufferedAssistantTextInEncounterOrder(t *testing.T) {
 	}
 }
 
+func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
+	tests := []struct {
+		name       string
+		decision   provider.ApprovalDecision
+		resolution json.RawMessage
+		want       provider.ApprovalDecision
+		wantOption string
+	}{
+		{name: "accept", decision: provider.ApprovalDecisionAccept, resolution: json.RawMessage(`{"optionId":"allow"}`), want: provider.ApprovalDecisionAccept, wantOption: "allow"},
+		{name: "accept for session", decision: provider.ApprovalDecisionAcceptForSession, resolution: json.RawMessage(`{"optionId":"session"}`), want: provider.ApprovalDecisionAcceptForSession, wantOption: "session"},
+		{name: "decline", decision: provider.ApprovalDecisionDecline, resolution: json.RawMessage(`{"optionId":"reject"}`), want: provider.ApprovalDecisionDecline, wantOption: "reject"},
+		{name: "empty defaults to cancel", want: provider.ApprovalDecisionCancel},
+		{name: "unknown defaults to cancel", decision: provider.ApprovalDecision("unknown"), resolution: json.RawMessage(`not-json`), want: provider.ApprovalDecisionCancel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("thread-resolved-" + strings.ReplaceAll(tt.name, " ", "-"))
+			newThreadWithSession(t, engine, threadID)
+
+			ingestion.Ingest(provider.RuntimeEvent{
+				EventID:   "approval-opened",
+				Type:      provider.RuntimeEventRequestOpened,
+				ThreadID:  string(threadID),
+				TurnID:    "turn-1",
+				RequestID: "approval-1",
+				Payload: provider.RuntimeEventPayload{
+					RequestType: provider.RuntimeRequestCommandExecution,
+					Options:     []provider.ApprovalOption{{ID: "allow"}, {ID: "session"}, {ID: "reject"}},
+				},
+			})
+			thread, _ := engine.Thread(threadID)
+			if len(thread.Timeline) != 1 || thread.Timeline[0].Approval == nil {
+				t.Fatalf("timeline after open = %#v, want one approval", thread.Timeline)
+			}
+			createdAt := thread.Timeline[0].Approval.CreatedAt
+
+			ingestion.Ingest(provider.RuntimeEvent{
+				EventID:   "approval-resolved",
+				Type:      provider.RuntimeEventRequestResolved,
+				ThreadID:  string(threadID),
+				TurnID:    "turn-1",
+				RequestID: "approval-1",
+				Payload: provider.RuntimeEventPayload{
+					RequestType: provider.RuntimeRequestCommandExecution,
+					Decision:    tt.decision,
+					Resolution:  tt.resolution,
+				},
+			})
+
+			thread, _ = engine.Thread(threadID)
+			if len(thread.Timeline) != 1 || thread.Timeline[0].Approval == nil {
+				t.Fatalf("timeline after resolve = %#v, want the original approval in place", thread.Timeline)
+			}
+			approval := thread.Timeline[0].Approval
+			if approval.Status != ApprovalStatusResolved || approval.Decision != tt.want || approval.OptionID != tt.wantOption {
+				t.Fatalf("resolved approval = %#v, want decision=%q option=%q", approval, tt.want, tt.wantOption)
+			}
+			if !approval.CreatedAt.Equal(createdAt) {
+				t.Fatalf("resolved approval moved/recreated: createdAt=%v, want %v", approval.CreatedAt, createdAt)
+			}
+		})
+	}
+}
+
 func TestIngestionPreservesReplayedConversationOrderWithoutTurnIDs(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -888,36 +955,6 @@ func TestIngestionPreservesReasoningAssistantTextInterleaving(t *testing.T) {
 	}
 }
 
-// A provider pause must not hide buffered text: chunks left buffered by the
-// interval are flushed by the ingestion ticker, not only by the next chunk or
-// semantic boundary (which may be seconds away while the model generates
-// tool-call arguments).
-func TestIngestionTickerFlushesBufferedAssistantText(t *testing.T) {
-	pinFlushInterval(t, 20*time.Millisecond)
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	events := runIngestion(t, ingestion)
-	threadID := ThreadID("thread-assistant-deadline")
-	newThreadWithSession(t, engine, threadID)
-
-	chunk := func(eventID string, delta string) provider.RuntimeEvent {
-		return provider.RuntimeEvent{EventID: provider.RuntimeEventID(eventID), Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), ItemID: "provider-assistant-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: delta}}
-	}
-	events <- chunk("evt-deadline-1", "he")
-	events <- chunk("evt-deadline-2", "llo")
-
-	// No further chunks or boundaries arrive; only the ticker can flush "llo".
-	waitFor(t, "ticker flush of the buffered assistant chunk", func() bool {
-		thread, ok := engine.Thread(threadID)
-		if !ok {
-			return false
-		}
-		messages := thread.Timeline.Messages()
-		return len(messages) == 1 && messages[0].Text == "hello"
-	})
-}
-
 func TestIngestionTickerFlushesBufferedReasoningText(t *testing.T) {
 	pinFlushInterval(t, 20*time.Millisecond)
 	engine := NewEngine()
@@ -953,7 +990,9 @@ func TestIngestionTickerFlushesBufferedReasoningText(t *testing.T) {
 	})
 }
 
-func TestIngestionTickerFlushesConcurrentThreads(t *testing.T) {
+// A provider pause must not hide buffered text. This also verifies that one
+// ticker pass flushes every active thread, rather than only one pending stream.
+func TestIngestionTickerFlushesBufferedAssistantTextAcrossThreads(t *testing.T) {
 	pinFlushInterval(t, 20*time.Millisecond)
 	engine := NewEngine()
 	defer engine.Close()
@@ -1106,30 +1145,14 @@ func TestIngestionSessionScopedUpdatesBeforeBindingSurviveSessionStatusSet(t *te
 	if len(thread.Session.ConfigOptions) != 1 || thread.Session.ConfigOptions[0].CurrentValue != "fast" {
 		t.Fatalf("config options after session status set = %#v, want preserved model option", thread.Session.ConfigOptions)
 	}
+	if thread.Session.ConfigOptions[0].Category != provider.ConfigOptionCategoryModel {
+		t.Fatalf("config option category after session status set = %q, want model", thread.Session.ConfigOptions[0].Category)
+	}
 	if len(thread.Session.SlashCommands) != 1 || thread.Session.SlashCommands[0].Name != "compact" {
 		t.Fatalf("slash commands after session status set = %#v, want compact preserved", thread.Session.SlashCommands)
 	}
 	if thread.Session.TokenUsage == nil || thread.Session.TokenUsage.UsedTokens != 42 {
 		t.Fatalf("token usage after session status set = %#v, want preserved usage", thread.Session.TokenUsage)
-	}
-}
-
-func TestIngestionConfigOptionsProjectOntoSession(t *testing.T) {
-	engine := NewEngine()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-config")
-	newThreadWithSession(t, engine, threadID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-config", Type: provider.RuntimeEventConfigOptionsUpdated, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{
-		{ID: "model", Category: provider.ConfigOptionCategoryModel, Label: "Model", CurrentValue: "fast", Choices: []provider.ConfigChoice{{Value: "fast", Label: "Fast"}, {Value: "slow", Label: "Slow"}}},
-	}}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing")
-	}
-	if len(thread.Session.ConfigOptions) != 1 || thread.Session.ConfigOptions[0].Category != provider.ConfigOptionCategoryModel || thread.Session.ConfigOptions[0].CurrentValue != "fast" {
-		t.Fatalf("config options = %#v, want one model option", thread.Session.ConfigOptions)
 	}
 }
 
@@ -1139,10 +1162,12 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 	threadID := ThreadID("thread-empty-list-json")
 	newThreadWithSession(t, engine, threadID)
 
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-full-config", Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-full-slash", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-empty-config", Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-empty-slash", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{}}})
 
-	var sawConfig, sawSlash bool
+	var configJSON, slashJSON json.RawMessage
 	for _, event := range engine.ReplayEvents(ReplayEventsInput{}) {
 		raw, err := json.Marshal(event.Payload)
 		if err != nil {
@@ -1154,19 +1179,13 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 		}
 		switch event.Type {
 		case EventThreadConfigOptionsUpdated:
-			if string(payload["configOptions"]) != "[]" {
-				t.Fatalf("config update payload JSON = %s, want configOptions:[]", raw)
-			}
-			sawConfig = true
+			configJSON = append(configJSON[:0], payload["configOptions"]...)
 		case EventThreadSlashCommandsUpdated:
-			if string(payload["slashCommands"]) != "[]" {
-				t.Fatalf("slash update payload JSON = %s, want slashCommands:[]", raw)
-			}
-			sawSlash = true
+			slashJSON = append(slashJSON[:0], payload["slashCommands"]...)
 		}
 	}
-	if !sawConfig || !sawSlash {
-		t.Fatalf("saw config=%v slash=%v updates, want both", sawConfig, sawSlash)
+	if string(configJSON) != "[]" || string(slashJSON) != "[]" {
+		t.Fatalf("last list payloads = config:%s slash:%s, want explicit empty arrays", configJSON, slashJSON)
 	}
 
 	thread, ok := engine.Thread(threadID)
@@ -1321,7 +1340,7 @@ func TestIngestionSeparatesAssistantMessagesByProviderMessageID(t *testing.T) {
 
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-msg-1", Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "provider-msg-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first"}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-msg-2", Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "provider-msg-2", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-complete", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted}})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-complete", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted, StopReason: "end_turn"}})
 
 	thread, _ = engine.Thread(threadID)
 	if len(thread.Timeline.Messages()) != 3 {
@@ -1332,6 +1351,9 @@ func TestIngestionSeparatesAssistantMessagesByProviderMessageID(t *testing.T) {
 	}
 	if thread.Timeline.Messages()[2].ID != "assistant:provider-msg-2" || thread.Timeline.Messages()[2].Text != "second" {
 		t.Fatalf("second assistant = %#v", thread.Timeline.Messages()[2])
+	}
+	if thread.LatestTurn == nil || thread.LatestTurn.StopReason != "end_turn" {
+		t.Fatalf("latest turn = %#v, want runtime stop reason forwarded through ingestion", thread.LatestTurn)
 	}
 }
 

@@ -41,7 +41,7 @@ func newTestServer(t *testing.T) *Server {
 	return newServer(newLoggerFromEnv(), metadata)
 }
 
-func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
+func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "maid.db")
 	metadata, err := store.Open(path)
 	if err != nil {
@@ -79,12 +79,11 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 		t.Fatalf("server close: %v", err)
 	}
 
-	reopened, err := store.Open(path)
+	inspection, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("reopen store: %v", err)
+		t.Fatalf("open store for inspection: %v", err)
 	}
-	defer reopened.Close()
-	threads, err := reopened.ListThreads()
+	threads, err := inspection.ListThreads()
 	if err != nil {
 		t.Fatalf("ListThreads: %v", err)
 	}
@@ -100,30 +99,8 @@ func TestThreadMetadataSurvivesServerRestart(t *testing.T) {
 	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
 		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
 	}
-}
-
-func TestServerRestartRehydratesThreadStubs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "maid.db")
-	metadata, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	s := newServer(newLoggerFromEnv(), metadata)
-
-	cwd := t.TempDir()
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
-		Type:     orchestration.CommandThreadCreate,
-		ThreadID: "thread-1",
-		Title:    "Survives restarts",
-		Cwd:      cwd,
-	}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("server close: %v", err)
+	if err := inspection.Close(); err != nil {
+		t.Fatalf("close inspection store: %v", err)
 	}
 
 	reopened, err := store.Open(path)
@@ -138,8 +115,14 @@ func TestServerRestartRehydratesThreadStubs(t *testing.T) {
 		t.Fatalf("thread list after restart = %#v, want the rehydrated stub", list.Snapshot.Threads)
 	}
 	entry := list.Snapshot.Threads[0]
-	if entry.ID != "thread-1" || entry.Title != "Survives restarts" || entry.Cwd != cwd {
+	if entry.ID != "thread-1" || entry.Title != "Renamed thread" || entry.Cwd != cwd || entry.Draft {
 		t.Fatalf("rehydrated entry = %#v", entry)
+	}
+	if entry.ProviderInstanceID != "provider-1" || entry.ModelSelection == nil || entry.ModelSelection.Model != "model-1" {
+		t.Fatalf("rehydrated provider selection = %#v", entry)
+	}
+	if entry.CreatedAt.IsZero() || entry.UpdatedAt.Before(entry.CreatedAt) {
+		t.Fatalf("rehydrated timestamps = %#v", entry)
 	}
 	if entry.Session != nil {
 		t.Fatalf("rehydrated stub must be idle (no session binding), got %#v", entry.Session)
@@ -147,6 +130,9 @@ func TestServerRestartRehydratesThreadStubs(t *testing.T) {
 	snapshot, err := restarted.orchestration.ThreadSnapshot("thread-1")
 	if err != nil {
 		t.Fatalf("ThreadSnapshot after restart: %v", err)
+	}
+	if snapshot.Snapshot.Thread.Draft {
+		t.Fatalf("rehydrated thread = %#v, want promoted non-draft stub", snapshot.Snapshot.Thread)
 	}
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("rehydrated timeline = %#v, want empty", snapshot.Snapshot.Thread.Timeline)
@@ -342,12 +328,17 @@ func TestMetadataDBPathUsesDataDir(t *testing.T) {
 func TestServerRunsWithoutMetadataStore(t *testing.T) {
 	s := newServer(newLoggerFromEnv(), nil)
 	defer s.Close()
+	cwd := t.TempDir()
 	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
 		Type:     orchestration.CommandThreadCreate,
 		ThreadID: "thread-1",
 		Title:    "In-memory only",
-		Cwd:      t.TempDir(),
+		Cwd:      cwd,
 	}); err != nil {
 		t.Fatalf("thread.create without store: %v", err)
+	}
+	entry, ok := s.orchestration.ThreadListEntry("thread-1")
+	if !ok || entry.Title != "In-memory only" || entry.Cwd != cwd {
+		t.Fatalf("in-memory thread = %#v, %v; want visible thread", entry, ok)
 	}
 }
