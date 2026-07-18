@@ -27,6 +27,8 @@ const (
 
 	RPCMethodProviderStart         = "provider.start"
 	RPCMethodProviderList          = "provider.list"
+	RPCMethodACPRegistryList       = "acp.registry.list"
+	RPCMethodACPRegistryStart      = "acp.registry.start"
 	RPCMethodProviderAuthenticate  = "provider.authenticate"
 	RPCMethodProviderLogout        = "provider.logout"
 	RPCMethodProviderListSessions  = "provider.listSessions"
@@ -38,6 +40,11 @@ const (
 type providerStartRPCParams struct {
 	provider.InstanceSpec
 	Restart bool `json:"restart,omitempty"`
+}
+
+type acpRegistryStartParams struct {
+	RegistryID string `json:"registryId"`
+	Restart    bool   `json:"restart,omitempty"`
 }
 
 type providerAuthenticateParams struct {
@@ -370,6 +377,20 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		return h.server.StartProvider(ctx, params.InstanceSpec, params.Restart)
 	case RPCMethodProviderList:
 		return h.server.providerService.ListInstances(), nil
+	case RPCMethodACPRegistryList:
+		if h.server.acpRegistry == nil {
+			return nil, fmt.Errorf("ACP registry is unavailable")
+		}
+		return h.server.acpRegistry.list(ctx)
+	case RPCMethodACPRegistryStart:
+		var params acpRegistryStartParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.RegistryID == "" {
+			return nil, fmt.Errorf("%w: acp.registry.start requires registryId", jsonrpc2.ErrInvalidParams)
+		}
+		return h.server.StartACPRegistryProvider(ctx, params.RegistryID, params.Restart)
 	case RPCMethodProviderAuthenticate:
 		var params providerAuthenticateParams
 		if err := decodeRPCParams(req, &params); err != nil {

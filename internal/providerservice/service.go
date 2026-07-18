@@ -200,6 +200,24 @@ func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider
 	return err
 }
 
+// StartConfiguredInstance starts a persisted cold instance without replacing
+// its saved command with newer catalog metadata.
+func (s *Service) StartConfiguredInstance(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
+	if instanceID == "" {
+		return provider.InstanceInfo{}, fmt.Errorf("start configured provider requires instanceId")
+	}
+	s.mu.Lock()
+	_, configured := s.instanceSpecs[instanceID]
+	s.mu.Unlock()
+	if !configured {
+		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", instanceID)
+	}
+	if err := s.ensureInstanceStarted(ctx, instanceID); err != nil {
+		return provider.InstanceInfo{}, err
+	}
+	return s.Info(instanceID)
+}
+
 func (s *Service) persistThreadRoute(threadID string) {
 	if s.routeStore == nil || threadID == "" {
 		return
@@ -450,9 +468,16 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 		s.publish(runtimeEventEnvelope{event: event, instanceID: spec.InstanceID, generation: generation})
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Respect a caller's explicit acquisition deadline (registry-backed npm
+	// agents may need longer on first launch), while retaining a bounded default
+	// for internal lazy starts.
+	openCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		openCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	}
 	defer cancel()
-	instance, err := s.openInstance(ctx, cloneInstanceSpec(spec), emit)
+	instance, err := s.openInstance(openCtx, cloneInstanceSpec(spec), emit)
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}

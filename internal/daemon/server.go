@@ -38,6 +38,7 @@ type Server struct {
 	ctxCancel context.CancelFunc
 
 	providerService *providerservice.Service
+	acpRegistry     *acpRegistry
 	orchestration   *orchestration.Engine
 	ingestion       *orchestration.ProviderRuntimeIngestion
 	reactor         *orchestration.ProviderEventReactor
@@ -63,7 +64,7 @@ func NewServer() *Server {
 
 func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata}
+	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata, acpRegistry: newACPRegistry()}
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	if metadata != nil {
@@ -329,11 +330,31 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	return threadID, imported, nil
 }
 
+func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
+	if s.acpRegistry == nil {
+		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
+	}
+	spec, err := s.acpRegistry.instanceSpec(ctx, registryID)
+	if err != nil {
+		return provider.InstanceInfo{}, err
+	}
+	// A first npm acquisition can exceed the normal process-initialization
+	// timeout on a slow connection. Later starts use the persistent cache.
+	return s.startProvider(ctx, spec, restart, 2*time.Minute)
+}
+
 func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
+		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
+	}
+	return s.startProvider(ctx, spec, restart, 30*time.Second)
+}
+
+func (s *Server) startProvider(ctx context.Context, spec provider.InstanceSpec, restart bool, timeout time.Duration) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartInstance(ctx, spec, restart)

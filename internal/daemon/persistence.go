@@ -11,14 +11,21 @@ import (
 	"github.com/Aqothy/maiD/internal/store"
 )
 
+func maidDataDir() (string, error) {
+	if dir := os.Getenv("MAID_DATA_DIR"); dir != "" {
+		return dir, nil
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config dir: %w", err)
+	}
+	return filepath.Join(base, "maiD"), nil
+}
+
 func metadataDBPath() (string, error) {
-	dir := os.Getenv("MAID_DATA_DIR")
-	if dir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve user config dir: %w", err)
-		}
-		dir = filepath.Join(base, "maiD")
+	dir, err := maidDataDir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "maid.db"), nil
 }

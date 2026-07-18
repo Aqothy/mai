@@ -24,7 +24,8 @@ const DriverKind provider.DriverKind = "acp"
 
 // Config is the driver-owned provider.start configuration for an ACP process.
 type Config struct {
-	Command []string `json:"command"`
+	Command []string          `json:"command"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // OpenInstance decodes the ACP configuration, starts the agent, initializes the
@@ -50,6 +51,12 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	startedAt := time.Now()
 	cmd := exec.Command(config.Command[0], config.Command[1:]...)
 	cmd.Stderr = os.Stderr
+	if len(config.Env) > 0 {
+		cmd.Env = append([]string(nil), os.Environ()...)
+		for key, value := range config.Env {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
 	configureProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
