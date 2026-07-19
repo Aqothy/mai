@@ -244,9 +244,6 @@ func (c *rpcClient) writeOutbound() {
 func (c *rpcClient) subscribeThread(threadID orchestration.ThreadID) {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
-	if c.threadSubscriptions == nil {
-		c.threadSubscriptions = make(map[orchestration.ThreadID]struct{})
-	}
 	c.threadSubscriptions[threadID] = struct{}{}
 }
 

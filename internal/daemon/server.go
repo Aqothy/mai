@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -226,7 +227,6 @@ func (s *Server) doClose() error {
 	return err
 }
 
-// StartProvider brings a provider instance online or restarts it.
 // ImportProviderSession persists an explicitly selected provider session and
 // installs its empty, replay-pending thread stub in the live engine. Import is
 // serialized so duplicate requests always observe the first completed stub.
@@ -289,13 +289,9 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		if err != nil {
 			return "", false, err
 		}
-		foundMeta := false
-		for _, stored := range metas {
-			if stored.ThreadID == persistedThreadID {
-				meta = stored
-				foundMeta = true
-				break
-			}
+		metaIndex := slices.IndexFunc(metas, func(stored store.ThreadMeta) bool { return stored.ThreadID == persistedThreadID })
+		if metaIndex >= 0 {
+			meta = metas[metaIndex]
 		}
 		routes, err := s.metadataStore.LoadRoutes()
 		if err != nil {
@@ -303,7 +299,7 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		}
 		var foundRoute bool
 		route, foundRoute = routes[persistedThreadID]
-		if !foundMeta || !foundRoute {
+		if metaIndex < 0 || !foundRoute {
 			return "", false, fmt.Errorf("imported thread %q has incomplete persisted metadata", persistedThreadID)
 		}
 	}
