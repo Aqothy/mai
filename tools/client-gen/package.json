@@ -1,0 +1,11 @@
+{
+  "name": "maid-client-generator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "devDependencies": {
+    "quicktype": "25.0.0"
+  }
+}

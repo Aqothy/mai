@@ -1,0 +1,1461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maid.local/schema/client-api-v1.json",
+  "$ref": "#/$defs/contract",
+  "$defs": {
+    "ACPRegistryAgent": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "instanceId",
+        "name",
+        "package"
+      ],
+      "title": "ACPRegistryAgent"
+    },
+    "ACPRegistryStartParams": {
+      "properties": {
+        "registryId": {
+          "type": "string"
+        },
+        "restart": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "registryId"
+      ],
+      "title": "ACPRegistryStartParams"
+    },
+    "Approval": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "args": true,
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ApprovalOption"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "requestId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Approval"
+    },
+    "ApprovalEvent": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "requestType": {
+          "type": "string"
+        },
+        "args": true,
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ApprovalOption"
+          },
+          "type": "array"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "requestId"
+      ],
+      "title": "ApprovalEvent"
+    },
+    "ApprovalOption": {
+      "properties": {
+        "optionId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "raw": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "optionId",
+        "name"
+      ],
+      "title": "ApprovalOption"
+    },
+    "Attachment": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "raw": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "Attachment"
+    },
+    "Auth": {
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "methods": {
+          "items": {
+            "$ref": "#/$defs/AuthMethod"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "Auth"
+    },
+    "AuthMethod": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "title": "AuthMethod"
+    },
+    "Capabilities": {
+      "properties": {
+        "loadReplay": {
+          "type": "boolean"
+        },
+        "resume": {
+          "type": "boolean"
+        },
+        "auth": {
+          "type": "boolean"
+        },
+        "logout": {
+          "type": "boolean"
+        },
+        "promptContent": {
+          "$ref": "#/$defs/PromptContentCapabilities"
+        },
+        "modelSwitch": {
+          "type": "string"
+        },
+        "mcp": {
+          "$ref": "#/$defs/MCPCapabilities"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "Capabilities"
+    },
+    "Command": {
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "message": {
+          "$ref": "#/$defs/CommandMessage"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        },
+        "value": true,
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "title": "Command"
+    },
+    "CommandMessage": {
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "raw": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "title": "CommandMessage"
+    },
+    "ConfigChoice": {
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "title": "ConfigChoice"
+    },
+    "ConfigOption": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ConfigChoice"
+          },
+          "type": "array"
+        },
+        "currentValue": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "ConfigOption"
+    },
+    "DispatchResult": {
+      "properties": {
+        "sequence": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sequence"
+      ],
+      "title": "DispatchResult"
+    },
+    "EmptyParams": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "title": "EmptyParams"
+    },
+    "Event": {
+      "properties": {
+        "sequence": {
+          "type": "integer"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/EventMetadata"
+        },
+        "payload": {
+          "$ref": "#/$defs/EventPayload"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sequence",
+        "eventId",
+        "type",
+        "occurredAt",
+        "payload"
+      ],
+      "title": "Event"
+    },
+    "EventMetadata": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "EventMetadata"
+    },
+    "EventPayload": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionBinding"
+        },
+        "sessionCleared": {
+          "type": "boolean"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        },
+        "value": true,
+        "item": {
+          "$ref": "#/$defs/Item"
+        },
+        "plan": {
+          "$ref": "#/$defs/Plan"
+        },
+        "approval": {
+          "$ref": "#/$defs/ApprovalEvent"
+        },
+        "configOptions": {
+          "items": {
+            "$ref": "#/$defs/ConfigOption"
+          },
+          "type": "array"
+        },
+        "slashCommands": {
+          "items": {
+            "$ref": "#/$defs/SlashCommand"
+          },
+          "type": "array"
+        },
+        "tokenUsage": {
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "EventPayload"
+    },
+    "InstanceInfo": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "initializedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "auth": {
+          "$ref": "#/$defs/Auth"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId",
+        "name",
+        "driver",
+        "status",
+        "startedAt",
+        "initializedAt",
+        "capabilities",
+        "auth"
+      ],
+      "title": "InstanceInfo"
+    },
+    "Item": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "payload": true,
+        "textDelta": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Item"
+    },
+    "MCPCapabilities": {
+      "properties": {
+        "http": {
+          "type": "boolean"
+        },
+        "sse": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "MCPCapabilities"
+    },
+    "Message": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "role",
+        "text",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Message"
+    },
+    "ModelSelection": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "options": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ModelSelection"
+    },
+    "Plan": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/PlanEntry"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "entries",
+        "updatedAt"
+      ],
+      "title": "Plan"
+    },
+    "PlanEntry": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "title": "PlanEntry"
+    },
+    "PromptContentCapabilities": {
+      "properties": {
+        "image": {
+          "type": "boolean"
+        },
+        "audio": {
+          "type": "boolean"
+        },
+        "embeddedContext": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "PromptContentCapabilities"
+    },
+    "ProviderAuthenticateParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "methodId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId",
+        "methodId"
+      ],
+      "title": "ProviderAuthenticateParams"
+    },
+    "ProviderImportSessionParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionSummary"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId",
+        "session"
+      ],
+      "title": "ProviderImportSessionParams"
+    },
+    "ProviderImportSessionResult": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "imported": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId",
+        "imported"
+      ],
+      "title": "ProviderImportSessionResult"
+    },
+    "ProviderInstanceParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId"
+      ],
+      "title": "ProviderInstanceParams"
+    },
+    "ProviderListSessionsParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId"
+      ],
+      "title": "ProviderListSessionsParams"
+    },
+    "ProviderSessionParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "title": "ProviderSessionParams"
+    },
+    "ProviderStartParams": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "config": true,
+        "restart": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ProviderStartParams"
+    },
+    "ReplayEventsInput": {
+      "properties": {
+        "fromSequenceExclusive": {
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "fromSequenceExclusive"
+      ],
+      "title": "ReplayEventsInput"
+    },
+    "SessionBinding": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "providerName": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "activeTurnId": {
+          "type": "string"
+        },
+        "stopRequested": {
+          "type": "boolean"
+        },
+        "configOptions": {
+          "items": {
+            "$ref": "#/$defs/ConfigOption"
+          },
+          "type": "array"
+        },
+        "slashCommands": {
+          "items": {
+            "$ref": "#/$defs/SlashCommand"
+          },
+          "type": "array"
+        },
+        "tokenUsage": {
+          "$ref": "#/$defs/TokenUsage"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId",
+        "providerInstanceId",
+        "status",
+        "updatedAt"
+      ],
+      "title": "SessionBinding"
+    },
+    "SessionSummary": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sessionId"
+      ],
+      "title": "SessionSummary"
+    },
+    "SlashCommand": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "hasInput": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "title": "SlashCommand"
+    },
+    "SubscribeThreadInput": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId"
+      ],
+      "title": "SubscribeThreadInput"
+    },
+    "Thread": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionBinding"
+        },
+        "latestTurn": {
+          "$ref": "#/$defs/Turn"
+        },
+        "timeline": {
+          "$ref": "#/$defs/Timeline"
+        },
+        "plan": {
+          "$ref": "#/$defs/Plan"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "draft",
+        "title",
+        "timeline",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Thread"
+    },
+    "ThreadDetailSnapshot": {
+      "properties": {
+        "snapshotSequence": {
+          "type": "integer"
+        },
+        "thread": {
+          "$ref": "#/$defs/Thread"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "snapshotSequence",
+        "thread"
+      ],
+      "title": "ThreadDetailSnapshot"
+    },
+    "ThreadListEntry": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "latestTurn": {
+          "$ref": "#/$defs/Turn"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionBinding"
+        },
+        "hasPendingApprovals": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "draft",
+        "title",
+        "createdAt",
+        "updatedAt",
+        "hasPendingApprovals"
+      ],
+      "title": "ThreadListEntry"
+    },
+    "ThreadListSnapshot": {
+      "properties": {
+        "snapshotSequence": {
+          "type": "integer"
+        },
+        "threads": {
+          "items": {
+            "$ref": "#/$defs/ThreadListEntry"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "snapshotSequence",
+        "threads",
+        "updatedAt"
+      ],
+      "title": "ThreadListSnapshot"
+    },
+    "ThreadListStreamItem": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/ThreadListSnapshot"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "thread": {
+          "$ref": "#/$defs/ThreadListEntry"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "ThreadListStreamItem"
+    },
+    "ThreadStreamItem": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/ThreadDetailSnapshot"
+        },
+        "event": {
+          "$ref": "#/$defs/Event"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "ThreadStreamItem"
+    },
+    "Timeline": {
+      "items": {
+        "$ref": "#/$defs/TimelineEntry"
+      },
+      "type": "array",
+      "title": "Timeline"
+    },
+    "TimelineEntry": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "item": {
+          "$ref": "#/$defs/Item"
+        },
+        "approval": {
+          "$ref": "#/$defs/Approval"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "TimelineEntry"
+    },
+    "TokenUsage": {
+      "properties": {
+        "usedTokens": {
+          "type": "integer"
+        },
+        "maxTokens": {
+          "type": "integer"
+        },
+        "cost": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "usedTokens"
+      ],
+      "title": "TokenUsage"
+    },
+    "Turn": {
+      "properties": {
+        "turnId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "interruptRequested": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "turnId",
+        "state",
+        "requestedAt"
+      ],
+      "title": "Turn"
+    },
+    "contract": {
+      "properties": {
+        "emptyParams": {
+          "$ref": "#/$defs/EmptyParams"
+        },
+        "command": {
+          "$ref": "#/$defs/Command"
+        },
+        "commandMessage": {
+          "$ref": "#/$defs/CommandMessage"
+        },
+        "dispatchResult": {
+          "$ref": "#/$defs/DispatchResult"
+        },
+        "replayEventsParams": {
+          "$ref": "#/$defs/ReplayEventsInput"
+        },
+        "subscribeThreadParams": {
+          "$ref": "#/$defs/SubscribeThreadInput"
+        },
+        "threadStreamItem": {
+          "$ref": "#/$defs/ThreadStreamItem"
+        },
+        "threadListStreamItem": {
+          "$ref": "#/$defs/ThreadListStreamItem"
+        },
+        "threadDetailSnapshot": {
+          "$ref": "#/$defs/ThreadDetailSnapshot"
+        },
+        "threadListSnapshot": {
+          "$ref": "#/$defs/ThreadListSnapshot"
+        },
+        "threadListEntry": {
+          "$ref": "#/$defs/ThreadListEntry"
+        },
+        "event": {
+          "$ref": "#/$defs/Event"
+        },
+        "eventMetadata": {
+          "$ref": "#/$defs/EventMetadata"
+        },
+        "eventPayload": {
+          "$ref": "#/$defs/EventPayload"
+        },
+        "approvalEvent": {
+          "$ref": "#/$defs/ApprovalEvent"
+        },
+        "thread": {
+          "$ref": "#/$defs/Thread"
+        },
+        "turn": {
+          "$ref": "#/$defs/Turn"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "approval": {
+          "$ref": "#/$defs/Approval"
+        },
+        "sessionBinding": {
+          "$ref": "#/$defs/SessionBinding"
+        },
+        "item": {
+          "$ref": "#/$defs/Item"
+        },
+        "timelineEntry": {
+          "$ref": "#/$defs/TimelineEntry"
+        },
+        "plan": {
+          "$ref": "#/$defs/Plan"
+        },
+        "instanceInfo": {
+          "$ref": "#/$defs/InstanceInfo"
+        },
+        "sessionSummary": {
+          "$ref": "#/$defs/SessionSummary"
+        },
+        "attachment": {
+          "$ref": "#/$defs/Attachment"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "configOption": {
+          "$ref": "#/$defs/ConfigOption"
+        },
+        "configChoice": {
+          "$ref": "#/$defs/ConfigChoice"
+        },
+        "slashCommand": {
+          "$ref": "#/$defs/SlashCommand"
+        },
+        "tokenUsage": {
+          "$ref": "#/$defs/TokenUsage"
+        },
+        "approvalOption": {
+          "$ref": "#/$defs/ApprovalOption"
+        },
+        "providerStartParams": {
+          "$ref": "#/$defs/ProviderStartParams"
+        },
+        "acpRegistryStartParams": {
+          "$ref": "#/$defs/ACPRegistryStartParams"
+        },
+        "providerAuthenticateParams": {
+          "$ref": "#/$defs/ProviderAuthenticateParams"
+        },
+        "providerInstanceParams": {
+          "$ref": "#/$defs/ProviderInstanceParams"
+        },
+        "providerListSessionsParams": {
+          "$ref": "#/$defs/ProviderListSessionsParams"
+        },
+        "providerSessionParams": {
+          "$ref": "#/$defs/ProviderSessionParams"
+        },
+        "providerImportSessionParams": {
+          "$ref": "#/$defs/ProviderImportSessionParams"
+        },
+        "providerImportSessionResult": {
+          "$ref": "#/$defs/ProviderImportSessionResult"
+        },
+        "acpRegistryAgent": {
+          "$ref": "#/$defs/ACPRegistryAgent"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "emptyParams",
+        "command",
+        "commandMessage",
+        "dispatchResult",
+        "replayEventsParams",
+        "subscribeThreadParams",
+        "threadStreamItem",
+        "threadListStreamItem",
+        "threadDetailSnapshot",
+        "threadListSnapshot",
+        "threadListEntry",
+        "event",
+        "eventMetadata",
+        "eventPayload",
+        "approvalEvent",
+        "thread",
+        "turn",
+        "message",
+        "approval",
+        "sessionBinding",
+        "item",
+        "timelineEntry",
+        "plan",
+        "instanceInfo",
+        "sessionSummary",
+        "attachment",
+        "modelSelection",
+        "configOption",
+        "configChoice",
+        "slashCommand",
+        "tokenUsage",
+        "approvalOption",
+        "providerStartParams",
+        "acpRegistryStartParams",
+        "providerAuthenticateParams",
+        "providerInstanceParams",
+        "providerListSessionsParams",
+        "providerSessionParams",
+        "providerImportSessionParams",
+        "providerImportSessionResult",
+        "acpRegistryAgent"
+      ],
+      "title": "contract"
+    }
+  },
+  "title": "maiD Client API v1",
+  "description": "Client-visible JSON-RPC parameters, results, notifications, and shared models."
+}

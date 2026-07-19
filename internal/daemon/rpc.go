@@ -13,68 +13,40 @@ import (
 	"time"
 
 	"github.com/Aqothy/jsonrpc2"
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/coder/websocket"
 )
 
 const (
-	RPCMethodOrchestrationDispatchCommand     = "orchestration.dispatchCommand"
-	RPCMethodOrchestrationReplayEvents        = "orchestration.replayEvents"
-	RPCMethodOrchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
-	RPCMethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
-	RPCMethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
+	// Local handler/test names point at the canonical api/wire registry.
+	RPCMethodOrchestrationDispatchCommand     = wire.MethodOrchestrationDispatchCommand
+	RPCMethodOrchestrationReplayEvents        = wire.MethodOrchestrationReplayEvents
+	RPCMethodOrchestrationSubscribeThreadList = wire.MethodOrchestrationSubscribeThreadList
+	RPCMethodOrchestrationSubscribeThread     = wire.MethodOrchestrationSubscribeThread
+	RPCMethodOrchestrationUnsubscribeThread   = wire.MethodOrchestrationUnsubscribeThread
 
-	RPCMethodProviderStart         = "provider.start"
-	RPCMethodProviderList          = "provider.list"
-	RPCMethodACPRegistryList       = "acp.registry.list"
-	RPCMethodACPRegistryStart      = "acp.registry.start"
-	RPCMethodProviderAuthenticate  = "provider.authenticate"
-	RPCMethodProviderLogout        = "provider.logout"
-	RPCMethodProviderListSessions  = "provider.listSessions"
-	RPCMethodProviderImportSession = "provider.importSession"
-	RPCMethodProviderDeleteSession = "provider.deleteSession"
-	RPCMethodProviderCloseSession  = "provider.closeSession"
+	RPCMethodProviderStart         = wire.MethodProviderStart
+	RPCMethodProviderList          = wire.MethodProviderList
+	RPCMethodACPRegistryList       = wire.MethodACPRegistryList
+	RPCMethodACPRegistryStart      = wire.MethodACPRegistryStart
+	RPCMethodProviderAuthenticate  = wire.MethodProviderAuthenticate
+	RPCMethodProviderLogout        = wire.MethodProviderLogout
+	RPCMethodProviderListSessions  = wire.MethodProviderListSessions
+	RPCMethodProviderImportSession = wire.MethodProviderImportSession
+	RPCMethodProviderDeleteSession = wire.MethodProviderDeleteSession
+	RPCMethodProviderCloseSession  = wire.MethodProviderCloseSession
 )
 
-type providerStartRPCParams struct {
-	provider.InstanceSpec
-	Restart bool `json:"restart,omitempty"`
-}
-
-type acpRegistryStartParams struct {
-	RegistryID string `json:"registryId"`
-	Restart    bool   `json:"restart,omitempty"`
-}
-
-type providerAuthenticateParams struct {
-	InstanceID provider.InstanceID `json:"instanceId"`
-	MethodID   string              `json:"methodId"`
-}
-
-type providerInstanceParams struct {
-	InstanceID provider.InstanceID `json:"instanceId"`
-}
-
-type providerListSessionsParams struct {
-	InstanceID provider.InstanceID `json:"instanceId"`
-	Cwd        string              `json:"cwd,omitempty"`
-}
-
-type providerSessionParams struct {
-	InstanceID provider.InstanceID `json:"instanceId"`
-	SessionID  string              `json:"sessionId"`
-}
-
-type providerImportSessionParams struct {
-	InstanceID provider.InstanceID     `json:"instanceId"`
-	Session    provider.SessionSummary `json:"session"`
-}
-
-type providerImportSessionResult struct {
-	ThreadID orchestration.ThreadID `json:"threadId"`
-	Imported bool                   `json:"imported"`
-}
+type providerStartRPCParams = wire.ProviderStartParams
+type acpRegistryStartParams = wire.ACPRegistryStartParams
+type providerAuthenticateParams = wire.ProviderAuthenticateParams
+type providerInstanceParams = wire.ProviderInstanceParams
+type providerListSessionsParams = wire.ProviderListSessionsParams
+type providerSessionParams = wire.ProviderSessionParams
+type providerImportSessionParams = wire.ProviderImportSessionParams
+type providerImportSessionResult = wire.ProviderImportSessionResult
 
 var nextRPCClientID atomic.Uint64
 

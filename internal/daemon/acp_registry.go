@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -28,15 +29,8 @@ var (
 )
 
 type acpRegistryAgent struct {
-	ID          string              `json:"id"`
-	InstanceID  provider.InstanceID `json:"instanceId"`
-	Name        string              `json:"name"`
-	Version     string              `json:"version,omitempty"`
-	Description string              `json:"description,omitempty"`
-	Icon        string              `json:"icon,omitempty"`
-	Package     string              `json:"package"`
-	Args        []string            `json:"args,omitempty"`
-	Env         map[string]string   `json:"-"`
+	wire.ACPRegistryAgent
+	Env map[string]string `json:"-"`
 }
 
 type acpRegistryIndex struct {
@@ -183,9 +177,12 @@ func parseACPRegistry(raw []byte) ([]acpRegistryAgent, error) {
 			name = id
 		}
 		agents = append(agents, acpRegistryAgent{
-			ID: id, InstanceID: provider.InstanceID("registry-" + id), Name: name,
-			Version: entry.Version, Description: entry.Description, Icon: entry.Icon,
-			Package: npx.Package, Args: append([]string(nil), npx.Args...), Env: validRegistryEnv(npx.Env),
+			ACPRegistryAgent: wire.ACPRegistryAgent{
+				ID: id, InstanceID: provider.InstanceID("registry-" + id), Name: name,
+				Version: entry.Version, Description: entry.Description, Icon: entry.Icon,
+				Package: npx.Package, Args: append([]string(nil), npx.Args...),
+			},
+			Env: validRegistryEnv(npx.Env),
 		})
 	}
 	sort.Slice(agents, func(i, j int) bool { return strings.ToLower(agents[i].Name) < strings.ToLower(agents[j].Name) })

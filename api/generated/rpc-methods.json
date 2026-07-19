@@ -1,0 +1,93 @@
+{
+  "methods": [
+    {
+      "name": "orchestration.dispatchCommand",
+      "params": "Command",
+      "result": "DispatchResult"
+    },
+    {
+      "name": "orchestration.replayEvents",
+      "params": "ReplayEventsInput",
+      "result": "Event",
+      "resultArray": true
+    },
+    {
+      "name": "orchestration.subscribeThreadList",
+      "params": "EmptyParams",
+      "result": "ThreadListStreamItem"
+    },
+    {
+      "name": "orchestration.subscribeThread",
+      "params": "SubscribeThreadInput",
+      "result": "ThreadStreamItem"
+    },
+    {
+      "name": "orchestration.unsubscribeThread",
+      "params": "SubscribeThreadInput",
+      "resultNull": true
+    },
+    {
+      "name": "provider.start",
+      "params": "ProviderStartParams",
+      "result": "InstanceInfo"
+    },
+    {
+      "name": "provider.list",
+      "params": "EmptyParams",
+      "result": "InstanceInfo",
+      "resultArray": true
+    },
+    {
+      "name": "acp.registry.list",
+      "params": "EmptyParams",
+      "result": "ACPRegistryAgent",
+      "resultArray": true
+    },
+    {
+      "name": "acp.registry.start",
+      "params": "ACPRegistryStartParams",
+      "result": "InstanceInfo"
+    },
+    {
+      "name": "provider.authenticate",
+      "params": "ProviderAuthenticateParams",
+      "result": "InstanceInfo"
+    },
+    {
+      "name": "provider.logout",
+      "params": "ProviderInstanceParams",
+      "result": "InstanceInfo"
+    },
+    {
+      "name": "provider.listSessions",
+      "params": "ProviderListSessionsParams",
+      "result": "SessionSummary",
+      "resultArray": true
+    },
+    {
+      "name": "provider.importSession",
+      "params": "ProviderImportSessionParams",
+      "result": "ProviderImportSessionResult"
+    },
+    {
+      "name": "provider.deleteSession",
+      "params": "ProviderSessionParams",
+      "resultNull": true
+    },
+    {
+      "name": "provider.closeSession",
+      "params": "ProviderSessionParams",
+      "resultNull": true
+    }
+  ],
+  "notifications": [
+    {
+      "name": "orchestration.subscribeThreadList",
+      "payload": "ThreadListStreamItem"
+    },
+    {
+      "name": "orchestration.subscribeThread",
+      "payload": "ThreadStreamItem"
+    }
+  ]
+}
