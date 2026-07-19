@@ -50,6 +50,16 @@ swiftSource =
 
 ` +
   swiftSource.slice(decoderIndex);
+
+const codingKeyClass = "class JSONCodingKey: CodingKey {";
+if (!swiftSource.includes(codingKeyClass)) {
+  throw new Error("quicktype JSONCodingKey helper was not found");
+}
+swiftSource = swiftSource.replace(
+  codingKeyClass,
+  "final class JSONCodingKey: CodingKey {",
+);
+
 await writeFile(swiftModelsPath, swiftSource);
 
 const registry = JSON.parse(await readFile(methodsPath, "utf8"));
