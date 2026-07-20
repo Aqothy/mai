@@ -1,9 +1,11 @@
 import SwiftUI
 
 struct DesktopAppContainer: View {
+    let store: ThreadStore
+
     var body: some View {
         NavigationSplitView {
-            DesktopSidebarView(threads: [])
+            DesktopSidebarView(store: store)
                 .navigationSplitViewColumnWidth(260)
         } detail: {
         }
@@ -13,6 +15,6 @@ struct DesktopAppContainer: View {
 
 #if DEBUG
 #Preview("Desktop App") {
-    DesktopAppContainer()
+    DesktopAppContainer(store: PreviewData.threadStore())
 }
 #endif

@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct AppRootView: View {
+    let store: ThreadStore
+
     var body: some View {
         #if os(iOS)
-        IOSAppContainer()
+        IOSAppContainer(store: store)
         #else
-        DesktopAppContainer()
+        DesktopAppContainer(store: store)
         #endif
     }
 }

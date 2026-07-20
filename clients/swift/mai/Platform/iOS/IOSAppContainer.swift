@@ -2,13 +2,15 @@
 import SwiftUI
 
 struct IOSAppContainer: View {
+    let store: ThreadStore
+
     @State private var isSidebarPresented = false
 
     var body: some View {
         SlideOutMenu(isOpen: $isSidebarPresented) { _ in
             NavigationStack {
                 IOSSidebarView(
-                    threads: [],
+                    store: store,
                     isPresented: $isSidebarPresented
                 )
             }
@@ -33,7 +35,7 @@ struct IOSAppContainer: View {
 
 #if DEBUG
 #Preview("iOS App") {
-    IOSAppContainer()
+    IOSAppContainer(store: PreviewData.threadStore())
 }
 #endif
 #endif

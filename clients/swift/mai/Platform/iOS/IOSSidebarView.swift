@@ -2,14 +2,15 @@
 import SwiftUI
 
 struct IOSSidebarView: View {
-    let threads: [ThreadListEntry]
+    let store: ThreadStore
     @Binding var isPresented: Bool
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(threads, id: \.id) { thread in
+                ForEach(store.threads, id: \.id) { thread in
                     Button {
+                        store.selectThread(thread.id)
                         isPresented = false
                     } label: {
                         ThreadRow(thread: thread)
@@ -30,7 +31,7 @@ struct IOSSidebarView: View {
 
     NavigationStack {
         IOSSidebarView(
-            threads: PreviewData.threads,
+            store: PreviewData.threadStore(),
             isPresented: $isPresented
         )
     }

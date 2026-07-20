@@ -69,5 +69,12 @@ enum PreviewData {
             updatedAt: .now.addingTimeInterval(-86_400)
         )
     ]
+
+    static func threadStore() -> ThreadStore {
+        ThreadStore(
+            previewThreads: threads,
+            selectedThread: selectedThread
+        )
+    }
 }
 #endif
