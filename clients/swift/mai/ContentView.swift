@@ -4,18 +4,7 @@ import SwiftUI
 struct MaiApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView()
         }
     }
-}
-
-struct ContentView: View {
-    var body: some View {
-        Text("Hello, world!")
-            .padding()
-    }
-}
-
-#Preview {
-    ContentView()
 }
