@@ -16,12 +16,21 @@ struct ChatView: View {
                     Button("Retry", action: retry)
                 }
             } else if let thread {
-                ContentUnavailableView(
-                    thread.title,
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text("The chat timeline is the next feature to implement.")
-                )
-                .navigationTitle(thread.title)
+                VStack(alignment: .leading, spacing: 24) {
+                    Text(thread.title)
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.primary)
+                        .accessibilityHeading(.h1)
+
+                    ContentUnavailableView(
+                        "No Messages Yet",
+                        systemImage: "bubble.left.and.bubble.right",
+                        description: Text("The chat timeline is the next feature to implement.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding()
             } else {
                 ContentUnavailableView(
                     "No Thread Selected",
