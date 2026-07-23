@@ -3,6 +3,8 @@ import Observation
 
 @Observable
 final class ThreadStore {
+    static let maximumReconnectAttempts = 5
+
     enum ConnectionState {
         case disconnected
         case connecting
@@ -19,6 +21,18 @@ final class ThreadStore {
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var errorMessage: String?
     private(set) var selectedThreadLoadErrorMessage: String?
+    private(set) var reconnectAttempt = 0
+    private(set) var nextReconnectAt: Date?
+
+    var isReconnectScheduled: Bool {
+        nextReconnectAt != nil
+    }
+
+    var automaticReconnectsExhausted: Bool {
+        connectionState == .disconnected
+            && reconnectAttempt >= Self.maximumReconnectAttempts
+            && !isReconnectScheduled
+    }
 
     var selectedThread: Thread? {
         guard let selectedThreadID else { return nil }
@@ -94,11 +108,14 @@ final class ThreadStore {
                 connectionState = .disconnected
                 isStarted = false
                 rpc.disconnect()
+                scheduleReconnect()
                 return
             }
             connectionState = .connected
             reconnectTask?.cancel()
             reconnectTask = nil
+            reconnectAttempt = 0
+            nextReconnectAt = nil
             await restoreSubscriptions()
         } catch {
             isLoadingThreadListSnapshot = false
@@ -107,6 +124,7 @@ final class ThreadStore {
             errorMessage = error.localizedDescription
             isStarted = false
             rpc.disconnect()
+            scheduleReconnect()
         }
     }
 
@@ -120,6 +138,8 @@ final class ThreadStore {
 
         reconnectTask?.cancel()
         reconnectTask = nil
+        reconnectAttempt = 0
+        nextReconnectAt = nil
         Task {
             await start()
         }
@@ -213,15 +233,26 @@ final class ThreadStore {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
+        guard reconnectAttempt < Self.maximumReconnectAttempts else {
+            nextReconnectAt = nil
+            return
+        }
+
+        let attempt = reconnectAttempt + 1
+        let baseDelay = min(pow(2, Double(reconnectAttempt)), 30)
+        let delay = min(baseDelay * Double.random(in: 0.8...1.2), 30)
+        nextReconnectAt = Date().addingTimeInterval(delay)
 
         reconnectTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(2))
+                try await Task.sleep(for: .seconds(delay))
             } catch {
                 return
             }
             guard let self else { return }
             reconnectTask = nil
+            nextReconnectAt = nil
+            reconnectAttempt = attempt
             await start()
         }
     }

@@ -6,12 +6,13 @@ struct ConnectionStatusView: View {
     var body: some View {
         if store.connectionState != .connected, !store.threads.isEmpty {
             HStack {
-                if store.connectionState == .connecting {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Reconnecting…")
-                } else {
-                    Label("Disconnected", systemImage: "network.slash")
+                if store.connectionState == .connecting || store.nextReconnectAt != nil {
+                    ReconnectAttemptStatusView(store: store, showsIcon: true)
+                } else if store.automaticReconnectsExhausted {
+                    Label(
+                        "All \(ThreadStore.maximumReconnectAttempts) automatic retries failed",
+                        systemImage: "network.slash"
+                    )
                     Spacer()
                     Button("Retry", action: store.retry)
                 }
