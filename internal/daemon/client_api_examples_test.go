@@ -160,9 +160,6 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 			event.Payload.Session != nil && event.Payload.Session.Status == orchestration.SessionStatusReady
 	})
 
-	c.section("orchestration.replayEvents (per-thread, paged)")
-	c.mustCall("orchestration.replayEvents", map[string]any{"threadId": threadID, "fromSequenceExclusive": 0, "limit": 3})
-
 	c.section("orchestration.unsubscribeThread")
 	c.mustCall("orchestration.unsubscribeThread", map[string]any{"threadId": approvalThreadID})
 

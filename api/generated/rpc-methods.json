@@ -6,12 +6,6 @@
       "result": "DispatchResult"
     },
     {
-      "name": "orchestration.replayEvents",
-      "params": "ReplayEventsInput",
-      "result": "Event",
-      "resultArray": true
-    },
-    {
       "name": "orchestration.subscribeThreadList",
       "params": "EmptyParams",
       "result": "ThreadListStreamItem"

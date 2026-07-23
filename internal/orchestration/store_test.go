@@ -5,6 +5,30 @@ import (
 	"time"
 )
 
+func TestNormalizeEventCompletesItemTimestamps(t *testing.T) {
+	occurredAt := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+	original := &Item{ID: "item-1"}
+
+	event := normalizeEvent(Event{
+		Type:       EventThreadItemUpserted,
+		OccurredAt: occurredAt,
+		Payload:    EventPayload{Item: original},
+	})
+
+	if event.Payload.Item == nil {
+		t.Fatal("normalized event item is nil")
+	}
+	if !event.Payload.Item.CreatedAt.Equal(occurredAt) {
+		t.Fatalf("item createdAt = %v, want %v", event.Payload.Item.CreatedAt, occurredAt)
+	}
+	if !event.Payload.Item.UpdatedAt.Equal(occurredAt) {
+		t.Fatalf("item updatedAt = %v, want %v", event.Payload.Item.UpdatedAt, occurredAt)
+	}
+	if !original.CreatedAt.IsZero() || !original.UpdatedAt.IsZero() {
+		t.Fatalf("normalization mutated caller-owned item: %#v", original)
+	}
+}
+
 func TestProjectionDerivesStaleSessionClearingFromProviderSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

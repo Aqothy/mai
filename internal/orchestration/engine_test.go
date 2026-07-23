@@ -155,6 +155,7 @@ func TestEngineRejectsCwdMetaUpdateWhileProviderSessionBound(t *testing.T) {
 func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-create-idempotent")
 	first, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-idempotent-1", ThreadID: threadID, Title: "Original", ProviderInstanceID: "codex"})
 	if err != nil {
@@ -170,9 +171,9 @@ func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	if second.Sequence != first.Sequence {
 		t.Fatalf("duplicate create sequence = %d, want original create sequence %d", second.Sequence, first.Sequence)
 	}
-	replay := engine.ReplayEvents(ReplayEventsInput{})
-	if len(replay) != 2 {
-		t.Fatalf("replay events = %#v, want original create plus metadata update only", replay)
+	recorded := events.matching("", 0)
+	if len(recorded) != 2 {
+		t.Fatalf("events = %#v, want original create plus metadata update only", recorded)
 	}
 	thread, ok := engine.Thread(threadID)
 	if !ok || thread.Title != "Touched" || thread.ProviderInstanceID != "codex" {
@@ -311,12 +312,13 @@ func TestEngineRejectsProviderModelMetaUpdateDuringActiveTurn(t *testing.T) {
 func TestEngineRejectsNonCreateCommandForMissingThread(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-missing-config", ThreadID: "missing-thread", OptionID: "mode", Value: "agent"})
 	if err == nil {
 		t.Fatal("config-option set for missing thread err = nil, want rejection")
 	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 0 {
-		t.Fatalf("replay events = %#v, want no ghost thread events", replay)
+	if recorded := events.matching("", 0); len(recorded) != 0 {
+		t.Fatalf("events = %#v, want no ghost thread events", recorded)
 	}
 }
 
@@ -370,6 +372,7 @@ func TestEngineRequiresActiveSessionForConfigOptionSet(t *testing.T) {
 func TestEngineRejectsInvalidApprovalDecision(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-invalid-approval-decision")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-validation", ThreadID: threadID, Title: "Thread"}); err != nil {
 		t.Fatalf("thread.create: %v", err)
@@ -377,8 +380,8 @@ func TestEngineRejectsInvalidApprovalDecision(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-invalid-approval-decision", ThreadID: threadID, RequestID: "approval-1", Decision: "approve"}); err == nil {
 		t.Fatal("thread.approval.respond invalid decision err = nil, want rejection")
 	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 1 {
-		t.Fatalf("events after invalid approval decision = %#v, want only create", replay)
+	if recorded := events.matching("", 0); len(recorded) != 1 {
+		t.Fatalf("events after invalid approval decision = %#v, want only create", recorded)
 	}
 }
 
@@ -407,6 +410,7 @@ func TestApprovalResponseProjectionPreservesExplicitOptionID(t *testing.T) {
 func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-approval-option-validation")
 	requestID := ApprovalID("approval-1")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-option-validation", ThreadID: threadID, Title: "Thread"}); err != nil {
@@ -423,8 +427,8 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-bad-approval-option", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "allow-typo"}); err == nil {
 		t.Fatal("thread.approval.respond unoffered optionId err = nil, want rejection")
 	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 2 {
-		t.Fatalf("events after rejected approval responses = %#v, want only create/open", replay)
+	if recorded := events.matching("", 0); len(recorded) != 2 {
+		t.Fatalf("events after rejected approval responses = %#v, want only create/open", recorded)
 	}
 	thread, ok := engine.Thread(threadID)
 	if !ok || len(thread.Timeline.Approvals()) != 1 || thread.Timeline.Approvals()[0].Decision != "" || thread.Timeline.Approvals()[0].OptionID != "" {
@@ -437,8 +441,8 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-stale-approval-response", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
 		t.Fatal("thread.approval.respond resolved request err = nil, want rejection")
 	}
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 3 {
-		t.Fatalf("events after stale approval response = %#v, want create/open/resolve", replay)
+	if recorded := events.matching("", 0); len(recorded) != 3 {
+		t.Fatalf("events after stale approval response = %#v, want create/open/resolve", recorded)
 	}
 }
 
@@ -529,7 +533,7 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 		t.Fatalf("timeline updates were not applied in place: %#v", thread.Timeline)
 	}
 
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("thread snapshot: %v", err)
 	}
@@ -546,6 +550,7 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 func TestTurnSettleSurfacesProviderStopReason(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-stop-reason")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-stop-reason", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "prov-a"}); err != nil {
 		t.Fatalf("thread.create: %v", err)
@@ -573,15 +578,16 @@ func TestTurnSettleSurfacesProviderStopReason(t *testing.T) {
 	if thread.LatestTurn.StopReason != "max_tokens" {
 		t.Fatalf("latest turn stopReason = %q, want %q", thread.LatestTurn.StopReason, "max_tokens")
 	}
-	events := engine.ReplayEvents(ReplayEventsInput{FromSequenceExclusive: result.Sequence - 1, ThreadID: threadID})
-	if len(events) != 1 || events[0].Payload.StopReason != "max_tokens" {
-		t.Fatalf("settle event = %#v, want payload stopReason %q", events, "max_tokens")
+	recorded := events.matching(threadID, result.Sequence-1)
+	if len(recorded) != 1 || recorded[0].Payload.StopReason != "max_tokens" {
+		t.Fatalf("settle event = %#v, want payload stopReason %q", recorded, "max_tokens")
 	}
 }
 
 func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-completion-before-stop")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-completion-before-stop", ThreadID: threadID, ProviderInstanceID: "prov-a"}); err != nil {
 		t.Fatalf("thread.create: %v", err)
@@ -606,9 +612,9 @@ func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	if thread.LatestTurn == nil || thread.LatestTurn.StopReason != "end_turn" {
 		t.Fatalf("latest turn = %#v, want completed turn reason preserved", thread.LatestTurn)
 	}
-	events := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID, FromSequenceExclusive: result.Sequence - 1})
-	if len(events) != 1 || events[0].Payload.StopReason != "" {
-		t.Fatalf("stopped event = %#v, want no stale cancelled reason", events)
+	recorded := events.matching(threadID, result.Sequence-1)
+	if len(recorded) != 1 || recorded[0].Payload.StopReason != "" {
+		t.Fatalf("stopped event = %#v, want no stale cancelled reason", recorded)
 	}
 }
 
@@ -695,7 +701,7 @@ func TestEngineAcceptsAttachmentOnlyTurnStart(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-attachment-only", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-image", Attachments: []provider.Attachment{{Kind: "image", Data: "base64", MimeType: "image/png"}}}, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("attachment-only thread.turn.start: %v", err)
 	}
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -729,7 +735,7 @@ func TestEngineUserPromptMessageCarriesTurnID(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-user-message-turn-id", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -786,7 +792,7 @@ func TestEngineAcceptsTurnStartAsSteeringWhileTurnIsRunning(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("first thread.turn.start: %v", err)
 	}
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -799,7 +805,7 @@ func TestEngineAcceptsTurnStartAsSteeringWhileTurnIsRunning(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-2", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-2", Text: "actually, do this too"}, CreatedAt: time.Now().Add(time.Minute)}); err != nil {
 		t.Fatalf("steering thread.turn.start: %v", err)
 	}
-	snapshot, err = engine.ThreadSnapshot(threadID)
+	snapshot, err = engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot after steer: %v", err)
 	}
@@ -918,7 +924,7 @@ func TestEngineDeduplicatesCommandID(t *testing.T) {
 	if second.Sequence != first.Sequence {
 		t.Fatalf("duplicate sequence = %d, want %d", second.Sequence, first.Sequence)
 	}
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -965,78 +971,19 @@ func TestProviderCommandFailureCompletesTurnWithoutSession(t *testing.T) {
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-fail", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-fail", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
-	snapshot, err := engine.ThreadSnapshot(threadID)
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 	turnID := snapshot.Snapshot.Thread.LatestTurn.ID
 	reactor := &ProviderEventReactor{engine: engine}
 	reactor.failThread(threadID, turnID, "provider missing")
-	snapshot, err = engine.ThreadSnapshot(threadID)
+	snapshot, err = engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("snapshot after failure: %v", err)
 	}
 	if snapshot.Snapshot.Thread.LatestTurn.State != TurnStateError || snapshot.Snapshot.Thread.LatestTurn.Error != "provider missing" || snapshot.Snapshot.Thread.LatestTurn.CompletedAt == nil {
 		t.Fatalf("latest turn = %#v, want completed error", snapshot.Snapshot.Thread.LatestTurn)
-	}
-}
-
-func TestEngineReplayFiltersByThreadAndLimit(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadA := ThreadID("thread-replay-a")
-	threadB := ThreadID("thread-replay-b")
-	for _, command := range []Command{
-		{Type: CommandThreadCreate, CommandID: "cmd-replay-create-a", ThreadID: threadA, Title: "A"},
-		{Type: CommandThreadCreate, CommandID: "cmd-replay-create-b", ThreadID: threadB, Title: "B"},
-		{Type: CommandThreadMetaUpdate, CommandID: "cmd-replay-meta-a1", ThreadID: threadA, Title: "A1"},
-		{Type: CommandThreadMetaUpdate, CommandID: "cmd-replay-meta-b1", ThreadID: threadB, Title: "B1"},
-		{Type: CommandThreadMetaUpdate, CommandID: "cmd-replay-meta-a2", ThreadID: threadA, Title: "A2"},
-	} {
-		if _, err := engine.Dispatch(context.Background(), command); err != nil {
-			t.Fatalf("dispatch %s: %v", command.CommandID, err)
-		}
-	}
-
-	all := engine.ReplayEvents(ReplayEventsInput{})
-	if len(all) != 5 {
-		t.Fatalf("replay all = %d events, want 5", len(all))
-	}
-	onlyA := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadA})
-	if len(onlyA) != 3 {
-		t.Fatalf("replay thread A = %d events, want 3", len(onlyA))
-	}
-	for _, event := range onlyA {
-		if event.ThreadID() != threadA {
-			t.Fatalf("replay thread A returned event for %q", event.ThreadID())
-		}
-	}
-	page := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadA, Limit: 2})
-	if len(page) != 2 {
-		t.Fatalf("replay page = %d events, want limit 2", len(page))
-	}
-	next := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadA, FromSequenceExclusive: page[len(page)-1].Sequence, Limit: 2})
-	if len(next) != 1 || next[0].Sequence <= page[len(page)-1].Sequence {
-		t.Fatalf("replay next page = %#v, want 1 remaining event after sequence %d", next, page[len(page)-1].Sequence)
-	}
-}
-
-func TestEventStoreReplayLimitCapsPreallocation(t *testing.T) {
-	store := NewEventStore()
-	for i := 0; i < 100; i++ {
-		threadID := ThreadID("thread-other")
-		if i%10 == 0 {
-			threadID = "thread-target"
-		}
-		store.Append(Event{Type: EventThreadMetaUpdated, Payload: EventPayload{ThreadID: threadID}})
-	}
-
-	page := store.Replay(ReplayEventsInput{ThreadID: "thread-target", Limit: 3})
-	if len(page) != 3 {
-		t.Fatalf("limited replay returned %d events, want 3", len(page))
-	}
-	if cap(page) > 3 {
-		t.Fatalf("limited replay capacity = %d, want capped at page size 3", cap(page))
 	}
 }
 
@@ -1347,7 +1294,7 @@ func TestEnginePanicAfterMutationEscalatesToFatal(t *testing.T) {
 	snapshotDone := make(chan struct{})
 	go func() {
 		defer close(snapshotDone)
-		if _, err := engine.ThreadSnapshot(threadID); err != nil {
+		if _, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID}); err != nil {
 			t.Errorf("ThreadSnapshot after panic: %v", err)
 		}
 		engine.ThreadListSnapshot()
@@ -1596,5 +1543,44 @@ func TestEngineStoppedAcknowledgesWorkerExit(t *testing.T) {
 	case <-e.Stopped():
 	case <-time.After(2 * time.Second):
 		t.Fatal("engine worker did not acknowledge stop after Close")
+	}
+}
+
+func TestSubscribeThreadAlwaysReturnsCurrentAuthoritativeSnapshot(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	threadA := ThreadID("thread-snapshot-a")
+	threadB := ThreadID("thread-snapshot-b")
+	for _, command := range []Command{
+		{Type: CommandThreadCreate, CommandID: "snapshot-create-a", ThreadID: threadA, Title: "A"},
+		{Type: CommandThreadCreate, CommandID: "snapshot-create-b", ThreadID: threadB, Title: "B"},
+	} {
+		if _, err := engine.Dispatch(context.Background(), command); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	initial, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadA})
+	if err != nil || initial.Kind != "snapshot" || initial.Snapshot == nil {
+		t.Fatalf("initial subscribe = %#v, %v", initial, err)
+	}
+	for _, command := range []Command{
+		{Type: CommandThreadMetaUpdate, CommandID: "snapshot-meta-b", ThreadID: threadB, Title: "B2"},
+		{Type: CommandThreadMetaUpdate, CommandID: "snapshot-meta-a", ThreadID: threadA, Title: "A2"},
+	} {
+		if _, err := engine.Dispatch(context.Background(), command); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	refreshed, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadA})
+	if err != nil || refreshed.Kind != "snapshot" || refreshed.Snapshot == nil {
+		t.Fatalf("refreshed subscribe = %#v, %v", refreshed, err)
+	}
+	if refreshed.Snapshot.Thread.Title != "A2" {
+		t.Fatalf("refreshed title = %q, want A2", refreshed.Snapshot.Thread.Title)
+	}
+	if refreshed.Snapshot.SnapshotSequence <= initial.Snapshot.SnapshotSequence {
+		t.Fatalf("refreshed sequence = %d, want > %d", refreshed.Snapshot.SnapshotSequence, initial.Snapshot.SnapshotSequence)
 	}
 }

@@ -110,7 +110,8 @@ func newLoggerFromEnv() *slog.Logger {
 
 // logEvent deliberately records only correlation metadata. Event payloads can
 // contain prompts, tool output, attachments, and secrets and do not belong in
-// routine daemon logs. Full events remain available through replay/diagnostics.
+// routine daemon logs. The daemon intentionally retains no historical event
+// payloads; clients recover from authoritative snapshots.
 func (s *Server) logEvent(event orchestration.Event) {
 	attrs := []any{
 		"sequence", event.Sequence,

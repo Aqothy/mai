@@ -11,7 +11,6 @@ import (
 
 const (
 	MethodOrchestrationDispatchCommand     = "orchestration.dispatchCommand"
-	MethodOrchestrationReplayEvents        = "orchestration.replayEvents"
 	MethodOrchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
 	MethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
 	MethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
@@ -37,7 +36,6 @@ type EmptyParams struct{}
 type Command = orchestration.Command
 type CommandMessage = orchestration.CommandMessage
 type DispatchResult = orchestration.DispatchResult
-type ReplayEventsParams = orchestration.ReplayEventsInput
 type SubscribeThreadParams = orchestration.SubscribeThreadInput
 type ThreadStreamItem = orchestration.ThreadStreamItem
 type ThreadListStreamItem = orchestration.ThreadListStreamItem

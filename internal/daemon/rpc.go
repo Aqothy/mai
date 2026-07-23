@@ -22,7 +22,6 @@ import (
 const (
 	// Local handler/test names point at the canonical api/wire registry.
 	RPCMethodOrchestrationDispatchCommand     = wire.MethodOrchestrationDispatchCommand
-	RPCMethodOrchestrationReplayEvents        = wire.MethodOrchestrationReplayEvents
 	RPCMethodOrchestrationSubscribeThreadList = wire.MethodOrchestrationSubscribeThreadList
 	RPCMethodOrchestrationSubscribeThread     = wire.MethodOrchestrationSubscribeThread
 	RPCMethodOrchestrationUnsubscribeThread   = wire.MethodOrchestrationUnsubscribeThread
@@ -301,12 +300,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.server.orchestration.Dispatch(ctx, command)
-	case RPCMethodOrchestrationReplayEvents:
-		var params orchestration.ReplayEventsInput
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return h.server.orchestration.ReplayEvents(params), nil
 	case RPCMethodOrchestrationSubscribeThread:
 		var params orchestration.SubscribeThreadInput
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -316,7 +309,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, fmt.Errorf("%w: subscribeThread requires threadId", jsonrpc2.ErrInvalidParams)
 		}
 		h.client.subscribeThread(params.ThreadID)
-		snapshot, err := h.server.orchestration.ThreadSnapshot(params.ThreadID)
+		snapshot, err := h.server.orchestration.SubscribeThread(params)
 		if err != nil {
 			h.client.unsubscribeThread(params.ThreadID)
 			return nil, err

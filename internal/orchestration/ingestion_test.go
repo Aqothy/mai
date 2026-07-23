@@ -55,6 +55,7 @@ func newThreadWithSession(t *testing.T, engine *Engine, threadID ThreadID) {
 func TestRestoreHistoryDoesNotBlockOtherThreads(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	now := time.Now()
 	engine.RestoreThreads([]RestoredThread{
@@ -137,9 +138,9 @@ func TestRestoreHistoryDoesNotBlockOtherThreads(t *testing.T) {
 		t.Fatal("same-thread event remained blocked after ready")
 	}
 
-	events := engine.ReplayEvents(ReplayEventsInput{ThreadID: "restoring"})
+	recorded := events.matching("restoring", 0)
 	var messageSequence, queuedSequence, completionSequence, readySequence, afterReadySequence uint64
-	for _, event := range events {
+	for _, event := range recorded {
 		switch event.Type {
 		case EventThreadMessageSent:
 			messageSequence = event.Sequence
@@ -1023,11 +1024,12 @@ func TestIngestionTickerFlushesBufferedAssistantTextAcrossThreads(t *testing.T) 
 // Reasoning chunks are coalesced: a segment's first chunk flushes immediately
 // as a textDelta event (anchoring the item), chunks inside the flush interval
 // only accumulate, and the settle checkpoint carries the full text. Per-chunk
-// fan-out would flood the event store and every subscribed client.
+// fan-out would flood every subscribed client.
 func TestIngestionCoalescesReasoningChunks(t *testing.T) {
 	pinFlushInterval(t, time.Hour)
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-reasoning-delta-size")
 	newThreadWithSession(t, engine, threadID)
@@ -1042,7 +1044,7 @@ func TestIngestionCoalescesReasoningChunks(t *testing.T) {
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-reasoning-chunk-2", Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: " harder"}})
 
 	countReasoningEvents := func() (count int, last *Item) {
-		for _, event := range engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID}) {
+		for _, event := range events.matching(threadID, 0) {
 			if event.Type != EventThreadItemUpserted || event.Payload.Item == nil || event.Payload.Item.ID != reasoningID {
 				continue
 			}
@@ -1158,6 +1160,7 @@ func TestIngestionSessionScopedUpdatesBeforeBindingSurviveSessionStatusSet(t *te
 
 func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 	engine := NewEngine()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-empty-list-json")
 	newThreadWithSession(t, engine, threadID)
@@ -1168,7 +1171,7 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-empty-slash", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{}}})
 
 	var configJSON, slashJSON json.RawMessage
-	for _, event := range engine.ReplayEvents(ReplayEventsInput{}) {
+	for _, event := range events.matching("", 0) {
 		raw, err := json.Marshal(event.Payload)
 		if err != nil {
 			t.Fatalf("marshal payload: %v", err)
@@ -1210,6 +1213,7 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 
 func TestIngestionThreadMetadataAndTokenUsage(t *testing.T) {
 	engine := NewEngine()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-meta")
 	newThreadWithSession(t, engine, threadID)
@@ -1234,7 +1238,7 @@ func TestIngestionThreadMetadataAndTokenUsage(t *testing.T) {
 		t.Fatalf("title = %q, want agent rename", thread.Title)
 	}
 	var titleEvent *Event
-	for _, event := range engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID}) {
+	for _, event := range events.matching(threadID, 0) {
 		if event.Type == EventThreadMetaUpdated && event.Payload.Title == "Renamed by agent" {
 			eventCopy := event
 			titleEvent = &eventCopy
@@ -1422,6 +1426,7 @@ func TestIngestionRuntimeErrorForActiveTurnClosesTerminalProviderError(t *testin
 func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stop-vs-completion")
 	newThreadWithSession(t, engine, threadID)
@@ -1433,11 +1438,11 @@ func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-started-before-stop", Type: provider.RuntimeEventTurnStarted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now()})
 
 	// The stop confirmation wins the race with the turn completion.
-	if result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateStopped}); err != nil || result.Sequence == 0 {
-		t.Fatalf("stopped update = (%#v, %v), want accepted append", result, err)
+	stopResult, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateStopped})
+	if err != nil || stopResult.Sequence == 0 {
+		t.Fatalf("stopped update = (%#v, %v), want accepted append", stopResult, err)
 	}
-	stoppedAt := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID})
-	stoppedSequence := stoppedAt[len(stoppedAt)-1].Sequence
+	stoppedSequence := stopResult.Sequence
 
 	// The engine must drop the late settle update outright…
 	if result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: TurnID(turnID), TurnState: provider.RuntimeTurnCompleted}); err != nil || result.Sequence != 0 {
@@ -1453,7 +1458,7 @@ func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != TurnID(turnID) || thread.LatestTurn.State != TurnStateInterrupted || thread.LatestTurn.CompletedAt == nil {
 		t.Fatalf("latest turn = %#v, want stopped turn to remain interrupted/completed", thread.LatestTurn)
 	}
-	for _, event := range engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID, FromSequenceExclusive: stoppedSequence}) {
+	for _, event := range events.matching(threadID, stoppedSequence) {
 		if event.Type == EventThreadSessionStatusSet {
 			t.Fatalf("session status appended after stop: %#v, want late completion dropped", event.Payload.Session)
 		}
@@ -1668,6 +1673,7 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 func TestIngestionReasoningPreservesNonTextContent(t *testing.T) {
 	pinFlushInterval(t, time.Hour)
 	engine := NewEngine()
+	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-reasoning-content")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-reasoning-content", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
@@ -1724,7 +1730,7 @@ func TestIngestionReasoningPreservesNonTextContent(t *testing.T) {
 	// events — the attachment chunk's full replacement payload and the settle
 	// checkpoint. The earlier text chunk is folded into the attachment payload.
 	reasoningEvents := 0
-	for _, event := range engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID}) {
+	for _, event := range events.matching(threadID, 0) {
 		if event.Type != EventThreadItemUpserted || event.Payload.Item == nil || event.Payload.Item.Kind != provider.ItemKindReasoning {
 			continue
 		}

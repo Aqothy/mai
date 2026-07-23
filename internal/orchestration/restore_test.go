@@ -42,6 +42,7 @@ func TestImportThreadPublishesNonDraftReplayPendingStub(t *testing.T) {
 func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 
 	created := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
 	updated := created.Add(2 * time.Hour)
@@ -85,7 +86,7 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 		t.Fatalf("empty title = %q, want default", untitled.Title)
 	}
 
-	snapshot, err := engine.ThreadSnapshot("thread-restored")
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
 	if err != nil {
 		t.Fatalf("ThreadSnapshot: %v", err)
 	}
@@ -96,10 +97,9 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 		t.Fatalf("restored thread = %#v, want non-draft", snapshot.Snapshot.Thread)
 	}
 
-	// A restart is a new epoch: restore appends nothing to the event log, so
-	// clients resnapshot instead of replaying restored threads into existence.
-	if replay := engine.ReplayEvents(ReplayEventsInput{}); len(replay) != 0 {
-		t.Fatalf("restore appended events: %#v", replay)
+	// Restore emits no live events; clients obtain authoritative snapshots.
+	if recorded := events.matching("", 0); len(recorded) != 0 {
+		t.Fatalf("restore emitted events: %#v", recorded)
 	}
 }
 

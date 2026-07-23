@@ -42,19 +42,8 @@ type ThreadListStreamItem struct {
 	Snapshot *ThreadListSnapshot `json:"snapshot,omitempty"`
 	Sequence uint64              `json:"sequence,omitempty"`
 	Thread   *ThreadListEntry    `json:"thread,omitempty"`
-	ThreadID ThreadID            `json:"threadId,omitempty"`
 }
 
 type SubscribeThreadInput struct {
 	ThreadID ThreadID `json:"threadId"`
-}
-
-type ReplayEventsInput struct {
-	FromSequenceExclusive uint64 `json:"fromSequenceExclusive"`
-	// ThreadID, when set, restricts replay to one thread so a client catching up
-	// on a single conversation doesn't download every thread's stream.
-	ThreadID ThreadID `json:"threadId,omitempty"`
-	// Limit, when > 0, caps the number of returned events (page size). The
-	// client pages by re-requesting from the last received sequence.
-	Limit int `json:"limit,omitempty"`
 }

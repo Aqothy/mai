@@ -2,8 +2,8 @@ package daemon
 
 // Multi-client sync tests use two real WebSocket clients exercising
 // simultaneous actions, cross-client approvals/interrupts, reconnect
-// mid-turn, a slow client that
-// gets overflow-closed and recovers, and mobile-sized per-thread replay paging.
+// mid-turn, and a slow client that gets overflow-closed and recovers from an
+// authoritative snapshot.
 // Every client here follows the documented CLIENT_API.md sync contract.
 
 import (
@@ -46,7 +46,7 @@ func dialRecordingClient(t *testing.T, url string) *recordingClient {
 	if err != nil {
 		t.Fatalf("websocket dial: %v", err)
 	}
-	// Snapshots/replay pages of long threads exceed the 32KiB library default.
+	// Snapshots of long threads exceed the 32KiB library default.
 	ws.SetReadLimit(-1)
 	c.conn = jsonrpc2.NewWebSocketConnection(context.Background(), wsJSONRPC{conn: ws}, c)
 	t.Cleanup(func() { _ = c.conn.Close() })
@@ -166,20 +166,20 @@ func hasEvent(events []orchestration.Event, match func(orchestration.Event) bool
 
 // assistantMessageAfter matches the first coalesced assistant chunk flushed
 // after the given sequence.
-func assistantMessageAfter(afterSequence uint64) func([]orchestration.Event) bool {
+func assistantMessageAfter(minimumSequence uint64) func([]orchestration.Event) bool {
 	return func(events []orchestration.Event) bool {
 		return hasEvent(events, func(event orchestration.Event) bool {
-			return event.Sequence > afterSequence &&
+			return event.Sequence > minimumSequence &&
 				event.Type == orchestration.EventThreadMessageSent &&
 				event.Payload.Role == orchestration.MessageRoleAssistant
 		})
 	}
 }
 
-func sessionStatusAfter(afterSequence uint64, status orchestration.SessionStatus) func([]orchestration.Event) bool {
+func sessionStatusAfter(minimumSequence uint64, status orchestration.SessionStatus) func([]orchestration.Event) bool {
 	return func(events []orchestration.Event) bool {
 		return hasEvent(events, func(event orchestration.Event) bool {
-			return event.Sequence > afterSequence &&
+			return event.Sequence > minimumSequence &&
 				event.Type == orchestration.EventThreadSessionStatusSet &&
 				event.Payload.Session != nil &&
 				event.Payload.Session.Status == status
@@ -187,10 +187,10 @@ func sessionStatusAfter(afterSequence uint64, status orchestration.SessionStatus
 	}
 }
 
-func interruptSettledAfter(afterSequence uint64) func([]orchestration.Event) bool {
+func interruptSettledAfter(minimumSequence uint64) func([]orchestration.Event) bool {
 	return func(events []orchestration.Event) bool {
 		return hasEvent(events, func(event orchestration.Event) bool {
-			if event.Sequence <= afterSequence {
+			if event.Sequence <= minimumSequence {
 				return false
 			}
 			if event.Type == orchestration.EventThreadTurnInterruptConfirmed {
@@ -260,6 +260,7 @@ type dispatchOutcome struct {
 func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
+	events := observeServerEvents(t, s)
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
@@ -294,8 +295,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	// Cross-client idempotency: B retries A's create with the same commandId;
 	// the receipt must point at the original event and no duplicate may exist.
 	retryReceipt := b.dispatch(t, createOne)
-	var threadOneEvents []orchestration.Event
-	a.call(t, RPCMethodOrchestrationReplayEvents, orchestration.ReplayEventsInput{ThreadID: threadOne}, &threadOneEvents)
+	threadOneEvents := events.matching(threadOne, 0)
 	if len(threadOneEvents) != 1 || threadOneEvents[0].Type != orchestration.EventThreadCreated {
 		t.Fatalf("thread one events after cross-client retry = %#v, want exactly one thread.created", threadOneEvents)
 	}
@@ -397,57 +397,11 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	}
 }
 
-// replayCatchUp reconnects per the sync contract: subscribe first (live
-// events buffer via the recorder), then page replayEvents from the last
-// applied sequence, then apply buffered live events past the watermark. It
-// returns the merged, deduped event log a correct client would hold.
-func replayCatchUp(t *testing.T, client *recordingClient, threadID orchestration.ThreadID, applied []orchestration.Event, pageLimit int) []orchestration.Event {
-	t.Helper()
-	watermark := uint64(0)
-	if len(applied) > 0 {
-		watermark = applied[len(applied)-1].Sequence
-	}
-	merged := append([]orchestration.Event(nil), applied...)
-	client.subscribeThread(t, threadID)
-	for {
-		var page []orchestration.Event
-		client.call(t, RPCMethodOrchestrationReplayEvents, orchestration.ReplayEventsInput{FromSequenceExclusive: watermark, ThreadID: threadID, Limit: pageLimit}, &page)
-		for _, event := range page {
-			if event.Sequence <= watermark {
-				t.Fatalf("replay page returned sequence %d at or below watermark %d", event.Sequence, watermark)
-			}
-			merged = append(merged, event)
-			watermark = event.Sequence
-		}
-		if len(page) < pageLimit {
-			break
-		}
-	}
-	return merged
-}
-
-// applyLive folds live-recorded events into a merged log, dropping everything
-// at or below the current watermark (the dedupe rule).
-func applyLive(merged []orchestration.Event, live []orchestration.Event) []orchestration.Event {
-	watermark := uint64(0)
-	if len(merged) > 0 {
-		watermark = merged[len(merged)-1].Sequence
-	}
-	for _, event := range live {
-		if event.Sequence > watermark {
-			merged = append(merged, event)
-			watermark = event.Sequence
-		}
-	}
-	return merged
-}
-
-// TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates hard-drops a client
-// mid-stream, reconnects while the turn is still streaming, catches up via
-// per-thread paged replayEvents plus
-// the live stream, and must converge to exactly what a never-disconnected
-// observer saw.
-func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
+// TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive hard-drops a client
+// mid-stream, reconnects while the turn is still streaming, restores from one
+// authoritative snapshot, and then proves the replacement subscription stays
+// live through the rest of the turn and a follow-up.
+func TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
@@ -473,7 +427,6 @@ func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
 	dropper.waitThread(t, threadID, "some streamed events before dropping", func(events []orchestration.Event) bool {
 		return len(events) >= 200
 	})
-	preDropLog := dropper.threadLog(threadID)
 	if err := dropper.conn.Close(); err != nil {
 		t.Fatalf("hard-close dropper: %v", err)
 	}
@@ -483,20 +436,14 @@ func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
 		t.Fatal("turn already settled before reconnect; raise the tool-call count")
 	}
 
-	// Reconnect and catch up per the sync contract. preDropLog may contain
-	// events the pre-drop snapshot already covered; apply the dedupe rule.
-	applied := applyLive(nil, preDropLog)
-	if len(applied) > 0 && applied[0].Sequence <= dropperSnapshot.SnapshotSequence {
-		filtered := applied[:0]
-		for _, event := range applied {
-			if event.Sequence > dropperSnapshot.SnapshotSequence {
-				filtered = append(filtered, event)
-			}
-		}
-		applied = filtered
-	}
 	reconnected := dialRecordingClient(t, url)
-	merged := replayCatchUp(t, reconnected, threadID, applied, 1000)
+	reconnectedSnapshot := reconnected.subscribeThread(t, threadID)
+	if reconnectedSnapshot.SnapshotSequence <= dropperSnapshot.SnapshotSequence {
+		t.Fatalf("reconnect snapshot sequence = %d, want > pre-drop %d", reconnectedSnapshot.SnapshotSequence, dropperSnapshot.SnapshotSequence)
+	}
+	if reconnectedSnapshot.Thread.LatestTurn == nil || reconnectedSnapshot.Thread.LatestTurn.CompletedAt != nil {
+		t.Fatalf("reconnect snapshot latest turn = %#v, want an active turn", reconnectedSnapshot.Thread.LatestTurn)
+	}
 
 	// Wait for the turn to settle on both connections, then fence.
 	observer.waitThread(t, threadID, "turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
@@ -507,27 +454,14 @@ func TestRPCReconnectMidTurnCatchesUpWithoutGapsOrDuplicates(t *testing.T) {
 	observer.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
 	reconnected.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
 	fence(t, observer, threadID, "reconnect", observer, reconnected)
-
-	merged = applyLive(merged, reconnected.threadLog(threadID))
-
-	// The observer subscribed before the turn started and never disconnected:
-	// its log restricted to what the dropper should have (everything after the
-	// dropper's snapshot) is the ground truth.
-	want := make([]orchestration.Event, 0)
-	for _, event := range observer.threadLog(threadID) {
-		if event.Sequence > dropperSnapshot.SnapshotSequence {
-			want = append(want, event)
-		}
-	}
-	requireSameStream(t, threadID, "reconnected-merged", merged, "observer", want)
 }
 
-// TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay runs the
+// TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot runs the
 // overflow-close policy end-to-end: a subscribed client that stops reading is
 // disconnected by the daemon once its outbound queue fills, healthy clients
 // keep streaming unaffected, and the slow client recovers to full consistency
-// with mobile-sized per-thread replay pages.
-func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
+// with an authoritative snapshot when its missed range is oversized.
+func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
@@ -635,46 +569,15 @@ func TestRPCSlowClientOverflowClosesAndRecoversViaPagedReplay(t *testing.T) {
 		t.Fatalf("slow client drained %d notifications, want an overflow-close before the full flood", drained)
 	}
 
-	// Recovery: fresh connection, snapshot, then mobile-sized replay pages
-	// from zero must reproduce the observer's stream exactly.
+	// Recovery uses one authoritative snapshot rather than allocating or
+	// transferring thousands of missed deltas.
 	recovered := dialRecordingClient(t, url)
-	recovered.subscribeThread(t, threadID)
-	watermark := uint64(0)
-	var replayed []orchestration.Event
-	pages := 0
-	for {
-		var page []orchestration.Event
-		recovered.call(t, RPCMethodOrchestrationReplayEvents, orchestration.ReplayEventsInput{FromSequenceExclusive: watermark, ThreadID: threadID, Limit: 500}, &page)
-		for _, event := range page {
-			if event.Sequence <= watermark {
-				t.Fatalf("replay page %d returned sequence %d at or below watermark %d", pages, event.Sequence, watermark)
-			}
-			replayed = append(replayed, event)
-			watermark = event.Sequence
-		}
-		if len(page) < 500 {
-			break
-		}
-		pages++
+	var recoveredItem orchestration.ThreadStreamItem
+	recovered.call(t, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &recoveredItem)
+	if recoveredItem.Kind != "snapshot" || recoveredItem.Snapshot == nil {
+		t.Fatalf("recovery = %#v, want authoritative snapshot", recoveredItem)
 	}
-	if pages < 2 {
-		t.Fatalf("replay paging exercised %d full pages, want several (flood should span many pages)", pages)
-	}
-
-	observerLog := observer.threadLog(threadID)
-	if len(observerLog) == 0 {
-		t.Fatal("observer log empty")
-	}
-	// The observer subscribed after thread.create, so its log starts past the
-	// first replayed events; everything from its first sequence on must match.
-	fromObserverStart := make([]orchestration.Event, 0, len(replayed))
-	for _, event := range replayed {
-		if event.Sequence >= observerLog[0].Sequence {
-			fromObserverStart = append(fromObserverStart, event)
-		}
-	}
-	requireSameStream(t, threadID, "replayed", fromObserverStart, "observer", observerLog)
-	if replayed[0].Type != orchestration.EventThreadCreated {
-		t.Fatalf("replay from zero starts with %s, want thread.created", replayed[0].Type)
+	if recoveredItem.Snapshot.SnapshotSequence < turnReceipt.Sequence {
+		t.Fatalf("fallback snapshot sequence = %d, want at least %d", recoveredItem.Snapshot.SnapshotSequence, turnReceipt.Sequence)
 	}
 }

@@ -127,7 +127,7 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 	if entry.Session != nil {
 		t.Fatalf("rehydrated stub must be idle (no session binding), got %#v", entry.Session)
 	}
-	snapshot, err := restarted.orchestration.ThreadSnapshot("thread-1")
+	snapshot, err := restarted.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: "thread-1"})
 	if err != nil {
 		t.Fatalf("ThreadSnapshot after restart: %v", err)
 	}
@@ -137,9 +137,9 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("rehydrated timeline = %#v, want empty", snapshot.Snapshot.Thread.Timeline)
 	}
-	// New epoch: nothing to replay; clients resnapshot.
-	if replay := restarted.orchestration.ReplayEvents(orchestration.ReplayEventsInput{}); len(replay) != 0 {
-		t.Fatalf("restart replayed events: %#v", replay)
+	// The new process starts a fresh event sequence; clients obtain snapshots.
+	if snapshot.Snapshot.SnapshotSequence != 0 {
+		t.Fatalf("restart snapshot sequence = %d, want 0", snapshot.Snapshot.SnapshotSequence)
 	}
 }
 

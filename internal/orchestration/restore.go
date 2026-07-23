@@ -22,10 +22,10 @@ type RestoredThread struct {
 }
 
 // RestoreThreads seeds the projection with thread stubs at boot, before the
-// daemon serves connections. No events are appended: a restart is a new epoch
-// (sequences reset and clients resnapshot), so restored threads exist in the
-// projection but not in this epoch's event log. Threads already present are
-// left untouched.
+// daemon serves connections. No events are appended: sequences restart with
+// the process and clients obtain authoritative snapshots, so restored threads
+// are seeded directly into the projection without emitting live events. Threads
+// already present are left untouched.
 func (e *Engine) RestoreThreads(threads []RestoredThread) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

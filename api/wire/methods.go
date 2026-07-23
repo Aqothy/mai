@@ -19,7 +19,6 @@ type NotificationDefinition struct {
 // Methods is the canonical typed JSON-RPC method registry used by generators.
 var Methods = []MethodDefinition{
 	{Name: MethodOrchestrationDispatchCommand, Params: "Command", Result: "DispatchResult"},
-	{Name: MethodOrchestrationReplayEvents, Params: "ReplayEventsInput", Result: "Event", ResultArray: true},
 	{Name: MethodOrchestrationSubscribeThreadList, Params: "EmptyParams", Result: "ThreadListStreamItem"},
 	{Name: MethodOrchestrationSubscribeThread, Params: "SubscribeThreadInput", Result: "ThreadStreamItem"},
 	{Name: MethodOrchestrationUnsubscribeThread, Params: "SubscribeThreadInput", ResultNull: true},

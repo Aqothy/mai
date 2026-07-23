@@ -16,17 +16,19 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-const engineQueueSize = 256
+const (
+	engineQueueSize = 256
+)
 
 // Engine locking: the worker goroutine is the ONLY writer to the projection and
 // receipts (except boot-time RestoreThreads, which seeds stubs under mu before
 // any dispatch), so writes need no coordination with each other. mu exists for
 // cross-goroutine readers (snapshots, SessionView) racing the worker's
-// projection writes; the EventStore carries its own lock so Replay can serve
-// reads without holding mu.
+// projection writes; the EventSequencer carries its own lock for sequence
+// assignment. Snapshot creation holds mu while reading the projection.
 type Engine struct {
 	mu             sync.Mutex
-	store          *EventStore
+	sequencer      *EventSequencer
 	projection     *Projection
 	listeners      map[uint64]func(Event)
 	nextListenerID uint64
@@ -42,8 +44,8 @@ type Engine struct {
 	defaultCwd string
 
 	// onInvariant, when set, is notified of an InvariantViolationError — a
-	// panic that fired AFTER the event log began mutating, when store and
-	// read model may disagree and there is no persistence to rebuild from.
+	// panic that fired AFTER live state began mutating, when the sequence and
+	// read model may disagree and there is no complete process state to rebuild.
 	// The engine logs the violation and closes itself BEFORE notifying, so
 	// the handler observes a terminal engine; the daemon's handler shuts the
 	// whole server down and surfaces the error from RunWebSocket, leaving
@@ -65,11 +67,11 @@ type engineRequest struct {
 }
 
 // EventInput is the parameter of AppendEvent: the caller-supplied fields of an
-// event, appended nearly verbatim (the store mints Sequence). It carries
+// event, appended nearly verbatim (the sequencer mints Sequence). It carries
 // provider/server observations, which — unlike commands — are not client
 // intents: they cannot be refused or retried (no receipt) and carry no client
 // CommandID, so those fields deliberately do not exist here. Appends share the
-// engine queue with commands so the event log stays totally ordered.
+// engine queue with commands so live events stay totally ordered.
 type EventInput struct {
 	Type     EventType
 	ThreadID ThreadID
@@ -89,7 +91,7 @@ type dispatchOutcome struct {
 func NewEngine() *Engine {
 	defaultCwd, _ := os.Getwd()
 	e := &Engine{
-		store:        NewEventStore(),
+		sequencer:    NewEventSequencer(),
 		projection:   NewProjection(),
 		listeners:    make(map[uint64]func(Event)),
 		receipts:     make(map[CommandID]commandReceipt),
@@ -262,8 +264,8 @@ func (e *Engine) process(command Command) (DispatchResult, error) {
 
 // dispatchRecovered converts a pre-mutation (decider/validation) panic into a
 // command error so one bad command cannot wedge the worker. Panics that fire
-// after the event log began mutating arrive as InvariantViolationError because
-// store and read model may now disagree.
+// after live state began mutating arrive as InvariantViolationError because
+// the sequence and read model may now disagree.
 func (e *Engine) dispatchRecovered(command Command) (DispatchResult, error) {
 	return recoverEngineOperation(fmt.Sprintf("command %q", command.Type), func() (DispatchResult, error) {
 		return e.dispatch(command)
@@ -386,14 +388,17 @@ func validateEventInput(input EventInput) error {
 	return nil
 }
 
-func (e *Engine) ReplayEvents(input ReplayEventsInput) []Event {
-	return e.store.Replay(input)
-}
-
-func (e *Engine) ThreadSnapshot(threadID ThreadID) (ThreadStreamItem, error) {
+// SubscribeThread returns an authoritative snapshot. The RPC layer installs
+// the live subscription before calling this, so events at the captured
+// boundary can be duplicated but can never be lost.
+func (e *Engine) SubscribeThread(input SubscribeThreadInput) (ThreadStreamItem, error) {
 	e.mu.Lock()
-	snapshot, err := e.projection.ThreadSnapshot(threadID)
-	e.mu.Unlock()
+	defer e.mu.Unlock()
+
+	if e.projection.liveThread(input.ThreadID) == nil {
+		return ThreadStreamItem{}, fmt.Errorf("thread %q not found", input.ThreadID)
+	}
+	snapshot, err := e.projection.ThreadSnapshot(input.ThreadID)
 	if err != nil {
 		return ThreadStreamItem{}, err
 	}
@@ -701,8 +706,8 @@ func (e *Engine) append(event Event) Event {
 var testApplyHook func(Event)
 
 // InvariantViolationError is the terminal error the engine reports when a
-// panic fires after the event log began mutating: store and read model may
-// disagree, and with no persistence to rebuild from the engine cannot
+// panic fires after live state began mutating: the sequence and read model may
+// disagree, and with no complete process state to rebuild the engine cannot
 // continue — it closes itself. The process owner (main) decides how to exit;
 // the engine and server never call os.Exit themselves.
 type InvariantViolationError struct {
@@ -711,7 +716,7 @@ type InvariantViolationError struct {
 }
 
 func (e *InvariantViolationError) Error() string {
-	return fmt.Sprintf("orchestration invariant violation: panic after the event log began mutating (in-memory state is unrecoverable): %v", e.Cause)
+	return fmt.Sprintf("orchestration invariant violation: panic after live state began mutating (in-memory state is unrecoverable): %v", e.Cause)
 }
 
 // OnInvariantViolation installs the handler notified after the engine has
@@ -730,9 +735,9 @@ func (e *Engine) OnInvariantViolation(fn func(*InvariantViolationError)) {
 //     released, nothing was written, and the panic propagates to
 //     dispatchRecovered/appendRecovered, which convert it into a command
 //     error — one bad command cannot wedge the daemon.
-//   - AFTER mutation began (store.Append/projection.Apply): the mutex is
-//     released, everything committed to the store is still published, and a
-//     typed invariant violation tells the worker to close the engine.
+//   - AFTER mutation began (sequencer.Stamp/projection.Apply): the mutex is
+//     released, every completed event is still published, and a typed
+//     invariant violation tells the worker to close the engine.
 //
 // Listeners run outside the lock but synchronously on the worker. A listener
 // that needs engine work must hand it to another goroutine; awaiting a queued
@@ -771,13 +776,13 @@ func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) er
 	defer e.mu.Unlock()
 	return fn(func(event Event) Event {
 		mutated = true
-		stored := e.store.Append(event)
-		appended = append(appended, stored)
-		e.projection.Apply(stored)
+		sequenced := normalizeEvent(e.sequencer.Stamp(event))
+		appended = append(appended, sequenced)
+		e.projection.Apply(sequenced)
 		if hook := testApplyHook; hook != nil {
-			hook(stored)
+			hook(sequenced)
 		}
-		return stored
+		return sequenced
 	})
 }
 

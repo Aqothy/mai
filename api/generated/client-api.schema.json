@@ -871,25 +871,6 @@
       "type": "object",
       "title": "ProviderStartParams"
     },
-    "ReplayEventsInput": {
-      "properties": {
-        "fromSequenceExclusive": {
-          "type": "integer"
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "limit": {
-          "type": "integer"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "fromSequenceExclusive"
-      ],
-      "title": "ReplayEventsInput"
-    },
     "SessionBinding": {
       "properties": {
         "threadId": {
@@ -1161,9 +1142,6 @@
         },
         "thread": {
           "$ref": "#/$defs/ThreadListEntry"
-        },
-        "threadId": {
-          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1296,9 +1274,6 @@
         "dispatchResult": {
           "$ref": "#/$defs/DispatchResult"
         },
-        "replayEventsParams": {
-          "$ref": "#/$defs/ReplayEventsInput"
-        },
         "subscribeThreadParams": {
           "$ref": "#/$defs/SubscribeThreadInput"
         },
@@ -1415,7 +1390,6 @@
         "command",
         "commandMessage",
         "dispatchResult",
-        "replayEventsParams",
         "subscribeThreadParams",
         "threadStreamItem",
         "threadListStreamItem",

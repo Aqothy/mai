@@ -20,7 +20,6 @@ type contract struct {
 	Command                     wire.Command                     `json:"command"`
 	CommandMessage              wire.CommandMessage              `json:"commandMessage"`
 	DispatchResult              wire.DispatchResult              `json:"dispatchResult"`
-	ReplayEventsParams          wire.ReplayEventsParams          `json:"replayEventsParams"`
 	SubscribeThreadParams       wire.SubscribeThreadParams       `json:"subscribeThreadParams"`
 	ThreadStreamItem            wire.ThreadStreamItem            `json:"threadStreamItem"`
 	ThreadListStreamItem        wire.ThreadListStreamItem        `json:"threadListStreamItem"`

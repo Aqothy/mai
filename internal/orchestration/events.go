@@ -102,6 +102,22 @@ func (e Event) ThreadID() ThreadID {
 	return e.Payload.ThreadID
 }
 
+// normalizeEvent completes sparse event payload timestamps before the event is
+// applied or published. Existing item projections preserve their original
+// CreatedAt; new items use the time of their first upsert.
+func normalizeEvent(event Event) Event {
+	if event.Type != EventThreadItemUpserted || event.Payload.Item == nil {
+		return event
+	}
+	item := *event.Payload.Item
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = event.OccurredAt
+	}
+	item.UpdatedAt = event.OccurredAt
+	event.Payload.Item = &item
+	return event
+}
+
 // ApprovalEvent carries the data for thread.approval.open / thread.approval.resolve.
 type ApprovalEvent struct {
 	RequestID   string                      `json:"requestId"`

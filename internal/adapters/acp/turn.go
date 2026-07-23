@@ -452,7 +452,7 @@ func (h *Instance) scopedProviderItemIDLocked(sessionID string, providerItemID s
 func (h *Instance) sessionScopeLocked(sessionID string) string {
 	// The scope is random (not derived from the session id) so item ids from a
 	// re-materialized session can never collide with items an earlier binding of
-	// the same ACP session already wrote into the orchestration event log.
+	// the same ACP session already wrote into the orchestration projection.
 	session := h.sessionLocked(sessionID)
 	if session == nil {
 		// Stray traffic from an unbound session must not re-materialize

@@ -310,6 +310,7 @@ func TestReactorPreparesSessionBeforeFirstTurn(t *testing.T) {
 func TestReactorRequestsReplayWhenPreparingRestoredEmptyThread(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	fake := newFakeProviderRuntime()
 	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
 	fake.startReplay = []provider.RuntimeEvent{{
@@ -344,9 +345,9 @@ func TestReactorRequestsReplayWhenPreparingRestoredEmptyThread(t *testing.T) {
 	if len(thread.Timeline) != 1 || thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "restored question" {
 		t.Fatalf("timeline = %#v, want replay applied before preparation completed", thread.Timeline)
 	}
-	events := engine.ReplayEvents(ReplayEventsInput{ThreadID: threadID, FromSequenceExclusive: result.Sequence})
+	recorded := events.matching(threadID, result.Sequence)
 	var historySequence, readySequence uint64
-	for _, event := range events {
+	for _, event := range recorded {
 		switch event.Type {
 		case EventThreadHistoryReplayCompleted:
 			historySequence = event.Sequence

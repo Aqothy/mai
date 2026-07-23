@@ -113,6 +113,23 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	}
 }
 
+func TestRPCClientKeepsIndependentThreadSubscriptions(t *testing.T) {
+	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
+	threadA := orchestration.ThreadID("thread-a")
+	threadB := orchestration.ThreadID("thread-b")
+
+	client.subscribeThread(threadA)
+	client.subscribeThread(threadB)
+	client.unsubscribeThread(threadA)
+
+	if client.subscribedThread(threadA) {
+		t.Fatal("thread A remained subscribed after its explicit unsubscribe")
+	}
+	if !client.subscribedThread(threadB) {
+		t.Fatal("unsubscribing thread A removed the independent thread B subscription")
+	}
+}
+
 func TestRPCSubscribeThreadStreamsEventsAppendedAfterSnapshot(t *testing.T) {
 	s := newTestServer(t)
 	threadID := orchestration.ThreadID("thread-subscribe-race")
@@ -300,6 +317,7 @@ func TestRPCFailedDispatchReturnsNilResult(t *testing.T) {
 func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
+	events := observeServerEvents(t, s)
 	client := newRPCTestClient(t, s, rpcTestClientHandler{})
 	ctx := context.Background()
 
@@ -335,8 +353,8 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 			t.Fatalf("%s dispatched over RPC without error", command.Type)
 		}
 	}
-	if replay := s.orchestration.ReplayEvents(orchestration.ReplayEventsInput{}); len(replay) != 1 {
-		t.Fatalf("replay events = %#v, want only client-created thread event", replay)
+	if recorded := events.matching("", 0); len(recorded) != 1 {
+		t.Fatalf("events = %#v, want only client-created thread event", recorded)
 	}
 }
 
@@ -454,22 +472,22 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadHistoryReplayCompleted
 	})
-	var replayed orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &replayed); err != nil {
+	var refreshed orchestration.ThreadStreamItem
+	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &refreshed); err != nil {
 		t.Fatalf("resubscribe imported thread: %v", err)
 	}
-	if replayed.Snapshot == nil {
-		t.Fatalf("resubscribe imported thread = %#v, want snapshot", replayed)
+	if refreshed.Snapshot == nil {
+		t.Fatalf("resubscribe imported thread = %#v, want snapshot", refreshed)
 	}
-	encoded, err := json.Marshal(replayed.Snapshot.Thread.Timeline)
+	encoded, err := json.Marshal(refreshed.Snapshot.Thread.Timeline)
 	if err != nil {
 		t.Fatalf("encode replayed timeline: %v", err)
 	}
 	if !strings.Contains(string(encoded), "replayed") {
 		t.Fatalf("imported timeline = %s, want provider replay", encoded)
 	}
-	if replayed.Snapshot.Thread.Session == nil || replayed.Snapshot.Thread.Session.ProviderInstanceID != "codex" || replayed.Snapshot.Thread.Session.Cwd != importCwd {
-		t.Fatalf("prepared imported session = %+v, want codex binding in %q", replayed.Snapshot.Thread.Session, importCwd)
+	if refreshed.Snapshot.Thread.Session == nil || refreshed.Snapshot.Thread.Session.ProviderInstanceID != "codex" || refreshed.Snapshot.Thread.Session.Cwd != importCwd {
+		t.Fatalf("prepared imported session = %+v, want codex binding in %q", refreshed.Snapshot.Thread.Session, importCwd)
 	}
 }
 
@@ -671,5 +689,60 @@ func waitForThreadEvent(t *testing.T, items <-chan orchestration.ThreadStreamIte
 		case <-deadline:
 			t.Fatal("timeout waiting for orchestration thread event")
 		}
+	}
+}
+
+func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
+	s := newTestServer(t)
+	threadID := orchestration.ThreadID("thread-snapshot-race")
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "snapshot-race-create", ThreadID: threadID, Title: "initial"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "snapshot-race-before", ThreadID: threadID, Title: "before-boundary"}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &rpcClient{id: "client-snapshot-race", outbound: make(chan rpcOutbound, 4), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
+	s.rpcMu.Lock()
+	s.rpcClients[client.id] = client
+	s.rpcMu.Unlock()
+	defer func() {
+		s.rpcMu.Lock()
+		delete(s.rpcClients, client.id)
+		s.rpcMu.Unlock()
+		client.closeOutbound()
+		_ = s.Close()
+	}()
+
+	handler := &rpcHandler{server: s, client: client, afterThreadSnapshot: func(orchestration.ThreadID) {
+		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "snapshot-race-after", ThreadID: threadID, Title: "after-boundary"}); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := handler.Handle(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := result.(orchestration.ThreadStreamItem)
+	if item.Snapshot == nil || item.Snapshot.Thread.Title != "before-boundary" {
+		t.Fatalf("snapshot response = %#v", item)
+	}
+
+	select {
+	case msg := <-client.outbound:
+		raw := msg.params.(json.RawMessage)
+		var live orchestration.ThreadStreamItem
+		if err := json.Unmarshal(raw, &live); err != nil {
+			t.Fatal(err)
+		}
+		if live.Event == nil || live.Event.Payload.Title != "after-boundary" || live.Event.Sequence <= item.Snapshot.SnapshotSequence {
+			t.Fatalf("live boundary event = %#v, snapshot sequence %d", live, item.Snapshot.SnapshotSequence)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for live boundary event")
 	}
 }
