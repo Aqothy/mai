@@ -12,11 +12,22 @@ final class RPCClient {
     private var pendingRequests: [Int: CheckedContinuation<Data, any Error>] = [:]
 
     init(
-        endpoint: URL = URL(string: "ws://127.0.0.1:8765/rpc")!,
+        endpoint: URL? = nil,
         session: URLSession = .shared
     ) {
-        self.endpoint = endpoint
+        self.endpoint = endpoint ?? RPCClient.configuredEndpoint
         self.session = session
+    }
+
+    private static var configuredEndpoint: URL {
+        if let value = Bundle.main.object(forInfoDictionaryKey: "MAI_RPC_URL") as? String,
+           let endpoint = URL(string: value),
+           endpoint.host != nil,
+           let scheme = endpoint.scheme?.lowercased(),
+           ["ws", "wss"].contains(scheme) {
+            return endpoint
+        }
+        return URL(string: "ws://127.0.0.1:8765/rpc")!
     }
 
     func connect() {

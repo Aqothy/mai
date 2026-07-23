@@ -32,3 +32,4 @@ go.work.sum
 
 xcuserdata/
 buildServer.json
+Local.xcconfig
