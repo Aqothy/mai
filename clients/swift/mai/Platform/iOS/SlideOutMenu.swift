@@ -12,49 +12,40 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
     @State private var xOffset: CGFloat = 0
     @State private var progress: CGFloat = 0
     @State private var hapticTrigger = false
-    @GestureState private var dragTranslation: CGFloat = 0
+    @State private var dragStartOffset: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let displayedOffset = clamp(
-            xOffset + dragTranslation,
-            lower: 0,
-            upper: preferredWidth
-        )
-        let displayedProgress = dragTranslation == 0
-            ? progress
-            : displayedOffset / preferredWidth
-
         ZStack(alignment: .leading) {
-            menu(displayedProgress)
+            menu(progress)
                 .frame(width: preferredWidth)
                 .frame(maxHeight: .infinity)
                 .accessibilityHidden(!isOpen)
 
-            content(displayedProgress)
+            content(progress)
                 .containerRelativeFrame(.horizontal)
                 .frame(maxHeight: .infinity)
                 .background(.background)
-                .clipShape(.rect(cornerRadius: 26 * displayedProgress, style: .continuous))
+                .clipShape(.rect(cornerRadius: 26 * progress, style: .continuous))
                 .overlay {
                     Button {
                         isOpen = false
                     } label: {
-                        Color.black.opacity(0.18 * displayedProgress)
+                        Color.black.opacity(0.18 * progress)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(.rect)
                     .buttonStyle(.plain)
-                    .allowsHitTesting(displayedProgress > 0.001)
-                    .accessibilityHidden(displayedProgress <= 0.001)
+                    .allowsHitTesting(progress > 0.001)
+                    .accessibilityHidden(progress <= 0.001)
                     .accessibilityLabel("Close menu")
                 }
                 .shadow(
-                    color: .black.opacity(0.22 * displayedProgress),
-                    radius: 24 * displayedProgress,
-                    x: -8 * displayedProgress
+                    color: .black.opacity(0.22 * progress),
+                    radius: 24 * progress,
+                    x: -8 * progress
                 )
-                .offset(x: displayedOffset)
+                .offset(x: xOffset)
                 .accessibilityHidden(isOpen)
         }
         .contentShape(.rect)
@@ -65,42 +56,52 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
         .onChange(of: isOpen) { _, newValue in
             setOpen(newValue, menuWidth: preferredWidth)
         }
-        .gesture(dragGesture(menuWidth: preferredWidth))
+        .simultaneousGesture(
+            dragGesture(menuWidth: preferredWidth),
+            isEnabled: isEnabled
+        )
         .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
         .ignoresSafeArea()
     }
 
     private func dragGesture(menuWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10, coordinateSpace: .local)
-            .updating($dragTranslation) { value, translation, _ in
-                guard canHandle(value) else { return }
+            .onChanged { value in
+                guard isEnabled else { return }
 
-                let baseOffset = isOpen ? menuWidth : 0
+                if dragStartOffset == nil {
+                    guard isHorizontal(value) else { return }
+                    dragStartOffset = xOffset
+                }
+
                 let proposedOffset = clamp(
-                    baseOffset + value.translation.width,
+                    (dragStartOffset ?? xOffset) + value.translation.width,
                     lower: 0,
                     upper: menuWidth
                 )
-                translation = proposedOffset - baseOffset
+                xOffset = proposedOffset
+                progress = proposedOffset / menuWidth
             }
             .onEnded { value in
-                guard canHandle(value) else { return }
+                guard isEnabled, dragStartOffset != nil else {
+                    dragStartOffset = nil
+                    return
+                }
 
-                let baseOffset = isOpen ? menuWidth : 0
                 let predictedOffset = clamp(
-                    baseOffset + value.predictedEndTranslation.width,
+                    xOffset
+                        + value.predictedEndTranslation.width
+                        - value.translation.width,
                     lower: 0,
                     upper: menuWidth
                 )
+                dragStartOffset = nil
                 setOpen(predictedOffset > menuWidth / 2, menuWidth: menuWidth)
             }
     }
 
-    private func canHandle(_ value: DragGesture.Value) -> Bool {
-        guard isEnabled else { return false }
-
-        let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
-        return isHorizontal
+    private func isHorizontal(_ value: DragGesture.Value) -> Bool {
+        return abs(value.translation.width) > abs(value.translation.height)
     }
 
     private func setOpen(_ newValue: Bool, menuWidth: CGFloat) {
