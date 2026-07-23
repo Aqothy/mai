@@ -22,6 +22,28 @@ struct IOSSidebarView: View {
             .padding(.horizontal)
         }
         .scrollIndicators(.hidden)
+        .overlay {
+            if store.connectionState == .connecting, store.threads.isEmpty {
+                ProgressView("Connecting to maiD…")
+            } else if store.connectionState == .disconnected, store.threads.isEmpty {
+                ContentUnavailableView {
+                    Label("maiD Unavailable", systemImage: "network.slash")
+                } description: {
+                    Text(store.errorMessage ?? "Could not connect to the server.")
+                } actions: {
+                    Button("Retry", action: store.retry)
+                }
+            } else if store.connectionState == .connected, store.threads.isEmpty {
+                ContentUnavailableView(
+                    "No Threads",
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text("Your conversations will appear here.")
+                )
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            ConnectionStatusView(store: store)
+        }
     }
 }
 

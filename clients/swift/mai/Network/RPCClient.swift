@@ -1,6 +1,6 @@
 import Foundation
 
-final class MaidRPCClient {
+final class RPCClient {
     var onNotification: ((String, Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 

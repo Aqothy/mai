@@ -2,7 +2,6 @@
 
 public enum MaidRPCMethod {
     public static let orchestrationDispatchCommand = "orchestration.dispatchCommand"
-    public static let orchestrationReplayEvents = "orchestration.replayEvents"
     public static let orchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
     public static let orchestrationSubscribeThread = "orchestration.subscribeThread"
     public static let orchestrationUnsubscribeThread = "orchestration.unsubscribeThread"

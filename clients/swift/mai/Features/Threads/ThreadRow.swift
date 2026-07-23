@@ -19,6 +19,14 @@ struct ThreadRow: View {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Agent working")
+            } else if thread.latestTurn?.state == "error" || thread.session?.status == "error" {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("Failed")
+            } else if thread.latestTurn?.state == "interrupted" {
+                Image(systemName: "stop.circle.fill")
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Interrupted")
             } else if thread.latestTurn?.state == "completed" {
                 Image(systemName: "circle.fill")
                     .foregroundStyle(.green)

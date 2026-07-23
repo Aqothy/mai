@@ -2364,63 +2364,6 @@ public extension ProviderStartParams {
     }
 }
 
-// MARK: - ReplayEventsInput
-public struct ReplayEventsInput: Codable {
-    public let fromSequenceExclusive: Int
-    public let limit: Int?
-    public let threadID: String?
-
-    public enum CodingKeys: String, CodingKey {
-        case fromSequenceExclusive, limit
-        case threadID = "threadId"
-    }
-
-    public init(fromSequenceExclusive: Int, limit: Int?, threadID: String?) {
-        self.fromSequenceExclusive = fromSequenceExclusive
-        self.limit = limit
-        self.threadID = threadID
-    }
-}
-
-// MARK: ReplayEventsInput convenience initializers and mutators
-
-public extension ReplayEventsInput {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(ReplayEventsInput.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        fromSequenceExclusive: Int? = nil,
-        limit: Int?? = nil,
-        threadID: String?? = nil
-    ) -> ReplayEventsInput {
-        return ReplayEventsInput(
-            fromSequenceExclusive: fromSequenceExclusive ?? self.fromSequenceExclusive,
-            limit: limit ?? self.limit,
-            threadID: threadID ?? self.threadID
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - SubscribeThreadInput
 public struct SubscribeThreadInput: Codable {
     public let threadID: String
@@ -2891,19 +2834,12 @@ public struct ThreadListStreamItem: Codable {
     public let sequence: Int?
     public let snapshot: ThreadListSnapshot?
     public let thread: ThreadListEntry?
-    public let threadID: String?
 
-    public enum CodingKeys: String, CodingKey {
-        case kind, sequence, snapshot, thread
-        case threadID = "threadId"
-    }
-
-    public init(kind: String, sequence: Int?, snapshot: ThreadListSnapshot?, thread: ThreadListEntry?, threadID: String?) {
+    public init(kind: String, sequence: Int?, snapshot: ThreadListSnapshot?, thread: ThreadListEntry?) {
         self.kind = kind
         self.sequence = sequence
         self.snapshot = snapshot
         self.thread = thread
-        self.threadID = threadID
     }
 }
 
@@ -2929,15 +2865,13 @@ public extension ThreadListStreamItem {
         kind: String? = nil,
         sequence: Int?? = nil,
         snapshot: ThreadListSnapshot?? = nil,
-        thread: ThreadListEntry?? = nil,
-        threadID: String?? = nil
+        thread: ThreadListEntry?? = nil
     ) -> ThreadListStreamItem {
         return ThreadListStreamItem(
             kind: kind ?? self.kind,
             sequence: sequence ?? self.sequence,
             snapshot: snapshot ?? self.snapshot,
-            thread: thread ?? self.thread,
-            threadID: threadID ?? self.threadID
+            thread: thread ?? self.thread
         )
     }
 

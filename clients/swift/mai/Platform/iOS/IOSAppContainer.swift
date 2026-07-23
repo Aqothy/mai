@@ -16,18 +16,22 @@ struct IOSAppContainer: View {
             }
         } content: { _ in
             NavigationStack {
-                Color.clear
-                    .toolbar {
-                        ToolbarItem(placement: .navigation) {
-                            Button(
-                                isSidebarPresented ? "Close menu" : "Open menu",
-                                systemImage: "line.3.horizontal"
-                            ) {
-                                isSidebarPresented.toggle()
-                            }
-                            .labelStyle(.iconOnly)
+                ChatView(
+                    thread: store.selectedThread,
+                    errorMessage: store.selectedThreadLoadErrorMessage,
+                    retry: store.retry
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button(
+                            isSidebarPresented ? "Close menu" : "Open menu",
+                            systemImage: "line.3.horizontal"
+                        ) {
+                            isSidebarPresented.toggle()
                         }
+                        .labelStyle(.iconOnly)
                     }
+                }
             }
         }
     }
