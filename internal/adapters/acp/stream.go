@@ -149,6 +149,7 @@ func (h *Instance) abandonSessionStream(stream *sessionStream, cause error) {
 	if cause == nil {
 		cause = errSessionStreamClosed
 	}
+	var invalidated func()
 	h.mu.Lock()
 	stream.closed = true
 	stream.closeErr = cause
@@ -165,6 +166,9 @@ func (h *Instance) abandonSessionStream(stream *sessionStream, cause error) {
 	// was already stopped/rebound may have a replacement stream whose bindings
 	// must survive this (older) stream's abandonment.
 	if session := h.sessionLocked(stream.sessionID); session != nil && session.stream == stream {
+		if session.optionsCallbacks != nil {
+			invalidated = session.optionsCallbacks.Invalidated
+		}
 		h.unbindSessionLocked(stream.sessionID)
 	}
 	h.mu.Unlock()
@@ -188,6 +192,9 @@ func (h *Instance) abandonSessionStream(stream *sessionStream, cause error) {
 	}
 	for _, barrier := range barriers {
 		barrier.abandon()
+	}
+	if invalidated != nil {
+		invalidated()
 	}
 }
 

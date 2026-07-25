@@ -49,7 +49,8 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		},
 		// ACP exposes in-session model/config switching via session/set_config_option
 		// (the actual model/mode lists, if any, arrive per session as ConfigOptions).
-		ModelSwitch: provider.ModelSwitchInSession,
+		ModelSwitch:   provider.ModelSwitchInSession,
+		ConfigOptions: true,
 		MCP: provider.MCPCapabilities{
 			HTTP: boolValue(mcp.HTTP),
 			SSE:  boolValue(mcp.SSE),

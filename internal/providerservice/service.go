@@ -50,6 +50,15 @@ type SessionManager interface {
 	CloseSession(ctx context.Context, sessionID string) error
 }
 
+// OptionsSessionProvider is optional. Providers with a static catalog can
+// implement these methods without opening a native session; ACP uses an
+// unbound session so dependent configuration remains spec-correct.
+type OptionsSessionProvider interface {
+	OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error)
+	SetOptionsSessionValue(ctx context.Context, handle string, optionID string, value any) ([]provider.ConfigOption, error)
+	CloseOptionsSession(ctx context.Context, handle string) error
+}
+
 // InstanceFactory opens one concrete adapter instance. The daemon owns driver
 // selection; providerservice supplies the per-instance event sink.
 type InstanceFactory func(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error)
@@ -909,6 +918,42 @@ func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigO
 		})
 		return nil
 	})
+}
+
+func (s *Service) OpenOptionsSession(ctx context.Context, instanceID provider.InstanceID, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	instance, err := s.instance(instanceID)
+	if err != nil {
+		return provider.OptionsSession{}, err
+	}
+	optionsProvider, ok := instance.(OptionsSessionProvider)
+	if !ok || !instance.Info().Capabilities.ConfigOptions {
+		return provider.OptionsSession{}, fmt.Errorf("provider instance %q does not support config options", instanceID)
+	}
+	return optionsProvider.OpenOptionsSession(ctx, cwd, callbacks)
+}
+
+func (s *Service) SetOptionsSessionValue(ctx context.Context, instanceID provider.InstanceID, handle string, optionID string, value any) ([]provider.ConfigOption, error) {
+	instance, err := s.instance(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	optionsProvider, ok := instance.(OptionsSessionProvider)
+	if !ok || !instance.Info().Capabilities.ConfigOptions {
+		return nil, fmt.Errorf("provider instance %q does not support config options", instanceID)
+	}
+	return optionsProvider.SetOptionsSessionValue(ctx, handle, optionID, value)
+}
+
+func (s *Service) CloseOptionsSession(ctx context.Context, instanceID provider.InstanceID, handle string) error {
+	instance, err := s.instance(instanceID)
+	if err != nil {
+		return err
+	}
+	optionsProvider, ok := instance.(OptionsSessionProvider)
+	if !ok {
+		return nil
+	}
+	return optionsProvider.CloseOptionsSession(ctx, handle)
 }
 
 // updateRouteStartInput persists a successful live-session preference for a

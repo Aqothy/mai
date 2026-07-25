@@ -68,6 +68,7 @@ type fakeWireAgent struct {
 	capabilities map[string]any
 	authMethods  []any
 
+	onInitialize      func(params json.RawMessage)
 	onNewSession      func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
 	onLoadSession     func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
 	onResumeSession   func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams)
@@ -150,6 +151,9 @@ func (a *fakeWireAgent) dispatch(msg wireMsg) {
 	}
 	switch msg.Method {
 	case "initialize":
+		if a.onInitialize != nil {
+			a.onInitialize(msg.Params)
+		}
 		capabilities := a.capabilities
 		if capabilities == nil {
 			capabilities = map[string]any{}
@@ -374,6 +378,25 @@ func wireModelConfigOptions(current string) []any {
 			map[string]any{"value": "model-b", "name": "Model B"},
 		},
 	}}
+}
+
+func wireModelAndReasoningOptions(model string, reasoning string) []any {
+	return []any{
+		map[string]any{
+			"type": "select", "id": "z-model", "name": "Model", "category": "model", "currentValue": model,
+			"options": []any{
+				map[string]any{"value": "model-a", "name": "Model A"},
+				map[string]any{"value": "model-b", "name": "Model B"},
+			},
+		},
+		map[string]any{
+			"type": "select", "id": "a-reasoning", "name": "Reasoning", "category": "thought_level", "currentValue": reasoning,
+			"options": []any{
+				map[string]any{"value": "low", "name": "Low"},
+				map[string]any{"value": "high", "name": "High"},
+			},
+		},
+	}
 }
 
 // --- conversion / pure unit tests -------------------------------------------
@@ -1338,7 +1361,15 @@ func TestStartSessionAppliesModelSelectionConfigOption(t *testing.T) {
 	}
 	h := newWireTestHandle(t, agent)
 
-	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID:       "thread-1",
+		ModelSelection: &provider.ModelSelection{Model: "model-b"},
+		ConfigSelections: []provider.ConfigOptionSelection{{
+			OptionID: "model",
+			Value:    "model-b",
+			Category: provider.ConfigOptionCategoryModel,
+		}},
+	})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -1348,6 +1379,52 @@ func TestStartSessionAppliesModelSelectionConfigOption(t *testing.T) {
 	}
 	if len(result.Session.ConfigOptions) != 1 || result.Session.ConfigOptions[0].CurrentValue != "model-b" {
 		t.Fatalf("session config options = %#v, want current model-b", result.Session.ConfigOptions)
+	}
+}
+
+func TestStartSessionInfersMissingCategoriesAndAppliesModelFirst(t *testing.T) {
+	recorder := &callRecorder{}
+	model := "model-a"
+	reasoning := "low"
+	agent := &fakeWireAgent{
+		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.respond(id, map[string]any{
+				"sessionId":     "sess",
+				"configOptions": wireModelAndReasoningOptions(model, reasoning),
+			})
+		},
+		onSetConfigOption: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			recorder.recordConfig(params)
+			switch params.ConfigID {
+			case "z-model":
+				model = params.stringValue()
+			case "a-reasoning":
+				reasoning = params.stringValue()
+			}
+			a.respond(id, map[string]any{
+				"configOptions": wireModelAndReasoningOptions(model, reasoning),
+			})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+
+	_, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID: "thread-1",
+		// The client can Send before its options catalog loads, so these
+		// selections intentionally omit category and arrive dependent-first.
+		ConfigSelections: []provider.ConfigOptionSelection{
+			{OptionID: "a-reasoning", Value: "high"},
+			{OptionID: "z-model", Value: "model-b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	calls := recorder.configCalls()
+	if len(calls) != 2 ||
+		calls[0].ConfigID != "z-model" || calls[0].Value != "model-b" ||
+		calls[1].ConfigID != "a-reasoning" || calls[1].Value != "high" {
+		t.Fatalf("set_config_option calls = %#v, want model before reasoning", calls)
 	}
 }
 

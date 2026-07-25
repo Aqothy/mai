@@ -95,6 +95,7 @@ type Capabilities struct {
 	Logout        bool                      `json:"logout,omitempty"`
 	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
 	ModelSwitch   ModelSwitchSupport        `json:"modelSwitch,omitempty"`
+	ConfigOptions bool                      `json:"configOptions,omitempty"`
 	MCP           MCPCapabilities           `json:"mcp,omitzero"`
 }
 
@@ -233,6 +234,18 @@ type ConfigOptionSelection struct {
 	OptionID string               `json:"optionId"`
 	Value    any                  `json:"value"`
 	Category ConfigOptionCategory `json:"category,omitempty"`
+}
+
+// OptionsSession is a disposable provider-side helper used only to populate a
+// draft's configuration controls. Handle is opaque outside the adapter.
+type OptionsSession struct {
+	Handle        string
+	ConfigOptions []ConfigOption
+}
+
+type OptionsSessionCallbacks struct {
+	Updated     func([]ConfigOption)
+	Invalidated func()
 }
 
 type StartSessionInput struct {

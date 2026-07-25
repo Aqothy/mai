@@ -46,6 +46,70 @@ type acpSession struct {
 	replayEvents       []provider.RuntimeEvent
 	toolStates         map[string]toolState
 	pendingPermissions map[string]*pendingPermission
+	optionsCallbacks   *provider.OptionsSessionCallbacks
+}
+
+func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	if cwd == "" {
+		return provider.OptionsSession{}, fmt.Errorf("provider options session requires cwd")
+	}
+	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: cwd, MCPServers: []schema.McpServer{}})
+	if err != nil {
+		return provider.OptionsSession{}, acpRequestError(err)
+	}
+	sessionID := string(resp.SessionID)
+	if sessionID == "" {
+		return provider.OptionsSession{}, fmt.Errorf("ACP session/new returned an empty session id")
+	}
+	if err := h.bindSession("", sessionID); err != nil {
+		// The fresh session was never exposed; close it best-effort rather than
+		// leaking it in the agent process.
+		if h.sessionCapabilities().Close != nil {
+			_, _ = h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)})
+		}
+		return provider.OptionsSession{}, err
+	}
+	h.mu.Lock()
+	if session := h.sessionLocked(sessionID); session != nil {
+		copied := callbacks
+		session.optionsCallbacks = &copied
+	}
+	h.mu.Unlock()
+	h.ensureSessionStream(sessionID)
+	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
+	return provider.OptionsSession{Handle: sessionID, ConfigOptions: h.combinedConfigOptions(sessionID)}, nil
+}
+
+func (h *Instance) SetOptionsSessionValue(ctx context.Context, handle string, optionID string, value any) ([]provider.ConfigOption, error) {
+	h.mu.Lock()
+	session := h.sessionLocked(handle)
+	isOptionsSession := session != nil && session.threadID == "" && session.optionsCallbacks != nil
+	h.mu.Unlock()
+	if !isOptionsSession {
+		return nil, fmt.Errorf("ACP options session %q is not active", handle)
+	}
+	if err := h.setSessionConfigOptionValue(ctx, handle, optionID, value); err != nil {
+		return nil, err
+	}
+	return h.combinedConfigOptions(handle), nil
+}
+
+func (h *Instance) CloseOptionsSession(ctx context.Context, handle string) error {
+	h.mu.Lock()
+	session := h.sessionLocked(handle)
+	isOptionsSession := session != nil && session.threadID == "" && session.optionsCallbacks != nil
+	h.mu.Unlock()
+	if !isOptionsSession {
+		return nil
+	}
+	var closeErr error
+	if h.sessionCapabilities().Close != nil {
+		if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(handle)}); err != nil {
+			closeErr = acpRequestError(err)
+		}
+	}
+	h.unbindSessionID(handle)
+	return closeErr
 }
 
 // sessionLocked returns the session struct for an ACP session id. h.mu must be
@@ -458,18 +522,50 @@ func (h *Instance) unbindSessionID(sessionID string) {
 func (h *Instance) applyInitialSessionPreferences(ctx context.Context, sessionID string, input provider.StartSessionInput) {
 	// Model changes may replace the provider's advertised option set, so resolve
 	// and apply the model before replaying selections against the refreshed set.
+	selections := h.configSelectionsWithInferredCategories(sessionID, input.ConfigSelections)
+	hasModelSelection := input.ModelSelection != nil && strings.TrimSpace(input.ModelSelection.Model) != ""
 	h.applyModelSelectionPreference(ctx, sessionID, input)
-	for _, selection := range input.ConfigSelections {
-		if err := h.setSessionConfigOptionValue(ctx, sessionID, selection.OptionID, selection.Value); err != nil {
-			h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-				EventID:   provider.RuntimeEventID(newID()),
-				Type:      provider.RuntimeEventRuntimeWarning,
-				Provider:  DriverKind,
-				ThreadID:  input.ThreadID,
-				CreatedAt: time.Now(),
-				Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("config option %q not restored: %v", selection.OptionID, err)},
-			})
+	if !hasModelSelection {
+		for _, selection := range selections {
+			if selection.Category == provider.ConfigOptionCategoryModel {
+				h.applyConfigSelectionPreference(ctx, sessionID, input.ThreadID, selection)
+			}
 		}
+	}
+	for _, selection := range selections {
+		if selection.Category == provider.ConfigOptionCategoryModel {
+			continue
+		}
+		h.applyConfigSelectionPreference(ctx, sessionID, input.ThreadID, selection)
+	}
+}
+
+func (h *Instance) configSelectionsWithInferredCategories(sessionID string, selections []provider.ConfigOptionSelection) []provider.ConfigOptionSelection {
+	categories := make(map[string]provider.ConfigOptionCategory)
+	for _, option := range h.combinedConfigOptions(sessionID) {
+		if option.ID != "" && option.Category != "" {
+			categories[option.ID] = option.Category
+		}
+	}
+	resolved := append([]provider.ConfigOptionSelection(nil), selections...)
+	for index := range resolved {
+		if resolved[index].Category == "" {
+			resolved[index].Category = categories[resolved[index].OptionID]
+		}
+	}
+	return resolved
+}
+
+func (h *Instance) applyConfigSelectionPreference(ctx context.Context, sessionID string, threadID string, selection provider.ConfigOptionSelection) {
+	if err := h.setSessionConfigOptionValue(ctx, sessionID, selection.OptionID, selection.Value); err != nil {
+		h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
+			EventID:   provider.RuntimeEventID(newID()),
+			Type:      provider.RuntimeEventRuntimeWarning,
+			Provider:  DriverKind,
+			ThreadID:  threadID,
+			CreatedAt: time.Now(),
+			Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("config option %q not restored: %v", selection.OptionID, err)},
+		})
 	}
 }
 
@@ -626,6 +722,16 @@ func (h *Instance) emitConfigOptions(sessionID string, options []provider.Config
 	if options == nil {
 		options = []provider.ConfigOption{}
 	}
+	h.mu.Lock()
+	var updated func([]provider.ConfigOption)
+	if session := h.sessionLocked(sessionID); session != nil && session.optionsCallbacks != nil {
+		updated = session.optionsCallbacks.Updated
+	}
+	h.mu.Unlock()
+	if updated != nil {
+		updated(append([]provider.ConfigOption(nil), options...))
+		return
+	}
 	h.emitBoundRuntimeEventForSession(sessionID, provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Type:      provider.RuntimeEventConfigOptionsUpdated,
@@ -642,8 +748,10 @@ func (h *Instance) emitConfigOptions(sessionID string, options []provider.Config
 func (h *Instance) bindSession(threadID string, sessionID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if existingSessionID := h.sessionsByThread[threadID]; existingSessionID != "" && existingSessionID != sessionID {
-		return fmt.Errorf("thread %q is already bound to ACP session %q", threadID, existingSessionID)
+	if threadID != "" {
+		if existingSessionID := h.sessionsByThread[threadID]; existingSessionID != "" && existingSessionID != sessionID {
+			return fmt.Errorf("thread %q is already bound to ACP session %q", threadID, existingSessionID)
+		}
 	}
 	session := h.sessionLocked(sessionID)
 	if session != nil && session.threadID != "" && session.threadID != threadID {
@@ -658,7 +766,9 @@ func (h *Instance) bindSession(threadID string, sessionID string) error {
 		h.sessions[sessionID] = session
 	}
 	session.threadID = threadID
-	h.sessionsByThread[threadID] = sessionID
+	if threadID != "" {
+		h.sessionsByThread[threadID] = sessionID
+	}
 	return nil
 }
 
