@@ -2,17 +2,14 @@ import SwiftUI
 
 struct DesktopAppContainer: View {
     let store: ThreadStore
+    let draftStore: ThreadDraftStore
 
     var body: some View {
         NavigationSplitView {
-            DesktopSidebarView(store: store)
+            DesktopSidebarView(store: store, draftStore: draftStore)
                 .navigationSplitViewColumnWidth(260)
         } detail: {
-            ChatView(
-                thread: store.selectedThread,
-                errorMessage: store.selectedThreadLoadErrorMessage,
-                retry: store.retry
-            )
+            ChatView(store: store, draftStore: draftStore)
         }
         .toolbar(removing: .title)
     }
@@ -20,6 +17,9 @@ struct DesktopAppContainer: View {
 
 #if DEBUG
 #Preview("Desktop App") {
-    DesktopAppContainer(store: PreviewData.threadStore())
+    DesktopAppContainer(
+        store: PreviewData.threadStore(),
+        draftStore: ThreadDraftStore()
+    )
 }
 #endif

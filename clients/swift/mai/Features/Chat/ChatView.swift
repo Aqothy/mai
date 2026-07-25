@@ -1,43 +1,39 @@
 import SwiftUI
 
 struct ChatView: View {
-    let thread: Thread?
-    let errorMessage: String?
-    let retry: () -> Void
+    let store: ThreadStore
+    let draftStore: ThreadDraftStore
 
     var body: some View {
-        Group {
-            if let errorMessage {
-                ContentUnavailableView {
-                    Label("Unable to Load Thread", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(errorMessage)
-                } actions: {
-                    Button("Retry", action: retry)
-                }
-            } else if let thread {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text(thread.title)
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(.primary)
-                        .accessibilityHeading(.h1)
-
-                    ContentUnavailableView(
-                        "No Messages Yet",
-                        systemImage: "bubble.left.and.bubble.right",
-                        description: Text("The chat timeline is the next feature to implement.")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding()
-            } else {
-                ContentUnavailableView(
-                    "No Thread Selected",
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text("Select a thread from the sidebar.")
-                )
+        if let errorMessage = store.selectedThreadLoadErrorMessage {
+            ContentUnavailableView {
+                Label("Unable to Load Thread", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(errorMessage)
+            } actions: {
+                Button("Retry", action: store.retry)
             }
+        } else if let thread = store.selectedThread {
+            VStack(alignment: .leading) {
+                Text(thread.title)
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(.primary)
+                    .accessibilityHeading(.h1)
+
+                ContentUnavailableView(
+                    "No Messages Yet",
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text("The chat timeline is the next feature to implement.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding()
+        } else if store.selectedThreadID != nil, store.selectedThread == nil {
+            ProgressView("Loading Chat…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            DraftPromptView(store: store, draftStore: draftStore)
         }
     }
 }
@@ -46,14 +42,16 @@ struct ChatView: View {
 #Preview("Selected Chat") {
     NavigationStack {
         ChatView(
-            thread: PreviewData.selectedThread,
-            errorMessage: nil,
-            retry: {}
+            store: PreviewData.threadStore(),
+            draftStore: ThreadDraftStore()
         )
     }
 }
 
-#Preview("Empty Chat") {
-    ChatView(thread: nil, errorMessage: nil, retry: {})
+#Preview("Draft Chat") {
+    ChatView(
+        store: ThreadStore(previewThreads: PreviewData.threads),
+        draftStore: ThreadDraftStore()
+    )
 }
 #endif

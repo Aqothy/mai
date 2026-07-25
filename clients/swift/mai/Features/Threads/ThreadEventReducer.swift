@@ -55,11 +55,9 @@ enum ThreadEventReducer {
                 session = current.with(activeTurnID: .some(turnID), status: "running", updatedAt: event.occurredAt)
             }
             thread = thread.with(
-                draft: false,
                 latestTurn: turn.map(Optional.some),
                 session: session.map(Optional.some),
-                timeline: timeline,
-                title: original.draft ? nonEmpty(event.payload.title) ?? thread.title : thread.title
+                timeline: timeline
             )
 
         case "thread.turn-interrupt-requested":

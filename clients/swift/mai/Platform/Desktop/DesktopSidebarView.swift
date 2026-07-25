@@ -2,9 +2,14 @@ import SwiftUI
 
 struct DesktopSidebarView: View {
     let store: ThreadStore
+    let draftStore: ThreadDraftStore
 
     var body: some View {
         List(selection: selection) {
+            Button("New Chat", systemImage: "square.and.pencil") {
+                store.startNewDraft()
+            }
+
             ForEach(store.threads, id: \.id) { thread in
                 ThreadRow(thread: thread)
                     .tag(thread.id)
@@ -50,7 +55,10 @@ struct DesktopSidebarView: View {
 #if DEBUG
 #Preview("Desktop Sidebar") {
     NavigationStack {
-        DesktopSidebarView(store: PreviewData.threadStore())
+        DesktopSidebarView(
+            store: PreviewData.threadStore(),
+            draftStore: ThreadDraftStore()
+        )
     }
 }
 #endif

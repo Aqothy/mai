@@ -3,6 +3,7 @@ import SwiftUI
 
 struct IOSAppContainer: View {
     let store: ThreadStore
+    let draftStore: ThreadDraftStore
 
     @State private var isSidebarPresented = false
 
@@ -11,16 +12,13 @@ struct IOSAppContainer: View {
             NavigationStack {
                 IOSSidebarView(
                     store: store,
+                    draftStore: draftStore,
                     isPresented: $isSidebarPresented
                 )
             }
         } content: { _ in
             NavigationStack {
-                ChatView(
-                    thread: store.selectedThread,
-                    errorMessage: store.selectedThreadLoadErrorMessage,
-                    retry: store.retry
-                )
+                ChatView(store: store, draftStore: draftStore)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button(
@@ -39,7 +37,10 @@ struct IOSAppContainer: View {
 
 #if DEBUG
 #Preview("iOS App") {
-    IOSAppContainer(store: PreviewData.threadStore())
+    IOSAppContainer(
+        store: PreviewData.threadStore(),
+        draftStore: ThreadDraftStore()
+    )
 }
 #endif
 #endif

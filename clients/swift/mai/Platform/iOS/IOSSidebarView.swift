@@ -3,11 +3,19 @@ import SwiftUI
 
 struct IOSSidebarView: View {
     let store: ThreadStore
+    let draftStore: ThreadDraftStore
     @Binding var isPresented: Bool
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
+                Button("New Chat", systemImage: "square.and.pencil") {
+                    store.startNewDraft()
+                    isPresented = false
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+
                 ForEach(store.threads, id: \.id) { thread in
                     Button {
                         store.selectThread(thread.id)
@@ -56,6 +64,7 @@ struct IOSSidebarView: View {
     NavigationStack {
         IOSSidebarView(
             store: PreviewData.threadStore(),
+            draftStore: ThreadDraftStore(),
             isPresented: $isPresented
         )
     }

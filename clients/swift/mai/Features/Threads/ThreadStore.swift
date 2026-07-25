@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+struct ACPAgentChoice: Identifiable {
+    let id: String
+    let name: String
+}
+
 @Observable
 final class ThreadStore {
     static let maximumReconnectAttempts = 5
@@ -23,6 +28,45 @@ final class ThreadStore {
     private(set) var selectedThreadLoadErrorMessage: String?
     private(set) var reconnectAttempt = 0
     private(set) var nextReconnectAt: Date?
+    private(set) var providers: [InstanceInfo] = []
+    private(set) var registryAgents: [ACPRegistryAgent] = []
+    var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
+    var onProviderOptionsInvalidated: ((ProviderOptionsInvalidated) -> Void)?
+
+    var nativeProviders: [InstanceInfo] {
+        providers
+            .filter { !isACPProvider($0) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    var acpAgentChoices: [ACPAgentChoice] {
+        let runningAgents = providers.filter(isACPProvider).map {
+            ACPAgentChoice(id: $0.instanceID, name: $0.name)
+        }
+        let runningIDs = Set(runningAgents.map(\.id))
+        let registryChoices = registryAgents.compactMap { agent -> ACPAgentChoice? in
+            guard !runningIDs.contains(agent.instanceID) else { return nil }
+            return ACPAgentChoice(
+                id: agent.instanceID,
+                name: agent.name
+            )
+        }
+        return (runningAgents + registryChoices).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    var hasACPProvider: Bool {
+        !acpAgentChoices.isEmpty
+    }
+
+    var recentWorkingDirectories: [String] {
+        var seen: Set<String> = []
+        return threads.compactMap { thread in
+            guard let cwd = thread.cwd, seen.insert(cwd).inserted else { return nil }
+            return cwd
+        }
+    }
 
     var isReconnectScheduled: Bool {
         nextReconnectAt != nil
@@ -68,11 +112,18 @@ final class ThreadStore {
     }
 
     #if DEBUG
-    init(previewThreads: [ThreadListEntry], selectedThread: Thread? = nil) {
+    init(
+        previewThreads: [ThreadListEntry],
+        selectedThread: Thread? = nil,
+        providers: [InstanceInfo] = [],
+        registryAgents: [ACPRegistryAgent] = []
+    ) {
         rpc = RPCClient()
         cachePolicy = CachePolicy()
         now = Date.init
         threads = previewThreads
+        self.providers = providers
+        self.registryAgents = registryAgents
         selectedThreadID = selectedThread?.id
         if let selectedThread {
             var session = ThreadSession(thread: selectedThread)
@@ -111,6 +162,9 @@ final class ThreadStore {
                 scheduleReconnect()
                 return
             }
+            providers = try await rpc.listProviders()
+            registryAgents = (try? await rpc.listRegistryAgents()) ?? []
+
             connectionState = .connected
             reconnectTask?.cancel()
             reconnectTask = nil
@@ -132,6 +186,15 @@ final class ThreadStore {
         if isStarted {
             guard connectionState == .connected, let selectedThreadID else { return }
             selectedThreadLoadErrorMessage = nil
+            if let thread = sessionsByID[selectedThreadID]?.thread,
+               sessionsByID[selectedThreadID]?.subscriptionState.isSubscribed == true,
+               thread.session == nil,
+               thread.latestTurn == nil {
+                Task {
+                    await prepareSelectedRestoredThreadIfNeeded(selectedThreadID)
+                }
+                return
+            }
             ensureSubscribed(selectedThreadID)
             return
         }
@@ -143,6 +206,44 @@ final class ThreadStore {
         Task {
             await start()
         }
+    }
+
+    func isACPProviderID(_ providerID: String) -> Bool {
+        registryAgents.contains { $0.instanceID == providerID }
+            || providers.first(where: { $0.instanceID == providerID }).map(isACPProvider) == true
+    }
+
+    func ensureProviderAvailable(_ requestedID: String) async throws -> String {
+        try await resolveProvider(requestedID)
+    }
+
+    func providerSupportsConfigOptions(_ providerID: String) -> Bool {
+        providers.first { $0.instanceID == providerID }?.capabilities.configOptions == true
+    }
+
+    func getProviderOptions(providerID: String, cwd: String) async throws -> ProviderOptionsResult {
+        try await rpc.getProviderOptions(
+            ProviderOptionsGetParams(cwd: cwd, providerInstanceID: providerID)
+        )
+    }
+
+    func setProviderOption(optionsSessionID: String, optionID: String, value: JSONAny) async throws -> ProviderOptionsResult {
+        try await rpc.setProviderOption(
+            ProviderOptionsSetParams(optionID: optionID, optionsSessionID: optionsSessionID, value: value)
+        )
+    }
+
+    func startThread(_ input: Command) async throws {
+        guard let threadID = input.threadID else {
+            throw RPCError(code: nil, message: "Starting a chat requires a thread ID", data: nil)
+        }
+        _ = try await rpc.dispatchCommand(input)
+        selectThread(threadID)
+        await subscriptionTasks[threadID]?.task.value
+    }
+
+    func startNewDraft() {
+        selectThread(nil)
     }
 
     func selectThread(_ id: String?) {
@@ -201,6 +302,63 @@ final class ThreadStore {
         }
 
         scheduleMaintenance()
+    }
+
+    private func isACPProvider(_ provider: InstanceInfo) -> Bool {
+        registryAgents.contains { $0.instanceID == provider.instanceID }
+            || provider.driver == "acp"
+    }
+
+    private func resolveProvider(_ requestedID: String?) async throws -> String {
+        let preferredID = requestedID ?? providers.first?.instanceID ?? registryAgents.first?.instanceID
+
+        if let provider = providers.first(where: { $0.instanceID == preferredID }) {
+            guard provider.status != "initialized" else { return provider.instanceID }
+            let started = try await rpc.startProvider(provider.instanceID)
+            providers.removeAll { $0.instanceID == started.instanceID }
+            providers.append(started)
+            return started.instanceID
+        }
+
+        if let agent = registryAgents.first(where: {
+            $0.instanceID == preferredID || $0.id == preferredID
+        }) {
+            let started = try await rpc.startRegistryAgent(agent.id)
+            providers.removeAll { $0.instanceID == started.instanceID }
+            providers.append(started)
+            return started.instanceID
+        }
+
+        throw RPCError(code: nil, message: "No agent is available", data: nil)
+    }
+
+    private func command(
+        type: String,
+        threadID: String,
+        title: String? = nil,
+        providerInstanceID: String? = nil,
+        cwd: String? = nil,
+        message: CommandMessage? = nil,
+        configSelections: [ConfigOptionSelection]? = nil,
+        commandID: String = UUID().uuidString
+    ) -> Command {
+        Command(
+            commandID: commandID,
+            configSelections: configSelections,
+            createdAt: now(),
+            cwd: cwd,
+            decision: nil,
+            message: message,
+            modelSelection: nil,
+            optionID: nil,
+            providerInstanceID: providerInstanceID,
+            requestID: nil,
+            threadID: threadID,
+            title: title,
+            turnID: nil,
+            type: type,
+            value: nil
+        )
     }
 
     private func handleDisconnect(_ error: Error?) {
@@ -357,6 +515,7 @@ final class ThreadStore {
                 applyThreadEventItem(bufferedItem)
             }
             performSubscriptionMaintenance()
+            await prepareSelectedRestoredThreadIfNeeded(id)
         } catch is CancellationError {
             return
         } catch {
@@ -365,6 +524,25 @@ final class ThreadStore {
             failed.subscriptionState = .unsubscribed
             failed.bufferedItems.removeAll()
             sessionsByID[id] = failed
+            if selectedThreadID == id {
+                selectedThreadLoadErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func prepareSelectedRestoredThreadIfNeeded(_ id: String) async {
+        guard connectionState == .connected,
+              selectedThreadID == id,
+              let thread = sessionsByID[id]?.thread,
+              thread.session == nil,
+              thread.latestTurn == nil else {
+            return
+        }
+        do {
+            _ = try await rpc.dispatchCommand(
+                command(type: "thread.session.prepare", threadID: id)
+            )
+        } catch {
             if selectedThreadID == id {
                 selectedThreadLoadErrorMessage = error.localizedDescription
             }
@@ -473,6 +651,18 @@ final class ThreadStore {
                     from: data
                 )
                 receiveThreadItem(notification.params)
+            case MaidRPCMethod.providerOptionsUpdated:
+                let notification = try newJSONDecoder().decode(
+                    Notification<ProviderOptionsResult>.self,
+                    from: data
+                )
+                onProviderOptionsUpdated?(notification.params)
+            case MaidRPCMethod.providerOptionsInvalidated:
+                let notification = try newJSONDecoder().decode(
+                    Notification<ProviderOptionsInvalidated>.self,
+                    from: data
+                )
+                onProviderOptionsInvalidated?(notification.params)
             default:
                 break
             }
@@ -530,8 +720,14 @@ final class ThreadStore {
         }
 
         lastThreadListSequence = snapshot.snapshotSequence
-        threads = snapshot.threads.filter { !$0.draft }
+        threads = snapshot.threads
         sortThreads()
+        if let selectedThreadID,
+           !snapshot.threads.contains(where: { $0.id == selectedThreadID }) {
+            self.selectedThreadID = nil
+            selectedThreadLoadErrorMessage = nil
+            sessionsByID[selectedThreadID] = nil
+        }
         isLoadingThreadListSnapshot = false
 
         let bufferedItems = bufferedThreadListItems
@@ -550,9 +746,7 @@ final class ThreadStore {
         case "thread-upserted":
             guard let thread = item.thread else { return }
             threads.removeAll { $0.id == thread.id }
-            if !thread.draft {
-                threads.append(thread)
-            }
+            threads.append(thread)
             sortThreads()
         default:
             break
