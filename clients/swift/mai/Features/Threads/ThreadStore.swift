@@ -242,6 +242,15 @@ final class ThreadStore {
         await subscriptionTasks[threadID]?.task.value
     }
 
+    func retryFailedTurn(threadID: String) async throws {
+        _ = try await rpc.dispatchCommand(
+            command(
+                type: "thread.turn.retry",
+                threadID: threadID
+            )
+        )
+    }
+
     func startNewDraft() {
         selectThread(nil)
     }
