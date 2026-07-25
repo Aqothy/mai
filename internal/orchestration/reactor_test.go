@@ -844,6 +844,53 @@ func TestReactorProjectsProviderSessionReturnedFromStartSession(t *testing.T) {
 	}
 }
 
+func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	fake.startErr = errors.New("agent unavailable")
+	newTestReactor(engine, fake)
+	threadID := ThreadID("thread-first-turn-retry-config")
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadStart, CommandID: "start-first-turn-retry-config", ThreadID: threadID,
+		ProviderInstanceID: "codex", Cwd: t.TempDir(),
+		Message: &CommandMessage{MessageID: "message-first-turn-retry-config", Text: "hello"},
+		ConfigSelections: []provider.ConfigOptionSelection{{
+			OptionID: "mode", Category: provider.ConfigOptionCategoryMode, Value: "plan",
+		}},
+	}); err != nil {
+		t.Fatalf("thread.start: %v", err)
+	}
+	waitForSessionStatus(t, engine, threadID, SessionStatusError)
+
+	fake.startErr = nil
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadTurnRetry, CommandID: "retry-first-turn-config", ThreadID: threadID,
+	}); err != nil {
+		t.Fatalf("thread.turn.retry: %v", err)
+	}
+	select {
+	case <-fake.sendSignal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried turn was not dispatched")
+	}
+
+	input := fake.lastStartInput()
+	if len(input.ConfigSelections) != 1 ||
+		input.ConfigSelections[0].OptionID != "mode" ||
+		input.ConfigSelections[0].Category != provider.ConfigOptionCategoryMode ||
+		input.ConfigSelections[0].Value != "plan" {
+		t.Fatalf("retry config selections = %#v, want mode=plan", input.ConfigSelections)
+	}
+	if messages := func() []Message {
+		thread, _ := engine.Thread(threadID)
+		return thread.Timeline.Messages()
+	}(); len(messages) != 1 || messages[0].ID != "message-first-turn-retry-config" {
+		t.Fatalf("messages after retry = %#v, want the one original message", messages)
+	}
+}
+
 func TestReactorEnsuresProviderSessionForExistingReadyBinding(t *testing.T) {
 	engine := NewEngine()
 	fake := newFakeProviderRuntime()

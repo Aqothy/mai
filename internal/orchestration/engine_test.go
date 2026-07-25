@@ -981,6 +981,20 @@ func TestProviderCommandFailureCompletesTurnWithoutSession(t *testing.T) {
 	if snapshot.Snapshot.Thread.LatestTurn.State != TurnStateError || snapshot.Snapshot.Thread.LatestTurn.Error != "provider missing" || snapshot.Snapshot.Thread.LatestTurn.CompletedAt == nil {
 		t.Fatalf("latest turn = %#v, want completed error", snapshot.Snapshot.Thread.LatestTurn)
 	}
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadTurnRetry, CommandID: "cmd-turn-retry", ThreadID: threadID,
+	}); err != nil {
+		t.Fatalf("thread.turn.retry: %v", err)
+	}
+	thread, ok := engine.Thread(threadID)
+	if !ok || thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateRunning {
+		t.Fatalf("thread after retry = %#v, want running retry turn", thread)
+	}
+	messages := thread.Timeline.Messages()
+	if len(messages) != 1 || messages[0].ID != "msg-fail" || messages[0].TurnID != thread.LatestTurn.ID {
+		t.Fatalf("messages after retry = %#v, want original message rebound to retry turn", messages)
+	}
 }
 
 func TestEngineAppendEventDoesNotDeduplicateProviderEvents(t *testing.T) {

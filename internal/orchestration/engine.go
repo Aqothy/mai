@@ -283,6 +283,8 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 		return e.dispatchThreadMetaUpdate(command)
 	case CommandThreadTurnStart:
 		return e.dispatchThreadTurnStart(command)
+	case CommandThreadTurnRetry:
+		return e.dispatchThreadTurnRetry(command)
 	case CommandThreadTurnInterrupt:
 		return e.dispatchThreadTurnInterrupt(command)
 	case CommandThreadApprovalRespond:
@@ -660,6 +662,33 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 		return DispatchResult{}, err
 	}
 	return DispatchResult{Sequence: sequence}, nil
+}
+
+// dispatchThreadTurnRetry starts a fresh turn with the existing user message
+// from the failed turn. It avoids appending the same prompt to the timeline a
+// second time.
+func (e *Engine) dispatchThreadTurnRetry(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		if sessionPreparing(*thread) {
+			return Event{}, fmt.Errorf("cannot retry a turn while thread %q is preparing its provider session", command.ThreadID)
+		}
+		if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError {
+			return Event{}, fmt.Errorf("thread %q has no failed turn to retry", command.ThreadID)
+		}
+		var messageID MessageID
+		for _, message := range thread.Timeline.Messages() {
+			if message.Role == MessageRoleUser && message.TurnID == thread.LatestTurn.ID {
+				messageID = message.ID
+			}
+		}
+		if messageID == "" {
+			return Event{}, fmt.Errorf("failed turn %q has no user message to retry", thread.LatestTurn.ID)
+		}
+		return threadEvent(command, EventThreadTurnStartRequested, ActorKindClient, EventPayload{
+			MessageID: messageID,
+			TurnID:    TurnID(newID("turn")),
+		}), nil
+	})
 }
 
 func (e *Engine) dispatchApprovalRespond(command Command) (DispatchResult, error) {

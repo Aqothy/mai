@@ -15,6 +15,7 @@ const (
 	CommandThreadStart           = "thread.start"
 	CommandThreadMetaUpdate      = "thread.meta.update"
 	CommandThreadTurnStart       = "thread.turn.start"
+	CommandThreadTurnRetry       = "thread.turn.retry"
 	CommandThreadTurnInterrupt   = "thread.turn.interrupt"
 	CommandThreadApprovalRespond = "thread.approval.respond"
 	CommandThreadSessionPrepare  = "thread.session.prepare"
