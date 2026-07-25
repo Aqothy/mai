@@ -72,6 +72,16 @@
       "name": "provider.closeSession",
       "params": "ProviderSessionParams",
       "resultNull": true
+    },
+    {
+      "name": "provider.options.get",
+      "params": "ProviderOptionsGetParams",
+      "result": "ProviderOptionsResult"
+    },
+    {
+      "name": "provider.options.set",
+      "params": "ProviderOptionsSetParams",
+      "result": "ProviderOptionsResult"
     }
   ],
   "notifications": [
@@ -82,6 +92,14 @@
     {
       "name": "orchestration.subscribeThread",
       "payload": "ThreadStreamItem"
+    },
+    {
+      "name": "provider.options.updated",
+      "payload": "ProviderOptionsResult"
+    },
+    {
+      "name": "provider.options.invalidated",
+      "payload": "ProviderOptionsInvalidated"
     }
   ]
 }

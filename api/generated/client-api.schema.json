@@ -250,6 +250,9 @@
         "modelSwitch": {
           "type": "string"
         },
+        "configOptions": {
+          "type": "boolean"
+        },
         "mcp": {
           "$ref": "#/$defs/MCPCapabilities"
         }
@@ -297,6 +300,12 @@
           "type": "string"
         },
         "value": true,
+        "configSelections": {
+          "items": {
+            "$ref": "#/$defs/ConfigOptionSelection"
+          },
+          "type": "array"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -383,6 +392,24 @@
         "type"
       ],
       "title": "ConfigOption"
+    },
+    "ConfigOptionSelection": {
+      "properties": {
+        "optionId": {
+          "type": "string"
+        },
+        "value": true,
+        "category": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "optionId",
+        "value"
+      ],
+      "title": "ConfigOptionSelection"
     },
     "DispatchResult": {
       "properties": {
@@ -834,6 +861,75 @@
       ],
       "title": "ProviderListSessionsParams"
     },
+    "ProviderOptionsGetParams": {
+      "properties": {
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "providerInstanceId",
+        "cwd"
+      ],
+      "title": "ProviderOptionsGetParams"
+    },
+    "ProviderOptionsInvalidated": {
+      "properties": {
+        "optionsSessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "optionsSessionId"
+      ],
+      "title": "ProviderOptionsInvalidated"
+    },
+    "ProviderOptionsResult": {
+      "properties": {
+        "optionsSessionId": {
+          "type": "string"
+        },
+        "configOptions": {
+          "items": {
+            "$ref": "#/$defs/ConfigOption"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "optionsSessionId",
+        "configOptions"
+      ],
+      "title": "ProviderOptionsResult"
+    },
+    "ProviderOptionsSetParams": {
+      "properties": {
+        "optionsSessionId": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "optionsSessionId",
+        "optionId",
+        "value"
+      ],
+      "title": "ProviderOptionsSetParams"
+    },
     "ProviderSessionParams": {
       "properties": {
         "instanceId": {
@@ -989,9 +1085,6 @@
         "id": {
           "type": "string"
         },
-        "draft": {
-          "type": "boolean"
-        },
         "title": {
           "type": "string"
         },
@@ -1029,7 +1122,6 @@
       "type": "object",
       "required": [
         "id",
-        "draft",
         "title",
         "timeline",
         "createdAt",
@@ -1058,9 +1150,6 @@
       "properties": {
         "id": {
           "type": "string"
-        },
-        "draft": {
-          "type": "boolean"
         },
         "title": {
           "type": "string"
@@ -1096,7 +1185,6 @@
       "type": "object",
       "required": [
         "id",
-        "draft",
         "title",
         "createdAt",
         "updatedAt",
@@ -1346,6 +1434,9 @@
         "configChoice": {
           "$ref": "#/$defs/ConfigChoice"
         },
+        "configOptionSelection": {
+          "$ref": "#/$defs/ConfigOptionSelection"
+        },
         "slashCommand": {
           "$ref": "#/$defs/SlashCommand"
         },
@@ -1378,6 +1469,18 @@
         },
         "providerImportSessionResult": {
           "$ref": "#/$defs/ProviderImportSessionResult"
+        },
+        "providerOptionsGetParams": {
+          "$ref": "#/$defs/ProviderOptionsGetParams"
+        },
+        "providerOptionsSetParams": {
+          "$ref": "#/$defs/ProviderOptionsSetParams"
+        },
+        "providerOptionsResult": {
+          "$ref": "#/$defs/ProviderOptionsResult"
+        },
+        "providerOptionsInvalidated": {
+          "$ref": "#/$defs/ProviderOptionsInvalidated"
         },
         "acpRegistryAgent": {
           "$ref": "#/$defs/ACPRegistryAgent"
@@ -1414,6 +1517,7 @@
         "modelSelection",
         "configOption",
         "configChoice",
+        "configOptionSelection",
         "slashCommand",
         "tokenUsage",
         "approvalOption",
@@ -1425,6 +1529,10 @@
         "providerSessionParams",
         "providerImportSessionParams",
         "providerImportSessionResult",
+        "providerOptionsGetParams",
+        "providerOptionsSetParams",
+        "providerOptionsResult",
+        "providerOptionsInvalidated",
         "acpRegistryAgent"
       ],
       "title": "contract"

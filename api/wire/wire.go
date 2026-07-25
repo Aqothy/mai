@@ -15,16 +15,20 @@ const (
 	MethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
 	MethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
 
-	MethodProviderStart         = "provider.start"
-	MethodProviderList          = "provider.list"
-	MethodACPRegistryList       = "acp.registry.list"
-	MethodACPRegistryStart      = "acp.registry.start"
-	MethodProviderAuthenticate  = "provider.authenticate"
-	MethodProviderLogout        = "provider.logout"
-	MethodProviderListSessions  = "provider.listSessions"
-	MethodProviderImportSession = "provider.importSession"
-	MethodProviderDeleteSession = "provider.deleteSession"
-	MethodProviderCloseSession  = "provider.closeSession"
+	MethodProviderStart              = "provider.start"
+	MethodProviderList               = "provider.list"
+	MethodACPRegistryList            = "acp.registry.list"
+	MethodACPRegistryStart           = "acp.registry.start"
+	MethodProviderAuthenticate       = "provider.authenticate"
+	MethodProviderLogout             = "provider.logout"
+	MethodProviderListSessions       = "provider.listSessions"
+	MethodProviderImportSession      = "provider.importSession"
+	MethodProviderDeleteSession      = "provider.deleteSession"
+	MethodProviderCloseSession       = "provider.closeSession"
+	MethodProviderOptionsGet         = "provider.options.get"
+	MethodProviderOptionsSet         = "provider.options.set"
+	MethodProviderOptionsUpdated     = "provider.options.updated"
+	MethodProviderOptionsInvalidated = "provider.options.invalidated"
 )
 
 // EmptyParams is the params object sent to methods that take no arguments.
@@ -62,6 +66,7 @@ type Attachment = provider.Attachment
 type ModelSelection = provider.ModelSelection
 type ConfigOption = provider.ConfigOption
 type ConfigChoice = provider.ConfigChoice
+type ConfigOptionSelection = provider.ConfigOptionSelection
 type SlashCommand = provider.SlashCommand
 type TokenUsage = provider.TokenUsage
 type ApprovalOption = provider.ApprovalOption
@@ -105,6 +110,26 @@ type ProviderImportSessionParams struct {
 type ProviderImportSessionResult struct {
 	ThreadID orchestration.ThreadID `json:"threadId"`
 	Imported bool                   `json:"imported"`
+}
+
+type ProviderOptionsGetParams struct {
+	ProviderInstanceID provider.InstanceID `json:"providerInstanceId"`
+	Cwd                string              `json:"cwd"`
+}
+
+type ProviderOptionsSetParams struct {
+	OptionsSessionID string `json:"optionsSessionId"`
+	OptionID         string `json:"optionId"`
+	Value            any    `json:"value"`
+}
+
+type ProviderOptionsResult struct {
+	OptionsSessionID string                  `json:"optionsSessionId"`
+	ConfigOptions    []provider.ConfigOption `json:"configOptions"`
+}
+
+type ProviderOptionsInvalidated struct {
+	OptionsSessionID string `json:"optionsSessionId"`
 }
 
 // ACPRegistryAgent is a safe, installable entry returned by the public ACP

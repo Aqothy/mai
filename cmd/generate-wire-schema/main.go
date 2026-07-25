@@ -44,6 +44,7 @@ type contract struct {
 	ModelSelection              wire.ModelSelection              `json:"modelSelection"`
 	ConfigOption                wire.ConfigOption                `json:"configOption"`
 	ConfigChoice                wire.ConfigChoice                `json:"configChoice"`
+	ConfigOptionSelection       wire.ConfigOptionSelection       `json:"configOptionSelection"`
 	SlashCommand                wire.SlashCommand                `json:"slashCommand"`
 	TokenUsage                  wire.TokenUsage                  `json:"tokenUsage"`
 	ApprovalOption              wire.ApprovalOption              `json:"approvalOption"`
@@ -55,6 +56,10 @@ type contract struct {
 	ProviderSessionParams       wire.ProviderSessionParams       `json:"providerSessionParams"`
 	ProviderImportSessionParams wire.ProviderImportSessionParams `json:"providerImportSessionParams"`
 	ProviderImportSessionResult wire.ProviderImportSessionResult `json:"providerImportSessionResult"`
+	ProviderOptionsGetParams    wire.ProviderOptionsGetParams    `json:"providerOptionsGetParams"`
+	ProviderOptionsSetParams    wire.ProviderOptionsSetParams    `json:"providerOptionsSetParams"`
+	ProviderOptionsResult       wire.ProviderOptionsResult       `json:"providerOptionsResult"`
+	ProviderOptionsInvalidated  wire.ProviderOptionsInvalidated  `json:"providerOptionsInvalidated"`
 	ACPRegistryAgent            wire.ACPRegistryAgent            `json:"acpRegistryAgent"`
 }
 

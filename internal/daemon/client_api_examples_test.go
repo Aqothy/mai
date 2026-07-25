@@ -60,39 +60,31 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 	c.section("orchestration.subscribeThreadList")
 	c.mustCall("orchestration.subscribeThreadList", nil)
 
-	c.section("thread.create")
-	created, _ := c.mustCall("orchestration.dispatchCommand", map[string]any{
-		"type":               "thread.create",
+	startCommand := map[string]any{
+		"type":               "thread.start",
 		"commandId":          "5f0c9a3e-8f1d-4f6a-b2e7-9c8d7a6b5e40",
 		"threadId":           threadID,
 		"title":              "Fix the flaky login test",
 		"providerInstanceId": "claude-code",
 		"cwd":                demoCwd,
-	})
+		"message":            map[string]any{"messageId": "7a1c4e90-5b2d-4c8f-a3e6-1d9b0f7c2a85", "text": "Why is TestLogin flaky?"},
+		"configSelections": []any{
+			map[string]any{"optionId": "model", "category": "model", "value": "test-model-1"},
+		},
+	}
+	c.section("thread.start")
+	created, _ := c.mustCall("orchestration.dispatchCommand", startCommand)
 
-	c.section("thread.create retried with the same commandId (idempotent receipt)")
-	retried, _ := c.mustCall("orchestration.dispatchCommand", map[string]any{
-		"type":               "thread.create",
-		"commandId":          "5f0c9a3e-8f1d-4f6a-b2e7-9c8d7a6b5e40",
-		"threadId":           threadID,
-		"title":              "Fix the flaky login test",
-		"providerInstanceId": "claude-code",
-		"cwd":                demoCwd,
-	})
+	c.section("thread.start retried with the same commandId (idempotent receipt)")
+	retried, _ := c.mustCall("orchestration.dispatchCommand", startCommand)
 	if string(created) != string(retried) {
-		t.Fatalf("retried thread.create receipt = %s, want %s", retried, created)
+		t.Fatalf("retried thread.start receipt = %s, want %s", retried, created)
 	}
 
 	c.section("orchestration.subscribeThread")
 	c.mustCall("orchestration.subscribeThread", map[string]any{"threadId": threadID})
 
-	c.section("thread.turn.start and the live event stream")
-	c.mustCall("orchestration.dispatchCommand", map[string]any{
-		"type":      "thread.turn.start",
-		"commandId": "e1d4b7a2-0c3f-45e8-9a6b-8f2c1d0e7a54",
-		"threadId":  threadID,
-		"message":   map[string]any{"messageId": "7a1c4e90-5b2d-4c8f-a3e6-1d9b0f7c2a85", "text": "Why is TestLogin flaky?"},
-	})
+	c.section("thread.start live event stream")
 	c.drainUntilEvent(func(event orchestration.Event) bool {
 		return event.ThreadID() == orchestration.ThreadID(threadID) &&
 			event.Type == orchestration.EventThreadSessionStatusSet &&
@@ -125,20 +117,15 @@ func TestCaptureClientAPIExamples(t *testing.T) {
 		"config": map[string]any{"command": helperCommand("permission-allow-sessions")},
 	})
 	c.mustCall("orchestration.dispatchCommand", map[string]any{
-		"type":               "thread.create",
+		"type":               "thread.start",
 		"commandId":          "b4a7d2c9-1e6f-483b-9c5a-0d8e3f6a2b17",
 		"threadId":           approvalThreadID,
 		"title":              "Refactor session store",
 		"providerInstanceId": "codex",
 		"cwd":                demoCwd,
+		"message":            map[string]any{"messageId": "8c5f2a71-6d3b-4e90-a1c8-3f7d0b6e9a24", "text": "Apply the refactor"},
 	})
 	c.mustCall("orchestration.subscribeThread", map[string]any{"threadId": approvalThreadID})
-	c.mustCall("orchestration.dispatchCommand", map[string]any{
-		"type":      "thread.turn.start",
-		"commandId": "0f3b6d8a-4c1e-47f2-8b9d-5a7e2c0f4d61",
-		"threadId":  approvalThreadID,
-		"message":   map[string]any{"messageId": "8c5f2a71-6d3b-4e90-a1c8-3f7d0b6e9a24", "text": "Apply the refactor"},
-	})
 	opened := c.drainUntilEvent(func(event orchestration.Event) bool {
 		return event.ThreadID() == orchestration.ThreadID(approvalThreadID) &&
 			event.Type == orchestration.EventThreadApprovalOpened

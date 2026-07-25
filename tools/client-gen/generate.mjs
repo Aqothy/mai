@@ -63,8 +63,12 @@ swiftSource = swiftSource.replace(
 await writeFile(swiftModelsPath, swiftSource);
 
 const registry = JSON.parse(await readFile(methodsPath, "utf8"));
-const methodConstants = registry.methods
-  .map((method) => `    public static let ${methodKey(method.name)} = ${JSON.stringify(method.name)}`)
+const rpcNames = [...new Set([
+  ...registry.methods.map((method) => method.name),
+  ...registry.notifications.map((notification) => notification.name),
+])];
+const methodConstants = rpcNames
+  .map((name) => `    public static let ${methodKey(name)} = ${JSON.stringify(name)}`)
   .join("\n");
 await writeFile(
   path.join(swiftDir, "MaidRPC.swift"),

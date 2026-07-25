@@ -36,6 +36,8 @@ const (
 	RPCMethodProviderImportSession = wire.MethodProviderImportSession
 	RPCMethodProviderDeleteSession = wire.MethodProviderDeleteSession
 	RPCMethodProviderCloseSession  = wire.MethodProviderCloseSession
+	RPCMethodProviderOptionsGet    = wire.MethodProviderOptionsGet
+	RPCMethodProviderOptionsSet    = wire.MethodProviderOptionsSet
 )
 
 type providerStartRPCParams = wire.ProviderStartParams
@@ -46,6 +48,9 @@ type providerListSessionsParams = wire.ProviderListSessionsParams
 type providerSessionParams = wire.ProviderSessionParams
 type providerImportSessionParams = wire.ProviderImportSessionParams
 type providerImportSessionResult = wire.ProviderImportSessionResult
+type providerOptionsGetParams = wire.ProviderOptionsGetParams
+type providerOptionsSetParams = wire.ProviderOptionsSetParams
+type providerOptionsResult = wire.ProviderOptionsResult
 
 var nextRPCClientID atomic.Uint64
 
@@ -67,6 +72,19 @@ type rpcClient struct {
 	subscriptionsMu      sync.Mutex
 	threadSubscriptions  map[orchestration.ThreadID]struct{}
 	threadListSubscribed bool
+
+	optionsLifecycleMu   sync.Mutex
+	optionsMu            sync.Mutex
+	optionsSessions      map[provider.InstanceID]*clientOptionsSession
+	nextOptionsSessionID atomic.Uint64
+}
+
+type clientOptionsSession struct {
+	optionsSessionID   string
+	providerInstanceID provider.InstanceID
+	handle             string
+	cwd                string
+	configOptions      []provider.ConfigOption
 }
 
 type rpcOutbound struct {
@@ -186,7 +204,11 @@ func (s *Server) WebSocketHandler() http.HandlerFunc {
 }
 
 func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
-	client := &rpcClient{id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn, outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
+	client := &rpcClient{
+		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
+		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
+		threadSubscriptions: make(map[orchestration.ThreadID]struct{}),
+	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
 	s.rpcClients[client.id] = client
@@ -208,6 +230,10 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	if client.closeOutbound() {
 		client.logger.Info("client disconnected")
 	}
+	// Cleanup is deliberately independent of who first closed the outbound
+	// channel. Queue overflow can close it before socket teardown reaches this
+	// path, and detaching the active sessions makes repeated cleanup harmless.
+	go s.closeClientOptionsSessions(client)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -393,8 +419,176 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return nil, h.server.providerService.CloseSession(ctx, params.InstanceID, params.SessionID)
+	case RPCMethodProviderOptionsGet:
+		var params providerOptionsGetParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.getProviderOptions(ctx, params)
+	case RPCMethodProviderOptionsSet:
+		var params providerOptionsSetParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.setProviderOption(ctx, params)
 	default:
 		return nil, jsonrpc2.ErrNotHandled
+	}
+}
+
+func (c *rpcClient) newOptionsSessionID() string {
+	return fmt.Sprintf("%s-options-session-%d", c.id, c.nextOptionsSessionID.Add(1))
+}
+
+func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOptionsGetParams) (providerOptionsResult, error) {
+	if params.ProviderInstanceID == "" || params.Cwd == "" {
+		return providerOptionsResult{}, fmt.Errorf("%w: provider.options.get requires providerInstanceId and cwd", jsonrpc2.ErrInvalidParams)
+	}
+	h.client.optionsLifecycleMu.Lock()
+	defer h.client.optionsLifecycleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return providerOptionsResult{}, err
+	}
+	if h.client.closed.Load() {
+		return providerOptionsResult{}, fmt.Errorf("client disconnected")
+	}
+
+	h.client.optionsMu.Lock()
+	if h.client.optionsSessions == nil {
+		h.client.optionsSessions = make(map[provider.InstanceID]*clientOptionsSession)
+	}
+	current := h.client.optionsSessions[params.ProviderInstanceID]
+	if current != nil && current.cwd == params.Cwd {
+		result := providerOptionsResult{
+			OptionsSessionID: current.optionsSessionID,
+			ConfigOptions:    append([]provider.ConfigOption(nil), current.configOptions...),
+		}
+		h.client.optionsMu.Unlock()
+		return result, nil
+	}
+	delete(h.client.optionsSessions, params.ProviderInstanceID)
+	h.client.optionsMu.Unlock()
+	if current != nil {
+		go h.closeOptionsSession(*current)
+	}
+
+	optionsSessionID := h.client.newOptionsSessionID()
+	callbacks := provider.OptionsSessionCallbacks{
+		Updated: func(options []provider.ConfigOption) {
+			h.publishOptionsUpdate(params.ProviderInstanceID, optionsSessionID, options)
+		},
+		Invalidated: func() {
+			h.invalidateOptionsSession(params.ProviderInstanceID, optionsSessionID)
+		},
+	}
+	opened, err := h.server.providerService.OpenOptionsSession(ctx, params.ProviderInstanceID, params.Cwd, callbacks)
+	if err != nil {
+		return providerOptionsResult{}, err
+	}
+	entry := &clientOptionsSession{
+		optionsSessionID: optionsSessionID, providerInstanceID: params.ProviderInstanceID,
+		handle: opened.Handle, cwd: params.Cwd,
+		configOptions: append([]provider.ConfigOption(nil), opened.ConfigOptions...),
+	}
+	h.client.optionsMu.Lock()
+	if h.client.closed.Load() {
+		h.client.optionsMu.Unlock()
+		go h.closeOptionsSession(*entry)
+		return providerOptionsResult{}, fmt.Errorf("client disconnected")
+	}
+	h.client.optionsSessions[params.ProviderInstanceID] = entry
+	h.client.optionsMu.Unlock()
+	return providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: opened.ConfigOptions}, nil
+}
+
+func (h *rpcHandler) setProviderOption(ctx context.Context, params providerOptionsSetParams) (providerOptionsResult, error) {
+	if params.OptionsSessionID == "" || params.OptionID == "" {
+		return providerOptionsResult{}, fmt.Errorf("%w: provider.options.set requires optionsSessionId and optionId", jsonrpc2.ErrInvalidParams)
+	}
+	h.client.optionsLifecycleMu.Lock()
+	defer h.client.optionsLifecycleMu.Unlock()
+
+	h.client.optionsMu.Lock()
+	var entry *clientOptionsSession
+	for _, candidate := range h.client.optionsSessions {
+		if candidate.optionsSessionID == params.OptionsSessionID {
+			entry = candidate
+			break
+		}
+	}
+	if entry == nil {
+		h.client.optionsMu.Unlock()
+		return providerOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
+	}
+	snapshot := *entry
+	h.client.optionsMu.Unlock()
+
+	options, err := h.server.providerService.SetOptionsSessionValue(ctx, snapshot.providerInstanceID, snapshot.handle, params.OptionID, params.Value)
+	if err != nil {
+		return providerOptionsResult{}, err
+	}
+	h.client.optionsMu.Lock()
+	current := h.client.optionsSessions[snapshot.providerInstanceID]
+	if current != entry || current.optionsSessionID != snapshot.optionsSessionID {
+		h.client.optionsMu.Unlock()
+		return providerOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
+	}
+	current.configOptions = append([]provider.ConfigOption(nil), options...)
+	h.client.optionsMu.Unlock()
+	return providerOptionsResult{OptionsSessionID: snapshot.optionsSessionID, ConfigOptions: options}, nil
+}
+
+func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, optionsSessionID string, options []provider.ConfigOption) {
+	h.client.optionsMu.Lock()
+	current := h.client.optionsSessions[instanceID]
+	active := current != nil && current.optionsSessionID == optionsSessionID
+	if active {
+		current.configOptions = append([]provider.ConfigOption(nil), options...)
+	}
+	h.client.optionsMu.Unlock()
+	if active {
+		h.client.notify(wire.MethodProviderOptionsUpdated, providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: options})
+	}
+}
+
+func (h *rpcHandler) invalidateOptionsSession(instanceID provider.InstanceID, optionsSessionID string) {
+	h.client.optionsMu.Lock()
+	current := h.client.optionsSessions[instanceID]
+	active := current != nil && current.optionsSessionID == optionsSessionID
+	if active {
+		delete(h.client.optionsSessions, instanceID)
+	}
+	h.client.optionsMu.Unlock()
+	if active {
+		h.client.notify(wire.MethodProviderOptionsInvalidated, wire.ProviderOptionsInvalidated{OptionsSessionID: optionsSessionID})
+	}
+}
+
+func (h *rpcHandler) closeOptionsSession(entry clientOptionsSession) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := h.server.providerService.CloseOptionsSession(ctx, entry.providerInstanceID, entry.handle); err != nil {
+		h.client.logger.Debug("close disposable options session", "provider", entry.providerInstanceID, "error", compactError(err))
+	}
+}
+
+func (s *Server) closeClientOptionsSessions(client *rpcClient) {
+	client.optionsLifecycleMu.Lock()
+	defer client.optionsLifecycleMu.Unlock()
+
+	client.optionsMu.Lock()
+	entries := make([]clientOptionsSession, 0, len(client.optionsSessions))
+	for _, entry := range client.optionsSessions {
+		entries = append(entries, *entry)
+	}
+	client.optionsSessions = nil
+	client.optionsMu.Unlock()
+	for _, entry := range entries {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := s.providerService.CloseOptionsSession(ctx, entry.providerInstanceID, entry.handle); err != nil {
+			client.logger.Debug("close disposable options session", "provider", entry.providerInstanceID, "error", compactError(err))
+		}
+		cancel()
 	}
 }
 

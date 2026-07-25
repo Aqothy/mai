@@ -32,9 +32,13 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderImportSession, Params: "ProviderImportSessionParams", Result: "ProviderImportSessionResult"},
 	{Name: MethodProviderDeleteSession, Params: "ProviderSessionParams", ResultNull: true},
 	{Name: MethodProviderCloseSession, Params: "ProviderSessionParams", ResultNull: true},
+	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
+	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
 }
 
 var Notifications = []NotificationDefinition{
 	{Name: MethodOrchestrationSubscribeThreadList, Payload: "ThreadListStreamItem"},
 	{Name: MethodOrchestrationSubscribeThread, Payload: "ThreadStreamItem"},
+	{Name: MethodProviderOptionsUpdated, Payload: "ProviderOptionsResult"},
+	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
 }

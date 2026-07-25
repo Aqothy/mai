@@ -433,6 +433,7 @@ public extension Attachment {
 // MARK: - Command
 public struct Command: Codable {
     public let commandID: String?
+    public let configSelections: [ConfigOptionSelection]?
     public let createdAt: Date?
     public let cwd, decision: String?
     public let message: CommandMessage?
@@ -444,7 +445,7 @@ public struct Command: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case commandID = "commandId"
-        case createdAt, cwd, decision, message, modelSelection
+        case configSelections, createdAt, cwd, decision, message, modelSelection
         case optionID = "optionId"
         case providerInstanceID = "providerInstanceId"
         case requestID = "requestId"
@@ -454,8 +455,9 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(commandID: String?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.commandID = commandID
+        self.configSelections = configSelections
         self.createdAt = createdAt
         self.cwd = cwd
         self.decision = decision
@@ -492,6 +494,7 @@ public extension Command {
 
     func with(
         commandID: String?? = nil,
+        configSelections: [ConfigOptionSelection]?? = nil,
         createdAt: Date?? = nil,
         cwd: String?? = nil,
         decision: String?? = nil,
@@ -508,6 +511,7 @@ public extension Command {
     ) -> Command {
         return Command(
             commandID: commandID ?? self.commandID,
+            configSelections: configSelections ?? self.configSelections,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             decision: decision ?? self.decision,
@@ -520,6 +524,64 @@ public extension Command {
             title: title ?? self.title,
             turnID: turnID ?? self.turnID,
             type: type ?? self.type,
+            value: value ?? self.value
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ConfigOptionSelection
+public struct ConfigOptionSelection: Codable {
+    public let category: String?
+    public let optionID: String
+    public let value: JSONAny
+
+    public enum CodingKeys: String, CodingKey {
+        case category
+        case optionID = "optionId"
+        case value
+    }
+
+    public init(category: String?, optionID: String, value: JSONAny) {
+        self.category = category
+        self.optionID = optionID
+        self.value = value
+    }
+}
+
+// MARK: ConfigOptionSelection convenience initializers and mutators
+
+public extension ConfigOptionSelection {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConfigOptionSelection.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        category: String?? = nil,
+        optionID: String? = nil,
+        value: JSONAny? = nil
+    ) -> ConfigOptionSelection {
+        return ConfigOptionSelection(
+            category: category ?? self.category,
+            optionID: optionID ?? self.optionID,
             value: value ?? self.value
         )
     }
@@ -1695,14 +1757,15 @@ public extension AuthMethod {
 
 // MARK: - Capabilities
 public struct Capabilities: Codable {
-    public let auth, loadReplay, logout: Bool?
+    public let auth, configOptions, loadReplay, logout: Bool?
     public let mcp: MCPCapabilities?
     public let modelSwitch: String?
     public let promptContent: PromptContentCapabilities?
     public let resume: Bool?
 
-    public init(auth: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?) {
+    public init(auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?) {
         self.auth = auth
+        self.configOptions = configOptions
         self.loadReplay = loadReplay
         self.logout = logout
         self.mcp = mcp
@@ -1732,6 +1795,7 @@ public extension Capabilities {
 
     func with(
         auth: Bool?? = nil,
+        configOptions: Bool?? = nil,
         loadReplay: Bool?? = nil,
         logout: Bool?? = nil,
         mcp: MCPCapabilities?? = nil,
@@ -1741,6 +1805,7 @@ public extension Capabilities {
     ) -> Capabilities {
         return Capabilities(
             auth: auth ?? self.auth,
+            configOptions: configOptions ?? self.configOptions,
             loadReplay: loadReplay ?? self.loadReplay,
             logout: logout ?? self.logout,
             mcp: mcp ?? self.mcp,
@@ -2248,6 +2313,216 @@ public extension ProviderListSessionsParams {
     }
 }
 
+// MARK: - ProviderOptionsGetParams
+public struct ProviderOptionsGetParams: Codable {
+    public let cwd, providerInstanceID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case cwd
+        case providerInstanceID = "providerInstanceId"
+    }
+
+    public init(cwd: String, providerInstanceID: String) {
+        self.cwd = cwd
+        self.providerInstanceID = providerInstanceID
+    }
+}
+
+// MARK: ProviderOptionsGetParams convenience initializers and mutators
+
+public extension ProviderOptionsGetParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderOptionsGetParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cwd: String? = nil,
+        providerInstanceID: String? = nil
+    ) -> ProviderOptionsGetParams {
+        return ProviderOptionsGetParams(
+            cwd: cwd ?? self.cwd,
+            providerInstanceID: providerInstanceID ?? self.providerInstanceID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderOptionsInvalidated
+public struct ProviderOptionsInvalidated: Codable {
+    public let optionsSessionID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case optionsSessionID = "optionsSessionId"
+    }
+
+    public init(optionsSessionID: String) {
+        self.optionsSessionID = optionsSessionID
+    }
+}
+
+// MARK: ProviderOptionsInvalidated convenience initializers and mutators
+
+public extension ProviderOptionsInvalidated {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderOptionsInvalidated.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        optionsSessionID: String? = nil
+    ) -> ProviderOptionsInvalidated {
+        return ProviderOptionsInvalidated(
+            optionsSessionID: optionsSessionID ?? self.optionsSessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderOptionsResult
+public struct ProviderOptionsResult: Codable {
+    public let configOptions: [ConfigOption]
+    public let optionsSessionID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case configOptions
+        case optionsSessionID = "optionsSessionId"
+    }
+
+    public init(configOptions: [ConfigOption], optionsSessionID: String) {
+        self.configOptions = configOptions
+        self.optionsSessionID = optionsSessionID
+    }
+}
+
+// MARK: ProviderOptionsResult convenience initializers and mutators
+
+public extension ProviderOptionsResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderOptionsResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        configOptions: [ConfigOption]? = nil,
+        optionsSessionID: String? = nil
+    ) -> ProviderOptionsResult {
+        return ProviderOptionsResult(
+            configOptions: configOptions ?? self.configOptions,
+            optionsSessionID: optionsSessionID ?? self.optionsSessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderOptionsSetParams
+public struct ProviderOptionsSetParams: Codable {
+    public let optionID, optionsSessionID: String
+    public let value: JSONAny
+
+    public enum CodingKeys: String, CodingKey {
+        case optionID = "optionId"
+        case optionsSessionID = "optionsSessionId"
+        case value
+    }
+
+    public init(optionID: String, optionsSessionID: String, value: JSONAny) {
+        self.optionID = optionID
+        self.optionsSessionID = optionsSessionID
+        self.value = value
+    }
+}
+
+// MARK: ProviderOptionsSetParams convenience initializers and mutators
+
+public extension ProviderOptionsSetParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderOptionsSetParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        optionID: String? = nil,
+        optionsSessionID: String? = nil,
+        value: JSONAny? = nil
+    ) -> ProviderOptionsSetParams {
+        return ProviderOptionsSetParams(
+            optionID: optionID ?? self.optionID,
+            optionsSessionID: optionsSessionID ?? self.optionsSessionID,
+            value: value ?? self.value
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ProviderSessionParams
 public struct ProviderSessionParams: Codable {
     public let instanceID, sessionID: String
@@ -2416,7 +2691,6 @@ public extension SubscribeThreadInput {
 public struct Thread: Codable {
     public let createdAt: Date
     public let cwd: String?
-    public let draft: Bool
     public let id: String
     public let latestTurn: Turn?
     public let modelSelection: ModelSelection?
@@ -2428,15 +2702,14 @@ public struct Thread: Codable {
     public let updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, cwd, draft, id, latestTurn, modelSelection, plan
+        case createdAt, cwd, id, latestTurn, modelSelection, plan
         case providerInstanceID = "providerInstanceId"
         case session, timeline, title, updatedAt
     }
 
-    public init(createdAt: Date, cwd: String?, draft: Bool, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+    public init(createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
         self.createdAt = createdAt
         self.cwd = cwd
-        self.draft = draft
         self.id = id
         self.latestTurn = latestTurn
         self.modelSelection = modelSelection
@@ -2470,7 +2743,6 @@ public extension Thread {
     func with(
         createdAt: Date? = nil,
         cwd: String?? = nil,
-        draft: Bool? = nil,
         id: String? = nil,
         latestTurn: Turn?? = nil,
         modelSelection: ModelSelection?? = nil,
@@ -2484,7 +2756,6 @@ public extension Thread {
         return Thread(
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
-            draft: draft ?? self.draft,
             id: id ?? self.id,
             latestTurn: latestTurn ?? self.latestTurn,
             modelSelection: modelSelection ?? self.modelSelection,
@@ -2691,7 +2962,7 @@ public extension ThreadDetailSnapshot {
 public struct ThreadListEntry: Codable {
     public let createdAt: Date
     public let cwd: String?
-    public let draft, hasPendingApprovals: Bool
+    public let hasPendingApprovals: Bool
     public let id: String
     public let latestTurn: Turn?
     public let modelSelection: ModelSelection?
@@ -2701,15 +2972,14 @@ public struct ThreadListEntry: Codable {
     public let updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, cwd, draft, hasPendingApprovals, id, latestTurn, modelSelection
+        case createdAt, cwd, hasPendingApprovals, id, latestTurn, modelSelection
         case providerInstanceID = "providerInstanceId"
         case session, title, updatedAt
     }
 
-    public init(createdAt: Date, cwd: String?, draft: Bool, hasPendingApprovals: Bool, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, providerInstanceID: String?, session: SessionBinding?, title: String, updatedAt: Date) {
+    public init(createdAt: Date, cwd: String?, hasPendingApprovals: Bool, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, providerInstanceID: String?, session: SessionBinding?, title: String, updatedAt: Date) {
         self.createdAt = createdAt
         self.cwd = cwd
-        self.draft = draft
         self.hasPendingApprovals = hasPendingApprovals
         self.id = id
         self.latestTurn = latestTurn
@@ -2742,7 +3012,6 @@ public extension ThreadListEntry {
     func with(
         createdAt: Date? = nil,
         cwd: String?? = nil,
-        draft: Bool? = nil,
         hasPendingApprovals: Bool? = nil,
         id: String? = nil,
         latestTurn: Turn?? = nil,
@@ -2755,7 +3024,6 @@ public extension ThreadListEntry {
         return ThreadListEntry(
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
-            draft: draft ?? self.draft,
             hasPendingApprovals: hasPendingApprovals ?? self.hasPendingApprovals,
             id: id ?? self.id,
             latestTurn: latestTurn ?? self.latestTurn,

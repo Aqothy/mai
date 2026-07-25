@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Aqothy/jsonrpc2"
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/providerservice"
 	"github.com/coder/websocket"
 )
 
@@ -113,6 +116,269 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	}
 }
 
+func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
+	s := newTestServer(t)
+	s.providerService.Close()
+	instances := map[provider.InstanceID]*optionsRPCProvider{}
+	for _, instanceID := range []provider.InstanceID{"provider-a", "provider-b"} {
+		instances[instanceID] = &optionsRPCProvider{
+			info: provider.InstanceInfo{
+				InstanceID: instanceID, Name: string(instanceID), Status: provider.InstanceStatusInitialized,
+				Capabilities: provider.Capabilities{ConfigOptions: true},
+			},
+			sessions:  make(map[string][]provider.ConfigOption),
+			callbacks: make(map[string]provider.OptionsSessionCallbacks),
+			closed:    make(chan string, 4),
+		}
+	}
+	s.providerService = providerservice.New(func(_ context.Context, spec provider.InstanceSpec, _ provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
+		return instances[spec.InstanceID], nil
+	})
+	for instanceID := range instances {
+		if _, err := s.providerService.StartInstance(context.Background(), provider.InstanceSpec{
+			InstanceID: instanceID, Name: string(instanceID), Driver: "test",
+		}, false); err != nil {
+			t.Fatalf("start %s: %v", instanceID, err)
+		}
+	}
+	defer s.Close()
+
+	client := &rpcClient{
+		id: "options-client", logger: s.logger, outbound: make(chan rpcOutbound, 8),
+		done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{}),
+	}
+	handler := &rpcHandler{server: s, client: client}
+	first, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+		ProviderInstanceID: "provider-a", Cwd: "/first",
+	})
+	if err != nil {
+		t.Fatalf("first get: %v", err)
+	}
+	_, err = handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+		ProviderInstanceID: "provider-b", Cwd: "/other",
+	})
+	if err != nil {
+		t.Fatalf("second provider get: %v", err)
+	}
+	reused, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+		ProviderInstanceID: "provider-a", Cwd: "/first",
+	})
+	if err != nil {
+		t.Fatalf("reused get: %v", err)
+	}
+	if reused.OptionsSessionID != first.OptionsSessionID ||
+		instances["provider-a"].openCount() != 1 ||
+		instances["provider-b"].openCount() != 1 {
+		t.Fatalf("warm switch-back opened another session: first=%#v reused=%#v", first, reused)
+	}
+	instances["provider-a"].publishOptions("handle-/first", []provider.ConfigOption{{
+		ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow",
+	}})
+	select {
+	case message := <-client.outbound:
+		update, ok := message.params.(providerOptionsResult)
+		if message.method != wire.MethodProviderOptionsUpdated ||
+			!ok ||
+			update.OptionsSessionID != first.OptionsSessionID ||
+			len(update.ConfigOptions) != 1 ||
+			update.ConfigOptions[0].CurrentValue != "slow" {
+			t.Fatalf("options update notification = %#v", message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("spontaneous options update was not routed to the client")
+	}
+
+	closeStarted := make(chan struct{}, 1)
+	closeBlock := make(chan struct{})
+	instances["provider-a"].mu.Lock()
+	instances["provider-a"].closeStarted = closeStarted
+	instances["provider-a"].closeBlock = closeBlock
+	instances["provider-a"].mu.Unlock()
+	type replacementResult struct {
+		result providerOptionsResult
+		err    error
+	}
+	replacementDone := make(chan replacementResult, 1)
+	go func() {
+		result, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+			ProviderInstanceID: "provider-a", Cwd: "/second",
+		})
+		replacementDone <- replacementResult{result: result, err: err}
+	}()
+	select {
+	case <-closeStarted:
+	case <-time.After(2 * time.Second):
+		close(closeBlock)
+		t.Fatal("replacement did not begin closing the old options session")
+	}
+	var replacement providerOptionsResult
+	select {
+	case result := <-replacementDone:
+		if result.err != nil {
+			close(closeBlock)
+			t.Fatalf("replacement get: %v", result.err)
+		}
+		if result.result.OptionsSessionID == first.OptionsSessionID {
+			close(closeBlock)
+			t.Fatal("cwd replacement reused the old options ID")
+		}
+		replacement = result.result
+	case <-time.After(2 * time.Second):
+		close(closeBlock)
+		t.Fatal("replacement waited for best-effort close of the old options session")
+	}
+	close(closeBlock)
+	select {
+	case handle := <-instances["provider-a"].closed:
+		if handle != "handle-/first" {
+			t.Fatalf("closed handle = %q, want old provider-a handle", handle)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("old provider-a options session was not closed")
+	}
+	if instances["provider-a"].openCount() != 2 || instances["provider-b"].openCount() != 1 {
+		t.Fatal("cwd replacement affected the wrong provider")
+	}
+
+	instances["provider-a"].invalidateOptions("handle-/second")
+	select {
+	case message := <-client.outbound:
+		invalidation, ok := message.params.(wire.ProviderOptionsInvalidated)
+		if message.method != wire.MethodProviderOptionsInvalidated ||
+			!ok ||
+			invalidation.OptionsSessionID != replacement.OptionsSessionID {
+			t.Fatalf("options invalidation notification = %#v", message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("options invalidation was not routed to the client")
+	}
+	if _, err := handler.setProviderOption(context.Background(), providerOptionsSetParams{
+		OptionsSessionID: replacement.OptionsSessionID, OptionID: "model", Value: "slow",
+	}); err == nil {
+		t.Fatal("set with invalidated optionsSessionId succeeded")
+	}
+	reopenedAfterInvalidation, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+		ProviderInstanceID: "provider-a", Cwd: "/second",
+	})
+	if err != nil || reopenedAfterInvalidation.OptionsSessionID == replacement.OptionsSessionID {
+		t.Fatalf("reopen invalidated provider-a session = %#v, err = %v", reopenedAfterInvalidation, err)
+	}
+	s.disconnectRPCClient(client)
+	for instanceID, wantHandle := range map[provider.InstanceID]string{
+		"provider-a": "handle-/second",
+		"provider-b": "handle-/other",
+	} {
+		select {
+		case handle := <-instances[instanceID].closed:
+			if handle != wantHandle {
+				t.Fatalf("%s closed handle = %q, want %q", instanceID, handle, wantHandle)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s options session was not closed on disconnect", instanceID)
+		}
+	}
+}
+
+type optionsRPCProvider struct {
+	mu           sync.Mutex
+	info         provider.InstanceInfo
+	opens        int
+	sessions     map[string][]provider.ConfigOption
+	callbacks    map[string]provider.OptionsSessionCallbacks
+	closeStarted chan struct{}
+	closeBlock   <-chan struct{}
+	closed       chan string
+}
+
+func (p *optionsRPCProvider) Info() provider.InstanceInfo { return p.info }
+func (p *optionsRPCProvider) Close() error                { return nil }
+func (p *optionsRPCProvider) StartSession(context.Context, provider.StartSessionInput) (provider.StartSessionResult, error) {
+	return provider.StartSessionResult{}, nil
+}
+func (p *optionsRPCProvider) SendTurn(context.Context, provider.SendTurnInput) error { return nil }
+func (p *optionsRPCProvider) InterruptTurn(context.Context, provider.InterruptTurnInput) error {
+	return nil
+}
+func (p *optionsRPCProvider) SetConfigOption(context.Context, provider.SetConfigOptionInput) error {
+	return nil
+}
+func (p *optionsRPCProvider) RespondToRequest(context.Context, provider.RespondToRequestInput) error {
+	return nil
+}
+func (p *optionsRPCProvider) StopSession(context.Context, provider.StopSessionInput) error {
+	return nil
+}
+func (p *optionsRPCProvider) OpenOptionsSession(_ context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.opens++
+	handle := "handle-" + cwd
+	options := []provider.ConfigOption{{
+		ID: "model", Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryModel,
+		Choices: []provider.ConfigChoice{{Value: "fast"}}, CurrentValue: "fast",
+	}}
+	p.sessions[handle] = options
+	p.callbacks[handle] = callbacks
+	return provider.OptionsSession{Handle: handle, ConfigOptions: options}, nil
+}
+func (p *optionsRPCProvider) SetOptionsSessionValue(_ context.Context, handle string, _ string, _ any) ([]provider.ConfigOption, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]provider.ConfigOption(nil), p.sessions[handle]...), nil
+}
+func (p *optionsRPCProvider) CloseOptionsSession(ctx context.Context, handle string) error {
+	p.mu.Lock()
+	closeStarted := p.closeStarted
+	closeBlock := p.closeBlock
+	p.mu.Unlock()
+	if closeStarted != nil {
+		select {
+		case closeStarted <- struct{}{}:
+		default:
+		}
+	}
+	if closeBlock != nil {
+		select {
+		case <-closeBlock:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.sessions, handle)
+	delete(p.callbacks, handle)
+	if p.closed != nil {
+		select {
+		case p.closed <- handle:
+		default:
+		}
+	}
+	return nil
+}
+func (p *optionsRPCProvider) openCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.opens
+}
+
+func (p *optionsRPCProvider) publishOptions(handle string, options []provider.ConfigOption) {
+	p.mu.Lock()
+	callback := p.callbacks[handle].Updated
+	p.mu.Unlock()
+	if callback != nil {
+		callback(options)
+	}
+}
+
+func (p *optionsRPCProvider) invalidateOptions(handle string) {
+	p.mu.Lock()
+	callback := p.callbacks[handle].Invalidated
+	p.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
+}
 func TestRPCClientKeepsIndependentThreadSubscriptions(t *testing.T) {
 	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
 	threadA := orchestration.ThreadID("thread-a")
@@ -127,65 +393,6 @@ func TestRPCClientKeepsIndependentThreadSubscriptions(t *testing.T) {
 	}
 	if !client.subscribedThread(threadB) {
 		t.Fatal("unsubscribing thread A removed the independent thread B subscription")
-	}
-}
-
-func TestRPCSubscribeThreadStreamsEventsAppendedAfterSnapshot(t *testing.T) {
-	s := newTestServer(t)
-	threadID := orchestration.ThreadID("thread-subscribe-race")
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create-subscribe-race", ThreadID: threadID, Title: "before"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-
-	client := &rpcClient{id: "client-subscribe-race", outbound: make(chan rpcOutbound, 4), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
-	s.rpcMu.Lock()
-	s.rpcClients[client.id] = client
-	s.rpcMu.Unlock()
-	defer func() {
-		s.rpcMu.Lock()
-		delete(s.rpcClients, client.id)
-		s.rpcMu.Unlock()
-		client.closeOutbound()
-		_ = s.Close()
-	}()
-
-	handler := &rpcHandler{server: s, client: client, afterThreadSnapshot: func(orchestration.ThreadID) {
-		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "meta-during-subscribe", ThreadID: threadID, Title: "during-subscribe"}); err != nil {
-			t.Fatalf("thread.meta.update: %v", err)
-		}
-	}}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("new call: %v", err)
-	}
-
-	result, err := handler.Handle(context.Background(), req)
-	if err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-	snapshot := result.(orchestration.ThreadStreamItem)
-	if snapshot.Kind != "snapshot" || snapshot.Snapshot == nil || snapshot.Snapshot.Thread.Title != "before" {
-		t.Fatalf("snapshot = %#v, want pre-update thread snapshot", snapshot)
-	}
-
-	select {
-	case msg := <-client.outbound:
-		if msg.method != RPCMethodOrchestrationSubscribeThread {
-			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
-		}
-		raw, ok := msg.params.(json.RawMessage)
-		if !ok {
-			t.Fatalf("notification params = %T, want pre-marshaled json.RawMessage", msg.params)
-		}
-		var item orchestration.ThreadStreamItem
-		if err := json.Unmarshal(raw, &item); err != nil {
-			t.Fatalf("decode notification: %v", err)
-		}
-		if item.Kind != "event" || item.Event == nil || item.Event.Type != orchestration.EventThreadMetaUpdated || item.Event.Payload.Title != "during-subscribe" {
-			t.Fatalf("notification = %s, want live meta update event", raw)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for live event appended after snapshot")
 	}
 }
 
@@ -734,7 +941,13 @@ func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 
 	select {
 	case msg := <-client.outbound:
-		raw := msg.params.(json.RawMessage)
+		if msg.method != RPCMethodOrchestrationSubscribeThread {
+			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
+		}
+		raw, ok := msg.params.(json.RawMessage)
+		if !ok {
+			t.Fatalf("notification params = %T, want pre-marshaled json.RawMessage", msg.params)
+		}
 		var live orchestration.ThreadStreamItem
 		if err := json.Unmarshal(raw, &live); err != nil {
 			t.Fatal(err)
