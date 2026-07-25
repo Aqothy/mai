@@ -113,6 +113,11 @@ func newLoggerFromEnv() *slog.Logger {
 // routine daemon logs. The daemon intentionally retains no historical event
 // payloads; clients recover from authoritative snapshots.
 func (s *Server) logEvent(event orchestration.Event) {
+	// Runs on the engine worker for every event, including each streamed
+	// flush, so do not build the attribute slice unless it will be used.
+	if !s.logger.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
 	attrs := []any{
 		"sequence", event.Sequence,
 		"event", event.Type,
