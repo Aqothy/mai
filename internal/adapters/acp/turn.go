@@ -347,7 +347,7 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 	if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 		return acpRequestError(err)
 	}
-	cancels, _, dropped, stream := h.markPromptCancelled(sessionID, input.TurnID)
+	cancels, dropped, stream := h.markPromptCancelled(sessionID, input.TurnID)
 	for _, cancel := range cancels {
 		cancel()
 	}
@@ -627,8 +627,29 @@ func shouldStampActiveTurn(eventType provider.RuntimeEventType) bool {
 	}
 }
 
-// promptCancellationMatches reports whether turnID names the session's active
-// or registered collector without changing turn state.
+// cancellationTargetsLocked lists the session's cancellation targets: the
+// in-flight prompt's turn and the registered (newest) turn, which differ while a
+// follow-up turn is queued. An interrupt may name either. h.mu must be held.
+func cancellationTargetsLocked(session *acpSession) []*promptCollector {
+	var targets []*promptCollector
+	if session.stream != nil && session.stream.active != nil && session.stream.active.collector != nil {
+		targets = append(targets, session.stream.active.collector)
+	}
+	if collector := session.collector; collector != nil && (len(targets) == 0 || targets[0] != collector) {
+		targets = append(targets, collector)
+	}
+	return targets
+}
+
+// Shared by the read-only pre-check and the mutating mark below so they cannot
+// drift; a mismatch would cancel the wrong turn.
+func turnMatchesCollector(collector *promptCollector, turnID string) bool {
+	return collector != nil && (turnID == "" || collector.turnID == "" || collector.turnID == turnID)
+}
+
+// promptCancellationMatches reports whether turnID names a cancellation target,
+// without changing turn state. InterruptTurn checks this before sending the
+// session-scoped agent cancel, which would otherwise kill a newer turn.
 func (h *Instance) promptCancellationMatches(sessionID string, turnID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -636,47 +657,30 @@ func (h *Instance) promptCancellationMatches(sessionID string, turnID string) bo
 	if session == nil {
 		return false
 	}
-	matches := func(collector *promptCollector) bool {
-		return collector != nil && (turnID == "" || collector.turnID == "" || collector.turnID == turnID)
+	for _, collector := range cancellationTargetsLocked(session) {
+		if turnMatchesCollector(collector, turnID) {
+			return true
+		}
 	}
-	if session.stream != nil && session.stream.active != nil && matches(session.stream.active.collector) {
-		return true
-	}
-	return matches(session.collector)
+	return false
 }
 
-// markPromptCancelled marks the session's active turn cancelled when turnID
-// names it (or is empty), removes queued prompts for cancelled collectors, and collects the
-// turn's pending permission cancels. The matched result reports whether a
-// turn matched: callers must not fall back to a session-wide agent cancel
-// when a non-empty turnID matched nothing — that would cancel a newer turn.
+// markPromptCancelled cancels the targets turnID names (or all, when empty),
+// removes their queued prompts, and collects their pending permission cancels.
 // The dropped result is a cleared queued prompt that no in-flight prompt will
 // settle; the caller must finalize it via settlePrompt.
-func (h *Instance) markPromptCancelled(sessionID string, turnID string) ([]context.CancelFunc, bool, *pendingPrompt, *sessionStream) {
-	turnMatches := func(collector *promptCollector) bool {
-		return collector != nil && (turnID == "" || collector.turnID == "" || collector.turnID == turnID)
-	}
+func (h *Instance) markPromptCancelled(sessionID string, turnID string) ([]context.CancelFunc, *pendingPrompt, *sessionStream) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	session := h.sessionLocked(sessionID)
 	if session == nil {
-		return nil, false, nil, nil
+		return nil, nil, nil
 	}
 	stream := session.stream
-	// Both the in-flight prompt's turn and the registered (newest) turn are
-	// cancellation targets: while a follow-up turn is queued they differ, and
-	// an interrupt may name either.
-	var targets []*promptCollector
-	if stream != nil && stream.active != nil {
-		targets = append(targets, stream.active.collector)
-	}
-	if collector := session.collector; collector != nil && (len(targets) == 0 || targets[0] != collector) {
-		targets = append(targets, collector)
-	}
 	matched := false
 	var cancels []context.CancelFunc
-	for _, collector := range targets {
-		if !turnMatches(collector) {
+	for _, collector := range cancellationTargetsLocked(session) {
+		if !turnMatchesCollector(collector, turnID) {
 			continue
 		}
 		matched = true
@@ -686,7 +690,7 @@ func (h *Instance) markPromptCancelled(sessionID string, turnID string) ([]conte
 		}
 	}
 	if !matched {
-		return nil, false, nil, nil
+		return nil, nil, nil
 	}
 	var dropped *pendingPrompt
 	if stream != nil && len(stream.queued) > 0 {
@@ -704,5 +708,5 @@ func (h *Instance) markPromptCancelled(sessionID string, turnID string) ([]conte
 		}
 		stream.queued = kept
 	}
-	return cancels, matched, dropped, stream
+	return cancels, dropped, stream
 }

@@ -370,7 +370,7 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 		// agent never received.
 		return acpRequestError(err)
 	}
-	cancels, _, dropped, stream := h.markPromptCancelled(sessionID, "")
+	cancels, dropped, stream := h.markPromptCancelled(sessionID, "")
 	for _, cancel := range cancels {
 		cancel()
 	}

@@ -993,9 +993,12 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 	}
 
 	// An interrupt must still find and cancel the second (live) request.
-	cancels, matched, _, _ := h.markPromptCancelled("sess", "turn-1")
-	if !matched || len(cancels) != 1 {
-		t.Fatalf("interrupt found %d pending permission cancels (matched=%v), want the duplicate request still registered", len(cancels), matched)
+	if !h.promptCancellationMatches("sess", "turn-1") {
+		t.Fatal("turn-1 is not a cancellation target")
+	}
+	cancels, _, _ := h.markPromptCancelled("sess", "turn-1")
+	if len(cancels) != 1 {
+		t.Fatalf("interrupt found %d pending permission cancels, want the duplicate request still registered", len(cancels))
 	}
 	for _, cancel := range cancels {
 		cancel()
@@ -1054,7 +1057,11 @@ func TestPermissionRequestAfterTurnCancellationResolvesOnCancelledTurn(t *testin
 	var events []provider.RuntimeEvent
 	h := newInstance(func(event provider.RuntimeEvent) { events = append(events, event) })
 	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
-	if _, matched, _, _ := h.markPromptCancelled("sess", "turn-1"); !matched {
+	if !h.promptCancellationMatches("sess", "turn-1") {
+		t.Fatal("expected turn-1 to be a cancellation target")
+	}
+	h.markPromptCancelled("sess", "turn-1")
+	if session := h.sessionForThreadLocked("thread-1"); session == nil || !session.collector.cancelled {
 		t.Fatal("expected active turn-1 collector to be cancelled")
 	}
 
