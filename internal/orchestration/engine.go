@@ -21,15 +21,15 @@ const (
 	engineQueueSize = 256
 )
 
-// Engine locking: the worker goroutine is the ONLY writer to the projection and
-// receipts (except boot-time RestoreThreads, which seeds stubs under mu before
-// any dispatch), so writes need no coordination with each other. mu exists for
-// cross-goroutine readers (snapshots, SessionView) racing the worker's
-// projection writes; the EventSequencer carries its own lock for sequence
-// assignment. Snapshot creation holds mu while reading the projection.
+// Engine locking: the worker goroutine is the ONLY writer to the projection,
+// the sequence, and receipts (except boot-time RestoreThreads, which seeds
+// stubs under mu before any dispatch), so writes need no coordination with each
+// other. mu exists for cross-goroutine readers (snapshots, SessionView) racing
+// the worker's projection writes. Snapshot creation holds mu while reading the
+// projection.
 type Engine struct {
 	mu             sync.Mutex
-	sequencer      *EventSequencer
+	nextSequence   uint64
 	projection     *Projection
 	listeners      map[uint64]func(Event)
 	nextListenerID uint64
@@ -68,7 +68,7 @@ type engineRequest struct {
 }
 
 // EventInput is the parameter of AppendEvent: the caller-supplied fields of an
-// event, appended nearly verbatim (the sequencer mints Sequence). It carries
+// event, appended nearly verbatim (the engine mints Sequence). It carries
 // provider/server observations, which — unlike commands — are not client
 // intents: they cannot be refused or retried (no receipt) and carry no client
 // CommandID, so those fields deliberately do not exist here. Appends share the
@@ -92,7 +92,6 @@ type dispatchOutcome struct {
 func NewEngine() *Engine {
 	defaultCwd, _ := os.Getwd()
 	e := &Engine{
-		sequencer:    NewEventSequencer(),
 		projection:   NewProjection(),
 		listeners:    make(map[uint64]func(Event)),
 		receipts:     make(map[CommandID]commandReceipt),
@@ -842,7 +841,7 @@ func (e *Engine) OnInvariantViolation(fn func(*InvariantViolationError)) {
 //     released, nothing was written, and the panic propagates to
 //     dispatchRecovered/appendRecovered, which convert it into a command
 //     error — one bad command cannot wedge the daemon.
-//   - AFTER mutation began (sequencer.Stamp/projection.Apply): the mutex is
+//   - AFTER mutation began (stamp/projection.Apply): the mutex is
 //     released, every completed event is still published, and a typed
 //     invariant violation tells the worker to close the engine.
 //
@@ -883,7 +882,7 @@ func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) er
 	defer e.mu.Unlock()
 	return fn(func(event Event) Event {
 		mutated = true
-		sequenced := normalizeEvent(e.sequencer.Stamp(event))
+		sequenced := normalizeEvent(e.stamp(event))
 		appended = append(appended, sequenced)
 		e.projection.Apply(sequenced)
 		if hook := testApplyHook; hook != nil {
