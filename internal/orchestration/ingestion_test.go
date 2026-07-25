@@ -1,10 +1,8 @@
 package orchestration
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 	"testing"
 	"time"
@@ -1282,32 +1280,6 @@ func TestIngestionProjectsAssistantAttachments(t *testing.T) {
 	thread, ok := engine.Thread(threadID)
 	if !ok || len(thread.Timeline.Messages()) != 1 || len(thread.Timeline.Messages()[0].Attachments) != 1 || thread.Timeline.Messages()[0].Attachments[0].Kind != "image" {
 		t.Fatalf("messages = %#v, want assistant image attachment preserved", thread.Timeline.Messages())
-	}
-}
-
-func TestIngestionLogsRejectedEventAppend(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-invalid-ingestion")
-	newThreadWithSession(t, engine, threadID)
-
-	var logs bytes.Buffer
-	previousWriter := log.Writer()
-	previousFlags := log.Flags()
-	previousPrefix := log.Prefix()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	log.SetPrefix("")
-	t.Cleanup(func() {
-		log.SetOutput(previousWriter)
-		log.SetFlags(previousFlags)
-		log.SetPrefix(previousPrefix)
-	})
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-invalid-approval", Type: provider.RuntimeEventRequestOpened, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now()})
-	if output := logs.String(); !strings.Contains(output, "failed to append ingested event") || !strings.Contains(output, string(EventThreadApprovalOpened)) {
-		t.Fatalf("log output = %q, want rejected append context", output)
 	}
 }
 

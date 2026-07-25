@@ -94,7 +94,7 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 		t.Fatalf("unexpected persisted thread meta: %+v", threads[0])
 	}
 	if threads[0].ProviderInstanceID != "provider-1" || threads[0].ModelSelection == nil || threads[0].ModelSelection.Model != "model-1" {
-		t.Fatalf("draft selection was not persisted on promotion: %+v", threads[0])
+		t.Fatalf("provider selection was not persisted: %+v", threads[0])
 	}
 	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
 		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
@@ -115,7 +115,7 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 		t.Fatalf("thread list after restart = %#v, want the rehydrated stub", list.Snapshot.Threads)
 	}
 	entry := list.Snapshot.Threads[0]
-	if entry.ID != "thread-1" || entry.Title != "Renamed thread" || entry.Cwd != cwd || entry.Draft {
+	if entry.ID != "thread-1" || entry.Title != "Renamed thread" || entry.Cwd != cwd {
 		t.Fatalf("rehydrated entry = %#v", entry)
 	}
 	if entry.ProviderInstanceID != "provider-1" || entry.ModelSelection == nil || entry.ModelSelection.Model != "model-1" {
@@ -130,9 +130,6 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 	snapshot, err := restarted.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: "thread-1"})
 	if err != nil {
 		t.Fatalf("ThreadSnapshot after restart: %v", err)
-	}
-	if snapshot.Snapshot.Thread.Draft {
-		t.Fatalf("rehydrated thread = %#v, want promoted non-draft stub", snapshot.Snapshot.Thread)
 	}
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("rehydrated timeline = %#v, want empty", snapshot.Snapshot.Thread.Timeline)
@@ -285,10 +282,10 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	}
 }
 
-func TestThreadMetaWriterSkipsDraftUntilFirstTurn(t *testing.T) {
+func TestThreadMetaWriterPersistsCreatedRealThread(t *testing.T) {
 	engine := orchestration.NewEngine()
 	defer engine.Close()
-	threadID := orchestration.ThreadID("thread-draft-persistence")
+	threadID := orchestration.ThreadID("thread-create-persistence")
 	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
@@ -297,17 +294,8 @@ func TestThreadMetaWriterSkipsDraftUntilFirstTurn(t *testing.T) {
 	w := &threadMetaWriter{engine: engine, threads: stored, logger: newLoggerFromEnv(), dirty: make(map[orchestration.ThreadID]struct{})}
 	w.markDirty(threadID)
 	w.flush()
-	if len(stored.saved) != 0 {
-		t.Fatalf("draft metadata was persisted: %+v", stored.saved)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: threadID, Title: "Promoted title", Message: &orchestration.CommandMessage{Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	w.markDirty(threadID)
-	w.flush()
-	if len(stored.saved) != 1 || stored.saved[0].Title != "Promoted title" {
-		t.Fatalf("promoted metadata = %+v, want one row with final title", stored.saved)
+	if len(stored.saved) != 1 || stored.saved[0].Title != "New thread" {
+		t.Fatalf("created metadata = %+v, want one real thread", stored.saved)
 	}
 }
 

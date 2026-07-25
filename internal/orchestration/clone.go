@@ -16,6 +16,7 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 
 func cloneThread(thread Thread) Thread {
 	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
+	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
 	thread.Session = cloneSessionPtr(thread.Session)
 	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
 	thread.Timeline = thread.Timeline.Clone()

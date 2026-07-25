@@ -12,6 +12,7 @@ import (
 // observations are not commands — they enter the log through Engine.AppendEvent.
 const (
 	CommandThreadCreate          = "thread.create"
+	CommandThreadStart           = "thread.start"
 	CommandThreadMetaUpdate      = "thread.meta.update"
 	CommandThreadTurnStart       = "thread.turn.start"
 	CommandThreadTurnInterrupt   = "thread.turn.interrupt"
@@ -22,20 +23,21 @@ const (
 )
 
 type Command struct {
-	Type               string                    `json:"type"`
-	CommandID          CommandID                 `json:"commandId,omitempty"`
-	ThreadID           ThreadID                  `json:"threadId,omitempty"`
-	TurnID             TurnID                    `json:"turnId,omitempty"`
-	Title              string                    `json:"title,omitempty"`
-	ProviderInstanceID provider.InstanceID       `json:"providerInstanceId,omitempty"`
-	Cwd                string                    `json:"cwd,omitempty"`
-	ModelSelection     *provider.ModelSelection  `json:"modelSelection,omitempty"`
-	Message            *CommandMessage           `json:"message,omitempty"`
-	RequestID          ApprovalID                `json:"requestId,omitempty"`
-	Decision           provider.ApprovalDecision `json:"decision,omitempty"`
-	OptionID           string                    `json:"optionId,omitempty"`
-	Value              any                       `json:"value,omitempty"`
-	CreatedAt          time.Time                 `json:"createdAt,omitzero"`
+	Type               string                           `json:"type"`
+	CommandID          CommandID                        `json:"commandId,omitempty"`
+	ThreadID           ThreadID                         `json:"threadId,omitempty"`
+	TurnID             TurnID                           `json:"turnId,omitempty"`
+	Title              string                           `json:"title,omitempty"`
+	ProviderInstanceID provider.InstanceID              `json:"providerInstanceId,omitempty"`
+	Cwd                string                           `json:"cwd,omitempty"`
+	ModelSelection     *provider.ModelSelection         `json:"modelSelection,omitempty"`
+	Message            *CommandMessage                  `json:"message,omitempty"`
+	RequestID          ApprovalID                       `json:"requestId,omitempty"`
+	Decision           provider.ApprovalDecision        `json:"decision,omitempty"`
+	OptionID           string                           `json:"optionId,omitempty"`
+	Value              any                              `json:"value,omitempty"`
+	ConfigSelections   []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
+	CreatedAt          time.Time                        `json:"createdAt,omitzero"`
 }
 
 type CommandMessage struct {

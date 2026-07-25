@@ -159,7 +159,7 @@ func (w *threadMetaWriter) flush() {
 	var failed []orchestration.ThreadID
 	for threadID := range dirty {
 		entry, ok := w.engine.ThreadListEntry(threadID)
-		if !ok || entry.Draft {
+		if !ok {
 			continue
 		}
 		meta := store.ThreadMeta{

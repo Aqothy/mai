@@ -36,7 +36,7 @@ func (e *Engine) RestoreThreads(threads []RestoredThread) {
 
 // ImportThread installs a committed external-session thread through the engine
 // worker and publishes one thread.imported event to live clients. Like boot
-// restoration, the imported thread is non-draft, starts with an empty timeline,
+// restoration, the imported thread starts with an empty timeline,
 // and requests provider history on its first session preparation.
 func (e *Engine) ImportThread(ctx context.Context, thread RestoredThread) (DispatchResult, error) {
 	return e.await(ctx, engineRequest{importedThread: &thread, done: make(chan dispatchOutcome, 1)})
@@ -92,7 +92,6 @@ func (p *Projection) restoreThread(stub RestoredThread) {
 	}
 	p.threads[stub.ThreadID] = &Thread{
 		ID:                   stub.ThreadID,
-		Draft:                false,
 		ReplayHistoryPending: true,
 		Title:                title,
 		ProviderInstanceID:   stub.ProviderInstanceID,

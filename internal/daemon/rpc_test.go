@@ -462,7 +462,7 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
 		t.Fatalf("subscribe imported thread: %v", err)
 	}
-	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Draft || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd != importCwd || subscribed.Snapshot.Thread.ProviderInstanceID != "codex" {
+	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd != importCwd || subscribed.Snapshot.Thread.ProviderInstanceID != "codex" {
 		t.Fatalf("imported snapshot = %+v", subscribed.Snapshot)
 	}
 	var receipt orchestration.DispatchResult

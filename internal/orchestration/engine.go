@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,6 +277,8 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 	switch command.Type {
 	case CommandThreadCreate:
 		return e.dispatchThreadCreate(command)
+	case CommandThreadStart:
+		return e.dispatchThreadStart(command)
 	case CommandThreadMetaUpdate:
 		return e.dispatchThreadMetaUpdate(command)
 	case CommandThreadTurnStart:
@@ -510,6 +513,81 @@ func (e *Engine) dispatchThreadCreate(command Command) (DispatchResult, error) {
 	}
 	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), Cwd: cwd}})
 	return DispatchResult{Sequence: appended.Sequence}, nil
+}
+
+// dispatchThreadStart creates a real thread and records its first user message
+// and turn request in one locked operation. The provider work remains
+// asynchronous in ProviderEventReactor, exactly like every later turn.
+func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
+	if command.ThreadID == "" {
+		return DispatchResult{}, fmt.Errorf("thread.start requires threadId")
+	}
+	if sequence, exists := e.existingThreadSequence(command.ThreadID); exists {
+		return DispatchResult{Sequence: sequence}, nil
+	}
+	if command.ProviderInstanceID == "" {
+		return DispatchResult{}, fmt.Errorf("thread.start requires providerInstanceId")
+	}
+	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
+		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
+	}
+	if err := validateGenericAttachments(command.Type, command.Message.Attachments); err != nil {
+		return DispatchResult{}, err
+	}
+	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
+	if err != nil {
+		return DispatchResult{}, err
+	}
+	messageID := MessageID(command.Message.MessageID)
+	if messageID == "" {
+		messageID = MessageID(newID("msg"))
+	}
+	turnID := TurnID(newID("turn"))
+	title := command.Title
+	if title == "" {
+		title = strings.Join(strings.Fields(command.Message.Text), " ")
+		titleRunes := []rune(title)
+		if len(titleRunes) > 80 {
+			title = string(titleRunes[:80])
+		}
+		if title == "" {
+			title = "Untitled thread"
+		}
+	}
+	modelSelection := cloneModelSelection(command.ModelSelection)
+	for _, selection := range command.ConfigSelections {
+		if selection.Category == provider.ConfigOptionCategoryModel {
+			if model, ok := selection.Value.(string); ok && model != "" {
+				if modelSelection == nil {
+					modelSelection = &provider.ModelSelection{}
+				}
+				modelSelection.Model = model
+			}
+		}
+	}
+
+	var sequence uint64
+	err = e.withLockNotify(func(appendEvent func(Event) Event) error {
+		appendEvent(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
+			ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID,
+			ModelSelection: modelSelection, Cwd: cwd, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
+		}})
+		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
+			ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text,
+			Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt,
+		}})
+		started := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
+			ThreadID: command.ThreadID, Title: title, MessageID: messageID, TurnID: turnID,
+			ProviderInstanceID: command.ProviderInstanceID, ModelSelection: modelSelection,
+			ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
+		}})
+		sequence = started.Sequence
+		return nil
+	})
+	if err != nil {
+		return DispatchResult{}, err
+	}
+	return DispatchResult{Sequence: sequence}, nil
 }
 
 func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, error) {

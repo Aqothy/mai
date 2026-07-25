@@ -143,21 +143,33 @@ func startSessionInputFromThread(thread Thread) provider.StartSessionInput {
 }
 
 func configSelectionsFromThread(thread Thread) []provider.ConfigOptionSelection {
-	if thread.Session == nil {
-		return nil
+	selections := append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
+	indices := make(map[string]int, len(selections))
+	for index, selection := range selections {
+		if selection.OptionID != "" {
+			indices[selection.OptionID] = index
+		}
 	}
-	var selections []provider.ConfigOptionSelection
+	if thread.Session == nil {
+		return selections
+	}
 	for _, option := range thread.Session.ConfigOptions {
 		if option.ID == "" || option.Category == provider.ConfigOptionCategoryModel {
 			continue
 		}
 		switch option.CurrentValue.(type) {
 		case string, bool:
-			selections = append(selections, provider.ConfigOptionSelection{
+			selection := provider.ConfigOptionSelection{
 				OptionID: option.ID,
 				Value:    option.CurrentValue,
 				Category: option.Category,
-			})
+			}
+			if index, ok := indices[option.ID]; ok {
+				selections[index] = selection
+			} else {
+				indices[option.ID] = len(selections)
+				selections = append(selections, selection)
+			}
 		}
 	}
 	return selections

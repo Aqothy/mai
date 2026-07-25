@@ -91,9 +91,10 @@ type EventPayload struct {
 	Approval  *ApprovalEvent            `json:"approval,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so clients clear state.
-	ConfigOptions []provider.ConfigOption `json:"configOptions,omitzero"`
-	SlashCommands []provider.SlashCommand `json:"slashCommands,omitzero"`
-	TokenUsage    *provider.TokenUsage    `json:"tokenUsage,omitempty"`
+	ConfigOptions    []provider.ConfigOption          `json:"configOptions,omitzero"`
+	ConfigSelections []provider.ConfigOptionSelection `json:"-"`
+	SlashCommands    []provider.SlashCommand          `json:"slashCommands,omitzero"`
+	TokenUsage       *provider.TokenUsage             `json:"tokenUsage,omitempty"`
 }
 
 // ThreadID names the thread an event belongs to. Every event constructor

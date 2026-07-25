@@ -141,10 +141,10 @@ func (p *Projection) applyThreadCreated(event Event) {
 	}
 	p.threads[threadID] = &Thread{
 		ID:                 threadID,
-		Draft:              true,
 		Title:              title,
 		ProviderInstanceID: payload.ProviderInstanceID,
 		ModelSelection:     cloneModelSelection(payload.ModelSelection),
+		ConfigSelections:   append([]provider.ConfigOptionSelection(nil), payload.ConfigSelections...),
 		Cwd:                payload.Cwd,
 		Timeline:           Timeline{},
 		CreatedAt:          event.OccurredAt,
@@ -283,12 +283,6 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 		return
 	}
 	applyThreadProviderSelectionPatch(thread, event.Payload.ProviderInstanceID, event.Payload.ModelSelection, event.Payload.SessionCleared)
-	if thread.Draft {
-		thread.Draft = false
-		if event.Payload.Title != "" {
-			thread.Title = event.Payload.Title
-		}
-	}
 	now := event.OccurredAt
 	turnID := event.Payload.TurnID
 	if turnID == "" {
@@ -618,5 +612,5 @@ func threadListEntryFromThread(thread Thread) ThreadListEntry {
 			pendingApprovals = true
 		}
 	}
-	return ThreadListEntry{ID: thread.ID, Draft: thread.Draft, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
 }

@@ -108,7 +108,7 @@ func selectionEqual(a, b *provider.ModelSelection) bool {
 // §7): a present providerInstanceId replaces both the identity and the model
 // selection (an absent modelSelection means "none" — a provider-only switch
 // cleared the old instance's model); a payload with only modelSelection (a
-// draft thread with no instance, or a config-derived model update) replaces
+// empty thread with no instance, or a config-derived model update) replaces
 // just the model choice.
 func applyThreadProviderSelectionPatch(thread *Thread, providerInstanceID provider.InstanceID, selection *provider.ModelSelection, sessionCleared bool) {
 	if thread == nil {

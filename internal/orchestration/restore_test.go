@@ -9,7 +9,7 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestImportThreadPublishesNonDraftReplayPendingStub(t *testing.T) {
+func TestImportThreadPublishesReplayPendingStub(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
@@ -28,8 +28,8 @@ func TestImportThreadPublishesNonDraftReplayPendingStub(t *testing.T) {
 		t.Fatalf("ImportThread: %v", err)
 	}
 	thread, ok := engine.projection.Thread("thread-imported")
-	if !ok || thread.Draft || !thread.ReplayHistoryPending || len(thread.Timeline) != 0 {
-		t.Fatalf("imported thread = %+v, want non-draft empty replay-pending stub", thread)
+	if !ok || !thread.ReplayHistoryPending || len(thread.Timeline) != 0 {
+		t.Fatalf("imported thread = %+v, want empty replay-pending stub", thread)
 	}
 	if !thread.CreatedAt.Equal(now) || !thread.UpdatedAt.Equal(now) {
 		t.Fatalf("imported timestamps = (%v, %v), want %v", thread.CreatedAt, thread.UpdatedAt, now)
@@ -79,9 +79,6 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	if entry.Session != nil {
 		t.Fatalf("restored stub must have no session binding, got %#v", entry.Session)
 	}
-	if entry.Draft {
-		t.Fatalf("restored entry = %#v, want non-draft", entry)
-	}
 	if untitled, _ := engine.ThreadListEntry("thread-untitled"); untitled.Title != "Untitled thread" {
 		t.Fatalf("empty title = %q, want default", untitled.Title)
 	}
@@ -92,9 +89,6 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	}
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("restored timeline = %#v, want empty (history is provider-owned)", snapshot.Snapshot.Thread.Timeline)
-	}
-	if snapshot.Snapshot.Thread.Draft {
-		t.Fatalf("restored thread = %#v, want non-draft", snapshot.Snapshot.Thread)
 	}
 
 	// Restore emits no live events; clients obtain authoritative snapshots.

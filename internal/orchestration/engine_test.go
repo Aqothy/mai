@@ -69,51 +69,47 @@ func TestThreadCwdDefaultsToDaemonCwdAndRejectsBadPaths(t *testing.T) {
 	}
 }
 
-func TestDraftThreadPromotesOnFirstTurn(t *testing.T) {
+func TestThreadStartCreatesRealThreadWithFirstTurnAndConfig(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	threadID := ThreadID("thread-draft-promotion")
+	cwd := t.TempDir()
+	threadID := ThreadID("thread-local-draft-start")
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-draft-promotion", ThreadID: threadID, Title: "New thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
+	result, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadStart, CommandID: "start-local-draft", ThreadID: threadID,
+		Title: "Build the chat view", ProviderInstanceID: "codex", Cwd: cwd,
+		Message: &CommandMessage{MessageID: "first-message", Text: "Build the chat view"},
+		ConfigSelections: []provider.ConfigOptionSelection{{
+			OptionID: "model", Value: "fast", Category: provider.ConfigOptionCategoryModel,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("thread.start: %v", err)
 	}
 	thread, ok := engine.Thread(threadID)
-	if !ok || !thread.Draft {
-		t.Fatalf("created thread = %#v, want draft", thread)
+	if !ok || thread.ProviderInstanceID != "codex" || thread.Cwd != cwd {
+		t.Fatalf("thread = %#v, want real configured thread", thread)
 	}
-	entry, ok := engine.ThreadListEntry(threadID)
-	if !ok || !entry.Draft {
-		t.Fatalf("created list entry = %#v, want draft", entry)
+	if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateRunning {
+		t.Fatalf("latest turn = %#v, want running first turn", thread.LatestTurn)
+	}
+	if message := thread.Timeline.Message("first-message"); message == nil || message.Text != "Build the chat view" {
+		t.Fatalf("first message = %#v", message)
+	}
+	if len(thread.ConfigSelections) != 1 || thread.ConfigSelections[0].Value != "fast" {
+		t.Fatalf("config selections = %#v", thread.ConfigSelections)
 	}
 
-	if _, err := engine.Dispatch(context.Background(), Command{
-		Type:      CommandThreadTurnStart,
-		CommandID: "cmd-turn-draft-promotion",
-		ThreadID:  threadID,
-		Title:     "First prompt becomes the title",
-		Message:   &CommandMessage{MessageID: "message-draft-promotion", Text: "First prompt becomes the title"},
-	}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
+	duplicate, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadStart, CommandID: "start-local-draft", ThreadID: threadID,
+		ProviderInstanceID: "other", Cwd: cwd,
+		Message: &CommandMessage{MessageID: "duplicate", Text: "duplicate"},
+	})
+	if err != nil || duplicate.Sequence != result.Sequence {
+		t.Fatalf("duplicate result = %#v, err = %v, want idempotent receipt %#v", duplicate, err, result)
 	}
-	thread, ok = engine.Thread(threadID)
-	if !ok || thread.Draft || thread.Title != "First prompt becomes the title" {
-		t.Fatalf("promoted thread = %#v, want non-draft with first-prompt title", thread)
-	}
-	entry, ok = engine.ThreadListEntry(threadID)
-	if !ok || entry.Draft {
-		t.Fatalf("promoted list entry = %#v, want non-draft", entry)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{
-		Type:      CommandThreadTurnStart,
-		CommandID: "cmd-steer-draft-promotion",
-		ThreadID:  threadID,
-		Title:     "A later turn must not retitle",
-		Message:   &CommandMessage{MessageID: "message-steer-draft-promotion", Text: "follow up"},
-	}); err != nil {
-		t.Fatalf("steering thread.turn.start: %v", err)
-	}
-	if thread, _ := engine.Thread(threadID); thread.Title != "First prompt becomes the title" {
-		t.Fatalf("title after later turn = %q, want first-prompt title", thread.Title)
+	if thread, _ := engine.Thread(threadID); thread.Timeline.Message("duplicate") != nil {
+		t.Fatal("duplicate thread.start appended another message")
 	}
 }
 
@@ -987,7 +983,7 @@ func TestProviderCommandFailureCompletesTurnWithoutSession(t *testing.T) {
 	}
 }
 
-func TestEngineTracksReceiptsOnlyForClientCommands(t *testing.T) {
+func TestEngineAppendEventDoesNotDeduplicateProviderEvents(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	threadID := ThreadID("thread-receipt-scope")
@@ -995,22 +991,6 @@ func TestEngineTracksReceiptsOnlyForClientCommands(t *testing.T) {
 		t.Fatalf("thread.create: %v", err)
 	}
 
-	// Client command: same CommandID must dedupe to the original sequence.
-	first, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-receipt-meta", ThreadID: threadID, Title: "Once"})
-	if err != nil {
-		t.Fatalf("thread.meta.update: %v", err)
-	}
-	retry, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-receipt-meta", ThreadID: threadID, Title: "Twice"})
-	if err != nil {
-		t.Fatalf("thread.meta.update retry: %v", err)
-	}
-	if retry.Sequence != first.Sequence {
-		t.Fatalf("client retry sequence = %d, want deduped %d", retry.Sequence, first.Sequence)
-	}
-
-	// Provider/server appends leave no receipt: repeated identical appends add a
-	// fresh event each time (they arrive once per provider event, one per
-	// streamed delta; tracking them would grow the receipts map without bound).
 	item := &Item{ID: "item-receipt", Kind: provider.ItemKindToolCall, Title: "call"}
 	firstItem, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: item}})
 	if err != nil {
@@ -1023,8 +1003,8 @@ func TestEngineTracksReceiptsOnlyForClientCommands(t *testing.T) {
 	if secondItem.Sequence <= firstItem.Sequence {
 		t.Fatalf("append repeat sequence = %d, want new event after %d", secondItem.Sequence, firstItem.Sequence)
 	}
-	if len(engine.receipts) != 2 {
-		t.Fatalf("receipts = %d entries, want 2 (create + meta; none for appends)", len(engine.receipts))
+	if len(engine.receipts) != 1 {
+		t.Fatalf("receipts = %d entries, want only the thread.create receipt", len(engine.receipts))
 	}
 }
 
@@ -1158,7 +1138,7 @@ func TestThreadMetadataMayChangeIncludesOnlyDurableChanges(t *testing.T) {
 		event Event
 		want  bool
 	}{
-		{"draft created", Event{Type: EventThreadCreated}, false},
+		{"thread created", Event{Type: EventThreadCreated}, false},
 		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
 		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
 		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
