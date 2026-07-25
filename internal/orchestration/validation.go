@@ -7,11 +7,17 @@ import (
 )
 
 func activeTurnID(thread Thread) TurnID {
-	if thread.Session != nil && thread.Session.ActiveTurnID != "" {
-		return thread.Session.ActiveTurnID
+	return activeTurnIDOf(thread.Session, thread.LatestTurn)
+}
+
+// activeTurnIDOf is the session/turn-only form, for callers holding a
+// ThreadSessionView rather than a cloned thread.
+func activeTurnIDOf(session *SessionBinding, latestTurn *Turn) TurnID {
+	if session != nil && session.ActiveTurnID != "" {
+		return session.ActiveTurnID
 	}
-	if thread.LatestTurn != nil && thread.LatestTurn.State == TurnStateRunning {
-		return thread.LatestTurn.ID
+	if latestTurn != nil && latestTurn.State == TurnStateRunning {
+		return latestTurn.ID
 	}
 	return ""
 }

@@ -440,6 +440,32 @@ type ThreadSessionView struct {
 	LatestTurn         *Turn
 }
 
+// ThreadApprovalView is SessionView plus one approval, read under a single lock
+// acquisition: composing two reads could answer a request against a session
+// that has since been replaced.
+type ThreadApprovalView struct {
+	Session *SessionBinding
+	// Approval is nil when the thread has no such request.
+	Approval *Approval
+}
+
+func (e *Engine) ApprovalView(threadID ThreadID, requestID ApprovalID) (ThreadApprovalView, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	thread := e.projection.liveThread(threadID)
+	if thread == nil {
+		return ThreadApprovalView{}, false
+	}
+	view := ThreadApprovalView{Session: cloneSessionPtr(thread.Session)}
+	if approval := thread.Timeline.Approval(string(requestID)); approval != nil {
+		clone := *approval
+		clone.Args = cloneRawMessage(approval.Args)
+		clone.Options = append([]provider.ApprovalOption(nil), approval.Options...)
+		view.Approval = &clone
+	}
+	return view, true
+}
+
 func (e *Engine) SessionView(threadID ThreadID) (ThreadSessionView, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

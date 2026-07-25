@@ -336,9 +336,12 @@ func (r *ProviderEventReactor) confirmInterruptBeforeTurnDispatch(threadID Threa
 	}
 }
 
+// The handlers below read through SessionView/ApprovalView rather than
+// Engine.Thread, which deep-clones the whole timeline per provider RPC.
 func (r *ProviderEventReactor) handleInterrupt(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
-	if !ok || thread.Session == nil || !interruptEventTargetsCancellableTurn(thread, event.Payload.TurnID) {
+	threadID := event.ThreadID()
+	view, ok := r.engine.SessionView(threadID)
+	if !ok || view.Session == nil || !interruptEventTargetsCancellableTurn(view, event.Payload.TurnID) {
 		return
 	}
 	// Do not settle session lifecycle from this async reactor. The interrupt
@@ -346,56 +349,58 @@ func (r *ProviderEventReactor) handleInterrupt(event Event) {
 	// events remain authoritative if completion wins the race.
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	if err := r.provider.InterruptTurn(ctx, provider.InterruptTurnInput{ThreadID: string(thread.ID), TurnID: string(event.Payload.TurnID)}); err != nil {
-		r.record(EventInput{Type: EventThreadTurnInterruptFailed, ThreadID: thread.ID, Actor: ActorKindServer, Payload: EventPayload{TurnID: event.Payload.TurnID}})
-		r.appendErrorItem(thread.ID, event.Payload.TurnID, err.Error())
+	if err := r.provider.InterruptTurn(ctx, provider.InterruptTurnInput{ThreadID: string(threadID), TurnID: string(event.Payload.TurnID)}); err != nil {
+		r.record(EventInput{Type: EventThreadTurnInterruptFailed, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{TurnID: event.Payload.TurnID}})
+		r.appendErrorItem(threadID, event.Payload.TurnID, err.Error())
 	}
 }
 
 func (r *ProviderEventReactor) handleStop(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
+	threadID := event.ThreadID()
+	view, ok := r.engine.SessionView(threadID)
 	if !ok {
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	input := provider.StopSessionInput{ThreadID: string(thread.ID)}
-	if thread.Session == nil {
+	input := provider.StopSessionInput{ThreadID: string(threadID)}
+	if view.Session == nil {
 		if err := r.provider.ReleaseSession(ctx, input); err != nil {
-			log.Printf("orchestration: release stopped idle thread %q: %v", thread.ID, err)
+			log.Printf("orchestration: release stopped idle thread %q: %v", threadID, err)
 		}
 		return
 	}
 	stopReason := ""
-	if activeTurnID(thread) != "" {
+	if activeTurnIDOf(view.Session, view.LatestTurn) != "" {
 		stopReason = "cancelled"
 	}
 	if err := r.provider.StopSession(ctx, input); err != nil {
-		r.record(EventInput{Type: EventThreadSessionStopFailed, ThreadID: thread.ID, Actor: ActorKindServer})
-		r.appendErrorItem(thread.ID, event.Payload.TurnID, err.Error())
+		r.record(EventInput{Type: EventThreadSessionStopFailed, ThreadID: threadID, Actor: ActorKindServer})
+		r.appendErrorItem(threadID, event.Payload.TurnID, err.Error())
 		return
 	}
-	r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateStopped, StopReason: stopReason})
+	r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateStopped, StopReason: stopReason})
 }
 
 func (r *ProviderEventReactor) handleConfigOption(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
-	if !ok || thread.Session == nil {
+	threadID := event.ThreadID()
+	view, ok := r.engine.SessionView(threadID)
+	if !ok || view.Session == nil {
 		return
 	}
-	category := configOptionCategory(thread, event.Payload.OptionID)
+	category := configOptionCategory(view.Session, event.Payload.OptionID)
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	if err := r.provider.SetConfigOption(ctx, provider.SetConfigOptionInput{ThreadID: string(thread.ID), OptionID: event.Payload.OptionID, Value: event.Payload.Value, Category: category}); err != nil {
-		r.appendErrorItem(thread.ID, "", err.Error())
+	if err := r.provider.SetConfigOption(ctx, provider.SetConfigOptionInput{ThreadID: string(threadID), OptionID: event.Payload.OptionID, Value: event.Payload.Value, Category: category}); err != nil {
+		r.appendErrorItem(threadID, "", err.Error())
 	}
 }
 
-func configOptionCategory(thread Thread, optionID string) provider.ConfigOptionCategory {
-	if thread.Session == nil {
+func configOptionCategory(session *SessionBinding, optionID string) provider.ConfigOptionCategory {
+	if session == nil {
 		return ""
 	}
-	for _, option := range thread.Session.ConfigOptions {
+	for _, option := range session.ConfigOptions {
 		if option.ID == optionID {
 			return option.Category
 		}
@@ -404,21 +409,21 @@ func configOptionCategory(thread Thread, optionID string) provider.ConfigOptionC
 }
 
 func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
-	if !ok || thread.Session == nil {
+	threadID := event.ThreadID()
+	view, ok := r.engine.ApprovalView(threadID, event.Payload.RequestID)
+	if !ok || view.Session == nil {
 		return
 	}
-	approval, ok := findApproval(thread, event.Payload.RequestID)
-	if !ok {
-		r.appendErrorItem(thread.ID, event.Payload.TurnID, fmt.Sprintf("unknown approval request %s", event.Payload.RequestID))
+	if view.Approval == nil {
+		r.appendErrorItem(threadID, event.Payload.TurnID, fmt.Sprintf("unknown approval request %s", event.Payload.RequestID))
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 	// The decision was validated (and defaulted) by the engine's decider before
 	// the event was appended, so it passes through as-is.
-	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(thread.ID), RequestID: approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID}); err != nil {
-		r.appendErrorItem(thread.ID, approval.TurnID, err.Error())
+	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID}); err != nil {
+		r.appendErrorItem(threadID, view.Approval.TurnID, err.Error())
 		return
 	}
 }
@@ -448,19 +453,19 @@ func (r *ProviderEventReactor) recordSessionUpdate(threadID ThreadID, update ses
 	return err == nil && result.Sequence != 0
 }
 
-func interruptEventTargetsCancellableTurn(thread Thread, turnID TurnID) bool {
-	if turnID == "" || thread.LatestTurn == nil || thread.LatestTurn.ID != turnID {
+func interruptEventTargetsCancellableTurn(view ThreadSessionView, turnID TurnID) bool {
+	if turnID == "" || view.LatestTurn == nil || view.LatestTurn.ID != turnID {
 		return false
 	}
-	if thread.LatestTurn.CompletedAt != nil || thread.LatestTurn.State == TurnStateCompleted || thread.LatestTurn.State == TurnStateError {
+	if view.LatestTurn.CompletedAt != nil || view.LatestTurn.State == TurnStateCompleted || view.LatestTurn.State == TurnStateError {
 		return false
 	}
-	if thread.Session != nil {
-		switch thread.Session.Status {
+	if view.Session != nil {
+		switch view.Session.Status {
 		case SessionStatusReady, SessionStatusStopped, SessionStatusError:
 			return false
 		}
-		if thread.Session.ActiveTurnID != "" && thread.Session.ActiveTurnID != turnID {
+		if view.Session.ActiveTurnID != "" && view.Session.ActiveTurnID != turnID {
 			return false
 		}
 	}
@@ -472,11 +477,4 @@ func findMessage(thread Thread, id MessageID) Message {
 		return *message
 	}
 	return Message{}
-}
-
-func findApproval(thread Thread, id ApprovalID) (Approval, bool) {
-	if approval := thread.Timeline.Approval(string(id)); approval != nil {
-		return *approval, true
-	}
-	return Approval{}, false
 }
