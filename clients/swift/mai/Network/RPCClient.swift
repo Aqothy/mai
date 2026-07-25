@@ -6,6 +6,11 @@ final class RPCClient {
 
     private let endpoint: URL
     private let session: URLSession
+    // Built once: these run on the main actor per inbound frame, including
+    // every streamed delta.
+    private let decoder = newJSONDecoder()
+    private let routeDecoder = JSONDecoder()
+    private let encoder = newJSONEncoder()
     private var webSocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
@@ -54,7 +59,7 @@ final class RPCClient {
         as resultType: Result.Type = Result.self
     ) async throws -> Result {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
-        let response = try newJSONDecoder().decode(Response<Result>.self, from: data)
+        let response = try decoder.decode(Response<Result>.self, from: data)
 
         if let error = response.error {
             throw RPCError(code: error.code, message: error.message, data: error.data)
@@ -71,7 +76,7 @@ final class RPCClient {
 
     func callVoid<Params: Encodable>(_ method: String, params: Params) async throws {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
-        let response = try newJSONDecoder().decode(ErrorResponse.self, from: data)
+        let response = try decoder.decode(ErrorResponse.self, from: data)
         if let error = response.error {
             throw RPCError(code: error.code, message: error.message, data: error.data)
         }
@@ -88,7 +93,7 @@ final class RPCClient {
         let requestID = nextRequestID
         nextRequestID += 1
         let request = Request(id: requestID, method: method, params: params)
-        let requestData = try newJSONEncoder().encode(request)
+        let requestData = try encoder.encode(request)
         guard let requestText = String(data: requestData, encoding: .utf8) else {
             throw RPCError(
                 code: nil,
@@ -170,7 +175,7 @@ final class RPCClient {
     }
 
     private func routeMessage(_ data: Data) throws {
-        let route = try JSONDecoder().decode(Route.self, from: data)
+        let route = try routeDecoder.decode(Route.self, from: data)
 
         if let id = route.id {
             pendingRequests.removeValue(forKey: id)?.resume(returning: data)

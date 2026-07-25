@@ -30,6 +30,18 @@ type ThreadListSnapshot struct {
 	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
+// StreamItemKind is an alias, not a defined type, for the same reason as
+// CommandType: the wire field stays a plain string so an unknown kind decodes
+// and is ignored instead of failing the whole notification.
+type StreamItemKind = string
+
+// Clients branch on these rather than on which optional field is populated.
+const (
+	StreamItemSnapshot       StreamItemKind = "snapshot"
+	StreamItemEvent          StreamItemKind = "event"
+	StreamItemThreadUpserted StreamItemKind = "thread-upserted"
+)
+
 type ThreadStreamItem struct {
 	Kind     string                `json:"kind"`
 	Snapshot *ThreadDetailSnapshot `json:"snapshot,omitempty"`

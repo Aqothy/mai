@@ -66,6 +66,7 @@ type contract struct {
 func main() {
 	out := flag.String("out", "api/generated/client-api.schema.json", "schema output path")
 	methodsOut := flag.String("methods-out", "api/generated/rpc-methods.json", "method registry output path")
+	vocabularyOut := flag.String("vocabulary-out", "api/generated/vocabulary.json", "closed string vocabulary output path")
 	flag.Parse()
 
 	r := &jsonschema.Reflector{
@@ -109,6 +110,24 @@ func main() {
 		fatal(err)
 	}
 	if err := os.WriteFile(*methodsOut, methodData, 0o644); err != nil {
+		fatal(err)
+	}
+
+	// Closed string vocabularies are emitted separately: the JSON Schema
+	// reflector sees only `string` for Go named-string constants, so without
+	// this every client would re-type the literals by hand.
+	vocabularies := struct {
+		Vocabularies []wire.VocabularyDefinition `json:"vocabularies"`
+	}{wire.Vocabularies}
+	vocabularyData, err := json.MarshalIndent(vocabularies, "", "  ")
+	if err != nil {
+		fatal(err)
+	}
+	vocabularyData = append(vocabularyData, '\n')
+	if err := os.MkdirAll(filepath.Dir(*vocabularyOut), 0o755); err != nil {
+		fatal(err)
+	}
+	if err := os.WriteFile(*vocabularyOut, vocabularyData, 0o644); err != nil {
 		fatal(err)
 	}
 }

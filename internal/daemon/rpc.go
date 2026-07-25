@@ -649,7 +649,7 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	}
 
 	if len(threadClients) > 0 {
-		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: "event", Event: &event}, RPCMethodOrchestrationSubscribeThread); ok {
+		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: orchestration.StreamItemEvent, Event: &event}, RPCMethodOrchestrationSubscribeThread); ok {
 			for _, client := range threadClients {
 				client.notify(RPCMethodOrchestrationSubscribeThread, params)
 			}
@@ -662,7 +662,7 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	if !ok {
 		return
 	}
-	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: "thread-upserted", Sequence: event.Sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
+	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: orchestration.StreamItemThreadUpserted, Sequence: event.Sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
 		for _, client := range threadListClients {
 			client.notify(RPCMethodOrchestrationSubscribeThreadList, params)
 		}

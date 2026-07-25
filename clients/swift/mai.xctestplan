@@ -1,0 +1,30 @@
+{
+  "configurations" : [
+    {
+      "id" : "E369C971-52BB-4057-923F-32AAE2E0B3DC",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:mai.xcodeproj",
+      "identifier" : "000000000000000100000000",
+      "name" : "mai"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:mai.xcodeproj",
+        "identifier" : "F3C108CE300EB34000EF5F93",
+        "name" : "maiTests"
+      }
+    }
+  ],
+  "version" : 1
+}

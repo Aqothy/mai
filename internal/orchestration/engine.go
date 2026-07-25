@@ -406,14 +406,14 @@ func (e *Engine) SubscribeThread(input SubscribeThreadInput) (ThreadStreamItem, 
 	if err != nil {
 		return ThreadStreamItem{}, err
 	}
-	return ThreadStreamItem{Kind: "snapshot", Snapshot: &snapshot}, nil
+	return ThreadStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}, nil
 }
 
 func (e *Engine) ThreadListSnapshot() ThreadListStreamItem {
 	e.mu.Lock()
 	snapshot := e.projection.ThreadListSnapshot()
 	e.mu.Unlock()
-	return ThreadListStreamItem{Kind: "snapshot", Snapshot: &snapshot}
+	return ThreadListStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}
 }
 
 func (e *Engine) ThreadListEntry(threadID ThreadID) (ThreadListEntry, bool) {

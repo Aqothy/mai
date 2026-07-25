@@ -8,7 +8,7 @@ enum PreviewData {
         interruptRequested: nil,
         requestedAt: .now,
         startedAt: .now,
-        state: "running",
+        state: MaidTurnState.running.rawValue,
         stopReason: nil,
         turnID: "preview-turn"
     )

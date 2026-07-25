@@ -1,214 +1,220 @@
 import Foundation
 
+extension Thread {
+    /// Applies `event` to this thread in place.
+    ///
+    /// `timeline` is copy-on-write, so call this through your own storage
+    /// (`sessionsByID[id]?.thread?.apply(event)`) rather than a temporary copy —
+    /// a second reference forces a full array copy per streamed chunk.
+    mutating func apply(_ event: Event) {
+        ThreadEventReducer.apply(event, to: &self)
+    }
+}
+
+/// Client-side mirror of the daemon's `orchestration.Projection.Apply`: the
+/// daemon streams events, not snapshots, so every branch below must match the
+/// Go projection.
 enum ThreadEventReducer {
-    static func apply(_ event: Event, to original: Thread) -> Thread {
-        guard event.payload.threadID == original.id else { return original }
-        var thread = original
+    static func apply(_ event: Event, to thread: inout Thread) {
+        guard event.payload.threadID == thread.id else { return }
+        let payload = event.payload
+        let occurredAt = event.occurredAt
 
-        switch event.type {
-        case "thread.meta-updated":
-            thread = applyProviderSelection(event.payload, to: thread)
-            thread = thread.with(
-                cwd: nonEmpty(event.payload.cwd).map(Optional.some),
-                title: nonEmpty(event.payload.title) ?? thread.title
-            )
+        switch event.eventType {
+        case .threadMetaUpdated:
+            applyProviderSelection(payload, to: &thread)
+            if let cwd = nonEmpty(payload.cwd) { thread.cwd = cwd }
+            if let title = nonEmpty(payload.title) { thread.title = title }
 
-        case "thread.message-sent":
-            guard let id = event.payload.messageID, let role = event.payload.role else { break }
-            var timeline = thread.timeline
-            if let index = timeline.firstIndex(where: { $0.message?.id == id }), let old = timeline[index].message {
-                let message = old.with(
-                    attachments: (old.attachments ?? []) + (event.payload.attachments ?? []),
-                    text: old.text + (event.payload.text ?? ""),
-                    turnID: nonEmpty(event.payload.turnID).map(Optional.some),
-                    updatedAt: event.occurredAt
-                )
-                timeline[index] = timeline[index].with(message: .some(message))
+        case .threadMessageSent:
+            guard let id = payload.messageID, let role = payload.role else { break }
+            if let index = thread.timeline.lastIndex(where: { $0.message?.id == id }),
+               var message = thread.timeline[index].message {
+                message.attachments = (message.attachments ?? []) + (payload.attachments ?? [])
+                message.text += payload.text ?? ""
+                if let turnID = nonEmpty(payload.turnID) { message.turnID = turnID }
+                message.updatedAt = occurredAt
+                thread.timeline[index].message = message
             } else {
                 let message = Message(
-                    attachments: event.payload.attachments,
-                    createdAt: event.payload.createdAt ?? event.occurredAt,
+                    attachments: payload.attachments,
+                    createdAt: payload.createdAt ?? occurredAt,
                     id: id,
                     role: role,
-                    text: event.payload.text ?? "",
-                    turnID: event.payload.turnID,
-                    updatedAt: event.payload.updatedAt ?? event.occurredAt
+                    text: payload.text ?? "",
+                    turnID: payload.turnID,
+                    updatedAt: payload.updatedAt ?? occurredAt
                 )
-                timeline.append(TimelineEntry(approval: nil, item: nil, kind: "message", message: message))
-            }
-            thread = thread.with(timeline: timeline)
-
-        case "thread.turn-start-requested":
-            thread = applyProviderSelection(event.payload, to: thread)
-            let turnID = nonEmpty(event.payload.turnID) ?? event.eventID
-            var timeline = thread.timeline
-            if let messageID = event.payload.messageID,
-               let index = timeline.firstIndex(where: { $0.message?.id == messageID }),
-               let message = timeline[index].message {
-                timeline[index] = timeline[index].with(message: .some(message.with(turnID: .some(turnID))))
-            }
-            let turn = thread.latestTurn?.turnID == turnID
-                ? thread.latestTurn
-                : Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: event.occurredAt, startedAt: event.occurredAt, state: "running", stopReason: nil, turnID: turnID)
-            var session = thread.session
-            if let current = session {
-                session = current.with(activeTurnID: .some(turnID), status: "running", updatedAt: event.occurredAt)
-            }
-            thread = thread.with(
-                latestTurn: turn.map(Optional.some),
-                session: session.map(Optional.some),
-                timeline: timeline
-            )
-
-        case "thread.turn-interrupt-requested":
-            if let turn = thread.latestTurn, event.payload.turnID == nil || event.payload.turnID == turn.turnID {
-                thread = thread.with(latestTurn: .some(turn.with(interruptRequested: .some(true))))
+                thread.timeline.append(TimelineEntry(approval: nil, item: nil, kind: MaidTimelineEntryKind.message.rawValue, message: message))
             }
 
-        case "thread.turn-interrupt-confirmed":
-            if let turn = thread.latestTurn, turn.turnID == event.payload.turnID, turn.completedAt == nil {
-                thread = thread.with(latestTurn: .some(turn.with(completedAt: .some(event.occurredAt), interruptRequested: .some(false), state: "interrupted")))
+        case .threadTurnStartRequested:
+            applyProviderSelection(payload, to: &thread)
+            let turnID = nonEmpty(payload.turnID) ?? event.eventID
+            if let messageID = payload.messageID,
+               let index = thread.timeline.lastIndex(where: { $0.message?.id == messageID }) {
+                thread.timeline[index].message?.turnID = turnID
+            }
+            // A turn.start for the already-running turn is steering: the same
+            // logical turn continues, so its timestamps must survive.
+            if thread.latestTurn?.turnID != turnID {
+                thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID)
+            }
+            if thread.session != nil {
+                thread.session?.activeTurnID = turnID
+                thread.session?.status = MaidSessionStatus.running.rawValue
+                thread.session?.updatedAt = occurredAt
             }
 
-        case "thread.turn-interrupt-failed":
-            if let turn = thread.latestTurn, turn.turnID == event.payload.turnID, turn.completedAt == nil {
-                thread = thread.with(latestTurn: .some(turn.with(interruptRequested: .some(false))))
+        case .threadTurnInterruptRequested:
+            if let turn = thread.latestTurn, payload.turnID == nil || payload.turnID == turn.turnID {
+                thread.latestTurn?.interruptRequested = true
             }
 
-        case "thread.session-prepare-requested":
-            let session = ensureSession(thread, event).with(activeTurnID: .some(nil), lastError: .some(nil), status: "starting", updatedAt: event.occurredAt)
-            thread = thread.with(session: .some(session))
-
-        case "thread.session-stop-requested":
-            if let session = thread.session {
-                thread = thread.with(session: .some(session.with(stopRequested: .some(true))))
+        case .threadTurnInterruptConfirmed:
+            if let turn = thread.latestTurn, turn.turnID == payload.turnID, turn.completedAt == nil {
+                thread.latestTurn?.completedAt = occurredAt
+                thread.latestTurn?.interruptRequested = false
+                thread.latestTurn?.state = MaidTurnState.interrupted.rawValue
             }
 
-        case "thread.session-stop-failed":
-            if let session = thread.session {
-                thread = thread.with(session: .some(session.with(stopRequested: .some(false))))
+        case .threadTurnInterruptFailed:
+            if let turn = thread.latestTurn, turn.turnID == payload.turnID, turn.completedAt == nil {
+                thread.latestTurn?.interruptRequested = false
             }
 
-        case "thread.session-status-set":
-            guard var session = event.payload.session else { break }
-            session = session.with(
-                lastError: session.status == "error" ? nil : .some(nil),
-                stopRequested: .some(false),
-                threadID: thread.id,
-                updatedAt: event.occurredAt
-            )
-            var turn = thread.latestTurn
+        case .threadSessionPrepareRequested:
+            var session = ensureSession(thread, event)
+            session.activeTurnID = nil
+            session.lastError = nil
+            session.status = MaidSessionStatus.starting.rawValue
+            session.updatedAt = occurredAt
+            thread.session = session
+
+        case .threadSessionStopRequested:
+            thread.session?.stopRequested = true
+
+        case .threadSessionStopFailed:
+            thread.session?.stopRequested = false
+
+        case .threadSessionStatusSet:
+            guard var session = payload.session else { break }
+            let failed = session.sessionStatus == .error
+            if !failed { session.lastError = nil }
+            session.stopRequested = false
+            session.threadID = thread.id
+            session.updatedAt = occurredAt
+
             if let active = session.activeTurnID, !active.isEmpty {
-                if turn?.turnID != active {
-                    turn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: event.occurredAt, startedAt: event.occurredAt, state: "running", stopReason: nil, turnID: active)
-                } else if let current = turn {
-                    turn = current.with(state: "running")
+                if thread.latestTurn?.turnID != active {
+                    thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: active)
+                } else {
+                    thread.latestTurn?.state = MaidTurnState.running.rawValue
                 }
-            } else if let current = turn, current.completedAt == nil {
-                let state: String
-                switch session.status {
-                case "error": state = "error"
-                case "interrupted", "stopped": state = "interrupted"
-                default: state = "completed"
+            } else if let turn = thread.latestTurn, turn.completedAt == nil {
+                let state: MaidTurnState = switch session.sessionStatus {
+                case .error: .error
+                case .interrupted, .stopped: .interrupted
+                default: .completed
                 }
-                turn = current.with(
-                    completedAt: .some(event.occurredAt),
-                    error: session.status == "error" ? .some(session.lastError) : nil,
-                    interruptRequested: .some(false),
-                    state: state,
-                    stopReason: .some(event.payload.stopReason)
-                )
+                thread.latestTurn?.completedAt = occurredAt
+                if failed { thread.latestTurn?.error = session.lastError }
+                thread.latestTurn?.interruptRequested = false
+                thread.latestTurn?.state = state.rawValue
+                thread.latestTurn?.stopReason = payload.stopReason
             }
-            thread = thread.with(
-                cwd: thread.cwd == nil ? session.cwd.map(Optional.some) : nil,
-                latestTurn: turn.map(Optional.some),
-                providerInstanceID: thread.providerInstanceID == nil ? Optional.some(session.providerInstanceID) : nil,
-                session: .some(session)
-            )
 
-        case "thread.item-upserted":
-            guard var item = event.payload.item else { break }
-            var timeline = thread.timeline
-            if let index = timeline.firstIndex(where: { $0.item?.id == item.id }), let old = timeline[index].item {
-                let payload = mergedItemPayload(old: old, incoming: item)
-                item = item.with(
-                    createdAt: old.createdAt,
-                    kind: nonEmpty(item.kind) ?? old.kind,
-                    payload: .some(payload),
-                    status: nonEmpty(item.status) ?? old.status,
-                    textDelta: .some(nil),
-                    title: nonEmpty(item.title).map(Optional.some) ?? .some(old.title),
-                    turnID: nonEmpty(item.turnID).map(Optional.some) ?? .some(old.turnID),
-                    updatedAt: event.occurredAt
-                )
-                timeline[index] = timeline[index].with(item: .some(item))
+            if thread.cwd == nil, let cwd = session.cwd { thread.cwd = cwd }
+            if thread.providerInstanceID == nil { thread.providerInstanceID = session.providerInstanceID }
+            thread.session = session
+
+        // normalizeEvent stamps createdAt server-side, so an incoming item
+        // always carries one; an existing entry keeps its original across merges.
+        case .threadItemUpserted:
+            guard var item = payload.item else { break }
+            if let index = thread.timeline.lastIndex(where: { $0.item?.id == item.id }),
+               let old = thread.timeline[index].item {
+                item.payload = mergedItemPayload(old: old, incoming: item)
+                item.createdAt = old.createdAt
+                if nonEmpty(item.kind) == nil { item.kind = old.kind }
+                if nonEmpty(item.status) == nil { item.status = old.status }
+                if nonEmpty(item.title) == nil { item.title = old.title }
+                if nonEmpty(item.turnID) == nil { item.turnID = old.turnID }
+                item.textDelta = nil
+                item.updatedAt = occurredAt
+                thread.timeline[index].item = item
             } else {
-                item = item.with(
-                    payload: .some(mergedItemPayload(old: nil, incoming: item)),
-                    status: nonEmpty(item.status) ?? "in_progress",
-                    textDelta: .some(nil),
-                    updatedAt: event.occurredAt
-                )
-                timeline.append(TimelineEntry(approval: nil, item: item, kind: "item", message: nil))
-            }
-            thread = thread.with(timeline: timeline)
-
-        case "thread.plan-updated":
-            if let plan = event.payload.plan {
-                thread = thread.with(plan: .some(plan.with(updatedAt: event.occurredAt)))
+                item.payload = mergedItemPayload(old: nil, incoming: item)
+                if nonEmpty(item.status) == nil { item.status = MaidItemStatus.inProgress.rawValue }
+                item.textDelta = nil
+                item.updatedAt = occurredAt
+                thread.timeline.append(TimelineEntry(approval: nil, item: item, kind: MaidTimelineEntryKind.item.rawValue, message: nil))
             }
 
-        case "thread.approval-opened", "thread.approval-resolved":
-            guard let update = event.payload.approval else { break }
-            var timeline = thread.timeline
-            let resolved = event.type == "thread.approval-resolved"
-            if let index = timeline.firstIndex(where: { $0.approval?.requestID == update.requestID }), let old = timeline[index].approval {
-                let approval = old.with(
-                    args: resolved ? nil : .some(update.args),
-                    decision: .some(resolved ? update.decision : nil),
-                    optionID: .some(resolved ? update.optionID : nil),
-                    options: resolved ? nil : .some(update.options),
-                    status: resolved ? "resolved" : "pending",
-                    turnID: update.turnID.map(Optional.some),
-                    updatedAt: event.occurredAt
-                )
-                timeline[index] = timeline[index].with(approval: .some(approval))
+        case .threadPlanUpdated:
+            if var plan = payload.plan {
+                plan.updatedAt = occurredAt
+                thread.plan = plan
+            }
+
+        case .threadApprovalOpened, .threadApprovalResolved:
+            guard let update = payload.approval else { break }
+            let resolved = event.eventType == .threadApprovalResolved
+            let status = resolved ? MaidApprovalStatus.resolved : .pending
+            if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == update.requestID }),
+               var approval = thread.timeline[index].approval {
+                // Reopening restores the request's arguments and options; a
+                // resolution leaves them as they were.
+                if !resolved {
+                    approval.args = update.args
+                    approval.options = update.options
+                }
+                approval.decision = resolved ? update.decision : nil
+                approval.optionID = resolved ? update.optionID : nil
+                approval.status = status.rawValue
+                if let turnID = update.turnID { approval.turnID = turnID }
+                approval.updatedAt = occurredAt
+                thread.timeline[index].approval = approval
             } else {
-                let approval = Approval(args: update.args, createdAt: event.occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: resolved ? "resolved" : "pending", turnID: update.turnID, updatedAt: event.occurredAt)
-                timeline.append(TimelineEntry(approval: approval, item: nil, kind: "approval", message: nil))
-            }
-            thread = thread.with(timeline: timeline)
-
-        case "thread.approval-response-requested":
-            guard let requestID = event.payload.requestID else { break }
-            var timeline = thread.timeline
-            if let index = timeline.firstIndex(where: { $0.approval?.requestID == requestID }), let old = timeline[index].approval {
-                timeline[index] = timeline[index].with(approval: .some(old.with(decision: .some(event.payload.decision), optionID: .some(event.payload.optionID), updatedAt: event.occurredAt)))
-                thread = thread.with(timeline: timeline)
+                let approval = Approval(args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt)
+                thread.timeline.append(TimelineEntry(approval: approval, item: nil, kind: MaidTimelineEntryKind.approval.rawValue, message: nil))
             }
 
-        case "thread.config-options-updated":
-            let session = ensureSession(thread, event).with(configOptions: .some(event.payload.configOptions ?? []), updatedAt: event.occurredAt)
-            if let model = event.payload.modelSelection {
-                thread = thread.with(modelSelection: .some(model))
+        case .threadApprovalResponseRequested:
+            guard let requestID = payload.requestID else { break }
+            if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == requestID }) {
+                thread.timeline[index].approval?.decision = payload.decision
+                thread.timeline[index].approval?.optionID = payload.optionID
+                thread.timeline[index].approval?.updatedAt = occurredAt
             }
-            thread = thread.with(session: .some(session))
 
-        case "thread.slash-commands-updated":
-            let session = ensureSession(thread, event).with(slashCommands: .some(event.payload.slashCommands ?? []), updatedAt: event.occurredAt)
-            thread = thread.with(session: .some(session))
+        case .threadConfigOptionsUpdated:
+            var session = ensureSession(thread, event)
+            session.configOptions = payload.configOptions ?? []
+            session.updatedAt = occurredAt
+            if let model = payload.modelSelection { thread.modelSelection = model }
+            thread.session = session
 
-        case "thread.token-usage-updated":
-            let session = ensureSession(thread, event).with(tokenUsage: .some(event.payload.tokenUsage), updatedAt: event.occurredAt)
-            thread = thread.with(session: .some(session))
+        case .threadSlashCommandsUpdated:
+            var session = ensureSession(thread, event)
+            session.slashCommands = payload.slashCommands ?? []
+            session.updatedAt = occurredAt
+            thread.session = session
 
+        case .threadTokenUsageUpdated:
+            var session = ensureSession(thread, event)
+            session.tokenUsage = payload.tokenUsage
+            session.updatedAt = occurredAt
+            thread.session = session
+
+        // Remaining cases change nothing client-visible; `nil` is an event type
+        // this build does not know.
         default:
             break
         }
-        return thread
     }
 
-    private static func applyProviderSelection(_ payload: EventPayload, to thread: Thread) -> Thread {
+    private static func applyProviderSelection(_ payload: EventPayload, to thread: inout Thread) {
         let providerID = nonEmpty(payload.providerInstanceID)
         let staleSession = providerID != nil
             && nonEmpty(thread.session?.providerInstanceID) != nil
@@ -216,24 +222,19 @@ enum ThreadEventReducer {
         let clearSession = payload.sessionCleared == true || staleSession
 
         if let providerID {
-            return thread.with(
-                modelSelection: .some(payload.modelSelection),
-                providerInstanceID: .some(providerID),
-                session: clearSession ? .some(nil) : nil
-            )
+            // A provider-only switch carries no modelSelection, which replaces
+            // (and so clears) the old instance's model choice.
+            thread.modelSelection = payload.modelSelection
+            thread.providerInstanceID = providerID
+        } else if let model = payload.modelSelection {
+            thread.modelSelection = model
         }
-        if let model = payload.modelSelection {
-            return thread.with(
-                modelSelection: .some(model),
-                session: clearSession ? .some(nil) : nil
-            )
-        }
-        return clearSession ? thread.with(session: .some(nil)) : thread
+        if clearSession { thread.session = nil }
     }
 
     private static func ensureSession(_ thread: Thread, _ event: Event) -> SessionBinding {
         if let session = thread.session { return session }
-        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, lastError: nil, provider: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: "starting", stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
+        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, lastError: nil, provider: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

@@ -304,8 +304,6 @@ final class DraftPromptModel {
             message: CommandMessage(
                 attachments: nil,
                 messageID: UUID().uuidString,
-                raw: nil,
-                role: "user",
                 text: text
             ),
             modelSelection: nil,
@@ -315,7 +313,7 @@ final class DraftPromptModel {
             threadID: threadID,
             title: nil,
             turnID: nil,
-            type: "thread.start",
+            type: MaidCommandType.threadStart.rawValue,
             value: nil
         )
         do {
@@ -392,13 +390,13 @@ final class DraftPromptModel {
 
     private func sendRememberedValues(providerID: String) async {
         guard let optionsSessionID else { return }
-        let modelOptions = configOptions.filter { $0.category == "model" }
+        let modelOptions = configOptions.filter { $0.optionCategory == .model }
         guard await sendRememberedValues(
             modelOptions,
             providerID: providerID,
             optionsSessionID: optionsSessionID
         ) else { return }
-        let dependentOptions = configOptions.filter { $0.category != "model" }
+        let dependentOptions = configOptions.filter { $0.optionCategory != .model }
         _ = await sendRememberedValues(
             dependentOptions,
             providerID: providerID,
@@ -521,7 +519,7 @@ final class DraftPromptModel {
     }
 
     private func configValueIsValid(_ value: JSONAny, for option: ConfigOption) -> Bool {
-        if option.type == "boolean" {
+        if option.optionType == .boolean {
             return value.value is Bool
         }
         guard let string = value.value as? String else { return false }

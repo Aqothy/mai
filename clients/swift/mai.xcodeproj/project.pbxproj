@@ -18,6 +18,7 @@
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* mai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mai.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F39388BD30155F19009B8EEC /* mai.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = mai.xctestplan; sourceTree = "<group>"; };
 		F3C108CF300EB34000EF5F93 /* maiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = maiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -64,6 +65,7 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				F39388BD30155F19009B8EEC /* mai.xctestplan */,
 				000000000000000000000010 /* mai */,
 				F3C108D0300EB34000EF5F93 /* maiTests */,
 				000000000000000000000020 /* Products */,
@@ -435,6 +437,7 @@
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
@@ -461,6 +464,7 @@
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;

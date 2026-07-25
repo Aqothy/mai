@@ -1,0 +1,221 @@
+{
+  "vocabularies": [
+    {
+      "name": "EventType",
+      "description": "Type discriminator of a thread event delivered on orchestration.subscribeThread.",
+      "values": [
+        "thread.created",
+        "thread.imported",
+        "thread.meta-updated",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+        "thread.turn-interrupt-requested",
+        "thread.turn-interrupt-confirmed",
+        "thread.turn-interrupt-failed",
+        "thread.approval-response-requested",
+        "thread.session-prepare-requested",
+        "thread.session-stop-requested",
+        "thread.session-stop-failed",
+        "thread.config-option-set-requested",
+        "thread.session-status-set",
+        "thread.item-upserted",
+        "thread.plan-updated",
+        "thread.approval-opened",
+        "thread.approval-resolved",
+        "thread.config-options-updated",
+        "thread.slash-commands-updated",
+        "thread.token-usage-updated",
+        "thread.history-replay-completed"
+      ]
+    },
+    {
+      "name": "CommandType",
+      "description": "Type discriminator of a client command sent to orchestration.dispatchCommand.",
+      "values": [
+        "thread.create",
+        "thread.start",
+        "thread.meta.update",
+        "thread.turn.start",
+        "thread.turn.retry",
+        "thread.turn.interrupt",
+        "thread.approval.respond",
+        "thread.session.prepare",
+        "thread.session.stop",
+        "thread.config-option.set"
+      ]
+    },
+    {
+      "name": "StreamItemKind",
+      "description": "Payload discriminator of a subscription snapshot or update.",
+      "values": [
+        "snapshot",
+        "event",
+        "thread-upserted"
+      ]
+    },
+    {
+      "name": "ActorKind",
+      "description": "Origin of a thread event.",
+      "values": [
+        "client",
+        "server",
+        "provider"
+      ]
+    },
+    {
+      "name": "TimelineEntryKind",
+      "description": "Which payload of a timeline entry's tagged union is populated.",
+      "values": [
+        "message",
+        "item",
+        "approval"
+      ]
+    },
+    {
+      "name": "MessageRole",
+      "description": "Author of a timeline message.",
+      "values": [
+        "user",
+        "assistant"
+      ]
+    },
+    {
+      "name": "TurnState",
+      "description": "Lifecycle state of a thread's latest turn.",
+      "values": [
+        "running",
+        "interrupted",
+        "completed",
+        "error"
+      ]
+    },
+    {
+      "name": "SessionStatus",
+      "description": "Status of a thread's provider session binding.",
+      "values": [
+        "starting",
+        "running",
+        "ready",
+        "interrupted",
+        "stopped",
+        "error"
+      ]
+    },
+    {
+      "name": "ApprovalStatus",
+      "description": "Whether an approval request is still awaiting a decision.",
+      "values": [
+        "pending",
+        "resolved"
+      ]
+    },
+    {
+      "name": "ApprovalDecision",
+      "description": "Client decision on an approval request.",
+      "values": [
+        "accept",
+        "acceptForSession",
+        "decline",
+        "cancel"
+      ]
+    },
+    {
+      "name": "RequestType",
+      "description": "What an approval request is asking permission for.",
+      "values": [
+        "command_execution_approval",
+        "file_read_approval",
+        "file_change_approval",
+        "dynamic_tool_call"
+      ]
+    },
+    {
+      "name": "ItemKind",
+      "description": "Kind of a non-message timeline item.",
+      "values": [
+        "user_message",
+        "assistant_message",
+        "reasoning",
+        "command_execution",
+        "file_change",
+        "mcp_tool_call",
+        "tool_call",
+        "warning",
+        "error"
+      ]
+    },
+    {
+      "name": "ItemStatus",
+      "description": "Lifecycle status of a timeline item.",
+      "values": [
+        "in_progress",
+        "completed",
+        "failed",
+        "interrupted",
+        "declined"
+      ]
+    },
+    {
+      "name": "ConfigOptionType",
+      "description": "Control a session config option renders as.",
+      "values": [
+        "select",
+        "boolean"
+      ]
+    },
+    {
+      "name": "ConfigOptionCategory",
+      "description": "Advisory grouping hint for a session config option; unknown values must be tolerated.",
+      "values": [
+        "model",
+        "mode",
+        "model_config",
+        "thought_level",
+        "other"
+      ]
+    },
+    {
+      "name": "PlanEntryStatus",
+      "description": "Status of an execution-plan checklist entry.",
+      "values": [
+        "pending",
+        "in_progress",
+        "completed"
+      ]
+    },
+    {
+      "name": "PlanEntryPriority",
+      "description": "Priority of an execution-plan checklist entry.",
+      "values": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    {
+      "name": "InstanceStatus",
+      "description": "Whether a provider instance's process is alive.",
+      "values": [
+        "initialized",
+        "exited"
+      ]
+    },
+    {
+      "name": "AuthStatus",
+      "description": "Provider authentication state. Unknown means the agent advertises auth methods but exposes no probe.",
+      "values": [
+        "unknown",
+        "authenticated",
+        "unauthenticated"
+      ]
+    },
+    {
+      "name": "ModelSwitchSupport",
+      "description": "Whether a provider can change the active model for a thread.",
+      "values": [
+        "unsupported",
+        "in-session"
+      ]
+    }
+  ]
+}

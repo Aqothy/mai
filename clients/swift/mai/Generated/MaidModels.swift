@@ -7,10 +7,10 @@ import Foundation
 
 // MARK: - ACPRegistryAgent
 public struct ACPRegistryAgent: Codable {
-    public let args: [String]?
-    public let description, icon: String?
-    public let id, instanceID, name, package: String
-    public let version: String?
+    public var args: [String]?
+    public var description, icon: String?
+    public var id, instanceID, name, package: String
+    public var version: String?
 
     public enum CodingKeys: String, CodingKey {
         case args, description, icon, id
@@ -81,8 +81,8 @@ public extension ACPRegistryAgent {
 
 // MARK: - ACPRegistryStartParams
 public struct ACPRegistryStartParams: Codable {
-    public let registryID: String
-    public let restart: Bool?
+    public var registryID: String
+    public var restart: Bool?
 
     public enum CodingKeys: String, CodingKey {
         case registryID = "registryId"
@@ -134,13 +134,13 @@ public extension ACPRegistryStartParams {
 
 // MARK: - Approval
 public struct Approval: Codable {
-    public let args: JSONAny?
-    public let createdAt: Date
-    public let decision, optionID: String?
-    public let options: [ApprovalOption]?
-    public let requestID, status: String
-    public let turnID: String?
-    public let updatedAt: Date
+    public var args: JSONAny?
+    public var createdAt: Date
+    public var decision, optionID: String?
+    public var options: [ApprovalOption]?
+    public var requestID, status: String
+    public var turnID: String?
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case args, createdAt, decision
@@ -218,10 +218,10 @@ public extension Approval {
 
 // MARK: - ApprovalOption
 public struct ApprovalOption: Codable {
-    public let kind: String?
-    public let metadata: [String: JSONAny]?
-    public let name, optionID: String
-    public let raw: JSONAny?
+    public var kind: String?
+    public var metadata: [String: JSONAny]?
+    public var name, optionID: String
+    public var raw: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
         case kind, metadata, name
@@ -283,12 +283,12 @@ public extension ApprovalOption {
 
 // MARK: - ApprovalEvent
 public struct ApprovalEvent: Codable {
-    public let args: JSONAny?
-    public let cancelled: Bool?
-    public let decision, detail, optionID: String?
-    public let options: [ApprovalOption]?
-    public let requestID: String
-    public let requestType, turnID: String?
+    public var args: JSONAny?
+    public var cancelled: Bool?
+    public var decision, detail, optionID: String?
+    public var options: [ApprovalOption]?
+    public var requestID: String
+    public var requestType, turnID: String?
 
     public enum CodingKeys: String, CodingKey {
         case args, cancelled, decision, detail
@@ -365,12 +365,12 @@ public extension ApprovalEvent {
 
 // MARK: - Attachment
 public struct Attachment: Codable {
-    public let data: String?
-    public let kind: String
-    public let metadata: [String: JSONAny]?
-    public let mimeType, name: String?
-    public let raw: JSONAny?
-    public let uri: String?
+    public var data: String?
+    public var kind: String
+    public var metadata: [String: JSONAny]?
+    public var mimeType, name: String?
+    public var raw: JSONAny?
+    public var uri: String?
 
     public init(data: String?, kind: String, metadata: [String: JSONAny]?, mimeType: String?, name: String?, raw: JSONAny?, uri: String?) {
         self.data = data
@@ -432,16 +432,16 @@ public extension Attachment {
 
 // MARK: - Command
 public struct Command: Codable {
-    public let commandID: String?
-    public let configSelections: [ConfigOptionSelection]?
-    public let createdAt: Date?
-    public let cwd, decision: String?
-    public let message: CommandMessage?
-    public let modelSelection: ModelSelection?
-    public let optionID, providerInstanceID, requestID, threadID: String?
-    public let title, turnID: String?
-    public let type: String
-    public let value: JSONAny?
+    public var commandID: String?
+    public var configSelections: [ConfigOptionSelection]?
+    public var createdAt: Date?
+    public var cwd, decision: String?
+    public var message: CommandMessage?
+    public var modelSelection: ModelSelection?
+    public var optionID, providerInstanceID, requestID, threadID: String?
+    public var title, turnID: String?
+    public var type: String
+    public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
         case commandID = "commandId"
@@ -539,9 +539,9 @@ public extension Command {
 
 // MARK: - ConfigOptionSelection
 public struct ConfigOptionSelection: Codable {
-    public let category: String?
-    public let optionID: String
-    public let value: JSONAny
+    public var category: String?
+    public var optionID: String
+    public var value: JSONAny
 
     public enum CodingKeys: String, CodingKey {
         case category
@@ -597,23 +597,19 @@ public extension ConfigOptionSelection {
 
 // MARK: - CommandMessage
 public struct CommandMessage: Codable {
-    public let attachments: [Attachment]?
-    public let messageID: String?
-    public let raw: JSONAny?
-    public let role: String?
-    public let text: String
+    public var attachments: [Attachment]?
+    public var messageID: String?
+    public var text: String
 
     public enum CodingKeys: String, CodingKey {
         case attachments
         case messageID = "messageId"
-        case raw, role, text
+        case text
     }
 
-    public init(attachments: [Attachment]?, messageID: String?, raw: JSONAny?, role: String?, text: String) {
+    public init(attachments: [Attachment]?, messageID: String?, text: String) {
         self.attachments = attachments
         self.messageID = messageID
-        self.raw = raw
-        self.role = role
         self.text = text
     }
 }
@@ -639,15 +635,11 @@ public extension CommandMessage {
     func with(
         attachments: [Attachment]?? = nil,
         messageID: String?? = nil,
-        raw: JSONAny?? = nil,
-        role: String?? = nil,
         text: String? = nil
     ) -> CommandMessage {
         return CommandMessage(
             attachments: attachments ?? self.attachments,
             messageID: messageID ?? self.messageID,
-            raw: raw ?? self.raw,
-            role: role ?? self.role,
             text: text ?? self.text
         )
     }
@@ -663,8 +655,8 @@ public extension CommandMessage {
 
 // MARK: - ModelSelection
 public struct ModelSelection: Codable {
-    public let model: String?
-    public let options: JSONAny?
+    public var model: String?
+    public var options: JSONAny?
 
     public init(model: String?, options: JSONAny?) {
         self.model = model
@@ -711,8 +703,8 @@ public extension ModelSelection {
 
 // MARK: - ConfigChoice
 public struct ConfigChoice: Codable {
-    public let label: String?
-    public let value: String
+    public var label: String?
+    public var value: String
 
     public init(label: String?, value: String) {
         self.label = label
@@ -759,13 +751,13 @@ public extension ConfigChoice {
 
 // MARK: - ConfigOption
 public struct ConfigOption: Codable {
-    public let category: String?
-    public let choices: [ConfigChoice]?
-    public let currentValue: JSONAny?
-    public let description: String?
-    public let id: String
-    public let label: String?
-    public let type: String
+    public var category: String?
+    public var choices: [ConfigChoice]?
+    public var currentValue: JSONAny?
+    public var description: String?
+    public var id: String
+    public var label: String?
+    public var type: String
 
     public init(category: String?, choices: [ConfigChoice]?, currentValue: JSONAny?, description: String?, id: String, label: String?, type: String) {
         self.category = category
@@ -827,7 +819,7 @@ public extension ConfigOption {
 
 // MARK: - DispatchResult
 public struct DispatchResult: Codable {
-    public let sequence: Int
+    public var sequence: Int
 
     public init(sequence: Int) {
         self.sequence = sequence
@@ -911,13 +903,13 @@ public extension EmptyParams {
 
 // MARK: - Event
 public struct Event: Codable {
-    public let actor, commandID: String?
-    public let eventID: String
-    public let metadata: EventMetadata?
-    public let occurredAt: Date
-    public let payload: EventPayload
-    public let sequence: Int
-    public let type: String
+    public var actor, commandID: String?
+    public var eventID: String
+    public var metadata: EventMetadata?
+    public var occurredAt: Date
+    public var payload: EventPayload
+    public var sequence: Int
+    public var type: String
 
     public enum CodingKeys: String, CodingKey {
         case actor
@@ -989,7 +981,7 @@ public extension Event {
 
 // MARK: - EventMetadata
 public struct EventMetadata: Codable {
-    public let requestID: String?
+    public var requestID: String?
 
     public enum CodingKeys: String, CodingKey {
         case requestID = "requestId"
@@ -1037,25 +1029,25 @@ public extension EventMetadata {
 
 // MARK: - EventPayload
 public struct EventPayload: Codable {
-    public let approval: ApprovalEvent?
-    public let attachments: [Attachment]?
-    public let configOptions: [ConfigOption]?
-    public let createdAt: Date?
-    public let cwd, decision: String?
-    public let item: Item?
-    public let messageID: String?
-    public let modelSelection: ModelSelection?
-    public let optionID: String?
-    public let plan: Plan?
-    public let providerInstanceID, requestID, role: String?
-    public let session: SessionBinding?
-    public let sessionCleared: Bool?
-    public let slashCommands: [SlashCommand]?
-    public let stopReason, text, threadID, title: String?
-    public let tokenUsage: TokenUsage?
-    public let turnID: String?
-    public let updatedAt: Date?
-    public let value: JSONAny?
+    public var approval: ApprovalEvent?
+    public var attachments: [Attachment]?
+    public var configOptions: [ConfigOption]?
+    public var createdAt: Date?
+    public var cwd, decision: String?
+    public var item: Item?
+    public var messageID: String?
+    public var modelSelection: ModelSelection?
+    public var optionID: String?
+    public var plan: Plan?
+    public var providerInstanceID, requestID, role: String?
+    public var session: SessionBinding?
+    public var sessionCleared: Bool?
+    public var slashCommands: [SlashCommand]?
+    public var stopReason, text, threadID, title: String?
+    public var tokenUsage: TokenUsage?
+    public var turnID: String?
+    public var updatedAt: Date?
+    public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
         case approval, attachments, configOptions, createdAt, cwd, decision, item
@@ -1186,12 +1178,12 @@ public extension EventPayload {
 
 // MARK: - Item
 public struct Item: Codable {
-    public let createdAt: Date
-    public let id, kind: String
-    public let payload: JSONAny?
-    public let status: String
-    public let textDelta, title, turnID: String?
-    public let updatedAt: Date
+    public var createdAt: Date
+    public var id, kind: String
+    public var payload: JSONAny?
+    public var status: String
+    public var textDelta, title, turnID: String?
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case createdAt, id, kind, payload, status, textDelta, title
@@ -1265,8 +1257,8 @@ public extension Item {
 
 // MARK: - Plan
 public struct Plan: Codable {
-    public let entries: [PlanEntry]
-    public let updatedAt: Date
+    public var entries: [PlanEntry]
+    public var updatedAt: Date
 
     public init(entries: [PlanEntry], updatedAt: Date) {
         self.entries = entries
@@ -1313,8 +1305,8 @@ public extension Plan {
 
 // MARK: - PlanEntry
 public struct PlanEntry: Codable {
-    public let content: String
-    public let priority, status: String?
+    public var content: String
+    public var priority, status: String?
 
     public init(content: String, priority: String?, status: String?) {
         self.content = content
@@ -1364,17 +1356,17 @@ public extension PlanEntry {
 
 // MARK: - SessionBinding
 public struct SessionBinding: Codable {
-    public let activeTurnID: String?
-    public let configOptions: [ConfigOption]?
-    public let cwd, lastError, provider: String?
-    public let providerInstanceID: String
-    public let providerName: String?
-    public let slashCommands: [SlashCommand]?
-    public let status: String
-    public let stopRequested: Bool?
-    public let threadID: String
-    public let tokenUsage: TokenUsage?
-    public let updatedAt: Date
+    public var activeTurnID: String?
+    public var configOptions: [ConfigOption]?
+    public var cwd, lastError, provider: String?
+    public var providerInstanceID: String
+    public var providerName: String?
+    public var slashCommands: [SlashCommand]?
+    public var status: String
+    public var stopRequested: Bool?
+    public var threadID: String
+    public var tokenUsage: TokenUsage?
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case activeTurnID = "activeTurnId"
@@ -1463,9 +1455,9 @@ public extension SessionBinding {
 
 // MARK: - SlashCommand
 public struct SlashCommand: Codable {
-    public let description: String?
-    public let hasInput: Bool?
-    public let name: String
+    public var description: String?
+    public var hasInput: Bool?
+    public var name: String
 
     public init(description: String?, hasInput: Bool?, name: String) {
         self.description = description
@@ -1515,10 +1507,10 @@ public extension SlashCommand {
 
 // MARK: - TokenUsage
 public struct TokenUsage: Codable {
-    public let cost: Double?
-    public let currency: String?
-    public let maxTokens: Int?
-    public let usedTokens: Int
+    public var cost: Double?
+    public var currency: String?
+    public var maxTokens: Int?
+    public var usedTokens: Int
 
     public init(cost: Double?, currency: String?, maxTokens: Int?, usedTokens: Int) {
         self.cost = cost
@@ -1571,16 +1563,16 @@ public extension TokenUsage {
 
 // MARK: - InstanceInfo
 public struct InstanceInfo: Codable {
-    public let auth: Auth
-    public let capabilities: Capabilities
-    public let driver: String
-    public let initializedAt: Date
-    public let instanceID: String
-    public let metadata: [String: JSONAny]?
-    public let name: String
-    public let pid: Int?
-    public let startedAt: Date
-    public let status: String
+    public var auth: Auth
+    public var capabilities: Capabilities
+    public var driver: String
+    public var initializedAt: Date
+    public var instanceID: String
+    public var metadata: [String: JSONAny]?
+    public var name: String
+    public var pid: Int?
+    public var startedAt: Date
+    public var status: String
 
     public enum CodingKeys: String, CodingKey {
         case auth, capabilities, driver, initializedAt
@@ -1657,8 +1649,8 @@ public extension InstanceInfo {
 
 // MARK: - Auth
 public struct Auth: Codable {
-    public let methods: [AuthMethod]?
-    public let status: String?
+    public var methods: [AuthMethod]?
+    public var status: String?
 
     public init(methods: [AuthMethod]?, status: String?) {
         self.methods = methods
@@ -1705,9 +1697,9 @@ public extension Auth {
 
 // MARK: - AuthMethod
 public struct AuthMethod: Codable {
-    public let description: String?
-    public let id: String
-    public let name: String?
+    public var description: String?
+    public var id: String
+    public var name: String?
 
     public init(description: String?, id: String, name: String?) {
         self.description = description
@@ -1757,11 +1749,11 @@ public extension AuthMethod {
 
 // MARK: - Capabilities
 public struct Capabilities: Codable {
-    public let auth, configOptions, loadReplay, logout: Bool?
-    public let mcp: MCPCapabilities?
-    public let modelSwitch: String?
-    public let promptContent: PromptContentCapabilities?
-    public let resume: Bool?
+    public var auth, configOptions, loadReplay, logout: Bool?
+    public var mcp: MCPCapabilities?
+    public var modelSwitch: String?
+    public var promptContent: PromptContentCapabilities?
+    public var resume: Bool?
 
     public init(auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?) {
         self.auth = auth
@@ -1826,7 +1818,7 @@ public extension Capabilities {
 
 // MARK: - MCPCapabilities
 public struct MCPCapabilities: Codable {
-    public let http, sse: Bool?
+    public var http, sse: Bool?
 
     public init(http: Bool?, sse: Bool?) {
         self.http = http
@@ -1873,7 +1865,7 @@ public extension MCPCapabilities {
 
 // MARK: - PromptContentCapabilities
 public struct PromptContentCapabilities: Codable {
-    public let audio, embeddedContext, image: Bool?
+    public var audio, embeddedContext, image: Bool?
 
     public init(audio: Bool?, embeddedContext: Bool?, image: Bool?) {
         self.audio = audio
@@ -1923,11 +1915,11 @@ public extension PromptContentCapabilities {
 
 // MARK: - Message
 public struct Message: Codable {
-    public let attachments: [Attachment]?
-    public let createdAt: Date
-    public let id, role, text: String
-    public let turnID: String?
-    public let updatedAt: Date
+    public var attachments: [Attachment]?
+    public var createdAt: Date
+    public var id, role, text: String
+    public var turnID: String?
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case attachments, createdAt, id, role, text
@@ -1995,7 +1987,7 @@ public extension Message {
 
 // MARK: - ProviderAuthenticateParams
 public struct ProviderAuthenticateParams: Codable {
-    public let instanceID, methodID: String
+    public var instanceID, methodID: String
 
     public enum CodingKeys: String, CodingKey {
         case instanceID = "instanceId"
@@ -2047,8 +2039,8 @@ public extension ProviderAuthenticateParams {
 
 // MARK: - ProviderImportSessionParams
 public struct ProviderImportSessionParams: Codable {
-    public let instanceID: String
-    public let session: SessionSummary
+    public var instanceID: String
+    public var session: SessionSummary
 
     public enum CodingKeys: String, CodingKey {
         case instanceID = "instanceId"
@@ -2100,9 +2092,9 @@ public extension ProviderImportSessionParams {
 
 // MARK: - SessionSummary
 public struct SessionSummary: Codable {
-    public let cwd: String?
-    public let sessionID: String
-    public let title, updatedAt: String?
+    public var cwd: String?
+    public var sessionID: String
+    public var title, updatedAt: String?
 
     public enum CodingKeys: String, CodingKey {
         case cwd
@@ -2161,8 +2153,8 @@ public extension SessionSummary {
 
 // MARK: - ProviderImportSessionResult
 public struct ProviderImportSessionResult: Codable {
-    public let imported: Bool
-    public let threadID: String
+    public var imported: Bool
+    public var threadID: String
 
     public enum CodingKeys: String, CodingKey {
         case imported
@@ -2214,7 +2206,7 @@ public extension ProviderImportSessionResult {
 
 // MARK: - ProviderInstanceParams
 public struct ProviderInstanceParams: Codable {
-    public let instanceID: String
+    public var instanceID: String
 
     public enum CodingKeys: String, CodingKey {
         case instanceID = "instanceId"
@@ -2262,8 +2254,8 @@ public extension ProviderInstanceParams {
 
 // MARK: - ProviderListSessionsParams
 public struct ProviderListSessionsParams: Codable {
-    public let cwd: String?
-    public let instanceID: String
+    public var cwd: String?
+    public var instanceID: String
 
     public enum CodingKeys: String, CodingKey {
         case cwd
@@ -2315,7 +2307,7 @@ public extension ProviderListSessionsParams {
 
 // MARK: - ProviderOptionsGetParams
 public struct ProviderOptionsGetParams: Codable {
-    public let cwd, providerInstanceID: String
+    public var cwd, providerInstanceID: String
 
     public enum CodingKeys: String, CodingKey {
         case cwd
@@ -2367,7 +2359,7 @@ public extension ProviderOptionsGetParams {
 
 // MARK: - ProviderOptionsInvalidated
 public struct ProviderOptionsInvalidated: Codable {
-    public let optionsSessionID: String
+    public var optionsSessionID: String
 
     public enum CodingKeys: String, CodingKey {
         case optionsSessionID = "optionsSessionId"
@@ -2415,8 +2407,8 @@ public extension ProviderOptionsInvalidated {
 
 // MARK: - ProviderOptionsResult
 public struct ProviderOptionsResult: Codable {
-    public let configOptions: [ConfigOption]
-    public let optionsSessionID: String
+    public var configOptions: [ConfigOption]
+    public var optionsSessionID: String
 
     public enum CodingKeys: String, CodingKey {
         case configOptions
@@ -2468,8 +2460,8 @@ public extension ProviderOptionsResult {
 
 // MARK: - ProviderOptionsSetParams
 public struct ProviderOptionsSetParams: Codable {
-    public let optionID, optionsSessionID: String
-    public let value: JSONAny
+    public var optionID, optionsSessionID: String
+    public var value: JSONAny
 
     public enum CodingKeys: String, CodingKey {
         case optionID = "optionId"
@@ -2525,7 +2517,7 @@ public extension ProviderOptionsSetParams {
 
 // MARK: - ProviderSessionParams
 public struct ProviderSessionParams: Codable {
-    public let instanceID, sessionID: String
+    public var instanceID, sessionID: String
 
     public enum CodingKeys: String, CodingKey {
         case instanceID = "instanceId"
@@ -2577,9 +2569,9 @@ public extension ProviderSessionParams {
 
 // MARK: - ProviderStartParams
 public struct ProviderStartParams: Codable {
-    public let config: JSONAny?
-    public let driver, instanceID, name: String?
-    public let restart: Bool?
+    public var config: JSONAny?
+    public var driver, instanceID, name: String?
+    public var restart: Bool?
 
     public enum CodingKeys: String, CodingKey {
         case config, driver
@@ -2641,7 +2633,7 @@ public extension ProviderStartParams {
 
 // MARK: - SubscribeThreadInput
 public struct SubscribeThreadInput: Codable {
-    public let threadID: String
+    public var threadID: String
 
     public enum CodingKeys: String, CodingKey {
         case threadID = "threadId"
@@ -2689,17 +2681,17 @@ public extension SubscribeThreadInput {
 
 // MARK: - Thread
 public struct Thread: Codable {
-    public let createdAt: Date
-    public let cwd: String?
-    public let id: String
-    public let latestTurn: Turn?
-    public let modelSelection: ModelSelection?
-    public let plan: Plan?
-    public let providerInstanceID: String?
-    public let session: SessionBinding?
-    public let timeline: [TimelineEntry]
-    public let title: String
-    public let updatedAt: Date
+    public var createdAt: Date
+    public var cwd: String?
+    public var id: String
+    public var latestTurn: Turn?
+    public var modelSelection: ModelSelection?
+    public var plan: Plan?
+    public var providerInstanceID: String?
+    public var session: SessionBinding?
+    public var timeline: [TimelineEntry]
+    public var title: String
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case createdAt, cwd, id, latestTurn, modelSelection, plan
@@ -2779,14 +2771,14 @@ public extension Thread {
 
 // MARK: - Turn
 public struct Turn: Codable {
-    public let completedAt: Date?
-    public let error: String?
-    public let interruptRequested: Bool?
-    public let requestedAt: Date
-    public let startedAt: Date?
-    public let state: String
-    public let stopReason: String?
-    public let turnID: String
+    public var completedAt: Date?
+    public var error: String?
+    public var interruptRequested: Bool?
+    public var requestedAt: Date
+    public var startedAt: Date?
+    public var state: String
+    public var stopReason: String?
+    public var turnID: String
 
     public enum CodingKeys: String, CodingKey {
         case completedAt, error, interruptRequested, requestedAt, startedAt, state, stopReason
@@ -2856,10 +2848,10 @@ public extension Turn {
 
 // MARK: - TimelineEntry
 public struct TimelineEntry: Codable {
-    public let approval: Approval?
-    public let item: Item?
-    public let kind: String
-    public let message: Message?
+    public var approval: Approval?
+    public var item: Item?
+    public var kind: String
+    public var message: Message?
 
     public init(approval: Approval?, item: Item?, kind: String, message: Message?) {
         self.approval = approval
@@ -2912,8 +2904,8 @@ public extension TimelineEntry {
 
 // MARK: - ThreadDetailSnapshot
 public struct ThreadDetailSnapshot: Codable {
-    public let snapshotSequence: Int
-    public let thread: Thread
+    public var snapshotSequence: Int
+    public var thread: Thread
 
     public init(snapshotSequence: Int, thread: Thread) {
         self.snapshotSequence = snapshotSequence
@@ -2960,16 +2952,16 @@ public extension ThreadDetailSnapshot {
 
 // MARK: - ThreadListEntry
 public struct ThreadListEntry: Codable {
-    public let createdAt: Date
-    public let cwd: String?
-    public let hasPendingApprovals: Bool
-    public let id: String
-    public let latestTurn: Turn?
-    public let modelSelection: ModelSelection?
-    public let providerInstanceID: String?
-    public let session: SessionBinding?
-    public let title: String
-    public let updatedAt: Date
+    public var createdAt: Date
+    public var cwd: String?
+    public var hasPendingApprovals: Bool
+    public var id: String
+    public var latestTurn: Turn?
+    public var modelSelection: ModelSelection?
+    public var providerInstanceID: String?
+    public var session: SessionBinding?
+    public var title: String
+    public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
         case createdAt, cwd, hasPendingApprovals, id, latestTurn, modelSelection
@@ -3046,9 +3038,9 @@ public extension ThreadListEntry {
 
 // MARK: - ThreadListSnapshot
 public struct ThreadListSnapshot: Codable {
-    public let snapshotSequence: Int
-    public let threads: [ThreadListEntry]
-    public let updatedAt: Date
+    public var snapshotSequence: Int
+    public var threads: [ThreadListEntry]
+    public var updatedAt: Date
 
     public init(snapshotSequence: Int, threads: [ThreadListEntry], updatedAt: Date) {
         self.snapshotSequence = snapshotSequence
@@ -3098,10 +3090,10 @@ public extension ThreadListSnapshot {
 
 // MARK: - ThreadListStreamItem
 public struct ThreadListStreamItem: Codable {
-    public let kind: String
-    public let sequence: Int?
-    public let snapshot: ThreadListSnapshot?
-    public let thread: ThreadListEntry?
+    public var kind: String
+    public var sequence: Int?
+    public var snapshot: ThreadListSnapshot?
+    public var thread: ThreadListEntry?
 
     public init(kind: String, sequence: Int?, snapshot: ThreadListSnapshot?, thread: ThreadListEntry?) {
         self.kind = kind
@@ -3154,9 +3146,9 @@ public extension ThreadListStreamItem {
 
 // MARK: - ThreadStreamItem
 public struct ThreadStreamItem: Codable {
-    public let event: Event?
-    public let kind: String
-    public let snapshot: ThreadDetailSnapshot?
+    public var event: Event?
+    public var kind: String
+    public var snapshot: ThreadDetailSnapshot?
 
     public init(event: Event?, kind: String, snapshot: ThreadDetailSnapshot?) {
         self.event = event

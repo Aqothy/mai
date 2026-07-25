@@ -20,7 +20,7 @@ struct ChatView: View {
                     .foregroundStyle(.primary)
                     .accessibilityHeading(.h1)
 
-                if thread.latestTurn?.state == "error" {
+                if thread.latestTurn?.turnState == .error {
                     FailedTurnView(store: store, thread: thread)
                         .id(thread.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

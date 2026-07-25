@@ -1,26 +1,31 @@
 package orchestration
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
+// CommandType is an alias, not a defined type: Command.Type stays a plain string
+// so an unknown type reaches the dispatch switch's default and is rejected
+// there rather than failing to decode. The alias marks the constants below as
+// one closed vocabulary for api/wire's coverage test.
+type CommandType = string
+
 // Commands are CLIENT intents: they are validated by a decider and can be
 // rejected or retried (idempotently, by CommandID). Provider/server
 // observations are not commands — they enter the log through Engine.AppendEvent.
 const (
-	CommandThreadCreate          = "thread.create"
-	CommandThreadStart           = "thread.start"
-	CommandThreadMetaUpdate      = "thread.meta.update"
-	CommandThreadTurnStart       = "thread.turn.start"
-	CommandThreadTurnRetry       = "thread.turn.retry"
-	CommandThreadTurnInterrupt   = "thread.turn.interrupt"
-	CommandThreadApprovalRespond = "thread.approval.respond"
-	CommandThreadSessionPrepare  = "thread.session.prepare"
-	CommandThreadSessionStop     = "thread.session.stop"
-	CommandThreadConfigOptionSet = "thread.config-option.set"
+	CommandThreadCreate          CommandType = "thread.create"
+	CommandThreadStart           CommandType = "thread.start"
+	CommandThreadMetaUpdate      CommandType = "thread.meta.update"
+	CommandThreadTurnStart       CommandType = "thread.turn.start"
+	CommandThreadTurnRetry       CommandType = "thread.turn.retry"
+	CommandThreadTurnInterrupt   CommandType = "thread.turn.interrupt"
+	CommandThreadApprovalRespond CommandType = "thread.approval.respond"
+	CommandThreadSessionPrepare  CommandType = "thread.session.prepare"
+	CommandThreadSessionStop     CommandType = "thread.session.stop"
+	CommandThreadConfigOptionSet CommandType = "thread.config-option.set"
 )
 
 type Command struct {
@@ -41,12 +46,13 @@ type Command struct {
 	CreatedAt          time.Time                        `json:"createdAt,omitzero"`
 }
 
+// CommandMessage is the prompt a client sends with thread.start/thread.turn.start.
+// It carries no role: a client-authored message is always a user message, and
+// the engine stamps MessageRoleUser itself.
 type CommandMessage struct {
 	MessageID   string                `json:"messageId,omitempty"`
-	Role        MessageRole           `json:"role,omitempty"`
 	Text        string                `json:"text"`
 	Attachments []provider.Attachment `json:"attachments,omitempty"`
-	Raw         json.RawMessage       `json:"raw,omitempty"`
 }
 
 // DispatchResult is the receipt returned for a dispatched command: the

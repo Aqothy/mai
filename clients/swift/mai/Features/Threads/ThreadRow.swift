@@ -15,19 +15,19 @@ struct ThreadRow: View {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.orange)
                     .accessibilityLabel("Approval required")
-            } else if thread.latestTurn?.state == "running" {
+            } else if thread.latestTurn?.turnState == .running {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Agent working")
-            } else if thread.latestTurn?.state == "error" || thread.session?.status == "error" {
+            } else if thread.latestTurn?.turnState == .error || thread.session?.sessionStatus == .error {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.red)
                     .accessibilityLabel("Failed")
-            } else if thread.latestTurn?.state == "interrupted" {
+            } else if thread.latestTurn?.turnState == .interrupted {
                 Image(systemName: "stop.circle.fill")
                     .foregroundStyle(.orange)
                     .accessibilityLabel("Interrupted")
-            } else if thread.latestTurn?.state == "completed" {
+            } else if thread.latestTurn?.turnState == .completed {
                 Image(systemName: "circle.fill")
                     .foregroundStyle(.green)
                     .accessibilityLabel("Completed")

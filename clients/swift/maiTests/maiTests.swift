@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import mai
 
-@MainActor
 struct ThreadStoreTests {
     @Test
     func keepsFiveInactiveSubscriptionsAndCachesEvictedModel() async {
@@ -515,7 +514,7 @@ struct ThreadStoreTests {
     }
 
     private func waitUntil(
-        _ condition: @MainActor () -> Bool,
+        _ condition: () -> Bool,
         attempts: Int = 100
     ) async {
         for _ in 0..<attempts {
@@ -526,7 +525,6 @@ struct ThreadStoreTests {
     }
 }
 
-@MainActor
 private final class MockThreadRPCClient: ThreadRPCClient {
     var onNotification: ((String, Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
@@ -931,7 +929,6 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     }
 }
 
-@MainActor
 private func makeThreadListEntry(_ thread: mai.Thread) -> ThreadListEntry {
     ThreadListEntry(
         createdAt: thread.createdAt,
@@ -947,7 +944,6 @@ private func makeThreadListEntry(_ thread: mai.Thread) -> ThreadListEntry {
     )
 }
 
-@MainActor
 private func makeEventPayload(
     threadID: String,
     messageID: String? = nil,
@@ -986,7 +982,6 @@ private func makeEventPayload(
     )
 }
 
-@MainActor
 private func makeThread(_ id: String, isRunning: Bool = false) -> mai.Thread {
     let turn = isRunning
         ? Turn(

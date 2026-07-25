@@ -323,9 +323,6 @@
         "messageId": {
           "type": "string"
         },
-        "role": {
-          "type": "string"
-        },
         "text": {
           "type": "string"
         },
@@ -334,8 +331,7 @@
             "$ref": "#/$defs/Attachment"
           },
           "type": "array"
-        },
-        "raw": true
+        }
       },
       "additionalProperties": false,
       "type": "object",

@@ -86,6 +86,9 @@ final class ThreadStore {
     private let rpc: any ThreadRPCClient
     private let cachePolicy: CachePolicy
     private let now: () -> Date
+    // Reused across notifications: receiveNotification runs on every streamed
+    // event, and a fresh JSONDecoder per frame is pure allocation.
+    private let decoder = newJSONDecoder()
     private var sessionsByID: [String: ThreadSession] = [:]
     private var isStarted = false
     private var lastThreadListSequence = 0
@@ -245,7 +248,7 @@ final class ThreadStore {
     func retryFailedTurn(threadID: String) async throws {
         _ = try await rpc.dispatchCommand(
             command(
-                type: "thread.turn.retry",
+                type: MaidCommandType.threadTurnRetry.rawValue,
                 threadID: threadID
             )
         )
@@ -322,7 +325,7 @@ final class ThreadStore {
         let preferredID = requestedID ?? providers.first?.instanceID ?? registryAgents.first?.instanceID
 
         if let provider = providers.first(where: { $0.instanceID == preferredID }) {
-            guard provider.status != "initialized" else { return provider.instanceID }
+            guard provider.instanceStatus != .initialized else { return provider.instanceID }
             let started = try await rpc.startProvider(provider.instanceID)
             providers.removeAll { $0.instanceID == started.instanceID }
             providers.append(started)
@@ -501,7 +504,7 @@ final class ThreadStore {
                   case .subscribing(recoveryID) = current.subscriptionState else {
                 return
             }
-            guard item.kind == "snapshot",
+            guard item.streamKind == .snapshot,
                   let snapshot = item.snapshot,
                   snapshot.thread.id == id else {
                 throw ThreadStoreError.invalidSnapshot
@@ -549,7 +552,7 @@ final class ThreadStore {
         }
         do {
             _ = try await rpc.dispatchCommand(
-                command(type: "thread.session.prepare", threadID: id)
+                command(type: MaidCommandType.threadSessionPrepare.rawValue, threadID: id)
             )
         } catch {
             if selectedThreadID == id {
@@ -649,25 +652,25 @@ final class ThreadStore {
         do {
             switch method {
             case MaidRPCMethod.orchestrationSubscribeThreadList:
-                let notification = try newJSONDecoder().decode(
+                let notification = try decoder.decode(
                     Notification<ThreadListStreamItem>.self,
                     from: data
                 )
                 receiveThreadListItem(notification.params)
             case MaidRPCMethod.orchestrationSubscribeThread:
-                let notification = try newJSONDecoder().decode(
+                let notification = try decoder.decode(
                     Notification<ThreadStreamItem>.self,
                     from: data
                 )
                 receiveThreadItem(notification.params)
             case MaidRPCMethod.providerOptionsUpdated:
-                let notification = try newJSONDecoder().decode(
+                let notification = try decoder.decode(
                     Notification<ProviderOptionsResult>.self,
                     from: data
                 )
                 onProviderOptionsUpdated?(notification.params)
             case MaidRPCMethod.providerOptionsInvalidated:
-                let notification = try newJSONDecoder().decode(
+                let notification = try decoder.decode(
                     Notification<ProviderOptionsInvalidated>.self,
                     from: data
                 )
@@ -692,22 +695,17 @@ final class ThreadStore {
     }
 
     private func applyThreadEventItem(_ item: ThreadStreamItem) {
-        guard item.kind == "event", let event = item.event else { return }
+        guard item.streamKind == .event, let event = item.event else { return }
         applyThreadEvent(event)
     }
 
     private func applyThreadEvent(_ event: Event) {
-        guard let threadID = event.payload.threadID,
-              var session = sessionsByID[threadID],
-              event.sequence > session.lastSequence,
-              let thread = session.thread else { return }
-        let wasProtected = session.isProtected
-        session.thread = ThreadEventReducer.apply(event, to: thread)
-        let protectionChanged = session.isProtected != wasProtected
-        session.lastSequence = event.sequence
-        sessionsByID[threadID] = session
+        guard let threadID = event.payload.threadID else { return }
+        // Straight through the subscript: a local copy of the session would
+        // defeat copy-on-write and duplicate the timeline on every chunk.
+        guard let result = sessionsByID[threadID]?.apply(event), result.applied else { return }
         reconcileSubscriptionState(threadID, at: now())
-        if protectionChanged {
+        if result.protectionChanged {
             performSubscriptionMaintenance()
         }
     }
@@ -721,7 +719,7 @@ final class ThreadStore {
     }
 
     private func applyThreadListSnapshot(_ item: ThreadListStreamItem) -> Bool {
-        guard item.kind == "snapshot", let snapshot = item.snapshot else {
+        guard item.streamKind == .snapshot, let snapshot = item.snapshot else {
             errorMessage = "maiD returned an invalid thread-list snapshot"
             isLoadingThreadListSnapshot = false
             bufferedThreadListItems.removeAll()
@@ -751,8 +749,8 @@ final class ThreadStore {
         guard let sequence = item.sequence, sequence > lastThreadListSequence else { return }
         lastThreadListSequence = sequence
 
-        switch item.kind {
-        case "thread-upserted":
+        switch item.streamKind {
+        case .threadUpserted:
             guard let thread = item.thread else { return }
             threads.removeAll { $0.id == thread.id }
             threads.append(thread)

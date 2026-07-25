@@ -5,7 +5,7 @@ struct DraftConfigOptionView: View {
     let setValue: (JSONAny) -> Void
 
     var body: some View {
-        if option.type == "boolean" {
+        if option.optionType == .boolean {
             Toggle(option.label ?? option.id, isOn: booleanValue)
                 .fixedSize()
         } else if let choices = option.choices, !choices.isEmpty {
@@ -44,10 +44,12 @@ struct DraftConfigOptionView: View {
     }
 
     private var icon: String {
-        switch option.category {
-        case "model": "cpu"
-        case "mode": "slider.horizontal.3"
-        case "thought", "thinking", "thought_level": "brain"
+        switch option.optionCategory {
+        case .model: "cpu"
+        case .mode: "slider.horizontal.3"
+        case .thoughtLevel: "brain"
+        case .modelConfig: "dial.medium"
+        // .other and any category this build predates.
         default: "gearshape"
         }
     }
