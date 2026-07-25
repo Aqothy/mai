@@ -610,6 +610,7 @@ func threadListEntryFromThread(thread Thread) ThreadListEntry {
 	for _, entry := range thread.Timeline {
 		if approval := entry.Approval; approval != nil && approval.Status == ApprovalStatusPending {
 			pendingApprovals = true
+			break
 		}
 	}
 	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}

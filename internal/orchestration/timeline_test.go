@@ -6,25 +6,46 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestTimelineAppendsFindsAndValidatesTypedUnion(t *testing.T) {
+func TestTimelineAppendsAndFindsTypedUnion(t *testing.T) {
 	var timeline Timeline
 	timeline.AppendMessage(Message{ID: "message-1", Text: "hello"})
 	timeline.AppendItem(Item{ID: "tool-1", Kind: provider.ItemKindToolCall})
 	timeline.AppendApproval(Approval{RequestID: "approval-1"})
 
-	if err := timeline.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
 	if len(timeline) != 3 || timeline[0].Kind != TimelineEntryMessage || timeline[1].Kind != TimelineEntryItem || timeline[2].Kind != TimelineEntryApproval {
 		t.Fatalf("timeline order = %#v", timeline)
 	}
 	if timeline.Message("message-1") == nil || timeline.Item("tool-1") == nil || timeline.Approval("approval-1") == nil {
 		t.Fatalf("typed lookup failed: %#v", timeline)
 	}
+	if timeline.Message("missing") != nil || timeline.Item("missing") != nil || timeline.Approval("missing") != nil {
+		t.Fatalf("lookup of an absent id returned an entry: %#v", timeline)
+	}
+}
 
-	invalid := Timeline{{Kind: TimelineEntryMessage, Item: &Item{ID: "wrong"}}}
-	if err := invalid.Validate(); err == nil {
-		t.Fatal("Validate accepted mismatched timeline union")
+// Lookups scan backwards for the streaming hot path, so they must still return
+// the one matching entry regardless of where it sits.
+func TestTimelineLookupFindsEntriesAtEveryPosition(t *testing.T) {
+	var timeline Timeline
+	for _, id := range []string{"a", "b", "c"} {
+		timeline.AppendMessage(Message{ID: MessageID("message-" + id), Text: id})
+		timeline.AppendItem(Item{ID: "item-" + id, Kind: provider.ItemKindToolCall, Title: id})
+		timeline.AppendApproval(Approval{RequestID: "approval-" + id, OptionID: id})
+	}
+
+	for _, id := range []string{"a", "b", "c"} {
+		message := timeline.Message(MessageID("message-" + id))
+		if message == nil || message.Text != id {
+			t.Fatalf("Message(%q) = %#v, want the entry appended for %q", "message-"+id, message, id)
+		}
+		item := timeline.Item("item-" + id)
+		if item == nil || item.Title != id {
+			t.Fatalf("Item(%q) = %#v, want the entry appended for %q", "item-"+id, item, id)
+		}
+		approval := timeline.Approval("approval-" + id)
+		if approval == nil || approval.OptionID != id {
+			t.Fatalf("Approval(%q) = %#v, want the entry appended for %q", "approval-"+id, approval, id)
+		}
 	}
 }
 

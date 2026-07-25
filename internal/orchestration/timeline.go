@@ -1,18 +1,15 @@
 package orchestration
 
-import (
-	"encoding/json"
-	"fmt"
-
-	"github.com/Aqothy/maiD/internal/provider"
-)
+import "github.com/Aqothy/maiD/internal/provider"
 
 // Timeline is the canonical ordered conversation projection. Entries never
 // move: new identities append and lifecycle updates mutate the matching entry.
 type Timeline []TimelineEntry
 
+// Lookups scan from the END: a streamed update addresses the entry it just
+// appended or one near it, and these run under the engine's write lock.
 func (t Timeline) Message(id MessageID) *Message {
-	for i := range t {
+	for i := len(t) - 1; i >= 0; i-- {
 		if message := t[i].Message; message != nil && message.ID == id {
 			return message
 		}
@@ -21,7 +18,7 @@ func (t Timeline) Message(id MessageID) *Message {
 }
 
 func (t Timeline) Item(id string) *Item {
-	for i := range t {
+	for i := len(t) - 1; i >= 0; i-- {
 		if item := t[i].Item; item != nil && item.ID == id {
 			return item
 		}
@@ -30,7 +27,7 @@ func (t Timeline) Item(id string) *Item {
 }
 
 func (t Timeline) Approval(requestID string) *Approval {
-	for i := range t {
+	for i := len(t) - 1; i >= 0; i-- {
 		if approval := t[i].Approval; approval != nil && approval.RequestID == requestID {
 			return approval
 		}
@@ -104,28 +101,4 @@ func (t Timeline) Clone() Timeline {
 		}
 	}
 	return clone
-}
-
-// Validate protects the tagged-union invariant at projection/test seams.
-func (t Timeline) Validate() error {
-	for i, entry := range t {
-		payloads := 0
-		if entry.Message != nil {
-			payloads++
-		}
-		if entry.Item != nil {
-			payloads++
-		}
-		if entry.Approval != nil {
-			payloads++
-		}
-		kindMatches := entry.Kind == TimelineEntryMessage && entry.Message != nil ||
-			entry.Kind == TimelineEntryItem && entry.Item != nil ||
-			entry.Kind == TimelineEntryApproval && entry.Approval != nil
-		if payloads != 1 || !kindMatches {
-			encoded, _ := json.Marshal(entry)
-			return fmt.Errorf("timeline entry %d is invalid: %s", i, encoded)
-		}
-	}
-	return nil
 }
