@@ -347,6 +347,39 @@ struct ThreadStoreTests {
         #expect(store.subscribedThreadIDs.count == 6)
     }
 
+    @Test
+    func draftStorePersistsTheActiveDraft() throws {
+        let suiteName = "ThreadDraftStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ThreadDraftStore(defaults: defaults)
+        store.setActiveDraftThreadID("thread-a")
+        store.setText("First prompt", for: "thread-a")
+        store.preferences.rememberProvider("codex")
+        store.preferences.rememberWorkingDirectory("/tmp/project")
+        store.preferences.rememberConfigValue(
+            JSONAny("high"),
+            providerID: "codex",
+            optionID: "reasoning"
+        )
+
+        let restored = ThreadDraftStore(defaults: defaults)
+        #expect(restored.activeDraftThreadID == "thread-a")
+        #expect(restored.text(for: "thread-a") == "First prompt")
+        #expect(restored.preferences.providerID == "codex")
+        #expect(restored.preferences.workingDirectory == "/tmp/project")
+        #expect(
+            restored.preferences.configValue(
+                providerID: "codex",
+                optionID: "reasoning"
+            )?.value as? String == "high"
+        )
+
+        restored.setText("  \n", for: "thread-a")
+        #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a").isEmpty)
+    }
+
     private func waitUntil(
         _ condition: @MainActor () -> Bool,
         attempts: Int = 100
