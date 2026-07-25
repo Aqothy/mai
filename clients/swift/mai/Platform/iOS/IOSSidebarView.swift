@@ -3,7 +3,6 @@ import SwiftUI
 
 struct IOSSidebarView: View {
     let store: ThreadStore
-    let draftStore: ThreadDraftStore
     @Binding var isPresented: Bool
 
     var body: some View {
@@ -62,11 +61,7 @@ struct IOSSidebarView: View {
     @Previewable @State var isPresented = true
 
     NavigationStack {
-        IOSSidebarView(
-            store: PreviewData.threadStore(),
-            draftStore: ThreadDraftStore(),
-            isPresented: $isPresented
-        )
+        IOSSidebarView(store: PreviewData.threadStore(), isPresented: $isPresented)
     }
 }
 #endif

@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+/// Storage for the ONE unsent draft prompt, keyed by the thread id it was
+/// started under.
+///
+/// The thread-id parameters are not a per-thread map in disguise — they are
+/// staleness guards. `send()` completes asynchronously, so its `removeDraft`
+/// (and any in-flight editor binding) must be ignored once the user has moved
+/// on to a newer draft.
 @Observable
 final class ThreadDraftStore {
     let preferences: DraftPreferencesStore
@@ -13,8 +20,8 @@ final class ThreadDraftStore {
     private static let storageKey = "thread-drafts"
 
     private(set) var activeDraftThreadID: String?
-    private(set) var draftText: String
 
+    private var draftText: String
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {

@@ -8,15 +8,11 @@ struct IOSAppContainer: View {
     @State private var isSidebarPresented = false
 
     var body: some View {
-        SlideOutMenu(isOpen: $isSidebarPresented) { _ in
+        SlideOutMenu(isOpen: $isSidebarPresented) {
             NavigationStack {
-                IOSSidebarView(
-                    store: store,
-                    draftStore: draftStore,
-                    isPresented: $isSidebarPresented
-                )
+                IOSSidebarView(store: store, isPresented: $isSidebarPresented)
             }
-        } content: { _ in
+        } content: {
             NavigationStack {
                 ChatView(store: store, draftStore: draftStore)
                 .toolbar {

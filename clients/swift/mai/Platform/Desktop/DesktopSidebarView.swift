@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DesktopSidebarView: View {
     let store: ThreadStore
-    let draftStore: ThreadDraftStore
 
     var body: some View {
         List(selection: selection) {
@@ -55,10 +54,7 @@ struct DesktopSidebarView: View {
 #if DEBUG
 #Preview("Desktop Sidebar") {
     NavigationStack {
-        DesktopSidebarView(
-            store: PreviewData.threadStore(),
-            draftStore: ThreadDraftStore()
-        )
+        DesktopSidebarView(store: PreviewData.threadStore())
     }
 }
 #endif

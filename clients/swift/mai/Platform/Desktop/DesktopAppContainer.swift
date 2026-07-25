@@ -6,7 +6,7 @@ struct DesktopAppContainer: View {
 
     var body: some View {
         NavigationSplitView {
-            DesktopSidebarView(store: store, draftStore: draftStore)
+            DesktopSidebarView(store: store)
                 .navigationSplitViewColumnWidth(260)
         } detail: {
             ChatView(store: store, draftStore: draftStore)
