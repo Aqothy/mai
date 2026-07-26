@@ -85,12 +85,13 @@ func (t Timeline) Clone() Timeline {
 		clone[i].Kind = entry.Kind
 		if entry.Message != nil {
 			message := *entry.Message
-			message.Attachments = append([]provider.Attachment(nil), entry.Message.Attachments...)
+			message.Attachments = cloneAttachments(entry.Message.Attachments)
 			clone[i].Message = &message
 		}
 		if entry.Item != nil {
 			item := *entry.Item
 			item.Payload = cloneRawMessage(entry.Item.Payload)
+			item.ToolCall = cloneToolCall(entry.Item.ToolCall)
 			clone[i].Item = &item
 		}
 		if entry.Approval != nil {

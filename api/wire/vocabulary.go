@@ -169,6 +169,34 @@ var Vocabularies = []VocabularyDefinition{
 		),
 	},
 	{
+		Name:        "ToolAction",
+		Description: "Provider-neutral semantic action performed by a tool call.",
+		Values: values(
+			string(provider.ToolActionRead),
+			string(provider.ToolActionEdit),
+			string(provider.ToolActionDelete),
+			string(provider.ToolActionMove),
+			string(provider.ToolActionSearch),
+			string(provider.ToolActionExecute),
+			string(provider.ToolActionThink),
+			string(provider.ToolActionFetch),
+			string(provider.ToolActionSwitchMode),
+			string(provider.ToolActionDelegate),
+			string(provider.ToolActionView),
+			string(provider.ToolActionOther),
+		),
+	},
+	{
+		Name:        "FileChangeKind",
+		Description: "Kind of a normalized file mutation produced by a tool.",
+		Values: values(
+			string(provider.FileChangeAdd),
+			string(provider.FileChangeUpdate),
+			string(provider.FileChangeDelete),
+			string(provider.FileChangeMove),
+		),
+	},
+	{
 		Name:        "ConfigOptionType",
 		Description: "Control a session config option renders as.",
 		Values: values(

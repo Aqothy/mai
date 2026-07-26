@@ -1598,13 +1598,15 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 		t.Fatalf("thread.create: %v", err)
 	}
 
-	// Providers send the COMPLETE tool-call state on every event (the ACP
-	// adapter accumulates sparse updates itself); the projected payload is a
-	// replacement of the previous one, and a data-less status update keeps it.
-	startData := json.RawMessage(`{"toolCallId":"tool-1","content":[{"type":"terminal","command":"go test ./..."}],"locations":[{"path":"main.go"}],"status":"pending"}`)
-	doneData := json.RawMessage(`{"toolCallId":"tool-1","content":[{"type":"terminal","command":"go test ./..."}],"locations":[{"path":"main.go"}],"status":"completed"}`)
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-start", Type: provider.RuntimeEventItemStarted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests", Data: startData}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-done", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Data: doneData}})
+	// Providers send the COMPLETE neutral tool-call state on every data-bearing
+	// event (the ACP adapter accumulates sparse updates itself); a status-only
+	// update keeps the previous snapshot.
+	startTool := &provider.ToolCall{Action: provider.ToolActionExecute, Command: "go test ./...", Locations: []provider.ToolLocation{{Path: "main.go"}}, RawInput: json.RawMessage(`{"command":"go test ./..."}`)}
+	doneValue := *startTool
+	doneTool := &doneValue
+	doneTool.RawOutput = json.RawMessage(`{"exitCode":0}`)
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-start", Type: provider.RuntimeEventItemStarted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests", ToolCall: startTool}})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-done", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ToolCall: doneTool}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-status-only", Type: provider.RuntimeEventItemUpdated, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution}})
 
 	thread, ok := engine.Thread(threadID)
@@ -1618,21 +1620,15 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 	if item.ID != "tool-1" || item.Kind != provider.ItemKindCommandExecution || item.Status != provider.ItemStatusCompleted || item.Title != "run tests" {
 		t.Fatalf("item = %#v, want completed command_execution keeping its title", item)
 	}
-	var payload struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(item.Payload, &payload); err != nil {
-		t.Fatalf("unmarshal item payload: %v", err)
-	}
-	if string(payload.Data["status"]) != `"completed"` || string(payload.Data["locations"]) != `[{"path":"main.go"}]` {
-		t.Fatalf("item payload = %s, want the completed event's full data as the replacement payload", item.Payload)
+	if item.ToolCall == nil || item.ToolCall.Command != "go test ./..." || len(item.ToolCall.Locations) != 1 || item.ToolCall.Locations[0].Path != "main.go" || string(item.ToolCall.RawOutput) != `{"exitCode":0}` {
+		t.Fatalf("item tool call = %#v, want the completed neutral snapshot", item.ToolCall)
 	}
 
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-interrupted", Type: provider.RuntimeEventItemUpdated, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusInterrupted}})
 	thread, _ = engine.Thread(threadID)
 	item = thread.Timeline.Items()[0]
-	if item.Status != provider.ItemStatusInterrupted || item.Kind != provider.ItemKindCommandExecution || item.Title != "run tests" || string(item.Payload) == "" {
-		t.Fatalf("interrupted item = %#v, want interrupted status preserving kind, title, and completed payload", item)
+	if item.Status != provider.ItemStatusInterrupted || item.Kind != provider.ItemKindCommandExecution || item.Title != "run tests" || item.ToolCall == nil {
+		t.Fatalf("interrupted item = %#v, want interrupted status preserving kind, title, and tool call", item)
 	}
 }
 

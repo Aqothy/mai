@@ -139,6 +139,7 @@ enum ThreadEventReducer {
                 if nonEmpty(item.kind) == nil { item.kind = old.kind }
                 if nonEmpty(item.status) == nil { item.status = old.status }
                 if nonEmpty(item.title) == nil { item.title = old.title }
+                if item.toolCall == nil { item.toolCall = old.toolCall }
                 if nonEmpty(item.turnID) == nil { item.turnID = old.turnID }
                 item.textDelta = nil
                 item.updatedAt = occurredAt

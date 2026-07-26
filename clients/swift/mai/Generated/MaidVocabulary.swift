@@ -134,6 +134,30 @@ public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case declined = "declined"
 }
 
+/// Provider-neutral semantic action performed by a tool call.
+public enum MaidToolAction: String, Codable, Sendable, CaseIterable {
+    case read = "read"
+    case edit = "edit"
+    case delete = "delete"
+    case move = "move"
+    case search = "search"
+    case execute = "execute"
+    case think = "think"
+    case fetch = "fetch"
+    case switchMode = "switch_mode"
+    case delegate = "delegate"
+    case view = "view"
+    case other = "other"
+}
+
+/// Kind of a normalized file mutation produced by a tool.
+public enum MaidFileChangeKind: String, Codable, Sendable, CaseIterable {
+    case add = "add"
+    case update = "update"
+    case delete = "delete"
+    case move = "move"
+}
+
 /// Control a session config option renders as.
 public enum MaidConfigOptionType: String, Codable, Sendable, CaseIterable {
     case select = "select"

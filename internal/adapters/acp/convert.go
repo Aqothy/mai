@@ -310,6 +310,14 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 	if !ok {
 		return nil
 	}
+	attachment, ok := attachmentFromACPBlock(block)
+	if !ok {
+		return nil
+	}
+	return []provider.Attachment{attachment}
+}
+
+func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, bool) {
 	attachment := provider.Attachment{}
 	switch block.Type {
 	case schema.ContentBlockTypeImage, schema.ContentBlockTypeAudio:
@@ -333,7 +341,7 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 		}
 	case schema.ContentBlockTypeResource:
 		if block.Resource == nil {
-			return nil
+			return provider.Attachment{}, false
 		}
 		attachment.Kind = "resource"
 		attachment.URI = block.Resource.URI
@@ -346,9 +354,9 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 			attachment.Data = *block.Resource.Blob
 		}
 	default:
-		return nil
+		return provider.Attachment{}, false
 	}
-	return []provider.Attachment{attachment}
+	return attachment, true
 }
 
 func itemKindFromToolKind(kind string) provider.ItemKind {
@@ -383,11 +391,11 @@ func itemStatusFromACP(status string) provider.ItemStatus {
 	}
 }
 
-// toolCallData projects the tool-call fields of a session update into the raw
-// item payload. ACP tool_call_update uses replacement semantics for content and
-// locations: present-but-empty collections mean "clear this field" and must
-// stay distinguishable from absent ones, so fields are only included when the
-// update carried them.
+// toolCallData captures one ACP-native sparse patch for adapter-private
+// accumulation. ACP tool_call_update uses replacement semantics for content
+// and locations: present-but-empty collections mean "clear this field" and
+// must stay distinguishable from absent ones, so fields are only included
+// when the update carried them.
 func toolCallData(u schema.SessionUpdate) json.RawMessage {
 	object := map[string]any{"toolCallId": u.ToolCallID}
 	if u.Title != nil {
@@ -412,6 +420,186 @@ func toolCallData(u schema.SessionUpdate) json.RawMessage {
 		object["rawOutput"] = u.RawOutput
 	}
 	return marshalRaw(object)
+}
+
+// toolCallFromACPData converts the adapter's accumulated ACP snapshot into the
+// public neutral snapshot. It runs only after sparse ACP updates have been
+// overlaid by reconcileToolState.
+func toolCallFromACPData(data json.RawMessage) *provider.ToolCall {
+	if len(data) == 0 {
+		return nil
+	}
+	var snapshot struct {
+		Kind      string                    `json:"kind"`
+		Content   []schema.ToolCallContent  `json:"content"`
+		Locations []schema.ToolCallLocation `json:"locations"`
+		RawInput  json.RawMessage           `json:"rawInput"`
+		RawOutput json.RawMessage           `json:"rawOutput"`
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil
+	}
+	providerKind := strings.ToLower(strings.TrimSpace(snapshot.Kind))
+	action := toolActionFromACP(providerKind)
+	call := &provider.ToolCall{
+		Action:       action,
+		ProviderKind: providerKind,
+		Locations:    toolLocationsFromACP(snapshot.Locations),
+		Changes:      toolChangesFromACP(snapshot.Content, action),
+		Attachments:  toolAttachmentsFromACP(snapshot.Content),
+		Output:       toolTextFromACP(snapshot.Content),
+		RawInput:     snapshot.RawInput,
+		RawOutput:    snapshot.RawOutput,
+	}
+	call.Command, call.Query, call.Cwd = toolInputDetails(snapshot.RawInput)
+	return call
+}
+
+func toolActionFromACP(kind string) provider.ToolAction {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "read":
+		return provider.ToolActionRead
+	case "edit", "patch", "file_change", "write", "create":
+		return provider.ToolActionEdit
+	case "delete":
+		return provider.ToolActionDelete
+	case "move":
+		return provider.ToolActionMove
+	case "search":
+		return provider.ToolActionSearch
+	case "execute", "terminal", "command", "shell":
+		return provider.ToolActionExecute
+	case "think":
+		return provider.ToolActionThink
+	case "fetch":
+		return provider.ToolActionFetch
+	case "switch_mode":
+		return provider.ToolActionSwitchMode
+	case "":
+		return provider.ToolActionOther
+	default:
+		return provider.ToolActionOther
+	}
+}
+
+func toolLocationsFromACP(locations []schema.ToolCallLocation) []provider.ToolLocation {
+	if locations == nil {
+		return nil
+	}
+	converted := make([]provider.ToolLocation, 0, len(locations))
+	for _, location := range locations {
+		converted = append(converted, provider.ToolLocation{
+			Path: location.Path,
+			Line: location.Line,
+		})
+	}
+	return converted
+}
+
+func toolAttachmentsFromACP(content []schema.ToolCallContent) []provider.Attachment {
+	if content == nil {
+		return nil
+	}
+	attachments := make([]provider.Attachment, 0)
+	for _, entry := range content {
+		if entry.Type != schema.ToolCallContentTypeContent || entry.Content == nil {
+			continue
+		}
+		if attachment, ok := attachmentFromACPBlock(*entry.Content); ok {
+			attachments = append(attachments, attachment)
+		}
+	}
+	return attachments
+}
+
+func toolTextFromACP(content []schema.ToolCallContent) string {
+	var parts []string
+	for _, entry := range content {
+		if entry.Type == schema.ToolCallContentTypeContent && entry.Content != nil &&
+			entry.Content.Type == schema.ContentBlockTypeText && entry.Content.Text != nil {
+			parts = append(parts, *entry.Content.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAction) []provider.FileChange {
+	if content == nil {
+		return nil
+	}
+	changes := make([]provider.FileChange, 0)
+	for _, entry := range content {
+		if entry.Type != schema.ToolCallContentTypeDiff {
+			continue
+		}
+		change := provider.FileChange{Kind: fileChangeKindFromAction(action)}
+		if entry.Path != nil {
+			change.Path = *entry.Path
+		}
+		if entry.OldText != nil {
+			change.OldText = *entry.OldText
+		}
+		if entry.NewText != nil {
+			change.NewText = *entry.NewText
+		}
+		changes = append(changes, change)
+	}
+	return changes
+}
+
+func fileChangeKindFromAction(action provider.ToolAction) provider.FileChangeKind {
+	switch action {
+	case provider.ToolActionDelete:
+		return provider.FileChangeDelete
+	case provider.ToolActionMove:
+		return provider.FileChangeMove
+	default:
+		return provider.FileChangeUpdate
+	}
+}
+
+func toolInputDetails(raw json.RawMessage) (command, query, cwd string) {
+	var input struct {
+		Command    any    `json:"command"`
+		Cmd        any    `json:"cmd"`
+		Executable string `json:"executable"`
+		Args       any    `json:"args"`
+		Query      string `json:"query"`
+		Pattern    string `json:"pattern"`
+		Cwd        string `json:"cwd"`
+	}
+	if json.Unmarshal(raw, &input) != nil {
+		return "", "", ""
+	}
+	command = commandValue(input.Command)
+	if command == "" {
+		command = commandValue(input.Cmd)
+	}
+	if command == "" {
+		command = strings.TrimSpace(strings.TrimSpace(input.Executable) + " " + commandValue(input.Args))
+	}
+	query = strings.TrimSpace(input.Query)
+	if query == "" {
+		query = strings.TrimSpace(input.Pattern)
+	}
+	return command, query, strings.TrimSpace(input.Cwd)
+}
+
+func commandValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, part := range typed {
+			if text, ok := part.(string); ok && strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		}
+		return strings.Join(parts, " ")
+	default:
+		return ""
+	}
 }
 
 func toolCallTitle(tool schema.ToolCallUpdate) string {

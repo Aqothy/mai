@@ -1889,8 +1889,8 @@ func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	if trailing.Payload.ItemType != provider.ItemKindCommandExecution || trailing.Payload.ItemStatus != provider.ItemStatusCompleted {
 		t.Fatalf("trailing event payload = %#v, want tombstone-enriched command_execution/completed", trailing.Payload)
 	}
-	if !strings.Contains(string(trailing.Payload.Data), "late output") {
-		t.Fatalf("trailing event data = %s, want the late rawOutput carried through", trailing.Payload.Data)
+	if trailing.Payload.ToolCall == nil || !strings.Contains(string(trailing.Payload.ToolCall.RawOutput), "late output") {
+		t.Fatalf("trailing event tool call = %#v, want the late rawOutput carried through", trailing.Payload.ToolCall)
 	}
 }
 

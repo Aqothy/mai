@@ -395,15 +395,10 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	}
 	itemID := firstNonEmpty(event.ItemID, string(event.EventID))
 	i.trackOpenItem(event, itemID, status)
-	// Payloads are REPLACED downstream, so one is emitted only when the event
-	// carries provider data (the ACP adapter sends the complete accumulated
-	// tool-call state on every update); status-only updates keep the previous
-	// payload.
-	var payload json.RawMessage
-	if len(event.Payload.Data) > 0 {
-		payload = marshalEventPayload(map[string]any{"itemType": event.Payload.ItemType, "data": event.Payload.Data})
-	}
-	item := &Item{ID: itemID, Kind: kind, Title: firstNonEmpty(event.Payload.Title, event.Payload.Detail), Status: status, Payload: payload, TurnID: TurnID(event.TurnID)}
+	// ToolCall is a complete neutral replacement snapshot when present;
+	// status-only updates leave it absent so projection preserves the previous
+	// one. Provider-shaped Data must never cross this boundary for tool items.
+	item := &Item{ID: itemID, Kind: kind, Title: firstNonEmpty(event.Payload.Title, event.Payload.Detail), Status: status, ToolCall: event.Payload.ToolCall, TurnID: TurnID(event.TurnID)}
 	i.recordItem(event, item, createdAt)
 }
 

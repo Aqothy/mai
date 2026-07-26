@@ -232,7 +232,7 @@ struct ThreadEventReducerTests {
 
         thread.apply(
             makeEvent(.threadItemUpserted, occurredAt: created, payload: makePayload(
-                item: makeItem(id: "i1", createdAt: created, kind: MaidItemKind.toolCall.rawValue, status: MaidItemStatus.inProgress.rawValue, title: "Run tests", turnID: "turn-1")
+                item: makeItem(id: "i1", createdAt: created, kind: MaidItemKind.toolCall.rawValue, status: MaidItemStatus.inProgress.rawValue, title: "Run tests", toolCall: makeToolCall(command: "swift test"), turnID: "turn-1")
             ))
         )
         #expect(thread.timeline.count == 1)
@@ -252,6 +252,7 @@ struct ThreadEventReducerTests {
         #expect(item?.itemStatus == .completed)
         #expect(item?.itemKind == .toolCall)
         #expect(item?.title == "Run tests")
+        #expect(item?.toolCall?.command == "swift test")
         #expect(item?.turnID == "turn-1")
         #expect(item?.createdAt == created)
         #expect(item?.updatedAt == updated)
@@ -536,6 +537,7 @@ private func makeItem(
     payload: JSONAny? = nil,
     textDelta: String? = nil,
     title: String? = nil,
+    toolCall: ToolCall? = nil,
     turnID: String? = nil
 ) -> Item {
     Item(
@@ -546,8 +548,30 @@ private func makeItem(
         status: status,
         textDelta: textDelta,
         title: title,
+        toolCall: toolCall,
         turnID: turnID,
         updatedAt: Date(timeIntervalSince1970: 0)
+    )
+}
+
+private func makeToolCall(command: String) -> ToolCall {
+    ToolCall(
+        action: MaidToolAction.execute.rawValue,
+        attachments: nil,
+        changes: nil,
+        command: command,
+        cwd: nil,
+        durationMilliseconds: nil,
+        error: nil,
+        exitCode: nil,
+        locations: nil,
+        name: nil,
+        namespace: nil,
+        output: nil,
+        providerKind: nil,
+        query: nil,
+        rawInput: nil,
+        rawOutput: nil
     )
 }
 

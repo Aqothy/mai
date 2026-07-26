@@ -14,6 +14,53 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 	return append(json.RawMessage(nil), value...)
 }
 
+func cloneAttachments(values []provider.Attachment) []provider.Attachment {
+	if values == nil {
+		return nil
+	}
+	clones := make([]provider.Attachment, len(values))
+	for index, value := range values {
+		clones[index] = value
+		clones[index].Raw = cloneRawMessage(value.Raw)
+		if value.Metadata != nil {
+			clones[index].Metadata = make(map[string]json.RawMessage, len(value.Metadata))
+			for key, raw := range value.Metadata {
+				clones[index].Metadata[key] = cloneRawMessage(raw)
+			}
+		}
+	}
+	return clones
+}
+
+// cloneToolCall isolates a public thread snapshot from projection-owned state.
+// Inside ingestion and projection, tool snapshots are immutable and shared.
+func cloneToolCall(value *provider.ToolCall) *provider.ToolCall {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
+	for index := range clone.Locations {
+		if value.Locations[index].Line != nil {
+			line := *value.Locations[index].Line
+			clone.Locations[index].Line = &line
+		}
+	}
+	clone.Changes = append([]provider.FileChange(nil), value.Changes...)
+	clone.Attachments = cloneAttachments(value.Attachments)
+	clone.RawInput = cloneRawMessage(value.RawInput)
+	clone.RawOutput = cloneRawMessage(value.RawOutput)
+	if value.ExitCode != nil {
+		exitCode := *value.ExitCode
+		clone.ExitCode = &exitCode
+	}
+	if value.DurationMilliseconds != nil {
+		duration := *value.DurationMilliseconds
+		clone.DurationMilliseconds = &duration
+	}
+	return &clone
+}
+
 func cloneThread(thread Thread) Thread {
 	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
 	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)

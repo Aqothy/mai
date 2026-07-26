@@ -405,6 +405,75 @@ const (
 	ItemKindError            ItemKind = "error"
 )
 
+// ToolAction is the provider-neutral semantic action performed by a tool.
+// Provider-native names and kinds are retained separately on ToolCall so
+// clients can render a stable action without branching on an adapter.
+type ToolAction string
+
+const (
+	ToolActionRead       ToolAction = "read"
+	ToolActionEdit       ToolAction = "edit"
+	ToolActionDelete     ToolAction = "delete"
+	ToolActionMove       ToolAction = "move"
+	ToolActionSearch     ToolAction = "search"
+	ToolActionExecute    ToolAction = "execute"
+	ToolActionThink      ToolAction = "think"
+	ToolActionFetch      ToolAction = "fetch"
+	ToolActionSwitchMode ToolAction = "switch_mode"
+	ToolActionDelegate   ToolAction = "delegate"
+	ToolActionView       ToolAction = "view"
+	ToolActionOther      ToolAction = "other"
+)
+
+type ToolLocation struct {
+	Path string  `json:"path"`
+	Line *uint32 `json:"line,omitempty"`
+}
+
+type FileChangeKind string
+
+const (
+	FileChangeAdd    FileChangeKind = "add"
+	FileChangeUpdate FileChangeKind = "update"
+	FileChangeDelete FileChangeKind = "delete"
+	FileChangeMove   FileChangeKind = "move"
+)
+
+// FileChange is a normalized file mutation. Diff supports providers that emit
+// unified diffs; OldText/NewText supports ACP-style before/after blocks.
+type FileChange struct {
+	Path     string         `json:"path"`
+	Kind     FileChangeKind `json:"kind,omitempty"`
+	Diff     string         `json:"diff,omitempty"`
+	OldText  string         `json:"oldText,omitempty"`
+	NewText  string         `json:"newText,omitempty"`
+	MovePath string         `json:"movePath,omitempty"`
+}
+
+// ToolCall is the complete provider-neutral display snapshot for a tool item.
+// Adapters merge native sparse updates before emitting it; consumers treat the
+// snapshot as immutable. RawInput/RawOutput intentionally remain arbitrary
+// JSON: clients may inspect or pretty-print them, but must not branch on
+// provider-specific keys.
+type ToolCall struct {
+	Action               ToolAction      `json:"action"`
+	Name                 string          `json:"name,omitempty"`
+	Namespace            string          `json:"namespace,omitempty"`
+	ProviderKind         string          `json:"providerKind,omitempty"`
+	Command              string          `json:"command,omitempty"`
+	Query                string          `json:"query,omitempty"`
+	Cwd                  string          `json:"cwd,omitempty"`
+	Output               string          `json:"output,omitempty"`
+	Error                string          `json:"error,omitempty"`
+	Locations            []ToolLocation  `json:"locations,omitempty"`
+	Changes              []FileChange    `json:"changes,omitempty"`
+	Attachments          []Attachment    `json:"attachments,omitempty"`
+	RawInput             json.RawMessage `json:"rawInput,omitempty"`
+	RawOutput            json.RawMessage `json:"rawOutput,omitempty"`
+	ExitCode             *int            `json:"exitCode,omitempty"`
+	DurationMilliseconds *int64          `json:"durationMilliseconds,omitempty"`
+}
+
 // ItemStatus is the provider-neutral lifecycle status of an item.
 type ItemStatus string
 
@@ -440,8 +509,9 @@ type PlanEntry struct {
 }
 
 // RuntimeEventPayload is a provider-neutral tagged payload. Structured fields
-// cover the orchestration-relevant facts; provider-specific details travel in
-// Args/Data without becoming part of the server interface.
+// cover orchestration and client-visible facts. Args carries opaque approval
+// arguments; Data is retained only for adapter diagnostics and non-tool native
+// details, and must not be projected into client-visible tool items.
 type RuntimeEventPayload struct {
 	TurnState   RuntimeTurnState         `json:"turnState,omitempty"`
 	StopReason  string                   `json:"stopReason,omitempty"`
@@ -460,6 +530,7 @@ type RuntimeEventPayload struct {
 	Args        json.RawMessage          `json:"args,omitempty"`
 	Resolution  json.RawMessage          `json:"resolution,omitempty"`
 	Data        json.RawMessage          `json:"data,omitempty"`
+	ToolCall    *ToolCall                `json:"toolCall,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption             `json:"configOptions,omitzero"`

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/Aqothy/go-acp/schema"
@@ -26,8 +27,8 @@ type toolState struct {
 	status   provider.ItemStatus
 	threadID string
 	turnID   string
-	// data is the accumulated full tool-call state (ACP updates are sparse;
-	// downstream item payloads are replacements — see overlayToolCallData).
+	// data is the adapter-private accumulated ACP tool-call state. It is
+	// converted to provider.ToolCall before the runtime event is published.
 	data json.RawMessage
 	// settled marks a tombstone: the tool reached a terminal status but its
 	// state is kept so trailing tool_call_updates (agents resend terminal
@@ -514,11 +515,11 @@ func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeE
 	}
 	// ACP tool_call_update payloads are SPARSE (only changed fields), but the
 	// provider contract requires every item event to carry the COMPLETE
-	// tool-call state — downstream item payloads are replacements, not
-	// merge-patches. Accumulate here, in the one layer that knows the ACP
-	// tool-call field set.
+	// tool-call state. Accumulate the ACP-shaped private snapshot here, convert
+	// it once into the neutral contract, and never publish the native envelope.
 	state.data = overlayToolCallData(state.data, event.Payload.Data)
-	event.Payload.Data = state.data
+	event.Payload.ToolCall = toolCallFromACPData(state.data)
+	event.Payload.Data = nil
 	if event.Type == provider.RuntimeEventItemCompleted || itemStatusSettled(state.status) {
 		// Keep a settled tombstone (instead of deleting) so a trailing
 		// tool_call_update for the settled tool still emits a well-formed
@@ -547,9 +548,7 @@ func overlayToolCallData(base json.RawMessage, patch json.RawMessage) json.RawMe
 	if json.Unmarshal(base, &baseObject) != nil || json.Unmarshal(patch, &patchObject) != nil {
 		return patch
 	}
-	for key, value := range patchObject {
-		baseObject[key] = value
-	}
+	maps.Copy(baseObject, patchObject)
 	merged, err := json.Marshal(baseObject)
 	if err != nil {
 		return patch
@@ -628,8 +627,14 @@ func shouldStampActiveTurn(eventType provider.RuntimeEventType) bool {
 }
 
 // cancellationTargetsLocked lists the session's cancellation targets: the
-// in-flight prompt's turn and the registered (newest) turn, which differ while a
-// follow-up turn is queued. An interrupt may name either. h.mu must be held.
+// in-flight prompt's collector and the registered one.
+//
+// They are usually the same object. They diverge because a prompt refuses to
+// join a cancelled or completing collector even when the turn id matches
+// (promptJoinsCollector): after an interrupt, the agent has not settled yet, so
+// stream.active still holds the cancelled prompt while a re-prompt — which the
+// engine steers onto the SAME turn id — registers a fresh collector. A later
+// interrupt must reach both. h.mu must be held.
 func cancellationTargetsLocked(session *acpSession) []*promptCollector {
 	var targets []*promptCollector
 	if session.stream != nil && session.stream.active != nil && session.stream.active.collector != nil {

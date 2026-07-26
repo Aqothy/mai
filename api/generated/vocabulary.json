@@ -156,6 +156,34 @@
       ]
     },
     {
+      "name": "ToolAction",
+      "description": "Provider-neutral semantic action performed by a tool call.",
+      "values": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "switch_mode",
+        "delegate",
+        "view",
+        "other"
+      ]
+    },
+    {
+      "name": "FileChangeKind",
+      "description": "Kind of a normalized file mutation produced by a tool.",
+      "values": [
+        "add",
+        "update",
+        "delete",
+        "move"
+      ]
+    },
+    {
       "name": "ConfigOptionType",
       "description": "Control a session config option renders as.",
       "values": [

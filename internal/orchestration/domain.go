@@ -138,9 +138,11 @@ type Item struct {
 	Kind   provider.ItemKind   `json:"kind"`
 	Title  string              `json:"title,omitempty"`
 	Status provider.ItemStatus `json:"status"`
-	// Payload is provider-shaped JSON, applied by REPLACEMENT: a non-empty
-	// payload on an item event is the item's complete new payload; an absent
-	// one keeps the previous payload (CLIENT_API §5).
+	// ToolCall is a complete provider-neutral snapshot. An absent value on an
+	// update preserves the prior snapshot; adapters merge native sparse updates.
+	ToolCall *provider.ToolCall `json:"toolCall,omitempty"`
+	// Payload is orchestration-owned display JSON for non-tool items such as
+	// reasoning, warnings, and errors. It is applied by replacement.
 	Payload json.RawMessage `json:"payload,omitempty"`
 	// TextDelta is an EVENT-ONLY field (coalesced reasoning chunks): when set,
 	// the chunk is appended to the payload's "text" instead of the payload

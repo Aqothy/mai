@@ -389,6 +389,9 @@ func (p *Projection) applyThreadItemUpserted(event Event) {
 		if item.Status == "" {
 			item.Status = existing.Status
 		}
+		if item.ToolCall == nil {
+			item.ToolCall = existing.ToolCall
+		}
 		item.Payload = applyItemPayload(existing.Payload, item.Payload, item.TextDelta)
 		item.TextDelta = ""
 		if item.TurnID == "" {
@@ -540,9 +543,8 @@ func interruptTargetsActiveTurn(thread *Thread, turnID TurnID) bool {
 // (CLIENT_API §5):
 //   - textDelta (coalesced reasoning chunk): append it to the payload's
 //     "text" — events stay O(chunk) instead of re-sending accumulated text;
-//   - otherwise a non-empty payload REPLACES the previous one (producers send
-//     the complete payload — the ACP adapter accumulates sparse tool-call
-//     updates itself), and an absent payload keeps it.
+//   - otherwise a non-empty payload REPLACES the previous one, and an absent
+//     payload keeps it.
 func applyItemPayload(existing json.RawMessage, incoming json.RawMessage, textDelta string) json.RawMessage {
 	if textDelta != "" {
 		return appendPayloadText(existing, textDelta)

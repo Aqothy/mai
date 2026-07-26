@@ -1182,16 +1182,18 @@ public struct Item: Codable {
     public var id, kind: String
     public var payload: JSONAny?
     public var status: String
-    public var textDelta, title, turnID: String?
+    public var textDelta, title: String?
+    public var toolCall: ToolCall?
+    public var turnID: String?
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, id, kind, payload, status, textDelta, title
+        case createdAt, id, kind, payload, status, textDelta, title, toolCall
         case turnID = "turnId"
         case updatedAt
     }
 
-    public init(createdAt: Date, id: String, kind: String, payload: JSONAny?, status: String, textDelta: String?, title: String?, turnID: String?, updatedAt: Date) {
+    public init(createdAt: Date, id: String, kind: String, payload: JSONAny?, status: String, textDelta: String?, title: String?, toolCall: ToolCall?, turnID: String?, updatedAt: Date) {
         self.createdAt = createdAt
         self.id = id
         self.kind = kind
@@ -1199,6 +1201,7 @@ public struct Item: Codable {
         self.status = status
         self.textDelta = textDelta
         self.title = title
+        self.toolCall = toolCall
         self.turnID = turnID
         self.updatedAt = updatedAt
     }
@@ -1230,6 +1233,7 @@ public extension Item {
         status: String? = nil,
         textDelta: String?? = nil,
         title: String?? = nil,
+        toolCall: ToolCall?? = nil,
         turnID: String?? = nil,
         updatedAt: Date? = nil
     ) -> Item {
@@ -1241,8 +1245,217 @@ public extension Item {
             status: status ?? self.status,
             textDelta: textDelta ?? self.textDelta,
             title: title ?? self.title,
+            toolCall: toolCall ?? self.toolCall,
             turnID: turnID ?? self.turnID,
             updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ToolCall
+public struct ToolCall: Codable {
+    public var action: String
+    public var attachments: [Attachment]?
+    public var changes: [FileChange]?
+    public var command, cwd: String?
+    public var durationMilliseconds: Int?
+    public var error: String?
+    public var exitCode: Int?
+    public var locations: [ToolLocation]?
+    public var name, namespace, output, providerKind: String?
+    public var query: String?
+    public var rawInput, rawOutput: JSONAny?
+
+    public init(action: String, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?, rawInput: JSONAny?, rawOutput: JSONAny?) {
+        self.action = action
+        self.attachments = attachments
+        self.changes = changes
+        self.command = command
+        self.cwd = cwd
+        self.durationMilliseconds = durationMilliseconds
+        self.error = error
+        self.exitCode = exitCode
+        self.locations = locations
+        self.name = name
+        self.namespace = namespace
+        self.output = output
+        self.providerKind = providerKind
+        self.query = query
+        self.rawInput = rawInput
+        self.rawOutput = rawOutput
+    }
+}
+
+// MARK: ToolCall convenience initializers and mutators
+
+public extension ToolCall {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ToolCall.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        action: String? = nil,
+        attachments: [Attachment]?? = nil,
+        changes: [FileChange]?? = nil,
+        command: String?? = nil,
+        cwd: String?? = nil,
+        durationMilliseconds: Int?? = nil,
+        error: String?? = nil,
+        exitCode: Int?? = nil,
+        locations: [ToolLocation]?? = nil,
+        name: String?? = nil,
+        namespace: String?? = nil,
+        output: String?? = nil,
+        providerKind: String?? = nil,
+        query: String?? = nil,
+        rawInput: JSONAny?? = nil,
+        rawOutput: JSONAny?? = nil
+    ) -> ToolCall {
+        return ToolCall(
+            action: action ?? self.action,
+            attachments: attachments ?? self.attachments,
+            changes: changes ?? self.changes,
+            command: command ?? self.command,
+            cwd: cwd ?? self.cwd,
+            durationMilliseconds: durationMilliseconds ?? self.durationMilliseconds,
+            error: error ?? self.error,
+            exitCode: exitCode ?? self.exitCode,
+            locations: locations ?? self.locations,
+            name: name ?? self.name,
+            namespace: namespace ?? self.namespace,
+            output: output ?? self.output,
+            providerKind: providerKind ?? self.providerKind,
+            query: query ?? self.query,
+            rawInput: rawInput ?? self.rawInput,
+            rawOutput: rawOutput ?? self.rawOutput
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - FileChange
+public struct FileChange: Codable {
+    public var diff, kind, movePath, newText: String?
+    public var oldText: String?
+    public var path: String
+
+    public init(diff: String?, kind: String?, movePath: String?, newText: String?, oldText: String?, path: String) {
+        self.diff = diff
+        self.kind = kind
+        self.movePath = movePath
+        self.newText = newText
+        self.oldText = oldText
+        self.path = path
+    }
+}
+
+// MARK: FileChange convenience initializers and mutators
+
+public extension FileChange {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(FileChange.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        diff: String?? = nil,
+        kind: String?? = nil,
+        movePath: String?? = nil,
+        newText: String?? = nil,
+        oldText: String?? = nil,
+        path: String? = nil
+    ) -> FileChange {
+        return FileChange(
+            diff: diff ?? self.diff,
+            kind: kind ?? self.kind,
+            movePath: movePath ?? self.movePath,
+            newText: newText ?? self.newText,
+            oldText: oldText ?? self.oldText,
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ToolLocation
+public struct ToolLocation: Codable {
+    public var line: Int?
+    public var path: String
+
+    public init(line: Int?, path: String) {
+        self.line = line
+        self.path = path
+    }
+}
+
+// MARK: ToolLocation convenience initializers and mutators
+
+public extension ToolLocation {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ToolLocation.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        line: Int?? = nil,
+        path: String? = nil
+    ) -> ToolLocation {
+        return ToolLocation(
+            line: line ?? self.line,
+            path: path ?? self.path
         )
     }
 

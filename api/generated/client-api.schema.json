@@ -566,6 +566,34 @@
       "type": "object",
       "title": "EventPayload"
     },
+    "FileChange": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "oldText": {
+          "type": "string"
+        },
+        "newText": {
+          "type": "string"
+        },
+        "movePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "title": "FileChange"
+    },
     "InstanceInfo": {
       "properties": {
         "instanceId": {
@@ -629,6 +657,9 @@
         },
         "status": {
           "type": "string"
+        },
+        "toolCall": {
+          "$ref": "#/$defs/ToolCall"
         },
         "payload": true,
         "textDelta": {
@@ -1304,6 +1335,85 @@
         "usedTokens"
       ],
       "title": "TokenUsage"
+    },
+    "ToolCall": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "providerKind": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/ToolLocation"
+          },
+          "type": "array"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          },
+          "type": "array"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "rawInput": true,
+        "rawOutput": true,
+        "exitCode": {
+          "type": "integer"
+        },
+        "durationMilliseconds": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "title": "ToolCall"
+    },
+    "ToolLocation": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "title": "ToolLocation"
     },
     "Turn": {
       "properties": {
