@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SlideOutMenu<Menu: View, Content: View>: View {
     @Binding var isOpen: Bool
@@ -26,31 +27,13 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
                 .frame(maxHeight: .infinity)
                 .accessibilityHidden(!isOpen)
 
-            content
-                .containerRelativeFrame(.horizontal)
-                .frame(maxHeight: .infinity)
-                .background(.background)
-                .clipShape(.rect(cornerRadius: 26 * progress, style: .continuous))
-                .overlay {
-                    Button {
-                        isOpen = false
-                    } label: {
-                        Color.black.opacity(0.18 * progress)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(.rect)
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(progress > 0.001)
-                    .accessibilityHidden(progress <= 0.001)
-                    .accessibilityLabel("Close menu")
-                }
-                .shadow(
-                    color: .black.opacity(0.22 * progress),
-                    radius: 24 * progress,
-                    x: -8 * progress
-                )
-                .offset(x: xOffset)
-                .accessibilityHidden(isOpen)
+            SlideOutMenuContentView(
+                content: content,
+                progress: progress,
+                xOffset: xOffset
+            ) {
+                setOpen(false, menuWidth: preferredWidth)
+            }
         }
         .contentShape(.rect)
         .onAppear {
@@ -59,50 +42,56 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
         .onChange(of: isOpen) { _, newValue in
             setOpen(newValue, menuWidth: preferredWidth)
         }
-        .simultaneousGesture(dragGesture(menuWidth: preferredWidth))
-        .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
-        .ignoresSafeArea()
-    }
-
-    private func dragGesture(menuWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .local)
-            .onChanged { value in
-                if dragStartOffset == nil {
-                    guard isHorizontal(value) else { return }
+        .gesture(
+            HorizontalPanGesture(
+                canBegin: { velocityX in
+                    if xOffset <= 0 {
+                        return velocityX > 0
+                    }
+                    if xOffset >= preferredWidth {
+                        return velocityX < 0
+                    }
+                    return true
+                },
+                onBegan: {
                     dragStartOffset = xOffset
-                }
-
-                xOffset = clamp(
-                    (dragStartOffset ?? xOffset) + value.translation.width,
-                    lower: 0,
-                    upper: menuWidth
-                )
-            }
-            .onEnded { value in
-                guard dragStartOffset != nil else {
+                },
+                onChanged: { translationX in
+                    xOffset = clamp(
+                        (dragStartOffset ?? xOffset) + translationX,
+                        lower: 0,
+                        upper: preferredWidth
+                    )
+                },
+                onEnded: { velocityX in
+                    let projectedOffset = clamp(
+                        xOffset + velocityX * 0.2,
+                        lower: 0,
+                        upper: preferredWidth
+                    )
                     dragStartOffset = nil
-                    return
+                    setOpen(
+                        projectedOffset > preferredWidth / 2,
+                        menuWidth: preferredWidth
+                    )
+                },
+                onCancelled: {
+                    dragStartOffset = nil
+                    setOpen(
+                        xOffset > preferredWidth / 2,
+                        menuWidth: preferredWidth
+                    )
                 }
-
-                let predictedOffset = clamp(
-                    xOffset
-                        + value.predictedEndTranslation.width
-                        - value.translation.width,
-                    lower: 0,
-                    upper: menuWidth
-                )
-                dragStartOffset = nil
-                setOpen(predictedOffset > menuWidth / 2, menuWidth: menuWidth)
-            }
-    }
-
-    private func isHorizontal(_ value: DragGesture.Value) -> Bool {
-        return abs(value.translation.width) > abs(value.translation.height)
+            )
+        )
+        .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
+        .ignoresSafeArea(.container, edges: .vertical)
     }
 
     private func setOpen(_ newValue: Bool, menuWidth: CGFloat) {
         let targetOffset = newValue ? menuWidth : 0
-        let animation: Animation = reduceMotion
+        let animation: Animation =
+            reduceMotion
             ? .easeOut(duration: 0.15)
             : .interactiveSpring(response: 0.35, dampingFraction: 0.86)
 
@@ -118,5 +107,84 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
 
     private func clamp(_ value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
         min(max(value, lower), upper)
+    }
+}
+
+private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
+    var canBegin: (CGFloat) -> Bool
+    var onBegan: () -> Void
+    var onChanged: (CGFloat) -> Void
+    var onEnded: (CGFloat) -> Void
+    var onCancelled: () -> Void
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var gesture: HorizontalPanGesture
+
+        init(gesture: HorizontalPanGesture) {
+            self.gesture = gesture
+        }
+
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer,
+                let view = panGesture.view
+            else {
+                return false
+            }
+
+            let velocity = panGesture.velocity(in: view)
+            return abs(velocity.x) > abs(velocity.y)
+                && gesture.canBegin(velocity.x)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // A vertical pan fails our direction check, then scrolling proceeds.
+            // A horizontal pan wins first so both views cannot move together.
+            otherGestureRecognizer.view is UIScrollView
+        }
+    }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(gesture: self)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        recognizer.maximumNumberOfTouches = 1
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(
+        _ recognizer: UIPanGestureRecognizer,
+        context: Context
+    ) {
+        context.coordinator.gesture = self
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: UIPanGestureRecognizer,
+        context: Context
+    ) {
+        switch recognizer.state {
+        case .began:
+            context.coordinator.gesture.onBegan()
+        case .changed:
+            let translationX = recognizer.translation(in: recognizer.view).x
+            context.coordinator.gesture.onChanged(translationX)
+        case .ended:
+            let velocityX = recognizer.velocity(in: recognizer.view).x
+            context.coordinator.gesture.onEnded(velocityX)
+        case .cancelled, .failed:
+            context.coordinator.gesture.onCancelled()
+        case .possible:
+            break
+        @unknown default:
+            context.coordinator.gesture.onCancelled()
+        }
     }
 }
