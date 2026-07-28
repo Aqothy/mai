@@ -49,7 +49,7 @@ final class ThreadDraftStore {
 
     func setText(_ text: String, for threadID: String) {
         guard activeDraftThreadID == threadID else { return }
-        draftText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : text
+        draftText = text
         save()
     }
 

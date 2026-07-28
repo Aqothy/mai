@@ -56,10 +56,6 @@ final class ThreadStore {
         }
     }
 
-    var hasACPProvider: Bool {
-        !acpAgentChoices.isEmpty
-    }
-
     var recentWorkingDirectories: [String] {
         var seen: Set<String> = []
         return threads.compactMap { thread in
@@ -236,11 +232,31 @@ final class ThreadStore {
         )
     }
 
-    func startThread(_ input: Command) async throws {
-        guard let threadID = input.threadID else {
-            throw RPCError(code: nil, message: "Starting a chat requires a thread ID", data: nil)
-        }
-        _ = try await rpc.dispatchCommand(input)
+    func startThread(
+        threadID: String,
+        providerInstanceID: String,
+        cwd: String,
+        message: CommandMessage,
+        configSelections: [ConfigOptionSelection]
+    ) async throws {
+        let command = Command(
+            commandID: UUID().uuidString,
+            configSelections: configSelections,
+            createdAt: now(),
+            cwd: cwd,
+            decision: nil,
+            message: message,
+            modelSelection: nil,
+            optionID: nil,
+            providerInstanceID: providerInstanceID,
+            requestID: nil,
+            threadID: threadID,
+            title: nil,
+            turnID: nil,
+            type: MaidCommandType.threadStart.rawValue,
+            value: nil
+        )
+        _ = try await rpc.dispatchCommand(command)
         selectThread(threadID)
         await subscriptionTasks[threadID]?.task.value
     }
@@ -250,6 +266,66 @@ final class ThreadStore {
             command(
                 type: MaidCommandType.threadTurnRetry.rawValue,
                 threadID: threadID
+            )
+        )
+    }
+
+    func startTurn(
+        threadID: String,
+        text: String,
+        attachments: [Attachment] = []
+    ) async throws {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !attachments.isEmpty else {
+            throw RPCError(
+                code: nil,
+                message: "Sending a message requires text or an attachment",
+                data: nil
+            )
+        }
+
+        _ = try await rpc.dispatchCommand(
+            command(
+                type: MaidCommandType.threadTurnStart.rawValue,
+                threadID: threadID,
+                message: CommandMessage(
+                    attachments: attachments.isEmpty ? nil : attachments,
+                    messageID: UUID().uuidString,
+                    text: text
+                )
+            )
+        )
+    }
+
+    func promptContentCapabilities(
+        for providerInstanceID: String?
+    ) -> PromptContentCapabilities? {
+        guard let providerInstanceID else { return nil }
+        return providers.first { $0.instanceID == providerInstanceID }?
+            .capabilities.promptContent
+    }
+
+    func interruptTurn(threadID: String, turnID: String) async throws {
+        _ = try await rpc.dispatchCommand(
+            command(
+                type: MaidCommandType.threadTurnInterrupt.rawValue,
+                threadID: threadID,
+                turnID: turnID
+            )
+        )
+    }
+
+    func setThreadConfigOption(
+        threadID: String,
+        optionID: String,
+        value: JSONAny
+    ) async throws {
+        _ = try await rpc.dispatchCommand(
+            command(
+                type: MaidCommandType.threadConfigOptionSet.rawValue,
+                threadID: threadID,
+                optionID: optionID,
+                value: value
             )
         )
     }
@@ -321,9 +397,7 @@ final class ThreadStore {
             || provider.driver == "acp"
     }
 
-    private func resolveProvider(_ requestedID: String?) async throws -> String {
-        let preferredID = requestedID ?? providers.first?.instanceID ?? registryAgents.first?.instanceID
-
+    private func resolveProvider(_ preferredID: String) async throws -> String {
         if let provider = providers.first(where: { $0.instanceID == preferredID }) {
             guard provider.instanceStatus != .initialized else { return provider.instanceID }
             let started = try await rpc.startProvider(provider.instanceID)
@@ -347,29 +421,27 @@ final class ThreadStore {
     private func command(
         type: String,
         threadID: String,
-        title: String? = nil,
-        providerInstanceID: String? = nil,
-        cwd: String? = nil,
         message: CommandMessage? = nil,
-        configSelections: [ConfigOptionSelection]? = nil,
-        commandID: String = UUID().uuidString
+        turnID: String? = nil,
+        optionID: String? = nil,
+        value: JSONAny? = nil
     ) -> Command {
         Command(
-            commandID: commandID,
-            configSelections: configSelections,
+            commandID: UUID().uuidString,
+            configSelections: nil,
             createdAt: now(),
-            cwd: cwd,
+            cwd: nil,
             decision: nil,
             message: message,
             modelSelection: nil,
-            optionID: nil,
-            providerInstanceID: providerInstanceID,
+            optionID: optionID,
+            providerInstanceID: nil,
             requestID: nil,
             threadID: threadID,
-            title: title,
-            turnID: nil,
+            title: nil,
+            turnID: turnID,
             type: type,
-            value: nil
+            value: value
         )
     }
 

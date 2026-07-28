@@ -2,22 +2,50 @@ import SwiftUI
 
 struct ChatView: View {
     let store: ThreadStore
-    let draftStore: ThreadDraftStore
+
+    @State private var draftModel: DraftPromptModel
+    @State private var chatModel: ChatPromptModel?
+
+    init(store: ThreadStore, draftStore: ThreadDraftStore) {
+        self.store = store
+        _draftModel = State(initialValue: DraftPromptModel(store: store, draftStore: draftStore))
+    }
 
     var body: some View {
-        if let errorMessage = store.selectedThreadLoadErrorMessage {
-            ContentUnavailableView {
-                Label("Unable to Load Thread", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(errorMessage)
-            } actions: {
-                Button("Retry", action: store.retry)
+        content
+            .safeAreaInset(edge: .bottom) {
+                composerStack
             }
+            .onChange(of: store.selectedThreadID, initial: true) { _, threadID in
+                if let threadID {
+                    if chatModel?.threadID != threadID {
+                        chatModel = ChatPromptModel(store: store, threadID: threadID)
+                    }
+                } else {
+                    chatModel = nil
+                }
+            }
+            .alert(
+                "Something Went Wrong",
+                isPresented: Binding(
+                    get: { chatModel?.isErrorPresented ?? false },
+                    set: { chatModel?.isErrorPresented = $0 }
+                )
+            ) {
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(chatModel?.errorMessage ?? "An unknown error occurred.")
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let errorMessage = store.selectedThreadLoadErrorMessage {
+            ThreadLoadErrorView(store: store, errorMessage: errorMessage)
         } else if let thread = store.selectedThread {
             VStack(alignment: .leading) {
                 Text(thread.title)
                     .font(.largeTitle.bold())
-                    .foregroundStyle(.primary)
                     .accessibilityHeading(.h1)
 
                 if thread.latestTurn?.turnState == .error {
@@ -35,11 +63,136 @@ struct ChatView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding()
-        } else if store.selectedThreadID != nil, store.selectedThread == nil {
+        } else if store.selectedThreadID != nil {
             ProgressView("Loading Chat…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            DraftPromptView(store: store, draftStore: draftStore)
+            DraftPromptView(model: draftModel)
+        }
+    }
+
+    /// One composer for both the draft and thread phases. Its structural
+    /// identity never changes across the transition, so the text field (and
+    /// keyboard focus) survives sending the first message; only the bindings
+    /// and controls around it swap.
+    private var composerStack: some View {
+        let thread = store.selectedThread
+
+        return VStack(alignment: .leading, spacing: 10) {
+            if chatModel == nil {
+                HStack(spacing: 16) {
+                    DraftSessionControlsView(model: draftModel)
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+            }
+
+            PromptComposer(
+                text: promptText,
+                isEnabled: chatModel == nil
+                    ? draftModel.isPromptEnabled
+                    : thread != nil && chatModel?.isPromptEnabled == true,
+                focusID: chatModel == nil ? draftModel.promptFocusID : nil,
+                canSend: chatModel == nil
+                    ? draftModel.canSend
+                    : thread != nil && chatModel?.canSend == true,
+                isSending: isSendingNow,
+                isRunning: thread?.latestTurn?.turnState == .running,
+                isStopping: chatModel?.isInterrupting == true,
+                attachments: currentAttachments,
+                submitLabel: chatModel == nil ? "Start chat" : "Send"
+            ) {
+                if let chatModel {
+                    Task { await chatModel.send() }
+                } else {
+                    Task { await draftModel.send() }
+                }
+            } stop: {
+                if let chatModel, let turnID = thread?.latestTurn?.turnID {
+                    Task { await chatModel.interrupt(turnID: turnID) }
+                }
+            } removeAttachment: { id in
+                if let chatModel {
+                    chatModel.removeAttachment(id: id)
+                } else {
+                    draftModel.removeAttachment(id: id)
+                }
+            } leadingControls: {
+                ComposerAddMenu(
+                    isImageAttachmentAvailable: supportsImageAttachments,
+                    isImageAttachmentDisabled: isSendingNow
+                        || currentAttachments.count
+                            >= ChatAttachmentLoader.maximumAttachmentCount,
+                    maximumImageSelectionCount: max(
+                        1,
+                        ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
+                    ),
+                    commands: thread?.session?.slashCommands ?? [],
+                    addImages: chatModel?.addImages ?? draftModel.addImages,
+                    addPhotos: chatModel?.addPhotos ?? draftModel.addPhotos,
+                    addCameraImage: chatModel?.addCameraImage ?? draftModel.addCameraImage,
+                    insertCommand: chatModel?.insertSlashCommand ?? { _ in },
+                    showError: chatModel?.showError ?? draftModel.showError
+                )
+            } trailingControls: {
+                if let chatModel, let thread {
+                    ChatComposerControlsView(thread: thread, model: chatModel)
+                } else if chatModel == nil {
+                    DraftComposerControlsView(model: draftModel)
+                }
+            }
+        }
+    }
+
+    private var promptText: Binding<String> {
+        Binding(
+            get: {
+                if let chatModel {
+                    chatModel.text
+                } else {
+                    draftModel.prompt
+                }
+            },
+            set: { newValue in
+                if let chatModel {
+                    chatModel.text = newValue
+                } else {
+                    draftModel.prompt = newValue
+                }
+            }
+        )
+    }
+
+    private var currentAttachments: [ChatPendingAttachment] {
+        chatModel?.attachments ?? draftModel.attachments
+    }
+
+    private var isSendingNow: Bool {
+        chatModel?.isSending ?? draftModel.isSending
+    }
+
+    private var supportsImageAttachments: Bool {
+        if chatModel != nil {
+            return store.promptContentCapabilities(
+                for: store.selectedThread?.providerInstanceID
+            )?.image == true
+        }
+        return draftModel.supportsImageAttachments
+    }
+}
+
+private struct ThreadLoadErrorView: View {
+    let store: ThreadStore
+    let errorMessage: String
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Unable to Load Thread", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(errorMessage)
+        } actions: {
+            Button("Retry", action: store.retry)
         }
     }
 }
@@ -86,19 +239,19 @@ private struct FailedTurnView: View {
 }
 
 #if DEBUG
-#Preview("Selected Chat") {
-    NavigationStack {
+    #Preview("Selected Chat") {
+        NavigationStack {
+            ChatView(
+                store: PreviewData.threadStore(),
+                draftStore: ThreadDraftStore()
+            )
+        }
+    }
+
+    #Preview("Draft Chat") {
         ChatView(
-            store: PreviewData.threadStore(),
+            store: ThreadStore(previewThreads: PreviewData.threads),
             draftStore: ThreadDraftStore()
         )
     }
-}
-
-#Preview("Draft Chat") {
-    ChatView(
-        store: ThreadStore(previewThreads: PreviewData.threads),
-        draftStore: ThreadDraftStore()
-    )
-}
 #endif

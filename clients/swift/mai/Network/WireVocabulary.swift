@@ -17,10 +17,6 @@ extension SessionBinding {
     var sessionStatus: MaidSessionStatus? { MaidSessionStatus(rawValue: status) }
 }
 
-extension Message {
-    var messageRole: MaidMessageRole? { MaidMessageRole(rawValue: role) }
-}
-
 extension Approval {
     var approvalStatus: MaidApprovalStatus? { MaidApprovalStatus(rawValue: status) }
 }
@@ -45,6 +41,11 @@ extension ThreadListStreamItem {
 extension ConfigOption {
     var optionType: MaidConfigOptionType? { MaidConfigOptionType(rawValue: type) }
     var optionCategory: MaidConfigOptionCategory? { category.flatMap(MaidConfigOptionCategory.init) }
+
+    var selectedChoiceLabel: String? {
+        guard let currentValue = currentValue?.value as? String else { return nil }
+        return choices?.first { $0.value == currentValue }?.label ?? currentValue
+    }
 }
 
 extension InstanceInfo {

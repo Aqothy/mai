@@ -1,5 +1,7 @@
 import Foundation
 import Observation
+import PhotosUI
+import SwiftUI
 
 @Observable
 final class DraftPromptModel {
@@ -45,6 +47,8 @@ final class DraftPromptModel {
     private var configUpdateTask: Task<Void, Never>?
     private var isConfiguringInitialSelection = false
 
+    private let attachmentsModel = ComposerAttachmentsModel()
+
     init(store: ThreadStore, draftStore: ThreadDraftStore) {
         self.store = store
         self.draftStore = draftStore
@@ -54,6 +58,16 @@ final class DraftPromptModel {
         store.onProviderOptionsInvalidated = { [weak self] invalidation in
             self?.receiveInvalidation(invalidation)
         }
+        attachmentsModel.canAttachImages = { [weak self] in
+            self?.supportsImageAttachments == true
+        }
+        attachmentsModel.reportError = { [weak self] message in
+            self?.errorMessage = message
+        }
+    }
+
+    var attachments: [ChatPendingAttachment] {
+        attachmentsModel.attachments
     }
 
     var nativeProviders: [InstanceInfo] {
@@ -62,6 +76,76 @@ final class DraftPromptModel {
 
     var acpAgentChoices: [ACPAgentChoice] {
         store.acpAgentChoices
+    }
+
+    var providerChoices: [DraftProviderChoice] {
+        let nativeChoices = nativeProviders.map { provider in
+            let driver = provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
+            let groupID = driver.isEmpty ? provider.instanceID : driver
+            let groupName = driver.isEmpty
+                ? provider.name
+                : Self.displayName(forProviderDriver: driver)
+            return DraftProviderChoice(
+                id: "native:\(provider.instanceID)",
+                name: provider.name,
+                providerID: provider.instanceID,
+                acpAgentID: nil,
+                groupID: groupID,
+                groupName: groupName
+            )
+        }
+        let acpChoices = acpAgentChoices.map { agent in
+            DraftProviderChoice(
+                id: "acp:\(agent.id)",
+                name: agent.name,
+                providerID: Self.acpProviderID,
+                acpAgentID: agent.id,
+                groupID: Self.acpProviderID,
+                groupName: Self.displayName(forProviderDriver: Self.acpProviderID)
+            )
+        }
+        return (nativeChoices + acpChoices).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    var providerGroups: [DraftProviderGroup] {
+        Dictionary(grouping: providerChoices, by: \.groupID)
+            .compactMap { groupID, choices in
+                guard let first = choices.first else { return nil }
+                return DraftProviderGroup(
+                    id: groupID,
+                    name: first.groupName,
+                    choices: choices.sorted {
+                        $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                    }
+                )
+            }
+            .sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+    }
+
+    var selectedProviderChoiceID: String? {
+        providerChoices.first {
+            $0.providerID == selectedProviderID
+                && $0.acpAgentID == (usesACPProvider ? selectedACPAgentID : nil)
+        }?.id
+    }
+
+    var selectedProviderGroup: DraftProviderGroup? {
+        guard let selectedProviderChoiceID else { return nil }
+        return providerGroups.first {
+            $0.choices.contains { $0.id == selectedProviderChoiceID }
+        }
+    }
+
+    var selectedProviderGroupChoices: [DraftProviderChoice] {
+        selectedProviderGroup?.choices ?? []
+    }
+
+    var selectedProviderOptionLabel: String {
+        providerChoices.first { $0.id == selectedProviderChoiceID }?.name ?? "Provider"
     }
 
     var recentWorkingDirectories: [String] {
@@ -80,7 +164,7 @@ final class DraftPromptModel {
     }
 
     var hasProviderChoices: Bool {
-        !nativeProviders.isEmpty || store.hasACPProvider
+        !providerChoices.isEmpty
     }
 
     var hasWorkingDirectory: Bool {
@@ -92,14 +176,7 @@ final class DraftPromptModel {
     }
 
     var providerLabel: String {
-        guard let selectedProviderID else { return "Provider" }
-        if usesACPProvider { return "ACP" }
-        return nativeProviders.first { $0.instanceID == selectedProviderID }?.name ?? "Provider"
-    }
-
-    var acpAgentLabel: String {
-        guard let selectedACPAgentID else { return "Agent" }
-        return acpAgentChoices.first { $0.id == selectedACPAgentID }?.name ?? "Agent"
+        selectedProviderGroup?.name ?? "Provider"
     }
 
     var directoryLabel: String {
@@ -116,7 +193,10 @@ final class DraftPromptModel {
         connectionState == .connected
             && effectiveProviderID != nil
             && !workingDirectory.isEmpty
-            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !attachments.isEmpty)
+            && (attachments.isEmpty || supportsImageAttachments)
+            && attachments.allSatisfy { !$0.isProcessing }
             && !isSending
     }
 
@@ -130,6 +210,10 @@ final class DraftPromptModel {
 
     var configControlsAreDisabled: Bool {
         optionsPhase != .live || isSending
+    }
+
+    var supportsImageAttachments: Bool {
+        store.promptContentCapabilities(for: effectiveProviderID)?.image == true
     }
 
     var connectionState: ThreadStore.ConnectionState {
@@ -146,9 +230,7 @@ final class DraftPromptModel {
     }
 
     var catalogSelectionKey: String {
-        let providers = nativeProviders.map(\.instanceID).joined(separator: ",")
-        let agents = acpAgentChoices.map(\.id).joined(separator: ",")
-        return "\(providers)|\(agents)"
+        providerChoices.map(\.id).joined(separator: ",")
     }
 
     var optionsSelectionKey: String {
@@ -173,11 +255,8 @@ final class DraftPromptModel {
             if let providerID = draftStore.preferences.providerID,
                providerIsAvailable(providerID) {
                 selectProvider(providerID)
-            } else if let provider = nativeProviders.first {
-                selectedProviderID = provider.instanceID
-            } else if let agent = acpAgentChoices.first {
-                selectedProviderID = Self.acpProviderID
-                selectedACPAgentID = agent.id
+            } else if let provider = providerChoices.first {
+                selectProvider(provider)
             }
         }
         if workingDirectory.isEmpty {
@@ -193,6 +272,19 @@ final class DraftPromptModel {
     func beginEnteringDirectory() {
         directoryInput = workingDirectory
         isEnteringDirectory = true
+    }
+
+    func selectProvider(_ choice: DraftProviderChoice) {
+        selectedACPAgentID = choice.acpAgentID
+        selectedProviderID = choice.providerID
+    }
+
+    func selectProviderGroup(_ group: DraftProviderGroup) {
+        let choice =
+            group.choices.first { $0.id == selectedProviderChoiceID }
+            ?? group.choices.first
+        guard let choice else { return }
+        selectProvider(choice)
     }
 
     func commitDirectoryInput() {
@@ -272,13 +364,32 @@ final class DraftPromptModel {
         }
     }
 
+    func addImages(from urls: [URL]) async {
+        await attachmentsModel.addImages(from: urls)
+    }
+
+    func addPhotos(_ photos: [PhotosPickerItem]) {
+        attachmentsModel.addPhotos(photos)
+    }
+
+    func addCameraImage(_ thumbnail: ChatComposerThumbnail) {
+        attachmentsModel.addCameraImage(thumbnail)
+    }
+
+    func removeAttachment(id: UUID) {
+        attachmentsModel.remove(id: id)
+    }
+
+    func showError(_ error: Error) {
+        errorMessage = error.localizedDescription
+    }
+
     func send() async {
         // An earlier ambiguous Start may have already created this thread; open
         // it instead of silently colliding with the idempotent thread ID.
         if reconcileAcceptedDraft() { return }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend,
-              !text.isEmpty,
               let requestedProviderID = effectiveProviderID,
               let threadID = draftStore.activeDraftThreadID else { return }
 
@@ -295,29 +406,18 @@ final class DraftPromptModel {
             return
         }
 
-        let attempt = Command(
-            commandID: UUID().uuidString,
-            configSelections: selections,
-            createdAt: .now,
-            cwd: requestedCwd,
-            decision: nil,
-            message: CommandMessage(
-                attachments: nil,
-                messageID: UUID().uuidString,
-                text: text
-            ),
-            modelSelection: nil,
-            optionID: nil,
-            providerInstanceID: providerID,
-            requestID: nil,
-            threadID: threadID,
-            title: nil,
-            turnID: nil,
-            type: MaidCommandType.threadStart.rawValue,
-            value: nil
-        )
         do {
-            try await store.startThread(attempt)
+            try await store.startThread(
+                threadID: threadID,
+                providerInstanceID: providerID,
+                cwd: requestedCwd,
+                message: CommandMessage(
+                    attachments: attachments.compactMap(\.attachment),
+                    messageID: UUID().uuidString,
+                    text: text
+                ),
+                configSelections: selections
+            )
             draftStore.removeDraft(for: threadID)
         } catch is CancellationError {
             return
@@ -537,8 +637,14 @@ final class DraftPromptModel {
         }
     }
 
-    private func showError(_ error: Error) {
-        errorMessage = error.localizedDescription
+    private static func displayName(forProviderDriver driver: String) -> String {
+        let words = driver
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .map(String.init)
+        if words.count == 1, let word = words.first, word.count <= 4 {
+            return word.uppercased()
+        }
+        return words.map(\.capitalized).joined(separator: " ")
     }
 
     private struct ConfigUpdate {

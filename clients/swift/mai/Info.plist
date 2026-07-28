@@ -4,5 +4,7 @@
 <dict>
 	<key>MAI_RPC_URL</key>
 	<string>$(MAI_RPC_URL)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Allow mai to take photos you choose to attach to a message.</string>
 </dict>
 </plist>

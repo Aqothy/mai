@@ -381,7 +381,7 @@ struct ThreadStoreTests {
         )
 
         restored.setText("  \n", for: "thread-a")
-        #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a").isEmpty)
+        #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a") == "  \n")
     }
 
     @Test

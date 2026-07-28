@@ -7,8 +7,6 @@ struct SlideOutMenuContentView<Content: View>: View {
     let close: () -> Void
 
     var body: some View {
-        let contentShape = ContainerRelativeShape()
-
         content
             .containerRelativeFrame(.horizontal)
             .frame(maxHeight: .infinity)
@@ -28,7 +26,7 @@ struct SlideOutMenuContentView<Content: View>: View {
                 .accessibilityHidden(progress <= 0.001)
                 .accessibilityLabel("Close menu")
             }
-            .clipShape(contentShape)
+            .clipShape(ContainerRelativeShape())
             .shadow(
                 color: .black.opacity(0.22 * progress),
                 radius: 24 * progress,

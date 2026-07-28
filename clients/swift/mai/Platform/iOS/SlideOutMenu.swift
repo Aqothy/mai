@@ -1,10 +1,9 @@
+#if os(iOS)
 import SwiftUI
 import UIKit
 
 struct SlideOutMenu<Menu: View, Content: View>: View {
     @Binding var isOpen: Bool
-
-    var preferredWidth: CGFloat = 280
 
     @ViewBuilder var menu: Menu
     @ViewBuilder var content: Content
@@ -12,7 +11,10 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
     @State private var xOffset: CGFloat = 0
     @State private var hapticTrigger = false
     @State private var dragStartOffset: CGFloat?
+    @State private var isContentObscured = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var preferredWidth: CGFloat { 280 }
 
     /// Open-ness in 0...1. Derived from xOffset rather than tracked alongside
     /// it, so the two can never disagree mid-drag or mid-animation.
@@ -28,16 +30,19 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
                 .accessibilityHidden(!isOpen)
 
             SlideOutMenuContentView(
-                content: content,
+                content: content.environment(
+                    \.isSlideOutMenuPresented,
+                    isContentObscured
+                ),
                 progress: progress,
                 xOffset: xOffset
             ) {
                 setOpen(false, menuWidth: preferredWidth)
             }
         }
-        .contentShape(.rect)
         .onAppear {
             xOffset = isOpen ? preferredWidth : 0
+            isContentObscured = isOpen
         }
         .onChange(of: isOpen) { _, newValue in
             setOpen(newValue, menuWidth: preferredWidth)
@@ -55,6 +60,9 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
                 },
                 onBegan: {
                     dragStartOffset = xOffset
+                    if xOffset <= 0 {
+                        isContentObscured = true
+                    }
                 },
                 onChanged: { translationX in
                     xOffset = clamp(
@@ -85,10 +93,15 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
             )
         )
         .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
-        .ignoresSafeArea(.container, edges: .vertical)
+        // The drawer chrome must not resize with the keyboard: keyboard
+        // avoidance belongs to the NavigationStack content, and stable
+        // full-screen bounds keep the clip shape from masking the composer
+        // mid-animation.
+        .ignoresSafeArea(edges: .vertical)
     }
 
     private func setOpen(_ newValue: Bool, menuWidth: CGFloat) {
+        isContentObscured = newValue
         let targetOffset = newValue ? menuWidth : 0
         let animation: Animation =
             reduceMotion
@@ -188,3 +201,4 @@ private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
         }
     }
 }
+#endif

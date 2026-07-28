@@ -1,164 +1,52 @@
 import SwiftUI
 
 struct DraftPromptView: View {
-    @State private var model: DraftPromptModel
-
-    init(store: ThreadStore, draftStore: ThreadDraftStore) {
-        _model = State(initialValue: DraftPromptModel(store: store, draftStore: draftStore))
-    }
+    let model: DraftPromptModel
 
     var body: some View {
         @Bindable var model = model
 
-        ScrollView {
-            VStack {
-                VStack {
-                    Image(systemName: "sparkles")
-                        .font(.largeTitle)
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
-
-                    Text("What would you like to build?")
-                        .font(.largeTitle.bold())
-                        .multilineTextAlignment(.center)
-                        .accessibilityHeading(.h1)
-
-                    Text("Choose a provider and describe your task.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    if model.connectionState != .connected {
-                        Label("Waiting for maiD…", systemImage: "network")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else if !model.hasProviderChoices {
-                        Label("No providers available", systemImage: "exclamationmark.triangle")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else if !model.hasWorkingDirectory {
-                        Label("Choose a working directory", systemImage: "folder.badge.questionmark")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                VStack(spacing: 0) {
-                    DraftPromptEditor(
-                        text: $model.prompt,
-                        isEnabled: model.isPromptEnabled,
-                        focusID: model.promptFocusID,
-                        canSend: model.canSend
-                    ) {
-                        Task { await model.send() }
-                    }
-
-                    Divider()
-
-                    HStack {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                Picker(selection: $model.selectedProviderID) {
-                                    ForEach(model.nativeProviders, id: \.instanceID) { provider in
-                                        Text(provider.name).tag(Optional(provider.instanceID))
-                                    }
-                                    if !model.acpAgentChoices.isEmpty {
-                                        Text("ACP").tag(Optional("acp"))
-                                    }
-                                } label: {
-                                    Label(model.providerLabel, systemImage: "server.rack")
-                                }
-                                .pickerStyle(.menu)
-                                .fixedSize()
-                                .disabled(model.isSending)
-                                .accessibilityLabel("Provider")
-
-                                if model.usesACPProvider {
-                                    Picker(selection: $model.selectedACPAgentID) {
-                                        ForEach(model.acpAgentChoices) { agent in
-                                            Text(agent.name).tag(Optional(agent.id))
-                                        }
-                                    } label: {
-                                        Label(model.acpAgentLabel, systemImage: "person.crop.circle")
-                                    }
-                                    .pickerStyle(.menu)
-                                    .fixedSize()
-                                    .disabled(model.isSending)
-                                    .accessibilityLabel("ACP agent")
-                                }
-
-                                ForEach(model.configOptions, id: \.id) { option in
-                                    DraftConfigOptionView(option: option) { value in
-                                        model.updateConfig(option.id, value: value)
-                                    }
-                                    .disabled(model.configControlsAreDisabled)
-                                }
-
-                                switch model.optionsPhase {
-                                case .loading:
-                                    ProgressView(model.optionsLoadingLabel)
-                                        .font(.callout)
-                                case .failed(let message):
-                                    Label(message, systemImage: "exclamationmark.triangle")
-                                        .font(.callout)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                    Button("Retry settings", action: model.retryOptions)
-                                case .unavailable, .live:
-                                    EmptyView()
-                                }
-
-                                Menu {
-                                    if !model.recentWorkingDirectories.isEmpty {
-                                        ForEach(model.recentWorkingDirectories, id: \.self) { directory in
-                                            Button(directory) {
-                                                model.workingDirectory = directory
-                                            }
-                                        }
-                                        Divider()
-                                    }
-
-                                    Button("Enter a path…") {
-                                        model.beginEnteringDirectory()
-                                    }
-                                } label: {
-                                    Label(model.directoryLabel, systemImage: "folder")
-                                        .lineLimit(1)
-                                }
-                                .fixedSize()
-                                .disabled(model.isSending)
-                                .accessibilityLabel("Working directory")
-                            }
-                        }
-                        .scrollIndicators(.hidden)
-
-                        Spacer()
-
-                        Button(
-                            "Start chat",
-                            systemImage: model.isSending ? "hourglass" : "arrow.up"
-                        ) {
-                            Task { await model.send() }
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .disabled(!model.canSend)
-                    }
-                    .padding()
-                }
-                .background(.background)
-                .clipShape(.rect(cornerRadius: 18))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(.quaternary, lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.06), radius: 16, y: 6)
+        ZStack {
+            // empty scroll view to dismiss keyboard without scrolling content
+            // view in draft
+            ScrollView {
             }
-            .frame(maxWidth: 720)
+            .scrollDismissesKeyboard(.interactively)
+
+            VStack {
+                Image(systemName: "sparkles")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+
+                Text("What would you like to build?")
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
+                    .accessibilityHeading(.h1)
+
+                Text("Choose a provider and describe your task.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if model.connectionState != .connected {
+                    Label("Waiting for maiD…", systemImage: "network")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if !model.hasProviderChoices {
+                    Label("No providers available", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if !model.hasWorkingDirectory {
+                    Label(
+                        "Choose a working directory", systemImage: "folder.badge.questionmark"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+            }
             .frame(maxWidth: .infinity)
             .padding()
         }
-        .scrollDismissesKeyboard(.interactively)
         .task {
             model.ensureLocalDraft()
         }
@@ -185,11 +73,166 @@ struct DraftPromptView: View {
     }
 }
 
-#if DEBUG
-#Preview("Draft Prompt") {
-    DraftPromptView(
-        store: ThreadStore(previewThreads: PreviewData.threads),
-        draftStore: ThreadDraftStore()
-    )
+struct DraftComposerControlsView: View {
+    let model: DraftPromptModel
+
+    @State private var isOptionsPresented = false
+
+    var body: some View {
+        Group {
+            switch model.optionsPhase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(model.optionsLoadingLabel)
+            case .failed:
+                Button("Retry options", systemImage: "exclamationmark.triangle") {
+                    model.retryOptions()
+                }
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Retry provider options")
+            case .live where !model.configOptions.isEmpty:
+                ComposerOptionsButton(
+                    summary: selectionSummary,
+                    isPresented: $isOptionsPresented,
+                    isDisabled: model.isSending
+                ) {
+                    ComposerOptionsSheet(
+                        options: model.configOptions,
+                        isOptionDisabled: { _ in model.configControlsAreDisabled },
+                        setValue: { option, value in
+                            model.updateConfig(option.id, value: value)
+                        }
+                    )
+                }
+            case .unavailable, .live:
+                EmptyView()
+            }
+        }
+    }
+
+    private var selectionSummary: String {
+        model.configOptions.selectionSummary ?? model.providerLabel
+    }
 }
+
+struct DraftSessionControlsView: View {
+    let model: DraftPromptModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.providerGroups) { group in
+                Button {
+                    model.selectProviderGroup(group)
+                } label: {
+                    if model.selectedProviderGroup?.id == group.id {
+                        Label(group.name, systemImage: "checkmark")
+                    } else {
+                        Text(group.name)
+                    }
+                }
+            }
+        } label: {
+            Label(model.selectedProviderGroup?.name ?? "Provider", systemImage: "server.rack")
+                .lineLimit(1)
+        }
+        .disabled(model.isSending || !model.hasProviderChoices)
+        .accessibilityLabel("Provider")
+
+        if model.selectedProviderGroupChoices.count > 1 {
+            Menu {
+                ForEach(model.selectedProviderGroupChoices) { provider in
+                    Button {
+                        model.selectProvider(provider)
+                    } label: {
+                        if model.selectedProviderChoiceID == provider.id {
+                            Label(provider.name, systemImage: "checkmark")
+                        } else {
+                            Text(provider.name)
+                        }
+                    }
+                }
+            } label: {
+                Label(
+                    model.selectedProviderOptionLabel,
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
+                .lineLimit(1)
+            }
+            .disabled(model.isSending)
+            .accessibilityLabel("Provider option")
+        }
+
+        Menu {
+            ForEach(model.recentWorkingDirectories, id: \.self) { directory in
+                Button(directory) {
+                    model.workingDirectory = directory
+                }
+            }
+
+            if !model.recentWorkingDirectories.isEmpty {
+                Divider()
+            }
+
+            Button("Enter a path…") {
+                model.beginEnteringDirectory()
+            }
+        } label: {
+            Label(model.directoryLabel, systemImage: "folder")
+                .lineLimit(1)
+        }
+        .disabled(model.isSending)
+        .accessibilityLabel("Working directory")
+    }
+}
+
+struct DraftProviderChoice: Identifiable {
+    let id: String
+    let name: String
+    let providerID: String
+    let acpAgentID: String?
+    let groupID: String
+    let groupName: String
+}
+
+struct DraftProviderGroup: Identifiable {
+    let id: String
+    let name: String
+    let choices: [DraftProviderChoice]
+}
+
+#if DEBUG
+    #Preview("Draft Prompt") {
+        DraftPromptView(
+            model: DraftPromptModel(
+                store: ThreadStore(
+                    previewThreads: PreviewData.threads,
+                    registryAgents: [
+                        ACPRegistryAgent(
+                            args: nil,
+                            description: nil,
+                            icon: nil,
+                            id: "claude-code",
+                            instanceID: "claude-code",
+                            name: "Claude",
+                            package: "claude-code-acp",
+                            version: nil
+                        ),
+                        ACPRegistryAgent(
+                            args: nil,
+                            description: nil,
+                            icon: nil,
+                            id: "codex",
+                            instanceID: "codex",
+                            name: "Codex",
+                            package: "codex-acp",
+                            version: nil
+                        ),
+                    ]
+                ),
+                draftStore: ThreadDraftStore()
+            )
+        )
+    }
 #endif
