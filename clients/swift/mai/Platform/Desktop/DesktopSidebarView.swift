@@ -15,30 +15,7 @@ struct DesktopSidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .overlay {
-            if store.threads.isEmpty {
-                if store.connectionState == .connected {
-                    ContentUnavailableView(
-                        "No Threads",
-                        systemImage: "bubble.left.and.bubble.right",
-                        description: Text("Your conversations will appear here.")
-                    )
-                } else if store.automaticReconnectsExhausted {
-                    ContentUnavailableView {
-                        Label("maiD Unavailable", systemImage: "network.slash")
-                    } description: {
-                        Text(store.errorMessage ?? "Could not connect to the server.")
-                    } actions: {
-                        Button("Retry", action: store.retry)
-                    }
-                } else {
-                    ReconnectOverlayView(store: store)
-                }
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            ConnectionStatusView(store: store)
-        }
+        .modifier(ThreadListStatusModifier(store: store))
     }
 
     private var selection: Binding<String?> {

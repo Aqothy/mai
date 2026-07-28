@@ -9,9 +9,7 @@ struct IOSAppContainer: View {
 
     var body: some View {
         SlideOutMenu(isOpen: $isSidebarPresented) {
-            NavigationStack {
-                IOSSidebarView(store: store, isPresented: $isSidebarPresented)
-            }
+            IOSSidebarView(store: store, isPresented: $isSidebarPresented)
         } content: {
             NavigationStack {
                 ChatView(store: store, draftStore: draftStore)
