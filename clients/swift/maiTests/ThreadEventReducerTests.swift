@@ -569,9 +569,7 @@ private func makeToolCall(command: String) -> ToolCall {
         namespace: nil,
         output: nil,
         providerKind: nil,
-        query: nil,
-        rawInput: nil,
-        rawOutput: nil
+        query: nil
     )
 }
 

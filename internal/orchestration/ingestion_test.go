@@ -1601,10 +1601,10 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 	// Providers send the COMPLETE neutral tool-call state on every data-bearing
 	// event (the ACP adapter accumulates sparse updates itself); a status-only
 	// update keeps the previous snapshot.
-	startTool := &provider.ToolCall{Action: provider.ToolActionExecute, Command: "go test ./...", Locations: []provider.ToolLocation{{Path: "main.go"}}, RawInput: json.RawMessage(`{"command":"go test ./..."}`)}
+	startTool := &provider.ToolCall{Action: provider.ToolActionExecute, Command: "go test ./...", Locations: []provider.ToolLocation{{Path: "main.go"}}}
 	doneValue := *startTool
 	doneTool := &doneValue
-	doneTool.RawOutput = json.RawMessage(`{"exitCode":0}`)
+	doneTool.Output = "ok"
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-start", Type: provider.RuntimeEventItemStarted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests", ToolCall: startTool}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-done", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ToolCall: doneTool}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-item-status-only", Type: provider.RuntimeEventItemUpdated, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", ItemID: "tool-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution}})
@@ -1620,7 +1620,7 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 	if item.ID != "tool-1" || item.Kind != provider.ItemKindCommandExecution || item.Status != provider.ItemStatusCompleted || item.Title != "run tests" {
 		t.Fatalf("item = %#v, want completed command_execution keeping its title", item)
 	}
-	if item.ToolCall == nil || item.ToolCall.Command != "go test ./..." || len(item.ToolCall.Locations) != 1 || item.ToolCall.Locations[0].Path != "main.go" || string(item.ToolCall.RawOutput) != `{"exitCode":0}` {
+	if item.ToolCall == nil || item.ToolCall.Command != "go test ./..." || len(item.ToolCall.Locations) != 1 || item.ToolCall.Locations[0].Path != "main.go" || item.ToolCall.Output != "ok" {
 		t.Fatalf("item tool call = %#v, want the completed neutral snapshot", item.ToolCall)
 	}
 

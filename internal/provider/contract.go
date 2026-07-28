@@ -125,16 +125,15 @@ type Auth struct {
 // client to display and authenticate the provider. InstanceID is the
 // client-chosen routing key used by every instance-scoped RPC.
 type InstanceInfo struct {
-	InstanceID    InstanceID                 `json:"instanceId"`
-	Name          string                     `json:"name"`
-	Driver        DriverKind                 `json:"driver"`
-	PID           int                        `json:"pid,omitempty"`
-	Status        InstanceStatus             `json:"status"`
-	StartedAt     time.Time                  `json:"startedAt"`
-	InitializedAt time.Time                  `json:"initializedAt"`
-	Capabilities  Capabilities               `json:"capabilities"`
-	Auth          Auth                       `json:"auth"`
-	Metadata      map[string]json.RawMessage `json:"metadata,omitempty"`
+	InstanceID    InstanceID     `json:"instanceId"`
+	Name          string         `json:"name"`
+	Driver        DriverKind     `json:"driver"`
+	PID           int            `json:"pid,omitempty"`
+	Status        InstanceStatus `json:"status"`
+	StartedAt     time.Time      `json:"startedAt"`
+	InitializedAt time.Time      `json:"initializedAt"`
+	Capabilities  Capabilities   `json:"capabilities"`
+	Auth          Auth           `json:"auth"`
 }
 
 // SlashCommand is an agent-advertised command the client can offer (ACP
@@ -279,13 +278,11 @@ type StartSessionResult struct {
 }
 
 type Attachment struct {
-	Kind     string                     `json:"kind"`
-	Name     string                     `json:"name,omitempty"`
-	MimeType string                     `json:"mimeType,omitempty"`
-	Data     string                     `json:"data,omitempty"`
-	URI      string                     `json:"uri,omitempty"`
-	Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
-	Raw      json.RawMessage            `json:"raw,omitempty"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Data     string `json:"data,omitempty"`
+	URI      string `json:"uri,omitempty"`
 }
 
 type SendTurnInput struct {
@@ -323,11 +320,9 @@ const (
 )
 
 type ApprovalOption struct {
-	ID       string                     `json:"optionId"`
-	Name     string                     `json:"name"`
-	Kind     string                     `json:"kind,omitempty"`
-	Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
-	Raw      json.RawMessage            `json:"raw,omitempty"`
+	ID   string `json:"optionId"`
+	Name string `json:"name"`
+	Kind string `json:"kind,omitempty"`
 }
 
 type RespondToRequestInput struct {
@@ -452,26 +447,23 @@ type FileChange struct {
 
 // ToolCall is the complete provider-neutral display snapshot for a tool item.
 // Adapters merge native sparse updates before emitting it; consumers treat the
-// snapshot as immutable. RawInput/RawOutput intentionally remain arbitrary
-// JSON: clients may inspect or pretty-print them, but must not branch on
-// provider-specific keys.
+// snapshot as immutable. Provider-native input and output blobs stay private to
+// adapters and must be normalized into these client-facing fields.
 type ToolCall struct {
-	Action               ToolAction      `json:"action"`
-	Name                 string          `json:"name,omitempty"`
-	Namespace            string          `json:"namespace,omitempty"`
-	ProviderKind         string          `json:"providerKind,omitempty"`
-	Command              string          `json:"command,omitempty"`
-	Query                string          `json:"query,omitempty"`
-	Cwd                  string          `json:"cwd,omitempty"`
-	Output               string          `json:"output,omitempty"`
-	Error                string          `json:"error,omitempty"`
-	Locations            []ToolLocation  `json:"locations,omitempty"`
-	Changes              []FileChange    `json:"changes,omitempty"`
-	Attachments          []Attachment    `json:"attachments,omitempty"`
-	RawInput             json.RawMessage `json:"rawInput,omitempty"`
-	RawOutput            json.RawMessage `json:"rawOutput,omitempty"`
-	ExitCode             *int            `json:"exitCode,omitempty"`
-	DurationMilliseconds *int64          `json:"durationMilliseconds,omitempty"`
+	Action               ToolAction     `json:"action"`
+	Name                 string         `json:"name,omitempty"`
+	Namespace            string         `json:"namespace,omitempty"`
+	ProviderKind         string         `json:"providerKind,omitempty"`
+	Command              string         `json:"command,omitempty"`
+	Query                string         `json:"query,omitempty"`
+	Cwd                  string         `json:"cwd,omitempty"`
+	Output               string         `json:"output,omitempty"`
+	Error                string         `json:"error,omitempty"`
+	Locations            []ToolLocation `json:"locations,omitempty"`
+	Changes              []FileChange   `json:"changes,omitempty"`
+	Attachments          []Attachment   `json:"attachments,omitempty"`
+	ExitCode             *int           `json:"exitCode,omitempty"`
+	DurationMilliseconds *int64         `json:"durationMilliseconds,omitempty"`
 }
 
 // ItemStatus is the provider-neutral lifecycle status of an item.
@@ -533,11 +525,10 @@ type RuntimeEventPayload struct {
 	ToolCall    *ToolCall                `json:"toolCall,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
-	ConfigOptions []ConfigOption             `json:"configOptions,omitzero"`
-	SlashCommands []SlashCommand             `json:"slashCommands,omitzero"`
-	TokenUsage    *TokenUsage                `json:"tokenUsage,omitempty"`
-	PlanEntries   []PlanEntry                `json:"planEntries,omitempty"`
-	Metadata      map[string]json.RawMessage `json:"metadata,omitempty"`
+	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
+	SlashCommands []SlashCommand `json:"slashCommands,omitzero"`
+	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
+	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
 }
 
 // RuntimeEvent is the canonical provider-neutral event emitted by adapters.

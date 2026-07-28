@@ -73,20 +73,6 @@ func boolValue(value *bool) bool {
 	return value != nil && *value
 }
 
-func metadataFromInitialize(initResp schema.InitializeResponse, rawInit json.RawMessage) map[string]json.RawMessage {
-	metadata := map[string]json.RawMessage{
-		"agentCapabilities": marshalRaw(agentCapabilitiesValue(initResp.AgentCapabilities)),
-		"authMethods":       marshalRaw(initResp.AuthMethods),
-	}
-	if initResp.AgentInfo != nil {
-		metadata["agentInfo"] = marshalRaw(initResp.AgentInfo)
-	}
-	if len(rawInit) > 0 {
-		metadata["rawInitialize"] = append(json.RawMessage(nil), rawInit...)
-	}
-	return metadata
-}
-
 // contentBlocks builds the ACP prompt content. Text and resource_link are
 // always allowed (baseline ACP); image/audio/embedded blocks are gated on the
 // agent's advertised prompt-content capabilities.
@@ -95,10 +81,7 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 	if strings.TrimSpace(input.Input) != "" {
 		blocks = append(blocks, schema.TextBlock(input.Input))
 	}
-	for i, attachment := range input.Attachments {
-		if len(attachment.Raw) > 0 {
-			return nil, fmt.Errorf("unsupported raw ACP attachment at index %d; use a generic attachment kind", i)
-		}
+	for _, attachment := range input.Attachments {
 		switch attachment.Kind {
 		case "", "text":
 			blocks = append(blocks, schema.TextBlock(attachment.Data))
@@ -218,7 +201,7 @@ func selectedPermissionOptionID(resp schema.RequestPermissionResponse) (schema.P
 func permissionOptionsFromACP(options []schema.PermissionOption) []provider.ApprovalOption {
 	converted := make([]provider.ApprovalOption, 0, len(options))
 	for _, option := range options {
-		converted = append(converted, provider.ApprovalOption{ID: string(option.OptionID), Name: option.Name, Kind: string(option.Kind), Raw: marshalRaw(option)})
+		converted = append(converted, provider.ApprovalOption{ID: string(option.OptionID), Name: option.Name, Kind: string(option.Kind)})
 	}
 	return converted
 }
@@ -414,10 +397,9 @@ func toolCallData(u schema.SessionUpdate) json.RawMessage {
 		object["locations"] = u.Locations
 	}
 	if u.RawInput != nil {
+		// Retained only in the adapter-private snapshot so command/query/cwd can
+		// be normalized. It is never copied into the public ToolCall.
 		object["rawInput"] = u.RawInput
-	}
-	if u.RawOutput != nil {
-		object["rawOutput"] = u.RawOutput
 	}
 	return marshalRaw(object)
 }
@@ -434,7 +416,6 @@ func toolCallFromACPData(data json.RawMessage) *provider.ToolCall {
 		Content   []schema.ToolCallContent  `json:"content"`
 		Locations []schema.ToolCallLocation `json:"locations"`
 		RawInput  json.RawMessage           `json:"rawInput"`
-		RawOutput json.RawMessage           `json:"rawOutput"`
 	}
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return nil
@@ -448,8 +429,6 @@ func toolCallFromACPData(data json.RawMessage) *provider.ToolCall {
 		Changes:      toolChangesFromACP(snapshot.Content, action),
 		Attachments:  toolAttachmentsFromACP(snapshot.Content),
 		Output:       toolTextFromACP(snapshot.Content),
-		RawInput:     snapshot.RawInput,
-		RawOutput:    snapshot.RawOutput,
 	}
 	call.Command, call.Query, call.Cwd = toolInputDetails(snapshot.RawInput)
 	return call

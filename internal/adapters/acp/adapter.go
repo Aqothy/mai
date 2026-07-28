@@ -97,7 +97,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		return nil, err
 	}
 
-	rawInit, _ := json.Marshal(initResp)
 	h.info = provider.InstanceInfo{
 		InstanceID:    spec.InstanceID,
 		Name:          spec.Name,
@@ -108,7 +107,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		InitializedAt: h.initializedAt,
 		Capabilities:  capabilitySet(initResp),
 		Auth:          authStateFromACP(initResp),
-		Metadata:      metadataFromInitialize(initResp, rawInit),
 	}
 	go h.wait()
 	return h, nil
@@ -223,13 +221,6 @@ func (h *Instance) Info() provider.InstanceInfo {
 
 func cloneInstanceInfo(conn provider.InstanceInfo) provider.InstanceInfo {
 	conn.Auth.Methods = append([]provider.AuthMethod(nil), conn.Auth.Methods...)
-	if conn.Metadata != nil {
-		metadata := make(map[string]json.RawMessage, len(conn.Metadata))
-		for key, value := range conn.Metadata {
-			metadata[key] = append(json.RawMessage(nil), value...)
-		}
-		conn.Metadata = metadata
-	}
 	return conn
 }
 
@@ -238,21 +229,14 @@ func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	resp, err := h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
+	_, err = h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.info.Metadata == nil {
-		h.info.Metadata = make(map[string]json.RawMessage)
-	}
-	now := time.Now()
 	h.info.Auth.Status = provider.AuthStatusAuthenticated
-	h.info.Metadata["authenticatedAt"] = marshalRaw(now)
-	h.info.Metadata["authenticatedMethodId"] = marshalRaw(resolvedMethodID)
-	h.info.Metadata["authenticateResponse"] = marshalRaw(resp)
 	return cloneInstanceInfo(h.info), nil
 }
 
@@ -260,19 +244,14 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	if !h.Info().Capabilities.Logout {
 		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
 	}
-	resp, err := h.agent().Logout(ctx, schema.LogoutRequest{})
+	_, err := h.agent().Logout(ctx, schema.LogoutRequest{})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.info.Metadata == nil {
-		h.info.Metadata = make(map[string]json.RawMessage)
-	}
 	h.info.Auth.Status = provider.AuthStatusUnauthenticated
-	h.info.Metadata["loggedOutAt"] = marshalRaw(time.Now())
-	h.info.Metadata["logoutResponse"] = marshalRaw(resp)
 	return cloneInstanceInfo(h.info), nil
 }
 

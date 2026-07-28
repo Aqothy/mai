@@ -23,8 +23,6 @@ func TestToolCallContractCoversTargetProviderShapes(t *testing.T) {
 				Locations:    []ToolLocation{{Path: "main.go", Line: &line}},
 				Changes:      []FileChange{{Path: "main.go", Kind: FileChangeUpdate, OldText: "old", NewText: "new"}},
 				Attachments:  []Attachment{{Kind: "image", Data: "aW1hZ2U=", MimeType: "image/png"}},
-				RawInput:     json.RawMessage(`{"command":"go test ./..."}`),
-				RawOutput:    json.RawMessage(`{"exitCode":0}`),
 				ExitCode:     &exitZero,
 			},
 		},
@@ -35,8 +33,6 @@ func TestToolCallContractCoversTargetProviderShapes(t *testing.T) {
 				Name:         "web_search",
 				ProviderKind: "webSearch",
 				Query:        "neutral tool contracts",
-				RawInput:     json.RawMessage(`{"query":"neutral tool contracts"}`),
-				RawOutput:    json.RawMessage(`{"results":[{"title":"Result"}]}`),
 			},
 		},
 		{
@@ -48,8 +44,6 @@ func TestToolCallContractCoversTargetProviderShapes(t *testing.T) {
 				ProviderKind:         "mcpToolCall",
 				Output:               "snapshot ready",
 				Attachments:          []Attachment{{Kind: "resource", URI: "file:///tmp/snapshot.png", MimeType: "image/png"}},
-				RawInput:             json.RawMessage(`{"interactiveOnly":true}`),
-				RawOutput:            json.RawMessage(`{"structuredContent":{"ok":true}}`),
 				DurationMilliseconds: &duration,
 			},
 		},
@@ -61,8 +55,6 @@ func TestToolCallContractCoversTargetProviderShapes(t *testing.T) {
 				ProviderKind: "tool_use",
 				Locations:    []ToolLocation{{Path: "/repo/main.go"}},
 				Changes:      []FileChange{{Path: "/repo/main.go", Kind: FileChangeUpdate}},
-				RawInput:     json.RawMessage(`{"file_path":"/repo/main.go","old_string":"old","new_string":"new"}`),
-				RawOutput:    json.RawMessage(`{"type":"tool_result","content":"updated"}`),
 				Output:       "updated",
 			},
 		},
@@ -80,9 +72,6 @@ func TestToolCallContractCoversTargetProviderShapes(t *testing.T) {
 			}
 			if decoded.Action != test.call.Action || decoded.Name != test.call.Name || decoded.ProviderKind != test.call.ProviderKind {
 				t.Fatalf("identity fields changed: got %#v want %#v", decoded, test.call)
-			}
-			if string(decoded.RawInput) != string(test.call.RawInput) || string(decoded.RawOutput) != string(test.call.RawOutput) {
-				t.Fatalf("raw values changed: got %s / %s", decoded.RawInput, decoded.RawOutput)
 			}
 			if len(decoded.Locations) != len(test.call.Locations) || len(decoded.Changes) != len(test.call.Changes) || len(decoded.Attachments) != len(test.call.Attachments) {
 				t.Fatalf("display collections changed: got %#v want %#v", decoded, test.call)

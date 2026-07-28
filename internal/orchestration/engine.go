@@ -558,9 +558,6 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
 		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
 	}
-	if err := validateGenericAttachments(command.Type, command.Message.Attachments); err != nil {
-		return DispatchResult{}, err
-	}
 	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
 	if err != nil {
 		return DispatchResult{}, err
@@ -644,9 +641,6 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 	}
 	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
 		return DispatchResult{}, fmt.Errorf("thread.turn.start requires message.text or message.attachments")
-	}
-	if err := validateGenericAttachments(command.Type, command.Message.Attachments); err != nil {
-		return DispatchResult{}, err
 	}
 	messageID := MessageID(command.Message.MessageID)
 	if messageID == "" {

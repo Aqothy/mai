@@ -1,7 +1,6 @@
 package orchestration
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -52,30 +51,23 @@ func TestTimelineLookupFindsEntriesAtEveryPosition(t *testing.T) {
 
 func TestTimelineCloneOwnsMutablePayloads(t *testing.T) {
 	var timeline Timeline
-	timeline.AppendMessage(Message{ID: "message-1", Attachments: []provider.Attachment{{Name: "before", Metadata: map[string]json.RawMessage{"value": json.RawMessage(`"before"`)}}}})
+	timeline.AppendMessage(Message{ID: "message-1", Attachments: []provider.Attachment{{Name: "before"}}})
 	timeline.AppendItem(Item{ID: "item-1", Payload: []byte(`{"value":"before"}`), ToolCall: &provider.ToolCall{
-		Action: provider.ToolActionOther,
-		Attachments: []provider.Attachment{{
-			Raw:      json.RawMessage(`{"value":"before"}`),
-			Metadata: map[string]json.RawMessage{"value": json.RawMessage(`"before"`)},
-		}},
+		Action:      provider.ToolActionOther,
+		Attachments: []provider.Attachment{{Name: "before"}},
 	}})
 	timeline.AppendApproval(Approval{RequestID: "approval-1", Args: []byte(`{"value":"before"}`), Options: []provider.ApprovalOption{{ID: "before"}}})
 
 	clone := timeline.Clone()
 	clone[0].Message.Attachments[0].Name = "after"
-	clone[0].Message.Attachments[0].Metadata["value"][1] = 'a'
 	clone[1].Item.Payload[0] = '['
-	clone[1].Item.ToolCall.Attachments[0].Raw[0] = '['
-	clone[1].Item.ToolCall.Attachments[0].Metadata["value"][1] = 'a'
+	clone[1].Item.ToolCall.Attachments[0].Name = "after"
 	clone[2].Approval.Args[0] = '['
 	clone[2].Approval.Options[0].ID = "after"
 
 	if timeline[0].Message.Attachments[0].Name != "before" ||
-		string(timeline[0].Message.Attachments[0].Metadata["value"]) != `"before"` ||
 		string(timeline[1].Item.Payload) != `{"value":"before"}` ||
-		string(timeline[1].Item.ToolCall.Attachments[0].Raw) != `{"value":"before"}` ||
-		string(timeline[1].Item.ToolCall.Attachments[0].Metadata["value"]) != `"before"` ||
+		timeline[1].Item.ToolCall.Attachments[0].Name != "before" ||
 		string(timeline[2].Approval.Args) != `{"value":"before"}` ||
 		timeline[2].Approval.Options[0].ID != "before" {
 		t.Fatalf("clone mutated source: %#v", timeline)

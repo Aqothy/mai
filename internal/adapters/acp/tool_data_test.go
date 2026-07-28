@@ -4,21 +4,39 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/maiD/internal/provider"
 )
+
+func TestToolCallDataKeepsOnlyRawInputNeededForNormalization(t *testing.T) {
+	data := toolCallData(schema.SessionUpdate{
+		RawInput:  map[string]any{"command": "go test ./..."},
+		RawOutput: map[string]any{"stdout": "large output"},
+	})
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("tool data unparseable: %v (%s)", err, data)
+	}
+	if _, ok := got["rawInput"]; !ok {
+		t.Fatal("adapter-private rawInput missing; command normalization needs it")
+	}
+	if _, ok := got["rawOutput"]; ok {
+		t.Fatalf("provider-native rawOutput retained: %s", data)
+	}
+}
 
 // Every item event must carry the COMPLETE neutral tool-call snapshot, so
 // sparse ACP tool_call_updates are accumulated adapter-side.
 func TestOverlayToolCallDataAccumulatesSparseUpdates(t *testing.T) {
 	start := json.RawMessage(`{"toolCallId":"tool-1","title":"run tests","status":"pending","rawInput":{"command":"go test"}}`)
-	update := json.RawMessage(`{"toolCallId":"tool-1","status":"completed","rawOutput":{"exit":0}}`)
+	update := json.RawMessage(`{"toolCallId":"tool-1","status":"completed","content":[]}`)
 
 	merged := overlayToolCallData(start, update)
 	var got map[string]json.RawMessage
 	if err := json.Unmarshal(merged, &got); err != nil {
 		t.Fatalf("merged data unparseable: %v (%s)", err, merged)
 	}
-	if string(got["status"]) != `"completed"` || string(got["rawOutput"]) != `{"exit":0}` {
+	if string(got["status"]) != `"completed"` || string(got["content"]) != `[]` {
 		t.Fatalf("merged = %s, want update fields applied", merged)
 	}
 	if string(got["title"]) != `"run tests"` || string(got["rawInput"]) != `{"command":"go test"}` {
@@ -43,8 +61,7 @@ func TestToolCallFromACPDataNormalizesDisplayFields(t *testing.T) {
 			{"type":"terminal","terminalId":"term-1"}
 		],
 		"locations":[{"path":"main.go","line":12}],
-		"rawInput":{"executable":"go","args":["test","./..."],"cwd":"/repo"},
-		"rawOutput":{"content":"ok","exitCode":0,"durationMs":42}
+		"rawInput":{"executable":"go","args":["test","./..."],"cwd":"/repo"}
 	}`)
 
 	call := toolCallFromACPData(data)
@@ -65,9 +82,6 @@ func TestToolCallFromACPDataNormalizesDisplayFields(t *testing.T) {
 	}
 	if call.Output != "building" || call.ExitCode != nil || call.DurationMilliseconds != nil {
 		t.Fatalf("result = %#v", call)
-	}
-	if string(call.RawInput) != `{"executable":"go","args":["test","./..."],"cwd":"/repo"}` {
-		t.Fatalf("raw input = %s", call.RawInput)
 	}
 }
 

@@ -74,12 +74,3 @@ func validateApprovalResponse(commandType string, thread Thread, requestID Appro
 	}
 	return fmt.Errorf("%s optionId %q was not offered for request %q", commandType, optionID, requestID)
 }
-
-func validateGenericAttachments(commandType string, attachments []provider.Attachment) error {
-	for i, attachment := range attachments {
-		if len(attachment.Raw) > 0 {
-			return fmt.Errorf("%s message.attachments[%d].raw is not supported; use a generic attachment kind", commandType, i)
-		}
-	}
-	return nil
-}

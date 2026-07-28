@@ -31,8 +31,8 @@ type toolState struct {
 	// converted to provider.ToolCall before the runtime event is published.
 	data json.RawMessage
 	// settled marks a tombstone: the tool reached a terminal status but its
-	// state is kept so trailing tool_call_updates (agents resend terminal
-	// updates with late rawOutput) still emit well-formed ItemUpdated events
+	// state is kept so trailing tool_call_updates still emit well-formed
+	// ItemUpdated events
 	// instead of empty-ItemType events that ingestion drops. Tombstones die
 	// with the session (unbind) or the turn's collector.
 	settled bool
@@ -533,8 +533,8 @@ func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeE
 }
 
 // overlayToolCallData lays a sparse ACP tool-call update (the top-level
-// fields toolCallData emits: title, kind, status, content, locations,
-// rawInput, rawOutput) over the last known full state. It is a shallow,
+// fields toolCallData emits: title, kind, status, content, locations, and
+// adapter-private rawInput) over the last known full state. It is a shallow,
 // ACP-shaped overlay — nested values are whole ACP structures and are always
 // replaced wholesale.
 func overlayToolCallData(base json.RawMessage, patch json.RawMessage) json.RawMessage {

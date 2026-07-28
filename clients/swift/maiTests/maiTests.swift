@@ -798,7 +798,6 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             driver: "mock",
             initializedAt: .now,
             instanceID: "codex",
-            metadata: nil,
             name: "Codex",
             pid: nil,
             startedAt: .now,

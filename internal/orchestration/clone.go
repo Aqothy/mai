@@ -15,21 +15,7 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 }
 
 func cloneAttachments(values []provider.Attachment) []provider.Attachment {
-	if values == nil {
-		return nil
-	}
-	clones := make([]provider.Attachment, len(values))
-	for index, value := range values {
-		clones[index] = value
-		clones[index].Raw = cloneRawMessage(value.Raw)
-		if value.Metadata != nil {
-			clones[index].Metadata = make(map[string]json.RawMessage, len(value.Metadata))
-			for key, raw := range value.Metadata {
-				clones[index].Metadata[key] = cloneRawMessage(raw)
-			}
-		}
-	}
-	return clones
+	return append([]provider.Attachment(nil), values...)
 }
 
 // cloneToolCall isolates a public thread snapshot from projection-owned state.
@@ -48,8 +34,6 @@ func cloneToolCall(value *provider.ToolCall) *provider.ToolCall {
 	}
 	clone.Changes = append([]provider.FileChange(nil), value.Changes...)
 	clone.Attachments = cloneAttachments(value.Attachments)
-	clone.RawInput = cloneRawMessage(value.RawInput)
-	clone.RawOutput = cloneRawMessage(value.RawOutput)
 	if value.ExitCode != nil {
 		exitCode := *value.ExitCode
 		clone.ExitCode = &exitCode

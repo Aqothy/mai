@@ -150,12 +150,7 @@
         },
         "kind": {
           "type": "string"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "raw": true
+        }
       },
       "additionalProperties": false,
       "type": "object",
@@ -181,12 +176,7 @@
         },
         "uri": {
           "type": "string"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "raw": true
+        }
       },
       "additionalProperties": false,
       "type": "object",
@@ -624,10 +614,6 @@
         },
         "auth": {
           "$ref": "#/$defs/Auth"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -1383,8 +1369,6 @@
           },
           "type": "array"
         },
-        "rawInput": true,
-        "rawOutput": true,
         "exitCode": {
           "type": "integer"
         },

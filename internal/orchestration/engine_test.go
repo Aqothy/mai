@@ -706,22 +706,6 @@ func TestEngineAcceptsAttachmentOnlyTurnStart(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsRawAttachments(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-raw-attachment")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-raw-attachment", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-raw-attachment", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-raw", Text: "hello", Attachments: []provider.Attachment{{Raw: json.RawMessage(`{"type":"image","data":"base64"}`)}}}}); err == nil {
-		t.Fatal("thread.turn.start raw attachment err = nil, want rejection")
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || len(thread.Timeline.Messages()) != 0 {
-		t.Fatalf("thread messages = %#v, want no recorded raw attachment message", thread.Timeline.Messages())
-	}
-}
-
 func TestEngineUserPromptMessageCarriesTurnID(t *testing.T) {
 	engine := NewEngine()
 	threadID := ThreadID("thread-user-message-turn-id")

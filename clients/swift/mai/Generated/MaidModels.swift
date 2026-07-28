@@ -219,22 +219,17 @@ public extension Approval {
 // MARK: - ApprovalOption
 public struct ApprovalOption: Codable {
     public var kind: String?
-    public var metadata: [String: JSONAny]?
     public var name, optionID: String
-    public var raw: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case kind, metadata, name
+        case kind, name
         case optionID = "optionId"
-        case raw
     }
 
-    public init(kind: String?, metadata: [String: JSONAny]?, name: String, optionID: String, raw: JSONAny?) {
+    public init(kind: String?, name: String, optionID: String) {
         self.kind = kind
-        self.metadata = metadata
         self.name = name
         self.optionID = optionID
-        self.raw = raw
     }
 }
 
@@ -258,17 +253,13 @@ public extension ApprovalOption {
 
     func with(
         kind: String?? = nil,
-        metadata: [String: JSONAny]?? = nil,
         name: String? = nil,
-        optionID: String? = nil,
-        raw: JSONAny?? = nil
+        optionID: String? = nil
     ) -> ApprovalOption {
         return ApprovalOption(
             kind: kind ?? self.kind,
-            metadata: metadata ?? self.metadata,
             name: name ?? self.name,
-            optionID: optionID ?? self.optionID,
-            raw: raw ?? self.raw
+            optionID: optionID ?? self.optionID
         )
     }
 
@@ -367,18 +358,13 @@ public extension ApprovalEvent {
 public struct Attachment: Codable {
     public var data: String?
     public var kind: String
-    public var metadata: [String: JSONAny]?
-    public var mimeType, name: String?
-    public var raw: JSONAny?
-    public var uri: String?
+    public var mimeType, name, uri: String?
 
-    public init(data: String?, kind: String, metadata: [String: JSONAny]?, mimeType: String?, name: String?, raw: JSONAny?, uri: String?) {
+    public init(data: String?, kind: String, mimeType: String?, name: String?, uri: String?) {
         self.data = data
         self.kind = kind
-        self.metadata = metadata
         self.mimeType = mimeType
         self.name = name
-        self.raw = raw
         self.uri = uri
     }
 }
@@ -404,19 +390,15 @@ public extension Attachment {
     func with(
         data: String?? = nil,
         kind: String? = nil,
-        metadata: [String: JSONAny]?? = nil,
         mimeType: String?? = nil,
         name: String?? = nil,
-        raw: JSONAny?? = nil,
         uri: String?? = nil
     ) -> Attachment {
         return Attachment(
             data: data ?? self.data,
             kind: kind ?? self.kind,
-            metadata: metadata ?? self.metadata,
             mimeType: mimeType ?? self.mimeType,
             name: name ?? self.name,
-            raw: raw ?? self.raw,
             uri: uri ?? self.uri
         )
     }
@@ -1272,9 +1254,8 @@ public struct ToolCall: Codable {
     public var locations: [ToolLocation]?
     public var name, namespace, output, providerKind: String?
     public var query: String?
-    public var rawInput, rawOutput: JSONAny?
 
-    public init(action: String, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?, rawInput: JSONAny?, rawOutput: JSONAny?) {
+    public init(action: String, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?) {
         self.action = action
         self.attachments = attachments
         self.changes = changes
@@ -1289,8 +1270,6 @@ public struct ToolCall: Codable {
         self.output = output
         self.providerKind = providerKind
         self.query = query
-        self.rawInput = rawInput
-        self.rawOutput = rawOutput
     }
 }
 
@@ -1326,9 +1305,7 @@ public extension ToolCall {
         namespace: String?? = nil,
         output: String?? = nil,
         providerKind: String?? = nil,
-        query: String?? = nil,
-        rawInput: JSONAny?? = nil,
-        rawOutput: JSONAny?? = nil
+        query: String?? = nil
     ) -> ToolCall {
         return ToolCall(
             action: action ?? self.action,
@@ -1344,9 +1321,7 @@ public extension ToolCall {
             namespace: namespace ?? self.namespace,
             output: output ?? self.output,
             providerKind: providerKind ?? self.providerKind,
-            query: query ?? self.query,
-            rawInput: rawInput ?? self.rawInput,
-            rawOutput: rawOutput ?? self.rawOutput
+            query: query ?? self.query
         )
     }
 
@@ -1780,9 +1755,7 @@ public struct InstanceInfo: Codable {
     public var capabilities: Capabilities
     public var driver: String
     public var initializedAt: Date
-    public var instanceID: String
-    public var metadata: [String: JSONAny]?
-    public var name: String
+    public var instanceID, name: String
     public var pid: Int?
     public var startedAt: Date
     public var status: String
@@ -1790,16 +1763,15 @@ public struct InstanceInfo: Codable {
     public enum CodingKeys: String, CodingKey {
         case auth, capabilities, driver, initializedAt
         case instanceID = "instanceId"
-        case metadata, name, pid, startedAt, status
+        case name, pid, startedAt, status
     }
 
-    public init(auth: Auth, capabilities: Capabilities, driver: String, initializedAt: Date, instanceID: String, metadata: [String: JSONAny]?, name: String, pid: Int?, startedAt: Date, status: String) {
+    public init(auth: Auth, capabilities: Capabilities, driver: String, initializedAt: Date, instanceID: String, name: String, pid: Int?, startedAt: Date, status: String) {
         self.auth = auth
         self.capabilities = capabilities
         self.driver = driver
         self.initializedAt = initializedAt
         self.instanceID = instanceID
-        self.metadata = metadata
         self.name = name
         self.pid = pid
         self.startedAt = startedAt
@@ -1831,7 +1803,6 @@ public extension InstanceInfo {
         driver: String? = nil,
         initializedAt: Date? = nil,
         instanceID: String? = nil,
-        metadata: [String: JSONAny]?? = nil,
         name: String? = nil,
         pid: Int?? = nil,
         startedAt: Date? = nil,
@@ -1843,7 +1814,6 @@ public extension InstanceInfo {
             driver: driver ?? self.driver,
             initializedAt: initializedAt ?? self.initializedAt,
             instanceID: instanceID ?? self.instanceID,
-            metadata: metadata ?? self.metadata,
             name: name ?? self.name,
             pid: pid ?? self.pid,
             startedAt: startedAt ?? self.startedAt,

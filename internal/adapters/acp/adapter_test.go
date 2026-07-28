@@ -401,18 +401,6 @@ func wireModelAndReasoningOptions(model string, reasoning string) []any {
 
 // --- conversion / pure unit tests -------------------------------------------
 
-func TestContentBlocksRejectRawAttachments(t *testing.T) {
-	_, err := contentBlocks(provider.SendTurnInput{
-		Input: "hello",
-		Attachments: []provider.Attachment{{
-			Raw: json.RawMessage(`{"type":"text","text":"from raw"}`),
-		}},
-	}, provider.PromptContentCapabilities{})
-	if err == nil {
-		t.Fatal("contentBlocks raw attachment err = nil, want rejection")
-	}
-}
-
 func TestContentBlocksMapEmbeddedResourceWhenAdvertised(t *testing.T) {
 	input := provider.SendTurnInput{Attachments: []provider.Attachment{{Kind: "resource", URI: "file:///tmp/context.txt", MimeType: "text/plain", Data: "context"}}}
 	if _, err := contentBlocks(input, provider.PromptContentCapabilities{}); err == nil {
@@ -1117,20 +1105,14 @@ func TestPromptJoinsCollectorClassification(t *testing.T) {
 
 func TestInfoReturnsDeepCopy(t *testing.T) {
 	h := &Instance{info: provider.InstanceInfo{
-		Auth:     provider.Auth{Methods: []provider.AuthMethod{{ID: "agent-login"}}},
-		Metadata: map[string]json.RawMessage{"raw": json.RawMessage(`{"ok":true}`)},
+		Auth: provider.Auth{Methods: []provider.AuthMethod{{ID: "agent-login"}}},
 	}}
 	info := h.Info()
 	info.Auth.Methods[0].ID = "mutated"
-	info.Metadata["raw"][0] = 'x'
-	info.Metadata["new"] = json.RawMessage(`true`)
 
 	again := h.Info()
-	if again.Auth.Methods[0].ID != "agent-login" || string(again.Metadata["raw"]) != `{"ok":true}` {
+	if again.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("info = %#v, want original values unaffected by caller mutation", again)
-	}
-	if _, ok := again.Metadata["new"]; ok {
-		t.Fatalf("metadata contains caller-added key: %#v", again.Metadata)
 	}
 }
 
@@ -1838,11 +1820,10 @@ func TestResumeSessionRoutesUpdatesEmittedBeforeResponse(t *testing.T) {
 	}
 }
 
-// Wire-level regression for the settled-tool tombstone: agents resend a
-// terminal tool_call_update carrying late rawOutput AFTER the tool already
-// settled. That trailing update must reach the listener as a well-formed
-// ItemUpdated (itemType/status enriched from the tombstone) so ingestion can
-// merge it downstream instead of silently dropping an empty-ItemType event.
+// Wire-level regression for the settled-tool tombstone: agents can resend a
+// terminal tool_call_update after the tool already settled. That trailing
+// update must reach the listener as a well-formed ItemUpdated (itemType/status
+// enriched from the tombstone) without exposing provider-native raw output.
 func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	agent := &fakeWireAgent{}
 	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
@@ -1889,8 +1870,15 @@ func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	if trailing.Payload.ItemType != provider.ItemKindCommandExecution || trailing.Payload.ItemStatus != provider.ItemStatusCompleted {
 		t.Fatalf("trailing event payload = %#v, want tombstone-enriched command_execution/completed", trailing.Payload)
 	}
-	if trailing.Payload.ToolCall == nil || !strings.Contains(string(trailing.Payload.ToolCall.RawOutput), "late output") {
-		t.Fatalf("trailing event tool call = %#v, want the late rawOutput carried through", trailing.Payload.ToolCall)
+	if trailing.Payload.ToolCall == nil {
+		t.Fatal("trailing event lost the normalized tool call")
+	}
+	encoded, err := json.Marshal(trailing.Payload.ToolCall)
+	if err != nil {
+		t.Fatalf("marshal trailing tool call: %v", err)
+	}
+	if strings.Contains(string(encoded), "late output") || strings.Contains(string(encoded), "rawOutput") {
+		t.Fatalf("trailing tool call exposed provider-native raw output: %s", encoded)
 	}
 }
 
