@@ -439,6 +439,8 @@ func (e *Engine) ThreadListEntry(threadID ThreadID) (ThreadListEntry, bool) {
 	return e.projection.ThreadListEntry(threadID)
 }
 
+// Thread returns a detached complete thread snapshot for diagnostics and tests.
+// Client and runtime paths should use bounded projections/views instead.
 func (e *Engine) Thread(threadID ThreadID) (Thread, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -455,6 +457,21 @@ type ThreadSessionView struct {
 	ProviderInstanceID provider.InstanceID
 	Session            *SessionBinding
 	LatestTurn         *Turn
+}
+
+// ThreadProviderView is the bounded state needed to start or resume provider
+// work. It deliberately excludes the timeline except for the addressed prompt,
+// avoiding an O(thread size) clone on every session/turn start.
+type ThreadProviderView struct {
+	ID                   ThreadID
+	ReplayHistoryPending bool
+	ProviderInstanceID   provider.InstanceID
+	Cwd                  string
+	ModelSelection       *provider.ModelSelection
+	ConfigSelections     []provider.ConfigOptionSelection
+	Session              *SessionBinding
+	LatestTurn           *Turn
+	Message              *Message
 }
 
 // ThreadApprovalView is SessionView plus one approval, read under a single lock
@@ -495,6 +512,33 @@ func (e *Engine) SessionView(threadID ThreadID) (ThreadSessionView, bool) {
 		Session:            cloneSessionPtr(thread.Session),
 		LatestTurn:         cloneTurnPtr(thread.LatestTurn),
 	}, true
+}
+
+func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadProviderView, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	thread := e.projection.liveThread(threadID)
+	if thread == nil {
+		return ThreadProviderView{}, false
+	}
+	view := ThreadProviderView{
+		ID:                   thread.ID,
+		ReplayHistoryPending: thread.ReplayHistoryPending,
+		ProviderInstanceID:   thread.ProviderInstanceID,
+		Cwd:                  thread.Cwd,
+		ModelSelection:       cloneModelSelection(thread.ModelSelection),
+		ConfigSelections:     append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...),
+		Session:              cloneSessionPtr(thread.Session),
+		LatestTurn:           cloneTurnPtr(thread.LatestTurn),
+	}
+	if messageID != "" {
+		if message := thread.Timeline.Message(messageID); message != nil {
+			clone := *message
+			clone.Attachments = cloneAttachments(message.Attachments)
+			view.Message = &clone
+		}
+	}
+	return view, true
 }
 
 func (e *Engine) existingThreadSequence(threadID ThreadID) (uint64, bool) {
@@ -666,25 +710,25 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 
 	var sequence uint64
 	err := e.withLockNotify(func(appendEvent func(Event) Event) error {
-		thread, ok := e.projection.Thread(command.ThreadID)
-		if !ok {
+		thread := e.projection.liveThread(command.ThreadID)
+		if thread == nil {
 			return fmt.Errorf("thread %q not found", command.ThreadID)
 		}
-		if sessionPreparing(thread) {
+		if sessionPreparing(*thread) {
 			return fmt.Errorf("cannot start a turn while thread %q is preparing its provider session", command.ThreadID)
 		}
 		if thread.ReplayHistoryPending {
 			return fmt.Errorf("cannot start a turn on restored thread %q before preparing its provider session", command.ThreadID)
 		}
-		active := activeTurnID(thread)
+		active := activeTurnID(*thread)
 		steering := active != ""
 		turnID := active
 		if turnID == "" {
 			turnID = TurnID(newID("turn"))
 		}
-		selectionChange := resolveProviderSelectionChange(thread, command.ProviderInstanceID, command.ModelSelection)
+		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
 		if steering {
-			if err := selectionChange.validateSteering(thread); err != nil {
+			if err := selectionChange.validateSteering(*thread); err != nil {
 				return err
 			}
 			selectionChange = providerSelectionChange{}

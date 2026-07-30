@@ -132,28 +132,30 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 	}()
 }
 
-func startSessionInputFromThread(thread Thread) provider.StartSessionInput {
+func startSessionInputFromProviderView(view ThreadProviderView) provider.StartSessionInput {
 	return provider.StartSessionInput{
-		ThreadID:           string(thread.ID),
-		ProviderInstanceID: thread.ProviderInstanceID,
-		Cwd:                thread.Cwd,
-		ModelSelection:     cloneModelSelection(thread.ModelSelection),
-		ConfigSelections:   configSelectionsFromThread(thread),
+		ThreadID:           string(view.ID),
+		ProviderInstanceID: view.ProviderInstanceID,
+		Cwd:                view.Cwd,
+		ModelSelection:     cloneModelSelection(view.ModelSelection),
+		ConfigSelections:   configSelectionsFromProviderView(view),
 	}
 }
 
-func configSelectionsFromThread(thread Thread) []provider.ConfigOptionSelection {
-	selections := append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
+func configSelectionsFromProviderView(view ThreadProviderView) []provider.ConfigOptionSelection {
+	// ProviderView already detached this slice from the mutable projection, so
+	// it is safe to consume and amend directly for this provider request.
+	selections := view.ConfigSelections
 	indices := make(map[string]int, len(selections))
 	for index, selection := range selections {
 		if selection.OptionID != "" {
 			indices[selection.OptionID] = index
 		}
 	}
-	if thread.Session == nil {
+	if view.Session == nil {
 		return selections
 	}
-	for _, option := range thread.Session.ConfigOptions {
+	for _, option := range view.Session.ConfigOptions {
 		if option.ID == "" || option.Category == provider.ConfigOptionCategoryModel {
 			continue
 		}
@@ -176,26 +178,26 @@ func configSelectionsFromThread(thread Thread) []provider.ConfigOptionSelection 
 }
 
 func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
-	thread, ok := r.engine.Thread(event.ThreadID())
+	view, ok := r.engine.ProviderView(event.ThreadID(), "")
 	if !ok {
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	input := startSessionInputFromThread(thread)
-	input.ReplayHistory = thread.ReplayHistoryPending
+	input := startSessionInputFromProviderView(view)
+	input.ReplayHistory = view.ReplayHistoryPending
 	start := func() (provider.StartSessionResult, error) {
-		return r.provider.StartSession(ctx, string(thread.ID), input)
+		return r.provider.StartSession(ctx, string(view.ID), input)
 	}
 	ready := func(session provider.Session) {
-		binding := bindingFromProviderSession(thread.ProviderInstanceID, session)
-		if r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding}) {
-			r.dispatchProviderSessionMetadata(thread.ID, session, time.Now())
+		binding := bindingFromProviderSession(view.ProviderInstanceID, session)
+		if r.recordSessionUpdate(view.ID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding}) {
+			r.dispatchProviderSessionMetadata(view.ID, session, time.Now())
 		}
 	}
 	var err error
 	if input.ReplayHistory {
-		err = r.ingestion.RestoreHistory(string(thread.ID), start, ready)
+		err = r.ingestion.RestoreHistory(string(view.ID), start, ready)
 	} else {
 		var result provider.StartSessionResult
 		result, err = start()
@@ -204,30 +206,29 @@ func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
 		}
 	}
 	if err != nil {
-		r.recordSessionUpdate(thread.ID, sessionUpdate{Kind: sessionUpdateError, Error: err.Error()})
+		r.recordSessionUpdate(view.ID, sessionUpdate{Kind: sessionUpdateError, Error: err.Error()})
 	}
 }
 
 func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	threadID := event.ThreadID()
 	turnID := event.Payload.TurnID
-	thread, ok := r.engine.Thread(threadID)
+	view, ok := r.engine.ProviderView(threadID, event.Payload.MessageID)
 	if !ok {
 		return
 	}
-	if !turnStillRunning(thread, turnID) {
-		if r.requeueSettledTurnStart(event, thread) {
+	if !providerTurnStillRunning(view, turnID) {
+		if r.requeueSettledTurnStart(event, view) {
 			return
 		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
 		return
 	}
-	message := findMessage(thread, event.Payload.MessageID)
-	if message.ID == "" {
+	if view.Message == nil {
 		r.failThread(threadID, turnID, "turn start message not found")
 		return
 	}
-	providerInstanceID := thread.ProviderInstanceID
+	providerInstanceID := view.ProviderInstanceID
 	if providerInstanceID == "" {
 		r.failThread(threadID, turnID, "thread has no provider instance")
 		return
@@ -235,7 +236,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// Prebind: the engine derives a "starting" binding for the turn from the
 	// live thread — or drops the update if the turn was interrupted first.
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID}) {
-		if current, ok := r.engine.Thread(threadID); ok && r.requeueSettledTurnStart(event, current) {
+		if current, ok := r.engine.ProviderView(threadID, event.Payload.MessageID); ok && r.requeueSettledTurnStart(event, current) {
 			return
 		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
@@ -244,7 +245,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 
-	result, err := r.provider.StartSession(ctx, string(thread.ID), startSessionInputFromThread(thread))
+	result, err := r.provider.StartSession(ctx, string(view.ID), startSessionInputFromProviderView(view))
 	if err != nil {
 		r.failThread(threadID, turnID, err.Error())
 		return
@@ -255,7 +256,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// drops the update, and the interrupt is confirmed instead of dispatching.
 	binding := bindingFromProviderSession(providerInstanceID, providerSession)
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding, TurnID: turnID}) {
-		if current, ok := r.engine.Thread(threadID); ok && r.requeueSettledTurnStart(event, current) {
+		if current, ok := r.engine.ProviderView(threadID, event.Payload.MessageID); ok && r.requeueSettledTurnStart(event, current) {
 			return
 		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, &binding)
@@ -269,7 +270,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(thread.ID), TurnID: string(turnID), Input: message.Text, Attachments: message.Attachments, ModelSelection: cloneModelSelection(thread.ModelSelection)}); err != nil {
+	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: view.Message.Text, Attachments: view.Message.Attachments, ModelSelection: cloneModelSelection(view.ModelSelection)}); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
 }
@@ -279,18 +280,18 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 // handler reached dispatch. The message is already in the projection, so a
 // single replacement start event moves it onto a fresh turn; the per-thread
 // reactor chain then handles that event normally. Interrupts are not requeued.
-func (r *ProviderEventReactor) requeueSettledTurnStart(event Event, thread Thread) bool {
-	turn := thread.LatestTurn
+func (r *ProviderEventReactor) requeueSettledTurnStart(event Event, view ThreadProviderView) bool {
+	turn := view.LatestTurn
 	if !event.Payload.Steering || turn == nil || turn.ID != event.Payload.TurnID || turn.CompletedAt == nil || turn.InterruptRequested {
 		return false
 	}
-	if findMessage(thread, event.Payload.MessageID).ID == "" {
+	if view.Message == nil {
 		return false
 	}
 	now := time.Now()
 	result, err := r.engine.AppendEvent(context.Background(), EventInput{
 		Type:       EventThreadTurnStartRequested,
-		ThreadID:   thread.ID,
+		ThreadID:   view.ID,
 		Actor:      ActorKindServer,
 		OccurredAt: now,
 		Payload: EventPayload{
@@ -299,7 +300,7 @@ func (r *ProviderEventReactor) requeueSettledTurnStart(event Event, thread Threa
 		},
 	})
 	if err != nil {
-		log.Printf("orchestration: requeue settled turn start for thread %q: %v", thread.ID, err)
+		log.Printf("orchestration: requeue settled turn start for thread %q: %v", view.ID, err)
 		return false
 	}
 	return result.Sequence != 0
@@ -472,9 +473,12 @@ func interruptEventTargetsCancellableTurn(view ThreadSessionView, turnID TurnID)
 	return true
 }
 
-func findMessage(thread Thread, id MessageID) Message {
-	if message := thread.Timeline.Message(id); message != nil {
-		return *message
+func providerTurnStillRunning(view ThreadProviderView, turnID TurnID) bool {
+	if turnID == "" {
+		return true
 	}
-	return Message{}
+	if view.LatestTurn != nil && view.LatestTurn.ID == turnID {
+		return view.LatestTurn.State == TurnStateRunning && !view.LatestTurn.InterruptRequested
+	}
+	return view.Session != nil && view.Session.ActiveTurnID == turnID && view.Session.Status == SessionStatusRunning
 }
