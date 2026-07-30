@@ -1,4 +1,6 @@
 import Foundation
+import Observation
+import Synchronization
 import Testing
 @testable import mai
 
@@ -143,6 +145,34 @@ struct ThreadStoreTests {
 
         #expect(store.cachedThread(for: "a")?.title == "Updated in background")
         #expect(store.inactiveSubscribedThreadIDs.contains("a"))
+    }
+
+    @Test
+    func hiddenThreadEventsDoNotInvalidateSelectedThreadObservers() async throws {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        store.selectThread("b")
+        await waitUntil { store.subscribedThreadIDs.contains("b") }
+        await waitUntil { store.inactiveSubscribedThreadIDs.contains("a") }
+
+        let selectedObserverInvalidated = Mutex(false)
+        withObservationTracking {
+            _ = store.selectedThread
+        } onChange: {
+            selectedObserverInvalidated.withLock { $0 = true }
+        }
+
+        try rpc.sendTitleUpdate(threadID: "a", title: "Hidden update", sequence: 100)
+        #expect(store.cachedThread(for: "a")?.title == "Hidden update")
+        #expect(!selectedObserverInvalidated.withLock { $0 })
+
+        try rpc.sendTitleUpdate(threadID: "b", title: "Visible update", sequence: 101)
+        await waitUntil { selectedObserverInvalidated.withLock { $0 } }
+        #expect(store.selectedThread?.title == "Visible update")
     }
 
     @Test

@@ -75,6 +75,7 @@ final class ThreadStore {
     }
 
     var selectedThread: Thread? {
+        _ = selectedSessionGeneration
         guard let selectedThreadID else { return nil }
         return sessionsByID[selectedThreadID]?.thread
     }
@@ -85,7 +86,11 @@ final class ThreadStore {
     // Reused across notifications: receiveNotification runs on every streamed
     // event, and a fresh JSONDecoder per frame is pure allocation.
     private let decoder = newJSONDecoder()
-    private var sessionsByID: [String: ThreadSession] = [:]
+    // Observation tracks this dictionary as one property rather than by key.
+    // Keep it ignored so hidden-thread events do not invalidate the visible chat;
+    // selected-thread projections observe selectedSessionGeneration instead.
+    @ObservationIgnored private var sessionsByID: [String: ThreadSession] = [:]
+    private var selectedSessionGeneration = 0
     private var isStarted = false
     private var lastThreadListSequence = 0
     private var isLoadingThreadListSnapshot = false
@@ -586,6 +591,7 @@ final class ThreadStore {
             current.lastSequence = snapshot.snapshotSequence
             current.shouldRestoreAfterReconnect = true
             sessionsByID[id] = current
+            noteSelectedSessionChanged(id)
             if selectedThreadID == id {
                 selectedThreadLoadErrorMessage = nil
             }
@@ -776,6 +782,7 @@ final class ThreadStore {
         // Straight through the subscript: a local copy of the session would
         // defeat copy-on-write and duplicate the timeline on every chunk.
         guard let result = sessionsByID[threadID]?.apply(event), result.applied else { return }
+        noteSelectedSessionChanged(threadID)
         reconcileSubscriptionState(threadID, at: now())
         if result.protectionChanged {
             performSubscriptionMaintenance()
@@ -787,6 +794,12 @@ final class ThreadStore {
             bufferedThreadListItems.append(item)
         } else {
             applyThreadListUpdate(item)
+        }
+    }
+
+    private func noteSelectedSessionChanged(_ id: String) {
+        if id == selectedThreadID {
+            selectedSessionGeneration &+= 1
         }
     }
 
