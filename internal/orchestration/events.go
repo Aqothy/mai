@@ -103,9 +103,9 @@ func (e Event) ThreadID() ThreadID {
 	return e.Payload.ThreadID
 }
 
-// normalizeEvent completes sparse event payload timestamps before the event is
-// applied or published. Existing item projections preserve their original
-// CreatedAt; new items use the time of their first upsert.
+// normalizeEvent completes sparse item metadata before the event is applied or
+// published. Existing item projections preserve their original CreatedAt; new
+// items use the time of their first upsert, and every upsert carries its sequence.
 func normalizeEvent(event Event) Event {
 	if event.Type != EventThreadItemUpserted || event.Payload.Item == nil {
 		return event
@@ -114,6 +114,7 @@ func normalizeEvent(event Event) Event {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = event.OccurredAt
 	}
+	item.Sequence = event.Sequence
 	item.UpdatedAt = event.OccurredAt
 	event.Payload.Item = &item
 	return event

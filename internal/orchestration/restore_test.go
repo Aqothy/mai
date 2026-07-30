@@ -90,6 +90,9 @@ func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
 	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
 		t.Fatalf("restored timeline = %#v, want empty (history is provider-owned)", snapshot.Snapshot.Thread.Timeline)
 	}
+	if !snapshot.Snapshot.HistoryRestorePending {
+		t.Fatal("restored snapshot did not expose pending provider history")
+	}
 
 	// Restore emits no live events; clients obtain authoritative snapshots.
 	if recorded := events.matching("", 0); len(recorded) != 0 {
@@ -164,11 +167,61 @@ func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
 	if !thread.ReplayHistoryPending {
 		t.Fatal("ready session status consumed replay intent")
 	}
+	pending, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
+	if err != nil {
+		t.Fatalf("subscribe pending restored thread: %v", err)
+	}
+	if !pending.Snapshot.HistoryRestorePending {
+		t.Fatal("snapshot declared provider history ready before replay completion")
+	}
 	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
 		t.Fatalf("append replay completion: %v", err)
 	}
 	thread, _ = engine.Thread("thread-restored")
 	if thread.ReplayHistoryPending {
 		t.Fatal("replay completion did not consume replay intent")
+	}
+	ready, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
+	if err != nil {
+		t.Fatalf("subscribe restored thread after completion: %v", err)
+	}
+	if ready.Snapshot.HistoryRestorePending {
+		t.Fatal("snapshot kept provider history pending after replay completion")
+	}
+}
+
+func TestPartiallyRestoredSnapshotRemainsPending(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	now := time.Now()
+	engine.RestoreThreads([]RestoredThread{{
+		ThreadID:           "thread-restored",
+		ProviderInstanceID: "codex",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}})
+
+	if _, err := engine.AppendEvent(context.Background(), EventInput{
+		Type:       EventThreadMessageSent,
+		ThreadID:   "thread-restored",
+		OccurredAt: now,
+		Payload: EventPayload{
+			MessageID: "restored-message",
+			Role:      MessageRoleUser,
+			Text:      "partially restored",
+		},
+	}); err != nil {
+		t.Fatalf("append partial restored history: %v", err)
+	}
+
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
+	if err != nil {
+		t.Fatalf("subscribe partially restored thread: %v", err)
+	}
+	if len(snapshot.Snapshot.Thread.Timeline) != 1 {
+		t.Fatalf("partial timeline length = %d, want 1", len(snapshot.Snapshot.Thread.Timeline))
+	}
+	if !snapshot.Snapshot.HistoryRestorePending {
+		t.Fatal("partially materialized snapshot was incorrectly declared ready")
 	}
 }

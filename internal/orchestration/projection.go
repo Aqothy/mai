@@ -105,11 +105,15 @@ func (p *Projection) ThreadListSnapshot() ThreadListSnapshot {
 }
 
 func (p *Projection) ThreadSnapshot(id ThreadID) (ThreadDetailSnapshot, error) {
-	thread, ok := p.Thread(id)
-	if !ok {
+	thread := p.liveThread(id)
+	if thread == nil {
 		return ThreadDetailSnapshot{}, fmt.Errorf("thread %q not found", id)
 	}
-	return ThreadDetailSnapshot{SnapshotSequence: p.sequence, Thread: thread}, nil
+	return ThreadDetailSnapshot{
+		HistoryRestorePending: thread.ReplayHistoryPending,
+		SnapshotSequence:      p.sequence,
+		Thread:                projectThreadForClient(*thread),
+	}, nil
 }
 
 // liveThread returns the projection's own mutable *Thread (nil if absent) for

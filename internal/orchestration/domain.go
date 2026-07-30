@@ -134,10 +134,15 @@ type SessionBinding struct {
 // Item is one entry in a thread's non-message timeline (tool calls, reasoning,
 // warnings, errors). It is upserted by ID across its lifecycle.
 type Item struct {
-	ID     string              `json:"id"`
-	Kind   provider.ItemKind   `json:"kind"`
-	Title  string              `json:"title,omitempty"`
-	Status provider.ItemStatus `json:"status"`
+	ID              string              `json:"id"`
+	Kind            provider.ItemKind   `json:"kind"`
+	Title           string              `json:"title,omitempty"`
+	Status          provider.ItemStatus `json:"status"`
+	DetailAvailable bool                `json:"detailAvailable,omitempty"`
+	ToolCallSummary *ToolCallSummary    `json:"toolCallSummary,omitempty"`
+	// Sequence is the event sequence of the latest upsert and is the stable key
+	// for cached item details.
+	Sequence uint64 `json:"sequence,omitempty"`
 	// ToolCall is a complete provider-neutral snapshot. An absent value on an
 	// update preserves the prior snapshot; adapters merge native sparse updates.
 	ToolCall *provider.ToolCall `json:"toolCall,omitempty"`
@@ -152,6 +157,46 @@ type Item struct {
 	TurnID    TurnID    `json:"turnId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ToolCallSummary is the bounded, client-facing representation carried by
+// thread snapshots and live item events. Complete tool data remains in the
+// server projection and is available through orchestration.getItemDetail.
+type ToolCallSummary struct {
+	Action               provider.ToolAction     `json:"action"`
+	Name                 string                  `json:"name,omitempty"`
+	Namespace            string                  `json:"namespace,omitempty"`
+	ProviderKind         string                  `json:"providerKind,omitempty"`
+	CommandPreview       string                  `json:"commandPreview,omitempty"`
+	QueryPreview         string                  `json:"queryPreview,omitempty"`
+	Cwd                  string                  `json:"cwd,omitempty"`
+	OutputPreview        string                  `json:"outputPreview,omitempty"`
+	ErrorPreview         string                  `json:"errorPreview,omitempty"`
+	Locations            []provider.ToolLocation `json:"locations,omitempty"`
+	LocationCount        int                     `json:"locationCount,omitempty"`
+	Changes              []FileChangeSummary     `json:"changes,omitempty"`
+	ChangeCount          int                     `json:"changeCount,omitempty"`
+	Attachments          []ToolAttachmentSummary `json:"attachments,omitempty"`
+	AttachmentCount      int                     `json:"attachmentCount,omitempty"`
+	ExitCode             *int                    `json:"exitCode,omitempty"`
+	DurationMilliseconds *int64                  `json:"durationMilliseconds,omitempty"`
+	Truncated            bool                    `json:"truncated,omitempty"`
+}
+
+// FileChangeSummary deliberately excludes diff/oldText/newText.
+type FileChangeSummary struct {
+	Path     string                  `json:"path"`
+	Kind     provider.FileChangeKind `json:"kind,omitempty"`
+	MovePath string                  `json:"movePath,omitempty"`
+}
+
+// ToolAttachmentSummary excludes inline attachment data while retaining
+// enough metadata to describe the result before full details are requested.
+type ToolAttachmentSummary struct {
+	Kind     string `json:"kind"`
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	URI      string `json:"uri,omitempty"`
 }
 
 type TimelineEntryKind string

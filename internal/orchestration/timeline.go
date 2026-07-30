@@ -92,6 +92,7 @@ func (t Timeline) Clone() Timeline {
 			item := *entry.Item
 			item.Payload = cloneRawMessage(entry.Item.Payload)
 			item.ToolCall = cloneToolCall(entry.Item.ToolCall)
+			item.ToolCallSummary = cloneToolCallSummary(entry.Item.ToolCallSummary)
 			clone[i].Item = &item
 		}
 		if entry.Approval != nil {

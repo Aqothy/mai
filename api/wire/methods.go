@@ -22,6 +22,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodOrchestrationSubscribeThreadList, Params: "EmptyParams", Result: "ThreadListStreamItem"},
 	{Name: MethodOrchestrationSubscribeThread, Params: "SubscribeThreadInput", Result: "ThreadStreamItem"},
 	{Name: MethodOrchestrationUnsubscribeThread, Params: "SubscribeThreadInput", ResultNull: true},
+	{Name: MethodOrchestrationGetItemDetail, Params: "GetItemDetailInput", Result: "Item"},
 	{Name: MethodProviderStart, Params: "ProviderStartParams", Result: "InstanceInfo"},
 	{Name: MethodProviderList, Params: "EmptyParams", Result: "InstanceInfo", ResultArray: true},
 	{Name: MethodACPRegistryList, Params: "EmptyParams", Result: "ACPRegistryAgent", ResultArray: true},

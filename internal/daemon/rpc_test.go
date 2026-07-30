@@ -116,6 +116,61 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	}
 }
 
+func TestRPCGetItemDetailReturnsCanonicalToolData(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+
+	threadID := orchestration.ThreadID("thread-item-detail")
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
+		Type:      orchestration.CommandThreadCreate,
+		CommandID: "create-item-detail",
+		ThreadID:  threadID,
+		Title:     "Item detail",
+	}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
+		Type:     orchestration.EventThreadItemUpserted,
+		ThreadID: threadID,
+		Payload: orchestration.EventPayload{Item: &orchestration.Item{
+			ID:     "tool-1",
+			Kind:   provider.ItemKindCommandExecution,
+			Status: provider.ItemStatusCompleted,
+			ToolCall: &provider.ToolCall{
+				Action:  provider.ToolActionExecute,
+				Command: "go test ./...",
+				Output:  "ok",
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("append tool event: %v", err)
+	}
+
+	handler := &rpcHandler{
+		server: s,
+		client: &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})},
+	}
+	req, err := jsonrpc2.NewCall(
+		jsonrpc2.StringID("1"),
+		RPCMethodOrchestrationGetItemDetail,
+		orchestration.GetItemDetailInput{ThreadID: threadID, ItemID: "tool-1"},
+	)
+	if err != nil {
+		t.Fatalf("new getItemDetail call: %v", err)
+	}
+	result, err := handler.Handle(context.Background(), req)
+	if err != nil {
+		t.Fatalf("getItemDetail: %v", err)
+	}
+	item, ok := result.(orchestration.Item)
+	if !ok || item.ToolCall == nil || item.ToolCall.Output != "ok" {
+		t.Fatalf("getItemDetail result = %#v", result)
+	}
+	if item.ToolCallSummary != nil || item.DetailAvailable {
+		t.Fatalf("getItemDetail returned compact projection: %#v", item)
+	}
+}
+
 func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	s := newTestServer(t)
 	s.providerService.Close()

@@ -584,6 +584,42 @@
       ],
       "title": "FileChange"
     },
+    "FileChangeSummary": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "movePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "title": "FileChangeSummary"
+    },
+    "GetItemDetailInput": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId",
+        "itemId"
+      ],
+      "title": "GetItemDetailInput"
+    },
     "InstanceInfo": {
       "properties": {
         "instanceId": {
@@ -643,6 +679,15 @@
         },
         "status": {
           "type": "string"
+        },
+        "detailAvailable": {
+          "type": "boolean"
+        },
+        "toolCallSummary": {
+          "$ref": "#/$defs/ToolCallSummary"
+        },
+        "sequence": {
+          "type": "integer"
         },
         "toolCall": {
           "$ref": "#/$defs/ToolCall"
@@ -1144,6 +1189,9 @@
     },
     "ThreadDetailSnapshot": {
       "properties": {
+        "historyRestorePending": {
+          "type": "boolean"
+        },
         "snapshotSequence": {
           "type": "integer"
         },
@@ -1322,6 +1370,28 @@
       ],
       "title": "TokenUsage"
     },
+    "ToolAttachmentSummary": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "ToolAttachmentSummary"
+    },
     "ToolCall": {
       "properties": {
         "action": {
@@ -1382,6 +1452,79 @@
         "action"
       ],
       "title": "ToolCall"
+    },
+    "ToolCallSummary": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "providerKind": {
+          "type": "string"
+        },
+        "commandPreview": {
+          "type": "string"
+        },
+        "queryPreview": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "outputPreview": {
+          "type": "string"
+        },
+        "errorPreview": {
+          "type": "string"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/ToolLocation"
+          },
+          "type": "array"
+        },
+        "locationCount": {
+          "type": "integer"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/FileChangeSummary"
+          },
+          "type": "array"
+        },
+        "changeCount": {
+          "type": "integer"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/ToolAttachmentSummary"
+          },
+          "type": "array"
+        },
+        "attachmentCount": {
+          "type": "integer"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "durationMilliseconds": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "title": "ToolCallSummary"
     },
     "ToolLocation": {
       "properties": {
@@ -1455,6 +1598,9 @@
         "subscribeThreadParams": {
           "$ref": "#/$defs/SubscribeThreadInput"
         },
+        "getItemDetailParams": {
+          "$ref": "#/$defs/GetItemDetailInput"
+        },
         "threadStreamItem": {
           "$ref": "#/$defs/ThreadStreamItem"
         },
@@ -1499,6 +1645,15 @@
         },
         "item": {
           "$ref": "#/$defs/Item"
+        },
+        "toolCallSummary": {
+          "$ref": "#/$defs/ToolCallSummary"
+        },
+        "fileChangeSummary": {
+          "$ref": "#/$defs/FileChangeSummary"
+        },
+        "toolAttachmentSummary": {
+          "$ref": "#/$defs/ToolAttachmentSummary"
         },
         "timelineEntry": {
           "$ref": "#/$defs/TimelineEntry"
@@ -1584,6 +1739,7 @@
         "commandMessage",
         "dispatchResult",
         "subscribeThreadParams",
+        "getItemDetailParams",
         "threadStreamItem",
         "threadListStreamItem",
         "threadDetailSnapshot",
@@ -1599,6 +1755,9 @@
         "approval",
         "sessionBinding",
         "item",
+        "toolCallSummary",
+        "fileChangeSummary",
+        "toolAttachmentSummary",
         "timelineEntry",
         "plan",
         "instanceInfo",

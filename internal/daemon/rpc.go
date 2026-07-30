@@ -25,6 +25,7 @@ const (
 	RPCMethodOrchestrationSubscribeThreadList = wire.MethodOrchestrationSubscribeThreadList
 	RPCMethodOrchestrationSubscribeThread     = wire.MethodOrchestrationSubscribeThread
 	RPCMethodOrchestrationUnsubscribeThread   = wire.MethodOrchestrationUnsubscribeThread
+	RPCMethodOrchestrationGetItemDetail       = wire.MethodOrchestrationGetItemDetail
 
 	RPCMethodProviderStart         = wire.MethodProviderStart
 	RPCMethodProviderList          = wire.MethodProviderList
@@ -354,6 +355,15 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		h.client.unsubscribeThread(params.ThreadID)
 		return nil, nil
+	case RPCMethodOrchestrationGetItemDetail:
+		var params orchestration.GetItemDetailInput
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.ThreadID == "" || params.ItemID == "" {
+			return nil, fmt.Errorf("%w: getItemDetail requires threadId and itemId", jsonrpc2.ErrInvalidParams)
+		}
+		return h.server.orchestration.GetItemDetail(params)
 	case RPCMethodOrchestrationSubscribeThreadList:
 		h.client.subscribeThreadList()
 		return h.server.orchestration.ThreadListSnapshot(), nil
@@ -626,7 +636,7 @@ func decodeRPCParams(req *jsonrpc2.Request, dst any) error {
 //   - collect subscribers first and bail before building anything nobody wants;
 //   - marshal each notification ONCE and fan out the bytes, instead of
 //     re-marshaling per client;
-//   - build the thread-list item (a full-thread clone) only for thread-list-visible events.
+//   - build the sidebar projection only for thread-list-visible events.
 func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	threadID := event.ThreadID()
 	if threadID == "" {
@@ -649,7 +659,8 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	}
 
 	if len(threadClients) > 0 {
-		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: orchestration.StreamItemEvent, Event: &event}, RPCMethodOrchestrationSubscribeThread); ok {
+		clientEvent := orchestration.ProjectEventForClient(event)
+		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: orchestration.StreamItemEvent, Event: &clientEvent}, RPCMethodOrchestrationSubscribeThread); ok {
 			for _, client := range threadClients {
 				client.notify(RPCMethodOrchestrationSubscribeThread, params)
 			}

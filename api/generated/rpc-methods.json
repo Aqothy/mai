@@ -21,6 +21,11 @@
       "resultNull": true
     },
     {
+      "name": "orchestration.getItemDetail",
+      "params": "GetItemDetailInput",
+      "result": "Item"
+    },
+    {
       "name": "provider.start",
       "params": "ProviderStartParams",
       "result": "InstanceInfo"

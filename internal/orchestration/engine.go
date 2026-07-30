@@ -409,6 +409,23 @@ func (e *Engine) SubscribeThread(input SubscribeThreadInput) (ThreadStreamItem, 
 	return ThreadStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}, nil
 }
 
+// GetItemDetail returns one complete canonical item without exposing or
+// replaying the event history that produced it.
+func (e *Engine) GetItemDetail(input GetItemDetailInput) (Item, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	thread := e.projection.liveThread(input.ThreadID)
+	if thread == nil {
+		return Item{}, fmt.Errorf("thread %q not found", input.ThreadID)
+	}
+	item := thread.Timeline.Item(input.ItemID)
+	if item == nil {
+		return Item{}, fmt.Errorf("item %q not found in thread %q", input.ItemID, input.ThreadID)
+	}
+	return cloneItem(*item), nil
+}
+
 func (e *Engine) ThreadListSnapshot() ThreadListStreamItem {
 	e.mu.Lock()
 	snapshot := e.projection.ThreadListSnapshot()

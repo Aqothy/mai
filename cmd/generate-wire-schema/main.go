@@ -21,6 +21,7 @@ type contract struct {
 	CommandMessage              wire.CommandMessage              `json:"commandMessage"`
 	DispatchResult              wire.DispatchResult              `json:"dispatchResult"`
 	SubscribeThreadParams       wire.SubscribeThreadParams       `json:"subscribeThreadParams"`
+	GetItemDetailParams         wire.GetItemDetailParams         `json:"getItemDetailParams"`
 	ThreadStreamItem            wire.ThreadStreamItem            `json:"threadStreamItem"`
 	ThreadListStreamItem        wire.ThreadListStreamItem        `json:"threadListStreamItem"`
 	ThreadDetailSnapshot        wire.ThreadDetailSnapshot        `json:"threadDetailSnapshot"`
@@ -36,6 +37,9 @@ type contract struct {
 	Approval                    wire.Approval                    `json:"approval"`
 	SessionBinding              wire.SessionBinding              `json:"sessionBinding"`
 	Item                        wire.Item                        `json:"item"`
+	ToolCallSummary             wire.ToolCallSummary             `json:"toolCallSummary"`
+	FileChangeSummary           wire.FileChangeSummary           `json:"fileChangeSummary"`
+	ToolAttachmentSummary       wire.ToolAttachmentSummary       `json:"toolAttachmentSummary"`
 	TimelineEntry               wire.TimelineEntry               `json:"timelineEntry"`
 	Plan                        wire.Plan                        `json:"plan"`
 	InstanceInfo                wire.InstanceInfo                `json:"instanceInfo"`

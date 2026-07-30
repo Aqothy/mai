@@ -14,6 +14,7 @@ const (
 	MethodOrchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
 	MethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
 	MethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
+	MethodOrchestrationGetItemDetail       = "orchestration.getItemDetail"
 
 	MethodProviderStart              = "provider.start"
 	MethodProviderList               = "provider.list"
@@ -41,6 +42,7 @@ type Command = orchestration.Command
 type CommandMessage = orchestration.CommandMessage
 type DispatchResult = orchestration.DispatchResult
 type SubscribeThreadParams = orchestration.SubscribeThreadInput
+type GetItemDetailParams = orchestration.GetItemDetailInput
 type ThreadStreamItem = orchestration.ThreadStreamItem
 type ThreadListStreamItem = orchestration.ThreadListStreamItem
 type ThreadDetailSnapshot = orchestration.ThreadDetailSnapshot
@@ -56,6 +58,9 @@ type Message = orchestration.Message
 type Approval = orchestration.Approval
 type SessionBinding = orchestration.SessionBinding
 type Item = orchestration.Item
+type ToolCallSummary = orchestration.ToolCallSummary
+type FileChangeSummary = orchestration.FileChangeSummary
+type ToolAttachmentSummary = orchestration.ToolAttachmentSummary
 type TimelineEntry = orchestration.TimelineEntry
 type Plan = orchestration.Plan
 

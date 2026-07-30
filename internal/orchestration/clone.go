@@ -45,6 +45,31 @@ func cloneToolCall(value *provider.ToolCall) *provider.ToolCall {
 	return &clone
 }
 
+func cloneItem(value Item) Item {
+	clone := value
+	clone.Payload = cloneRawMessage(value.Payload)
+	clone.ToolCall = cloneToolCall(value.ToolCall)
+	clone.ToolCallSummary = nil
+	clone.DetailAvailable = false
+	return clone
+}
+
+func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
+	for index := range clone.Locations {
+		clone.Locations[index].Line = cloneUint32Ptr(value.Locations[index].Line)
+	}
+	clone.Changes = append([]FileChangeSummary(nil), value.Changes...)
+	clone.Attachments = append([]ToolAttachmentSummary(nil), value.Attachments...)
+	clone.ExitCode = cloneIntPtr(value.ExitCode)
+	clone.DurationMilliseconds = cloneInt64Ptr(value.DurationMilliseconds)
+	return &clone
+}
+
 func cloneThread(thread Thread) Thread {
 	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
 	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
@@ -112,6 +137,30 @@ func cloneTurnPtr(value *Turn) *Turn {
 }
 
 func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneUint32Ptr(value *uint32) *uint32 {
 	if value == nil {
 		return nil
 	}
