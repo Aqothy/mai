@@ -10,7 +10,6 @@ final class RPCClient {
     // every streamed delta.
     private let decoder = newJSONDecoder()
     private let routeDecoder = JSONDecoder()
-    private let encoder = newJSONEncoder()
     private var webSocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
@@ -55,7 +54,7 @@ final class RPCClient {
 
     func call<Params: Encodable, Result: Decodable>(
         _ method: String,
-        params: Params,
+        params: sending Params,
         as resultType: Result.Type = Result.self
     ) async throws -> Result {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
@@ -74,7 +73,10 @@ final class RPCClient {
         return result
     }
 
-    func callVoid<Params: Encodable>(_ method: String, params: Params) async throws {
+    func callVoid<Params: Encodable>(
+        _ method: String,
+        params: sending Params
+    ) async throws {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
         let response = try decoder.decode(ErrorResponse.self, from: data)
         if let error = response.error {
@@ -82,24 +84,38 @@ final class RPCClient {
         }
     }
 
-    private func sendRequestAndWaitForResponse<Params: Encodable>(
-        _ method: String,
-        params: Params
-    ) async throws -> Data {
-        guard let socket = webSocket else {
-            throw RPCError(code: nil, message: "Not connected to maiD", data: nil)
-        }
-
-        let requestID = nextRequestID
-        nextRequestID += 1
-        let request = Request(id: requestID, method: method, params: params)
-        let requestData = try encoder.encode(request)
-        guard let requestText = String(data: requestData, encoding: .utf8) else {
+    @concurrent
+    private static func encode<Value: Encodable & SendableMetatype>(
+        _ value: sending Value
+    ) async throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(value)
+        guard let text = String(data: data, encoding: .utf8) else {
             throw RPCError(
                 code: nil,
                 message: "Could not encode the JSON-RPC request",
                 data: nil
             )
+        }
+        return text
+    }
+
+    private func sendRequestAndWaitForResponse<Params: Encodable>(
+        _ method: String,
+        params: sending Params
+    ) async throws -> Data {
+        guard webSocket != nil else {
+            throw RPCError(code: nil, message: "Not connected to maiD", data: nil)
+        }
+
+        let requestID = nextRequestID
+        nextRequestID += 1
+        let requestText = try await Self.encode(
+            Request(id: requestID, method: method, params: params)
+        )
+        guard let socket = webSocket else {
+            throw RPCError(code: nil, message: "Not connected to maiD", data: nil)
         }
 
         return try await withTaskCancellationHandler {
@@ -210,7 +226,7 @@ final class RPCClient {
         onDisconnect?(error)
     }
 
-    private struct Request<Params: Encodable>: Encodable {
+    nonisolated private struct Request<Params: Encodable>: Encodable {
         let jsonrpc = "2.0"
         let id: Int
         let method: String
