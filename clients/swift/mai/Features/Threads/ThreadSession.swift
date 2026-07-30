@@ -49,9 +49,28 @@ struct ThreadSession {
     /// second reference to the timeline array and force a full copy.
     mutating func apply(_ event: Event) -> EventApplication {
         guard thread != nil, event.sequence > lastSequence else { return EventApplication() }
-        let wasProtected = isProtected
+        // Streamed content cannot change turn, session, or approval state, so
+        // avoid scanning the timeline for protection around those events.
+        let tracksProtection = Self.canChangeProtection(event.eventType)
+        let wasProtected = tracksProtection && isProtected
         thread?.apply(event)
         lastSequence = event.sequence
-        return EventApplication(applied: true, protectionChanged: isProtected != wasProtected)
+        return EventApplication(
+            applied: true,
+            protectionChanged: tracksProtection && isProtected != wasProtected
+        )
+    }
+
+    private static func canChangeProtection(_ eventType: MaidEventType?) -> Bool {
+        switch eventType {
+        case .threadMessageSent,
+             .threadItemUpserted,
+             .threadPlanUpdated,
+             .threadTokenUsageUpdated,
+             .threadSlashCommandsUpdated:
+            false
+        default:
+            true
+        }
     }
 }
