@@ -8,51 +8,81 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestToolCallDataKeepsOnlyRawInputNeededForNormalization(t *testing.T) {
-	data := toolCallData(schema.SessionUpdate{
-		RawInput:  map[string]any{"command": "go test ./..."},
-		RawOutput: map[string]any{"stdout": "large output"},
-	})
-	var got map[string]json.RawMessage
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("tool data unparseable: %v (%s)", err, data)
+// decodeSessionUpdate mirrors the transport: SessionUpdate fields such as
+// Content and RawInput arrive generically decoded, exactly as production
+// hands them to toolCallPatchFromUpdate.
+func decodeSessionUpdate(t *testing.T, raw string) schema.SessionUpdate {
+	t.Helper()
+	var update schema.SessionUpdate
+	if err := json.Unmarshal([]byte(raw), &update); err != nil {
+		t.Fatalf("decode session update: %v (%s)", err, raw)
 	}
-	if _, ok := got["rawInput"]; !ok {
+	return update
+}
+
+func TestToolCallPatchKeepsOnlyRawInputNeededForNormalization(t *testing.T) {
+	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call_update",
+		"toolCallId":"tool-1",
+		"rawInput":{"command":"go test ./..."},
+		"rawOutput":{"stdout":"large output"}
+	}`))
+	if patch == nil || patch.rawInput == nil {
 		t.Fatal("adapter-private rawInput missing; command normalization needs it")
 	}
-	if _, ok := got["rawOutput"]; ok {
-		t.Fatalf("provider-native rawOutput retained: %s", data)
+	call := patch.toolCall()
+	if call == nil || call.Command != "go test ./..." {
+		t.Fatalf("tool call = %#v, want normalized command", call)
+	}
+	if call.Output != "" {
+		t.Fatalf("output = %q, want provider-native rawOutput ignored", call.Output)
 	}
 }
 
 // Every item event must carry the COMPLETE neutral tool-call snapshot, so
 // sparse ACP tool_call_updates are accumulated adapter-side.
-func TestOverlayToolCallDataAccumulatesSparseUpdates(t *testing.T) {
-	start := json.RawMessage(`{"toolCallId":"tool-1","title":"run tests","status":"pending","rawInput":{"command":"go test"}}`)
-	update := json.RawMessage(`{"toolCallId":"tool-1","status":"completed","content":[]}`)
+func TestToolCallPatchOverlayAccumulatesSparseUpdates(t *testing.T) {
+	start := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call",
+		"toolCallId":"tool-1",
+		"title":"run tests",
+		"status":"pending",
+		"rawInput":{"command":"go test"}
+	}`))
+	update := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call_update",
+		"toolCallId":"tool-1",
+		"status":"completed",
+		"content":[]
+	}`))
 
-	merged := overlayToolCallData(start, update)
-	var got map[string]json.RawMessage
-	if err := json.Unmarshal(merged, &got); err != nil {
-		t.Fatalf("merged data unparseable: %v (%s)", err, merged)
+	merged := start.overlay(update)
+	if merged.status == nil || *merged.status != schema.ToolCallStatusCompleted {
+		t.Fatalf("merged status = %#v, want update fields applied", merged.status)
 	}
-	if string(got["status"]) != `"completed"` || string(got["content"]) != `[]` {
-		t.Fatalf("merged = %s, want update fields applied", merged)
+	if merged.content == nil || len(merged.content) != 0 {
+		t.Fatalf("merged content = %#v, want explicit empty replacement", merged.content)
 	}
-	if string(got["title"]) != `"run tests"` || string(got["rawInput"]) != `{"command":"go test"}` {
-		t.Fatalf("merged = %s, want fields from earlier updates preserved", merged)
+	if merged.title == nil || *merged.title != "run tests" {
+		t.Fatalf("merged title = %#v, want fields from earlier updates preserved", merged.title)
+	}
+	call := merged.toolCall()
+	if call == nil || call.Command != "go test" {
+		t.Fatalf("tool call = %#v, want rawInput from earlier updates preserved", call)
 	}
 
-	if out := overlayToolCallData(nil, update); string(out) != string(update) {
-		t.Fatalf("overlay with no base = %s, want the update itself", out)
+	if out := (*toolCallPatch)(nil).overlay(update); out != update {
+		t.Fatalf("overlay with no base = %#v, want the update itself", out)
 	}
-	if out := overlayToolCallData(start, nil); string(out) != string(start) {
-		t.Fatalf("overlay with no patch = %s, want the base kept", out)
+	if out := start.overlay(nil); out != start {
+		t.Fatalf("overlay with no patch = %#v, want the base kept", out)
 	}
 }
 
-func TestToolCallFromACPDataNormalizesDisplayFields(t *testing.T) {
-	data := json.RawMessage(`{
+func TestToolCallPatchNormalizesDisplayFields(t *testing.T) {
+	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call",
+		"toolCallId":"tool-1",
 		"kind":"execute",
 		"content":[
 			{"type":"content","content":{"type":"text","text":"building"}},
@@ -62,9 +92,9 @@ func TestToolCallFromACPDataNormalizesDisplayFields(t *testing.T) {
 		],
 		"locations":[{"path":"main.go","line":12}],
 		"rawInput":{"executable":"go","args":["test","./..."],"cwd":"/repo"}
-	}`)
+	}`))
 
-	call := toolCallFromACPData(data)
+	call := patch.toolCall()
 	if call == nil {
 		t.Fatal("tool call is nil")
 	}
@@ -85,15 +115,27 @@ func TestToolCallFromACPDataNormalizesDisplayFields(t *testing.T) {
 	}
 }
 
-func TestToolCallFromACPDataNormalizesQuery(t *testing.T) {
-	call := toolCallFromACPData(json.RawMessage(`{"kind":"search","rawInput":{"query":"needle"}}`))
+func TestToolCallPatchNormalizesQuery(t *testing.T) {
+	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call",
+		"toolCallId":"tool-1",
+		"kind":"search",
+		"rawInput":{"query":"needle"}
+	}`))
+	call := patch.toolCall()
 	if call == nil || call.Action != provider.ToolActionSearch || call.Query != "needle" {
 		t.Fatalf("tool call = %#v", call)
 	}
 }
 
-func TestToolCallFromACPDataPreservesExplicitEmptyCollections(t *testing.T) {
-	call := toolCallFromACPData(json.RawMessage(`{"content":[],"locations":[]}`))
+func TestToolCallPatchPreservesExplicitEmptyCollections(t *testing.T) {
+	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call_update",
+		"toolCallId":"tool-1",
+		"content":[],
+		"locations":[]
+	}`))
+	call := patch.toolCall()
 	if call == nil {
 		t.Fatal("tool call is nil")
 	}
@@ -108,5 +150,14 @@ func TestToolCallFromACPDataPreservesExplicitEmptyCollections(t *testing.T) {
 	}
 	if call.Locations == nil || len(call.Locations) != 0 {
 		t.Fatalf("locations = %#v, want explicit empty", call.Locations)
+	}
+}
+
+func TestToolCallPatchFromNonToolUpdateIsNil(t *testing.T) {
+	if patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"agent_message_chunk",
+		"content":{"type":"text","text":"hello"}
+	}`)); patch != nil {
+		t.Fatalf("patch = %#v, want nil for non-tool updates", patch)
 	}
 }

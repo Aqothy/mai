@@ -13,9 +13,7 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/Aqothy/go-acp/schema"
@@ -27,9 +25,11 @@ type toolState struct {
 	status   provider.ItemStatus
 	threadID string
 	turnID   string
-	// data is the adapter-private accumulated ACP tool-call state. It is
-	// converted to provider.ToolCall before the runtime event is published.
-	data json.RawMessage
+	// call is the adapter-private accumulated ACP tool-call state, typed so
+	// sparse updates overlay field-by-field instead of re-encoding the whole
+	// snapshot. It is converted to provider.ToolCall before the runtime event
+	// is published.
+	call *toolCallPatch
 	// settled marks a tombstone: the tool reached a terminal status but its
 	// state is kept so trailing tool_call_updates still emit well-formed
 	// ItemUpdated events
@@ -404,7 +404,7 @@ func (h *Instance) handleACPSessionUpdate(notification schema.SessionNotificatio
 	if drop {
 		return
 	}
-	h.reconcileToolState(sessionID, &update)
+	h.reconcileToolState(sessionID, &update, toolCallPatchFromUpdate(notification.Update))
 	var cancelPermission context.CancelFunc
 	if update.Type == provider.RuntimeEventItemCompleted || itemStatusSettled(update.Payload.ItemStatus) {
 		cancelPermission = h.markPermissionToolSettled(sessionID, update.ThreadID, update.ItemID)
@@ -466,7 +466,7 @@ func (h *Instance) sessionScopeLocked(sessionID string) string {
 	return session.scope
 }
 
-func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeEvent) {
+func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeEvent, patch *toolCallPatch) {
 	if event == nil || event.ItemID == "" {
 		return
 	}
@@ -515,11 +515,10 @@ func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeE
 	}
 	// ACP tool_call_update payloads are SPARSE (only changed fields), but the
 	// provider contract requires every item event to carry the COMPLETE
-	// tool-call state. Accumulate the ACP-shaped private snapshot here, convert
+	// tool-call state. Accumulate the typed private snapshot here, convert
 	// it once into the neutral contract, and never publish the native envelope.
-	state.data = overlayToolCallData(state.data, event.Payload.Data)
-	event.Payload.ToolCall = toolCallFromACPData(state.data)
-	event.Payload.Data = nil
+	state.call = state.call.overlay(patch)
+	event.Payload.ToolCall = state.call.toolCall()
 	if event.Type == provider.RuntimeEventItemCompleted || itemStatusSettled(state.status) {
 		// Keep a settled tombstone (instead of deleting) so a trailing
 		// tool_call_update for the settled tool still emits a well-formed
@@ -530,30 +529,6 @@ func (h *Instance) reconcileToolState(sessionID string, event *provider.RuntimeE
 		session.toolStates[event.ItemID] = state
 	}
 	h.mu.Unlock()
-}
-
-// overlayToolCallData lays a sparse ACP tool-call update (the top-level
-// fields toolCallData emits: title, kind, status, content, locations, and
-// adapter-private rawInput) over the last known full state. It is a shallow,
-// ACP-shaped overlay — nested values are whole ACP structures and are always
-// replaced wholesale.
-func overlayToolCallData(base json.RawMessage, patch json.RawMessage) json.RawMessage {
-	if len(base) == 0 {
-		return patch
-	}
-	if len(patch) == 0 {
-		return base
-	}
-	var baseObject, patchObject map[string]json.RawMessage
-	if json.Unmarshal(base, &baseObject) != nil || json.Unmarshal(patch, &patchObject) != nil {
-		return patch
-	}
-	maps.Copy(baseObject, patchObject)
-	merged, err := json.Marshal(baseObject)
-	if err != nil {
-		return patch
-	}
-	return merged
 }
 
 func itemStatusSettled(status provider.ItemStatus) bool {

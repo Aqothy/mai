@@ -541,18 +541,21 @@ func TestSessionUpdateMapsToolCallUpdateEmptyReplacementFields(t *testing.T) {
 		t.Fatalf("decode tool-call update: %v", err)
 	}
 	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventItemUpdated || event.Payload.Data == nil {
-		t.Fatalf("event = %#v, want item update with data", event)
+	if event.Type != provider.RuntimeEventItemUpdated {
+		t.Fatalf("event = %#v, want item update", event)
 	}
-	var data map[string]json.RawMessage
-	if err := json.Unmarshal(event.Payload.Data, &data); err != nil {
-		t.Fatalf("unmarshal tool-call update data: %v", err)
+	patch := toolCallPatchFromUpdate(notification.Update)
+	if patch == nil {
+		t.Fatal("patch is nil, want the tool-call update captured")
 	}
-	if string(data["content"]) != `[]` || string(data["locations"]) != `[]` {
-		t.Fatalf("tool-call update data = %s, want explicit empty content and locations", event.Payload.Data)
+	if patch.content == nil || len(patch.content) != 0 {
+		t.Fatalf("patch content = %#v, want explicit empty replacement", patch.content)
 	}
-	if _, ok := data["kind"]; ok {
-		t.Fatalf("tool-call update data = %s, want omitted kind to stay absent", event.Payload.Data)
+	if patch.locations == nil || len(patch.locations) != 0 {
+		t.Fatalf("patch locations = %#v, want explicit empty replacement", patch.locations)
+	}
+	if patch.kind != nil {
+		t.Fatalf("patch kind = %#v, want omitted kind to stay absent", patch.kind)
 	}
 }
 

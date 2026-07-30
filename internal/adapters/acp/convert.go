@@ -250,25 +250,25 @@ func sessionRuntimeEvent(notification schema.SessionNotification) provider.Runti
 		update.Type = provider.RuntimeEventItemCompleted
 		update.ItemID = messageID(u.MessageID)
 		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachmentsFromACPContent(u), Data: marshalRaw(u.Content)}
+		update.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachmentsFromACPContent(u)}
 	case schema.SessionUpdateAgentMessageChunk:
 		update.Type = provider.RuntimeEventContentDelta
 		update.ItemID = messageID(u.MessageID)
 		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: text, Attachments: attachmentsFromACPContent(u), Data: marshalRaw(u.Content)}
+		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: text, Attachments: attachmentsFromACPContent(u)}
 	case schema.SessionUpdateAgentThoughtChunk:
 		update.Type = provider.RuntimeEventContentDelta
 		update.ItemID = messageID(u.MessageID)
 		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: text, Attachments: attachmentsFromACPContent(u), Data: marshalRaw(u.Content)}
+		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: text, Attachments: attachmentsFromACPContent(u)}
 	case schema.SessionUpdateToolCall:
 		update.Type = provider.RuntimeEventItemStarted
 		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title), Data: toolCallData(u)}
+		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
 	case schema.SessionUpdateToolCallUpdate:
 		update.Type = provider.RuntimeEventItemUpdated
 		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title), Data: toolCallData(u)}
+		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
 	case schema.SessionUpdatePlan:
 		update.Type = provider.RuntimeEventTurnPlanUpdated
 		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries), Data: marshalRaw(schema.Plan{Entries: u.Entries})}
@@ -374,63 +374,115 @@ func itemStatusFromACP(status string) provider.ItemStatus {
 	}
 }
 
-// toolCallData captures one ACP-native sparse patch for adapter-private
-// accumulation. ACP tool_call_update uses replacement semantics for content
-// and locations: present-but-empty collections mean "clear this field" and
-// must stay distinguishable from absent ones, so fields are only included
-// when the update carried them.
-func toolCallData(u schema.SessionUpdate) json.RawMessage {
-	object := map[string]any{"toolCallId": u.ToolCallID}
-	if u.Title != nil {
-		object["title"] = *u.Title
-	}
-	if u.Kind != nil {
-		object["kind"] = *u.Kind
-	}
-	if u.Status != nil {
-		object["status"] = *u.Status
-	}
-	if u.Content != nil {
-		object["content"] = u.Content
-	}
-	if u.Locations != nil {
-		object["locations"] = u.Locations
-	}
-	if u.RawInput != nil {
-		// Retained only in the adapter-private snapshot so command/query/cwd can
-		// be normalized. It is never copied into the public ToolCall.
-		object["rawInput"] = u.RawInput
-	}
-	return marshalRaw(object)
+// toolCallPatch captures one ACP-native sparse tool_call/tool_call_update
+// with typed fields and doubles as the adapter-private accumulated snapshot
+// in reconcileToolState. ACP updates use replacement semantics per field:
+// nil means "absent, keep the prior value" while present-but-empty
+// collections mean "clear this field", so slices stay nil-vs-empty
+// distinguishable. Typed accumulation replaces the earlier JSON overlay,
+// which re-encoded the whole accumulated blob — including complete file
+// old/new text — on every sparse update.
+type toolCallPatch struct {
+	title     *string
+	kind      *schema.ToolKind
+	status    *schema.ToolCallStatus
+	content   []schema.ToolCallContent
+	locations []schema.ToolCallLocation
+	// rawInput is retained only in the adapter-private snapshot so
+	// command/query/cwd can be normalized. It is never copied into the public
+	// ToolCall. RawOutput is deliberately not captured.
+	rawInput any
 }
 
-// toolCallFromACPData converts the adapter's accumulated ACP snapshot into the
-// public neutral snapshot. It runs only after sparse ACP updates have been
-// overlaid by reconcileToolState.
-func toolCallFromACPData(data json.RawMessage) *provider.ToolCall {
-	if len(data) == 0 {
+// toolCallPatchFromUpdate extracts the sparse patch a tool_call or
+// tool_call_update carried; any other session update yields nil.
+func toolCallPatchFromUpdate(u schema.SessionUpdate) *toolCallPatch {
+	switch u.SessionUpdate {
+	case schema.SessionUpdateToolCall, schema.SessionUpdateToolCallUpdate:
+	default:
 		return nil
 	}
-	var snapshot struct {
-		Kind      string                    `json:"kind"`
-		Content   []schema.ToolCallContent  `json:"content"`
-		Locations []schema.ToolCallLocation `json:"locations"`
-		RawInput  json.RawMessage           `json:"rawInput"`
+	return &toolCallPatch{
+		title:     u.Title,
+		kind:      u.Kind,
+		status:    u.Status,
+		content:   toolCallContentFromAny(u.Content),
+		locations: u.Locations,
+		rawInput:  u.RawInput,
 	}
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+}
+
+// toolCallContentFromAny converts the transport's generically decoded content
+// collection into typed ACP content, preserving the present-but-empty versus
+// absent distinction. One bounded re-encode of the patch's own content is the
+// only conversion cost; accumulated state is never re-encoded.
+func toolCallContentFromAny(value any) []schema.ToolCallContent {
+	if value == nil {
 		return nil
 	}
-	providerKind := strings.ToLower(strings.TrimSpace(snapshot.Kind))
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var content []schema.ToolCallContent
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return nil
+	}
+	if content == nil {
+		content = []schema.ToolCallContent{}
+	}
+	return content
+}
+
+// overlay lays a sparse patch over the accumulated snapshot. It is a shallow,
+// ACP-shaped overlay — nested collections are whole ACP structures and are
+// always replaced wholesale.
+func (s *toolCallPatch) overlay(patch *toolCallPatch) *toolCallPatch {
+	if s == nil {
+		return patch
+	}
+	if patch == nil {
+		return s
+	}
+	if patch.title != nil {
+		s.title = patch.title
+	}
+	if patch.kind != nil {
+		s.kind = patch.kind
+	}
+	if patch.status != nil {
+		s.status = patch.status
+	}
+	if patch.content != nil {
+		s.content = patch.content
+	}
+	if patch.locations != nil {
+		s.locations = patch.locations
+	}
+	if patch.rawInput != nil {
+		s.rawInput = patch.rawInput
+	}
+	return s
+}
+
+// toolCall converts the accumulated adapter-private snapshot into the public
+// neutral snapshot. It runs only after sparse ACP updates have been overlaid
+// by reconcileToolState.
+func (s *toolCallPatch) toolCall() *provider.ToolCall {
+	if s == nil {
+		return nil
+	}
+	providerKind := strings.ToLower(strings.TrimSpace(toolKindString(s.kind)))
 	action := toolActionFromACP(providerKind)
 	call := &provider.ToolCall{
 		Action:       action,
 		ProviderKind: providerKind,
-		Locations:    toolLocationsFromACP(snapshot.Locations),
-		Changes:      toolChangesFromACP(snapshot.Content, action),
-		Attachments:  toolAttachmentsFromACP(snapshot.Content),
-		Output:       toolTextFromACP(snapshot.Content),
+		Locations:    toolLocationsFromACP(s.locations),
+		Changes:      toolChangesFromACP(s.content, action),
+		Attachments:  toolAttachmentsFromACP(s.content),
+		Output:       toolTextFromACP(s.content),
 	}
-	call.Command, call.Query, call.Cwd = toolInputDetails(snapshot.RawInput)
+	call.Command, call.Query, call.Cwd = toolInputDetails(s.rawInput)
 	return call
 }
 
@@ -537,31 +589,27 @@ func fileChangeKindFromAction(action provider.ToolAction) provider.FileChangeKin
 	}
 }
 
-func toolInputDetails(raw json.RawMessage) (command, query, cwd string) {
-	var input struct {
-		Command    any    `json:"command"`
-		Cmd        any    `json:"cmd"`
-		Executable string `json:"executable"`
-		Args       any    `json:"args"`
-		Query      string `json:"query"`
-		Pattern    string `json:"pattern"`
-		Cwd        string `json:"cwd"`
-	}
-	if json.Unmarshal(raw, &input) != nil {
+func toolInputDetails(raw any) (command, query, cwd string) {
+	input, ok := raw.(map[string]any)
+	if !ok {
 		return "", "", ""
 	}
-	command = commandValue(input.Command)
+	command = commandValue(input["command"])
 	if command == "" {
-		command = commandValue(input.Cmd)
+		command = commandValue(input["cmd"])
 	}
 	if command == "" {
-		command = strings.TrimSpace(strings.TrimSpace(input.Executable) + " " + commandValue(input.Args))
+		executable, _ := input["executable"].(string)
+		command = strings.TrimSpace(strings.TrimSpace(executable) + " " + commandValue(input["args"]))
 	}
-	query = strings.TrimSpace(input.Query)
+	queryInput, _ := input["query"].(string)
+	query = strings.TrimSpace(queryInput)
 	if query == "" {
-		query = strings.TrimSpace(input.Pattern)
+		pattern, _ := input["pattern"].(string)
+		query = strings.TrimSpace(pattern)
 	}
-	return command, query, strings.TrimSpace(input.Cwd)
+	cwdInput, _ := input["cwd"].(string)
+	return command, query, strings.TrimSpace(cwdInput)
 }
 
 func commandValue(value any) string {
@@ -659,8 +707,7 @@ func acpRequestError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var wireErr *jsonrpc2.WireError
-	if errors.As(err, &wireErr) {
+	if wireErr, ok := errors.AsType[*jsonrpc2.WireError](err); ok {
 		return &provider.RequestError{Code: int(wireErr.Code), Message: wireErr.Message, Data: wireErr.Data}
 	}
 	return err
