@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -563,6 +564,9 @@ func applyItemPayload(existing json.RawMessage, incoming json.RawMessage, textDe
 // unparseable base keeps the accumulated payload rather than resetting the
 // text to one chunk.
 func appendPayloadText(existing json.RawMessage, delta string) json.RawMessage {
+	if merged, ok := appendTextOnlyPayload(existing, delta); ok {
+		return merged
+	}
 	var base reasoningPayload
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &base); err != nil {
@@ -571,6 +575,32 @@ func appendPayloadText(existing json.RawMessage, delta string) json.RawMessage {
 	}
 	base.Text += delta
 	return marshalEventPayload(base)
+}
+
+// appendTextOnlyPayload appends a chunk in place when the payload has exactly
+// the text-only shape marshalEventPayload produces for reasoningPayload:
+// {"text":"…"}. Reasoning flushes rewrite the payload every few tens of
+// milliseconds over the whole accumulated thought, so a decode/encode cycle
+// per flush is quadratic in thought length; splicing the escaped chunk before
+// the structural closing `"}` keeps each flush O(chunk). The projection owns
+// the payload buffer (every read boundary clones), so the in-place append is
+// safe. A payload carrying attachments ends in `]}` and, like any other
+// shape, falls back to the full decode path.
+func appendTextOnlyPayload(existing json.RawMessage, delta string) (json.RawMessage, bool) {
+	const prefix = `{"text":"`
+	const suffix = `"}`
+	if delta == "" || len(existing) < len(prefix)+len(suffix) {
+		return nil, false
+	}
+	if !bytes.HasPrefix(existing, []byte(prefix)) || !bytes.HasSuffix(existing, []byte(suffix)) {
+		return nil, false
+	}
+	escaped, err := json.Marshal(delta)
+	if err != nil || len(escaped) < 2 {
+		return nil, false
+	}
+	merged := append(existing[:len(existing)-len(suffix)], escaped[1:len(escaped)-1]...)
+	return append(merged, suffix...), true
 }
 
 // ThreadListVisible reports whether an event changes state presented in the

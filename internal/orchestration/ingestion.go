@@ -50,11 +50,14 @@ type turnState struct {
 	assistants        []*assistantStream
 	assistantSegments map[string]uint64
 	idlessUserMessage MessageID
-	reasoning         string
+	// reasoning and reasoningPending are byte accumulators: deltas arrive per
+	// provider chunk, so string concatenation would copy the whole
+	// accumulated thought per chunk (quadratic in segment length).
+	reasoning []byte
 	// reasoningPending is the slice of reasoning not yet flushed as a textDelta
 	// event; reasoning above keeps the segment's FULL text for the settle
 	// checkpoint.
-	reasoningPending string
+	reasoningPending []byte
 	// reasoningSegment is incremented whenever reasoning resumes after another
 	// timeline entry. Consecutive chunks share one item; separated chunks do not.
 	reasoningSegment uint64
@@ -92,7 +95,7 @@ type assistantFlush struct {
 // textFlushInterval is the cadence of the single ingestion-owned flush ticker.
 // Semantic boundaries still flush immediately. A shared tick keeps concurrent
 // providers bounded without per-stream goroutines or timers.
-var textFlushInterval = 75 * time.Millisecond
+var textFlushInterval = 200 * time.Millisecond
 
 func (t *turnState) streamByKey(key string) *assistantStream {
 	for _, stream := range t.assistants {
@@ -309,8 +312,8 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 	if resumed {
 		ts.reasoningSegment++
 	}
-	ts.reasoning += event.Payload.Delta
-	ts.reasoningPending += event.Payload.Delta
+	ts.reasoning = append(ts.reasoning, event.Payload.Delta...)
+	ts.reasoningPending = append(ts.reasoningPending, event.Payload.Delta...)
 	ts.reasoningAttachments = append(ts.reasoningAttachments, event.Payload.Attachments...)
 	ts.reasoningActive = true
 	itemID := reasoningItemID(event, ts.reasoningSegment)
@@ -319,8 +322,8 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 		// Non-text content (ACP thought chunks are full ContentBlocks) flushes
 		// immediately as the COMPLETE replacement payload, so an attachment is
 		// never hidden until the settle checkpoint.
-		full = &reasoningPayload{Text: ts.reasoning, Attachments: append([]provider.Attachment(nil), ts.reasoningAttachments...)}
-		ts.reasoningPending = ""
+		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: append([]provider.Attachment(nil), ts.reasoningAttachments...)}
+		ts.reasoningPending = ts.reasoningPending[:0]
 	}
 	i.mu.Unlock()
 	if resumed {
@@ -338,6 +341,11 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 // reasoningPayload is orchestration's own payload shape for reasoning items:
 // the accumulated thought text plus any non-text content blocks the agent
 // attached to its thought stream.
+//
+// appendTextOnlyPayload (projection.go) splices flushed chunks into the
+// marshaled text-only form of this struct; a new field that can leave a
+// payload both starting with `{"text":"` and ending with `"}` must keep that
+// fast path in sync.
 type reasoningPayload struct {
 	Text        string                `json:"text"`
 	Attachments []provider.Attachment `json:"attachments,omitempty"`
@@ -350,10 +358,10 @@ func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, 
 	active := ts != nil && ts.reasoningActive
 	var itemID string
 	if active {
-		checkpoint = reasoningPayload{Text: ts.reasoning, Attachments: ts.reasoningAttachments}
+		checkpoint = reasoningPayload{Text: string(ts.reasoning), Attachments: ts.reasoningAttachments}
 		itemID = reasoningItemID(event, ts.reasoningSegment)
-		ts.reasoning = ""
-		ts.reasoningPending = ""
+		ts.reasoning = nil
+		ts.reasoningPending = nil
 		ts.reasoningAttachments = nil
 		ts.reasoningActive = false
 	}
@@ -769,9 +777,9 @@ func (i *ProviderRuntimeIngestion) flushPendingText(now time.Time) {
 			stream.text, stream.attachments = "", nil
 			pending = append(pending, pendingTextFlush{event: event, assistant: &flush})
 		}
-		if ts.reasoningActive && ts.reasoningPending != "" {
-			item := &Item{ID: reasoningItemID(event, ts.reasoningSegment), Kind: provider.ItemKindReasoning, Status: provider.ItemStatusInProgress, TextDelta: ts.reasoningPending, TurnID: TurnID(key.turnID)}
-			ts.reasoningPending = ""
+		if ts.reasoningActive && len(ts.reasoningPending) > 0 {
+			item := &Item{ID: reasoningItemID(event, ts.reasoningSegment), Kind: provider.ItemKindReasoning, Status: provider.ItemStatusInProgress, TextDelta: string(ts.reasoningPending), TurnID: TurnID(key.turnID)}
+			ts.reasoningPending = ts.reasoningPending[:0]
 			pending = append(pending, pendingTextFlush{event: event, reasoning: item})
 		}
 	}
