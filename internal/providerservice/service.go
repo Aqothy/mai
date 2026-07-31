@@ -672,9 +672,24 @@ func (s *Service) sessionManager(instanceID provider.InstanceID) (SessionManager
 func (s *Service) ListInstances() []provider.InstanceInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	infos := make([]provider.InstanceInfo, 0, len(s.instances))
+	infos := make([]provider.InstanceInfo, 0, len(s.instances)+len(s.instanceSpecs))
 	for _, instance := range s.instances {
 		infos = append(infos, instance.Info())
+	}
+	// Persisted specs without a live instance this run are configured
+	// providers: listed so clients can offer and start them, with a status
+	// that says no process exists yet.
+	for id, spec := range s.instanceSpecs {
+		if s.instances[id] != nil {
+			continue
+		}
+		infos = append(infos, provider.InstanceInfo{
+			InstanceID: id,
+			Name:       spec.Name,
+			Driver:     spec.Driver,
+			Status:     provider.InstanceStatusConfigured,
+			Auth:       provider.Auth{Status: provider.AuthStatusUnknown},
+		})
 	}
 	return infos
 }

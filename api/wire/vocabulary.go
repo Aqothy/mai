@@ -235,8 +235,9 @@ var Vocabularies = []VocabularyDefinition{
 	},
 	{
 		Name:        "InstanceStatus",
-		Description: "Whether a provider instance's process is alive.",
+		Description: "Lifecycle of a provider instance: configured but never started this run, alive, or exited.",
 		Values: values(
+			string(provider.InstanceStatusConfigured),
 			string(provider.InstanceStatusInitialized),
 			string(provider.InstanceStatusExited),
 		),

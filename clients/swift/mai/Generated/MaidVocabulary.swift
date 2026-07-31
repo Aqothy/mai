@@ -187,8 +187,9 @@ public enum MaidPlanEntryPriority: String, Codable, Sendable, CaseIterable {
     case low = "low"
 }
 
-/// Whether a provider instance's process is alive.
+/// Lifecycle of a provider instance: configured but never started this run, alive, or exited.
 public enum MaidInstanceStatus: String, Codable, Sendable, CaseIterable {
+    case configured = "configured"
     case initialized = "initialized"
     case exited = "exited"
 }

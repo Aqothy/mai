@@ -53,6 +53,7 @@ func (e *RequestError) Error() string {
 type InstanceStatus string
 
 const (
+	InstanceStatusConfigured  InstanceStatus = "configured"
 	InstanceStatusInitialized InstanceStatus = "initialized"
 	InstanceStatusExited      InstanceStatus = "exited"
 )

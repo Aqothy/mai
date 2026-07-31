@@ -222,8 +222,9 @@
     },
     {
       "name": "InstanceStatus",
-      "description": "Whether a provider instance's process is alive.",
+      "description": "Lifecycle of a provider instance: configured but never started this run, alive, or exited.",
       "values": [
+        "configured",
         "initialized",
         "exited"
       ]
