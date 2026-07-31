@@ -23,7 +23,7 @@ struct IOSThreadFilterMenu: View {
             Picker("Provider", systemImage: "cpu", selection: $filter.driver) {
                 Text("All Providers").tag(String?.none)
                 ForEach(store.availableDrivers, id: \.self) { driver in
-                    Text(ProviderDriverLabel.displayName(forDriver: driver))
+                    Text(driver)
                         .tag(String?.some(driver))
                 }
             }

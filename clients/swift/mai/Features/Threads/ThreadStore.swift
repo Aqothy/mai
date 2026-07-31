@@ -523,10 +523,10 @@ final class ThreadStore {
     func providerDisplayName(for thread: ThreadListEntry) -> String? {
         guard let driver = driver(for: thread) else { return nil }
         guard driver == Self.acpDriver else {
-            return ProviderDriverLabel.displayName(forDriver: driver)
+            return driver
         }
         guard let agentName = thread.session?.providerName, !agentName.isEmpty else {
-            return ProviderDriverLabel.displayName(forDriver: Self.acpDriver)
+            return Self.acpDriver
         }
         return "\(agentName) (ACP)"
     }

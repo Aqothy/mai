@@ -84,7 +84,7 @@ final class DraftPromptModel {
             let groupID = driver.isEmpty ? provider.instanceID : driver
             let groupName = driver.isEmpty
                 ? provider.name
-                : Self.displayName(forProviderDriver: driver)
+                : driver
             return DraftProviderChoice(
                 id: "native:\(provider.instanceID)",
                 name: provider.name,
@@ -101,7 +101,7 @@ final class DraftPromptModel {
                 providerID: Self.acpProviderID,
                 acpAgentID: agent.id,
                 groupID: Self.acpProviderID,
-                groupName: Self.displayName(forProviderDriver: Self.acpProviderID)
+                groupName: Self.acpProviderID
             )
         }
         return (nativeChoices + acpChoices).sorted {
@@ -635,16 +635,6 @@ final class DraftPromptModel {
         default:
             false
         }
-    }
-
-    private static func displayName(forProviderDriver driver: String) -> String {
-        let words = driver
-            .split(whereSeparator: { $0 == "-" || $0 == "_" })
-            .map(String.init)
-        if words.count == 1, let word = words.first, word.count <= 4 {
-            return word.uppercased()
-        }
-        return words.map(\.capitalized).joined(separator: " ")
     }
 
     private struct ConfigUpdate {
