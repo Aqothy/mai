@@ -43,6 +43,17 @@
       "resultArray": true
     },
     {
+      "name": "acp.registry.installed",
+      "params": "EmptyParams",
+      "result": "ACPRegistryInstalledAgent",
+      "resultArray": true
+    },
+    {
+      "name": "acp.registry.install",
+      "params": "ACPRegistryInstallParams",
+      "result": "ACPRegistryInstalledAgent"
+    },
+    {
       "name": "acp.registry.start",
       "params": "ACPRegistryStartParams",
       "result": "InstanceInfo"

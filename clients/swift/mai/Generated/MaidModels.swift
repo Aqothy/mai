@@ -79,6 +79,132 @@ public extension ACPRegistryAgent {
     }
 }
 
+// MARK: - ACPRegistryInstallParams
+public struct ACPRegistryInstallParams: Codable {
+    public var registryID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case registryID = "registryId"
+    }
+
+    public init(registryID: String) {
+        self.registryID = registryID
+    }
+}
+
+// MARK: ACPRegistryInstallParams convenience initializers and mutators
+
+public extension ACPRegistryInstallParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ACPRegistryInstallParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        registryID: String? = nil
+    ) -> ACPRegistryInstallParams {
+        return ACPRegistryInstallParams(
+            registryID: registryID ?? self.registryID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ACPRegistryInstalledAgent
+public struct ACPRegistryInstalledAgent: Codable {
+    public var args: [String]?
+    public var description, icon: String?
+    public var id: String
+    public var installedAt: Date
+    public var instanceID, name, package, version: String
+
+    public enum CodingKeys: String, CodingKey {
+        case args, description, icon, id, installedAt
+        case instanceID = "instanceId"
+        case name, package, version
+    }
+
+    public init(args: [String]?, description: String?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, version: String) {
+        self.args = args
+        self.description = description
+        self.icon = icon
+        self.id = id
+        self.installedAt = installedAt
+        self.instanceID = instanceID
+        self.name = name
+        self.package = package
+        self.version = version
+    }
+}
+
+// MARK: ACPRegistryInstalledAgent convenience initializers and mutators
+
+public extension ACPRegistryInstalledAgent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ACPRegistryInstalledAgent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        args: [String]?? = nil,
+        description: String?? = nil,
+        icon: String?? = nil,
+        id: String? = nil,
+        installedAt: Date? = nil,
+        instanceID: String? = nil,
+        name: String? = nil,
+        package: String? = nil,
+        version: String? = nil
+    ) -> ACPRegistryInstalledAgent {
+        return ACPRegistryInstalledAgent(
+            args: args ?? self.args,
+            description: description ?? self.description,
+            icon: icon ?? self.icon,
+            id: id ?? self.id,
+            installedAt: installedAt ?? self.installedAt,
+            instanceID: instanceID ?? self.instanceID,
+            name: name ?? self.name,
+            package: package ?? self.package,
+            version: version ?? self.version
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ACPRegistryStartParams
 public struct ACPRegistryStartParams: Codable {
     public var registryID: String

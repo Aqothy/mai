@@ -336,12 +336,11 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 	if s.acpRegistry == nil {
 		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
 	}
-	spec, err := s.acpRegistry.instanceSpec(ctx, registryID)
+	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	// A first npm acquisition can exceed the normal process-initialization
-	// timeout on a slow connection. Later starts use the persistent cache.
+	// npm may need to acquire the package before the agent can initialize.
 	return s.startProvider(ctx, spec, restart, 2*time.Minute)
 }
 

@@ -35,8 +35,11 @@ execFileSync(
 
 let swiftSource = await readFile(swiftModelsPath, "utf8");
 const catalogStart = swiftSource.indexOf("/// Client-visible JSON-RPC parameters");
-const firstModel = swiftSource.indexOf("// MARK: - ACPRegistryAgent");
-if (catalogStart < 0 || firstModel < 0) throw new Error("quicktype Swift catalog was not found");
+const catalogModel = swiftSource.indexOf("// MARK: - MaidClientAPI", Math.max(catalogStart, 0));
+const firstModel = swiftSource.indexOf("// MARK: - ", catalogModel + 1);
+if (catalogStart < 0 || catalogModel < 0 || firstModel < 0) {
+  throw new Error("quicktype Swift catalog was not found");
+}
 swiftSource = swiftSource.slice(0, catalogStart) + swiftSource.slice(firstModel);
 
 // quicktype declares every stored property `let`, which would force the reducer

@@ -5,6 +5,8 @@
 package wire
 
 import (
+	"time"
+
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -19,6 +21,8 @@ const (
 	MethodProviderStart              = "provider.start"
 	MethodProviderList               = "provider.list"
 	MethodACPRegistryList            = "acp.registry.list"
+	MethodACPRegistryInstalled       = "acp.registry.installed"
+	MethodACPRegistryInstall         = "acp.registry.install"
 	MethodACPRegistryStart           = "acp.registry.start"
 	MethodProviderAuthenticate       = "provider.authenticate"
 	MethodProviderLogout             = "provider.logout"
@@ -88,6 +92,10 @@ type ACPRegistryStartParams struct {
 	Restart    bool   `json:"restart,omitempty"`
 }
 
+type ACPRegistryInstallParams struct {
+	RegistryID string `json:"registryId"`
+}
+
 type ProviderAuthenticateParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	MethodID   string              `json:"methodId"`
@@ -148,4 +156,20 @@ type ACPRegistryAgent struct {
 	Icon        string              `json:"icon,omitempty"`
 	Package     string              `json:"package"`
 	Args        []string            `json:"args,omitempty"`
+}
+
+// ACPRegistryInstalledAgent describes an ACP agent the user enabled from the
+// registry. npm acquires the package lazily when it starts, bounded by Version;
+// selecting Update records a newer registry version ceiling. Environment
+// variables remain server-only and are not represented.
+type ACPRegistryInstalledAgent struct {
+	ID          string              `json:"id"`
+	InstanceID  provider.InstanceID `json:"instanceId"`
+	Name        string              `json:"name"`
+	Version     string              `json:"version"`
+	Description string              `json:"description,omitempty"`
+	Icon        string              `json:"icon,omitempty"`
+	Package     string              `json:"package"`
+	Args        []string            `json:"args,omitempty"`
+	InstalledAt time.Time           `json:"installedAt"`
 }

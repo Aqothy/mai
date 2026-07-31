@@ -65,6 +65,8 @@ type contract struct {
 	ProviderOptionsResult       wire.ProviderOptionsResult       `json:"providerOptionsResult"`
 	ProviderOptionsInvalidated  wire.ProviderOptionsInvalidated  `json:"providerOptionsInvalidated"`
 	ACPRegistryAgent            wire.ACPRegistryAgent            `json:"acpRegistryAgent"`
+	ACPRegistryInstalledAgent   wire.ACPRegistryInstalledAgent   `json:"acpRegistryInstalledAgent"`
+	ACPRegistryInstallParams    wire.ACPRegistryInstallParams    `json:"acpRegistryInstallParams"`
 }
 
 func main() {

@@ -43,6 +43,65 @@
       ],
       "title": "ACPRegistryAgent"
     },
+    "ACPRegistryInstallParams": {
+      "properties": {
+        "registryId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "registryId"
+      ],
+      "title": "ACPRegistryInstallParams"
+    },
+    "ACPRegistryInstalledAgent": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "installedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "instanceId",
+        "name",
+        "version",
+        "package",
+        "installedAt"
+      ],
+      "title": "ACPRegistryInstalledAgent"
+    },
     "ACPRegistryStartParams": {
       "properties": {
         "registryId": {
@@ -1729,6 +1788,12 @@
         },
         "acpRegistryAgent": {
           "$ref": "#/$defs/ACPRegistryAgent"
+        },
+        "acpRegistryInstalledAgent": {
+          "$ref": "#/$defs/ACPRegistryInstalledAgent"
+        },
+        "acpRegistryInstallParams": {
+          "$ref": "#/$defs/ACPRegistryInstallParams"
         }
       },
       "additionalProperties": false,
@@ -1782,7 +1847,9 @@
         "providerOptionsSetParams",
         "providerOptionsResult",
         "providerOptionsInvalidated",
-        "acpRegistryAgent"
+        "acpRegistryAgent",
+        "acpRegistryInstalledAgent",
+        "acpRegistryInstallParams"
       ],
       "title": "contract"
     }
