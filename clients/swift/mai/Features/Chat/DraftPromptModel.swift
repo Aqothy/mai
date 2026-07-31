@@ -419,6 +419,7 @@ final class DraftPromptModel {
                 configSelections: selections
             )
             draftStore.removeDraft(for: threadID)
+            store.selectThread(threadID)
         } catch is CancellationError {
             return
         } catch {
@@ -476,8 +477,8 @@ final class DraftPromptModel {
               store.threads.contains(where: { $0.id == threadID }) else {
             return false
         }
-        store.selectThread(threadID)
         draftStore.removeDraft(for: threadID)
+        store.selectThread(threadID)
         return true
     }
 

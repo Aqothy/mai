@@ -14,35 +14,12 @@ struct DraftPromptView: View {
             .scrollDismissesKeyboard(.interactively)
 
             VStack {
-                Image(systemName: "sparkles")
+                (Text("What should we build in ")
+                    + Text(model.directoryLabel).underline()
+                    + Text("?"))
                     .font(.largeTitle)
-                    .foregroundStyle(.tint)
-                    .accessibilityHidden(true)
-
-                Text("What would you like to build?")
-                    .font(.largeTitle.bold())
                     .multilineTextAlignment(.center)
                     .accessibilityHeading(.h1)
-
-                Text("Choose a provider and describe your task.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                if model.connectionState != .connected {
-                    Label("Waiting for maiD…", systemImage: "network")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else if !model.hasProviderChoices {
-                    Label("No providers available", systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else if !model.hasWorkingDirectory {
-                    Label(
-                        "Choose a working directory", systemImage: "folder.badge.questionmark"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -140,7 +117,7 @@ struct DraftSessionControlsView: View {
         .disabled(model.isSending || !model.hasProviderChoices)
         .accessibilityLabel("Provider")
 
-        if model.selectedProviderGroupChoices.count > 1 {
+        if !model.selectedProviderGroupChoices.isEmpty {
             Menu {
                 ForEach(model.selectedProviderGroupChoices) { provider in
                     Button {

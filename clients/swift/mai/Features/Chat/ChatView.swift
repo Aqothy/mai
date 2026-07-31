@@ -85,6 +85,8 @@ struct ChatView: View {
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal)
                 .padding(.bottom, 10)
             } else if let chatModel, !chatModel.queuedPrompts.isEmpty {
