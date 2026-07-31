@@ -28,6 +28,10 @@ final class ChatPromptModel {
         attachmentsModel.attachments
     }
 
+    var queuedPrompts: [QueuedChatPrompt] {
+        store.queuedPrompts(for: threadID)
+    }
+
     var canSend: Bool {
         store.connectionState == .connected
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -60,7 +64,7 @@ final class ChatPromptModel {
         defer { isSending = false }
 
         do {
-            try await store.startTurn(
+            try await store.submitTurn(
                 threadID: threadID,
                 text: submittedText,
                 attachments: submittedAttachments.compactMap(\.attachment)
@@ -69,6 +73,20 @@ final class ChatPromptModel {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeQueuedPrompt(_ promptID: String) {
+        store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
+    }
+
+    func steerQueuedPrompt(_ promptID: String) async {
+        do {
+            try await store.steerQueuedPrompt(threadID: threadID, promptID: promptID)
         } catch is CancellationError {
             return
         } catch {

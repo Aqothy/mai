@@ -80,7 +80,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 trailingControls
 
                 Button {
-                    if isRunning {
+                    if showsStop {
                         stop()
                     } else {
                         #if canImport(UIKit)
@@ -100,8 +100,8 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                                 .controlSize(.small)
                         } else {
                             Label(
-                                isRunning ? "Stop generation" : submitLabel,
-                                systemImage: isRunning ? "stop.fill" : "arrow.up"
+                                showsStop ? "Stop generation" : submitLabel,
+                                systemImage: showsStop ? "stop.fill" : "arrow.up"
                             )
                             .labelStyle(.iconOnly)
                         }
@@ -113,17 +113,23 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                     .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
-                .disabled(isRunning ? isStopping : !canSend)
+                .disabled(showsStop ? isStopping : !canSend)
             }
             .frame(height: 36)
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
         }
-        .modifier(ComposerSurfaceStyle())
+        .glassSurface(in: .rect(cornerRadius: 24), isShadowed: true)
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
         .padding(.horizontal)
         .padding(.bottom, 12)
+    }
+
+    /// While a turn is running the button stops it, unless there is a draft to
+    /// send — sending mid-turn queues the prompt instead.
+    private var showsStop: Bool {
+        isRunning && !canSend
     }
 
     private var sendButtonBackground: Color {
@@ -132,25 +138,6 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
 
     private var sendButtonForeground: Color {
         isRunning || canSend ? .black : .secondary
-    }
-}
-
-private struct ComposerSurfaceStyle: ViewModifier {
-    private let shape = RoundedRectangle(cornerRadius: 24)
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            content
-                .glassEffect(.regular, in: shape)
-        } else {
-            content
-                .background(.regularMaterial, in: shape)
-                .overlay {
-                    shape.stroke(.quaternary, lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.12), radius: 24, y: 12)
-        }
     }
 }
 

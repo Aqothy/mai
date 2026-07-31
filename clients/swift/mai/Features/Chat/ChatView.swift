@@ -78,7 +78,7 @@ struct ChatView: View {
     private var composerStack: some View {
         let thread = store.selectedThread
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading) {
             if chatModel == nil {
                 HStack(spacing: 16) {
                     DraftSessionControlsView(model: draftModel)
@@ -86,6 +86,9 @@ struct ChatView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
+                .padding(.bottom, 10)
+            } else if let chatModel, !chatModel.queuedPrompts.isEmpty {
+                ChatPromptQueueView(model: chatModel)
             }
 
             PromptComposer(
@@ -179,6 +182,68 @@ struct ChatView: View {
             )?.image == true
         }
         return draftModel.supportsImageAttachments
+    }
+}
+
+/// A panel of queued prompts whose bottom edge tucks behind the composer so
+/// the two read as one connected surface.
+private struct ChatPromptQueueView: View {
+    let model: ChatPromptModel
+
+    /// Matches the composer's corner radius; the panel extends this far
+    /// beneath the composer to close the gap left by its rounded corners.
+    private let composerOverlap: CGFloat = 24
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(model.queuedPrompts) { prompt in
+                QueuedPromptRow(model: model, prompt: prompt)
+            }
+        }
+        .padding(.bottom, composerOverlap)
+        .background(
+            .regularMaterial,
+            in: .rect(topLeadingRadius: 20, topTrailingRadius: 20)
+        )
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom, -composerOverlap)
+    }
+}
+
+private struct QueuedPromptRow: View {
+    let model: ChatPromptModel
+    let prompt: QueuedChatPrompt
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.turn.down.right")
+                .foregroundStyle(.secondary)
+
+            Text(prompt.text.isEmpty
+                ? "\(prompt.attachments.count) attachment(s)"
+                : prompt.text)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button("Steer", systemImage: "arrow.triangle.branch") {
+                Task { await model.steerQueuedPrompt(prompt.id) }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Button("Remove queued prompt", systemImage: "trash") {
+                model.removeQueuedPrompt(prompt.id)
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 

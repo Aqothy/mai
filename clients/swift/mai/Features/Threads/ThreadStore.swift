@@ -12,11 +12,6 @@ struct QueuedChatPrompt: Identifiable {
     let attachments: [Attachment]
 }
 
-enum ChatPromptSubmissionMode {
-    case queue
-    case steer
-}
-
 @Observable
 final class ThreadStore {
     static let maximumReconnectAttempts = 5
@@ -309,8 +304,7 @@ final class ThreadStore {
     func submitTurn(
         threadID: String,
         text: String,
-        attachments: [Attachment] = [],
-        mode: ChatPromptSubmissionMode? = nil
+        attachments: [Attachment] = []
     ) async throws {
         let prompt = try validatedPrompt(
             text: text,
@@ -321,20 +315,30 @@ final class ThreadStore {
         let hasQueue = !(queuedPromptsByThreadID[threadID] ?? []).isEmpty
         let isDispatchingQueue = dispatchingQueuedPromptThreadIDs.contains(threadID)
 
-        switch mode {
-        case .queue:
+        if isRunning || hasQueue || isDispatchingQueue {
             enqueue(prompt, threadID: threadID)
-        case .steer:
-            try await dispatchTurn(threadID: threadID, prompt: prompt)
-        case nil where isRunning || hasQueue || isDispatchingQueue:
-            enqueue(prompt, threadID: threadID)
-        case nil:
+        } else {
             try await dispatchTurn(threadID: threadID, prompt: prompt)
         }
     }
 
     func queuedPrompts(for threadID: String) -> [QueuedChatPrompt] {
         queuedPromptsByThreadID[threadID] ?? []
+    }
+
+    /// Dispatches a queued prompt into the running turn immediately, removing
+    /// it from the queue once the dispatch succeeds.
+    func steerQueuedPrompt(threadID: String, promptID: String) async throws {
+        guard let prompt = queuedPromptsByThreadID[threadID]?
+            .first(where: { $0.id == promptID }),
+            !dispatchingQueuedPromptThreadIDs.contains(threadID)
+        else { return }
+
+        dispatchingQueuedPromptThreadIDs.insert(threadID)
+        defer { dispatchingQueuedPromptThreadIDs.remove(threadID) }
+
+        try await dispatchTurn(threadID: threadID, prompt: prompt)
+        removeQueuedPrompt(threadID: threadID, promptID: promptID)
     }
 
     func removeQueuedPrompt(threadID: String, promptID: String) {
