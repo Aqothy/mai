@@ -1036,7 +1036,7 @@
         "providerName": {
           "type": "string"
         },
-        "provider": {
+        "driver": {
           "type": "string"
         },
         "cwd": {
