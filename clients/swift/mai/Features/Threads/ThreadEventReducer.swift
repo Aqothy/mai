@@ -235,7 +235,7 @@ enum ThreadEventReducer {
 
     private static func ensureSession(_ thread: Thread, _ event: Event) -> SessionBinding {
         if let session = thread.session { return session }
-        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, lastError: nil, provider: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
+        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, driver: nil, lastError: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

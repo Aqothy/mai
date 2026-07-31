@@ -117,7 +117,7 @@ type SessionBinding struct {
 	// same provider instance and turn ids. It is server-internal projection state.
 	ProviderGeneration uint64              `json:"-"`
 	ProviderName       string              `json:"providerName,omitempty"`
-	Provider           provider.DriverKind `json:"provider,omitempty"`
+	Driver             provider.DriverKind `json:"driver,omitempty"`
 	Cwd                string              `json:"cwd,omitempty"`
 	Status             SessionStatus       `json:"status"`
 	ActiveTurnID       TurnID              `json:"activeTurnId,omitempty"`

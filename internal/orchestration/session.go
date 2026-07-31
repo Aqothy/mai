@@ -226,8 +226,8 @@ func overlaySessionIdentity(session *SessionBinding, binding *SessionBinding) {
 	if binding.ProviderName != "" {
 		session.ProviderName = binding.ProviderName
 	}
-	if binding.Provider != "" {
-		session.Provider = binding.Provider
+	if binding.Driver != "" {
+		session.Driver = binding.Driver
 	}
 	if binding.Cwd != "" {
 		session.Cwd = binding.Cwd

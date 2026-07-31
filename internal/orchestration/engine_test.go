@@ -1420,7 +1420,7 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 		t.Fatal("turn.start did not create a running turn")
 	}
 	turnID := thread.LatestTurn.ID
-	appendUpdate("bind prov-a", sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "prov-a", ProviderName: "Provider A", Provider: "acp"}})
+	appendUpdate("bind prov-a", sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "prov-a", ProviderName: "Provider A", Driver: "acp"}})
 	snapshotMustEqualLastPayload("after bind")
 
 	// 2. The agent publishes slash commands BETWEEN status events.
@@ -1439,7 +1439,7 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 	// 4. Switching providers emits a fresh binding WITHOUT provider A's
 	// metadata; replacement clears it. (The old documented merge rule kept
 	// the stale slash commands here — the client-divergence bug.)
-	appendUpdate("bind prov-b", sessionUpdate{Kind: sessionUpdateBound, Binding: &SessionBinding{ProviderInstanceID: "prov-b", ProviderName: "Provider B", Provider: "acp"}})
+	appendUpdate("bind prov-b", sessionUpdate{Kind: sessionUpdateBound, Binding: &SessionBinding{ProviderInstanceID: "prov-b", ProviderName: "Provider B", Driver: "acp"}})
 	switched := snapshotMustEqualLastPayload("after provider switch")
 	if strings.Contains(string(switched), `"compact"`) || strings.Contains(string(switched), "Provider A") {
 		t.Fatalf("provider-switch payload = %s, want no provider-A metadata", switched)

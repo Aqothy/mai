@@ -1161,29 +1161,35 @@ public extension EventPayload {
 // MARK: - Item
 public struct Item: Codable {
     public var createdAt: Date
+    public var detailAvailable: Bool?
     public var id, kind: String
     public var payload: JSONAny?
+    public var sequence: Int?
     public var status: String
     public var textDelta, title: String?
     public var toolCall: ToolCall?
+    public var toolCallSummary: ToolCallSummary?
     public var turnID: String?
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, id, kind, payload, status, textDelta, title, toolCall
+        case createdAt, detailAvailable, id, kind, payload, sequence, status, textDelta, title, toolCall, toolCallSummary
         case turnID = "turnId"
         case updatedAt
     }
 
-    public init(createdAt: Date, id: String, kind: String, payload: JSONAny?, status: String, textDelta: String?, title: String?, toolCall: ToolCall?, turnID: String?, updatedAt: Date) {
+    public init(createdAt: Date, detailAvailable: Bool?, id: String, kind: String, payload: JSONAny?, sequence: Int?, status: String, textDelta: String?, title: String?, toolCall: ToolCall?, toolCallSummary: ToolCallSummary?, turnID: String?, updatedAt: Date) {
         self.createdAt = createdAt
+        self.detailAvailable = detailAvailable
         self.id = id
         self.kind = kind
         self.payload = payload
+        self.sequence = sequence
         self.status = status
         self.textDelta = textDelta
         self.title = title
         self.toolCall = toolCall
+        self.toolCallSummary = toolCallSummary
         self.turnID = turnID
         self.updatedAt = updatedAt
     }
@@ -1209,25 +1215,31 @@ public extension Item {
 
     func with(
         createdAt: Date? = nil,
+        detailAvailable: Bool?? = nil,
         id: String? = nil,
         kind: String? = nil,
         payload: JSONAny?? = nil,
+        sequence: Int?? = nil,
         status: String? = nil,
         textDelta: String?? = nil,
         title: String?? = nil,
         toolCall: ToolCall?? = nil,
+        toolCallSummary: ToolCallSummary?? = nil,
         turnID: String?? = nil,
         updatedAt: Date? = nil
     ) -> Item {
         return Item(
             createdAt: createdAt ?? self.createdAt,
+            detailAvailable: detailAvailable ?? self.detailAvailable,
             id: id ?? self.id,
             kind: kind ?? self.kind,
             payload: payload ?? self.payload,
+            sequence: sequence ?? self.sequence,
             status: status ?? self.status,
             textDelta: textDelta ?? self.textDelta,
             title: title ?? self.title,
             toolCall: toolCall ?? self.toolCall,
+            toolCallSummary: toolCallSummary ?? self.toolCallSummary,
             turnID: turnID ?? self.turnID,
             updatedAt: updatedAt ?? self.updatedAt
         )
@@ -1443,6 +1455,218 @@ public extension ToolLocation {
     }
 }
 
+// MARK: - ToolCallSummary
+public struct ToolCallSummary: Codable {
+    public var action: String
+    public var attachmentCount: Int?
+    public var attachments: [ToolAttachmentSummary]?
+    public var changeCount: Int?
+    public var changes: [FileChangeSummary]?
+    public var commandPreview, cwd: String?
+    public var durationMilliseconds: Int?
+    public var errorPreview: String?
+    public var exitCode, locationCount: Int?
+    public var locations: [ToolLocation]?
+    public var name, namespace, outputPreview, providerKind: String?
+    public var queryPreview: String?
+    public var truncated: Bool?
+
+    public init(action: String, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
+        self.action = action
+        self.attachmentCount = attachmentCount
+        self.attachments = attachments
+        self.changeCount = changeCount
+        self.changes = changes
+        self.commandPreview = commandPreview
+        self.cwd = cwd
+        self.durationMilliseconds = durationMilliseconds
+        self.errorPreview = errorPreview
+        self.exitCode = exitCode
+        self.locationCount = locationCount
+        self.locations = locations
+        self.name = name
+        self.namespace = namespace
+        self.outputPreview = outputPreview
+        self.providerKind = providerKind
+        self.queryPreview = queryPreview
+        self.truncated = truncated
+    }
+}
+
+// MARK: ToolCallSummary convenience initializers and mutators
+
+public extension ToolCallSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ToolCallSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        action: String? = nil,
+        attachmentCount: Int?? = nil,
+        attachments: [ToolAttachmentSummary]?? = nil,
+        changeCount: Int?? = nil,
+        changes: [FileChangeSummary]?? = nil,
+        commandPreview: String?? = nil,
+        cwd: String?? = nil,
+        durationMilliseconds: Int?? = nil,
+        errorPreview: String?? = nil,
+        exitCode: Int?? = nil,
+        locationCount: Int?? = nil,
+        locations: [ToolLocation]?? = nil,
+        name: String?? = nil,
+        namespace: String?? = nil,
+        outputPreview: String?? = nil,
+        providerKind: String?? = nil,
+        queryPreview: String?? = nil,
+        truncated: Bool?? = nil
+    ) -> ToolCallSummary {
+        return ToolCallSummary(
+            action: action ?? self.action,
+            attachmentCount: attachmentCount ?? self.attachmentCount,
+            attachments: attachments ?? self.attachments,
+            changeCount: changeCount ?? self.changeCount,
+            changes: changes ?? self.changes,
+            commandPreview: commandPreview ?? self.commandPreview,
+            cwd: cwd ?? self.cwd,
+            durationMilliseconds: durationMilliseconds ?? self.durationMilliseconds,
+            errorPreview: errorPreview ?? self.errorPreview,
+            exitCode: exitCode ?? self.exitCode,
+            locationCount: locationCount ?? self.locationCount,
+            locations: locations ?? self.locations,
+            name: name ?? self.name,
+            namespace: namespace ?? self.namespace,
+            outputPreview: outputPreview ?? self.outputPreview,
+            providerKind: providerKind ?? self.providerKind,
+            queryPreview: queryPreview ?? self.queryPreview,
+            truncated: truncated ?? self.truncated
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ToolAttachmentSummary
+public struct ToolAttachmentSummary: Codable {
+    public var kind: String
+    public var mimeType, name, uri: String?
+
+    public init(kind: String, mimeType: String?, name: String?, uri: String?) {
+        self.kind = kind
+        self.mimeType = mimeType
+        self.name = name
+        self.uri = uri
+    }
+}
+
+// MARK: ToolAttachmentSummary convenience initializers and mutators
+
+public extension ToolAttachmentSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ToolAttachmentSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: String? = nil,
+        mimeType: String?? = nil,
+        name: String?? = nil,
+        uri: String?? = nil
+    ) -> ToolAttachmentSummary {
+        return ToolAttachmentSummary(
+            kind: kind ?? self.kind,
+            mimeType: mimeType ?? self.mimeType,
+            name: name ?? self.name,
+            uri: uri ?? self.uri
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - FileChangeSummary
+public struct FileChangeSummary: Codable {
+    public var kind, movePath: String?
+    public var path: String
+
+    public init(kind: String?, movePath: String?, path: String) {
+        self.kind = kind
+        self.movePath = movePath
+        self.path = path
+    }
+}
+
+// MARK: FileChangeSummary convenience initializers and mutators
+
+public extension FileChangeSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(FileChangeSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: String?? = nil,
+        movePath: String?? = nil,
+        path: String? = nil
+    ) -> FileChangeSummary {
+        return FileChangeSummary(
+            kind: kind ?? self.kind,
+            movePath: movePath ?? self.movePath,
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Plan
 public struct Plan: Codable {
     public var entries: [PlanEntry]
@@ -1546,7 +1770,7 @@ public extension PlanEntry {
 public struct SessionBinding: Codable {
     public var activeTurnID: String?
     public var configOptions: [ConfigOption]?
-    public var cwd, lastError, provider: String?
+    public var cwd, driver, lastError: String?
     public var providerInstanceID: String
     public var providerName: String?
     public var slashCommands: [SlashCommand]?
@@ -1558,19 +1782,19 @@ public struct SessionBinding: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case activeTurnID = "activeTurnId"
-        case configOptions, cwd, lastError, provider
+        case configOptions, cwd, driver, lastError
         case providerInstanceID = "providerInstanceId"
         case providerName, slashCommands, status, stopRequested
         case threadID = "threadId"
         case tokenUsage, updatedAt
     }
 
-    public init(activeTurnID: String?, configOptions: [ConfigOption]?, cwd: String?, lastError: String?, provider: String?, providerInstanceID: String, providerName: String?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
+    public init(activeTurnID: String?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
         self.activeTurnID = activeTurnID
         self.configOptions = configOptions
         self.cwd = cwd
+        self.driver = driver
         self.lastError = lastError
-        self.provider = provider
         self.providerInstanceID = providerInstanceID
         self.providerName = providerName
         self.slashCommands = slashCommands
@@ -1604,8 +1828,8 @@ public extension SessionBinding {
         activeTurnID: String?? = nil,
         configOptions: [ConfigOption]?? = nil,
         cwd: String?? = nil,
+        driver: String?? = nil,
         lastError: String?? = nil,
-        provider: String?? = nil,
         providerInstanceID: String? = nil,
         providerName: String?? = nil,
         slashCommands: [SlashCommand]?? = nil,
@@ -1619,8 +1843,8 @@ public extension SessionBinding {
             activeTurnID: activeTurnID ?? self.activeTurnID,
             configOptions: configOptions ?? self.configOptions,
             cwd: cwd ?? self.cwd,
+            driver: driver ?? self.driver,
             lastError: lastError ?? self.lastError,
-            provider: provider ?? self.provider,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             providerName: providerName ?? self.providerName,
             slashCommands: slashCommands ?? self.slashCommands,
@@ -1737,6 +1961,58 @@ public extension TokenUsage {
             currency: currency ?? self.currency,
             maxTokens: maxTokens ?? self.maxTokens,
             usedTokens: usedTokens ?? self.usedTokens
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - GetItemDetailInput
+public struct GetItemDetailInput: Codable {
+    public var itemID, threadID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case itemID = "itemId"
+        case threadID = "threadId"
+    }
+
+    public init(itemID: String, threadID: String) {
+        self.itemID = itemID
+        self.threadID = threadID
+    }
+}
+
+// MARK: GetItemDetailInput convenience initializers and mutators
+
+public extension GetItemDetailInput {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(GetItemDetailInput.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        itemID: String? = nil,
+        threadID: String? = nil
+    ) -> GetItemDetailInput {
+        return GetItemDetailInput(
+            itemID: itemID ?? self.itemID,
+            threadID: threadID ?? self.threadID
         )
     }
 
@@ -3087,10 +3363,12 @@ public extension TimelineEntry {
 
 // MARK: - ThreadDetailSnapshot
 public struct ThreadDetailSnapshot: Codable {
+    public var historyRestorePending: Bool?
     public var snapshotSequence: Int
     public var thread: Thread
 
-    public init(snapshotSequence: Int, thread: Thread) {
+    public init(historyRestorePending: Bool?, snapshotSequence: Int, thread: Thread) {
+        self.historyRestorePending = historyRestorePending
         self.snapshotSequence = snapshotSequence
         self.thread = thread
     }
@@ -3115,10 +3393,12 @@ public extension ThreadDetailSnapshot {
     }
 
     func with(
+        historyRestorePending: Bool?? = nil,
         snapshotSequence: Int? = nil,
         thread: Thread? = nil
     ) -> ThreadDetailSnapshot {
         return ThreadDetailSnapshot(
+            historyRestorePending: historyRestorePending ?? self.historyRestorePending,
             snapshotSequence: snapshotSequence ?? self.snapshotSequence,
             thread: thread ?? self.thread
         )

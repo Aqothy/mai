@@ -313,7 +313,7 @@ func bindingFromProviderSession(providerInstanceID provider.InstanceID, session 
 	if providerInstanceID == "" {
 		providerInstanceID = session.ProviderInstanceID
 	}
-	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Provider: session.Provider, Cwd: session.Cwd, ConfigOptions: cloneConfigOptions(session.ConfigOptions)}
+	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, ConfigOptions: cloneConfigOptions(session.ConfigOptions)}
 }
 
 func (r *ProviderEventReactor) dispatchProviderSessionMetadata(threadID ThreadID, session provider.Session, createdAt time.Time) {
