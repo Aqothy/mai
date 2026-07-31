@@ -4,22 +4,23 @@ struct ConnectionStatusView: View {
     let store: ThreadStore
 
     var body: some View {
-        if store.connectionState != .connected, !store.threads.isEmpty {
-            HStack {
-                if store.connectionState == .connecting || store.nextReconnectAt != nil {
-                    ReconnectAttemptStatusView(store: store, showsIcon: true)
-                } else if store.automaticReconnectsExhausted {
-                    Label(
-                        "All \(ThreadStore.maximumReconnectAttempts) automatic retries failed",
-                        systemImage: "network.slash"
-                    )
-                    Spacer()
+        if store.connectionState != .connected {
+            HStack(spacing: 8) {
+                if store.automaticReconnectsExhausted {
+                    Image(systemName: "wifi.slash")
+                        .foregroundStyle(.secondary)
+                    Text("Disconnected")
                     Button("Retry", action: store.retry)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                    ReconnectAttemptStatusView(store: store)
                 }
             }
-            .font(.caption)
-            .padding()
-            .background(.bar)
+            .font(.footnote)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .modifier(StatusCapsuleBackground())
         }
     }
 }

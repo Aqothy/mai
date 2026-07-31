@@ -2,30 +2,28 @@ import SwiftUI
 
 struct ReconnectAttemptStatusView: View {
     let store: ThreadStore
-    var showsIcon = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            if showsIcon {
-                Label(statusText(at: context.date), systemImage: "arrow.clockwise")
-            } else {
-                Text(statusText(at: context.date))
-            }
+            // Size against the widest possible string so per-second countdown
+            // updates and state changes never resize or shift the pill.
+            Text("Reconnecting in 88s")
+                .hidden()
+                .overlay(alignment: .leading) {
+                    Text(statusText(at: context.date))
+                }
         }
         .monospacedDigit()
     }
 
     private func statusText(at date: Date) -> String {
         if store.connectionState == .connecting {
-            guard store.reconnectAttempt > 0 else { return "Connecting…" }
-            return "Reconnect attempt \(store.reconnectAttempt) of \(ThreadStore.maximumReconnectAttempts)…"
+            return store.reconnectAttempt == 0 ? "Connecting…" : "Reconnecting…"
         }
-
         guard let nextReconnectAt = store.nextReconnectAt else {
             return "Connecting…"
         }
         let seconds = max(0, Int(ceil(nextReconnectAt.timeIntervalSince(date))))
-        let attempt = min(store.reconnectAttempt + 1, ThreadStore.maximumReconnectAttempts)
-        return "Reconnect attempt \(attempt) of \(ThreadStore.maximumReconnectAttempts) in \(seconds)s"
+        return "Reconnecting in \(seconds)s"
     }
 }

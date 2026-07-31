@@ -10,8 +10,23 @@ struct DesktopSidebarView: View {
             }
 
             ForEach(store.threads, id: \.id) { thread in
-                ThreadRow(thread: thread)
+                ThreadRow(
+                    thread: thread,
+                    isUnread: store.isThreadUnread(thread.id),
+                    providerName: store.providerDisplayName(for: thread)
+                )
                     .tag(thread.id)
+                    .contextMenu {
+                        if store.isThreadUnread(thread.id) {
+                            Button("Mark as Read", systemImage: "envelope.open") {
+                                store.markThreadRead(thread.id)
+                            }
+                        } else {
+                            Button("Mark as Unread", systemImage: "envelope.badge") {
+                                store.markThreadUnread(thread.id)
+                            }
+                        }
+                    }
             }
         }
         .listStyle(.sidebar)
