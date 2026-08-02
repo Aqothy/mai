@@ -6,10 +6,6 @@ final class RPCClient {
 
     private let endpoint: URL
     private let session: URLSession
-    // Built once: these run on the main actor per inbound frame, including
-    // every streamed delta.
-    private let decoder = newJSONDecoder()
-    private let routeDecoder = JSONDecoder()
     private var webSocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
@@ -58,7 +54,7 @@ final class RPCClient {
         as resultType: Result.Type = Result.self
     ) async throws -> Result {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
-        let response = try decoder.decode(Response<Result>.self, from: data)
+        let response = try await Self.decode(Response<Result>.self, from: data)
 
         if let error = response.error {
             throw RPCError(code: error.code, message: error.message, data: error.data)
@@ -78,12 +74,25 @@ final class RPCClient {
         params: sending Params
     ) async throws {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
-        let response = try decoder.decode(ErrorResponse.self, from: data)
+        let response = try await Self.decode(ErrorResponse.self, from: data)
         if let error = response.error {
             throw RPCError(code: error.code, message: error.message, data: error.data)
         }
     }
 
+    @concurrent
+    private static func decode<Value: Decodable & SendableMetatype>(
+        _ type: Value.Type,
+        from data: Data
+    ) async throws -> sending Value {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(type, from: data)
+    }
+
+    // Encoding runs off the main actor for the same reason decoding does: a
+    // thread.turn.start with base64 image/audio attachments is a multi-MB
+    // JSON body, and escaping it inline in the send path is a visible hitch.
     @concurrent
     private static func encode<Value: Encodable & SendableMetatype>(
         _ value: sending Value
@@ -181,7 +190,8 @@ final class RPCClient {
                     )
                 }
 
-                try routeMessage(data)
+                let route = try await Self.decode(Route.self, from: data)
+                routeMessage(route, data: data)
             }
         } catch is CancellationError {
             finishConnection(socket, error: nil)
@@ -190,9 +200,7 @@ final class RPCClient {
         }
     }
 
-    private func routeMessage(_ data: Data) throws {
-        let route = try routeDecoder.decode(Route.self, from: data)
-
+    private func routeMessage(_ route: Route, data: Data) {
         if let id = route.id {
             pendingRequests.removeValue(forKey: id)?.resume(returning: data)
         } else if let method = route.method {
@@ -233,21 +241,21 @@ final class RPCClient {
         let params: Params
     }
 
-    private struct Route: Decodable {
+    nonisolated private struct Route: Decodable {
         let id: Int?
         let method: String?
     }
 
-    private struct Response<Result: Decodable>: Decodable {
+    nonisolated private struct Response<Result: Decodable>: Decodable {
         let result: Result?
         let error: ErrorPayload?
     }
 
-    private struct ErrorResponse: Decodable {
+    nonisolated private struct ErrorResponse: Decodable {
         let error: ErrorPayload?
     }
 
-    private struct ErrorPayload: Decodable {
+    nonisolated private struct ErrorPayload: Decodable {
         let code: Int?
         let message: String
         let data: JSONAny?
