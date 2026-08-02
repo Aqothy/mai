@@ -194,9 +194,10 @@ private struct DraftPromptEditor: View {
             }
         #endif
         .onChange(of: focusID, initial: true) { _, focusID in
-            if focusID != nil {
-                isFocused = true
-            }
+            // Only a draft prompt auto-focuses. The composer keeps one
+            // identity across the draft-to-thread transition, so focus
+            // acquired in the draft must be released when a thread opens.
+            isFocused = focusID != nil
         }
     }
 }
