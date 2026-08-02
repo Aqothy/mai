@@ -150,8 +150,6 @@ private struct DraftPromptEditor: View {
     let send: () -> Void
 
     @FocusState private var isFocused: Bool
-    @State private var shouldRestoreFocusAfterMenu = false
-    @Environment(\.isSlideOutMenuPresented) private var isSlideOutMenuPresented
 
     private var minimumLineCount: Int {
         min(text.lazy.filter(\.isNewline).count + 1, 6)
@@ -196,16 +194,7 @@ private struct DraftPromptEditor: View {
             }
         #endif
         .onChange(of: focusID, initial: true) { _, focusID in
-            if focusID != nil && !isSlideOutMenuPresented {
-                isFocused = true
-            }
-        }
-        .onChange(of: isSlideOutMenuPresented) { _, isPresented in
-            if isPresented {
-                shouldRestoreFocusAfterMenu = isFocused
-                isFocused = false
-            } else if shouldRestoreFocusAfterMenu {
-                shouldRestoreFocusAfterMenu = false
+            if focusID != nil {
                 isFocused = true
             }
         }

@@ -5,10 +5,14 @@ struct IOSThreadListView: View {
     let store: ThreadStore
     let newChat: () -> Void
     let selectThread: (String) -> Void
+    let openAgentRegistry: () -> Void
 
     @State private var filter = ThreadListFilter()
 
     var body: some View {
+        // Hoisted so the filter runs once per body evaluation; the overlay
+        // below reads it as well.
+        let filteredThreads = self.filteredThreads
         List {
             IOSThreadRows(
                 store: store,
@@ -21,6 +25,13 @@ struct IOSThreadListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $filter.query, prompt: "Search Chats")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(
+                    "Agent Registry",
+                    systemImage: "puzzlepiece.extension",
+                    action: openAgentRegistry
+                )
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 IOSThreadFilterMenu(store: store, filter: $filter)
             }
@@ -57,7 +68,8 @@ struct IOSThreadListView: View {
         IOSThreadListView(
             store: PreviewData.threadStore(),
             newChat: {},
-            selectThread: { _ in }
+            selectThread: { _ in },
+            openAgentRegistry: {}
         )
     }
 }
@@ -67,7 +79,8 @@ struct IOSThreadListView: View {
         IOSThreadListView(
             store: ThreadStore(),
             newChat: {},
-            selectThread: { _ in }
+            selectThread: { _ in },
+            openAgentRegistry: {}
         )
     }
 }
