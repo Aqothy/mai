@@ -25,6 +25,7 @@ struct DraftPromptView: View {
             .padding()
         }
         .task {
+            model.activate()
             model.ensureLocalDraft()
         }
         .task(id: model.catalogSelectionKey) {
@@ -164,7 +165,7 @@ struct DraftSessionControlsView: View {
     }
 }
 
-struct DraftProviderChoice: Identifiable {
+struct DraftProviderChoice: Identifiable, Equatable {
     let id: String
     let name: String
     let providerID: String

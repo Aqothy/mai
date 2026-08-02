@@ -52,6 +52,14 @@ final class DraftPromptModel {
     init(store: ThreadStore, draftStore: ThreadDraftStore) {
         self.store = store
         self.draftStore = draftStore
+    }
+
+    /// Wires the store's provider-option pushes and the attachment pipeline
+    /// to this instance. Kept out of `init` because the view layer constructs
+    /// throwaway instances (`State(initialValue:)` discards re-init copies);
+    /// only the live model may own the store callbacks. Idempotent — re-run
+    /// every time the draft UI appears.
+    func activate() {
         store.onProviderOptionsUpdated = { [weak self] update in
             self?.receiveOptions(update)
         }
@@ -79,6 +87,24 @@ final class DraftPromptModel {
     }
 
     var providerChoices: [DraftProviderChoice] {
+        refreshProviderCatalogIfNeeded()
+        return cachedProviderChoices
+    }
+
+    var providerGroups: [DraftProviderGroup] {
+        refreshProviderCatalogIfNeeded()
+        return cachedProviderGroups
+    }
+
+    // The store exposes no change signal for its provider catalog, so the
+    // sorted/grouped projections are memoized on read: the cheap unsorted
+    // mapping is rebuilt each access and the locale-aware sorts and grouping
+    // re-run only when it actually changed.
+    @ObservationIgnored private var cachedUnsortedChoices: [DraftProviderChoice]?
+    @ObservationIgnored private var cachedProviderChoices: [DraftProviderChoice] = []
+    @ObservationIgnored private var cachedProviderGroups: [DraftProviderGroup] = []
+
+    private func refreshProviderCatalogIfNeeded() {
         let nativeChoices = nativeProviders.map { provider in
             let driver = provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
             let groupID = driver.isEmpty ? provider.instanceID : driver
@@ -104,13 +130,13 @@ final class DraftPromptModel {
                 groupName: Self.acpProviderID
             )
         }
-        return (nativeChoices + acpChoices).sorted {
+        let unsortedChoices = nativeChoices + acpChoices
+        guard unsortedChoices != cachedUnsortedChoices else { return }
+        cachedUnsortedChoices = unsortedChoices
+        cachedProviderChoices = unsortedChoices.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-    }
-
-    var providerGroups: [DraftProviderGroup] {
-        Dictionary(grouping: providerChoices, by: \.groupID)
+        cachedProviderGroups = Dictionary(grouping: cachedProviderChoices, by: \.groupID)
             .compactMap { groupID, choices in
                 guard let first = choices.first else { return nil }
                 return DraftProviderGroup(
