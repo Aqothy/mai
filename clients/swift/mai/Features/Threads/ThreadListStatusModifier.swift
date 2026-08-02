@@ -6,7 +6,7 @@ struct ThreadListStatusModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay {
-                if store.threads.isEmpty {
+                if store.isThreadListEmpty {
                     ThreadListEmptyStateView(store: store)
                 }
             }

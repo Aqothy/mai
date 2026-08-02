@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct ACPAgentChoice: Identifiable {
+struct ACPAgentChoice: Identifiable, Equatable {
     let id: String
     let name: String
 }
@@ -42,39 +42,31 @@ final class ThreadStore {
     private(set) var reconnectAttempt = 0
     private(set) var nextReconnectAt: Date?
     private(set) var providers: [InstanceInfo] = []
-    private(set) var registryAgents: [ACPRegistryAgent] = []
+    private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
     var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
     var onProviderOptionsInvalidated: ((ProviderOptionsInvalidated) -> Void)?
 
-    var nativeProviders: [InstanceInfo] {
-        providers
-            .filter { !isACPProvider($0) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
+    // Derived collections are cached stored properties rather than computed:
+    // a computed property would re-filter and re-sort on every read and give
+    // every reader a dependency on the whole input collection. They are
+    // recomputed in rebuildProviderCaches() / noteThreadsChanged() at every
+    // mutation site of `providers`, `installedAgents`, and `threads`.
+    private(set) var nativeProviders: [InstanceInfo] = []
+    private(set) var acpAgentChoices: [ACPAgentChoice] = []
+    private(set) var recentWorkingDirectories: [String] = []
+    /// Mirrors `threads.isEmpty` so chrome that only needs the empty bit does
+    /// not depend on the whole collection.
+    private(set) var isThreadListEmpty = true
+    /// Cached title of the selected thread: the live session snapshot's title
+    /// when one exists, falling back to the thread-list entry's. nil when no
+    /// thread is selected.
+    private(set) var selectedThreadTitle: String?
 
-    var acpAgentChoices: [ACPAgentChoice] {
-        let runningAgents = providers.filter(isACPProvider).map {
-            ACPAgentChoice(id: $0.instanceID, name: $0.name)
-        }
-        let runningIDs = Set(runningAgents.map(\.id))
-        let registryChoices = registryAgents.compactMap { agent -> ACPAgentChoice? in
-            guard !runningIDs.contains(agent.instanceID) else { return nil }
-            return ACPAgentChoice(
-                id: agent.instanceID,
-                name: agent.name
-            )
-        }
-        return (runningAgents + registryChoices).sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
-    }
-
-    var recentWorkingDirectories: [String] {
-        var seen: Set<String> = []
-        return threads.compactMap { thread in
-            guard let cwd = thread.cwd, seen.insert(cwd).inserted else { return nil }
-            return cwd
-        }
+    /// Binding projection for the sidebar's List selection: reads the
+    /// selected thread id and routes writes through selectThread(_:).
+    var sidebarSelection: String? {
+        get { selectedThreadID }
+        set { selectThread(newValue) }
     }
 
     var isReconnectScheduled: Bool {
@@ -162,7 +154,7 @@ final class ThreadStore {
         previewThreads: [ThreadListEntry],
         selectedThread: Thread? = nil,
         providers: [InstanceInfo] = [],
-        registryAgents: [ACPRegistryAgent] = []
+        installedAgents: [ACPRegistryInstalledAgent] = []
     ) {
         rpc = RPCClient()
         cachePolicy = CachePolicy()
@@ -170,7 +162,7 @@ final class ThreadStore {
         now = Date.init
         threads = previewThreads
         self.providers = providers
-        self.registryAgents = registryAgents
+        self.installedAgents = installedAgents
         selectedThreadID = selectedThread?.id
         if let selectedThread {
             var session = ThreadSession(thread: selectedThread)
@@ -179,6 +171,8 @@ final class ThreadStore {
             sessionsByID[selectedThread.id] = session
         }
         connectionState = .connected
+        rebuildProviderCaches()
+        noteThreadsChanged()
     }
     #endif
 
@@ -225,7 +219,8 @@ final class ThreadStore {
                 return
             }
             providers = try await rpc.listProviders()
-            registryAgents = (try? await rpc.listRegistryAgents()) ?? []
+            installedAgents = (try? await rpc.listInstalledAgents()) ?? []
+            rebuildProviderCaches()
 
             connectionState = .connected
             reconnectTask?.cancel()
@@ -270,7 +265,7 @@ final class ThreadStore {
     }
 
     func isACPProviderID(_ providerID: String) -> Bool {
-        registryAgents.contains { $0.instanceID == providerID }
+        installedAgents.contains { $0.instanceID == providerID }
             || providers.first(where: { $0.instanceID == providerID }).map(isACPProvider) == true
     }
 
@@ -292,6 +287,38 @@ final class ThreadStore {
         try await rpc.setProviderOption(
             ProviderOptionsSetParams(optionID: optionID, optionsSessionID: optionsSessionID, value: value)
         )
+    }
+
+    /// Fetches the public ACP registry index. Network-backed; callers own
+    /// loading and error presentation.
+    func fetchRegistryAgents() async throws -> [ACPRegistryAgent] {
+        try await rpc.listRegistryAgents()
+    }
+
+    func refreshInstalledAgents() async throws {
+        installedAgents = try await rpc.listInstalledAgents()
+        rebuildProviderCaches()
+    }
+
+    /// Installs (or updates) a registry agent at its current registry version.
+    /// If the agent was configured before, starting or restarting it also
+    /// refreshes the provider service's persisted launch command.
+    func installRegistryAgent(id: String) async throws -> ACPRegistryInstalledAgent {
+        let installed = try await rpc.installRegistryAgent(id)
+        installedAgents.removeAll { $0.id == installed.id }
+        installedAgents.append(installed)
+        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        rebuildProviderCaches()
+        if let existing = providers.first(where: { $0.instanceID == installed.instanceID }) {
+            let started = try await rpc.startRegistryAgent(
+                installed.id,
+                restart: existing.instanceStatus == .initialized
+            )
+            providers.removeAll { $0.instanceID == started.instanceID }
+            providers.append(started)
+            rebuildProviderCaches()
+        }
+        return installed
     }
 
     func startThread(
@@ -319,7 +346,7 @@ final class ThreadStore {
             value: nil
         )
         _ = try await rpc.dispatchCommand(command)
-        selectThread(threadID)
+        prepareThreadForSelection(threadID)
         await subscriptionTasks[threadID]?.task.value
     }
 
@@ -518,6 +545,7 @@ final class ThreadStore {
             }
         }
 
+        recomputeSelectedThreadTitle()
         performSubscriptionMaintenance(at: timestamp)
     }
 
@@ -526,17 +554,8 @@ final class ThreadStore {
     /// Distinct driver identifiers across the configured providers, e.g.
     /// ["acp", "claude", "codex"]. The server lists every configured provider
     /// (running or not), so this needs no inference beyond grouping by driver.
-    var availableDrivers: [String] {
-        var seen: Set<String> = []
-        return providers.compactMap { provider -> String? in
-            let driver = isACPProvider(provider)
-                ? Self.acpDriver
-                : provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !driver.isEmpty, seen.insert(driver).inserted else { return nil }
-            return driver
-        }
-        .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-    }
+    /// Cached; recomputed in rebuildProviderCaches().
+    private(set) var availableDrivers: [String] = []
 
     /// The thread's driver id, read from its session binding. Threads without
     /// a session yet simply have no driver, and their rows show no label.
@@ -599,25 +618,87 @@ final class ThreadStore {
     }
 
     private func isACPProvider(_ provider: InstanceInfo) -> Bool {
-        registryAgents.contains { $0.instanceID == provider.instanceID }
+        installedAgents.contains { $0.instanceID == provider.instanceID }
             || provider.driver == "acp"
     }
 
+    /// Recomputes every cache derived from `providers` and `installedAgents`.
+    /// Must be called after each mutation of either input.
+    private func rebuildProviderCaches() {
+        nativeProviders = providers
+            .filter { !isACPProvider($0) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+        let runningAgents = providers.filter(isACPProvider).map {
+            ACPAgentChoice(id: $0.instanceID, name: $0.name)
+        }
+        let runningIDs = Set(runningAgents.map(\.id))
+        let installedChoices = installedAgents.compactMap { agent -> ACPAgentChoice? in
+            guard !runningIDs.contains(agent.instanceID) else { return nil }
+            return ACPAgentChoice(
+                id: agent.instanceID,
+                name: agent.name
+            )
+        }
+        acpAgentChoices = (runningAgents + installedChoices).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+
+        var seenDrivers: Set<String> = []
+        availableDrivers = providers.compactMap { provider -> String? in
+            let driver = isACPProvider(provider)
+                ? Self.acpDriver
+                : provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !driver.isEmpty, seenDrivers.insert(driver).inserted else { return nil }
+            return driver
+        }
+        .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Recomputes every cache derived from `threads`. Must be called after
+    /// each mutation of the thread list.
+    private func noteThreadsChanged() {
+        isThreadListEmpty = threads.isEmpty
+        var seen: Set<String> = []
+        recentWorkingDirectories = threads.compactMap { thread in
+            guard let cwd = thread.cwd, seen.insert(cwd).inserted else { return nil }
+            return cwd
+        }
+        recomputeSelectedThreadTitle()
+    }
+
+    private func recomputeSelectedThreadTitle() {
+        guard let selectedThreadID else {
+            selectedThreadTitle = nil
+            return
+        }
+        selectedThreadTitle = sessionsByID[selectedThreadID]?.thread?.title
+            ?? threads.first { $0.id == selectedThreadID }?.title
+    }
+
     private func resolveProvider(_ preferredID: String) async throws -> String {
-        if let provider = providers.first(where: { $0.instanceID == preferredID }) {
-            guard provider.instanceStatus != .initialized else { return provider.instanceID }
-            let started = try await rpc.startProvider(provider.instanceID)
+        if let provider = providers.first(where: { $0.instanceID == preferredID }),
+           provider.instanceStatus == .initialized {
+            return provider.instanceID
+        }
+
+        // Installed registry metadata is canonical for cold starts. This also
+        // refreshes the persisted provider command after an explicit update.
+        if let agent = installedAgents.first(where: {
+            $0.instanceID == preferredID || $0.id == preferredID
+        }) {
+            let started = try await rpc.startRegistryAgent(agent.id, restart: false)
             providers.removeAll { $0.instanceID == started.instanceID }
             providers.append(started)
+            rebuildProviderCaches()
             return started.instanceID
         }
 
-        if let agent = registryAgents.first(where: {
-            $0.instanceID == preferredID || $0.id == preferredID
-        }) {
-            let started = try await rpc.startRegistryAgent(agent.id)
+        if let provider = providers.first(where: { $0.instanceID == preferredID }) {
+            let started = try await rpc.startProvider(provider.instanceID)
             providers.removeAll { $0.instanceID == started.instanceID }
             providers.append(started)
+            rebuildProviderCaches()
             return started.instanceID
         }
 
@@ -1018,16 +1099,6 @@ final class ThreadStore {
     }
 
     private func receiveNotification(method: String, data: Data) {
-        #if DEBUG
-        let performanceStartedAt = ContinuousClock.now
-        defer {
-            if method == MaidRPCMethod.orchestrationSubscribeThread {
-                ChatPerformanceDiagnostics.recordStreamUpdate(
-                    duration: performanceStartedAt.duration(to: .now)
-                )
-            }
-        }
-        #endif
         do {
             switch method {
             case MaidRPCMethod.orchestrationSubscribeThreadList:
@@ -1104,6 +1175,7 @@ final class ThreadStore {
     private func noteSelectedSessionChanged(_ id: String) {
         if id == selectedThreadID {
             selectedSessionGeneration &+= 1
+            recomputeSelectedThreadTitle()
         }
     }
 
@@ -1167,6 +1239,7 @@ final class ThreadStore {
             selectedThreadLoadErrorMessage = nil
             sessionsByID[selectedThreadID] = nil
         }
+        noteThreadsChanged()
         isLoadingThreadListSnapshot = false
 
         let bufferedItems = bufferedThreadListItems
@@ -1187,6 +1260,7 @@ final class ThreadStore {
             threads.removeAll { $0.id == thread.id }
             threads.append(thread)
             sortThreads()
+            noteThreadsChanged()
         default:
             break
         }

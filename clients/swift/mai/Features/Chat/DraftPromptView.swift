@@ -186,26 +186,28 @@ struct DraftProviderGroup: Identifiable {
             model: DraftPromptModel(
                 store: ThreadStore(
                     previewThreads: PreviewData.threads,
-                    registryAgents: [
-                        ACPRegistryAgent(
+                    installedAgents: [
+                        ACPRegistryInstalledAgent(
                             args: nil,
                             description: nil,
                             icon: nil,
                             id: "claude-code",
+                            installedAt: .now,
                             instanceID: "claude-code",
                             name: "Claude",
-                            package: "claude-code-acp",
-                            version: nil
+                            package: "claude-code-acp@1.0.0",
+                            version: "1.0.0"
                         ),
-                        ACPRegistryAgent(
+                        ACPRegistryInstalledAgent(
                             args: nil,
                             description: nil,
                             icon: nil,
                             id: "codex",
+                            installedAt: .now,
                             instanceID: "codex",
                             name: "Codex",
-                            package: "codex-acp",
-                            version: nil
+                            package: "codex-acp@1.0.0",
+                            version: "1.0.0"
                         ),
                     ]
                 ),
