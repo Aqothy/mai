@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ChatView: View {
     let store: ThreadStore
+    let draftStore: ThreadDraftStore
 
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
 
     init(store: ThreadStore, draftStore: ThreadDraftStore) {
         self.store = store
+        self.draftStore = draftStore
         _draftModel = State(initialValue: DraftPromptModel(store: store, draftStore: draftStore))
     }
 
@@ -19,7 +21,11 @@ struct ChatView: View {
             .onChange(of: store.selectedThreadID, initial: true) { _, threadID in
                 if let threadID {
                     if chatModel?.threadID != threadID {
-                        chatModel = ChatPromptModel(store: store, threadID: threadID)
+                        chatModel = ChatPromptModel(
+                            store: store,
+                            draftStore: draftStore,
+                            threadID: threadID
+                        )
                     }
                 } else {
                     chatModel = nil

@@ -8,17 +8,24 @@ final class ChatPromptModel {
     let store: ThreadStore
     let threadID: String
 
-    var text = ""
+    var text: String {
+        didSet {
+            draftStore.setText(text, for: threadID)
+        }
+    }
     private(set) var isSending = false
     private(set) var isInterrupting = false
     private(set) var settingConfigOptionIDs: Set<String> = []
     private(set) var errorMessage: String?
 
+    private let draftStore: ThreadDraftStore
     private let attachmentsModel = ComposerAttachmentsModel()
 
-    init(store: ThreadStore, threadID: String) {
+    init(store: ThreadStore, draftStore: ThreadDraftStore, threadID: String) {
         self.store = store
+        self.draftStore = draftStore
         self.threadID = threadID
+        text = draftStore.text(for: threadID)
         attachmentsModel.reportError = { [weak self] message in
             self?.errorMessage = message
         }
@@ -54,6 +61,25 @@ final class ChatPromptModel {
     }
 
     func send() async {
+        await submit()
+    }
+
+    func removeQueuedPrompt(_ promptID: String) {
+        store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
+    }
+
+    func steerQueuedPrompt(_ promptID: String) async {
+        do {
+            try await store.steerQueuedPrompt(threadID: threadID, promptID: promptID)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func submit() async {
+        let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
@@ -69,24 +95,11 @@ final class ChatPromptModel {
                 text: submittedText,
                 attachments: submittedAttachments.compactMap(\.attachment)
             )
-            if text.trimmingCharacters(in: .whitespacesAndNewlines) == submittedText {
+            if text == submittedDraft,
+               draftStore.text(for: threadID) == submittedDraft {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func removeQueuedPrompt(_ promptID: String) {
-        store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
-    }
-
-    func steerQueuedPrompt(_ promptID: String) async {
-        do {
-            try await store.steerQueuedPrompt(threadID: threadID, promptID: promptID)
         } catch is CancellationError {
             return
         } catch {
