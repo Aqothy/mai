@@ -95,6 +95,9 @@ struct ComposerOptionsSheet: View {
         }
     }
 
+    // Intentional picker-as-menu: the always-empty get keeps "Choose"
+    // displayed, and each selection fires an insert action instead of
+    // persisting state — a keypath binding cannot express this.
     private var commandSelection: Binding<String> {
         Binding(
             get: { "" },
