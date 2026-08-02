@@ -29,12 +29,21 @@ enum ThreadEventReducer {
         case .threadMessageSent:
             guard let id = payload.messageID, let role = payload.role else { break }
             if let index = thread.timeline.lastIndex(where: { $0.message?.id == id }),
-               var message = thread.timeline[index].message {
-                message.attachments = (message.attachments ?? []) + (payload.attachments ?? [])
-                message.text += payload.text ?? ""
-                if let turnID = nonEmpty(payload.turnID) { message.turnID = turnID }
-                message.updatedAt = occurredAt
-                thread.timeline[index].message = message
+               thread.timeline[index].message != nil {
+                // Mutate through the storage subscript: a local `var message`
+                // copy gives the accumulated text a second reference, forcing
+                // a full copy of the whole message per streamed chunk.
+                if let attachments = payload.attachments, !attachments.isEmpty {
+                    let merged = (thread.timeline[index].message?.attachments ?? []) + attachments
+                    thread.timeline[index].message?.attachments = merged
+                }
+                if let text = payload.text, !text.isEmpty {
+                    thread.timeline[index].message?.text += text
+                }
+                if let turnID = nonEmpty(payload.turnID) {
+                    thread.timeline[index].message?.turnID = turnID
+                }
+                thread.timeline[index].message?.updatedAt = occurredAt
             } else {
                 let message = Message(
                     attachments: payload.attachments,
@@ -140,6 +149,9 @@ enum ThreadEventReducer {
                 if nonEmpty(item.status) == nil { item.status = old.status }
                 if nonEmpty(item.title) == nil { item.title = old.title }
                 if item.toolCall == nil { item.toolCall = old.toolCall }
+                if item.toolCallSummary == nil { item.toolCallSummary = old.toolCallSummary }
+                if item.detailAvailable == nil { item.detailAvailable = old.detailAvailable }
+                if item.sequence == nil { item.sequence = old.sequence }
                 if nonEmpty(item.turnID) == nil { item.turnID = old.turnID }
                 item.textDelta = nil
                 item.updatedAt = occurredAt
