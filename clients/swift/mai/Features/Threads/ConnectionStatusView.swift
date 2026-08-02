@@ -24,7 +24,7 @@ struct ConnectionStatusView: View {
             .font(.footnote)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .modifier(StatusCapsuleBackground())
+            .glassSurface(in: .capsule)
         }
     }
 

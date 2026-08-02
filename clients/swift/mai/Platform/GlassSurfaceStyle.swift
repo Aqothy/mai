@@ -6,22 +6,24 @@ struct GlassSurfaceStyle<SurfaceShape: Shape>: ViewModifier {
     let shape: SurfaceShape
     var isShadowed = false
 
+    /// `isShadowed` is intentionally ignored on the glassEffect branch: glass
+    /// supplies its own depth.
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .glassEffect(.regular, in: shape)
         } else {
-            let surface = content
+            content
                 .background(.regularMaterial, in: shape)
                 .overlay {
                     shape.stroke(.quaternary, lineWidth: 1)
                 }
-            if isShadowed {
-                surface.shadow(color: .black.opacity(0.12), radius: 24, y: 12)
-            } else {
-                surface
-            }
+                .shadow(
+                    color: .black.opacity(isShadowed ? 0.12 : 0),
+                    radius: isShadowed ? 24 : 0,
+                    y: isShadowed ? 12 : 0
+                )
         }
     }
 }
