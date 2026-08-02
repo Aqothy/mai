@@ -2,15 +2,16 @@ import SwiftUI
 
 /// Skeleton rows shown while the thread-list snapshot loads.
 struct ThreadListLoadingPlaceholderView: View {
+    // Widths double as ForEach identity, so they must stay unique.
     private static let titleWidths: [CGFloat] = [236, 180, 268, 152, 244, 208, 190]
 
     var body: some View {
         VStack(alignment: .leading) {
-            ForEach(Self.titleWidths.indices, id: \.self) { index in
+            ForEach(Self.titleWidths, id: \.self) { titleWidth in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Capsule()
-                            .frame(width: Self.titleWidths[index], height: 14)
+                            .frame(width: titleWidth, height: 14)
                         Spacer()
                         Capsule()
                             .frame(width: 26, height: 10)

@@ -22,10 +22,14 @@ struct ThreadRow: View {
 
                 Spacer(minLength: 8)
 
-                Text(updatedAtText)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                // Driven by the schedule's date rather than Date.now so the
+                // relative timestamp keeps ticking while the row is on screen.
+                TimelineView(.everyMinute) { context in
+                    Text(updatedAtText(now: context.date))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             HStack(spacing: 6) {
@@ -45,7 +49,11 @@ struct ThreadRow: View {
 
                 Spacer(minLength: 8)
 
-                ThreadRowStatusView(thread: thread)
+                ThreadRowStatusView(
+                    hasPendingApprovals: thread.hasPendingApprovals,
+                    turnState: thread.latestTurn?.turnState,
+                    sessionStatus: thread.session?.sessionStatus
+                )
             }
             .font(.caption)
             .lineLimit(1)
@@ -59,8 +67,8 @@ struct ThreadRow: View {
         return URL(filePath: cwd).lastPathComponent
     }
 
-    private var updatedAtText: String {
-        let minutes = Int(max(0, Date.now.timeIntervalSince(thread.updatedAt)) / 60)
+    private func updatedAtText(now: Date) -> String {
+        let minutes = Int(max(0, now.timeIntervalSince(thread.updatedAt)) / 60)
         if minutes < 1 { return "now" }
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60

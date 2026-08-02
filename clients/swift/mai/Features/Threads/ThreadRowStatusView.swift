@@ -1,23 +1,24 @@
 import SwiftUI
 
 struct ThreadRowStatusView: View {
-    let thread: ThreadListEntry
+    let hasPendingApprovals: Bool
+    let turnState: MaidTurnState?
+    let sessionStatus: MaidSessionStatus?
 
     var body: some View {
-        if thread.hasPendingApprovals {
+        if hasPendingApprovals {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)
                 .accessibilityLabel("Approval required")
-        } else if thread.latestTurn?.turnState == .running {
+        } else if turnState == .running {
             ProgressView()
                 .controlSize(.mini)
                 .accessibilityLabel("Agent working")
-        } else if thread.latestTurn?.turnState == .error
-            || thread.session?.sessionStatus == .error {
+        } else if turnState == .error || sessionStatus == .error {
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
                 .accessibilityLabel("Failed")
-        } else if thread.latestTurn?.turnState == .interrupted {
+        } else if turnState == .interrupted {
             Image(systemName: "stop.circle.fill")
                 .foregroundStyle(.orange)
                 .accessibilityLabel("Interrupted")
