@@ -15,6 +15,13 @@ struct QueuedChatPrompt: Identifiable {
 @Observable
 final class ThreadStore {
     static let maximumReconnectAttempts = 5
+    /// Upper bound on one connect attempt (socket handshake through the
+    /// thread-list snapshot). Without it, an unresponsive daemon can hold an
+    /// attempt in flight for URLSession's default 60s handshake timeout — or
+    /// forever once the socket is up — leaving the store wedged in
+    /// `.connecting`, where nothing is shown and neither the retry countdown
+    /// nor the Disconnected/Retry pill can ever appear.
+    static let connectAttemptTimeout: Duration = .seconds(15)
 
     enum ConnectionState {
         case disconnected
@@ -192,6 +199,21 @@ final class ThreadStore {
             self?.handleDisconnect(error)
         }
         rpc.connect()
+
+        // A stalled attempt fails over to the scheduled-retry countdown
+        // instead of wedging silently in `.connecting`. Disconnecting fails
+        // the pending snapshot request, so the catch below runs the normal
+        // failure path.
+        let watchdog = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.connectAttemptTimeout)
+            } catch {
+                return
+            }
+            guard let self, connectionState == .connecting else { return }
+            rpc.disconnect()
+        }
+        defer { watchdog.cancel() }
 
         do {
             let item = try await rpc.subscribeThreadList()
