@@ -557,12 +557,16 @@ final class ThreadStore {
     /// Cached; recomputed in rebuildProviderCaches().
     private(set) var availableDrivers: [String] = []
 
-    /// The thread's driver id, read from its session binding. Threads without
-    /// a session yet simply have no driver, and their rows show no label.
+    /// The thread's driver id: from its session binding once one exists,
+    /// otherwise from the configured (possibly not running) instance the
+    /// thread is bound to, so restored threads label their rows immediately.
     func driver(for thread: ThreadListEntry) -> String? {
         let driver = thread.session?.driver?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return driver?.isEmpty == false ? driver : nil
+        if let driver, !driver.isEmpty { return driver }
+        guard let instance = instance(for: thread) else { return nil }
+        let instanceDriver = instance.driver.trimmingCharacters(in: .whitespacesAndNewlines)
+        return instanceDriver.isEmpty ? nil : instanceDriver
     }
 
     func providerDisplayName(for thread: ThreadListEntry) -> String? {
@@ -570,10 +574,15 @@ final class ThreadStore {
         guard driver == Self.acpDriver else {
             return driver
         }
-        guard let agentName = thread.session?.providerName, !agentName.isEmpty else {
+        let agentName = thread.session?.providerName ?? instance(for: thread)?.name
+        guard let agentName, !agentName.isEmpty else {
             return Self.acpDriver
         }
         return "\(agentName) (ACP)"
+    }
+
+    private func instance(for thread: ThreadListEntry) -> InstanceInfo? {
+        thread.providerInstanceID.flatMap { instancesByID[$0] }
     }
 
     func isThreadUnread(_ id: String) -> Bool {
@@ -622,9 +631,17 @@ final class ThreadStore {
             || provider.driver == "acp"
     }
 
+    /// Instances keyed by id, including configured-but-not-running ones.
+    /// Cached; recomputed in rebuildProviderCaches().
+    private var instancesByID: [String: InstanceInfo] = [:]
+
     /// Recomputes every cache derived from `providers` and `installedAgents`.
     /// Must be called after each mutation of either input.
     private func rebuildProviderCaches() {
+        instancesByID = Dictionary(
+            providers.map { ($0.instanceID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         nativeProviders = providers
             .filter { !isACPProvider($0) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
