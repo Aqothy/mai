@@ -287,6 +287,57 @@ struct ThreadEventReducerTests {
     }
 
     @Test
+    func statusOnlyToolUpdatePreservesCompactSummaryAndDetailMarker() {
+        let summary = ToolCallSummary(
+            action: MaidToolAction.execute.rawValue,
+            attachmentCount: nil,
+            attachments: nil,
+            changeCount: nil,
+            changes: nil,
+            commandPreview: "swift test",
+            cwd: nil,
+            durationMilliseconds: nil,
+            errorPreview: nil,
+            exitCode: nil,
+            locationCount: nil,
+            locations: nil,
+            name: nil,
+            namespace: nil,
+            outputPreview: nil,
+            providerKind: nil,
+            queryPreview: nil,
+            truncated: nil
+        )
+        var thread = makeThread()
+        thread.apply(
+            makeEvent(.threadItemUpserted, payload: makePayload(
+                item: makeItem(
+                    id: "tool-1",
+                    detailAvailable: true,
+                    kind: MaidItemKind.commandExecution.rawValue,
+                    status: MaidItemStatus.inProgress.rawValue,
+                    sequence: 1,
+                    toolCallSummary: summary
+                )
+            ))
+        )
+
+        thread.apply(
+            makeEvent(.threadItemUpserted, payload: makePayload(
+                item: makeItem(
+                    id: "tool-1",
+                    kind: MaidItemKind.commandExecution.rawValue,
+                    status: MaidItemStatus.completed.rawValue
+                )
+            ))
+        )
+
+        #expect(thread.timeline[0].item?.detailAvailable == true)
+        #expect(thread.timeline[0].item?.sequence == 1)
+        #expect(thread.timeline[0].item?.toolCallSummary?.commandPreview == "swift test")
+    }
+
+    @Test
     func newItemWithoutStatusDefaultsToInProgress() {
         var thread = makeThread()
         thread.apply(
@@ -532,23 +583,29 @@ private func makeTurn(
 private func makeItem(
     id: String,
     createdAt: Date = Date(timeIntervalSince1970: 0),
+    detailAvailable: Bool? = nil,
     kind: String,
     status: String,
     payload: JSONAny? = nil,
+    sequence: Int? = nil,
     textDelta: String? = nil,
     title: String? = nil,
     toolCall: ToolCall? = nil,
+    toolCallSummary: ToolCallSummary? = nil,
     turnID: String? = nil
 ) -> Item {
     Item(
         createdAt: createdAt,
+        detailAvailable: detailAvailable,
         id: id,
         kind: kind,
         payload: payload,
+        sequence: sequence,
         status: status,
         textDelta: textDelta,
         title: title,
         toolCall: toolCall,
+        toolCallSummary: toolCallSummary,
         turnID: turnID,
         updatedAt: Date(timeIntervalSince1970: 0)
     )

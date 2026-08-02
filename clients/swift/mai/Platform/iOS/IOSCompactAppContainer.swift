@@ -33,6 +33,17 @@ struct IOSCompactAppContainer: View {
                     )
                 }
             }
+            #if DEBUG
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink {
+                            MockChatView()
+                        } label: {
+                            Label("Mock Chat", systemImage: "ladybug")
+                        }
+                    }
+                }
+            #endif
         }
         .onChange(of: path, initial: true) { _, path in
             if path.isEmpty {

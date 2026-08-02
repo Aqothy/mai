@@ -7,14 +7,26 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
 
     @ViewBuilder var menu: Menu
     @ViewBuilder var content: Content
+    let onClosed: () -> Void
 
     @State private var xOffset: CGFloat = 0
     @State private var hapticTrigger = false
     @State private var dragStartOffset: CGFloat?
-    @State private var isContentObscured = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var preferredWidth: CGFloat { 280 }
+
+    init(
+        isOpen: Binding<Bool>,
+        @ViewBuilder menu: () -> Menu,
+        @ViewBuilder content: () -> Content,
+        onClosed: @escaping () -> Void = {}
+    ) {
+        _isOpen = isOpen
+        self.menu = menu()
+        self.content = content()
+        self.onClosed = onClosed
+    }
 
     /// Open-ness in 0...1. Derived from xOffset rather than tracked alongside
     /// it, so the two can never disagree mid-drag or mid-animation.
@@ -30,10 +42,7 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
                 .accessibilityHidden(!isOpen)
 
             SlideOutMenuContentView(
-                content: content.environment(
-                    \.isSlideOutMenuPresented,
-                    isContentObscured
-                ),
+                content: content,
                 progress: progress,
                 xOffset: xOffset
             ) {
@@ -42,7 +51,6 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
         }
         .onAppear {
             xOffset = isOpen ? preferredWidth : 0
-            isContentObscured = isOpen
         }
         .onChange(of: isOpen) { _, newValue in
             setOpen(newValue, menuWidth: preferredWidth)
@@ -60,9 +68,6 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
                 },
                 onBegan: {
                     dragStartOffset = xOffset
-                    if xOffset <= 0 {
-                        isContentObscured = true
-                    }
                 },
                 onChanged: { translationX in
                     xOffset = clamp(
@@ -93,28 +98,27 @@ struct SlideOutMenu<Menu: View, Content: View>: View {
             )
         )
         .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
-        // The drawer chrome must not resize with the keyboard: keyboard
-        // avoidance belongs to the NavigationStack content, and stable
-        // full-screen bounds keep the clip shape from masking the composer
-        // mid-animation.
-        .ignoresSafeArea(edges: .vertical)
     }
 
     private func setOpen(_ newValue: Bool, menuWidth: CGFloat) {
-        isContentObscured = newValue
         let targetOffset = newValue ? menuWidth : 0
         let animation: Animation =
             reduceMotion
             ? .easeOut(duration: 0.15)
-            : .interactiveSpring(response: 0.35, dampingFraction: 0.86)
+            : .easeOut(duration: 0.22)
 
-        if xOffset != targetOffset {
-            hapticTrigger.toggle()
+        guard xOffset != targetOffset else {
+            isOpen = newValue
+            return
         }
 
-        withAnimation(animation) {
+        hapticTrigger.toggle()
+        withAnimation(animation, completionCriteria: .removed) {
             xOffset = targetOffset
             isOpen = newValue
+        } completion: {
+            guard !newValue, !isOpen, xOffset == 0 else { return }
+            onClosed()
         }
     }
 

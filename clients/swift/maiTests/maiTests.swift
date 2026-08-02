@@ -131,6 +131,158 @@ struct ThreadStoreTests {
     }
 
     @Test
+    func itemDetailIsFetchedOncePerItemSequence() async throws {
+        let updatedAt = Date(timeIntervalSince1970: 2_000)
+        let summaryItem = Item(
+            createdAt: updatedAt,
+            detailAvailable: true,
+            id: "tool-1",
+            kind: MaidItemKind.commandExecution.rawValue,
+            payload: nil,
+            sequence: 1,
+            status: MaidItemStatus.completed.rawValue,
+            textDelta: nil,
+            title: "Run tests",
+            toolCall: nil,
+            toolCallSummary: ToolCallSummary(
+                action: MaidToolAction.execute.rawValue,
+                attachmentCount: nil,
+                attachments: nil,
+                changeCount: nil,
+                changes: nil,
+                commandPreview: "swift test",
+                cwd: nil,
+                durationMilliseconds: nil,
+                errorPreview: nil,
+                exitCode: 0,
+                locationCount: nil,
+                locations: nil,
+                name: nil,
+                namespace: nil,
+                outputPreview: "passed",
+                providerKind: nil,
+                queryPreview: nil,
+                truncated: nil
+            ),
+            turnID: "turn-1",
+            updatedAt: updatedAt
+        )
+        let fullItem = summaryItem.with(
+            detailAvailable: .some(false),
+            toolCall: .some(ToolCall(
+                action: MaidToolAction.execute.rawValue,
+                attachments: nil,
+                changes: nil,
+                command: "swift test",
+                cwd: nil,
+                durationMilliseconds: 125,
+                error: nil,
+                exitCode: 0,
+                locations: nil,
+                name: nil,
+                namespace: nil,
+                output: "all tests passed",
+                providerKind: nil,
+                query: nil
+            )),
+            toolCallSummary: .some(nil)
+        )
+        let thread = makeThread("thread-1").with(
+            timeline: [
+                TimelineEntry(
+                    approval: nil,
+                    item: summaryItem,
+                    kind: MaidTimelineEntryKind.item.rawValue,
+                    message: nil
+                )
+            ]
+        )
+        let rpc = MockThreadRPCClient(
+            threads: [thread],
+            itemDetails: ["thread-1": ["tool-1": fullItem]]
+        )
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        let first = try await store.itemDetail(threadID: thread.id, item: summaryItem)
+        let second = try await store.itemDetail(threadID: thread.id, item: summaryItem)
+        #expect(rpc.itemDetailInputs.count == 1)
+
+        let revisedSummary = summaryItem.with(sequence: .some(2))
+        rpc.setItemDetail(fullItem.with(sequence: .some(2)), threadID: thread.id)
+        let revised = try await store.itemDetail(threadID: thread.id, item: revisedSummary)
+        let cachedSequence = try await store.itemDetail(
+            threadID: thread.id,
+            item: revisedSummary
+        )
+
+        #expect(first.toolCall?.output == "all tests passed")
+        #expect(second.toolCall?.output == "all tests passed")
+        #expect(revised.sequence == 2)
+        #expect(cachedSequence.sequence == 2)
+        #expect(rpc.itemDetailInputs.count == 2)
+    }
+
+    @Test
+    func itemDetailWaitsForTheLatestVisibleSequence() async throws {
+        func makeItem(sequence: Int) -> Item {
+            let timestamp = Date(timeIntervalSince1970: TimeInterval(sequence))
+            return Item(
+                createdAt: timestamp,
+                detailAvailable: true,
+                id: "tool-1",
+                kind: MaidItemKind.commandExecution.rawValue,
+                payload: nil,
+                sequence: sequence,
+                status: MaidItemStatus.completed.rawValue,
+                textDelta: nil,
+                title: "Run tests",
+                toolCall: nil,
+                toolCallSummary: nil,
+                turnID: "turn-1",
+                updatedAt: timestamp
+            )
+        }
+
+        let initialItem = makeItem(sequence: 1)
+        let thread = makeThread("thread-1").with(
+            timeline: [
+                TimelineEntry(
+                    approval: nil,
+                    item: initialItem,
+                    kind: MaidTimelineEntryKind.item.rawValue,
+                    message: nil
+                )
+            ]
+        )
+        let rpc = MockThreadRPCClient(threads: [thread])
+        rpc.shouldBlockItemDetail = true
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread(thread.id)
+        await waitUntil { store.subscribedThreadIDs.contains(thread.id) }
+
+        let detailTask = Task {
+            try await store.itemDetail(threadID: thread.id, item: initialItem)
+        }
+        await waitUntil { rpc.itemDetailInputs.count == 1 }
+
+        try rpc.sendItemUpdate(threadID: thread.id, item: makeItem(sequence: 2), sequence: 2)
+        rpc.resumeNextItemDetail(returning: makeItem(sequence: 1))
+        await waitUntil { rpc.itemDetailInputs.count == 2 }
+
+        try rpc.sendItemUpdate(threadID: thread.id, item: makeItem(sequence: 3), sequence: 3)
+        rpc.resumeNextItemDetail(returning: makeItem(sequence: 2))
+        await waitUntil { rpc.itemDetailInputs.count == 3 }
+
+        rpc.resumeNextItemDetail(returning: makeItem(sequence: 3))
+        let detail = try await detailTask.value
+
+        #expect(detail.sequence == 3)
+        #expect(rpc.itemDetailInputs.count == 3)
+    }
+
+    @Test
     func inactiveSubscribedThreadReceivesBackgroundUpdates() async throws {
         let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
         let store = ThreadStore(rpc: rpc)
@@ -159,9 +311,12 @@ struct ThreadStoreTests {
         await waitUntil { store.subscribedThreadIDs.contains("b") }
         await waitUntil { store.inactiveSubscribedThreadIDs.contains("a") }
 
+        // The visible chat observes only the selected thread's projections;
+        // a hidden subscribed thread's stream must not invalidate them.
         let selectedObserverInvalidated = Mutex(false)
         withObservationTracking {
             _ = store.selectedThread
+            _ = store.selectedThreadSequence
         } onChange: {
             selectedObserverInvalidated.withLock { $0 = true }
         }
@@ -173,6 +328,47 @@ struct ThreadStoreTests {
         try rpc.sendTitleUpdate(threadID: "b", title: "Visible update", sequence: 101)
         await waitUntil { selectedObserverInvalidated.withLock { $0 } }
         #expect(store.selectedThread?.title == "Visible update")
+    }
+
+    @Test
+    func reopeningSubscribedThreadUsesItsCachedModelWithoutAnotherSnapshot() async {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        store.selectThread("b")
+        await waitUntil { store.subscribedThreadIDs.contains("b") }
+
+        let subscriptionCount = rpc.subscriptionInputs.count
+        let cachedTimelineCount = store.cachedThread(for: "a")?.timeline.count
+        store.selectThread("a")
+        await Task.yield()
+
+        #expect(store.selectedThread?.id == "a")
+        #expect(store.selectedThread?.timeline.count == cachedTimelineCount)
+        #expect(rpc.subscriptionInputs.count == subscriptionCount)
+    }
+
+    @Test
+    func preparingSelectionLoadsSnapshotWithoutPublishingSelection() async {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.prepareThreadForSelection("a")
+
+        #expect(store.selectedThreadID == nil)
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        #expect(store.cachedThread(for: "a")?.id == "a")
+
+        let subscriptionCount = rpc.subscriptionCount(for: "a")
+        store.selectThread("a")
+        await Task.yield()
+
+        #expect(store.selectedThread?.id == "a")
+        #expect(rpc.subscriptionCount(for: "a") == subscriptionCount)
     }
 
     @Test
@@ -350,7 +546,7 @@ struct ThreadStoreTests {
         let rpc = MockThreadRPCClient(threads: [
             makeThread("restored"),
             makeThread("active", isRunning: true),
-        ])
+        ], historyRestorePendingThreadIDs: ["restored"])
         rpc.prepareFailuresRemaining = 1
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -382,7 +578,130 @@ struct ThreadStoreTests {
     }
 
     @Test
-    func draftStorePersistsTheActiveDraft() throws {
+    func restoredHistoryStaysLoadingUntilReplayCompletion() async throws {
+        let rpc = MockThreadRPCClient(
+            threads: [makeThread("restored")],
+            historyRestorePendingThreadIDs: ["restored"]
+        )
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.selectThread("restored")
+        await waitUntil { store.selectedThread?.id == "restored" }
+        #expect(store.isSelectedThreadRestoringHistory)
+
+        try rpc.sendUserMessage(
+            threadID: "restored",
+            text: "Restored prompt",
+            occurredAt: .now,
+            authoritativeUpdatedAt: .now,
+            sequence: 100
+        )
+        #expect(store.selectedThread?.timeline.count == 1)
+        #expect(store.isSelectedThreadRestoringHistory)
+
+        try rpc.sendHistoryReplayCompleted(threadID: "restored", sequence: 101)
+
+        #expect(!store.isSelectedThreadRestoringHistory)
+        #expect(store.selectedThread?.timeline.first?.message?.text == "Restored prompt")
+    }
+
+    @Test
+    func partiallyRestoredSnapshotStaysLoadingUntilCompletion() async throws {
+        let now = Date.now
+        let partial = makeThread("restored").with(
+            session: SessionBinding(
+                activeTurnID: nil,
+                configOptions: nil,
+                cwd: nil,
+                driver: nil,
+                lastError: nil,
+                providerInstanceID: "provider",
+                providerName: nil,
+                slashCommands: nil,
+                status: MaidSessionStatus.starting.rawValue,
+                stopRequested: false,
+                threadID: "restored",
+                tokenUsage: nil,
+                updatedAt: now
+            ),
+            timeline: [
+                TimelineEntry(
+                    approval: nil,
+                    item: nil,
+                    kind: MaidTimelineEntryKind.message.rawValue,
+                    message: Message(
+                        attachments: nil,
+                        createdAt: now,
+                        id: "restored-message",
+                        role: MaidMessageRole.user.rawValue,
+                        text: "Partially restored",
+                        turnID: nil,
+                        updatedAt: now
+                    )
+                )
+            ]
+        )
+        let rpc = MockThreadRPCClient(
+            threads: [partial],
+            historyRestorePendingThreadIDs: ["restored"]
+        )
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.selectThread("restored")
+        await waitUntil { store.selectedThread?.timeline.count == 1 }
+
+        #expect(store.isSelectedThreadRestoringHistory)
+
+        try rpc.sendHistoryReplayCompleted(threadID: "restored", sequence: 100)
+
+        #expect(!store.isSelectedThreadRestoringHistory)
+        #expect(store.selectedThread?.timeline.first?.message?.text == "Partially restored")
+    }
+
+    @Test
+    func restoredHistoryFailureExposesOneManualRetry() async throws {
+        let rpc = MockThreadRPCClient(
+            threads: [makeThread("restored")],
+            historyRestorePendingThreadIDs: ["restored"]
+        )
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        store.selectThread("restored")
+        await waitUntil {
+            rpc.dispatchedCommands.contains {
+                $0.type == "thread.session.prepare" && $0.threadID == "restored"
+            }
+        }
+
+        try rpc.sendSessionStatus(
+            threadID: "restored",
+            session: makeSession(
+                threadID: "restored",
+                status: MaidSessionStatus.error.rawValue,
+                lastError: "Agent unavailable"
+            ),
+            sequence: 100
+        )
+
+        #expect(!store.isSelectedThreadRestoringHistory)
+        #expect(store.selectedThreadHistoryRestoreErrorMessage == "Agent unavailable")
+
+        let preparationCount = rpc.dispatchedCommands.filter {
+            $0.type == "thread.session.prepare" && $0.threadID == "restored"
+        }.count
+        store.retry()
+        await waitUntil {
+            rpc.dispatchedCommands.filter {
+                $0.type == "thread.session.prepare" && $0.threadID == "restored"
+            }.count == preparationCount + 1
+        }
+    }
+
+    @Test
+    func draftStorePersistsDraftsByThread() throws {
         let suiteName = "ThreadDraftStoreTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -390,6 +709,8 @@ struct ThreadStoreTests {
         let store = ThreadDraftStore(defaults: defaults)
         store.setActiveDraftThreadID("thread-a")
         store.setText("First prompt", for: "thread-a")
+        store.setText("Follow up in B", for: "thread-b")
+        store.setText("Follow up in C", for: "thread-c")
         store.preferences.rememberProvider("codex")
         store.preferences.rememberWorkingDirectory("/tmp/project")
         store.preferences.rememberConfigValue(
@@ -397,10 +718,13 @@ struct ThreadStoreTests {
             providerID: "codex",
             optionID: "reasoning"
         )
+        store.flushPendingSave()
 
         let restored = ThreadDraftStore(defaults: defaults)
         #expect(restored.activeDraftThreadID == "thread-a")
         #expect(restored.text(for: "thread-a") == "First prompt")
+        #expect(restored.text(for: "thread-b") == "Follow up in B")
+        #expect(restored.text(for: "thread-c") == "Follow up in C")
         #expect(restored.preferences.providerID == "codex")
         #expect(restored.preferences.workingDirectory == "/tmp/project")
         #expect(
@@ -411,7 +735,115 @@ struct ThreadStoreTests {
         )
 
         restored.setText("  \n", for: "thread-a")
+        restored.flushPendingSave()
         #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a") == "  \n")
+
+        restored.removeDraft(for: "thread-b")
+        let afterRemoval = ThreadDraftStore(defaults: defaults)
+        #expect(afterRemoval.text(for: "thread-b").isEmpty)
+        #expect(afterRemoval.text(for: "thread-c") == "Follow up in C")
+    }
+
+    @Test
+    func draftStoreDefersTextPersistenceUntilFlushed() throws {
+        let suiteName = "ThreadDraftDebounceTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ThreadDraftStore(defaults: defaults)
+        store.setText("Typing", for: "thread-a")
+
+        #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a").isEmpty)
+
+        store.flushPendingSave()
+
+        #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a") == "Typing")
+    }
+
+    @Test
+    func chatPromptModelRestoresItsThreadDraft() throws {
+        let suiteName = "ChatPromptDraftTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let threadStore = ThreadStore(rpc: MockThreadRPCClient(threads: []))
+        let draftStore = ThreadDraftStore(defaults: defaults)
+
+        let firstA = ChatPromptModel(
+            store: threadStore,
+            draftStore: draftStore,
+            threadID: "thread-a"
+        )
+        firstA.text = "Unsent A"
+
+        let threadB = ChatPromptModel(
+            store: threadStore,
+            draftStore: draftStore,
+            threadID: "thread-b"
+        )
+        threadB.text = "Unsent B"
+        draftStore.flushPendingSave()
+
+        let restoredA = ChatPromptModel(
+            store: threadStore,
+            draftStore: ThreadDraftStore(defaults: defaults),
+            threadID: "thread-a"
+        )
+        #expect(restoredA.text == "Unsent A")
+        #expect(threadB.text == "Unsent B")
+    }
+
+    @Test
+    func readStatePersistsUnreadThreadIDs() throws {
+        let suiteName = "ThreadReadStateStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = ThreadReadStateStore(defaults: defaults)
+        store.markUnread("thread-a")
+        store.markUnread("thread-b")
+        store.markRead("thread-b")
+
+        let restored = ThreadReadStateStore(defaults: defaults)
+        #expect(restored.isUnread("thread-a"))
+        #expect(!restored.isUnread("thread-b"))
+
+        restored.retainThreadIDs(["thread-b"])
+        #expect(!ThreadReadStateStore(defaults: defaults).isUnread("thread-a"))
+    }
+
+    @Test
+    func hiddenTurnCompletionBecomesUnreadUntilSelected() async throws {
+        let suiteName = "ThreadReadStateIntegrationTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let rpc = MockThreadRPCClient(threads: [
+            makeThread("running", isRunning: true),
+            makeThread("other"),
+        ])
+        let readState = ThreadReadStateStore(defaults: defaults)
+        let store = ThreadStore(rpc: rpc, readState: readState)
+        await store.start()
+
+        store.selectThread("running")
+        await waitUntil { store.subscribedThreadIDs.contains("running") }
+        store.selectThread("other")
+        await waitUntil { store.protectedSubscribedThreadIDs.contains("running") }
+
+        try rpc.sendTurnInterrupted(
+            threadID: "running",
+            turnID: "turn-running",
+            occurredAt: .now,
+            sequence: 100
+        )
+
+        #expect(store.isThreadUnread("running"))
+        #expect(ThreadReadStateStore(defaults: defaults).isUnread("running"))
+
+        store.selectThread("running")
+        #expect(!store.isThreadUnread("running"))
+        #expect(!ThreadReadStateStore(defaults: defaults).isUnread("running"))
     }
 
     @Test
@@ -543,6 +975,87 @@ struct ThreadStoreTests {
         #expect(draftStore.text(for: "accepted-thread").isEmpty)
     }
 
+    @Test
+    func queuedPromptsDispatchInFIFOOrderAsTurnsSettle() async throws {
+        let running = makeThread("queue", isRunning: true).with(
+            session: .some(makeSession(threadID: "queue", status: "running", activeTurnID: "turn-queue"))
+        )
+        let rpc = MockThreadRPCClient(threads: [running])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("queue")
+        await waitUntil { store.subscribedThreadIDs.contains("queue") }
+
+        try await store.submitTurn(threadID: "queue", text: "first")
+        try await store.submitTurn(threadID: "queue", text: "second")
+        #expect(rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.isEmpty)
+        #expect(store.queuedPrompts(for: "queue").map(\.text) == ["first", "second"])
+
+        try rpc.sendSessionStatus(
+            threadID: "queue",
+            session: makeSession(threadID: "queue", status: "ready"),
+            sequence: 100
+        )
+        await waitUntil {
+            rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 1
+        }
+        #expect(
+            rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }
+                .compactMap(\.message?.text) == ["first"]
+        )
+
+        try rpc.sendSessionStatus(
+            threadID: "queue",
+            session: makeSession(threadID: "queue", status: "running", activeTurnID: "turn-next"),
+            sequence: 101
+        )
+        try rpc.sendSessionStatus(
+            threadID: "queue",
+            session: makeSession(threadID: "queue", status: "ready"),
+            sequence: 102
+        )
+        await waitUntil {
+            rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 2
+        }
+
+        #expect(
+            rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }
+                .compactMap(\.message?.text) == ["first", "second"]
+        )
+        #expect(store.queuedPrompts(for: "queue").isEmpty)
+    }
+
+    @Test
+    func steeringAQueuedPromptDispatchesItAndRemovesItFromTheQueue() async throws {
+        let running = makeThread("steer-queued", isRunning: true).with(
+            session: .some(
+                makeSession(
+                    threadID: "steer-queued",
+                    status: "running",
+                    activeTurnID: "turn-steer-queued"
+                )
+            )
+        )
+        let rpc = MockThreadRPCClient(threads: [running])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("steer-queued")
+        await waitUntil { store.subscribedThreadIDs.contains("steer-queued") }
+
+        try await store.submitTurn(threadID: "steer-queued", text: "steer me")
+        try await store.submitTurn(threadID: "steer-queued", text: "stays queued")
+        #expect(rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.isEmpty)
+        let promptID = try #require(store.queuedPrompts(for: "steer-queued").first?.id)
+
+        try await store.steerQueuedPrompt(threadID: "steer-queued", promptID: promptID)
+
+        #expect(
+            rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }
+                .compactMap(\.message?.text) == ["steer me"]
+        )
+        #expect(store.queuedPrompts(for: "steer-queued").map(\.text) == ["stays queued"])
+    }
+
     private func waitUntil(
         _ condition: () -> Bool,
         attempts: Int = 100
@@ -555,6 +1068,69 @@ struct ThreadStoreTests {
     }
 }
 
+#if DEBUG
+    struct ChatScrollStateTests {
+        @Test
+        func startsWithTheEndVisible() {
+            let state = ChatScrollState()
+            #expect(state.isNearBottom)
+            #expect(state.shouldFollowBottom)
+        }
+
+        @Test
+        func endVisibilityControlsTheJumpButton() {
+            let state = ChatScrollState()
+            state.noteUserScrollActivity(isActive: true)
+            state.noteEndVisibility(false)
+            #expect(!state.isNearBottom)
+            state.noteEndVisibility(true)
+            #expect(state.isNearBottom)
+            #expect(!state.shouldFollowBottom)
+            state.noteUserScrollActivity(isActive: false)
+            #expect(state.isNearBottom)
+            #expect(state.shouldFollowBottom)
+        }
+
+        @Test
+        func userInteractionSuspendsFollowingWithoutImmediatelyShowingTheButton() {
+            let state = ChatScrollState()
+            state.noteUserScrollActivity(isActive: true)
+            #expect(state.isNearBottom)
+            #expect(!state.shouldFollowBottom)
+        }
+
+        @Test
+        func layoutChangesDoNotCancelPinnedIntent() {
+            let state = ChatScrollState()
+            state.noteEndVisibility(false)
+            #expect(state.isNearBottom)
+            #expect(state.shouldFollowBottom)
+        }
+
+        @Test
+        func bottomRequestsCarryAnimationAndIncrementTheirCount() {
+            let state = ChatScrollState()
+            state.requestScrollToBottom(animated: true)
+            #expect(state.bottomScrollRequest.count == 1)
+            #expect(state.bottomScrollRequest.animated)
+
+            state.requestScrollToBottom()
+            #expect(state.bottomScrollRequest.count == 2)
+            #expect(!state.bottomScrollRequest.animated)
+        }
+
+        @Test
+        func resetRestoresPinnedState() {
+            let state = ChatScrollState()
+            state.noteUserScrollActivity(isActive: true)
+            state.noteEndVisibility(false)
+            state.reset()
+            #expect(state.isNearBottom)
+            #expect(state.shouldFollowBottom)
+        }
+    }
+#endif
+
 private final class MockThreadRPCClient: ThreadRPCClient {
     var onNotification: ((String, Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
@@ -563,8 +1139,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private(set) var dispatchedCommands: [Command] = []
     private(set) var providerStartInputs: [String] = []
     private(set) var providerOptionSetInputs: [ProviderOptionsSetParams] = []
+    private(set) var itemDetailInputs: [GetItemDetailInput] = []
     var shouldBlockSubscribe = false
     var shouldBlockUnsubscribe = false
+    var shouldBlockItemDetail = false
     var shouldBlockProviderStart = false
     var shouldBlockProviderOptionSet = false
     var threadListFailuresRemaining = 0
@@ -586,15 +1164,19 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private var subscribeContinuations:
         [(continuation: CheckedContinuation<ThreadStreamItem, Never>, snapshot: ThreadStreamItem)] = []
     private var unsubscribeContinuations: [CheckedContinuation<Void, Never>] = []
+    private var itemDetailContinuations: [CheckedContinuation<Item, any Error>] = []
     private var providerStartContinuations: [CheckedContinuation<Void, Never>] = []
     private var providerOptionSetContinuations: [CheckedContinuation<Void, Never>] = []
     private let threadListItem: ThreadListStreamItem
     private var snapshotsByID: [String: ThreadStreamItem]
+    private var itemDetailsByThreadID: [String: [String: Item]]
 
     init(
         threads: [mai.Thread],
         detailThreads: [mai.Thread]? = nil,
-        detailSnapshotSequence: Int? = nil
+        detailSnapshotSequence: Int? = nil,
+        historyRestorePendingThreadIDs: Set<String> = [],
+        itemDetails: [String: [String: Item]] = [:]
     ) {
         let entries = threads.map(makeThreadListEntry)
         threadListItem = ThreadListStreamItem(
@@ -616,6 +1198,9 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                         event: nil,
                         kind: "snapshot",
                         snapshot: ThreadDetailSnapshot(
+                            historyRestorePending: historyRestorePendingThreadIDs.contains(thread.id)
+                                ? true
+                                : nil,
                             snapshotSequence: detailSnapshotSequence ?? index + 1,
                             thread: thread
                         )
@@ -623,6 +1208,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 )
             }
         )
+        itemDetailsByThreadID = itemDetails
     }
 
     func connect() {}
@@ -662,6 +1248,28 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 unsubscribeContinuations.append(continuation)
             }
         }
+    }
+
+    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
+        itemDetailInputs.append(input)
+        if shouldBlockItemDetail {
+            return try await withCheckedThrowingContinuation { continuation in
+                itemDetailContinuations.append(continuation)
+            }
+        }
+        guard let item = itemDetailsByThreadID[input.threadID]?[input.itemID] else {
+            throw MockError.missingItem(input.itemID)
+        }
+        return item
+    }
+
+    func resumeNextItemDetail(returning item: Item) {
+        guard !itemDetailContinuations.isEmpty else { return }
+        itemDetailContinuations.removeFirst().resume(returning: item)
+    }
+
+    func setItemDetail(_ item: Item, threadID: String) {
+        itemDetailsByThreadID[threadID, default: [:]][item.id] = item
     }
 
     func listProviders() async throws -> [InstanceInfo] {
@@ -735,15 +1343,19 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             snapshotsByID[threadID] = ThreadStreamItem(
                 event: nil,
                 kind: "snapshot",
-                snapshot: ThreadDetailSnapshot(snapshotSequence: 1, thread: thread)
+                snapshot: ThreadDetailSnapshot(
+                    historyRestorePending: nil,
+                    snapshotSequence: 1,
+                    thread: thread
+                )
             )
         } else if command.type == "thread.create", let threadID = command.threadID {
             let session = SessionBinding(
                 activeTurnID: nil,
                 configOptions: nil,
                 cwd: command.cwd,
+                driver: nil,
                 lastError: nil,
-                provider: nil,
                 providerInstanceID: command.providerInstanceID ?? "codex",
                 providerName: nil,
                 slashCommands: nil,
@@ -763,6 +1375,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 event: nil,
                 kind: "snapshot",
                 snapshot: ThreadDetailSnapshot(
+                    historyRestorePending: nil,
                     snapshotSequence: 1,
                     thread: thread
                 )
@@ -913,7 +1526,11 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         snapshotsByID[thread.id] = ThreadStreamItem(
             event: nil,
             kind: "snapshot",
-            snapshot: ThreadDetailSnapshot(snapshotSequence: sequence, thread: thread)
+            snapshot: ThreadDetailSnapshot(
+                historyRestorePending: nil,
+                snapshotSequence: sequence,
+                thread: thread
+            )
         )
         let item = ThreadListStreamItem(
             kind: "thread-upserted",
@@ -923,6 +1540,58 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         )
         let data = try newJSONEncoder().encode(MockNotification(params: item))
         onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList, data)
+    }
+
+    func sendItemUpdate(threadID: String, item: Item, sequence: Int) throws {
+        let event = Event(
+            actor: nil,
+            commandID: nil,
+            eventID: "event-\(sequence)",
+            metadata: nil,
+            occurredAt: .now,
+            payload: makeEventPayload(threadID: threadID, item: item),
+            sequence: sequence,
+            type: "thread.item-upserted"
+        )
+        let streamItem = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
+        let data = try newJSONEncoder().encode(MockNotification(params: streamItem))
+        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+    }
+
+    func sendSessionStatus(
+        threadID: String,
+        session: SessionBinding,
+        sequence: Int
+    ) throws {
+        let event = Event(
+            actor: nil,
+            commandID: nil,
+            eventID: "event-\(sequence)",
+            metadata: nil,
+            occurredAt: .now,
+            payload: makeEventPayload(threadID: threadID, session: session),
+            sequence: sequence,
+            type: "thread.session-status-set"
+        )
+        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
+        let data = try newJSONEncoder().encode(MockNotification(params: item))
+        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+    }
+
+    func sendHistoryReplayCompleted(threadID: String, sequence: Int) throws {
+        let event = Event(
+            actor: nil,
+            commandID: nil,
+            eventID: "event-\(sequence)",
+            metadata: nil,
+            occurredAt: .now,
+            payload: makeEventPayload(threadID: threadID),
+            sequence: sequence,
+            type: "thread.history-replay-completed"
+        )
+        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
+        let data = try newJSONEncoder().encode(MockNotification(params: item))
+        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
     }
 
     func sendTurnInterrupted(
@@ -948,6 +1617,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     private enum MockError: Error {
         case disconnected
+        case missingItem(String)
         case missingThread(String)
         case prepareFailed
         case subscriptionFailed
@@ -980,7 +1650,8 @@ private func makeEventPayload(
     text: String? = nil,
     title: String? = nil,
     turnID: String? = nil,
-    session: SessionBinding? = nil
+    session: SessionBinding? = nil,
+    item: Item? = nil
 ) -> EventPayload {
     EventPayload(
         approval: nil,
@@ -989,7 +1660,7 @@ private func makeEventPayload(
         createdAt: nil,
         cwd: nil,
         decision: nil,
-        item: nil,
+        item: item,
         messageID: messageID,
         modelSelection: nil,
         optionID: nil,
@@ -1008,6 +1679,29 @@ private func makeEventPayload(
         turnID: turnID,
         updatedAt: nil,
         value: nil
+    )
+}
+
+private func makeSession(
+    threadID: String,
+    status: String,
+    activeTurnID: String? = nil,
+    lastError: String? = nil
+) -> SessionBinding {
+    SessionBinding(
+        activeTurnID: activeTurnID,
+        configOptions: nil,
+        cwd: nil,
+        driver: nil,
+        lastError: lastError,
+        providerInstanceID: "provider",
+        providerName: nil,
+        slashCommands: nil,
+        status: status,
+        stopRequested: false,
+        threadID: threadID,
+        tokenUsage: nil,
+        updatedAt: .now
     )
 }
 
