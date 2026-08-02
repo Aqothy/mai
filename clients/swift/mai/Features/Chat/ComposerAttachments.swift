@@ -35,6 +35,9 @@ struct ChatPendingAttachment: Identifiable {
     }
 
     mutating func finish(with loaded: ChatLoadedImageAttachment) {
+        if let loadedThumbnail = loaded.thumbnail {
+            thumbnail = loadedThumbnail
+        }
         attachment = Attachment(
             data: loaded.data,
             kind: "image",
@@ -390,10 +393,34 @@ enum ChatAttachmentLoader {
             guard data.count <= maximumImageBytes else {
                 throw ChatAttachmentLoadingError.imageTooLarge(name: name)
             }
+            guard
+                let source = CGImageSourceCreateWithData(data as CFData, nil),
+                let image = CGImageSourceCreateThumbnailAtIndex(
+                    source,
+                    0,
+                    [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceShouldCacheImmediately: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 320,
+                    ] as CFDictionary
+                )
+            else {
+                throw ChatAttachmentLoadingError.invalidImage(name: name)
+            }
+            #if canImport(UIKit)
+            let platformImage = UIImage(cgImage: image)
+            #else
+            let platformImage = NSImage(
+                cgImage: image,
+                size: NSSize(width: image.width, height: image.height)
+            )
+            #endif
             return ChatLoadedImageAttachment(
                 data: data.base64EncodedString(),
                 mimeType: "image/jpeg",
-                name: name
+                name: name,
+                thumbnail: ChatComposerThumbnail(image: platformImage)
             )
         }.value
     }
@@ -457,6 +484,19 @@ struct ChatLoadedImageAttachment: Sendable {
     let data: String
     let mimeType: String
     let name: String
+    let thumbnail: ChatComposerThumbnail?
+
+    nonisolated init(
+        data: String,
+        mimeType: String,
+        name: String,
+        thumbnail: ChatComposerThumbnail? = nil
+    ) {
+        self.data = data
+        self.mimeType = mimeType
+        self.name = name
+        self.thumbnail = thumbnail
+    }
 }
 
 private enum ChatAttachmentLoadingError: LocalizedError {

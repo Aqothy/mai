@@ -315,6 +315,7 @@ struct ComposerAddMenu: View {
         func makeUIViewController(context: Context) -> UIImagePickerController {
             let controller = UIImagePickerController()
             controller.sourceType = .camera
+            controller.mediaTypes = [UTType.image.identifier]
             controller.cameraCaptureMode = .photo
             controller.delegate = context.coordinator
             return controller
@@ -323,12 +324,14 @@ struct ComposerAddMenu: View {
         func updateUIViewController(
             _ uiViewController: UIImagePickerController,
             context: Context
-        ) {}
+        ) {
+            context.coordinator.parent = self
+        }
 
         final class Coordinator: NSObject, UIImagePickerControllerDelegate,
             UINavigationControllerDelegate
         {
-            let parent: ComposerCameraPicker
+            var parent: ComposerCameraPicker
 
             init(parent: ComposerCameraPicker) {
                 self.parent = parent
