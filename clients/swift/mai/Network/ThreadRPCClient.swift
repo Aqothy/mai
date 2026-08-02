@@ -9,10 +9,13 @@ protocol ThreadRPCClient: AnyObject {
     func subscribeThreadList() async throws -> ThreadListStreamItem
     func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem
     func unsubscribeThread(_ input: SubscribeThreadInput) async throws
+    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item
     func listProviders() async throws -> [InstanceInfo]
     func listRegistryAgents() async throws -> [ACPRegistryAgent]
+    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent]
+    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
-    func startRegistryAgent(_ registryID: String) async throws -> InstanceInfo
+    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
@@ -21,12 +24,17 @@ protocol ThreadRPCClient: AnyObject {
 extension ThreadRPCClient {
     func listProviders() async throws -> [InstanceInfo] { [] }
     func listRegistryAgents() async throws -> [ACPRegistryAgent] { [] }
+    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
+
+    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
+        throw RPCError(code: nil, message: "Agent installation is unavailable", data: nil)
+    }
 
     func startProvider(_ instanceID: String) async throws -> InstanceInfo {
         throw RPCError(code: nil, message: "Provider startup is unavailable", data: nil)
     }
 
-    func startRegistryAgent(_ registryID: String) async throws -> InstanceInfo {
+    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
         throw RPCError(code: nil, message: "Agent startup is unavailable", data: nil)
     }
 
@@ -40,6 +48,10 @@ extension ThreadRPCClient {
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
         throw RPCError(code: nil, message: "Command dispatch is unavailable", data: nil)
+    }
+
+    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
+        throw RPCError(code: nil, message: "Item details are unavailable", data: nil)
     }
 }
 
@@ -65,12 +77,30 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
+    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
+        try await call(
+            MaidRPCMethod.orchestrationGetItemDetail,
+            params: input
+        )
+    }
+
     func listProviders() async throws -> [InstanceInfo] {
         try await call(MaidRPCMethod.providerList, params: EmptyParams())
     }
 
     func listRegistryAgents() async throws -> [ACPRegistryAgent] {
         try await call(MaidRPCMethod.acpRegistryList, params: EmptyParams())
+    }
+
+    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] {
+        try await call(MaidRPCMethod.acpRegistryInstalled, params: EmptyParams())
+    }
+
+    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
+        try await call(
+            MaidRPCMethod.acpRegistryInstall,
+            params: ACPRegistryInstallParams(registryID: registryID)
+        )
     }
 
     func startProvider(_ instanceID: String) async throws -> InstanceInfo {
@@ -86,10 +116,10 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
-    func startRegistryAgent(_ registryID: String) async throws -> InstanceInfo {
+    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
         try await call(
             MaidRPCMethod.acpRegistryStart,
-            params: ACPRegistryStartParams(registryID: registryID, restart: nil)
+            params: ACPRegistryStartParams(registryID: registryID, restart: restart ? true : nil)
         )
     }
 
