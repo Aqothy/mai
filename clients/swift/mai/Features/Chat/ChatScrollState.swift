@@ -31,6 +31,14 @@ final class ChatScrollState {
         }
     }
 
+    /// Expanding a row grows content just like streaming does, but the user
+    /// is reading in place: stop following the bottom so the growth cannot
+    /// yank the viewport. Following resumes via `noteEndVisibility` if the
+    /// end of the timeline is still on screen afterwards.
+    func noteContentExpansion() {
+        shouldFollowBottom = false
+    }
+
     func noteUserScrollActivity(isActive: Bool) {
         isUserScrolling = isActive
         if isActive {

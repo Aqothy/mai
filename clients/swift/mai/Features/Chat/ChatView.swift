@@ -28,6 +28,7 @@ struct ChatView: View {
                     threadID: thread.id,
                     timeline: thread.timeline,
                     plan: thread.plan,
+                    latestTurn: thread.latestTurn,
                     streamingTurnID: thread.latestTurn?.turnState == .running
                         ? thread.latestTurn?.turnID
                         : nil,
@@ -223,17 +224,43 @@ private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
     }
 }
 
+/// Expanded/collapsed turn sections. A reference type so rows can toggle the
+/// fold without closure or binding inputs defeating row-level invalidation.
+@Observable
+final class ChatTimelineFoldModel {
+    private(set) var expandedSectionIDs: Set<String> = []
+
+    func toggle(_ sectionID: String) {
+        // No animation: List rows animating height changes overlap badly.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            expandedSectionIDs.formSymmetricDifference([sectionID])
+        }
+    }
+}
+
 private struct ChatTimeline: View {
     static let nearBottomDistance: CGFloat = 24
 
     let threadID: String
     let timeline: [TimelineEntry]
     let plan: Plan?
+    let latestTurn: Turn?
     let streamingTurnID: String?
     let store: ThreadStore
     let scrollState: ChatScrollState
 
+    @State private var foldModel = ChatTimelineFoldModel()
+
     var body: some View {
+        let rows = ChatTimelineLayout.rows(
+            timeline: timeline,
+            streamingTurnID: streamingTurnID,
+            latestTurn: latestTurn,
+            expandedSectionIDs: foldModel.expandedSectionIDs
+        )
+
         ScrollViewReader { proxy in
             List {
                 if let plan, !plan.entries.isEmpty {
@@ -245,24 +272,28 @@ private struct ChatTimeline: View {
                         .listRowSeparator(.hidden)
                 }
 
-                ForEach(timeline, id: \.chatIdentity) { entry in
+                ForEach(rows) { row in
                     ChatTimelineRow(
-                        entry: entry,
-                        messagePresentation: entry.message.map {
-                            ChatMarkdownPresentation.timelineMessage(
-                                role: $0.role,
-                                turnID: $0.turnID,
-                                streamingTurnID: streamingTurnID
-                            )
-                        } ?? ChatMarkdownPresentation(isStreaming: false),
+                        row: row,
+                        streamingTurnID: streamingTurnID,
                         threadID: threadID,
-                        store: store
+                        store: store,
+                        foldModel: foldModel,
+                        scrollState: scrollState
                     )
-                    .padding(.vertical, 10)
                     .listRowInsets(
                         .init(top: 0, leading: 16, bottom: 0, trailing: 16)
                     )
                     .listRowSeparator(.hidden)
+                }
+
+                if streamingTurnID != nil {
+                    ChatWorkingIndicator(activityKey: rows.last?.id)
+                        .padding(.vertical, 10)
+                        .listRowInsets(
+                            .init(top: 0, leading: 16, bottom: 0, trailing: 16)
+                        )
+                        .listRowSeparator(.hidden)
                 }
 
                 ChatEndMarker()
@@ -299,6 +330,8 @@ private struct ChatTimeline: View {
                     newGeometry.bottomInset > oldGeometry.bottomInset
                     || newGeometry.containerHeight < oldGeometry.containerHeight
                 // Pin after layout so content growth uses the final size.
+                // Expansion toggles call noteContentExpansion() first, which
+                // drops shouldFollowBottom so this pin cannot fire for them.
                 let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
                 let shouldPin =
                     (viewportShrank || contentGrew) && scrollState.shouldFollowBottom
@@ -330,55 +363,569 @@ private struct ChatScrollGeometry: Equatable {
     let contentHeight: CGFloat
 }
 
-private enum ChatRowIdentity: Hashable {
-    case message(String)
-    case item(String)
-    case approval(String)
-    case unknown(String)
-}
-
-private extension TimelineEntry {
-    var chatIdentity: ChatRowIdentity {
-        if let message { return .message(message.id) }
-        if let item { return .item(item.id) }
-        if let approval { return .approval(approval.requestID) }
-        return .unknown(kind)
-    }
-}
-
 private struct ChatTimelineRow: View {
-    let entry: TimelineEntry
-    let messagePresentation: ChatMarkdownPresentation
+    let row: ChatTimelineRowModel
+    let streamingTurnID: String?
     let threadID: String
     let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
+    let scrollState: ChatScrollState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            switch entry.entryKind {
-            case .message:
-                if let message = entry.message {
-                    ChatMessageRow(
-                        messageID: message.id,
-                        text: message.text,
+            switch row {
+            case .message(let message):
+                ChatMessageRow(
+                    messageID: message.id,
+                    text: message.text,
+                    role: message.role,
+                    attachments: message.attachments,
+                    presentation: ChatMarkdownPresentation.timelineMessage(
                         role: message.role,
-                        attachments: message.attachments,
-                        presentation: messagePresentation
+                        turnID: message.turnID,
+                        streamingTurnID: streamingTurnID
+                    )
+                )
+                .padding(.vertical, 10)
+            case .thought(let item):
+                ChatThoughtRow(item: item)
+            case .turnActivity(let activity):
+                ChatTurnActivityRow(
+                    activity: activity,
+                    foldModel: foldModel,
+                    scrollState: scrollState
+                )
+            case .activityGroup(let group):
+                // A lone step needs no group wrapper: one tap reaches it.
+                if group.items.count == 1, let item = group.items.first {
+                    ChatActivityItemRow(
+                        item: item,
+                        threadID: threadID,
+                        store: store,
+                        scrollState: scrollState
+                    )
+                    .padding(.vertical, 4)
+                } else {
+                    ChatActivityGroupRow(
+                        group: group,
+                        threadID: threadID,
+                        store: store,
+                        scrollState: scrollState
                     )
                 }
-            case .item:
-                if let item = entry.item {
-                    ChatItemRow(item: item, threadID: threadID, store: store)
-                }
-            case .approval:
-                if let approval = entry.approval {
-                    ChatApprovalRow(approval: approval, threadID: threadID, store: store)
-                }
-            case nil:
-                Label("Unsupported timeline entry", systemImage: "questionmark.circle")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .notice(let item):
+                ChatNoticeRow(item: item)
+            case .approval(let approval):
+                ChatApprovalRow(approval: approval, threadID: threadID, store: store)
+                    .padding(.vertical, 10)
             }
         }
+    }
+}
+
+/// The model's reasoning, shown as plain dimmed prose in the timeline —
+/// streaming while the turn runs, folding with the rest when it finishes.
+/// Deliberately not Markdown-rendered: the renderer's own text styling would
+/// fight the dimmed secondary look that separates thoughts from answers.
+private struct ChatThoughtRow: View {
+    let item: Item
+
+    var body: some View {
+        if let text = ChatTimelineLayout.reasoningText(item) {
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+        }
+    }
+}
+
+/// The turn's work header. While the turn runs it is a live elapsed timer;
+/// once finished it becomes the "Worked for 42s" disclosure that folds and
+/// unfolds the turn's activity.
+private struct ChatTurnActivityRow: View {
+    let activity: ChatTurnActivity
+    let foldModel: ChatTimelineFoldModel
+    let scrollState: ChatScrollState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if activity.isRunning {
+                    Text("Working")
+                    if let startedAt = activity.startedAt {
+                        Text(startedAt, style: .timer)
+                            .monospacedDigit()
+                    }
+                } else {
+                    Button {
+                        scrollState.noteContentExpansion()
+                        foldModel.toggle(activity.sectionID)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(activity.title)
+
+                            if activity.hasFailure {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+
+                            Image(
+                                systemName: activity.isExpanded
+                                    ? "chevron.down" : "chevron.right"
+                            )
+                            .font(.caption2.weight(.semibold))
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        activity.isExpanded
+                            ? "Hide agent activity, \(activity.title)"
+                            : "Show agent activity, \(activity.title)"
+                    )
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            Divider()
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+}
+
+/// One compact line summarizing a run of consecutive activity items, e.g.
+/// "Read 2 files, ran a command". Tapping reveals the individual steps.
+private struct ChatActivityGroupRow: View {
+    let group: ChatActivityGroup
+    let threadID: String
+    let store: ThreadStore
+    let scrollState: ChatScrollState
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                scrollState.noteContentExpansion()
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: Self.iconName(for: group.items.first))
+                        .font(.caption)
+                        .frame(width: 16)
+                        .foregroundStyle(
+                            group.hasFailure
+                                ? AnyShapeStyle(.red)
+                                : AnyShapeStyle(.secondary)
+                        )
+
+                    summaryText
+                        .lineLimit(1)
+
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(group.items, id: \.id) { item in
+                        ChatActivityItemRow(
+                            item: item,
+                            threadID: threadID,
+                            store: store,
+                            scrollState: scrollState
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var summaryText: Text {
+        Text(group.summary)
+    }
+
+    /// A single-step group shows its specific work instead of an aggregate.
+    static func singleItemText(_ item: Item, fallback: String) -> Text {
+        let summary = item.toolCallSummary
+        switch ChatActivityVerb(item: item) {
+        case .ranCommand:
+            if let command = summary?.commandPreview, !command.isEmpty {
+                return Text("Ran ") + monospaced(command)
+            }
+        case .thought:
+            let seconds = item.updatedAt.timeIntervalSince(item.createdAt)
+            if seconds >= 1 {
+                return Text("Thought for \(ChatTurnActivity.formatted(.seconds(seconds)))")
+            }
+            return Text("Thought")
+        case .read:
+            if let path = summary?.locations?.first?.path, !path.isEmpty {
+                return Text("Read ") + monospaced(lastPathComponent(path))
+            }
+        case .edited:
+            if let path = summary?.changes?.first?.path, !path.isEmpty {
+                let extra = max(0, (summary?.changeCount ?? 1) - 1)
+                let suffix = extra > 0 ? " +\(extra)" : ""
+                return Text("Edited ") + monospaced(lastPathComponent(path)) + Text(suffix)
+            }
+        case .searched:
+            if let query = summary?.queryPreview, !query.isEmpty {
+                return Text("Searched ") + monospaced(query)
+            }
+        case .fetched, .tool:
+            break
+        }
+        if let title = item.title, !title.isEmpty {
+            return Text(title)
+        }
+        return Text(fallback)
+    }
+
+    /// The one-line label for a step, shared by the group summary and the
+    /// expanded per-step rows so both read identically.
+    static func itemLineText(_ item: Item) -> Text {
+        singleItemText(
+            item,
+            fallback: ChatActivityVerb(item: item)
+                .phrase(count: 1, toolName: item.toolCallSummary?.name)
+                .capitalizedFirst
+        )
+    }
+
+    private static func monospaced(_ value: String) -> Text {
+        Text(value).font(.callout.monospaced())
+    }
+
+    private static func lastPathComponent(_ path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
+    }
+
+    static func iconName(for item: Item?) -> String {
+        guard let item else { return "circle.dashed" }
+        return switch ChatActivityVerb(item: item) {
+        case .thought: "brain"
+        case .read: "book"
+        case .searched: "magnifyingglass"
+        case .edited: "pencil"
+        case .ranCommand: "terminal"
+        case .fetched: "globe"
+        case .tool: "wrench.and.screwdriver"
+        }
+    }
+}
+
+/// A single step inside an expanded activity group, in the same compact
+/// one-line style as the group row. Steps with output expand into a small
+/// box; file edits open the diff viewer directly; steps with nothing more to
+/// show are plain text, not buttons.
+private struct ChatActivityItemRow: View {
+    let item: Item
+    let threadID: String
+    let store: ThreadStore
+    let scrollState: ChatScrollState
+
+    @State private var isExpanded = false
+    // Captured at presentation: `detail` is cleared whenever the item
+    // updates, and an open sheet must not lose its content to that.
+    @State private var presentedChanges: [FileChange]?
+    @State private var detail: Item?
+    @State private var isLoadingDetail = false
+    @State private var detailErrorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isFileChangeStep || hasExpandableContent {
+                Button {
+                    if isFileChangeStep {
+                        Task { await openDiff() }
+                    } else {
+                        scrollState.noteContentExpansion()
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { isExpanded.toggle() }
+                        if isExpanded, detail == nil, item.detailAvailable == true {
+                            Task { await loadDetail() }
+                        }
+                    }
+                } label: {
+                    lineLabel
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            } else {
+                lineLabel
+            }
+
+            if isExpanded, hasExpandableContent || detailErrorMessage != nil {
+                expandedContent
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(
+            isPresented: Binding(
+                get: { presentedChanges != nil },
+                set: { if !$0 { presentedChanges = nil } }
+            )
+        ) {
+            // Placeholder until the diff viewer lands; the captured changes
+            // are already wired for it.
+            ChatStepDiffSheet(changes: presentedChanges ?? [])
+                .presentationDragIndicator(.visible)
+        }
+        .onChange(of: item.sequence) { _, _ in
+            itemDidUpdate()
+        }
+        .onChange(of: item.updatedAt) { _, _ in
+            guard item.sequence == nil else { return }
+            itemDidUpdate()
+        }
+    }
+
+    private var lineLabel: some View {
+        HStack(spacing: 8) {
+            Image(systemName: ChatActivityGroupRow.iconName(for: item))
+                .font(.caption)
+                .frame(width: 16)
+                .foregroundStyle(
+                    item.itemStatus == .failed
+                        ? AnyShapeStyle(.red)
+                        : AnyShapeStyle(.secondary)
+                )
+
+            ChatActivityGroupRow.itemLineText(item)
+                .lineLimit(1)
+
+            if let statusText {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(item.itemStatus == .failed ? .red : .secondary)
+            }
+
+            if isFileChangeStep || hasExpandableContent {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold))
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var expandedContent: some View {
+        if let detailErrorMessage {
+            HStack(spacing: 10) {
+                Text(detailErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Button("Retry", systemImage: "arrow.clockwise") {
+                    Task { await loadDetail() }
+                }
+                .font(.caption)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        } else {
+            // Summary previews render instantly; the fetched detail replaces
+            // them in place, so expansion never flashes a loading state.
+            ChatStepOutputBox(
+                command: toolCall?.command ?? summary?.commandPreview,
+                query: toolCall?.query ?? summary?.queryPreview,
+                output: toolCall?.output ?? summary?.outputPreview,
+                error: toolCall?.error ?? summary?.errorPreview,
+                metadata: metadata
+            )
+        }
+    }
+
+    private var summary: ToolCallSummary? { item.toolCallSummary }
+    private var toolCall: ToolCall? { detail?.toolCall }
+
+    private var isFileChangeStep: Bool {
+        ChatActivityVerb(item: item) == .edited
+    }
+
+    /// Expandable only when there is genuinely more to show; a bare read
+    /// with no output would otherwise expand into an empty box.
+    private var hasExpandableContent: Bool {
+        summary?.commandPreview != nil
+            || summary?.queryPreview != nil
+            || summary?.outputPreview != nil
+            || summary?.errorPreview != nil
+    }
+
+    private func openDiff() async {
+        if detail == nil {
+            await loadDetail()
+        }
+        if let changes = detail?.toolCall?.changes, !changes.isEmpty {
+            presentedChanges = changes
+        } else if hasExpandableContent || detailErrorMessage != nil {
+            // No structured diff came back; fall back to whatever the step
+            // can show instead of silently doing nothing.
+            isExpanded = true
+        }
+    }
+
+    private var statusText: String? {
+        switch item.itemStatus {
+        case .failed, .interrupted, .declined:
+            item.itemStatus.map { ChatTimelineText.humanized($0.rawValue) }
+        case .completed, .inProgress, nil:
+            nil
+        }
+    }
+
+    private var metadata: String? {
+        var values: [String] = []
+        let exitCode = toolCall?.exitCode ?? summary?.exitCode
+        if let exitCode, exitCode != 0 {
+            values.append("Exit \(exitCode)")
+        }
+        let duration = toolCall?.durationMilliseconds ?? summary?.durationMilliseconds
+        if let duration, duration >= 100 {
+            values.append("\(duration) ms")
+        }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private func itemDidUpdate() {
+        guard detail != nil else { return }
+        detail = nil
+        detailErrorMessage = nil
+        if isExpanded, item.itemStatus != .inProgress {
+            Task { await loadDetail() }
+        }
+    }
+
+    private func loadDetail() async {
+        guard !isLoadingDetail else { return }
+        isLoadingDetail = true
+        detailErrorMessage = nil
+        defer { isLoadingDetail = false }
+        do {
+            detail = try await store.itemDetail(threadID: threadID, item: item)
+        } catch {
+            detailErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// The rounded output panel under an expanded step: command, output, and
+/// error in monospaced text.
+private struct ChatStepOutputBox: View {
+    private static let maximumCharacters = 4_000
+
+    let command: String?
+    let query: String?
+    let output: String?
+    let error: String?
+    let metadata: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let command, !command.isEmpty {
+                monospacedText("$ " + command, style: .primary)
+            }
+            if let query, !query.isEmpty {
+                Text(query)
+                    .font(.callout)
+                    .textSelection(.enabled)
+            }
+            if let output, !output.isEmpty {
+                monospacedText(output, style: .secondary)
+            }
+            if let error, !error.isEmpty {
+                monospacedText(error, style: .red)
+            }
+            if let metadata {
+                Text(metadata)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.secondary.opacity(0.08), in: .rect(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func monospacedText(_ text: String, style: some ShapeStyle) -> some View {
+        let (preview, isTruncated) = truncated(text)
+        Text(preview)
+            .font(.caption.monospaced())
+            .foregroundStyle(style)
+            .textSelection(.enabled)
+        if isTruncated {
+            Text("Preview truncated")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func truncated(_ text: String) -> (String, Bool) {
+        guard let end = text.index(
+            text.startIndex,
+            offsetBy: Self.maximumCharacters,
+            limitedBy: text.endIndex
+        ) else {
+            return (text, false)
+        }
+        return (String(text[..<end]), end != text.endIndex)
+    }
+}
+
+/// Empty placeholder for a step's file changes until the diff viewer lands.
+private struct ChatStepDiffSheet: View {
+    let changes: [FileChange]
+
+    var body: some View {
+        Color.clear
+    }
+}
+
+/// Warnings and errors stay visible outside the fold.
+private struct ChatNoticeRow: View {
+    let item: Item
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(
+                item.title ?? ChatTimelineText.humanized(item.kind),
+                systemImage: item.itemKind == .error
+                    ? "xmark.octagon" : "exclamationmark.triangle"
+            )
+            .font(.callout.weight(.semibold))
+
+            if let text = ChatTimelineLayout.reasoningText(item) {
+                Text(text)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(
+            item.itemKind == .error ? .red.opacity(0.12) : .orange.opacity(0.12),
+            in: .rect(cornerRadius: 12)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
     }
 }
 
@@ -416,364 +963,6 @@ private struct ChatMessageRow: View {
             maxWidth: .infinity,
             alignment: role == MaidMessageRole.user.rawValue ? .trailing : .leading
         )
-    }
-}
-
-private struct ChatItemRow: View {
-    let item: Item
-    let threadID: String
-    let store: ThreadStore
-
-    @State private var isExpanded = false
-    @State private var detail: Item?
-    @State private var isLoadingDetail = false
-    @State private var detailErrorMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Label(
-                    item.title ?? ChatTimelineText.humanized(item.kind),
-                    systemImage: iconName
-                )
-                .bold()
-
-                Spacer()
-
-                Text(ChatTimelineText.humanized(item.status))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let summary = item.toolCallSummary {
-                ChatToolSummaryView(summary: summary)
-            } else if let toolCall = item.toolCall {
-                if let changes = toolCall.changes, !changes.isEmpty {
-                    ChatDetailTextBlock(
-                        title: "Changes",
-                        text: ChatTimelineText.encoded(changes) ?? ""
-                    )
-                } else if let text = ChatTimelineText.encoded(toolCall) {
-                    Text(text)
-                        .font(.callout.monospaced())
-                        .textSelection(.enabled)
-                }
-            }
-
-            if let payload = item.payload {
-                Text(ChatTimelineText.encoded(payload.value))
-                    .font(.callout.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            if item.detailAvailable == true {
-                Button(
-                    isExpanded ? "Hide details" : "Show details",
-                    systemImage: isExpanded ? "chevron.up" : "chevron.down"
-                ) {
-                    isExpanded.toggle()
-                    if isExpanded, detail == nil {
-                        Task { await loadDetail() }
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                if isExpanded {
-                    ChatItemDetailView(
-                        detail: detail,
-                        isLoading: isLoadingDetail,
-                        errorMessage: detailErrorMessage
-                    ) {
-                        Task { await loadDetail() }
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(backgroundStyle, in: .rect(cornerRadius: 14))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: item.sequence) { _, _ in
-            itemDidUpdate()
-        }
-        .onChange(of: item.updatedAt) { _, _ in
-            guard item.sequence == nil else { return }
-            itemDidUpdate()
-        }
-    }
-
-    private func itemDidUpdate() {
-        guard detail != nil else { return }
-        detail = nil
-        detailErrorMessage = nil
-        if isExpanded, item.itemStatus != .inProgress {
-            Task { await loadDetail() }
-        }
-    }
-
-    private func loadDetail() async {
-        guard !isLoadingDetail else { return }
-        isLoadingDetail = true
-        detailErrorMessage = nil
-        defer { isLoadingDetail = false }
-        do {
-            detail = try await store.itemDetail(threadID: threadID, item: item)
-        } catch {
-            detailErrorMessage = error.localizedDescription
-        }
-    }
-
-    private var iconName: String {
-        switch item.itemKind {
-        case .userMessage, .assistantMessage: "bubble.left"
-        case .reasoning: "brain"
-        case .commandExecution: "terminal"
-        case .fileChange: "doc.badge.gearshape"
-        case .mcpToolCall, .toolCall: "wrench.and.screwdriver"
-        case .warning: "exclamationmark.triangle"
-        case .error: "xmark.octagon"
-        case nil: "gearshape"
-        }
-    }
-
-    private var backgroundStyle: Color {
-        switch item.itemKind {
-        case .warning: .orange.opacity(0.12)
-        case .error: .red.opacity(0.12)
-        default: .secondary.opacity(0.08)
-        }
-    }
-}
-
-private struct ChatToolSummaryView: View {
-    let summary: ToolCallSummary
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            if let command = summary.commandPreview, !command.isEmpty {
-                Text(command)
-                    .font(.callout.monospaced())
-                    .lineLimit(2)
-            }
-            if let query = summary.queryPreview, !query.isEmpty {
-                Text(query)
-                    .font(.callout)
-                    .lineLimit(2)
-            }
-            if let changes = summary.changes, !changes.isEmpty {
-                Label(
-                    summarizedValues(
-                        changes.map(\.path),
-                        totalCount: summary.changeCount
-                    ),
-                    systemImage: "doc.on.doc"
-                )
-                .lineLimit(2)
-            }
-            if let locations = summary.locations, !locations.isEmpty {
-                Label(
-                    summarizedValues(
-                        locations.map(\.path),
-                        totalCount: summary.locationCount
-                    ),
-                    systemImage: "mappin.and.ellipse"
-                )
-                .lineLimit(2)
-            }
-            if let attachments = summary.attachments, !attachments.isEmpty {
-                Label(
-                    summarizedValues(
-                        attachments.map { $0.name ?? $0.kind },
-                        totalCount: summary.attachmentCount
-                    ),
-                    systemImage: "paperclip"
-                )
-                .lineLimit(2)
-            }
-            if let output = summary.outputPreview, !output.isEmpty {
-                Text(output)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-            if let error = summary.errorPreview, !error.isEmpty {
-                Text(error)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-    }
-
-    private func summarizedValues(_ values: [String], totalCount: Int?) -> String {
-        let displayed = values.joined(separator: " · ")
-        let omitted = max(0, (totalCount ?? values.count) - values.count)
-        return omitted == 0 ? displayed : "\(displayed) · +\(omitted)"
-    }
-}
-
-private struct ChatItemDetailView: View {
-    let detail: Item?
-    let isLoading: Bool
-    let errorMessage: String?
-    let retry: () -> Void
-
-    var body: some View {
-        Group {
-            if let detail {
-                if let toolCall = detail.toolCall {
-                    ChatToolDetailContent(toolCall: toolCall)
-                } else if let payload = detail.payload {
-                    ChatDetailTextBlock(
-                        title: "Details",
-                        text: ChatTimelineText.encoded(payload.value)
-                    )
-                }
-            } else if isLoading {
-                ProgressView("Loading details…")
-                    .controlSize(.small)
-            } else if let errorMessage {
-                VStack(alignment: .leading) {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                    Button("Retry", systemImage: "arrow.clockwise", action: retry)
-                }
-            }
-        }
-    }
-}
-
-private struct ChatToolDetailContent: View {
-    let toolCall: ToolCall
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let command = toolCall.command, !command.isEmpty {
-                ChatDetailTextBlock(title: "Command", text: command)
-            }
-            if let query = toolCall.query, !query.isEmpty {
-                ChatDetailTextBlock(title: "Query", text: query)
-            }
-            if let cwd = toolCall.cwd, !cwd.isEmpty {
-                ChatDetailValue(title: "Working directory", value: cwd)
-            }
-            if let output = toolCall.output, !output.isEmpty {
-                ChatDetailTextBlock(title: "Output", text: output)
-            }
-            if let error = toolCall.error, !error.isEmpty {
-                ChatDetailTextBlock(title: "Error", text: error, isError: true)
-            }
-            if let changes = toolCall.changes, !changes.isEmpty {
-                ChatDetailTextBlock(
-                    title: "Changes",
-                    text: ChatTimelineText.encoded(changes) ?? ""
-                )
-            }
-            if let locations = toolCall.locations, !locations.isEmpty {
-                ChatDetailValue(
-                    title: "Locations",
-                    value: locations.map { location in
-                        location.line.map { "\(location.path):\($0)" } ?? location.path
-                    }.joined(separator: "\n")
-                )
-            }
-            if let attachments = toolCall.attachments, !attachments.isEmpty {
-                ChatDetailValue(
-                    title: "Attachments",
-                    value: attachments.map(attachmentDescription).joined(separator: "\n")
-                )
-            }
-            if let metadata, !metadata.isEmpty {
-                ChatDetailValue(title: "Result", value: metadata.joined(separator: " · "))
-            }
-        }
-    }
-
-    private var metadata: [String]? {
-        var values: [String] = []
-        if let exitCode = toolCall.exitCode {
-            values.append("Exit \(exitCode)")
-        }
-        if let duration = toolCall.durationMilliseconds {
-            values.append("\(duration) ms")
-        }
-        if let name = toolCall.name, !name.isEmpty {
-            let qualifiedName = toolCall.namespace.map { "\($0).\(name)" } ?? name
-            values.append(qualifiedName)
-        } else if let providerKind = toolCall.providerKind, !providerKind.isEmpty {
-            values.append(providerKind)
-        }
-        return values.isEmpty ? nil : values
-    }
-
-    private func attachmentDescription(_ attachment: Attachment) -> String {
-        var description = attachment.name ?? attachment.uri ?? attachment.kind
-        if let mimeType = attachment.mimeType, !mimeType.isEmpty {
-            description += " · \(mimeType)"
-        }
-        if let data = attachment.data, !data.isEmpty {
-            description += " · embedded data omitted"
-        }
-        return description
-    }
-}
-
-private struct ChatDetailValue: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.callout.monospaced())
-                .textSelection(.enabled)
-        }
-    }
-}
-
-private struct ChatDetailTextBlock: View {
-    private static let maximumCharacters = 8_000
-
-    let title: String
-    let text: String
-    var isError = false
-
-    private var projectedText: (preview: String, isTruncated: Bool) {
-        guard let end = text.index(
-            text.startIndex,
-            offsetBy: Self.maximumCharacters,
-            limitedBy: text.endIndex
-        ) else {
-            return (text, false)
-        }
-        return (String(text[..<end]), end != text.endIndex)
-    }
-
-    var body: some View {
-        let projectedText = projectedText
-
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(projectedText.preview)
-                .font(.callout.monospaced())
-                .foregroundStyle(isError ? .red : .primary)
-                .textSelection(.enabled)
-            if projectedText.isTruncated {
-                Text(
-                    "Inline preview limited to \(Self.maximumCharacters.formatted()) characters"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
     }
 }
 

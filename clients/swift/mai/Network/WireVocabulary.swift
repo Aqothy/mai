@@ -10,7 +10,7 @@ extension Event {
 }
 
 extension Turn {
-    var turnState: MaidTurnState? { MaidTurnState(rawValue: state) }
+    nonisolated var turnState: MaidTurnState? { MaidTurnState(rawValue: state) }
 }
 
 extension SessionBinding {
@@ -18,16 +18,16 @@ extension SessionBinding {
 }
 
 extension Approval {
-    var approvalStatus: MaidApprovalStatus? { MaidApprovalStatus(rawValue: status) }
+    nonisolated var approvalStatus: MaidApprovalStatus? { MaidApprovalStatus(rawValue: status) }
 }
 
 extension Item {
-    var itemKind: MaidItemKind? { MaidItemKind(rawValue: kind) }
-    var itemStatus: MaidItemStatus? { MaidItemStatus(rawValue: status) }
+    nonisolated var itemKind: MaidItemKind? { MaidItemKind(rawValue: kind) }
+    nonisolated var itemStatus: MaidItemStatus? { MaidItemStatus(rawValue: status) }
 }
 
 extension TimelineEntry {
-    var entryKind: MaidTimelineEntryKind? { MaidTimelineEntryKind(rawValue: kind) }
+    nonisolated var entryKind: MaidTimelineEntryKind? { MaidTimelineEntryKind(rawValue: kind) }
 }
 
 extension ThreadStreamItem {
