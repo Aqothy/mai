@@ -2,7 +2,9 @@ package acp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/maiD/internal/provider"
@@ -20,12 +22,12 @@ func decodeSessionUpdate(t *testing.T, raw string) schema.SessionUpdate {
 	return update
 }
 
-func TestToolCallPatchKeepsOnlyRawInputNeededForNormalization(t *testing.T) {
+func TestToolCallPatchNormalizesRawInputAndRawOutput(t *testing.T) {
 	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
 		"sessionUpdate":"tool_call_update",
 		"toolCallId":"tool-1",
 		"rawInput":{"command":"go test ./..."},
-		"rawOutput":{"stdout":"large output"}
+		"rawOutput":{"stdout":"ok  \tmaiD\t0.3s"}
 	}`))
 	if patch == nil || patch.rawInput == nil {
 		t.Fatal("adapter-private rawInput missing; command normalization needs it")
@@ -34,8 +36,85 @@ func TestToolCallPatchKeepsOnlyRawInputNeededForNormalization(t *testing.T) {
 	if call == nil || call.Command != "go test ./..." {
 		t.Fatalf("tool call = %#v, want normalized command", call)
 	}
-	if call.Output != "" {
-		t.Fatalf("output = %q, want provider-native rawOutput ignored", call.Output)
+	if call.Output != "ok  \tmaiD\t0.3s" {
+		t.Fatalf("output = %q, want rawOutput stdout backfilled", call.Output)
+	}
+}
+
+// Textual content blocks are the canonical output; rawOutput only backfills
+// when the agent sent none (e.g. command output without terminal support).
+func TestToolCallOutputPrefersContentOverRawOutput(t *testing.T) {
+	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
+		"sessionUpdate":"tool_call_update",
+		"toolCallId":"tool-1",
+		"content":[{"type":"content","content":{"type":"text","text":"from content"}}],
+		"rawOutput":{"output":"from raw"}
+	}`))
+	if call := patch.toolCall(); call == nil || call.Output != "from content" {
+		t.Fatalf("output = %#v, want content text preferred", call)
+	}
+}
+
+func TestRawOutputTextRecognizesCommonShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  any
+		want string
+	}{
+		{name: "bare string", raw: "plain", want: "plain"},
+		{name: "output field", raw: map[string]any{"output": "out"}, want: "out"},
+		{
+			name: "stdout with stderr",
+			raw:  map[string]any{"stdout": "so", "stderr": "se"},
+			want: "so\nse",
+		},
+		{
+			name: "preserves whitespace",
+			raw:  map[string]any{"stdout": "  indented\n", "stderr": "warning\n"},
+			want: "  indented\nwarning\n",
+		},
+		{
+			name: "adds separator only when needed",
+			raw:  map[string]any{"stdout": "output", "stderr": "warning"},
+			want: "output\nwarning",
+		},
+		{name: "stderr only", raw: map[string]any{"stderr": "boom"}, want: "boom"},
+		{name: "text field", raw: map[string]any{"text": "t"}, want: "t"},
+		{name: "unrecognized", raw: map[string]any{"blob": 42}, want: ""},
+		{name: "nil", raw: nil, want: ""},
+	}
+	for _, tc := range cases {
+		if got := rawOutputText(tc.raw); got != tc.want {
+			t.Errorf("%s: rawOutputText = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestBoundedOutputTextTruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("é", toolOutputCharacterLimit)
+	got := boundedOutputText(long)
+	if len(got) > toolOutputCharacterLimit {
+		t.Fatalf("retained %d bytes, want at most %d", len(got), toolOutputCharacterLimit)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("truncation split a rune")
+	}
+}
+
+// Output is bounded no matter which source it came from.
+func TestToolCallOutputFromContentIsBounded(t *testing.T) {
+	oversized := strings.Repeat("x", toolOutputCharacterLimit+100)
+	patch := &toolCallPatch{
+		content: []schema.ToolCallContent{{
+			Type: schema.ToolCallContentTypeContent,
+			Content: &schema.ContentBlock{
+				Type: schema.ContentBlockTypeText,
+				Text: &oversized,
+			},
+		}},
+	}
+	if call := patch.toolCall(); len(call.Output) != toolOutputCharacterLimit {
+		t.Fatalf("output length = %d, want bounded to %d", len(call.Output), toolOutputCharacterLimit)
 	}
 }
 

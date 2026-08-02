@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/jsonrpc2"
@@ -390,8 +391,12 @@ type toolCallPatch struct {
 	locations []schema.ToolCallLocation
 	// rawInput is retained only in the adapter-private snapshot so
 	// command/query/cwd can be normalized. It is never copied into the public
-	// ToolCall. RawOutput is deliberately not captured.
+	// ToolCall.
 	rawInput any
+	// rawOutput backfills ToolCall.Output when the agent sends no textual
+	// content blocks — without client terminal support, command output often
+	// arrives only here. Only bounded text is ever extracted from it.
+	rawOutput any
 }
 
 // toolCallPatchFromUpdate extracts the sparse patch a tool_call or
@@ -409,6 +414,7 @@ func toolCallPatchFromUpdate(u schema.SessionUpdate) *toolCallPatch {
 		content:   toolCallContentFromAny(u.Content),
 		locations: u.Locations,
 		rawInput:  u.RawInput,
+		rawOutput: u.RawOutput,
 	}
 }
 
@@ -462,6 +468,9 @@ func (s *toolCallPatch) overlay(patch *toolCallPatch) *toolCallPatch {
 	if patch.rawInput != nil {
 		s.rawInput = patch.rawInput
 	}
+	if patch.rawOutput != nil {
+		s.rawOutput = patch.rawOutput
+	}
 	return s
 }
 
@@ -482,8 +491,61 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 		Attachments:  toolAttachmentsFromACP(s.content),
 		Output:       toolTextFromACP(s.content),
 	}
+	if call.Output == "" {
+		call.Output = rawOutputText(s.rawOutput)
+	}
+	call.Output = boundedOutputText(call.Output)
 	call.Command, call.Query, call.Cwd = toolInputDetails(s.rawInput)
 	return call
+}
+
+// toolOutputCharacterLimit bounds retained tool output regardless of whether
+// it arrived as content blocks or a raw provider blob. Generous enough for
+// real command output, small enough that per-item snapshots stay cheap to
+// re-emit on every sparse update.
+const toolOutputCharacterLimit = 16_384
+
+// boundedOutputText truncates output on a rune boundary.
+func boundedOutputText(text string) string {
+	if len(text) <= toolOutputCharacterLimit {
+		return text
+	}
+	cut := toolOutputCharacterLimit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+func rawOutputText(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return value
+	case map[string]any:
+		if text, ok := value["output"].(string); ok && text != "" {
+			return text
+		}
+		stdout, _ := value["stdout"].(string)
+		stderr, _ := value["stderr"].(string)
+		if stdout != "" || stderr != "" {
+			switch {
+			case stdout == "":
+				return stderr
+			case stderr == "":
+				return stdout
+			case strings.HasSuffix(stdout, "\n"):
+				return stdout + stderr
+			default:
+				return stdout + "\n" + stderr
+			}
+		}
+		for _, key := range []string{"text", "content"} {
+			if text, ok := value[key].(string); ok && text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 func toolActionFromACP(kind string) provider.ToolAction {

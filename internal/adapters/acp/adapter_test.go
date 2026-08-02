@@ -1826,7 +1826,8 @@ func TestResumeSessionRoutesUpdatesEmittedBeforeResponse(t *testing.T) {
 // Wire-level regression for the settled-tool tombstone: agents can resend a
 // terminal tool_call_update after the tool already settled. That trailing
 // update must reach the listener as a well-formed ItemUpdated (itemType/status
-// enriched from the tombstone) without exposing provider-native raw output.
+// enriched from the tombstone) with the late output normalized into
+// ToolCall.Output rather than exposed as a provider-native rawOutput blob.
 func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	agent := &fakeWireAgent{}
 	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
@@ -1876,12 +1877,18 @@ func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	if trailing.Payload.ToolCall == nil {
 		t.Fatal("trailing event lost the normalized tool call")
 	}
+	if trailing.Payload.ToolCall.Output != "late output" {
+		t.Fatalf(
+			"trailing tool call output = %q, want late rawOutput normalized",
+			trailing.Payload.ToolCall.Output,
+		)
+	}
 	encoded, err := json.Marshal(trailing.Payload.ToolCall)
 	if err != nil {
 		t.Fatalf("marshal trailing tool call: %v", err)
 	}
-	if strings.Contains(string(encoded), "late output") || strings.Contains(string(encoded), "rawOutput") {
-		t.Fatalf("trailing tool call exposed provider-native raw output: %s", encoded)
+	if strings.Contains(string(encoded), "rawOutput") {
+		t.Fatalf("trailing tool call exposed provider-native raw output blob: %s", encoded)
 	}
 }
 
