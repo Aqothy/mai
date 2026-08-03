@@ -20,11 +20,22 @@ struct IOSCompactAppContainer: View {
                 },
                 openAgentRegistry: {
                     path.append(.agentRegistry)
+                },
+                openSessionImport: {
+                    path.append(.sessionImport)
                 }
             )
             .navigationDestination(for: IOSNavigationRoute.self) { route in
                 if route == .agentRegistry {
                     ACPRegistryView(store: store)
+                } else if route == .sessionImport {
+                    SessionImportView(
+                        store: store,
+                        openThread: { threadID in
+                            store.prepareThreadForSelection(threadID)
+                            path = [.thread(threadID)]
+                        }
+                    )
                 } else {
                     IOSChatDestinationView(
                         route: route,

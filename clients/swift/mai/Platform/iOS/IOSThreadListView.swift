@@ -6,6 +6,7 @@ struct IOSThreadListView: View {
     let newChat: () -> Void
     let selectThread: (String) -> Void
     let openAgentRegistry: () -> Void
+    let openSessionImport: () -> Void
 
     @State private var filter = ThreadListFilter()
 
@@ -25,11 +26,16 @@ struct IOSThreadListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $filter.query, prompt: "Search Chats")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
                 Button(
                     "Agent Registry",
                     systemImage: "puzzlepiece.extension",
                     action: openAgentRegistry
+                )
+                Button(
+                    "Import Session",
+                    systemImage: "square.and.arrow.down",
+                    action: openSessionImport
                 )
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -69,7 +75,8 @@ struct IOSThreadListView: View {
             store: PreviewData.threadStore(),
             newChat: {},
             selectThread: { _ in },
-            openAgentRegistry: {}
+            openAgentRegistry: {},
+            openSessionImport: {}
         )
     }
 }
@@ -80,7 +87,8 @@ struct IOSThreadListView: View {
             store: ThreadStore(),
             newChat: {},
             selectThread: { _ in },
-            openAgentRegistry: {}
+            openAgentRegistry: {},
+            openSessionImport: {}
         )
     }
 }

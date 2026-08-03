@@ -2338,9 +2338,9 @@ public struct Capabilities: Codable {
     public var mcp: MCPCapabilities?
     public var modelSwitch: String?
     public var promptContent: PromptContentCapabilities?
-    public var resume: Bool?
+    public var resume, sessionList: Bool?
 
-    public init(auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?) {
+    public init(auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionList: Bool?) {
         self.auth = auth
         self.configOptions = configOptions
         self.loadReplay = loadReplay
@@ -2349,6 +2349,7 @@ public struct Capabilities: Codable {
         self.modelSwitch = modelSwitch
         self.promptContent = promptContent
         self.resume = resume
+        self.sessionList = sessionList
     }
 }
 
@@ -2378,7 +2379,8 @@ public extension Capabilities {
         mcp: MCPCapabilities?? = nil,
         modelSwitch: String?? = nil,
         promptContent: PromptContentCapabilities?? = nil,
-        resume: Bool?? = nil
+        resume: Bool?? = nil,
+        sessionList: Bool?? = nil
     ) -> Capabilities {
         return Capabilities(
             auth: auth ?? self.auth,
@@ -2388,7 +2390,8 @@ public extension Capabilities {
             mcp: mcp ?? self.mcp,
             modelSwitch: modelSwitch ?? self.modelSwitch,
             promptContent: promptContent ?? self.promptContent,
-            resume: resume ?? self.resume
+            resume: resume ?? self.resume,
+            sessionList: sessionList ?? self.sessionList
         )
     }
 

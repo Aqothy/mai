@@ -16,6 +16,8 @@ protocol ThreadRPCClient: AnyObject {
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
+    func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
+    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
@@ -36,6 +38,12 @@ extension ThreadRPCClient {
 
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
         throw RPCError(code: nil, message: "Agent startup is unavailable", data: nil)
+    }
+
+    func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
+
+    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
+        throw RPCError(code: nil, message: "Session import is unavailable", data: nil)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
@@ -121,6 +129,14 @@ extension RPCClient: ThreadRPCClient {
             MaidRPCMethod.acpRegistryStart,
             params: ACPRegistryStartParams(registryID: registryID, restart: restart ? true : nil)
         )
+    }
+
+    func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] {
+        try await call(MaidRPCMethod.providerListSessions, params: input)
+    }
+
+    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
+        try await call(MaidRPCMethod.providerImportSession, params: input)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {

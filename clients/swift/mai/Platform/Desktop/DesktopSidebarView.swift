@@ -4,6 +4,7 @@ struct DesktopSidebarView: View {
     @Bindable var store: ThreadStore
 
     @State private var isAgentRegistryPresented = false
+    @State private var isSessionImportPresented = false
 
     var body: some View {
         List(selection: $store.sidebarSelection) {
@@ -13,6 +14,10 @@ struct DesktopSidebarView: View {
 
             Button("Agent Registry", systemImage: "puzzlepiece.extension") {
                 isAgentRegistryPresented = true
+            }
+
+            Button("Import Session", systemImage: "square.and.arrow.down") {
+                isSessionImportPresented = true
             }
 
             ForEach(store.threads, id: \.id) { thread in
@@ -38,6 +43,25 @@ struct DesktopSidebarView: View {
                             }
                         }
                     }
+            }
+            .frame(minWidth: 500, minHeight: 440)
+        }
+        .sheet(isPresented: $isSessionImportPresented) {
+            NavigationStack {
+                SessionImportView(
+                    store: store,
+                    openThread: { threadID in
+                        isSessionImportPresented = false
+                        store.selectThread(threadID)
+                    }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            isSessionImportPresented = false
+                        }
+                    }
+                }
             }
             .frame(minWidth: 500, minHeight: 440)
         }

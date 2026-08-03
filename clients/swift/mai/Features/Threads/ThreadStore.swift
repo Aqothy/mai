@@ -321,6 +321,34 @@ final class ThreadStore {
         return installed
     }
 
+    /// Lists importable sessions reported by an agent, starting it first when
+    /// needed. Network-backed; callers own loading and error presentation.
+    func fetchProviderSessions(agentID: String) async throws -> [SessionSummary] {
+        let instanceID = try await ensureProviderAvailable(agentID)
+        guard let provider = providers.first(where: { $0.instanceID == instanceID }),
+              provider.capabilities.sessionList == true else {
+            throw RPCError(code: nil, message: "This agent does not support listing sessions", data: nil)
+        }
+        guard provider.capabilities.loadReplay == true || provider.capabilities.resume == true else {
+            throw RPCError(code: nil, message: "This agent does not support restoring sessions", data: nil)
+        }
+        return try await rpc.listProviderSessions(
+            ProviderListSessionsParams(cwd: nil, instanceID: instanceID)
+        )
+    }
+
+    /// Imports an agent session as a thread and returns its thread id.
+    /// Importing a session that was already imported returns the existing
+    /// thread. The imported thread reaches `threads` through the thread-list
+    /// stream; its history is replayed when it is first selected.
+    func importProviderSession(agentID: String, session: SessionSummary) async throws -> String {
+        let instanceID = try await ensureProviderAvailable(agentID)
+        let result = try await rpc.importProviderSession(
+            ProviderImportSessionParams(instanceID: instanceID, session: session)
+        )
+        return result.threadID
+    }
+
     func startThread(
         threadID: String,
         providerInstanceID: String,
