@@ -1524,6 +1524,9 @@ func TestListSessionsFollowsPagination(t *testing.T) {
 		},
 	}
 	h := newWireTestHandle(t, agent)
+	if !h.Info().Capabilities.SessionList {
+		t.Fatal("SessionList capability = false, want true")
+	}
 	sessions, err := h.ListSessions(context.Background(), "/tmp")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)

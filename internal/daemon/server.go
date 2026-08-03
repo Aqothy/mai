@@ -243,8 +243,12 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	if instanceID == "" || summary.SessionID == "" {
 		return "", false, fmt.Errorf("provider session import requires instanceId and session.sessionId")
 	}
-	if _, err := s.providerService.Info(instanceID); err != nil {
+	info, err := s.providerService.Info(instanceID)
+	if err != nil {
 		return "", false, err
+	}
+	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
+		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
 	}
 
 	s.importMu.Lock()

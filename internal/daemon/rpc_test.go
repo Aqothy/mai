@@ -753,6 +753,26 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	}
 }
 
+func TestRPCImportProviderSessionRejectsProviderWithoutRestore(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("list-only", "list-only", helperCommand("list-only-sessions")), false); err != nil {
+		t.Fatalf("provider start: %v", err)
+	}
+	client := newRPCTestClient(t, s, rpcTestClientHandler{})
+	var result providerImportSessionResult
+	err := client.Call(context.Background(), RPCMethodProviderImportSession, providerImportSessionParams{
+		InstanceID: "list-only",
+		Session: provider.SessionSummary{
+			SessionID: "external-session",
+			Cwd:       t.TempDir(),
+		},
+	}).Await(context.Background(), &result)
+	if err == nil || !strings.Contains(err.Error(), "does not support restoring imported sessions") {
+		t.Fatalf("provider.importSession err = %v, want restore capability error", err)
+	}
+}
+
 func TestRPCProviderSessionManagement(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()

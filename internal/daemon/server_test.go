@@ -252,7 +252,9 @@ func TestHelperProcess(t *testing.T) {
 	}
 	sessionCapabilities := map[string]any{}
 	loadSession := false
-	if isSessionMode(mode) {
+	if mode == "list-only-sessions" {
+		sessionCapabilities = map[string]any{"list": map[string]any{}}
+	} else if isSessionMode(mode) {
 		loadSession = true
 		sessionCapabilities = map[string]any{"list": map[string]any{}, "resume": map[string]any{}, "close": map[string]any{}}
 	}
@@ -293,7 +295,7 @@ func TestHelperProcess(t *testing.T) {
 func isSessionMode(mode string) bool {
 	switch mode {
 	case "sessions", "blocked-sessions", "permission-deny-sessions", "permission-allow-sessions", "lingering-sessions",
-		"rich-sessions", "scripted-sessions":
+		"rich-sessions", "scripted-sessions", "list-only-sessions":
 		return true
 	}
 	return false
