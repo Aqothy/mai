@@ -683,8 +683,6 @@ private struct ChatActivityItemRow: View {
                 set: { if !$0 { presentedChanges = nil } }
             )
         ) {
-            // Placeholder until the diff viewer lands; the captured changes
-            // are already wired for it.
             ChatStepDiffSheet(changes: presentedChanges ?? [])
                 .presentationDragIndicator(.visible)
         }
@@ -890,12 +888,12 @@ private struct ChatStepOutputBox: View {
     }
 }
 
-/// Empty placeholder for a step's file changes until the diff viewer lands.
+/// Presents a tool step's captured file changes in the shared diff viewer.
 private struct ChatStepDiffSheet: View {
     let changes: [FileChange]
 
     var body: some View {
-        Color.clear
+        UnifiedDiffView(changes: changes)
     }
 }
 
