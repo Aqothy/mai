@@ -434,9 +434,9 @@ private struct ChatTimeline: View {
 
     private static let bottomID = "chat-bottom"
 
-    /// Expands only settled oversized assistant messages. Streaming keeps its
-    /// stable incremental MarkdownView lifecycle; short and uncommon
-    /// document-wide Markdown features keep the existing static renderer.
+    /// Expands only settled oversized assistant messages. Streaming keeps one
+    /// stable live row; short and uncommon document-wide Markdown features
+    /// keep the existing static renderer after the message settles.
     private func renderRows(
         _ rows: [ChatTimelineRowModel]
     ) -> [ChatTimelineRenderRow] {
@@ -583,6 +583,7 @@ private struct ChatTimelineRenderRowView: View {
                     text: segment.source,
                     role: segment.role,
                     attachments: segment.attachments,
+                    streamingText: nil,
                     presentation: ChatMarkdownPresentation(isStreaming: false)
                 )
                 .padding(.top, segment.isFirst ? 10 : 0)
@@ -712,6 +713,10 @@ private struct ChatTimelineRow: View {
                     text: message.text,
                     role: message.role,
                     attachments: message.attachments,
+                    streamingText: store.streamingMessageText(
+                        threadID: threadID,
+                        messageID: message.id
+                    ),
                     presentation: ChatMarkdownPresentation.timelineMessage(
                         role: message.role,
                         turnID: message.turnID,
@@ -720,7 +725,14 @@ private struct ChatTimelineRow: View {
                 )
                 .padding(.vertical, 10)
             case .thought(let item):
-                ChatThoughtRow(item: item, scrollState: scrollState)
+                ChatThoughtRow(
+                    item: item,
+                    streamingText: store.streamingReasoningText(
+                        threadID: threadID,
+                        itemID: item.id
+                    ),
+                    scrollState: scrollState
+                )
             case .turnActivity(let activity):
                 ChatTurnActivityRow(
                     activity: activity,
@@ -763,6 +775,7 @@ private struct ChatTimelineRow: View {
 /// which the renderer's document styling would override.
 private struct ChatThoughtRow: View {
     let item: Item
+    let streamingText: ThreadStreamingText?
     let scrollState: ChatScrollState
 
     @State private var isExpandedOverride: Bool?
@@ -801,11 +814,10 @@ private struct ChatThoughtRow: View {
                 )
 
                 if isExpanded {
-                    Text(Self.attributed(text))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ChatThoughtText(
+                        fallbackText: text,
+                        streamingText: streamingText
+                    )
                 }
             }
             .padding(.vertical, 6)
@@ -817,6 +829,22 @@ private struct ChatThoughtRow: View {
     /// has toggled it themselves.
     private var isExpanded: Bool {
         isExpandedOverride ?? (item.itemStatus == .inProgress)
+    }
+
+}
+
+/// Owns the only observation read for a live thought. The disclosure row and
+/// surrounding List retain stable inputs while this leaf updates.
+private struct ChatThoughtText: View {
+    let fallbackText: String
+    let streamingText: ThreadStreamingText?
+
+    var body: some View {
+        Text(Self.attributed(streamingText?.text ?? fallbackText))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private static func attributed(_ text: String) -> AttributedString {
@@ -1320,6 +1348,7 @@ private struct ChatMessageRow: View {
     let text: String
     let role: String
     let attachments: [Attachment]?
+    let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
 
     var body: some View {
@@ -1328,6 +1357,12 @@ private struct ChatMessageRow: View {
                 if role == MaidMessageRole.user.rawValue {
                     Text(verbatim: text)
                         .textSelection(.enabled)
+                } else if let streamingText {
+                    ChatStreamingMarkdownMessageView(
+                        messageID: messageID,
+                        streamingText: streamingText,
+                        presentation: presentation
+                    )
                 } else {
                     ChatMarkdownMessageView(
                         messageID: messageID,

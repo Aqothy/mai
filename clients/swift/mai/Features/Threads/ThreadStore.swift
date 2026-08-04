@@ -12,6 +12,23 @@ struct QueuedChatPrompt: Identifiable {
     let attachments: [Attachment]
 }
 
+/// Stable text storage for one actively streaming timeline entry. The thread
+/// projection still records every chunk for restore, while the visible leaf
+/// row observes this reference directly.
+@Observable
+final class ThreadStreamingText {
+    private(set) var text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    func append(_ delta: String) {
+        guard !delta.isEmpty else { return }
+        text += delta
+    }
+}
+
 @Observable
 final class ThreadStore {
     static let maximumReconnectAttempts = 5
@@ -32,6 +49,16 @@ final class ThreadStore {
     struct CachePolicy {
         var maximumInactiveSubscriptions = 5
         var inactiveSubscriptionLifetime: TimeInterval = 30 * 60
+    }
+
+    private enum StreamingTextKind: Hashable {
+        case assistantMessage
+        case reasoningItem
+    }
+
+    private struct StreamingTextID: Hashable {
+        let kind: StreamingTextKind
+        let entryID: String
     }
 
     private(set) var threads: [ThreadListEntry] = []
@@ -119,6 +146,10 @@ final class ThreadStore {
     // noteSelectedSessionChanged.
     @ObservationIgnored private var sessionsByID: [String: ThreadSession] = [:]
     private var selectedSessionGeneration = 0
+    /// Stable reference models let live leaf rows update independently of the
+    /// value-typed thread snapshot and its full timeline projection.
+    @ObservationIgnored private var streamingTextByThreadID:
+        [String: [StreamingTextID: ThreadStreamingText]] = [:]
     private var isStarted = false
     private var lastThreadListSequence = 0
     private var isLoadingThreadListSnapshot = false
@@ -999,6 +1030,7 @@ final class ThreadStore {
             }
 
             removeItemDetails(for: id)
+            streamingTextByThreadID[id] = nil
             current.thread = snapshot.thread
             current.lastSequence = snapshot.snapshotSequence
             current.shouldRestoreAfterReconnect = true
@@ -1091,6 +1123,7 @@ final class ThreadStore {
         session.shouldRestoreAfterReconnect = false
         sessionsByID[id] = session
         removeItemDetails(for: id)
+        streamingTextByThreadID[id] = nil
 
         guard connectionState == .connected else { return }
         let previousTask = subscriptionTasks[id]?.task
@@ -1200,12 +1233,22 @@ final class ThreadStore {
         // Straight through the subscript: a local copy of the session would
         // defeat copy-on-write and duplicate the timeline on every chunk.
         guard let result = sessionsByID[threadID]?.apply(event), result.applied else { return }
-        noteSelectedSessionChanged(threadID)
+        let isLeafOnlyStreamingUpdate = updateStreamingText(
+            for: event,
+            threadID: threadID
+        )
+        let hasActiveTurn = hasActiveTurn(sessionsByID[threadID])
+        if hadActiveTurn && !hasActiveTurn {
+            streamingTextByThreadID[threadID] = nil
+        }
+        if !isLeafOnlyStreamingUpdate {
+            noteSelectedSessionChanged(threadID)
+        }
         updateReadState(
             for: event,
             threadID: threadID,
             hadActiveTurn: hadActiveTurn,
-            hasActiveTurn: hasActiveTurn(sessionsByID[threadID])
+            hasActiveTurn: hasActiveTurn
         )
         if result.protectionChanged {
             reconcileSubscriptionState(threadID, at: now())
@@ -1222,6 +1265,99 @@ final class ThreadStore {
             selectedSessionGeneration &+= 1
             recomputeSelectedThreadTitle()
         }
+    }
+
+    /// Updates an existing live row without publishing the enclosing thread.
+    /// Returns true only when the event changes text and nothing structural.
+    private func updateStreamingText(
+        for event: Event,
+        threadID: String
+    ) -> Bool {
+        switch event.eventType {
+        case .threadMessageSent:
+            guard event.payload.role == MaidMessageRole.assistant.rawValue,
+                let messageID = event.payload.messageID,
+                let delta = event.payload.text,
+                !delta.isEmpty
+            else { return false }
+
+            let id = StreamingTextID(
+                kind: .assistantMessage,
+                entryID: messageID
+            )
+            if let streamingText = streamingTextByThreadID[threadID]?[id] {
+                streamingText.append(delta)
+                return event.payload.attachments?.isEmpty != false
+            }
+
+            guard let text = sessionsByID[threadID]?.thread?.timeline
+                .last(where: { $0.message?.id == messageID })?.message?.text
+            else { return false }
+            streamingTextByThreadID[threadID, default: [:]][id] =
+                ThreadStreamingText(text: text)
+            return false
+
+        case .threadItemUpserted:
+            guard let item = event.payload.item,
+                item.itemKind == .reasoning
+            else { return false }
+
+            let id = StreamingTextID(
+                kind: .reasoningItem,
+                entryID: item.id
+            )
+            guard let delta = item.textDelta, !delta.isEmpty,
+                item.itemStatus == .inProgress
+            else {
+                streamingTextByThreadID[threadID]?[id] = nil
+                return false
+            }
+
+            if let streamingText = streamingTextByThreadID[threadID]?[id] {
+                streamingText.append(delta)
+                return true
+            }
+
+            guard let text = currentReasoningText(
+                threadID: threadID,
+                itemID: item.id
+            ) else { return false }
+            streamingTextByThreadID[threadID, default: [:]][id] =
+                ThreadStreamingText(text: text)
+            return false
+
+        default:
+            return false
+        }
+    }
+
+    private func currentReasoningText(
+        threadID: String,
+        itemID: String
+    ) -> String? {
+        guard let item = sessionsByID[threadID]?.thread?.timeline
+            .last(where: { $0.item?.id == itemID })?.item,
+            let object = item.payload?.value as? [String: Any]
+        else { return nil }
+        return object["text"] as? String
+    }
+
+    func streamingMessageText(
+        threadID: String,
+        messageID: String
+    ) -> ThreadStreamingText? {
+        streamingTextByThreadID[threadID]?[
+            StreamingTextID(kind: .assistantMessage, entryID: messageID)
+        ]
+    }
+
+    func streamingReasoningText(
+        threadID: String,
+        itemID: String
+    ) -> ThreadStreamingText? {
+        streamingTextByThreadID[threadID]?[
+            StreamingTextID(kind: .reasoningItem, entryID: itemID)
+        ]
     }
 
     private func hasActiveTurn(_ session: ThreadSession?) -> Bool {
@@ -1283,6 +1419,7 @@ final class ThreadStore {
             self.selectedThreadID = nil
             selectedThreadLoadErrorMessage = nil
             sessionsByID[selectedThreadID] = nil
+            streamingTextByThreadID[selectedThreadID] = nil
         }
         noteThreadsChanged()
         isLoadingThreadListSnapshot = false

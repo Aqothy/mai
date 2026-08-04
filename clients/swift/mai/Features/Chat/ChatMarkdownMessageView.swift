@@ -26,6 +26,22 @@ struct ChatMarkdownMessageView: View {
     }
 }
 
+/// Reads high-frequency text from the stable live-row model at the narrowest
+/// possible SwiftUI boundary. The surrounding timeline never observes it.
+struct ChatStreamingMarkdownMessageView: View {
+    let messageID: String
+    let streamingText: ThreadStreamingText
+    let presentation: ChatMarkdownPresentation
+
+    var body: some View {
+        ChatMarkdownMessageView(
+            messageID: messageID,
+            source: streamingText.text,
+            presentation: presentation
+        )
+    }
+}
+
 /// Prevents unrelated timeline updates—most notably streaming another row—
 /// from rebuilding stable Markdown attributed content on the main actor.
 private struct ChatMarkdownMessageLifetimeView: Equatable, View {
