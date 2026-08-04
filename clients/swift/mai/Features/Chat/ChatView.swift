@@ -379,7 +379,6 @@ private struct ChatTimeline: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 0)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .scrollDismissesKeyboard(.interactively)
             #if os(iOS)
                 // A row's content width is the list width minus 16pt insets
