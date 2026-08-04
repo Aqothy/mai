@@ -240,6 +240,27 @@ final class ChatTimelineFoldModel {
     }
 }
 
+nonisolated enum ChatTimelineMetrics {
+    static let rowHorizontalInset: CGFloat = 16
+    static let userBubbleHorizontalPadding: CGFloat = 14
+    static let userBubbleVerticalPadding: CGFloat = 10
+    static let interSegmentSpacing: CGFloat = 8
+
+    #if os(iOS)
+        static func textWidth(
+            for style: ChatTextLayoutStyle,
+            in rowWidth: CGFloat
+        ) -> CGFloat {
+            switch style {
+            case .markdownProse:
+                rowWidth
+            case .plain:
+                max(0, rowWidth - 2 * userBubbleHorizontalPadding)
+            }
+        }
+    #endif
+}
+
 private struct ChatTimeline: View {
     static let nearBottomDistance: CGFloat = 24
 
@@ -252,13 +273,22 @@ private struct ChatTimeline: View {
     let scrollState: ChatScrollState
 
     @State private var foldModel = ChatTimelineFoldModel()
+    @State private var segmentCache = ChatMarkdownSegmentCache()
+
+    #if os(iOS)
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        @State private var textLayoutStore = ChatTextLayoutStore()
+        @State private var textWarmRowWidth: CGFloat = 0
+    #endif
 
     var body: some View {
-        let rows = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
-            expandedSectionIDs: foldModel.expandedSectionIDs
+        let rows = renderRows(
+            ChatTimelineLayout.rows(
+                timeline: timeline,
+                streamingTurnID: streamingTurnID,
+                latestTurn: latestTurn,
+                expandedSectionIDs: foldModel.expandedSectionIDs
+            )
         )
 
         ScrollViewReader { proxy in
@@ -267,31 +297,49 @@ private struct ChatTimeline: View {
                     ChatPlanRow(plan: plan)
                         .padding(.vertical, 10)
                         .listRowInsets(
-                            .init(top: 0, leading: 16, bottom: 0, trailing: 16)
+                            .init(
+                                top: 0,
+                                leading: ChatTimelineMetrics.rowHorizontalInset,
+                                bottom: 0,
+                                trailing: ChatTimelineMetrics.rowHorizontalInset
+                            )
                         )
                         .listRowSeparator(.hidden)
                 }
 
                 ForEach(rows) { row in
-                    ChatTimelineRow(
-                        row: row,
-                        streamingTurnID: streamingTurnID,
-                        threadID: threadID,
-                        store: store,
-                        foldModel: foldModel,
-                        scrollState: scrollState
-                    )
-                    .listRowInsets(
-                        .init(top: 0, leading: 16, bottom: 0, trailing: 16)
-                    )
-                    .listRowSeparator(.hidden)
+                    #if os(iOS)
+                        ChatTimelineRenderRowView(
+                            row: row,
+                            streamingTurnID: streamingTurnID,
+                            threadID: threadID,
+                            store: store,
+                            foldModel: foldModel,
+                            scrollState: scrollState,
+                            textLayoutStore: textLayoutStore
+                        )
+                    #else
+                        ChatTimelineRenderRowView(
+                            row: row,
+                            streamingTurnID: streamingTurnID,
+                            threadID: threadID,
+                            store: store,
+                            foldModel: foldModel,
+                            scrollState: scrollState
+                        )
+                    #endif
                 }
 
                 if streamingTurnID != nil {
                     ChatWorkingIndicator(activityKey: rows.last?.id)
                         .padding(.vertical, 10)
                         .listRowInsets(
-                            .init(top: 0, leading: 16, bottom: 0, trailing: 16)
+                            .init(
+                                top: 0,
+                                leading: ChatTimelineMetrics.rowHorizontalInset,
+                                bottom: 0,
+                                trailing: ChatTimelineMetrics.rowHorizontalInset
+                            )
                         )
                         .listRowSeparator(.hidden)
                 }
@@ -306,6 +354,37 @@ private struct ChatTimeline: View {
             .environment(\.defaultMinListRowHeight, 0)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .scrollDismissesKeyboard(.interactively)
+            #if os(iOS)
+                // A row's content width is the list width minus 16pt insets
+                // on each side. Warm every settled prose segment at that
+                // exact width before List needs to realize it while scrolling.
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    max(
+                        0,
+                        geometry.size.width
+                            - 2 * ChatTimelineMetrics.rowHorizontalInset
+                    )
+                } action: { width in
+                    textWarmRowWidth = width
+                    warmTextLayouts(in: rows, rowWidth: width)
+                }
+                .onChange(of: timeline.count) { _, _ in
+                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                }
+                .onChange(of: streamingTurnID) { _, _ in
+                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                }
+                .onChange(of: foldModel.expandedSectionIDs) { _, _ in
+                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                }
+                .onChange(of: dynamicTypeSize) { _, _ in
+                    // Fonts are baked into each layout. Swapping the small
+                    // per-timeline store gives visible representables a new
+                    // dependency and guarantees they remeasure immediately.
+                    textLayoutStore = ChatTextLayoutStore()
+                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                }
+            #endif
             .onChange(of: scrollState.bottomScrollRequest) { _, request in
                 if request.animated {
                     withAnimation(.smooth) {
@@ -354,7 +433,260 @@ private struct ChatTimeline: View {
     }
 
     private static let bottomID = "chat-bottom"
+
+    /// Expands only settled oversized assistant messages. Streaming keeps its
+    /// stable incremental MarkdownView lifecycle; short and uncommon
+    /// document-wide Markdown features keep the existing static renderer.
+    private func renderRows(
+        _ rows: [ChatTimelineRowModel]
+    ) -> [ChatTimelineRenderRow] {
+        #if !os(iOS)
+            return rows.map(ChatTimelineRenderRow.standard)
+        #else
+            return rows.flatMap { row -> [ChatTimelineRenderRow] in
+                guard case .message(let message) = row else {
+                    return [.standard(row)]
+                }
+
+                let plan = ChatMessageTextPlanner.plan(
+                    messageID: message.id,
+                    role: message.role,
+                    messageTurnID: message.turnID,
+                    streamingTurnID: streamingTurnID,
+                    source: message.text,
+                    segmentCache: segmentCache
+                )
+                switch plan {
+                case .existingRenderer:
+                    return [.standard(row)]
+
+                case .plainText:
+                    return [
+                        .plainText(
+                            ChatMessageSegmentRowModel(
+                                messageID: message.id,
+                                index: 0,
+                                source: message.text,
+                                role: message.role,
+                                attachments: message.attachments,
+                                isFirst: true,
+                                isLast: true
+                            )
+                        )
+                    ]
+
+                case .segmented(let segments):
+                    return segments.indices.map { index in
+                        let segment = segments[index]
+                        let model = ChatMessageSegmentRowModel(
+                            messageID: message.id,
+                            index: index,
+                            source: segment.source,
+                            role: message.role,
+                            attachments: index == segments.count - 1
+                                ? message.attachments
+                                : nil,
+                            isFirst: index == 0,
+                            isLast: index == segments.count - 1
+                        )
+                        return segment.kind == .prose
+                            ? .prose(model)
+                            : .richMarkdown(model)
+                    }
+                }
+            }
+        #endif
+    }
+
+    #if os(iOS)
+        private func warmTextLayouts(
+            in rows: [ChatTimelineRenderRow],
+            rowWidth: CGFloat
+        ) {
+            let requests = rows.suffix(ChatTextLayoutStore.capacity).compactMap {
+                row -> ChatTextLayoutRequest? in
+                switch row {
+                case .prose(let segment):
+                    ChatTextLayoutRequest(
+                        id: segment.rowID,
+                        source: segment.source,
+                        style: .markdownProse,
+                        width: ChatTimelineMetrics.textWidth(
+                            for: .markdownProse,
+                            in: rowWidth
+                        )
+                    )
+                case .plainText(let message):
+                    ChatTextLayoutRequest(
+                        id: message.rowID,
+                        source: message.source,
+                        style: .plain,
+                        width: ChatTimelineMetrics.textWidth(
+                            for: .plain,
+                            in: rowWidth
+                        )
+                    )
+                case .standard, .richMarkdown:
+                    nil
+                }
+            }
+            textLayoutStore.warm(requests: requests)
+        }
+    #endif
 }
+
+private enum ChatTimelineRenderRow: Identifiable {
+    case standard(ChatTimelineRowModel)
+    case richMarkdown(ChatMessageSegmentRowModel)
+    case prose(ChatMessageSegmentRowModel)
+    case plainText(ChatMessageSegmentRowModel)
+
+    var id: String {
+        switch self {
+        case .standard(let row): row.id
+        case .richMarkdown(let segment): "\(segment.rowID)-rich"
+        case .prose(let segment): "\(segment.rowID)-prose"
+        case .plainText(let message): "\(message.rowID)-plain"
+        }
+    }
+}
+
+/// A single concrete row shape lets List derive every row identity without
+/// evaluating the case-specific body for the entire transcript.
+private struct ChatTimelineRenderRowView: View {
+    let row: ChatTimelineRenderRow
+    let streamingTurnID: String?
+    let threadID: String
+    let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
+    let scrollState: ChatScrollState
+    #if os(iOS)
+        let textLayoutStore: ChatTextLayoutStore
+    #endif
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch row {
+            case .standard(let model):
+                ChatTimelineRow(
+                    row: model,
+                    streamingTurnID: streamingTurnID,
+                    threadID: threadID,
+                    store: store,
+                    foldModel: foldModel,
+                    scrollState: scrollState
+                )
+
+            case .richMarkdown(let segment):
+                ChatMessageRow(
+                    messageID: segment.rowID,
+                    text: segment.source,
+                    role: segment.role,
+                    attachments: segment.attachments,
+                    presentation: ChatMarkdownPresentation(isStreaming: false)
+                )
+                .padding(.top, segment.isFirst ? 10 : 0)
+                .padding(
+                    .bottom,
+                    segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
+                )
+
+            case .prose(let segment):
+                #if os(iOS)
+                    ChatNativeTextMessageRow(
+                        segment: segment,
+                        style: .markdownProse,
+                        layoutStore: textLayoutStore
+                    )
+                    .padding(.top, segment.isFirst ? 10 : 0)
+                    .padding(
+                        .bottom,
+                        segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
+                    )
+                #endif
+
+            case .plainText(let message):
+                #if os(iOS)
+                    ChatNativeTextMessageRow(
+                        segment: message,
+                        style: .plain,
+                        layoutStore: textLayoutStore
+                    )
+                    .padding(.vertical, 10)
+                #endif
+            }
+        }
+        .listRowInsets(
+            .init(
+                top: 0,
+                leading: ChatTimelineMetrics.rowHorizontalInset,
+                bottom: 0,
+                trailing: ChatTimelineMetrics.rowHorizontalInset
+            )
+        )
+        .listRowSeparator(.hidden)
+    }
+}
+
+private struct ChatMessageSegmentRowModel {
+    let messageID: String
+    let index: Int
+    let source: String
+    let role: String
+    let attachments: [Attachment]?
+    let isFirst: Bool
+    let isLast: Bool
+
+    var rowID: String { "\(messageID)#segment-\(index)" }
+}
+
+#if os(iOS)
+    private struct ChatNativeTextMessageRow: View {
+        let segment: ChatMessageSegmentRowModel
+        let style: ChatTextLayoutStyle
+        let layoutStore: ChatTextLayoutStore
+
+        var body: some View {
+            VStack(alignment: .leading) {
+                ChatSelectableText(
+                    layoutID: segment.rowID,
+                    source: segment.source,
+                    style: style,
+                    layoutStore: layoutStore
+                )
+
+                if let attachments = segment.attachments, !attachments.isEmpty {
+                    Text(
+                        attachments.map { $0.name ?? $0.kind }
+                            .joined(separator: " · ")
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(
+                .horizontal,
+                isUserMessage ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
+            )
+            .padding(
+                .vertical,
+                isUserMessage ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
+            )
+            .background(
+                isUserMessage ? Color.accentColor.opacity(0.15) : Color.clear,
+                in: .rect(cornerRadius: 18)
+            )
+            .frame(
+                maxWidth: .infinity,
+                alignment: isUserMessage ? .trailing : .leading
+            )
+        }
+
+        private var isUserMessage: Bool {
+            segment.role == MaidMessageRole.user.rawValue
+        }
+    }
+#endif
 
 private struct ChatScrollGeometry: Equatable {
     let isNearBottom: Bool
@@ -937,11 +1269,16 @@ private struct ChatMessageRow: View {
     var body: some View {
         VStack(alignment: .leading) {
             if !text.isEmpty {
-                ChatMarkdownMessageView(
-                    messageID: messageID,
-                    source: text,
-                    presentation: presentation
-                )
+                if role == MaidMessageRole.user.rawValue {
+                    Text(verbatim: text)
+                        .textSelection(.enabled)
+                } else {
+                    ChatMarkdownMessageView(
+                        messageID: messageID,
+                        source: text,
+                        presentation: presentation
+                    )
+                }
             }
 
             if let attachments, !attachments.isEmpty {
@@ -950,8 +1287,16 @@ private struct ChatMessageRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, role == MaidMessageRole.user.rawValue ? 14 : 0)
-        .padding(.vertical, role == MaidMessageRole.user.rawValue ? 10 : 0)
+        .padding(
+            .horizontal,
+            role == MaidMessageRole.user.rawValue
+                ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
+        )
+        .padding(
+            .vertical,
+            role == MaidMessageRole.user.rawValue
+                ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
+        )
         .background(
             role == MaidMessageRole.user.rawValue
                 ? Color.accentColor.opacity(0.15) : Color.clear,

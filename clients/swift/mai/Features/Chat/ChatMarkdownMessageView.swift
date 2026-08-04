@@ -21,11 +21,14 @@ struct ChatMarkdownMessageView: View {
             source: source,
             presentation: presentation
         )
+        .equatable()
         .id(messageID)
     }
 }
 
-private struct ChatMarkdownMessageLifetimeView: View {
+/// Prevents unrelated timeline updates—most notably streaming another row—
+/// from rebuilding stable Markdown attributed content on the main actor.
+private struct ChatMarkdownMessageLifetimeView: Equatable, View {
     let source: String
     let presentation: ChatMarkdownPresentation
 
@@ -35,6 +38,13 @@ private struct ChatMarkdownMessageLifetimeView: View {
     @State private var hasStreamed = false
     // Finished sources store later text but no longer emit updates.
     @State private var streamFinished = false
+
+    nonisolated static func == (
+        lhs: ChatMarkdownMessageLifetimeView,
+        rhs: ChatMarkdownMessageLifetimeView
+    ) -> Bool {
+        lhs.source == rhs.source && lhs.presentation == rhs.presentation
+    }
 
     var body: some View {
         Group {

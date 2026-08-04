@@ -1,10 +1,12 @@
 import MarkdownView
+import RichText
 import SwiftUI
 
 /// Shared Markdown styling that keeps rendered links display-only.
 struct ChatMarkdownContentStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
+            .textLayoutEngine(.textKit2)
             .markdownMathRenderingEnabled()
             .markdownCodeBlockStyle(
                 .default(
