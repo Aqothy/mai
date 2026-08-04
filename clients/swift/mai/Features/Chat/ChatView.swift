@@ -720,7 +720,7 @@ private struct ChatTimelineRow: View {
                 )
                 .padding(.vertical, 10)
             case .thought(let item):
-                ChatThoughtRow(item: item)
+                ChatThoughtRow(item: item, scrollState: scrollState)
             case .turnActivity(let activity):
                 ChatTurnActivityRow(
                     activity: activity,
@@ -755,22 +755,78 @@ private struct ChatTimelineRow: View {
     }
 }
 
-/// The model's reasoning, shown as plain dimmed prose in the timeline —
-/// streaming while the turn runs, folding with the rest when it finishes.
-/// Deliberately not Markdown-rendered: the renderer's own text styling would
-/// fight the dimmed secondary look that separates thoughts from answers.
+/// The model's reasoning behind a "Thought" disclosure — open while the
+/// thought streams, folding on its own once the item settles.
+/// Rendered with Foundation's inline Markdown parsing rather than the
+/// MarkdownView renderer: inline attributes (bold section titles, code
+/// spans) apply on top of the row's own font and dimmed secondary color,
+/// which the renderer's document styling would override.
 private struct ChatThoughtRow: View {
     let item: Item
+    let scrollState: ChatScrollState
+
+    @State private var isExpandedOverride: Bool?
 
     var body: some View {
         if let text = ChatTimelineLayout.reasoningText(item) {
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    scrollState.noteContentExpansion()
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isExpandedOverride = !isExpanded
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "brain")
+                            .font(.caption)
+                            .frame(width: 16)
+
+                        ChatActivityGroupRow.itemLineText(item)
+
+                        Image(
+                            systemName: isExpanded
+                                ? "chevron.down" : "chevron.right"
+                        )
+                        .font(.caption2.weight(.semibold))
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    isExpanded ? "Hide thought" : "Show thought"
+                )
+
+                if isExpanded {
+                    Text(Self.attributed(text))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Streams stay readable live; a settled thought folds unless the user
+    /// has toggled it themselves.
+    private var isExpanded: Bool {
+        isExpandedOverride ?? (item.itemStatus == .inProgress)
+    }
+
+    private static func attributed(_ text: String) -> AttributedString {
+        guard let parsed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else {
+            return AttributedString(text)
+        }
+        return parsed
     }
 }
 

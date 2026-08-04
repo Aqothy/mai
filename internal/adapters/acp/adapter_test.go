@@ -581,6 +581,39 @@ func TestSessionUpdateMapsMessageID(t *testing.T) {
 	}
 }
 
+func TestSeparateReplayReasoningBlocksAddsParagraphBreaks(t *testing.T) {
+	reasoning := func(delta string) provider.RuntimeEvent {
+		return provider.RuntimeEvent{
+			Type:    provider.RuntimeEventContentDelta,
+			Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: delta},
+		}
+	}
+	events := []provider.RuntimeEvent{
+		reasoning("**Considering options**"),
+		reasoning("**Choosing an approach**\n"),
+		reasoning(""),
+		{
+			Type:    provider.RuntimeEventContentDelta,
+			Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"},
+		},
+	}
+
+	separateReplayReasoningBlocks(events)
+
+	if events[0].Payload.Delta != "**Considering options**\n\n" {
+		t.Fatalf("delta = %q, want trailing paragraph break", events[0].Payload.Delta)
+	}
+	if events[1].Payload.Delta != "**Choosing an approach**\n" {
+		t.Fatalf("delta = %q, want newline-terminated block untouched", events[1].Payload.Delta)
+	}
+	if events[2].Payload.Delta != "" {
+		t.Fatalf("delta = %q, want empty block untouched", events[2].Payload.Delta)
+	}
+	if events[3].Payload.Delta != "answer" {
+		t.Fatalf("delta = %q, want assistant text untouched", events[3].Payload.Delta)
+	}
+}
+
 func TestSessionUpdateMapsPlanAsGenericData(t *testing.T) {
 	var notification schema.SessionNotification
 	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"plan","entries":[{"content":"Do it","priority":"high","status":"pending"}]}}`), &notification); err != nil {

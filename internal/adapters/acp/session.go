@@ -246,7 +246,26 @@ func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionI
 		h.unbindSessionID(sessionID)
 		return provider.StartSessionResult{}, fmt.Errorf("await ACP session setup drain: %w", err)
 	}
+	separateReplayReasoningBlocks(replay)
 	return provider.StartSessionResult{Session: h.sessionProjection(input, sessionID), Replay: replay}, nil
+}
+
+// in session/load agents emits the replayed thoughts without separators
+// compared to live which does emit separators. this causes multi line thought
+// chunks to be 1 paragraph so need to this patch to separate them back into
+// multi line
+func separateReplayReasoningBlocks(events []provider.RuntimeEvent) {
+	for idx := range events {
+		event := &events[idx]
+		if event.Type != provider.RuntimeEventContentDelta ||
+			event.Payload.StreamKind != provider.RuntimeContentReasoningText {
+			continue
+		}
+		if event.Payload.Delta == "" || strings.HasSuffix(event.Payload.Delta, "\n") {
+			continue
+		}
+		event.Payload.Delta += "\n\n"
+	}
 }
 
 func (h *Instance) beginSessionLoad(sessionID string) {
