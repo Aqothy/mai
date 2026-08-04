@@ -64,12 +64,13 @@ private struct ChatMarkdownMessageLifetimeView: Equatable, View {
 
     var body: some View {
         Group {
-            if hasStreamed {
+            if hasStreamed && presentation.isStreaming {
                 StreamingMarkdownReader(streamingSource) { parseResult in
                     ChatMarkdownParsedContent(
                         parseResult: parseResult,
                         analysis: ChatMarkdownDocumentAnalyzer.analyze(parseResult),
-                        presentation: presentation
+                        presentation: presentation,
+                        renderingMode: .streaming
                     )
                 }
                 .markdownStreamingRenderThrottle(presentation.streamingThrottle)
@@ -79,7 +80,8 @@ private struct ChatMarkdownMessageLifetimeView: Equatable, View {
                     ChatMarkdownParsedContent(
                         parseResult: parseResult,
                         analysis: ChatMarkdownDocumentAnalyzer.analyze(parseResult),
-                        presentation: presentation
+                        presentation: presentation,
+                        renderingMode: .settled
                     )
                 }
             }
@@ -119,10 +121,16 @@ private struct ChatMarkdownMessageLifetimeView: Equatable, View {
     }
 }
 
+private enum ChatMarkdownRenderingMode: Equatable {
+    case streaming
+    case settled
+}
+
 private struct ChatMarkdownParsedContent: View {
     let parseResult: MarkdownParseResult
     let analysis: ChatMarkdownDocumentAnalysis
     let presentation: ChatMarkdownPresentation
+    let renderingMode: ChatMarkdownRenderingMode
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -141,6 +149,13 @@ private struct ChatMarkdownParsedContent: View {
                     #if os(iOS) || os(macOS)
                         .textSelection(.enabled)
                     #endif
+            } else if renderingMode == .streaming {
+                // MarkdownText is backed by RichText's non-scrolling
+                // UITextView. Its sizeThatFits path lays out the complete
+                // growing document whenever List measures the visible row.
+                // MarkdownView renders the same parse result as native
+                // SwiftUI blocks, avoiding that main-thread TextKit loop.
+                MarkdownView(parseResult)
             } else {
                 MarkdownText(parseResult)
             }
