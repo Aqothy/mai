@@ -26,7 +26,10 @@ struct ChatView: View {
             } else if let thread = store.selectedThread {
                 ChatTimeline(
                     threadID: thread.id,
-                    timeline: thread.timeline,
+                    sections: ChatTimelineLayout.sections(
+                        timeline: thread.timeline
+                    ),
+                    timelineEntryCount: thread.timeline.count,
                     plan: thread.plan,
                     latestTurn: thread.latestTurn,
                     streamingTurnID: thread.latestTurn?.turnState == .running
@@ -106,7 +109,7 @@ private struct ChatComposerStack: View {
     let chatModel: ChatPromptModel?
 
     var body: some View {
-        let thread = store.selectedThread
+        let state = ChatComposerThreadState(thread: store.selectedThread)
 
         VStack(alignment: .leading) {
             if chatModel == nil {
@@ -127,13 +130,13 @@ private struct ChatComposerStack: View {
                 text: promptText,
                 isEnabled: chatModel == nil
                     ? draftModel.isPromptEnabled
-                    : thread != nil && chatModel?.isPromptEnabled == true,
+                    : state.exists && chatModel?.isPromptEnabled == true,
                 focusID: chatModel == nil ? draftModel.promptFocusID : nil,
                 canSend: chatModel == nil
                     ? draftModel.canSend
-                    : thread != nil && chatModel?.canSend == true,
+                    : state.exists && chatModel?.canSend == true,
                 isSending: isSendingNow,
-                isRunning: thread?.latestTurn?.turnState == .running,
+                isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
@@ -144,7 +147,7 @@ private struct ChatComposerStack: View {
                     Task { await draftModel.send() }
                 }
             } stop: {
-                if let chatModel, let turnID = thread?.latestTurn?.turnID {
+                if let chatModel, let turnID = state.turnID {
                     Task { await chatModel.interrupt(turnID: turnID) }
                 }
             } removeAttachment: { id in
@@ -163,7 +166,7 @@ private struct ChatComposerStack: View {
                         1,
                         ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
                     ),
-                    commands: thread?.session?.slashCommands ?? [],
+                    commands: state.slashCommands,
                     addImages: chatModel?.addImages ?? draftModel.addImages,
                     addPhotos: chatModel?.addPhotos ?? draftModel.addPhotos,
                     addCameraImage: chatModel?.addCameraImage ?? draftModel.addCameraImage,
@@ -171,8 +174,11 @@ private struct ChatComposerStack: View {
                     showError: chatModel?.showError ?? draftModel.showError
                 )
             } trailingControls: {
-                if let chatModel, let thread {
-                    ChatComposerControlsView(thread: thread, model: chatModel)
+                if let chatModel, state.exists {
+                    ChatComposerControlsView(
+                        session: state.session,
+                        model: chatModel
+                    )
                 } else if chatModel == nil {
                     DraftComposerControlsView(model: draftModel)
                 }
@@ -204,6 +210,26 @@ private struct ChatComposerStack: View {
             )?.image == true
         }
         return draftModel.supportsImageAttachments
+    }
+}
+
+/// The composer needs a handful of session fields, not the thread's entire
+/// value-typed timeline. Capturing this projection in its view-builder
+/// closures keeps the store's timeline buffer uniquely owned while text
+/// streams into its final entry.
+private struct ChatComposerThreadState {
+    let exists: Bool
+    let turnID: String?
+    let isRunning: Bool
+    let session: SessionBinding?
+    let slashCommands: [SlashCommand]
+
+    init(thread: Thread?) {
+        exists = thread != nil
+        turnID = thread?.latestTurn?.turnID
+        isRunning = thread?.latestTurn?.turnState == .running
+        session = thread?.session
+        slashCommands = thread?.session?.slashCommands ?? []
     }
 }
 
@@ -265,7 +291,8 @@ private struct ChatTimeline: View {
     static let nearBottomDistance: CGFloat = 24
 
     let threadID: String
-    let timeline: [TimelineEntry]
+    let sections: [ChatTimelineLayout.Section]
+    let timelineEntryCount: Int
     let plan: Plan?
     let latestTurn: Turn?
     let streamingTurnID: String?
@@ -284,7 +311,7 @@ private struct ChatTimeline: View {
     var body: some View {
         let rows = renderRows(
             ChatTimelineLayout.rows(
-                timeline: timeline,
+                sections: sections,
                 streamingTurnID: streamingTurnID,
                 latestTurn: latestTurn,
                 expandedSectionIDs: foldModel.expandedSectionIDs
@@ -368,7 +395,7 @@ private struct ChatTimeline: View {
                     textWarmRowWidth = width
                     warmTextLayouts(in: rows, rowWidth: width)
                 }
-                .onChange(of: timeline.count) { _, _ in
+                .onChange(of: timelineEntryCount) { _, _ in
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
                 .onChange(of: streamingTurnID) { _, _ in

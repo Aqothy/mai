@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ChatComposerControlsView: View {
-    let thread: Thread
+    let session: SessionBinding?
     let model: ChatPromptModel
 
     @State private var isOptionsPresented = false
@@ -14,8 +14,8 @@ struct ChatComposerControlsView: View {
             ) {
                 ComposerOptionsSheet(
                     options: configOptions,
-                    commands: thread.session?.slashCommands ?? [],
-                    tokenUsage: thread.session?.tokenUsage,
+                    commands: session?.slashCommands ?? [],
+                    tokenUsage: session?.tokenUsage,
                     isOptionDisabled: { option in
                         model.isSettingConfigOption(option.id)
                     },
@@ -31,7 +31,7 @@ struct ChatComposerControlsView: View {
     }
 
     private var configOptions: [ConfigOption] {
-        thread.session?.configOptions ?? []
+        session?.configOptions ?? []
     }
 
     private var selectionSummary: String {

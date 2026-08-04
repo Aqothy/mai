@@ -24,8 +24,26 @@ nonisolated enum ChatTimelineLayout {
         latestTurn: Turn?,
         expandedSectionIDs: Set<String>
     ) -> [ChatTimelineRowModel] {
+        rows(
+            sections: sections(timeline: timeline),
+            streamingTurnID: streamingTurnID,
+            latestTurn: latestTurn,
+            expandedSectionIDs: expandedSectionIDs
+        )
+    }
+
+    /// Emits rows from an already projected timeline. Keeping these sections
+    /// as the List input prevents a live view from retaining the generated
+    /// model's large `TimelineEntry` array while the store appends text to its
+    /// last entry.
+    static func rows(
+        sections: [Section],
+        streamingTurnID: String?,
+        latestTurn: Turn?,
+        expandedSectionIDs: Set<String>
+    ) -> [ChatTimelineRowModel] {
         var rows: [ChatTimelineRowModel] = []
-        for section in sections(timeline: timeline) {
+        for section in sections {
             appendRows(
                 for: section,
                 into: &rows,
