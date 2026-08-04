@@ -112,6 +112,12 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.thread
     }
 
+    var selectedThreadMarkdownSegmentCache: ChatMarkdownSegmentCache? {
+        _ = selectedSessionGeneration
+        guard let selectedThreadID else { return nil }
+        return sessionsByID[selectedThreadID]?.markdownSegmentCache
+    }
+
     var selectedThreadSequence: Int {
         _ = selectedSessionGeneration
         guard let selectedThreadID else { return 0 }

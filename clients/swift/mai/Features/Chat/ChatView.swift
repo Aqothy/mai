@@ -23,7 +23,9 @@ struct ChatView: View {
             } else if store.isSelectedThreadRestoringHistory {
                 ProgressView("Restoring Chat…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let thread = store.selectedThread {
+            } else if let thread = store.selectedThread,
+                let segmentCache = store.selectedThreadMarkdownSegmentCache
+            {
                 ChatTimeline(
                     threadID: thread.id,
                     sections: ChatTimelineLayout.sections(
@@ -35,6 +37,7 @@ struct ChatView: View {
                     streamingTurnID: thread.latestTurn?.turnState == .running
                         ? thread.latestTurn?.turnID
                         : nil,
+                    segmentCache: segmentCache,
                     store: store,
                     scrollState: scrollState
                 )
@@ -296,11 +299,11 @@ private struct ChatTimeline: View {
     let plan: Plan?
     let latestTurn: Turn?
     let streamingTurnID: String?
+    let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
     let scrollState: ChatScrollState
 
     @State private var foldModel = ChatTimelineFoldModel()
-    @State private var segmentCache = ChatMarkdownSegmentCache()
 
     #if os(iOS)
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize

@@ -19,6 +19,9 @@ struct ThreadSession {
     }
 
     var thread: Thread?
+    /// Parsed Markdown boundaries belong to the cached thread session, not to
+    /// the disposable navigation destination. This retains no SwiftUI views.
+    let markdownSegmentCache = ChatMarkdownSegmentCache()
     var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
