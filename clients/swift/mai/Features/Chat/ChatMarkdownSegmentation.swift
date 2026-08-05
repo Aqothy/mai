@@ -34,7 +34,6 @@ nonisolated enum ChatMessageTextPlan: Equatable, Sendable {
 
 /// Chooses one rendering path for a message. Keeping the decision here makes
 /// production, previews, and performance fixtures exercise the same policy.
-@MainActor
 enum ChatMessageTextPlanner {
     static func plan(
         messageID: String,
@@ -217,7 +216,6 @@ private nonisolated struct ChatRichContentWalker: MarkupWalker {
 }
 
 /// Avoids reparsing unchanged settled messages when the timeline updates.
-@MainActor
 final class ChatMarkdownSegmentCache {
     private static let maximumEntryCount = 256
 

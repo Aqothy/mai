@@ -132,7 +132,6 @@
 
     /// Cache for completed layouts, in-flight warmups, and a small reuse pool
     /// of the native views List has already displayed.
-    @MainActor
     final class ChatTextLayoutStore {
         /// Bounds both retained layouts and eager warmup work. Callers use the
         /// same limit so they do not prepare requests the cache cannot retain.
