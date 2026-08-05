@@ -308,8 +308,16 @@ private struct ChatTimeline: View {
 
     #if os(iOS)
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-        @State private var textLayoutStore = ChatTextLayoutStore()
         @State private var textWarmRowWidth: CGFloat = 0
+
+        /// The List remounts when navigating between threads, while prepared
+        /// text remains valid for the same thread, width, and Dynamic Type.
+        private var textLayoutStore: ChatTextLayoutStore {
+            ChatTextLayoutStoreRegistry.store(
+                for: threadID,
+                dynamicTypeSize: dynamicTypeSize
+            )
+        }
     #endif
 
     var body: some View {
@@ -408,10 +416,8 @@ private struct ChatTimeline: View {
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
                 .onChange(of: dynamicTypeSize) { _, _ in
-                    // Fonts are baked into each layout. Swapping the small
-                    // per-timeline store gives visible representables a new
-                    // dependency and guarantees they remeasure immediately.
-                    textLayoutStore = ChatTextLayoutStore()
+                    // Fonts are baked into each layout. The registry replaces
+                    // this thread's store for the new Dynamic Type size.
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
             #endif

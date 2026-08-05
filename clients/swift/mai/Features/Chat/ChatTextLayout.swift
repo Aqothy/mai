@@ -130,8 +130,8 @@
         }
     }
 
-    /// Per-timeline cache for completed layouts, in-flight warmups, and a
-    /// small reuse pool of the native views List has already displayed.
+    /// Cache for completed layouts, in-flight warmups, and a small reuse pool
+    /// of the native views List has already displayed.
     @MainActor
     final class ChatTextLayoutStore {
         /// Bounds both retained layouts and eager warmup work. Callers use the
@@ -270,7 +270,7 @@
         }
 
         /// Returns the native view previously used to display this exact
-        /// layout. Keeping a small per-timeline reuse pool avoids repeating
+        /// layout. Keeping a small per-store reuse pool avoids repeating
         /// UITextView's TextKit geometry setup as List rows are recycled.
         func takeTextView(
             for layout: ChatTextLayout,
@@ -309,6 +309,62 @@
             entry.idleTextView = textView
             entries[key] = entry
             idleTextViewKeys.append(key)
+        }
+    }
+
+    /// Retains the recently used threads' prepared TextKit stacks across
+    /// navigation. `ChatTimeline` is intentionally remounted for each thread,
+    /// but rebuilding identical text layouts on every reopen is unnecessary.
+    enum ChatTextLayoutStoreRegistry {
+        /// A store can retain up to 256 complete TextKit stacks, so keep only
+        /// a small recent working set instead of mirroring every cached thread.
+        private static let capacity = 3
+
+        private struct Entry {
+            let dynamicTypeSize: DynamicTypeSize
+            let store: ChatTextLayoutStore
+        }
+
+        private static var entriesByThreadID: [String: Entry] = [:]
+        private static var threadOrder: [String] = []
+
+        static func store(
+            for threadID: String,
+            dynamicTypeSize: DynamicTypeSize
+        ) -> ChatTextLayoutStore {
+            if let entry = entriesByThreadID[threadID],
+                entry.dynamicTypeSize == dynamicTypeSize
+            {
+                noteUse(threadID)
+                return entry.store
+            }
+
+            if entriesByThreadID[threadID] == nil,
+                entriesByThreadID.count >= capacity,
+                let oldestThreadID = threadOrder.first
+            {
+                threadOrder.removeFirst()
+                entriesByThreadID.removeValue(forKey: oldestThreadID)
+            }
+
+            let store = ChatTextLayoutStore()
+            entriesByThreadID[threadID] = Entry(
+                dynamicTypeSize: dynamicTypeSize,
+                store: store
+            )
+            noteUse(threadID)
+            return store
+        }
+
+        static func removeAll() {
+            entriesByThreadID.removeAll()
+            threadOrder.removeAll()
+        }
+
+        private static func noteUse(_ threadID: String) {
+            guard threadOrder.last != threadID else { return }
+            threadOrder.removeAll { $0 == threadID }
+            threadOrder.append(threadID)
         }
     }
 
