@@ -304,6 +304,7 @@ private struct ChatTimeline: View {
     let scrollState: ChatScrollState
 
     @State private var foldModel = ChatTimelineFoldModel()
+    @State private var isAwaitingInitialBottom = true
 
     #if os(iOS)
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -414,6 +415,12 @@ private struct ChatTimeline: View {
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
             #endif
+            .onAppear {
+                // Position before scroll geometry becomes responsible for
+                // following subsequent content and viewport changes.
+                isAwaitingInitialBottom = true
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            }
             .onChange(of: scrollState.bottomScrollRequest) { _, request in
                 if request.animated {
                     withAnimation(.smooth) {
@@ -434,6 +441,13 @@ private struct ChatTimeline: View {
                 )
             } action: { oldGeometry, newGeometry in
                 scrollState.noteEndVisibility(newGeometry.isNearBottom)
+                if isAwaitingInitialBottom {
+                    if newGeometry.isNearBottom {
+                        isAwaitingInitialBottom = false
+                    }
+                    return
+                }
+
                 let viewportShrank =
                     newGeometry.bottomInset > oldGeometry.bottomInset
                     || newGeometry.containerHeight < oldGeometry.containerHeight
