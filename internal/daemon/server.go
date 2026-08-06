@@ -16,6 +16,7 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
 	"github.com/Aqothy/maiD/internal/store"
+	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
 
 // openProviderInstance maps a configured provider driver to its adapter.
@@ -50,6 +51,10 @@ type Server struct {
 
 	terminals *terminalRuntime
 
+	// workspaceSearch owns the warm per-workspace FFF file indexes behind
+	// workspace.searchFiles.
+	workspaceSearch *workspacesearch.Service
+
 	rpcMu      sync.Mutex
 	rpcClients map[string]*rpcClient
 
@@ -69,6 +74,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata, acpRegistry: newACPRegistry()}
 	s.terminals = newTerminalRuntime()
+	s.workspaceSearch = workspacesearch.NewService()
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	if metadata != nil {
@@ -216,6 +222,9 @@ func (s *Server) doClose() error {
 	// group to be cleaned up before releasing clients and the store.
 	if s.terminals != nil {
 		s.terminals.close()
+	}
+	if s.workspaceSearch != nil {
+		s.workspaceSearch.Close()
 	}
 
 	s.rpcMu.Lock()
