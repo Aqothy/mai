@@ -67,6 +67,13 @@ type contract struct {
 	ACPRegistryAgent            wire.ACPRegistryAgent            `json:"acpRegistryAgent"`
 	ACPRegistryInstalledAgent   wire.ACPRegistryInstalledAgent   `json:"acpRegistryInstalledAgent"`
 	ACPRegistryInstallParams    wire.ACPRegistryInstallParams    `json:"acpRegistryInstallParams"`
+	TerminalSummary             wire.TerminalSummary             `json:"terminalSummary"`
+	TerminalAttachSnapshot      wire.TerminalAttachSnapshot      `json:"terminalAttachSnapshot"`
+	TerminalStreamItem          wire.TerminalStreamItem          `json:"terminalStreamItem"`
+	TerminalCreateParams        wire.TerminalCreateParams        `json:"terminalCreateParams"`
+	TerminalIDParams            wire.TerminalIDParams            `json:"terminalIdParams"`
+	TerminalWriteParams         wire.TerminalWriteParams         `json:"terminalWriteParams"`
+	TerminalResizeParams        wire.TerminalResizeParams        `json:"terminalResizeParams"`
 }
 
 func main() {

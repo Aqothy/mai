@@ -206,3 +206,19 @@ public enum MaidModelSwitchSupport: String, Codable, Sendable, CaseIterable {
     case unsupported = "unsupported"
     case inSession = "in-session"
 }
+
+/// Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.
+public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
+    case starting = "starting"
+    case running = "running"
+    case exited = "exited"
+    case stopped = "stopped"
+    case error = "error"
+}
+
+/// Payload discriminator of a terminal.subscribe notification.
+public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable {
+    case output = "output"
+    case status = "status"
+    case controlRevoked = "control-revoked"
+}

@@ -98,6 +98,26 @@
       "name": "provider.options.set",
       "params": "ProviderOptionsSetParams",
       "result": "ProviderOptionsResult"
+    },
+    {
+      "name": "terminal.create",
+      "params": "TerminalCreateParams",
+      "result": "TerminalAttachSnapshot"
+    },
+    {
+      "name": "terminal.terminate",
+      "params": "TerminalIDParams",
+      "resultNull": true
+    },
+    {
+      "name": "terminal.write",
+      "params": "TerminalWriteParams",
+      "resultNull": true
+    },
+    {
+      "name": "terminal.resize",
+      "params": "TerminalResizeParams",
+      "resultNull": true
     }
   ],
   "notifications": [
@@ -116,6 +136,10 @@
     {
       "name": "provider.options.invalidated",
       "payload": "ProviderOptionsInvalidated"
+    },
+    {
+      "name": "terminal.subscribe",
+      "payload": "TerminalStreamItem"
     }
   ]
 }

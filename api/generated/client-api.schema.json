@@ -1200,6 +1200,200 @@
       ],
       "title": "SubscribeThreadInput"
     },
+    "TerminalAttachSnapshot": {
+      "properties": {
+        "terminal": {
+          "$ref": "#/$defs/TerminalSummary"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "replay": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "replayTruncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminal",
+        "runId",
+        "sequence"
+      ],
+      "title": "TerminalAttachSnapshot"
+    },
+    "TerminalCreateParams": {
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cwd",
+        "columns",
+        "rows"
+      ],
+      "title": "TerminalCreateParams"
+    },
+    "TerminalIDParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId"
+      ],
+      "title": "TerminalIDParams"
+    },
+    "TerminalResizeParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "runId",
+        "columns",
+        "rows"
+      ],
+      "title": "TerminalResizeParams"
+    },
+    "TerminalStreamItem": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "status": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "terminalId"
+      ],
+      "title": "TerminalStreamItem"
+    },
+    "TerminalSummary": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "title",
+        "cwd",
+        "status",
+        "columns",
+        "rows",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "TerminalSummary"
+    },
+    "TerminalWriteParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "runId",
+        "data"
+      ],
+      "title": "TerminalWriteParams"
+    },
     "Thread": {
       "properties": {
         "id": {
@@ -1797,6 +1991,27 @@
         },
         "acpRegistryInstallParams": {
           "$ref": "#/$defs/ACPRegistryInstallParams"
+        },
+        "terminalSummary": {
+          "$ref": "#/$defs/TerminalSummary"
+        },
+        "terminalAttachSnapshot": {
+          "$ref": "#/$defs/TerminalAttachSnapshot"
+        },
+        "terminalStreamItem": {
+          "$ref": "#/$defs/TerminalStreamItem"
+        },
+        "terminalCreateParams": {
+          "$ref": "#/$defs/TerminalCreateParams"
+        },
+        "terminalIdParams": {
+          "$ref": "#/$defs/TerminalIDParams"
+        },
+        "terminalWriteParams": {
+          "$ref": "#/$defs/TerminalWriteParams"
+        },
+        "terminalResizeParams": {
+          "$ref": "#/$defs/TerminalResizeParams"
         }
       },
       "additionalProperties": false,
@@ -1852,7 +2067,14 @@
         "providerOptionsInvalidated",
         "acpRegistryAgent",
         "acpRegistryInstalledAgent",
-        "acpRegistryInstallParams"
+        "acpRegistryInstallParams",
+        "terminalSummary",
+        "terminalAttachSnapshot",
+        "terminalStreamItem",
+        "terminalCreateParams",
+        "terminalIdParams",
+        "terminalWriteParams",
+        "terminalResizeParams"
       ],
       "title": "contract"
     }

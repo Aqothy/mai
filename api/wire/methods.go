@@ -37,6 +37,12 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderCloseSession, Params: "ProviderSessionParams", ResultNull: true},
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
+	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachSnapshot"},
+	{Name: MethodTerminalTerminate, Params: "TerminalIDParams", ResultNull: true},
+	// Clients send terminal.write and terminal.resize as notifications; they
+	// are registered here so generated clients can name them.
+	{Name: MethodTerminalWrite, Params: "TerminalWriteParams", ResultNull: true},
+	{Name: MethodTerminalResize, Params: "TerminalResizeParams", ResultNull: true},
 }
 
 var Notifications = []NotificationDefinition{
@@ -44,4 +50,5 @@ var Notifications = []NotificationDefinition{
 	{Name: MethodOrchestrationSubscribeThread, Payload: "ThreadStreamItem"},
 	{Name: MethodProviderOptionsUpdated, Payload: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
+	{Name: MethodTerminalSubscribe, Payload: "TerminalStreamItem"},
 }

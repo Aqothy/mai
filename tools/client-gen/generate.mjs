@@ -92,7 +92,7 @@ await writeFile(
   path.join(swiftDir, "MaidRPC.swift"),
   `// Code generated from api/wire/methods.go. DO NOT EDIT.
 
-public enum MaidRPCMethod {
+nonisolated public enum MaidRPCMethod {
 ${methodConstants}
 }
 `,

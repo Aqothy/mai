@@ -1,6 +1,6 @@
 // Code generated from api/wire/methods.go. DO NOT EDIT.
 
-public enum MaidRPCMethod {
+nonisolated public enum MaidRPCMethod {
     public static let orchestrationDispatchCommand = "orchestration.dispatchCommand"
     public static let orchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
     public static let orchestrationSubscribeThread = "orchestration.subscribeThread"
@@ -20,6 +20,11 @@ public enum MaidRPCMethod {
     public static let providerCloseSession = "provider.closeSession"
     public static let providerOptionsGet = "provider.options.get"
     public static let providerOptionsSet = "provider.options.set"
+    public static let terminalCreate = "terminal.create"
+    public static let terminalTerminate = "terminal.terminate"
+    public static let terminalWrite = "terminal.write"
+    public static let terminalResize = "terminal.resize"
     public static let providerOptionsUpdated = "provider.options.updated"
     public static let providerOptionsInvalidated = "provider.options.invalidated"
+    public static let terminalSubscribe = "terminal.subscribe"
 }

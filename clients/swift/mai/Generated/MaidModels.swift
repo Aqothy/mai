@@ -3267,6 +3267,450 @@ public extension SubscribeThreadInput {
     }
 }
 
+// MARK: - TerminalAttachSnapshot
+public struct TerminalAttachSnapshot: Codable {
+    public var replay: String?
+    public var replayTruncated: Bool?
+    public var runID: String
+    public var sequence: Int
+    public var terminal: TerminalSummary
+
+    public enum CodingKeys: String, CodingKey {
+        case replay, replayTruncated
+        case runID = "runId"
+        case sequence, terminal
+    }
+
+    public init(replay: String?, replayTruncated: Bool?, runID: String, sequence: Int, terminal: TerminalSummary) {
+        self.replay = replay
+        self.replayTruncated = replayTruncated
+        self.runID = runID
+        self.sequence = sequence
+        self.terminal = terminal
+    }
+}
+
+// MARK: TerminalAttachSnapshot convenience initializers and mutators
+
+public extension TerminalAttachSnapshot {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalAttachSnapshot.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        replay: String?? = nil,
+        replayTruncated: Bool?? = nil,
+        runID: String? = nil,
+        sequence: Int? = nil,
+        terminal: TerminalSummary? = nil
+    ) -> TerminalAttachSnapshot {
+        return TerminalAttachSnapshot(
+            replay: replay ?? self.replay,
+            replayTruncated: replayTruncated ?? self.replayTruncated,
+            runID: runID ?? self.runID,
+            sequence: sequence ?? self.sequence,
+            terminal: terminal ?? self.terminal
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalSummary
+public struct TerminalSummary: Codable {
+    public var columns: Int
+    public var createdAt: Date
+    public var cwd: String
+    public var exitCode: Int?
+    public var rows: Int
+    public var status, terminalID, title: String
+    public var updatedAt: Date
+
+    public enum CodingKeys: String, CodingKey {
+        case columns, createdAt, cwd, exitCode, rows, status
+        case terminalID = "terminalId"
+        case title, updatedAt
+    }
+
+    public init(columns: Int, createdAt: Date, cwd: String, exitCode: Int?, rows: Int, status: String, terminalID: String, title: String, updatedAt: Date) {
+        self.columns = columns
+        self.createdAt = createdAt
+        self.cwd = cwd
+        self.exitCode = exitCode
+        self.rows = rows
+        self.status = status
+        self.terminalID = terminalID
+        self.title = title
+        self.updatedAt = updatedAt
+    }
+}
+
+// MARK: TerminalSummary convenience initializers and mutators
+
+public extension TerminalSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columns: Int? = nil,
+        createdAt: Date? = nil,
+        cwd: String? = nil,
+        exitCode: Int?? = nil,
+        rows: Int? = nil,
+        status: String? = nil,
+        terminalID: String? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil
+    ) -> TerminalSummary {
+        return TerminalSummary(
+            columns: columns ?? self.columns,
+            createdAt: createdAt ?? self.createdAt,
+            cwd: cwd ?? self.cwd,
+            exitCode: exitCode ?? self.exitCode,
+            rows: rows ?? self.rows,
+            status: status ?? self.status,
+            terminalID: terminalID ?? self.terminalID,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalCreateParams
+public struct TerminalCreateParams: Codable {
+    public var columns: Int
+    public var cwd: String
+    public var rows: Int
+    public var title: String?
+
+    public init(columns: Int, cwd: String, rows: Int, title: String?) {
+        self.columns = columns
+        self.cwd = cwd
+        self.rows = rows
+        self.title = title
+    }
+}
+
+// MARK: TerminalCreateParams convenience initializers and mutators
+
+public extension TerminalCreateParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalCreateParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columns: Int? = nil,
+        cwd: String? = nil,
+        rows: Int? = nil,
+        title: String?? = nil
+    ) -> TerminalCreateParams {
+        return TerminalCreateParams(
+            columns: columns ?? self.columns,
+            cwd: cwd ?? self.cwd,
+            rows: rows ?? self.rows,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalIDParams
+public struct TerminalIDParams: Codable {
+    public var terminalID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case terminalID = "terminalId"
+    }
+
+    public init(terminalID: String) {
+        self.terminalID = terminalID
+    }
+}
+
+// MARK: TerminalIDParams convenience initializers and mutators
+
+public extension TerminalIDParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalIDParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        terminalID: String? = nil
+    ) -> TerminalIDParams {
+        return TerminalIDParams(
+            terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalResizeParams
+public struct TerminalResizeParams: Codable {
+    public var columns, rows: Int
+    public var runID, terminalID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case columns, rows
+        case runID = "runId"
+        case terminalID = "terminalId"
+    }
+
+    public init(columns: Int, rows: Int, runID: String, terminalID: String) {
+        self.columns = columns
+        self.rows = rows
+        self.runID = runID
+        self.terminalID = terminalID
+    }
+}
+
+// MARK: TerminalResizeParams convenience initializers and mutators
+
+public extension TerminalResizeParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalResizeParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columns: Int? = nil,
+        rows: Int? = nil,
+        runID: String? = nil,
+        terminalID: String? = nil
+    ) -> TerminalResizeParams {
+        return TerminalResizeParams(
+            columns: columns ?? self.columns,
+            rows: rows ?? self.rows,
+            runID: runID ?? self.runID,
+            terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalStreamItem
+public struct TerminalStreamItem: Codable {
+    public var data: String?
+    public var exitCode: Int?
+    public var kind: String
+    public var message, runID: String?
+    public var sequence: Int?
+    public var status: String?
+    public var terminalID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case data, exitCode, kind, message
+        case runID = "runId"
+        case sequence, status
+        case terminalID = "terminalId"
+    }
+
+    public init(data: String?, exitCode: Int?, kind: String, message: String?, runID: String?, sequence: Int?, status: String?, terminalID: String) {
+        self.data = data
+        self.exitCode = exitCode
+        self.kind = kind
+        self.message = message
+        self.runID = runID
+        self.sequence = sequence
+        self.status = status
+        self.terminalID = terminalID
+    }
+}
+
+// MARK: TerminalStreamItem convenience initializers and mutators
+
+public extension TerminalStreamItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalStreamItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: String?? = nil,
+        exitCode: Int?? = nil,
+        kind: String? = nil,
+        message: String?? = nil,
+        runID: String?? = nil,
+        sequence: Int?? = nil,
+        status: String?? = nil,
+        terminalID: String? = nil
+    ) -> TerminalStreamItem {
+        return TerminalStreamItem(
+            data: data ?? self.data,
+            exitCode: exitCode ?? self.exitCode,
+            kind: kind ?? self.kind,
+            message: message ?? self.message,
+            runID: runID ?? self.runID,
+            sequence: sequence ?? self.sequence,
+            status: status ?? self.status,
+            terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalWriteParams
+public struct TerminalWriteParams: Codable {
+    public var data, runID, terminalID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case data
+        case runID = "runId"
+        case terminalID = "terminalId"
+    }
+
+    public init(data: String, runID: String, terminalID: String) {
+        self.data = data
+        self.runID = runID
+        self.terminalID = terminalID
+    }
+}
+
+// MARK: TerminalWriteParams convenience initializers and mutators
+
+public extension TerminalWriteParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalWriteParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: String? = nil,
+        runID: String? = nil,
+        terminalID: String? = nil
+    ) -> TerminalWriteParams {
+        return TerminalWriteParams(
+            data: data ?? self.data,
+            runID: runID ?? self.runID,
+            terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Thread
 public struct Thread: Codable {
     public var createdAt: Date

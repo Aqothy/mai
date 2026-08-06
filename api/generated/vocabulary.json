@@ -245,6 +245,26 @@
         "unsupported",
         "in-session"
       ]
+    },
+    {
+      "name": "TerminalStatus",
+      "description": "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
+      "values": [
+        "starting",
+        "running",
+        "exited",
+        "stopped",
+        "error"
+      ]
+    },
+    {
+      "name": "TerminalStreamItemKind",
+      "description": "Payload discriminator of a terminal.subscribe notification.",
+      "values": [
+        "output",
+        "status",
+        "control-revoked"
+      ]
     }
   ]
 }

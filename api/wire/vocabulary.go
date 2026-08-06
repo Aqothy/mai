@@ -3,6 +3,7 @@ package wire
 import (
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/terminal"
 )
 
 // Vocabularies registers the closed string vocabularies clients branch on. The
@@ -257,6 +258,26 @@ var Vocabularies = []VocabularyDefinition{
 		Values: values(
 			string(provider.ModelSwitchUnsupported),
 			string(provider.ModelSwitchInSession),
+		),
+	},
+	{
+		Name:        "TerminalStatus",
+		Description: "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
+		Values: values(
+			string(terminal.StatusStarting),
+			string(terminal.StatusRunning),
+			string(terminal.StatusExited),
+			string(terminal.StatusStopped),
+			string(terminal.StatusError),
+		),
+	},
+	{
+		Name:        "TerminalStreamItemKind",
+		Description: "Payload discriminator of a terminal.subscribe notification.",
+		Values: values(
+			string(terminal.StreamItemOutput),
+			string(terminal.StreamItemStatus),
+			string(terminal.StreamItemControlRevoked),
 		),
 	},
 }
