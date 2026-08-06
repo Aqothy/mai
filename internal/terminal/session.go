@@ -17,7 +17,7 @@ import (
 
 const (
 	ptyReadBufferSize       = 32 * 1024
-	outputBatchSize         = 1024 * 1024
+	outputBatchSize         = 64 * 1024
 	outputBatchMaximumDelay = 8 * time.Millisecond
 	outputReadQueueSize     = 32
 )
@@ -38,6 +38,7 @@ type Session struct {
 	seq      uint64
 	exitCode *int
 	events   Events
+	replay   *ReplayBuffer
 
 	writeMu sync.Mutex
 
@@ -79,6 +80,7 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		columns:    spec.Columns,
 		rows:       spec.Rows,
 		events:     events,
+		replay:     NewReplayBuffer(),
 		done:       make(chan struct{}),
 	}
 
@@ -98,8 +100,8 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 // them over RPC. This keeps fast output from becoming thousands of tiny JSON
 // and renderer operations. A batch is published when it reaches the byte cap
 // or has waited eight milliseconds, whichever comes first. The bounded read
-// queue still propagates backpressure to the child when a client cannot keep
-// up.
+// queue prevents unbounded intermediate allocations if local processing
+// cannot keep up with the PTY.
 func (s *Session) readLoop() {
 	reads := make(chan []byte, outputReadQueueSize)
 	go s.readPTY(reads)
@@ -143,12 +145,19 @@ drainReads:
 				publish()
 				break drainReads
 			}
-			pending = append(pending, data...)
-			if len(pending) >= outputBatchSize {
-				publish()
-			} else if flushTimerChannel == nil {
-				flushTimer.Reset(outputBatchMaximumDelay)
-				flushTimerChannel = flushTimer.C
+			for len(data) > 0 {
+				available := outputBatchSize - len(pending)
+				if available > len(data) {
+					available = len(data)
+				}
+				pending = append(pending, data[:available]...)
+				data = data[available:]
+				if len(pending) == outputBatchSize {
+					publish()
+				} else if flushTimerChannel == nil {
+					flushTimer.Reset(outputBatchMaximumDelay)
+					flushTimerChannel = flushTimer.C
+				}
 			}
 		case <-flushTimerChannel:
 			flushTimerChannel = nil
@@ -165,6 +174,11 @@ drainReads:
 	}
 	if hasCode {
 		s.exitCode = &code
+	}
+	if s.status == StatusStopped {
+		// Explicit termination discards replay; a natural exit keeps it
+		// viewable until relaunch, delete, or daemon shutdown.
+		s.replay.Reset()
 	}
 	status := s.status
 	exitPtr := s.exitCode
@@ -203,9 +217,44 @@ func (s *Session) publishOutput(data []byte) {
 	s.mu.Lock()
 	s.seq++
 	seq := s.seq
+	// Retaining the chunk under the same lock that assigns its sequence
+	// makes Snapshot atomic: replay always ends exactly at the snapshot
+	// sequence, so an attach can neither lose nor duplicate output. Replay
+	// stores the raw byte stream; the client renders it behind an input
+	// barrier so historical device queries cannot generate new PTY input.
+	s.replay.Append(data)
 	s.mu.Unlock()
 	if s.events.Output != nil {
 		s.events.Output(s.TerminalID, s.RunID, seq, data)
+	}
+}
+
+// Snapshot is the authoritative attach point for one run. Clients apply the
+// replay bytes, then consume only live items with a greater sequence.
+type Snapshot struct {
+	RunID           string
+	Sequence        uint64
+	Status          Status
+	Columns         uint16
+	Rows            uint16
+	ExitCode        *int
+	Replay          []byte
+	ReplayTruncated bool
+}
+
+// Snapshot atomically captures replay state and the last assigned sequence.
+func (s *Session) Snapshot() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Snapshot{
+		RunID:           s.RunID,
+		Sequence:        s.seq,
+		Status:          s.status,
+		Columns:         s.columns,
+		Rows:            s.rows,
+		ExitCode:        s.exitCode,
+		Replay:          s.replay.Bytes(),
+		ReplayTruncated: s.replay.Truncated(),
 	}
 }
 
@@ -249,9 +298,12 @@ func (s *Session) Resize(columns, rows uint16) error {
 	return nil
 }
 
-// Terminate ends the run's whole process group: SIGTERM, a bounded grace
-// interval, then SIGKILL. It is idempotent and safe to call concurrently with
-// natural exit; it returns once the child has been reaped.
+// Terminate ends the run's whole process group: SIGHUP and SIGTERM, a bounded
+// grace interval, then SIGKILL. SIGHUP is the terminal-close signal —
+// interactive shells ignore SIGTERM by design but exit promptly on hangup, so
+// the grace is an upper bound, not the common cost. It is idempotent and safe
+// to call concurrently with natural exit; it returns once the child has been
+// reaped.
 func (s *Session) Terminate(grace time.Duration) {
 	s.terminateOnce.Do(func() {
 		s.mu.Lock()
@@ -277,6 +329,7 @@ func (s *Session) Terminate(grace time.Duration) {
 			return
 		}
 		for _, pgid := range groups {
+			signalProcessGroup(pgid, hangupSignal)
 			signalProcessGroup(pgid, terminateSignal)
 		}
 		select {

@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	hangupSignal    = syscall.SIGHUP
 	terminateSignal = syscall.SIGTERM
 	killSignal      = syscall.SIGKILL
 )

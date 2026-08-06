@@ -18,6 +18,7 @@ type collector struct {
 	output    bytes.Buffer
 	lastSeq   uint64
 	seqBroken bool
+	maxChunk  int
 	exits     int
 	exitSeq   uint64
 	status    Status
@@ -38,6 +39,7 @@ func (c *collector) events() Events {
 				c.seqBroken = true
 			}
 			c.lastSeq = seq
+			c.maxChunk = max(c.maxChunk, len(data))
 			c.output.Write(data)
 		},
 		Exit: func(_, _ string, seq uint64, status Status, exitCode *int) {
@@ -133,6 +135,25 @@ func TestResizeChangesSttySize(t *testing.T) {
 	// Unchanged dimensions dedupe without error.
 	if err := session.Resize(101, 41); err != nil {
 		t.Fatalf("dedupe resize: %v", err)
+	}
+}
+
+func TestTerminateIdleShellReturnsWellUnderGrace(t *testing.T) {
+	useQuietZsh(t)
+	svc := NewService()
+	defer svc.Close()
+	session, c := startTestSession(t, svc, "t1")
+	// Wait for an interactive prompt so the test exercises a shell that has
+	// already installed its SIGTERM-ignoring interactive signal handling.
+	if err := session.Write([]byte("printf 'READY-%d\\n' $((1+1))\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	waitFor(t, "shell readiness", func() bool { return c.contains("READY-2") })
+
+	start := time.Now()
+	session.Terminate(terminateGrace)
+	if elapsed := time.Since(start); elapsed >= terminateGrace {
+		t.Fatalf("terminate took %v; SIGHUP should end the shell before the %v grace", elapsed, terminateGrace)
 	}
 }
 
