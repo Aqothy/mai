@@ -20,18 +20,22 @@ final class TerminalSessionController {
 
     @ObservationIgnored private let pipeline: TerminalOutputPipeline
     @ObservationIgnored private let backend: any TerminalHostBackend
+    @ObservationIgnored private var fontSize: Float
     /// Last grid the surface reported. Updated only when rows/columns change.
     private(set) var grid: TerminalOutputPipeline.Grid?
 
     /// True after the remote process ended and the exit was delivered.
     private(set) var hasEnded = false
 
-    /// Terminal input forwarding; disabled when control is revoked or the
-    /// run has ended.
+    /// Terminal input forwarding; disabled when disconnected or the run ends.
     private(set) var isInputEnabled = true
 
-    init(backend: any TerminalHostBackend) {
+    init(
+        backend: any TerminalHostBackend,
+        fontSize: Float = TerminalSettings.defaultFontSize
+    ) {
         self.backend = backend
+        self.fontSize = fontSize
         viewState = TerminalViewState(theme: MaidTerminalAppearance.theme)
 
         let pipeline = TerminalOutputPipeline(
@@ -53,7 +57,10 @@ final class TerminalSessionController {
             }
         )
         self.session = session
-        viewState.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
+        viewState.configuration = TerminalSurfaceOptions(
+            backend: .inMemory(session),
+            fontSize: fontSize
+        )
 
         // Weak capture: the session's callbacks retain the pipeline, so a
         // strong sink reference back to the session would leak both.
@@ -77,6 +84,14 @@ final class TerminalSessionController {
         pipeline.deliver(data)
     }
 
+    /// Routes an attach snapshot's replay to the renderer behind the input
+    /// barrier: anything the renderer emits while re-processing historical
+    /// bytes (query answers, mode side effects) is dropped instead of being
+    /// written into the live PTY.
+    nonisolated func receiveReplay(_ data: Data) {
+        pipeline.deliverReplay(data)
+    }
+
     /// Delivers remote process exit to the surface after all previously
     /// received output.
     func processDidEnd(exitCode: Int?, runtimeMilliseconds: UInt64 = 0) {
@@ -85,6 +100,18 @@ final class TerminalSessionController {
             runtimeMilliseconds: runtimeMilliseconds
         )
         markEnded()
+    }
+
+    /// Applies a changed terminal font size to the surface configuration.
+    /// The surface reports the resulting grid change through the normal
+    /// resize path.
+    func setFontSize(_ size: Float) {
+        guard fontSize != size else { return }
+        fontSize = size
+        viewState.configuration = TerminalSurfaceOptions(
+            backend: .inMemory(session),
+            fontSize: size
+        )
     }
 
     /// Enables or disables terminal input forwarding.

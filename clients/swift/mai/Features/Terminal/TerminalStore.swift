@@ -1,70 +1,53 @@
 import Foundation
-#if DEBUG
-import OSLog
-#endif
 
-/// Owns one terminal's transport state on its own RPC connection, separate
-/// from ThreadStore. Observable properties change only on lifecycle events;
-/// raw output bytes flow straight to the session controller and never enter
-/// observation.
+/// Owns terminal transport state on its own RPC connection, separate from
+/// ThreadStore, so terminal bytes and reconnect behavior never affect
+/// agent-thread streaming.
 ///
-/// This first increment drives a single development terminal: connect, create
-/// once the surface reports its measured grid, stream output, forward input
-/// and resize, and surface exit. Terminal lists, reattach, and persistence
-/// arrive in later increments.
+/// The store manages the connection and this window's active attachment. Raw output
+/// bytes flow straight from the transport to the attachment's session
+/// controller and never enter observation.
 @Observable
 final class TerminalStore {
     struct Timing: Sendable {
-        let initialGridSettleDelay: Duration
         let resizeSettleDelay: Duration
+        let reconnectDelay: Duration
 
         static let standard = Timing(
-            initialGridSettleDelay: .milliseconds(100),
-            resizeSettleDelay: .milliseconds(40)
+            resizeSettleDelay: .milliseconds(40),
+            reconnectDelay: .seconds(2)
         )
 
         static let immediate = Timing(
-            initialGridSettleDelay: .zero,
-            resizeSettleDelay: .zero
+            resizeSettleDelay: .zero,
+            reconnectDelay: .zero
         )
     }
 
-    enum Phase: Equatable {
+    enum ConnectionPhase: Equatable {
         case idle
         case connecting
-        case running
-        case exited(Int?)
-        case failed(String)
+        case connected
         case disconnected
     }
 
-    private(set) var phase: Phase = .idle
+    private(set) var connectionPhase: ConnectionPhase = .idle
 
-    /// Stable for the store's lifetime so the Ghostty surface is never
-    /// recreated by SwiftUI updates.
-    @ObservationIgnored let controller: TerminalSessionController
+    /// Terminal summaries ordered by updatedAt descending, then id — the
+    /// same deterministic order the daemon persists.
+    private(set) var terminals: [TerminalSummary] = []
+    private(set) var hasLoadedTerminalList = false
 
-    @ObservationIgnored private let rpc: any TerminalRPCClient
-    @ObservationIgnored private let backend: TerminalDaemonBackend
+    /// The one attachment currently rendering a terminal, if any.
+    private(set) var activeAttachment: TerminalAttachment?
+
+    @ObservationIgnored let rpc: any TerminalRPCClient
+    @ObservationIgnored let timing: Timing
     @ObservationIgnored private var started = false
-    @ObservationIgnored private var isCreating = false
-    @ObservationIgnored private var terminalID: String?
-    @ObservationIgnored private var runID: String?
-    @ObservationIgnored private var lastAppliedSequence = 0
-    @ObservationIgnored private var bufferedItems: [TerminalStreamMessage] = []
-    @ObservationIgnored private var pendingGrid: TerminalOutputPipeline.Grid?
-    @ObservationIgnored private var lastSentGrid: TerminalOutputPipeline.Grid?
-    @ObservationIgnored private var requestedCwd = ""
-    @ObservationIgnored private var createTask: Task<Void, Never>?
-    @ObservationIgnored private var resizeTask: Task<Void, Never>?
-    @ObservationIgnored private let timing: Timing
-
-    #if DEBUG
-    private static let logger = Logger(
-        subsystem: "com.aqothy.mai",
-        category: "TerminalStream"
-    )
-    #endif
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+    @ObservationIgnored private var isAwaitingListSnapshot = false
+    @ObservationIgnored private var bufferedListItems: [TerminalListStreamItem] = []
+    @ObservationIgnored private var listSubscriptionGeneration = 0
 
     init(
         rpc: any TerminalRPCClient = RPCClient(),
@@ -72,224 +55,254 @@ final class TerminalStore {
     ) {
         self.rpc = rpc
         self.timing = timing
-        let backend = TerminalDaemonBackend()
-        self.backend = backend
-        controller = TerminalSessionController(backend: backend)
-        backend.bind(to: self)
     }
 
-    /// Connects the transport. The terminal itself is created lazily when the
-    /// surface reports its first measured grid, so the shell starts with real
-    /// dimensions instead of a guess.
-    func start(cwd: String = "") {
+    /// Connects the transport and subscribes to the terminal list.
+    /// Attachments start when their Ghostty surface reports its real grid.
+    func start() {
         guard !started else { return }
         started = true
-        requestedCwd = cwd
-        phase = .connecting
+        connectionPhase = .connecting
         rpc.onTerminalStreamItem = { [weak self] item in
             self?.receiveStreamItem(item)
+        }
+        rpc.onTerminalListItem = { [weak self] item in
+            self?.receiveListItem(item)
         }
         rpc.onDisconnect = { [weak self] _ in
             self?.handleDisconnect()
         }
         rpc.connect()
-        scheduleCreate()
+        subscribeList()
     }
 
     func stop() {
-        createTask?.cancel()
-        createTask = nil
-        resizeTask?.cancel()
-        resizeTask = nil
+        started = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        closeActiveAttachment()
+        listSubscriptionGeneration += 1
+        isAwaitingListSnapshot = false
+        bufferedListItems.removeAll(keepingCapacity: true)
+        connectionPhase = .idle
         rpc.disconnect()
     }
 
-    func terminate() {
-        guard let terminalID else { return }
-        Task {
-            try? await rpc.terminateTerminal(terminalID: terminalID)
-        }
+    // MARK: - Terminal list
+
+    func summary(for terminalID: String) -> TerminalSummary? {
+        terminals.first { $0.terminalID == terminalID }
     }
 
-    /// Forwards terminal input to the daemon. Called by the backend on the
-    /// MainActor in surface callback order.
-    func sendInput(_ data: Data) {
-        guard let terminalID, let runID, phase == .running else { return }
-        rpc.writeTerminal(TerminalWriteParams(
-            data: data.base64EncodedString(),
-            runID: runID,
-            terminalID: terminalID
-        ))
-    }
-
-    /// Handles a deduplicated grid change from the surface. Initial creation
-    /// waits for a stable keyboard-adjusted grid; later resize bursts keep
-    /// only their latest value.
-    func surfaceGridChanged(columns: UInt16, rows: UInt16) {
-        pendingGrid = .init(columns: columns, rows: rows)
-        if terminalID != nil, runID != nil {
-            scheduleResize()
-            return
-        }
-        scheduleCreate()
-    }
-
-    private func scheduleCreate() {
-        guard started, terminalID == nil, !isCreating, pendingGrid != nil else { return }
-        createTask?.cancel()
-        let delay = timing.initialGridSettleDelay
-        createTask = Task { [weak self] in
+    private func subscribeList() {
+        listSubscriptionGeneration += 1
+        let generation = listSubscriptionGeneration
+        isAwaitingListSnapshot = true
+        bufferedListItems.removeAll(keepingCapacity: true)
+        Task { [weak self] in
+            guard let self else { return }
             do {
-                try await Task.sleep(for: delay)
+                let snapshot = try await rpc.subscribeTerminalList()
+                guard started, generation == listSubscriptionGeneration else { return }
+                applyListItem(snapshot)
+                let buffered = bufferedListItems
+                bufferedListItems.removeAll(keepingCapacity: true)
+                isAwaitingListSnapshot = false
+                for item in buffered {
+                    applyListItem(item)
+                }
+                hasLoadedTerminalList = true
+                connectionPhase = .connected
             } catch {
-                return
+                guard generation == listSubscriptionGeneration else { return }
+                isAwaitingListSnapshot = false
+                bufferedListItems.removeAll(keepingCapacity: true)
+                // Connection loss is handled by the reconnect path; a failed
+                // subscribe on a live connection retries on the next connect.
             }
-            guard let self, terminalID == nil, !isCreating, let grid = pendingGrid else { return }
-            isCreating = true
-            await createTerminal(grid: grid)
         }
     }
 
-    private func createTerminal(grid: TerminalOutputPipeline.Grid) async {
-        do {
-            let snapshot = try await rpc.createTerminal(TerminalCreateParams(
-                columns: Int(grid.columns),
-                cwd: requestedCwd,
-                rows: Int(grid.rows),
-                title: nil
-            ))
-            guard !Task.isCancelled else { return }
-            apply(snapshot: snapshot)
-        } catch {
-            isCreating = false
-            createTask = nil
-            guard !Task.isCancelled else { return }
-            phase = .failed(error.localizedDescription)
+    private func receiveListItem(_ item: TerminalListStreamItem) {
+        if isAwaitingListSnapshot {
+            bufferedListItems.append(item)
+        } else {
+            applyListItem(item)
         }
     }
 
-    /// Installs the attach snapshot, then applies stream items that were
-    /// buffered while the create call was in flight, ordered by sequence.
-    private func apply(snapshot: TerminalAttachSnapshot) {
-        isCreating = false
-        createTask = nil
-        terminalID = snapshot.terminal.terminalID
-        runID = snapshot.runID
-        lastAppliedSequence = snapshot.sequence
-        lastSentGrid = .init(
-            columns: UInt16(clamping: snapshot.terminal.columns),
-            rows: UInt16(clamping: snapshot.terminal.rows)
-        )
-        phase = .running
-        if let replay = snapshot.replay,
-            let data = Data(base64Encoded: replay),
-            !data.isEmpty {
-            controller.receive(data)
-        }
-        let buffered = bufferedItems.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }
-        bufferedItems.removeAll()
-        for item in buffered {
-            applyStreamItem(item)
-        }
-        scheduleResize()
-    }
-
-    private func receiveStreamItem(_ item: TerminalStreamMessage) {
-        if terminalID == nil {
-            bufferedItems.append(item)
-            return
-        }
-        applyStreamItem(item)
-    }
-
-    private func applyStreamItem(_ item: TerminalStreamMessage) {
-        guard item.terminalID == terminalID, item.runID == runID else { return }
-        let sequence = item.sequence ?? 0
-        guard sequence > lastAppliedSequence else { return }
-        #if DEBUG
-        if sequence != lastAppliedSequence + 1 {
-            Self.logger.warning(
-                "terminal sequence gap previous=\(self.lastAppliedSequence) received=\(sequence)"
-            )
-        }
-        #endif
-        lastAppliedSequence = sequence
-
-        switch MaidTerminalStreamItemKind(rawValue: item.kind) {
-        case .output:
-            if let data = item.data {
-                controller.receive(data)
+    func applyListItem(_ item: TerminalListStreamItem) {
+        switch MaidTerminalListStreamItemKind(rawValue: item.kind) {
+        case .snapshot:
+            terminals = Self.sorted(item.terminals ?? [])
+        case .terminalUpserted:
+            guard let summary = item.terminal else { return }
+            var next = terminals
+            if let index = next.firstIndex(where: { $0.terminalID == summary.terminalID }) {
+                guard next[index] != summary else { return }
+                next[index] = summary
+            } else {
+                next.append(summary)
             }
-        case .status:
-            applyStatus(item)
-        case .controlRevoked:
-            controller.setInputEnabled(false)
+            terminals = Self.sorted(next)
+        case .terminalRemoved:
+            guard let terminalID = item.terminalID else { return }
+            terminals.removeAll { $0.terminalID == terminalID }
+            if let active = activeAttachment, active.terminalID == terminalID {
+                closeActiveAttachment()
+            }
         case nil:
             // Unknown future kinds must not crash the client.
             break
         }
     }
 
-    private func applyStatus(_ item: TerminalStreamMessage) {
-        switch MaidTerminalStatus(rawValue: item.status ?? "") {
-        case .exited, .stopped:
-            phase = .exited(item.exitCode)
-            controller.processDidEnd(exitCode: item.exitCode)
-        case .error:
-            phase = .failed(item.message ?? "The terminal failed")
-        case .starting, .running, nil:
-            break
+    private static func sorted(_ summaries: [TerminalSummary]) -> [TerminalSummary] {
+        summaries.sorted { lhs, rhs in
+            if lhs.updatedAt != rhs.updatedAt {
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            return lhs.terminalID < rhs.terminalID
         }
+    }
+
+    // MARK: - Attachments
+
+    /// Opens (or keeps) the attachment for the requested terminal. Any other
+    /// active attachment is detached first; its shell keeps running. Stopped
+    /// rows relaunch, which is the explicit-open acknowledgement the daemon
+    /// expects.
+    @discardableResult
+    func openTerminal(_ request: TerminalOpenRequest) -> TerminalAttachment {
+        if let active = activeAttachment, active.matches(request) {
+            return active
+        }
+        let mode: TerminalAttachment.Mode
+        switch request {
+        case .new(let cwd, let title):
+            mode = .create(cwd: cwd, title: title)
+        case .existing(let terminalID):
+            if summary(for: terminalID)?.needsRelaunchToOpen == true {
+                mode = .relaunch(terminalID: terminalID)
+            } else {
+                mode = .attach(terminalID: terminalID)
+            }
+        }
+        closeActiveAttachment()
+        let attachment = TerminalAttachment(store: self, origin: request, mode: mode, timing: timing)
+        activeAttachment = attachment
+        return attachment
+    }
+
+    /// Detaches whatever terminal is currently open. Driven by navigation
+    /// state: containers call this when the visible content is no longer a
+    /// terminal.
+    func closeActiveTerminal() {
+        closeActiveAttachment()
+    }
+
+    /// Detaches the given attachment if it is still the active one. Called
+    /// when a terminal view disappears; late calls after a switch are no-ops.
+    func closeAttachment(_ attachment: TerminalAttachment) {
+        guard attachment === activeAttachment else { return }
+        closeActiveAttachment()
+    }
+
+    /// Replaces the active attachment with a fresh run of the same terminal.
+    /// A new attachment (and Ghostty session) renders the new shell from a
+    /// clean state.
+    @discardableResult
+    func relaunchActiveTerminal() -> TerminalAttachment? {
+        guard let active = activeAttachment, let terminalID = active.terminalID else {
+            return nil
+        }
+        closeActiveAttachment()
+        let attachment = TerminalAttachment(
+            store: self,
+            origin: active.origin,
+            mode: .relaunch(terminalID: terminalID),
+            timing: timing
+        )
+        activeAttachment = attachment
+        return attachment
+    }
+
+    // MARK: - Actions
+
+    func terminateTerminal(terminalID: String) {
+        Task {
+            try? await rpc.terminateTerminal(terminalID: terminalID)
+        }
+    }
+
+    func renameTerminal(terminalID: String, title: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            if let summary = try? await rpc.renameTerminal(
+                TerminalRenameParams(terminalID: terminalID, title: title))
+            {
+                applyListItem(
+                    TerminalListStreamItem(
+                        kind: MaidTerminalListStreamItemKind.terminalUpserted.rawValue,
+                        terminal: summary,
+                        terminalID: nil,
+                        terminals: nil
+                    ))
+            }
+        }
+    }
+
+    /// Deletes the terminal: the daemon terminates any live shell and removes
+    /// the persisted row. The list removal notification clears local state.
+    func deleteTerminal(terminalID: String) async throws {
+        try await rpc.deleteTerminal(terminalID: terminalID)
+        if let active = activeAttachment, active.terminalID == terminalID {
+            closeActiveAttachment()
+        }
+    }
+
+    // MARK: - Transport events
+
+    /// Called by an attachment when its attach snapshot was installed,
+    /// proving the connection is live.
+    func attachmentDidAttach(_ attachment: TerminalAttachment) {
+        guard started, attachment === activeAttachment else { return }
+        connectionPhase = .connected
+    }
+
+    private func receiveStreamItem(_ item: TerminalStreamMessage) {
+        activeAttachment?.receive(item)
     }
 
     private func handleDisconnect() {
-        createTask?.cancel()
-        createTask = nil
-        resizeTask?.cancel()
-        resizeTask = nil
-        isCreating = false
-        phase = .disconnected
-        controller.setInputEnabled(false)
+        guard started else { return }
+        listSubscriptionGeneration += 1
+        isAwaitingListSnapshot = false
+        bufferedListItems.removeAll(keepingCapacity: true)
+        connectionPhase = .disconnected
+        activeAttachment?.connectionLost()
+        scheduleReconnect()
     }
 
-    private func scheduleResize() {
-        guard phase == .running,
-              terminalID != nil,
-              runID != nil,
-              pendingGrid != lastSentGrid
-        else { return }
-
-        resizeTask?.cancel()
-        if timing.resizeSettleDelay == .zero {
-            sendPendingResize()
-            return
-        }
-        let delay = timing.resizeSettleDelay
-        resizeTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: delay)
-            } catch {
-                return
+    private func scheduleReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            if timing.reconnectDelay != .zero {
+                do {
+                    try await Task.sleep(for: timing.reconnectDelay)
+                } catch { return }
             }
-            self?.sendPendingResize()
+            guard started else { return }
+            connectionPhase = .connecting
+            rpc.connect()
+            subscribeList()
+            activeAttachment?.reattachAfterReconnect()
         }
     }
 
-    private func sendPendingResize() {
-        resizeTask = nil
-        guard phase == .running,
-              let terminalID,
-              let runID,
-              let grid = pendingGrid,
-              grid != lastSentGrid
-        else { return }
-
-        lastSentGrid = grid
-        rpc.resizeTerminal(TerminalResizeParams(
-            columns: Int(grid.columns),
-            rows: Int(grid.rows),
-            runID: runID,
-            terminalID: terminalID
-        ))
+    private func closeActiveAttachment() {
+        activeAttachment?.close()
+        activeAttachment = nil
     }
 }

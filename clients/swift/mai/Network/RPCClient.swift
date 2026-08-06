@@ -5,6 +5,7 @@ final class RPCClient {
 
     var onNotification: ((String, Data) -> Void)?
     var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)?
+    var onTerminalListItem: ((TerminalListStreamItem) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
     private let endpoint: URL
@@ -269,9 +270,27 @@ final class RPCClient {
         } else if envelope.method == MaidRPCMethod.terminalSubscribe,
                   let item = envelope.params {
             onTerminalStreamItem?(item)
+        } else if envelope.method == MaidRPCMethod.terminalSubscribeList {
+            // List updates are low-frequency lifecycle changes; decoding
+            // inline keeps them ordered with the surrounding stream.
+            if let onTerminalListItem,
+               let notification = try? Self.listNotificationDecoder.decode(
+                    TerminalListNotification.self, from: data) {
+                onTerminalListItem(notification.params)
+            }
         } else if let method = envelope.method {
             onNotification?(method, data)
         }
+    }
+
+    private static let listNotificationDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    nonisolated private struct TerminalListNotification: Decodable {
+        let params: TerminalListStreamItem
     }
 
     private func cancelRequest(_ id: Int) {

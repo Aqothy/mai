@@ -4,9 +4,24 @@ import SwiftUI
 struct IOSAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let terminalStore: TerminalStore
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        IOSCompactAppContainer(store: store, draftStore: draftStore)
+        if horizontalSizeClass == .regular {
+            IOSRegularAppContainer(
+                store: store,
+                draftStore: draftStore,
+                terminalStore: terminalStore
+            )
+        } else {
+            IOSCompactAppContainer(
+                store: store,
+                draftStore: draftStore,
+                terminalStore: terminalStore
+            )
+        }
     }
 }
 
@@ -14,7 +29,8 @@ struct IOSAppContainer: View {
 #Preview("iOS App") {
     IOSAppContainer(
         store: PreviewData.threadStore(),
-        draftStore: ThreadDraftStore()
+        draftStore: ThreadDraftStore(),
+        terminalStore: TerminalStore()
     )
 }
 #endif

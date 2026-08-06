@@ -1,5 +1,5 @@
-/// Text normalization that belongs at the platform text-input boundary.
-/// Terminal Enter is carriage return; line feed remains available as Ctrl-J.
+/// Normalization at the UIKit text-input boundary. A terminal's Enter key is
+/// carriage return; line feed remains available as Ctrl-J.
 nonisolated enum TerminalInputText {
     static func normalizingSoftwareReturn(_ text: String) -> String {
         switch text {

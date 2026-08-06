@@ -12,9 +12,6 @@ struct TerminalThreadView: View {
         let backgroundColor = MaidTerminalAppearance.background(for: colorScheme)
 
         ZStack {
-            // Remains behind the keyboard safe area while UIKit animates the
-            // keyboard. Without an explicit backing surface, a temporary gap
-            // can reveal the hosting controller's black background.
             Rectangle()
                 .fill(backgroundColor)
                 .ignoresSafeArea()

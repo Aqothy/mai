@@ -3,30 +3,43 @@ import SwiftUI
 struct DesktopAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    @State private var showsDevTerminal = false
+    let terminalStore: TerminalStore
+
+    /// The open terminal, if any. Chat selection lives in ThreadStore; only
+    /// presentation merges the two domains.
+    @State private var terminalRoute: TerminalOpenRequest?
 
     var body: some View {
         NavigationSplitView {
-            DesktopSidebarView(store: store)
-                .navigationSplitViewColumnWidth(260)
+            DesktopSidebarView(
+                store: store,
+                terminalStore: terminalStore,
+                terminalRoute: $terminalRoute
+            )
+            .navigationSplitViewColumnWidth(260)
         } detail: {
-            ChatView(store: store, draftStore: draftStore)
+            if let terminalRoute {
+                TerminalThreadScreen(
+                    store: terminalStore,
+                    request: terminalRoute,
+                    onCreated: { terminalID in
+                        self.terminalRoute = .existing(terminalID: terminalID)
+                    },
+                    onDeleted: {
+                        self.terminalRoute = nil
+                    }
+                )
+            } else {
+                ChatView(store: store, draftStore: draftStore)
+            }
         }
         .toolbar(removing: .title)
-        .toolbar {
-            if TerminalLab.isEnabled {
-                ToolbarItem(placement: .automatic) {
-                    Button("Terminal", systemImage: "terminal") {
-                        showsDevTerminal = true
-                    }
-                }
+        .onChange(of: terminalRoute) { _, route in
+            // Detach is navigation-driven: leaving the terminal detail
+            // releases control without terminating the shell.
+            if route == nil {
+                terminalStore.closeActiveTerminal()
             }
-        }
-        .sheet(isPresented: $showsDevTerminal) {
-            NavigationStack {
-                TerminalDevView()
-            }
-            .frame(minWidth: 720, minHeight: 480)
         }
     }
 }
@@ -35,7 +48,8 @@ struct DesktopAppContainer: View {
 #Preview("Desktop App") {
     DesktopAppContainer(
         store: PreviewData.threadStore(),
-        draftStore: ThreadDraftStore()
+        draftStore: ThreadDraftStore(),
+        terminalStore: TerminalStore()
     )
 }
 #endif

@@ -4,6 +4,7 @@ import SwiftUI
 struct IOSCompactAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let terminalStore: TerminalStore
 
     @State private var path: [IOSNavigationRoute] = []
 
@@ -11,12 +12,19 @@ struct IOSCompactAppContainer: View {
         NavigationStack(path: $path) {
             IOSThreadListView(
                 store: store,
+                terminalStore: terminalStore,
                 newChat: {
                     path.append(.newChat)
+                },
+                newTerminal: { request in
+                    path.append(.terminal(request))
                 },
                 selectThread: { threadID in
                     store.prepareThreadForSelection(threadID)
                     path.append(.thread(threadID))
+                },
+                selectTerminal: { terminalID in
+                    path.append(.terminal(.existing(terminalID: terminalID)))
                 },
                 openAgentRegistry: {
                     path.append(.agentRegistry)
@@ -36,6 +44,8 @@ struct IOSCompactAppContainer: View {
                             path = [.thread(threadID)]
                         }
                     )
+                } else if case let .terminal(request) = route {
+                    TerminalThreadScreen(store: terminalStore, request: request)
                 } else {
                     IOSChatDestinationView(
                         route: route,
@@ -44,22 +54,18 @@ struct IOSCompactAppContainer: View {
                     )
                 }
             }
-            .toolbar {
-                if TerminalLab.isEnabled {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            TerminalDevView()
-                        } label: {
-                            Label("Terminal", systemImage: "terminal")
-                        }
-                    }
-                }
-            }
         }
         .onChange(of: path, initial: true) { _, path in
             if path.isEmpty {
                 store.startNewDraft()
             }
+            // Detach is navigation-driven: when the visible top of the stack
+            // stops being a terminal, release control; the shell keeps
+            // running on the daemon.
+            if case .terminal = path.last {
+                return
+            }
+            terminalStore.closeActiveTerminal()
         }
     }
 }

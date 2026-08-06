@@ -18,7 +18,7 @@ struct IOSChatDestinationView: View {
                     ProgressView("Opening Chat…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            case .agentRegistry, .sessionImport:
+            case .terminal, .agentRegistry, .sessionImport:
                 // Containers route these destinations before this view.
                 EmptyView()
             }
@@ -35,7 +35,7 @@ struct IOSChatDestinationView: View {
             case let .thread(threadID):
                 guard store.selectedThreadID != threadID else { return }
                 store.selectThread(threadID)
-            case .agentRegistry, .sessionImport:
+            case .terminal, .agentRegistry, .sessionImport:
                 break
             }
         }
