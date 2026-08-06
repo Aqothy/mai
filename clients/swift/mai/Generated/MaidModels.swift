@@ -4232,6 +4232,162 @@ public extension ThreadStreamItem {
     }
 }
 
+// MARK: - WorkspaceFileEntry
+public struct WorkspaceFileEntry: Codable {
+    public var displayName, relativePath: String
+
+    public init(displayName: String, relativePath: String) {
+        self.displayName = displayName
+        self.relativePath = relativePath
+    }
+}
+
+// MARK: WorkspaceFileEntry convenience initializers and mutators
+
+public extension WorkspaceFileEntry {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceFileEntry.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        displayName: String? = nil,
+        relativePath: String? = nil
+    ) -> WorkspaceFileEntry {
+        return WorkspaceFileEntry(
+            displayName: displayName ?? self.displayName,
+            relativePath: relativePath ?? self.relativePath
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - WorkspaceSearchFilesParams
+public struct WorkspaceSearchFilesParams: Codable {
+    public var cwd: String?
+    public var limit: Int?
+    public var query: String
+    public var threadID: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case cwd, limit, query
+        case threadID = "threadId"
+    }
+
+    public init(cwd: String?, limit: Int?, query: String, threadID: String?) {
+        self.cwd = cwd
+        self.limit = limit
+        self.query = query
+        self.threadID = threadID
+    }
+}
+
+// MARK: WorkspaceSearchFilesParams convenience initializers and mutators
+
+public extension WorkspaceSearchFilesParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceSearchFilesParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cwd: String?? = nil,
+        limit: Int?? = nil,
+        query: String? = nil,
+        threadID: String?? = nil
+    ) -> WorkspaceSearchFilesParams {
+        return WorkspaceSearchFilesParams(
+            cwd: cwd ?? self.cwd,
+            limit: limit ?? self.limit,
+            query: query ?? self.query,
+            threadID: threadID ?? self.threadID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - WorkspaceSearchFilesResult
+public struct WorkspaceSearchFilesResult: Codable {
+    public var entries: [WorkspaceFileEntry]
+    public var indexing: Bool?
+
+    public init(entries: [WorkspaceFileEntry], indexing: Bool?) {
+        self.entries = entries
+        self.indexing = indexing
+    }
+}
+
+// MARK: WorkspaceSearchFilesResult convenience initializers and mutators
+
+public extension WorkspaceSearchFilesResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceSearchFilesResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        entries: [WorkspaceFileEntry]? = nil,
+        indexing: Bool?? = nil
+    ) -> WorkspaceSearchFilesResult {
+        return WorkspaceSearchFilesResult(
+            entries: entries ?? self.entries,
+            indexing: indexing ?? self.indexing
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Helper functions for creating encoders and decoders
 
 func newJSONDecoder() -> JSONDecoder {

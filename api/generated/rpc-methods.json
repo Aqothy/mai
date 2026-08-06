@@ -118,6 +118,11 @@
       "name": "terminal.resize",
       "params": "TerminalResizeParams",
       "resultNull": true
+    },
+    {
+      "name": "workspace.searchFiles",
+      "params": "WorkspaceSearchFilesParams",
+      "result": "WorkspaceSearchFilesResult"
     }
   ],
   "notifications": [

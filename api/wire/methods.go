@@ -43,6 +43,7 @@ var Methods = []MethodDefinition{
 	// are registered here so generated clients can name them.
 	{Name: MethodTerminalWrite, Params: "TerminalWriteParams", ResultNull: true},
 	{Name: MethodTerminalResize, Params: "TerminalResizeParams", ResultNull: true},
+	{Name: MethodWorkspaceSearchFiles, Params: "WorkspaceSearchFilesParams", Result: "WorkspaceSearchFilesResult"},
 }
 
 var Notifications = []NotificationDefinition{

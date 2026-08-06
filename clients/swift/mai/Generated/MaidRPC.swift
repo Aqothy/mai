@@ -24,6 +24,7 @@ nonisolated public enum MaidRPCMethod {
     public static let terminalTerminate = "terminal.terminate"
     public static let terminalWrite = "terminal.write"
     public static let terminalResize = "terminal.resize"
+    public static let workspaceSearchFiles = "workspace.searchFiles"
     public static let providerOptionsUpdated = "provider.options.updated"
     public static let providerOptionsInvalidated = "provider.options.invalidated"
     public static let terminalSubscribe = "terminal.subscribe"

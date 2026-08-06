@@ -514,6 +514,18 @@ func (e *Engine) SessionView(threadID ThreadID) (ThreadSessionView, bool) {
 	}, true
 }
 
+// ThreadCwd returns the thread's workspace directory. It is a bounded read
+// for per-keystroke consumers (workspace file search): no timeline clone.
+func (e *Engine) ThreadCwd(threadID ThreadID) (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	thread := e.projection.liveThread(threadID)
+	if thread == nil {
+		return "", false
+	}
+	return thread.Cwd, true
+}
+
 func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadProviderView, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

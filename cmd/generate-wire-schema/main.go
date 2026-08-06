@@ -74,6 +74,9 @@ type contract struct {
 	TerminalIDParams            wire.TerminalIDParams            `json:"terminalIdParams"`
 	TerminalWriteParams         wire.TerminalWriteParams         `json:"terminalWriteParams"`
 	TerminalResizeParams        wire.TerminalResizeParams        `json:"terminalResizeParams"`
+	WorkspaceSearchFilesParams  wire.WorkspaceSearchFilesParams  `json:"workspaceSearchFilesParams"`
+	WorkspaceFileEntry          wire.WorkspaceFileEntry          `json:"workspaceFileEntry"`
+	WorkspaceSearchFilesResult  wire.WorkspaceSearchFilesResult  `json:"workspaceSearchFilesResult"`
 }
 
 func main() {
