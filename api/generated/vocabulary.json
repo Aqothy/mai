@@ -265,6 +265,15 @@
         "status",
         "control-revoked"
       ]
+    },
+    {
+      "name": "TerminalListStreamItemKind",
+      "description": "Payload discriminator of a terminal.subscribeList snapshot or update.",
+      "values": [
+        "snapshot",
+        "terminal-upserted",
+        "terminal-removed"
+      ]
     }
   ]
 }

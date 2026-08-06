@@ -105,7 +105,32 @@
       "result": "TerminalAttachSnapshot"
     },
     {
+      "name": "terminal.attach",
+      "params": "TerminalAttachParams",
+      "result": "TerminalAttachSnapshot"
+    },
+    {
+      "name": "terminal.relaunch",
+      "params": "TerminalAttachParams",
+      "result": "TerminalAttachSnapshot"
+    },
+    {
+      "name": "terminal.subscribeList",
+      "params": "EmptyParams",
+      "result": "TerminalListStreamItem"
+    },
+    {
+      "name": "terminal.rename",
+      "params": "TerminalRenameParams",
+      "result": "TerminalSummary"
+    },
+    {
       "name": "terminal.terminate",
+      "params": "TerminalIDParams",
+      "resultNull": true
+    },
+    {
+      "name": "terminal.delete",
       "params": "TerminalIDParams",
       "resultNull": true
     },
@@ -117,6 +142,11 @@
     {
       "name": "terminal.resize",
       "params": "TerminalResizeParams",
+      "resultNull": true
+    },
+    {
+      "name": "terminal.detach",
+      "params": "TerminalDetachParams",
       "resultNull": true
     }
   ],
@@ -140,6 +170,10 @@
     {
       "name": "terminal.subscribe",
       "payload": "TerminalStreamItem"
+    },
+    {
+      "name": "terminal.subscribeList",
+      "payload": "TerminalListStreamItem"
     }
   ]
 }

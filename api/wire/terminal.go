@@ -6,16 +6,45 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-// Terminal thread methods. terminal.write and terminal.resize are sent by
-// clients as JSON-RPC notifications; terminal.subscribe is the server-to-client
-// stream method registered by terminal.create (and later terminal.attach).
+// Terminal thread methods. terminal.write, terminal.resize, and
+// terminal.detach are sent by clients as JSON-RPC notifications;
+// terminal.subscribe is the server-to-client stream method registered by
+// terminal.create, terminal.attach, and terminal.relaunch.
 const (
-	MethodTerminalCreate    = "terminal.create"
-	MethodTerminalTerminate = "terminal.terminate"
-	MethodTerminalWrite     = "terminal.write"
-	MethodTerminalResize    = "terminal.resize"
-	MethodTerminalSubscribe = "terminal.subscribe"
+	MethodTerminalCreate        = "terminal.create"
+	MethodTerminalAttach        = "terminal.attach"
+	MethodTerminalRelaunch      = "terminal.relaunch"
+	MethodTerminalDetach        = "terminal.detach"
+	MethodTerminalRename        = "terminal.rename"
+	MethodTerminalTerminate     = "terminal.terminate"
+	MethodTerminalDelete        = "terminal.delete"
+	MethodTerminalWrite         = "terminal.write"
+	MethodTerminalResize        = "terminal.resize"
+	MethodTerminalSubscribe     = "terminal.subscribe"
+	MethodTerminalSubscribeList = "terminal.subscribeList"
 )
+
+// TerminalListStreamItemKind discriminates terminal.subscribeList payloads.
+type TerminalListStreamItemKind string
+
+const (
+	// TerminalListItemSnapshot carries every terminal summary.
+	TerminalListItemSnapshot TerminalListStreamItemKind = "snapshot"
+	// TerminalListItemUpserted carries one created/updated summary.
+	TerminalListItemUpserted TerminalListStreamItemKind = "terminal-upserted"
+	// TerminalListItemRemoved carries one deleted terminal id.
+	TerminalListItemRemoved TerminalListStreamItemKind = "terminal-removed"
+)
+
+// TerminalListStreamItem is one terminal.subscribeList snapshot or update.
+// The server publishes updates only for identity and lifecycle changes,
+// never for raw output, input, resize, or attach.
+type TerminalListStreamItem struct {
+	Kind       TerminalListStreamItemKind `json:"kind"`
+	Terminals  []TerminalSummary          `json:"terminals,omitempty"`
+	Terminal   *TerminalSummary           `json:"terminal,omitempty"`
+	TerminalID string                     `json:"terminalId,omitempty"`
+}
 
 // Client-visible terminal vocabularies.
 type TerminalStatus = terminal.Status
@@ -68,6 +97,27 @@ type TerminalCreateParams struct {
 
 type TerminalIDParams struct {
 	TerminalID string `json:"terminalId"`
+}
+
+// TerminalAttachParams attaches the calling client to a terminal (or, for
+// terminal.relaunch, to a fresh run) with the client's measured grid.
+type TerminalAttachParams struct {
+	TerminalID string `json:"terminalId"`
+	Columns    uint16 `json:"columns"`
+	Rows       uint16 `json:"rows"`
+}
+
+// TerminalDetachParams releases control without terminating the shell. RunID
+// fences the detach so it cannot release a newer attachment or run.
+type TerminalDetachParams struct {
+	TerminalID string `json:"terminalId"`
+	RunID      string `json:"runId"`
+}
+
+// TerminalRenameParams gives a terminal a user-chosen title.
+type TerminalRenameParams struct {
+	TerminalID string `json:"terminalId"`
+	Title      string `json:"title"`
 }
 
 // TerminalWriteParams carries terminal input bytes. Data is base64-encoded by

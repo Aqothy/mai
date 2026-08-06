@@ -1200,6 +1200,27 @@
       ],
       "title": "SubscribeThreadInput"
     },
+    "TerminalAttachParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "columns",
+        "rows"
+      ],
+      "title": "TerminalAttachParams"
+    },
     "TerminalAttachSnapshot": {
       "properties": {
         "terminal": {
@@ -1252,6 +1273,23 @@
       ],
       "title": "TerminalCreateParams"
     },
+    "TerminalDetachParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "runId"
+      ],
+      "title": "TerminalDetachParams"
+    },
     "TerminalIDParams": {
       "properties": {
         "terminalId": {
@@ -1264,6 +1302,48 @@
         "terminalId"
       ],
       "title": "TerminalIDParams"
+    },
+    "TerminalListStreamItem": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "terminals": {
+          "items": {
+            "$ref": "#/$defs/TerminalSummary"
+          },
+          "type": "array"
+        },
+        "terminal": {
+          "$ref": "#/$defs/TerminalSummary"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "TerminalListStreamItem"
+    },
+    "TerminalRenameParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "title"
+      ],
+      "title": "TerminalRenameParams"
     },
     "TerminalResizeParams": {
       "properties": {
@@ -2001,11 +2081,23 @@
         "terminalStreamItem": {
           "$ref": "#/$defs/TerminalStreamItem"
         },
+        "terminalListStreamItem": {
+          "$ref": "#/$defs/TerminalListStreamItem"
+        },
+        "terminalRenameParams": {
+          "$ref": "#/$defs/TerminalRenameParams"
+        },
         "terminalCreateParams": {
           "$ref": "#/$defs/TerminalCreateParams"
         },
         "terminalIdParams": {
           "$ref": "#/$defs/TerminalIDParams"
+        },
+        "terminalAttachParams": {
+          "$ref": "#/$defs/TerminalAttachParams"
+        },
+        "terminalDetachParams": {
+          "$ref": "#/$defs/TerminalDetachParams"
         },
         "terminalWriteParams": {
           "$ref": "#/$defs/TerminalWriteParams"
@@ -2071,8 +2163,12 @@
         "terminalSummary",
         "terminalAttachSnapshot",
         "terminalStreamItem",
+        "terminalListStreamItem",
+        "terminalRenameParams",
         "terminalCreateParams",
         "terminalIdParams",
+        "terminalAttachParams",
+        "terminalDetachParams",
         "terminalWriteParams",
         "terminalResizeParams"
       ],

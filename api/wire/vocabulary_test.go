@@ -35,8 +35,9 @@ var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
 	"InstanceStatus":         {"../../internal/provider", "InstanceStatus"},
 	"AuthStatus":             {"../../internal/provider", "AuthStatus"},
 	"ModelSwitchSupport":     {"../../internal/provider", "ModelSwitchSupport"},
-	"TerminalStatus":         {"../../internal/terminal", "Status"},
-	"TerminalStreamItemKind": {"../../internal/terminal", "StreamItemKind"},
+	"TerminalStatus":             {"../../internal/terminal", "Status"},
+	"TerminalStreamItemKind":     {"../../internal/terminal", "StreamItemKind"},
+	"TerminalListStreamItemKind": {".", "TerminalListStreamItemKind"},
 }
 
 // Adding a constant without registering it would ship a value no generated

@@ -70,8 +70,12 @@ type contract struct {
 	TerminalSummary             wire.TerminalSummary             `json:"terminalSummary"`
 	TerminalAttachSnapshot      wire.TerminalAttachSnapshot      `json:"terminalAttachSnapshot"`
 	TerminalStreamItem          wire.TerminalStreamItem          `json:"terminalStreamItem"`
+	TerminalListStreamItem      wire.TerminalListStreamItem      `json:"terminalListStreamItem"`
+	TerminalRenameParams        wire.TerminalRenameParams        `json:"terminalRenameParams"`
 	TerminalCreateParams        wire.TerminalCreateParams        `json:"terminalCreateParams"`
 	TerminalIDParams            wire.TerminalIDParams            `json:"terminalIdParams"`
+	TerminalAttachParams        wire.TerminalAttachParams        `json:"terminalAttachParams"`
+	TerminalDetachParams        wire.TerminalDetachParams        `json:"terminalDetachParams"`
 	TerminalWriteParams         wire.TerminalWriteParams         `json:"terminalWriteParams"`
 	TerminalResizeParams        wire.TerminalResizeParams        `json:"terminalResizeParams"`
 }

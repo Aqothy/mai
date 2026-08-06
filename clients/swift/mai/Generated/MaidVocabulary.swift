@@ -222,3 +222,10 @@ public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable 
     case status = "status"
     case controlRevoked = "control-revoked"
 }
+
+/// Payload discriminator of a terminal.subscribeList snapshot or update.
+public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseIterable {
+    case snapshot = "snapshot"
+    case terminalUpserted = "terminal-upserted"
+    case terminalRemoved = "terminal-removed"
+}

@@ -280,6 +280,15 @@ var Vocabularies = []VocabularyDefinition{
 			string(terminal.StreamItemControlRevoked),
 		),
 	},
+	{
+		Name:        "TerminalListStreamItemKind",
+		Description: "Payload discriminator of a terminal.subscribeList snapshot or update.",
+		Values: values(
+			string(TerminalListItemSnapshot),
+			string(TerminalListItemUpserted),
+			string(TerminalListItemRemoved),
+		),
+	},
 }
 
 // VocabularyDefinition is one closed set of wire string values.

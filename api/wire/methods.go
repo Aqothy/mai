@@ -38,11 +38,18 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachSnapshot"},
+	{Name: MethodTerminalAttach, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
+	{Name: MethodTerminalRelaunch, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
+	{Name: MethodTerminalSubscribeList, Params: "EmptyParams", Result: "TerminalListStreamItem"},
+	{Name: MethodTerminalRename, Params: "TerminalRenameParams", Result: "TerminalSummary"},
 	{Name: MethodTerminalTerminate, Params: "TerminalIDParams", ResultNull: true},
-	// Clients send terminal.write and terminal.resize as notifications; they
-	// are registered here so generated clients can name them.
+	{Name: MethodTerminalDelete, Params: "TerminalIDParams", ResultNull: true},
+	// Clients send terminal.write, terminal.resize, and terminal.detach as
+	// notifications; they are registered here so generated clients can name
+	// them.
 	{Name: MethodTerminalWrite, Params: "TerminalWriteParams", ResultNull: true},
 	{Name: MethodTerminalResize, Params: "TerminalResizeParams", ResultNull: true},
+	{Name: MethodTerminalDetach, Params: "TerminalDetachParams", ResultNull: true},
 }
 
 var Notifications = []NotificationDefinition{
@@ -51,4 +58,5 @@ var Notifications = []NotificationDefinition{
 	{Name: MethodProviderOptionsUpdated, Payload: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
 	{Name: MethodTerminalSubscribe, Payload: "TerminalStreamItem"},
+	{Name: MethodTerminalSubscribeList, Payload: "TerminalListStreamItem"},
 }
