@@ -23,6 +23,7 @@ type SQLite struct {
 var _ RouteStore = (*SQLite)(nil)
 var _ ThreadStore = (*SQLite)(nil)
 var _ ImportStore = (*SQLite)(nil)
+var _ TerminalStore = (*SQLite)(nil)
 
 const schema = `
 CREATE TABLE IF NOT EXISTS threads (
@@ -59,6 +60,14 @@ CREATE TABLE IF NOT EXISTS provider_session_imports (
 	provider_session_id TEXT NOT NULL,
 	thread_id           TEXT NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
 	PRIMARY KEY (instance_id, provider_session_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS terminal_threads (
+	terminal_id TEXT PRIMARY KEY,
+	title       TEXT NOT NULL DEFAULT '',
+	cwd         TEXT NOT NULL,
+	created_at  TEXT NOT NULL,
+	updated_at  TEXT NOT NULL
 ) STRICT;
 `
 
@@ -389,6 +398,55 @@ func (s *SQLite) LoadInstances() ([]provider.InstanceSpec, error) {
 		return nil, fmt.Errorf("store: load instances: %w", err)
 	}
 	return specs, nil
+}
+
+func (s *SQLite) UpsertTerminal(meta TerminalMeta) error {
+	if meta.TerminalID == "" {
+		return fmt.Errorf("store: upsert terminal requires a terminal id")
+	}
+	_, err := s.db.Exec(`INSERT INTO terminal_threads (terminal_id, title, cwd, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (terminal_id) DO UPDATE SET
+			title = excluded.title,
+			cwd = excluded.cwd,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at`,
+		meta.TerminalID, meta.Title, meta.Cwd, timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("store: upsert terminal %q: %w", meta.TerminalID, err)
+	}
+	return nil
+}
+
+func (s *SQLite) DeleteTerminal(terminalID string) error {
+	if _, err := s.db.Exec(`DELETE FROM terminal_threads WHERE terminal_id = ?`, terminalID); err != nil {
+		return fmt.Errorf("store: delete terminal %q: %w", terminalID, err)
+	}
+	return nil
+}
+
+func (s *SQLite) ListTerminals() ([]TerminalMeta, error) {
+	rows, err := s.db.Query(`SELECT terminal_id, title, cwd, created_at, updated_at
+		FROM terminal_threads ORDER BY updated_at DESC, terminal_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list terminals: %w", err)
+	}
+	defer rows.Close()
+	var terminals []TerminalMeta
+	for rows.Next() {
+		var meta TerminalMeta
+		var createdAt, updatedAt string
+		if err := rows.Scan(&meta.TerminalID, &meta.Title, &meta.Cwd, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan terminal: %w", err)
+		}
+		meta.CreatedAt = parseTimestamp(createdAt)
+		meta.UpdatedAt = parseTimestamp(updatedAt)
+		terminals = append(terminals, meta)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list terminals: %w", err)
+	}
+	return terminals, nil
 }
 
 // timestamp stores times as fixed-width RFC3339 UTC (9 fraction digits) so
