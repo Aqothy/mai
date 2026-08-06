@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/workspacesearch/fff"
@@ -49,8 +50,10 @@ type workspaceIndex struct {
 	finder    fff.Finder
 	createErr error
 
-	scannedMu sync.Mutex
-	scanned   bool
+	// scanned latches initial-scan completion: warm searches check the
+	// atomic and skip the native wait (and its lock) entirely.
+	scanned  atomic.Bool
+	scanWait sync.Mutex
 
 	// lastUsed is guarded by Service.mu.
 	lastUsed time.Time
@@ -183,18 +186,21 @@ func (s *Service) initialize(entry *workspaceIndex) {
 }
 
 // scanComplete reports whether the initial scan has finished, waiting at
-// most until ctx expires. The result is latched so warm queries skip the
-// native wait entirely.
+// most until ctx expires. scanWait keeps concurrent warm-up requests from
+// stacking native waits on one index.
 func (e *workspaceIndex) scanComplete(ctx context.Context) bool {
-	e.scannedMu.Lock()
-	defer e.scannedMu.Unlock()
-	if e.scanned {
+	if e.scanned.Load() {
+		return true
+	}
+	e.scanWait.Lock()
+	defer e.scanWait.Unlock()
+	if e.scanned.Load() {
 		return true
 	}
 	if err := e.finder.WaitReady(ctx); err != nil {
 		return false
 	}
-	e.scanned = true
+	e.scanned.Store(true)
 	return true
 }
 
