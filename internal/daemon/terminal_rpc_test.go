@@ -23,9 +23,10 @@ import (
 type terminalTestClient struct {
 	conn *jsonrpc2.Connection
 
-	mu     sync.Mutex
-	items  []wire.TerminalStreamItem
-	output bytes.Buffer
+	mu        sync.Mutex
+	items     []wire.TerminalStreamItem
+	listItems []wire.TerminalListStreamItem
+	output    bytes.Buffer
 }
 
 func dialTerminalClient(t *testing.T, url string) *terminalTestClient {
@@ -42,20 +43,40 @@ func dialTerminalClient(t *testing.T, url string) *terminalTestClient {
 }
 
 func (c *terminalTestClient) Handle(_ context.Context, req *jsonrpc2.Request) (any, error) {
-	if req.IsCall() || req.Method != RPCMethodTerminalSubscribe {
+	if req.IsCall() {
 		return nil, jsonrpc2.ErrNotHandled
 	}
-	var item wire.TerminalStreamItem
-	if err := jsonUnmarshalParams(req, &item); err != nil {
-		return nil, err
+	switch req.Method {
+	case RPCMethodTerminalSubscribe:
+		var item wire.TerminalStreamItem
+		if err := jsonUnmarshalParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.items = append(c.items, item)
+		if item.Kind == terminal.StreamItemOutput {
+			c.output.Write(item.Data)
+		}
+		return nil, nil
+	case RPCMethodTerminalSubscribeList:
+		var item wire.TerminalListStreamItem
+		if err := jsonUnmarshalParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.listItems = append(c.listItems, item)
+		return nil, nil
+	default:
+		return nil, jsonrpc2.ErrNotHandled
 	}
+}
+
+func (c *terminalTestClient) listItemsSnapshot() []wire.TerminalListStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.items = append(c.items, item)
-	if item.Kind == terminal.StreamItemOutput {
-		c.output.Write(item.Data)
-	}
-	return nil, nil
+	return append([]wire.TerminalListStreamItem(nil), c.listItems...)
 }
 
 func jsonUnmarshalParams(req *jsonrpc2.Request, dst any) error {
@@ -104,7 +125,7 @@ func (c *terminalTestClient) outputLength() int {
 	return c.output.Len()
 }
 
-func (c *terminalTestClient) outputStats() (chunks, bytes int) {
+func (c *terminalTestClient) outputStats() (chunks, bytes, largest int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, item := range c.items {
@@ -113,8 +134,9 @@ func (c *terminalTestClient) outputStats() (chunks, bytes int) {
 		}
 		chunks++
 		bytes += len(item.Data)
+		largest = max(largest, len(item.Data))
 	}
-	return chunks, bytes
+	return chunks, bytes, largest
 }
 
 func (c *terminalTestClient) waitForOutputLength(t *testing.T, minimum int) {
@@ -212,9 +234,11 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	const outputBytes = 5 * 1024 * 1024
+	const preferredBatchBytes = 64 * 1024
+	const maximumNotificationBytes = 64 * 1024
 	// Loose enough for scheduler variation, but strict enough to catch a
 	// regression to publishing nearly every small PTY read independently.
-	const maximumOutputChunks = 64
+	const maximumOutputChunks = outputBytes/preferredBatchBytes + 8
 	started := time.Now()
 	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
@@ -226,12 +250,19 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	})
 	client.waitForOutputLength(t, outputBytes)
 	client.waitForOutput(t, "LARGE-OUTPUT-DONE")
-	chunks, bytes := client.outputStats()
+	chunks, bytes, largest := client.outputStats()
 	if chunks > maximumOutputChunks {
 		t.Fatalf(
 			"5 MiB burst used %d terminal chunks, want at most %d",
 			chunks,
 			maximumOutputChunks,
+		)
+	}
+	if largest > maximumNotificationBytes {
+		t.Fatalf(
+			"largest terminal notification was %d bytes, want at most %d",
+			largest,
+			maximumNotificationBytes,
 		)
 	}
 	t.Logf(
@@ -242,7 +273,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 		time.Since(started).Round(time.Millisecond),
 	)
 
-	// A subsequent command proves the same controller connection remains live
+	// A subsequent command proves the same attached connection remains live
 	// after the output burst instead of being overflow-closed.
 	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
@@ -265,7 +296,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	}
 }
 
-func TestTerminalWriteFromNonControllerIsIgnored(t *testing.T) {
+func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -288,7 +319,7 @@ func TestTerminalWriteFromNonControllerIsIgnored(t *testing.T) {
 	controller.waitForOutput(t, "OWNER-21")
 
 	if controller.outputContains("INTRUDER-21") {
-		t.Fatal("non-controller input reached the PTY")
+		t.Fatal("unattached client input reached the PTY")
 	}
 	if intruder.outputContains("OWNER-21") {
 		t.Fatal("terminal output streamed to a client that never attached")

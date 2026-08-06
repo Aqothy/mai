@@ -42,11 +42,17 @@ const (
 	RPCMethodProviderOptionsGet    = wire.MethodProviderOptionsGet
 	RPCMethodProviderOptionsSet    = wire.MethodProviderOptionsSet
 
-	RPCMethodTerminalCreate    = wire.MethodTerminalCreate
-	RPCMethodTerminalTerminate = wire.MethodTerminalTerminate
-	RPCMethodTerminalWrite     = wire.MethodTerminalWrite
-	RPCMethodTerminalResize    = wire.MethodTerminalResize
-	RPCMethodTerminalSubscribe = wire.MethodTerminalSubscribe
+	RPCMethodTerminalCreate        = wire.MethodTerminalCreate
+	RPCMethodTerminalAttach        = wire.MethodTerminalAttach
+	RPCMethodTerminalRelaunch      = wire.MethodTerminalRelaunch
+	RPCMethodTerminalDetach        = wire.MethodTerminalDetach
+	RPCMethodTerminalRename        = wire.MethodTerminalRename
+	RPCMethodTerminalTerminate     = wire.MethodTerminalTerminate
+	RPCMethodTerminalDelete        = wire.MethodTerminalDelete
+	RPCMethodTerminalWrite         = wire.MethodTerminalWrite
+	RPCMethodTerminalResize        = wire.MethodTerminalResize
+	RPCMethodTerminalSubscribe     = wire.MethodTerminalSubscribe
+	RPCMethodTerminalSubscribeList = wire.MethodTerminalSubscribeList
 )
 
 type providerStartRPCParams = wire.ProviderStartParams
@@ -63,14 +69,16 @@ type providerOptionsSetParams = wire.ProviderOptionsSetParams
 type providerOptionsResult = wire.ProviderOptionsResult
 type terminalCreateParams = wire.TerminalCreateParams
 type terminalIDParams = wire.TerminalIDParams
+type terminalAttachParams = wire.TerminalAttachParams
+type terminalDetachParams = wire.TerminalDetachParams
+type terminalRenameParams = wire.TerminalRenameParams
 type terminalWriteParams = wire.TerminalWriteParams
 type terminalResizeParams = wire.TerminalResizeParams
 
 var nextRPCClientID atomic.Uint64
 
 const (
-	rpcOutboundQueueSize         = 1024
-	terminalOutboundQueueTimeout = 5 * time.Second
+	rpcOutboundQueueSize = 1024
 )
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
@@ -86,9 +94,11 @@ type rpcClient struct {
 	done     chan struct{}
 	closed   atomic.Bool
 
-	subscriptionsMu      sync.Mutex
-	threadSubscriptions  map[orchestration.ThreadID]struct{}
-	threadListSubscribed bool
+	subscriptionsMu        sync.Mutex
+	threadSubscriptions    map[orchestration.ThreadID]struct{}
+	terminalSubscriptions  map[string]struct{}
+	threadListSubscribed   bool
+	terminalListSubscribed bool
 
 	optionsLifecycleMu   sync.Mutex
 	optionsMu            sync.Mutex
@@ -224,7 +234,8 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 	client := &rpcClient{
 		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
-		threadSubscriptions: make(map[orchestration.ThreadID]struct{}),
+		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
+		terminalSubscriptions: make(map[string]struct{}),
 	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
@@ -251,11 +262,8 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	// channel. Queue overflow can close it before socket teardown reaches this
 	// path, and detaching the active sessions makes repeated cleanup harmless.
 	go s.closeClientOptionsSessions(client)
-	// Terminal shells stay alive across client disconnects; only the control
-	// attachment is cleared.
-	if s.terminals != nil {
-		s.terminals.clearControllerFor(client)
-	}
+	// Terminal subscriptions live on the connection and disappear with it;
+	// shells remain alive in the terminal service.
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -326,6 +334,42 @@ func (c *rpcClient) subscribedThreadList() bool {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 	return c.threadListSubscribed
+}
+
+func (c *rpcClient) subscribeTerminalList() {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	c.terminalListSubscribed = true
+}
+
+func (c *rpcClient) subscribedTerminalList() bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	return c.terminalListSubscribed
+}
+
+// subscribeTerminal adds one terminal stream listener and reports whether it
+// was newly added. The result lets failed create/relaunch calls roll back only
+// the subscription they introduced.
+func (c *rpcClient) subscribeTerminal(terminalID string) bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	_, existed := c.terminalSubscriptions[terminalID]
+	c.terminalSubscriptions[terminalID] = struct{}{}
+	return !existed
+}
+
+func (c *rpcClient) unsubscribeTerminal(terminalID string) {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	delete(c.terminalSubscriptions, terminalID)
+}
+
+func (c *rpcClient) subscribedTerminal(terminalID string) bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	_, ok := c.terminalSubscriptions[terminalID]
+	return ok
 }
 
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
@@ -494,6 +538,39 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.server.createTerminal(h.client, params)
+	case RPCMethodTerminalAttach:
+		var params terminalAttachParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.attachTerminal(h.client, params)
+	case RPCMethodTerminalRelaunch:
+		var params terminalAttachParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.relaunchTerminal(h.client, params)
+	case RPCMethodTerminalDetach:
+		var params terminalDetachParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.server.detachTerminal(h.client, params)
+		return nil, nil
+	case RPCMethodTerminalSubscribeList:
+		return h.server.subscribeTerminalList(h.client), nil
+	case RPCMethodTerminalRename:
+		var params terminalRenameParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.renameTerminal(params)
+	case RPCMethodTerminalDelete:
+		var params terminalIDParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.deleteTerminal(params.TerminalID)
 	case RPCMethodTerminalTerminate:
 		var params terminalIDParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -765,30 +842,6 @@ func (c *rpcClient) notify(method string, params any) {
 	case <-c.done:
 	case c.outbound <- rpcOutbound{method: method, params: params}:
 	default:
-		c.overflowClose(method)
-	}
-}
-
-// notifyTerminal preserves the byte stream while keeping memory bounded.
-// A temporary full queue applies normal PTY backpressure; a client that
-// remains blocked past the timeout is disconnected like any other slow
-// consumer. The fast path avoids allocating a timer for normal output.
-func (c *rpcClient) notifyTerminal(method string, params any) {
-	msg := rpcOutbound{method: method, params: params}
-	select {
-	case <-c.done:
-		return
-	case c.outbound <- msg:
-		return
-	default:
-	}
-
-	timer := time.NewTimer(terminalOutboundQueueTimeout)
-	defer timer.Stop()
-	select {
-	case <-c.done:
-	case c.outbound <- msg:
-	case <-timer.C:
 		c.overflowClose(method)
 	}
 }

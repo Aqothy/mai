@@ -68,7 +68,11 @@ func NewServer() *Server {
 func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata, acpRegistry: newACPRegistry()}
-	s.terminals = newTerminalRuntime()
+	var terminalMeta store.TerminalStore
+	if metadata != nil {
+		terminalMeta = metadata
+	}
+	s.terminals = newTerminalRuntime(terminalMeta, logger)
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	if metadata != nil {
