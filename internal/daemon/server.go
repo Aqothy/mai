@@ -48,6 +48,8 @@ type Server struct {
 	threadMetaWriter *threadMetaWriter
 	importMu         sync.Mutex
 
+	terminals *terminalRuntime
+
 	rpcMu      sync.Mutex
 	rpcClients map[string]*rpcClient
 
@@ -66,6 +68,7 @@ func NewServer() *Server {
 func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata, acpRegistry: newACPRegistry()}
+	s.terminals = newTerminalRuntime()
 	s.orchestration = orchestration.NewEngine()
 	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
 	if metadata != nil {
@@ -208,6 +211,11 @@ func (s *Server) doClose() error {
 	}
 	if s.providerService != nil {
 		s.providerService.Close()
+	}
+	// Terminal shells never survive daemon shutdown; wait for every process
+	// group to be cleaned up before releasing clients and the store.
+	if s.terminals != nil {
+		s.terminals.close()
 	}
 
 	s.rpcMu.Lock()

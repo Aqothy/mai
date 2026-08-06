@@ -41,6 +41,12 @@ const (
 	RPCMethodProviderCloseSession  = wire.MethodProviderCloseSession
 	RPCMethodProviderOptionsGet    = wire.MethodProviderOptionsGet
 	RPCMethodProviderOptionsSet    = wire.MethodProviderOptionsSet
+
+	RPCMethodTerminalCreate    = wire.MethodTerminalCreate
+	RPCMethodTerminalTerminate = wire.MethodTerminalTerminate
+	RPCMethodTerminalWrite     = wire.MethodTerminalWrite
+	RPCMethodTerminalResize    = wire.MethodTerminalResize
+	RPCMethodTerminalSubscribe = wire.MethodTerminalSubscribe
 )
 
 type providerStartRPCParams = wire.ProviderStartParams
@@ -55,10 +61,17 @@ type providerImportSessionResult = wire.ProviderImportSessionResult
 type providerOptionsGetParams = wire.ProviderOptionsGetParams
 type providerOptionsSetParams = wire.ProviderOptionsSetParams
 type providerOptionsResult = wire.ProviderOptionsResult
+type terminalCreateParams = wire.TerminalCreateParams
+type terminalIDParams = wire.TerminalIDParams
+type terminalWriteParams = wire.TerminalWriteParams
+type terminalResizeParams = wire.TerminalResizeParams
 
 var nextRPCClientID atomic.Uint64
 
-const rpcOutboundQueueSize = 1024
+const (
+	rpcOutboundQueueSize         = 1024
+	terminalOutboundQueueTimeout = 5 * time.Second
+)
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
 // attachments are the big case). Outbound frames are unaffected.
@@ -238,6 +251,11 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	// channel. Queue overflow can close it before socket teardown reaches this
 	// path, and detaching the active sessions makes repeated cleanup harmless.
 	go s.closeClientOptionsSessions(client)
+	// Terminal shells stay alive across client disconnects; only the control
+	// attachment is cleared.
+	if s.terminals != nil {
+		s.terminals.clearControllerFor(client)
+	}
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -255,6 +273,13 @@ func (c *rpcClient) overflowClose(what string) {
 	}
 }
 
+func (c *rpcClient) outboundWriteFailed(method string, err error) {
+	if c.closeOutbound() {
+		c.logger.Warn("client notification failed; closing connection", "method", method, "error", err)
+		go func() { _ = c.conn.Close() }()
+	}
+}
+
 func (c *rpcClient) writeOutbound() {
 	for {
 		select {
@@ -263,7 +288,9 @@ func (c *rpcClient) writeOutbound() {
 		case msg := <-c.outbound:
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := c.conn.Notify(ctx, msg.method, msg.params); err != nil {
-				c.logger.Warn("client notification failed", "method", msg.method, "error", err)
+				cancel()
+				c.outboundWriteFailed(msg.method, err)
+				return
 			}
 			cancel()
 		}
@@ -461,6 +488,30 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.setProviderOption(ctx, params)
+	case RPCMethodTerminalCreate:
+		var params terminalCreateParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.createTerminal(h.client, params)
+	case RPCMethodTerminalTerminate:
+		var params terminalIDParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.terminateTerminal(params.TerminalID)
+	case RPCMethodTerminalWrite:
+		var params terminalWriteParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.writeTerminal(h.client, params)
+	case RPCMethodTerminalResize:
+		var params terminalResizeParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.resizeTerminal(h.client, params)
 	default:
 		return nil, jsonrpc2.ErrNotHandled
 	}
@@ -714,6 +765,30 @@ func (c *rpcClient) notify(method string, params any) {
 	case <-c.done:
 	case c.outbound <- rpcOutbound{method: method, params: params}:
 	default:
+		c.overflowClose(method)
+	}
+}
+
+// notifyTerminal preserves the byte stream while keeping memory bounded.
+// A temporary full queue applies normal PTY backpressure; a client that
+// remains blocked past the timeout is disconnected like any other slow
+// consumer. The fast path avoids allocating a timer for normal output.
+func (c *rpcClient) notifyTerminal(method string, params any) {
+	msg := rpcOutbound{method: method, params: params}
+	select {
+	case <-c.done:
+		return
+	case c.outbound <- msg:
+		return
+	default:
+	}
+
+	timer := time.NewTimer(terminalOutboundQueueTimeout)
+	defer timer.Stop()
+	select {
+	case <-c.done:
+	case c.outbound <- msg:
+	case <-timer.C:
 		c.overflowClose(method)
 	}
 }
