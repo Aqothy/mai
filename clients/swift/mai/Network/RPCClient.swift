@@ -1,7 +1,10 @@
 import Foundation
 
 final class RPCClient {
+    private static let notificationQueueLimit = 1_024
+
     var onNotification: ((String, Data) -> Void)?
+    var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
     private let endpoint: URL
@@ -10,6 +13,8 @@ final class RPCClient {
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
     private var pendingRequests: [Int: CheckedContinuation<Data, any Error>] = [:]
+    private var notifyContinuation: AsyncStream<String>.Continuation?
+    private var notifyTask: Task<Void, Never>?
 
     init(
         endpoint: URL? = nil,
@@ -41,6 +46,24 @@ final class RPCClient {
         receiveTask = Task { [weak self] in
             await self?.receiveMessages(from: socket)
         }
+
+        // One consumer drains notifications sequentially so fire-and-forget
+        // sends (terminal input, resize) keep their order on the wire.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: String.self,
+            bufferingPolicy: .bufferingOldest(Self.notificationQueueLimit)
+        )
+        notifyContinuation = continuation
+        notifyTask = Task { [weak self] in
+            for await text in stream {
+                do {
+                    try await socket.send(.string(text))
+                } catch {
+                    self?.finishConnection(socket, error: error)
+                    break
+                }
+            }
+        }
     }
 
     func disconnect() {
@@ -67,6 +90,33 @@ final class RPCClient {
             )
         }
         return result
+    }
+
+    /// Sends a JSON-RPC notification: no id and no response. Payloads are
+    /// encoded inline (they are small, unlike attachment-heavy calls) and
+    /// delivered in call order. Transport failures close the connection and
+    /// surface through `onDisconnect`.
+    func notify<Params: Encodable>(_ method: String, params: Params) {
+        guard webSocket != nil, let continuation = notifyContinuation else { return }
+        guard let text = try? Self.encodeInline(NotificationRequest(method: method, params: params)) else {
+            return
+        }
+        switch continuation.yield(text) {
+        case .enqueued, .terminated:
+            break
+        case .dropped:
+            guard let socket = webSocket else { return }
+            finishConnection(
+                socket,
+                error: RPCError(
+                    code: nil,
+                    message: "Client notification queue is full",
+                    data: nil
+                )
+            )
+        @unknown default:
+            break
+        }
     }
 
     func callVoid<Params: Encodable>(
@@ -190,8 +240,13 @@ final class RPCClient {
                     )
                 }
 
-                let route = try await Self.decode(Route.self, from: data)
-                routeMessage(route, data: data)
+                if onTerminalStreamItem != nil {
+                    let envelope = try await Self.decode(TerminalEnvelope.self, from: data)
+                    routeTerminalEnvelope(envelope, data: data)
+                } else {
+                    let route = try await Self.decode(Route.self, from: data)
+                    routeMessage(route, data: data)
+                }
             }
         } catch is CancellationError {
             finishConnection(socket, error: nil)
@@ -208,13 +263,42 @@ final class RPCClient {
         }
     }
 
+    private func routeTerminalEnvelope(_ envelope: TerminalEnvelope, data: Data) {
+        if let id = envelope.id {
+            pendingRequests.removeValue(forKey: id)?.resume(returning: data)
+        } else if envelope.method == MaidRPCMethod.terminalSubscribe,
+                  let item = envelope.params {
+            onTerminalStreamItem?(item)
+        } else if let method = envelope.method {
+            onNotification?(method, data)
+        }
+    }
+
     private func cancelRequest(_ id: Int) {
         pendingRequests.removeValue(forKey: id)?.resume(throwing: CancellationError())
+    }
+
+    nonisolated private static func encodeInline<Value: Encodable>(_ value: Value) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(value)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw RPCError(
+                code: nil,
+                message: "Could not encode the JSON-RPC notification",
+                data: nil
+            )
+        }
+        return text
     }
 
     private func finishConnection(_ socket: URLSessionWebSocketTask, error: Error?) {
         guard webSocket === socket else { return }
 
+        notifyTask?.cancel()
+        notifyContinuation?.finish()
+        notifyTask = nil
+        notifyContinuation = nil
         receiveTask?.cancel()
         socket.cancel(with: .goingAway, reason: nil)
         webSocket = nil
@@ -241,9 +325,41 @@ final class RPCClient {
         let params: Params
     }
 
+    nonisolated private struct NotificationRequest<Params: Encodable>: Encodable {
+        let jsonrpc = "2.0"
+        let method: String
+        let params: Params
+    }
+
     nonisolated private struct Route: Decodable {
         let id: Int?
         let method: String?
+    }
+
+    /// Terminal connections decode their notification payload in the same
+    /// pass as the JSON-RPC route, avoiding a second parse of every output
+    /// frame. Malformed terminal output fails the connection instead of being
+    /// silently dropped, because one missing escape sequence can corrupt the
+    /// rendered screen.
+    nonisolated private struct TerminalEnvelope: Decodable, Sendable {
+        let id: Int?
+        let method: String?
+        let params: TerminalStreamMessage?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, method, params
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(Int.self, forKey: .id)
+            method = try container.decodeIfPresent(String.self, forKey: .method)
+            if method == MaidRPCMethod.terminalSubscribe {
+                params = try container.decode(TerminalStreamMessage.self, forKey: .params)
+            } else {
+                params = nil
+            }
+        }
     }
 
     nonisolated private struct Response<Result: Decodable>: Decodable {

@@ -44,6 +44,17 @@ struct IOSCompactAppContainer: View {
                     )
                 }
             }
+            .toolbar {
+                if TerminalLab.isEnabled {
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink {
+                            TerminalDevView()
+                        } label: {
+                            Label("Terminal", systemImage: "terminal")
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: path, initial: true) { _, path in
             if path.isEmpty {
