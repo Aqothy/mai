@@ -176,7 +176,14 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 
 	rt.persist(entry, s.logger)
 	session.SetAttached(true)
-	snapshot := s.terminalAttachSnapshot(entry, session)
+	snapshot, err := s.terminalAttachSnapshot(entry, session)
+	if err != nil {
+		client.unsubscribeTerminal(terminalID)
+		session.SetAttached(false)
+		entry.operations.Unlock()
+		s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
+		return wire.TerminalAttachSnapshot{}, err
+	}
 	entry.operations.Unlock()
 	s.publishTerminalListUpsert(snapshot.Terminal)
 	s.logger.Info("terminal created", "terminal", terminalID, "run", session.RunID, "client", client.id,
@@ -210,22 +217,31 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
 	}
 
-	client.subscribeTerminal(params.TerminalID)
-	// Attaching acknowledges a pending done state so the row returns to its
-	// current live activity once someone has looked at the result.
-	session.SetAttached(true)
-	snapshot := s.terminalAttachSnapshot(entry, session)
+	addedSubscription := client.subscribeTerminal(params.TerminalID)
+	// Resize before capturing the snapshot: the attach model reflows to the
+	// caller's grid first, so the native snapshot paints current state at
+	// exactly the grid the client renders — the mis-wrap class raw replay
+	// suffered cannot occur. The snapshot's grid matching the request also
+	// keeps the client from immediately re-sending the same resize.
 	if err := session.Resize(params.Columns, params.Rows); err != nil {
-		if !errors.Is(err, terminal.ErrNotRunning) {
-			s.logger.Warn("terminal attach resize failed", "terminal", params.TerminalID, "error", err)
+		if addedSubscription {
+			client.unsubscribeTerminal(params.TerminalID)
 		}
-	} else {
-		// Replay and sequence intentionally describe the pre-resize attach
-		// point, while the returned metadata describes the grid now installed
-		// on the PTY. This prevents the client from sending the same resize a
-		// second time immediately after applying the snapshot.
-		snapshot.Terminal.Columns = params.Columns
-		snapshot.Terminal.Rows = params.Rows
+		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
+		entry.operations.Unlock()
+		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal attach resize: %w", err)
+	}
+	// A successful attach acknowledges a pending done state, so the row
+	// returns to its live activity once someone has looked at the result.
+	session.SetAttached(true)
+	snapshot, err := s.terminalAttachSnapshot(entry, session)
+	if err != nil {
+		if addedSubscription {
+			client.unsubscribeTerminal(params.TerminalID)
+		}
+		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
+		entry.operations.Unlock()
+		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
 	s.logger.Info("terminal attached", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
@@ -275,18 +291,26 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	rt.persist(entry, s.logger)
 
 	session.SetAttached(true)
-	snapshot := s.terminalAttachSnapshot(entry, session)
-	entry.operations.Unlock()
 	// Existing listeners need one explicit new-run signal even when the fresh
 	// shell has not produced output yet. Their clients reattach for a snapshot;
-	// the caller already awaiting this response simply buffers and deduplicates
-	// the signal by sequence.
+	// the caller already awaiting this response buffers and deduplicates it.
 	s.publishTerminalStreamItem(params.TerminalID, wire.TerminalStreamItem{
 		Kind:       terminal.StreamItemStatus,
 		TerminalID: params.TerminalID,
 		RunID:      session.RunID,
 		Status:     terminal.StatusRunning,
 	})
+	snapshot, err := s.terminalAttachSnapshot(entry, session)
+	if err != nil {
+		if addedSubscription {
+			client.unsubscribeTerminal(params.TerminalID)
+		}
+		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
+		entry.operations.Unlock()
+		s.publishTerminalListUpsert(s.terminalListSummary(params.TerminalID, entry))
+		return wire.TerminalAttachSnapshot{}, err
+	}
+	entry.operations.Unlock()
 	s.publishTerminalListUpsert(snapshot.Terminal)
 	s.logger.Info("terminal relaunched", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
 		"columns", params.Columns, "rows", params.Rows)
@@ -314,21 +338,24 @@ func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachPar
 	session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 }
 
-func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.Session) wire.TerminalAttachSnapshot {
-	snapshot := session.Snapshot()
+func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.Session) (wire.TerminalAttachSnapshot, error) {
+	snapshot, err := session.Snapshot()
+	if err != nil {
+		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal attach snapshot: %w", err)
+	}
 	summary := s.terminalMetaSummary(entry)
 	summary.Status = snapshot.Status
-	summary.Columns = snapshot.Columns
-	summary.Rows = snapshot.Rows
 	summary.ExitCode = snapshot.ExitCode
 	applyAgentReport(&summary, session.AgentReport())
 	return wire.TerminalAttachSnapshot{
-		Terminal:        summary,
-		RunID:           snapshot.RunID,
-		Sequence:        snapshot.Sequence,
-		Replay:          snapshot.Replay,
-		ReplayTruncated: snapshot.ReplayTruncated,
-	}
+		Terminal:       summary,
+		RunID:          snapshot.RunID,
+		Sequence:       snapshot.Sequence,
+		Columns:        snapshot.Columns,
+		Rows:           snapshot.Rows,
+		SnapshotFormat: snapshot.SnapshotFormat,
+		Snapshot:       snapshot.Data,
+	}, nil
 }
 
 // terminalMetaSummary carries only persisted identity; the caller overlays
@@ -453,7 +480,6 @@ func (s *Server) terminalListSummary(terminalID string, entry *terminalEntry) wi
 	summary := s.terminalMetaSummary(entry)
 	if session, err := s.terminals.service.Get(terminalID); err == nil {
 		summary.Status = session.Status()
-		summary.Columns, summary.Rows = session.Size()
 		if code, ok := session.ExitCode(); ok {
 			summary.ExitCode = &code
 		}
@@ -476,8 +502,9 @@ func applyAgentReport(summary *wire.TerminalSummary, report terminal.AgentReport
 }
 
 // publishTerminalAgentReport fans one changed semantic agent state out as a
-// terminal-list upsert. The detector already deduplicated the report; a stale
-// run's report is dropped by the run check.
+// terminal-list upsert. The detector already deduplicated the report; a
+// stale run's report is dropped by the run check. Only the terminal fence-
+// free locks are taken so the detector may publish from any context.
 func (s *Server) publishTerminalAgentReport(terminalID, runID string, report terminal.AgentReport) {
 	rt := s.terminals
 	if rt == nil {

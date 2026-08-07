@@ -238,8 +238,13 @@ func TestNaturalExitReportsExitCode(t *testing.T) {
 	if err := session.Write([]byte("echo nope\n")); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("write after exit err = %v, want ErrNotRunning", err)
 	}
-	if err := session.Resize(90, 30); !errors.Is(err, ErrNotRunning) {
-		t.Fatalf("resize after exit err = %v, want ErrNotRunning", err)
+	// A naturally exited run rejects input but keeps a passive final model
+	// that can reflow for a later attachment at a different grid.
+	if err := session.Resize(90, 30); err != nil {
+		t.Fatalf("resize retained model after exit: %v", err)
+	}
+	if columns, rows := session.Size(); columns != 90 || rows != 30 {
+		t.Fatalf("size after final-model reflow = %dx%d, want 90x30", columns, rows)
 	}
 }
 
@@ -319,14 +324,14 @@ func TestServiceCloseTerminatesAllSessions(t *testing.T) {
 	}
 }
 
-func TestStartTwiceWhileRunningFails(t *testing.T) {
+func TestStartTwiceFails(t *testing.T) {
 	useQuietZsh(t)
 	svc := NewService()
 	defer svc.Close()
 	startTestSession(t, svc, "t1")
 
-	if _, err := svc.Start("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrAlreadyRunning) {
-		t.Fatalf("second start err = %v, want ErrAlreadyRunning", err)
+	if _, err := svc.Start("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("second start err = %v, want ErrAlreadyExists", err)
 	}
 }
 

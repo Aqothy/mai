@@ -172,7 +172,7 @@ func (d *Detector) ObserveOutput(data []byte) {
 func (d *Detector) ResizeScreen(columns, rows uint16) {
 	d.mu.Lock()
 	if d.screen != nil {
-		d.screen.Resize(columns, rows)
+		_ = d.screen.Resize(columns, rows)
 		// Reflow changes the screen contents; rescan once output settles.
 		d.dirty = true
 		d.nudgeRecheckLocked()

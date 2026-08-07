@@ -1232,12 +1232,18 @@
         "sequence": {
           "type": "integer"
         },
-        "replay": {
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "snapshotFormat": {
+          "type": "string"
+        },
+        "snapshot": {
           "type": "string",
           "contentEncoding": "base64"
-        },
-        "replayTruncated": {
-          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -1245,7 +1251,11 @@
       "required": [
         "terminal",
         "runId",
-        "sequence"
+        "sequence",
+        "columns",
+        "rows",
+        "snapshotFormat",
+        "snapshot"
       ],
       "title": "TerminalAttachSnapshot"
     },
@@ -1420,12 +1430,6 @@
         "status": {
           "type": "string"
         },
-        "columns": {
-          "type": "integer"
-        },
-        "rows": {
-          "type": "integer"
-        },
         "exitCode": {
           "type": "integer"
         },
@@ -1458,8 +1462,6 @@
         "title",
         "cwd",
         "status",
-        "columns",
-        "rows",
         "createdAt",
         "updatedAt"
       ],

@@ -22,6 +22,8 @@ const (
 	outputBatchSize         = 64 * 1024
 	outputBatchMaximumDelay = 8 * time.Millisecond
 	outputReadQueueSize     = 32
+	// attachScrollbackBytes bounds the attach model's retained scrollback.
+	attachScrollbackBytes = 2 * 1024 * 1024
 )
 
 // Session is one live PTY run. All mutating operations are serialized on mu;
@@ -40,12 +42,16 @@ type Session struct {
 	seq      uint64
 	exitCode *int
 	events   Events
-	replay   *ReplayBuffer
+	// attachVT is the passive terminal model exported for attach. It retains
+	// bounded scrollback and is fed under mu in sequence order so native
+	// snapshots are atomic with the sequence counter. Nil only after the run's
+	// attach state has been released.
+	attachVT vtscreen.SnapshotScreen
 
 	writeMu sync.Mutex
 
 	// detector derives shared agent state from the same output stream the
-	// clients render. It owns its synchronization and headless screen.
+	// clients render. It lives outside mu; its own lock serializes it.
 	detector *Detector
 
 	// done closes after the child has been reaped and the PTY closed.
@@ -86,20 +92,28 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		columns:    spec.Columns,
 		rows:       spec.Rows,
 		events:     events,
-		replay:     NewReplayBuffer(),
 		done:       make(chan struct{}),
 	}
+
+	// The attach model is the source of attach state; a session cannot run
+	// without it. Failure here means a misbuilt daemon, not a user error.
+	attachVT, err := vtscreen.NewSnapshot(spec.Columns, spec.Rows, attachScrollbackBytes)
+	if err != nil {
+		return nil, fmt.Errorf("terminal attach model: %w", err)
+	}
+	s.attachVT = attachVT
 
 	// creack/pty starts the child with Setsid, so the shell leads its own
 	// session and process group; group signals reach every descendant.
 	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: spec.Rows, Cols: spec.Columns})
 	if err != nil {
+		attachVT.Close()
 		return nil, fmt.Errorf("spawn %s: %w", shell, err)
 	}
 	s.ptyFile = ptyFile
 	s.status = StatusRunning
 	// A failed detection screen degrades to process and OSC evidence; the
-	// terminal itself remains usable.
+	// terminal itself is unaffected.
 	screen, screenErr := vtscreen.New(spec.Columns, spec.Rows)
 	if screenErr != nil {
 		screen = nil
@@ -201,9 +215,12 @@ drainReads:
 		s.exitCode = &code
 	}
 	if s.status == StatusStopped {
-		// Explicit termination discards replay; a natural exit keeps it
-		// viewable until relaunch, delete, or daemon shutdown.
-		s.replay.Reset()
+		// Explicit termination discards attach state; a natural exit keeps
+		// it viewable until relaunch, delete, or daemon shutdown.
+		if s.attachVT != nil {
+			s.attachVT.Close()
+			s.attachVT = nil
+		}
 	}
 	status := s.status
 	exitPtr := s.exitCode
@@ -211,10 +228,10 @@ drainReads:
 	seq := s.seq
 	s.mu.Unlock()
 
-	// Stop foreground probes before closing the PTY. Stop also clears the
-	// transient report so an exited terminal cannot remain visually working.
+	// The detector stops before the PTY closes so its foreground probes
+	// never race a closing descriptor. Its last report stays readable for
+	// list summaries until relaunch or delete replaces the session.
 	s.detector.Stop()
-
 	_ = s.ptyFile.Close()
 	close(s.done)
 	if s.events.Exit != nil {
@@ -246,48 +263,69 @@ func (s *Session) publishOutput(data []byte) {
 	s.mu.Lock()
 	s.seq++
 	seq := s.seq
-	// Retaining the chunk under the same lock that assigns its sequence
-	// makes Snapshot atomic: replay always ends exactly at the snapshot
-	// sequence, so an attach can neither lose nor duplicate output. Replay
-	// stores the raw byte stream; the client renders it behind an input
-	// barrier so historical device queries cannot generate new PTY input.
-	s.replay.Append(data)
+	// Feeding the attach model under the same lock that assigns its
+	// sequence makes Snapshot atomic: attach state always describes exactly
+	// the snapshot sequence, so an attach can neither lose nor duplicate
+	// output.
+	if s.attachVT != nil {
+		s.attachVT.Feed(data)
+	}
 	s.mu.Unlock()
-	// Detection receives the original bytes in order, before client fanout.
+	// The detector sees the original bytes once, in output order, before
+	// client fanout; both sides parse the same stream independently.
 	s.detector.ObserveOutput(data)
-
 	if s.events.Output != nil {
 		s.events.Output(s.TerminalID, s.RunID, seq, data)
 	}
 }
 
-// Snapshot is the authoritative attach point for one run. Clients apply the
-// replay bytes, then consume only live items with a greater sequence.
+// Snapshot is the authoritative attach point for one run. Data is a complete
+// native Ghostty model captured atomically at Sequence; clients restore it
+// before applying live items with a greater sequence.
 type Snapshot struct {
-	RunID           string
-	Sequence        uint64
-	Status          Status
-	Columns         uint16
-	Rows            uint16
-	ExitCode        *int
-	Replay          []byte
-	ReplayTruncated bool
+	RunID          string
+	Sequence       uint64
+	Status         Status
+	Columns        uint16
+	Rows           uint16
+	ExitCode       *int
+	SnapshotFormat string
+	Data           []byte
 }
 
-// Snapshot atomically captures replay state and the last assigned sequence.
-func (s *Session) Snapshot() Snapshot {
+// Snapshot atomically captures attach state and the last assigned sequence.
+func (s *Session) Snapshot() (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Snapshot{
-		RunID:           s.RunID,
-		Sequence:        s.seq,
-		Status:          s.status,
-		Columns:         s.columns,
-		Rows:            s.rows,
-		ExitCode:        s.exitCode,
-		Replay:          s.replay.Bytes(),
-		ReplayTruncated: s.replay.Truncated(),
+	snapshot := Snapshot{
+		RunID:    s.RunID,
+		Sequence: s.seq,
+		Status:   s.status,
+		Columns:  s.columns,
+		Rows:     s.rows,
+		ExitCode: s.exitCode,
 	}
+	if s.attachVT == nil {
+		return snapshot, ErrNotRunning
+	}
+	data, err := s.attachVT.Snapshot()
+	if err != nil {
+		return snapshot, fmt.Errorf("terminal snapshot encode: %w", err)
+	}
+	snapshot.SnapshotFormat = GhosttySnapshotFormat
+	snapshot.Data = data
+	return snapshot, nil
+}
+
+// Release frees the attach model's native resources once no future attach
+// can need them: after relaunch, removal, or service shutdown. Idempotent.
+func (s *Session) Release() {
+	s.mu.Lock()
+	if s.attachVT != nil {
+		s.attachVT.Close()
+		s.attachVT = nil
+	}
+	s.mu.Unlock()
 }
 
 // Write sends input bytes to the shell.
@@ -308,26 +346,38 @@ func (s *Session) Write(data []byte) error {
 	return nil
 }
 
-// Resize applies a changed grid size to the PTY. Unchanged dimensions are
-// deduplicated and not re-applied.
+// Resize applies a changed grid size to a running PTY and its passive models.
+// After a natural exit, the retained attach model can still reflow to an
+// attaching client's grid even though there is no longer a PTY to resize.
+// Unchanged dimensions are deduplicated and not re-applied.
 func (s *Session) Resize(columns, rows uint16) error {
 	if err := ValidateSize(columns, rows); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.status != StatusRunning {
+	if s.status != StatusRunning && (s.status != StatusExited || s.attachVT == nil) {
 		return ErrNotRunning
 	}
 	if s.columns == columns && s.rows == rows {
 		return nil
 	}
-	if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
-		return fmt.Errorf("terminal resize: %w", err)
+	if s.status == StatusRunning {
+		if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
+			return fmt.Errorf("terminal resize: %w", err)
+		}
+	}
+	if s.attachVT != nil {
+		if err := s.attachVT.Resize(columns, rows); err != nil {
+			return fmt.Errorf("terminal model resize: %w", err)
+		}
 	}
 	s.columns = columns
 	s.rows = rows
-	s.detector.ResizeScreen(columns, rows)
+	// The detector is relevant only while the run is live.
+	if s.status == StatusRunning {
+		s.detector.ResizeScreen(columns, rows)
+	}
 	return nil
 }
 
@@ -407,8 +457,8 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 // AgentReport returns the run's last published agent state.
 func (s *Session) AgentReport() AgentReport { return s.detector.Report() }
 
-// SetAttached tells the detector whether any client is attached. Attaching
-// acknowledges a pending done state.
+// SetAttached tells the run's detector whether any client is attached.
+// Attaching acknowledges a pending done state.
 func (s *Session) SetAttached(attached bool) { s.detector.SetAttached(attached) }
 
 // PID exposes the shell leader's pid for tests.

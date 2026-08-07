@@ -68,8 +68,6 @@ type TerminalSummary struct {
 	Title      string         `json:"title"`
 	Cwd        string         `json:"cwd"`
 	Status     TerminalStatus `json:"status"`
-	Columns    uint16         `json:"columns"`
-	Rows       uint16         `json:"rows"`
 	ExitCode   *int           `json:"exitCode,omitempty"`
 	CreatedAt  time.Time      `json:"createdAt"`
 	UpdatedAt  time.Time      `json:"updatedAt"`
@@ -86,14 +84,18 @@ type TerminalSummary struct {
 }
 
 // TerminalAttachSnapshot is the authoritative attach point for one run.
-// Clients apply the replay bytes, then consume only live output items whose
-// run ID matches and whose sequence is greater than Sequence.
+// Snapshot is a complete native Ghostty terminal model captured at Sequence
+// and Columns by Rows. Clients must validate SnapshotFormat, install Snapshot
+// transactionally, then consume only live output whose run ID matches and
+// whose sequence is greater than Sequence.
 type TerminalAttachSnapshot struct {
-	Terminal        TerminalSummary `json:"terminal"`
-	RunID           string          `json:"runId"`
-	Sequence        uint64          `json:"sequence"`
-	Replay          []byte          `json:"replay,omitempty"`
-	ReplayTruncated bool            `json:"replayTruncated,omitempty"`
+	Terminal       TerminalSummary `json:"terminal"`
+	RunID          string          `json:"runId"`
+	Sequence       uint64          `json:"sequence"`
+	Columns        uint16          `json:"columns"`
+	Rows           uint16          `json:"rows"`
+	SnapshotFormat string          `json:"snapshotFormat"`
+	Snapshot       []byte          `json:"snapshot"`
 }
 
 // TerminalStreamItem is one terminal.subscribe notification payload.

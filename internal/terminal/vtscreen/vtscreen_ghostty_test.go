@@ -71,7 +71,9 @@ func TestScreenFollowsAlternateScreen(t *testing.T) {
 func TestScreenResizeKeepsFormatting(t *testing.T) {
 	s := newTestScreen(t)
 	s.Feed([]byte("before resize\r\n"))
-	s.Resize(120, 40)
+	if err := s.Resize(120, 40); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
 	s.Feed([]byte("after resize"))
 	got := text(t, s)
 	if !strings.Contains(got, "after resize") {

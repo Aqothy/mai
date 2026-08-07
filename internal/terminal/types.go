@@ -36,6 +36,7 @@ var (
 	ErrInvalidCwd        = errors.New("terminal cwd is not an existing directory")
 	ErrInvalidDimensions = errors.New("terminal dimensions out of range")
 	ErrNotRunning        = errors.New("terminal is not running")
+	ErrAlreadyExists     = errors.New("terminal session already exists; use relaunch")
 	ErrAlreadyRunning    = errors.New("terminal already has a live run")
 	ErrServiceClosed     = errors.New("terminal service is closed")
 )
@@ -48,9 +49,13 @@ const (
 	StreamItemOutput StreamItemKind = "output"
 	// StreamItemStatus reports a lifecycle status change for a run.
 	StreamItemStatus StreamItemKind = "status"
-	// StreamItemControlRevoked tells a client another attachment took control.
-	StreamItemControlRevoked StreamItemKind = "control-revoked"
 )
+
+// GhosttySnapshotFormat identifies the exact native snapshot contract shared
+// by the daemon and client binary. GHOSTSNP v1 is intentionally not stable
+// across arbitrary Ghostty revisions, so compatibility is pinned to the core
+// commit used by both builds.
+const GhosttySnapshotFormat = "ghostty-gsn-v1-7a9c369cf5da72d41946f683c48b0466a210cb7e"
 
 const (
 	minColumns = 2

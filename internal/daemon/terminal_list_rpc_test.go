@@ -4,6 +4,7 @@ package daemon
 // rename/terminate/delete actions.
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 	"time"
@@ -134,6 +135,14 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 		TerminalID: created.Terminal.TerminalID,
 		Title:      "Survivor",
 	}, nil)
+	// A distinctive marker proves later that no pre-restart output can
+	// reach a post-restart attach.
+	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+		TerminalID: created.Terminal.TerminalID,
+		RunID:      created.RunID,
+		Data:       []byte("printf 'OLD-RUN-%d\\n' $((100+23))\n"),
+	})
+	client.waitForOutput(t, "OLD-RUN-123")
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -173,7 +182,9 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	if relaunched.RunID == created.RunID {
 		t.Fatal("relaunch after restart reused the old run id")
 	}
-	if len(relaunched.Replay) != 0 {
+	// A native snapshot of the fresh shell carries terminal state, but never
+	// the previous run's output.
+	if bytes.Contains(relaunched.Snapshot, []byte("OLD-RUN-123")) {
 		t.Fatal("old output survived the daemon restart")
 	}
 }

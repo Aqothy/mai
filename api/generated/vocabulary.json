@@ -262,8 +262,7 @@
       "description": "Payload discriminator of a terminal.subscribe notification.",
       "values": [
         "output",
-        "status",
-        "control-revoked"
+        "status"
       ]
     },
     {

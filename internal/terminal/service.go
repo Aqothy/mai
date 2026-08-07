@@ -22,19 +22,17 @@ func NewService() *Service {
 	return &Service{sessions: make(map[string]*Session)}
 }
 
-// Start spawns the login shell for terminalID. A terminal has at most one
-// live run; starting over an ended run replaces it, starting over a live run
-// fails with ErrAlreadyRunning.
+// Start spawns the first login shell for terminalID. An existing session is
+// never replaced implicitly; callers must use Relaunch for that lifecycle
+// transition.
 func (svc *Service) Start(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	if svc.closed {
 		return nil, ErrServiceClosed
 	}
-	if existing, ok := svc.sessions[terminalID]; ok {
-		if status := existing.Status(); status == StatusStarting || status == StatusRunning {
-			return nil, ErrAlreadyRunning
-		}
+	if svc.sessions[terminalID] != nil {
+		return nil, ErrAlreadyExists
 	}
 	session, err := startSession(terminalID, spec, events)
 	if err != nil {
@@ -57,7 +55,7 @@ func (svc *Service) Get(terminalID string) (*Session, error) {
 
 // Relaunch replaces a terminal's run with a fresh shell: any live process
 // group is killed first, then a new session starts with a new run ID, a reset
-// sequence, and an empty replay buffer. Events from the old run keep their old
+// sequence, and an empty attach model. Events from the old run keep their old
 // run ID and cannot affect the new shell.
 func (svc *Service) Relaunch(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
 	svc.mu.Lock()
@@ -72,6 +70,7 @@ func (svc *Service) Relaunch(terminalID string, spec SpawnSpec, events Events) (
 	// service lock.
 	if existing != nil {
 		existing.Terminate(terminateGrace)
+		existing.Release()
 	}
 
 	svc.mu.Lock()
@@ -111,6 +110,7 @@ func (svc *Service) Remove(terminalID string) error {
 		return ErrNotFound
 	}
 	session.Terminate(terminateGrace)
+	session.Release()
 	return nil
 }
 
@@ -139,6 +139,7 @@ func (svc *Service) Close() {
 		go func(s *Session) {
 			defer wg.Done()
 			s.Terminate(terminateGrace)
+			s.Release()
 		}(session)
 	}
 	wg.Wait()

@@ -8,32 +8,41 @@ import (
 	"time"
 )
 
-func TestSnapshotReplayEndsAtSnapshotSequence(t *testing.T) {
+func mustSessionSnapshot(t *testing.T, session *Session) Snapshot {
+	t.Helper()
+	snapshot, err := session.Snapshot()
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return snapshot
+}
+
+func TestNativeSnapshotEndsAtSnapshotSequence(t *testing.T) {
 	useQuietZsh(t)
 	svc := NewService()
 	defer svc.Close()
 	session, c := startTestSession(t, svc, "t1")
 
-	if err := session.Write([]byte("printf 'REPLAY-%d\\n' $((100+1))\n")); err != nil {
+	if err := session.Write([]byte("printf 'SNAPSHOT-%d\\n' $((100+1))\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	waitFor(t, "output", func() bool { return c.contains("REPLAY-101") })
+	waitFor(t, "output", func() bool { return c.contains("SNAPSHOT-101") })
 
-	snapshot := session.Snapshot()
+	snapshot := mustSessionSnapshot(t, session)
 	if snapshot.RunID != session.RunID {
 		t.Fatalf("snapshot run id = %s, want %s", snapshot.RunID, session.RunID)
 	}
 	if snapshot.Status != StatusRunning {
 		t.Fatalf("snapshot status = %s, want running", snapshot.Status)
 	}
-	if !bytes.Contains(snapshot.Replay, []byte("REPLAY-101")) {
-		t.Fatal("snapshot replay missing prior output")
+	if snapshot.SnapshotFormat != GhosttySnapshotFormat {
+		t.Fatalf("snapshot format = %q, want %q", snapshot.SnapshotFormat, GhosttySnapshotFormat)
+	}
+	if !bytes.Contains(snapshot.Data, []byte("SNAPSHOT-101")) {
+		t.Fatal("native snapshot missing prior output")
 	}
 	if snapshot.Sequence == 0 {
 		t.Fatal("snapshot sequence not advanced by output")
-	}
-	if snapshot.ReplayTruncated {
-		t.Fatal("small replay reported truncation")
 	}
 	if snapshot.Columns != 80 || snapshot.Rows != 24 {
 		t.Fatalf("snapshot size = %dx%d, want 80x24", snapshot.Columns, snapshot.Rows)
@@ -53,15 +62,14 @@ func TestSnapshotAfterLargeOutputIsCappedAndTruncated(t *testing.T) {
 	}
 	waitFor(t, "burst completion", func() bool { return c.contains("BURST-7007") })
 
-	snapshot := session.Snapshot()
-	if len(snapshot.Replay) > replayBufferLimit {
-		t.Fatalf("replay = %d bytes, want at most the cap", len(snapshot.Replay))
+	snapshot := mustSessionSnapshot(t, session)
+	// The attach model retains bounded scrollback; old lines drop off
+	// silently and the exported model must stay well under the burst size.
+	if len(snapshot.Data) > 3*1024*1024 {
+		t.Fatalf("native snapshot = %d bytes, want bounded", len(snapshot.Data))
 	}
-	if !snapshot.ReplayTruncated {
-		t.Fatal("4 MiB burst did not record truncation")
-	}
-	if !bytes.Contains(snapshot.Replay, []byte("BURST-7007")) {
-		t.Fatal("replay lost the newest output")
+	if !bytes.Contains(snapshot.Data, []byte("BURST-7007")) {
+		t.Fatal("snapshot lost the newest output")
 	}
 	c.mu.Lock()
 	maxChunk := c.maxChunk
@@ -86,26 +94,75 @@ func TestSnapshotSurvivesNaturalExitAndClearsOnTerminate(t *testing.T) {
 		t.Fatal("timed out waiting for exit")
 	}
 
-	snapshot := session.Snapshot()
+	snapshot := mustSessionSnapshot(t, session)
 	if snapshot.Status != StatusExited {
 		t.Fatalf("status = %s, want exited", snapshot.Status)
 	}
 	if snapshot.ExitCode == nil || *snapshot.ExitCode != 7 {
 		t.Fatalf("exit code = %v, want 7", snapshot.ExitCode)
 	}
-	if !bytes.Contains(snapshot.Replay, []byte("BEFORE-EXIT")) {
-		t.Fatal("replay discarded after natural exit")
+	if !bytes.Contains(snapshot.Data, []byte("BEFORE-EXIT")) {
+		t.Fatal("snapshot discarded after natural exit")
 	}
 
-	// Explicit termination of a second session discards its replay.
+	// Explicit termination of a second session discards its snapshot.
 	second, c2 := startTestSession(t, svc, "t2")
 	if err := second.Write([]byte("printf 'SECOND-OUT\\n'\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	waitFor(t, "second output", func() bool { return c2.contains("SECOND-OUT") })
 	second.Terminate(terminateGrace)
-	if replay := second.Snapshot().Replay; len(replay) != 0 {
-		t.Fatalf("terminated session kept %d replay bytes", len(replay))
+	if _, err := second.Snapshot(); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("terminated session snapshot error = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestExitedSnapshotReflowsToAnAttachingGrid(t *testing.T) {
+	useQuietZsh(t)
+	svc := NewService()
+	defer svc.Close()
+	session, c := startTestSession(t, svc, "t1")
+
+	if err := session.Write([]byte("printf 'FINAL-SCREEN\\n'; exit 0\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	select {
+	case <-c.exited:
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for exit")
+	}
+
+	if err := session.Resize(100, 30); err != nil {
+		t.Fatalf("resize retained model: %v", err)
+	}
+	snapshot := mustSessionSnapshot(t, session)
+	if snapshot.Columns != 100 || snapshot.Rows != 30 {
+		t.Fatalf("snapshot size = %dx%d, want 100x30", snapshot.Columns, snapshot.Rows)
+	}
+	if !bytes.Contains(snapshot.Data, []byte("FINAL-SCREEN")) {
+		t.Fatal("reflowed snapshot lost final screen")
+	}
+}
+
+func TestStartDoesNotReplaceExitedSession(t *testing.T) {
+	useQuietZsh(t)
+	svc := NewService()
+	defer svc.Close()
+	exited, collector := startTestSession(t, svc, "t1")
+	if err := exited.Write([]byte("exit 0\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	select {
+	case <-collector.exited:
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for exit")
+	}
+
+	if _, err := svc.Start("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("start over exited session error = %v, want ErrAlreadyExists", err)
+	}
+	if _, err := exited.Snapshot(); err != nil {
+		t.Fatalf("exited snapshot after rejected start: %v", err)
 	}
 }
 
@@ -132,9 +189,9 @@ func TestRelaunchStartsFreshRun(t *testing.T) {
 	if relaunched.RunID == oldRunID {
 		t.Fatal("relaunch reused the old run id")
 	}
-	snapshot := relaunched.Snapshot()
-	if bytes.Contains(snapshot.Replay, []byte("OLD-RUN-OUT")) {
-		t.Fatal("relaunch kept old replay output")
+	snapshot := mustSessionSnapshot(t, relaunched)
+	if bytes.Contains(snapshot.Data, []byte("OLD-RUN-OUT")) {
+		t.Fatal("relaunch kept old snapshot output")
 	}
 	if snapshot.Columns != 90 || snapshot.Rows != 30 {
 		t.Fatalf("relaunch size = %dx%d, want 90x30", snapshot.Columns, snapshot.Rows)

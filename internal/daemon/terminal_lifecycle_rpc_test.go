@@ -1,6 +1,6 @@
 package daemon
 
-// Increment 4 lifecycle tests: reattach replay ordering, detach without
+// Increment 4 lifecycle tests: reattach snapshot ordering, detach without
 // termination, relaunch run fencing, and shared multi-client attachment, all
 // through real WebSocket clients.
 
@@ -37,7 +37,7 @@ func (c *terminalTestClient) itemsAbove(sequence uint64) []wire.TerminalStreamIt
 	return out
 }
 
-func TestTerminalReattachReceivesReplayThenLive(t *testing.T) {
+func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -58,11 +58,11 @@ func TestTerminalReattachReceivesReplayThenLive(t *testing.T) {
 	if attach.RunID != snapshot.RunID {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
 	}
-	if !containsBytes(attach.Replay, "HISTORY-88") {
-		t.Fatal("attach replay missing output produced before attach")
+	if attach.SnapshotFormat != terminal.GhosttySnapshotFormat {
+		t.Fatalf("snapshot format = %q, want %q", attach.SnapshotFormat, terminal.GhosttySnapshotFormat)
 	}
-	if attach.ReplayTruncated {
-		t.Fatal("small replay reported truncation")
+	if !containsBytes(attach.Snapshot, "HISTORY-88") {
+		t.Fatal("attach snapshot missing output produced before attach")
 	}
 
 	// The new listener can write; live output arrives above the snapshot
@@ -96,12 +96,8 @@ func TestTerminalAttachSnapshotReportsAppliedGrid(t *testing.T) {
 		Rows:       31,
 	}, &attached)
 
-	if attached.Terminal.Columns != 96 || attached.Terminal.Rows != 31 {
-		t.Fatalf(
-			"attach grid = %dx%d, want 96x31",
-			attached.Terminal.Columns,
-			attached.Terminal.Rows,
-		)
+	if attached.Columns != 96 || attached.Rows != 31 {
+		t.Fatalf("attach grid = %dx%d, want 96x31", attached.Columns, attached.Rows)
 	}
 }
 
@@ -255,10 +251,10 @@ func TestTerminalDetachKeepsShellRunning(t *testing.T) {
 	if reattach.RunID != snapshot.RunID {
 		t.Fatal("detach terminated the shell")
 	}
-	if !containsBytes(reattach.Replay, "BEFORE-11") {
-		t.Fatal("replay lost pre-detach output")
+	if !containsBytes(reattach.Snapshot, "BEFORE-11") {
+		t.Fatal("snapshot lost pre-detach output")
 	}
-	if containsBytes(reattach.Replay, "DETACHED-12") {
+	if containsBytes(reattach.Snapshot, "DETACHED-12") {
 		t.Fatal("input written while detached reached the PTY")
 	}
 }
@@ -297,8 +293,8 @@ func TestTerminalDisconnectLeavesShellForNextClient(t *testing.T) {
 	if attach.RunID != snapshot.RunID {
 		t.Fatal("client disconnect terminated the shell")
 	}
-	if !containsBytes(attach.Replay, "SURVIVES-33") {
-		t.Fatal("replay lost output across client disconnect")
+	if !containsBytes(attach.Snapshot, "SURVIVES-33") {
+		t.Fatal("snapshot lost output across client disconnect")
 	}
 }
 
@@ -327,8 +323,8 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	if relaunched.RunID == snapshot.RunID {
 		t.Fatal("relaunch reused the old run id")
 	}
-	if containsBytes(relaunched.Replay, "OLDRUN-22") {
-		t.Fatal("relaunch kept the old run's replay")
+	if containsBytes(relaunched.Snapshot, "OLDRUN-22") {
+		t.Fatal("relaunch kept the old run's snapshot")
 	}
 
 	// Stale input carrying the old run id cannot reach the new shell.
@@ -379,7 +375,7 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 	if attach.Terminal.ExitCode == nil || *attach.Terminal.ExitCode != 4 {
 		t.Fatalf("attach exit code = %v, want 4", attach.Terminal.ExitCode)
 	}
-	if !containsBytes(attach.Replay, "FINAL-99") {
+	if !containsBytes(attach.Snapshot, "FINAL-99") {
 		t.Fatal("attach after exit lost the final screen output")
 	}
 }

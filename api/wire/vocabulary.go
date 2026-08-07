@@ -277,7 +277,6 @@ var Vocabularies = []VocabularyDefinition{
 		Values: values(
 			string(terminal.StreamItemOutput),
 			string(terminal.StreamItemStatus),
-			string(terminal.StreamItemControlRevoked),
 		),
 	},
 	{
