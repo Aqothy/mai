@@ -21,6 +21,7 @@ struct TerminalThreadScreen: View {
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeleteErrorPresented = false
     @State private var deleteErrorMessage = ""
+    @State private var isDeletingExitedTerminal = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -95,6 +96,14 @@ struct TerminalThreadScreen: View {
                 onCreated?(terminalID)
             }
         }
+        .onChange(of: attachment?.phase, initial: true) { _, phase in
+            guard case .exited = phase,
+                !isDeletingExitedTerminal,
+                let terminalID = attachment?.terminalID
+            else { return }
+            isDeletingExitedTerminal = true
+            deleteTerminal(terminalID)
+        }
         .alert("Rename Terminal", isPresented: $isRenamePresented) {
             TextField("Title", text: $renameTitle)
             Button("Rename") {
@@ -124,16 +133,7 @@ struct TerminalThreadScreen: View {
         ) {
             Button("Delete Terminal", role: .destructive) {
                 if let terminalID = attachment?.terminalID {
-                    Task {
-                        do {
-                            try await store.deleteTerminal(terminalID: terminalID)
-                            onDeleted?()
-                            dismiss()
-                        } catch {
-                            deleteErrorMessage = error.localizedDescription
-                            isDeleteErrorPresented = true
-                        }
-                    }
+                    deleteTerminal(terminalID)
                 }
             }
         } message: {
@@ -143,6 +143,20 @@ struct TerminalThreadScreen: View {
             Button("OK") {}
         } message: {
             Text(deleteErrorMessage)
+        }
+    }
+
+    private func deleteTerminal(_ terminalID: String) {
+        Task {
+            do {
+                try await store.deleteTerminal(terminalID: terminalID)
+                onDeleted?()
+                dismiss()
+            } catch {
+                isDeletingExitedTerminal = false
+                deleteErrorMessage = error.localizedDescription
+                isDeleteErrorPresented = true
+            }
         }
     }
 
