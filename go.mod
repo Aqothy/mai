@@ -8,8 +8,10 @@ require github.com/coder/websocket v1.8.14
 
 require (
 	github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be
+	github.com/BurntSushi/toml v1.6.0
 	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0
+	go.mitchellh.com/libghostty v0.0.0-20260803215605-774494360861
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
 )

@@ -274,6 +274,18 @@
         "terminal-upserted",
         "terminal-removed"
       ]
+    },
+    {
+      "name": "TerminalAgentActivity",
+      "description": "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
+      "values": [
+        "none",
+        "idle",
+        "working",
+        "blocked",
+        "done",
+        "unknown"
+      ]
     }
   ]
 }

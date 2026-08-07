@@ -50,9 +50,19 @@ type TerminalListStreamItem struct {
 type TerminalStatus = terminal.Status
 type TerminalStreamItemKind = terminal.StreamItemKind
 
+// TerminalAgentKind is an open label naming the detected foreground agent
+// ("codex", "claude", ...). Clients must tolerate values they do not know
+// and treat them as display labels, not behavior switches.
+type TerminalAgentKind = terminal.AgentKind
+
+// TerminalAgentActivity is the closed semantic activity vocabulary; see the
+// TerminalAgentActivity vocabulary definition.
+type TerminalAgentActivity = terminal.AgentActivityState
+
 // TerminalSummary describes one terminal thread for lists and snapshots.
 // Fields other than identity/title/cwd reflect the current live run and are
-// not durable.
+// not durable. The agent fields are the detector's semantic result only;
+// screen evidence and raw titles never cross the wire.
 type TerminalSummary struct {
 	TerminalID string         `json:"terminalId"`
 	Title      string         `json:"title"`
@@ -63,6 +73,16 @@ type TerminalSummary struct {
 	ExitCode   *int           `json:"exitCode,omitempty"`
 	CreatedAt  time.Time      `json:"createdAt"`
 	UpdatedAt  time.Time      `json:"updatedAt"`
+
+	// ObservedTitle is the normalized terminal title (control characters
+	// and spinner frames removed, capped at 128 scalars).
+	ObservedTitle string `json:"observedTitle,omitempty"`
+	// AgentKind names the detected foreground agent; empty when none.
+	AgentKind TerminalAgentKind `json:"agentKind,omitempty"`
+	// AgentActivity is the semantic agent state for the current run.
+	AgentActivity TerminalAgentActivity `json:"agentActivity,omitempty"`
+	// AgentActivityUpdatedAt is when the semantic activity last changed.
+	AgentActivityUpdatedAt *time.Time `json:"agentActivityUpdatedAt,omitempty"`
 }
 
 // TerminalAttachSnapshot is the authoritative attach point for one run.

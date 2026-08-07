@@ -289,6 +289,18 @@ var Vocabularies = []VocabularyDefinition{
 			string(TerminalListItemRemoved),
 		),
 	},
+	{
+		Name:        "TerminalAgentActivity",
+		Description: "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
+		Values: values(
+			string(terminal.AgentActivityNone),
+			string(terminal.AgentActivityIdle),
+			string(terminal.AgentActivityWorking),
+			string(terminal.AgentActivityBlocked),
+			string(terminal.AgentActivityDone),
+			string(terminal.AgentActivityUnknown),
+		),
+	},
 }
 
 // VocabularyDefinition is one closed set of wire string values.

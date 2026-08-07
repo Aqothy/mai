@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/Aqothy/maiD/internal/terminal/vtscreen"
 )
 
 const (
@@ -41,6 +43,10 @@ type Session struct {
 	replay   *ReplayBuffer
 
 	writeMu sync.Mutex
+
+	// detector derives shared agent state from the same output stream the
+	// clients render. It owns its synchronization and headless screen.
+	detector *Detector
 
 	// done closes after the child has been reaped and the PTY closed.
 	done          chan struct{}
@@ -92,6 +98,25 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 	}
 	s.ptyFile = ptyFile
 	s.status = StatusRunning
+	// A failed detection screen degrades to process and OSC evidence; the
+	// terminal itself remains usable.
+	screen, screenErr := vtscreen.New(spec.Columns, spec.Rows)
+	if screenErr != nil {
+		screen = nil
+	}
+	s.detector = newDetector(detectorConfig{
+		shellPGID: cmd.Process.Pid,
+		foregroundPGID: func() (int, bool) {
+			return foregroundProcessGroup(ptyFile)
+		},
+		inspectGroup: inspectProcessGroup,
+		screen:       screen,
+		publish: func(report AgentReport) {
+			if events.Agent != nil {
+				events.Agent(s.TerminalID, s.RunID, report)
+			}
+		},
+	})
 	go s.readLoop()
 	return s, nil
 }
@@ -186,6 +211,10 @@ drainReads:
 	seq := s.seq
 	s.mu.Unlock()
 
+	// Stop foreground probes before closing the PTY. Stop also clears the
+	// transient report so an exited terminal cannot remain visually working.
+	s.detector.Stop()
+
 	_ = s.ptyFile.Close()
 	close(s.done)
 	if s.events.Exit != nil {
@@ -224,6 +253,9 @@ func (s *Session) publishOutput(data []byte) {
 	// barrier so historical device queries cannot generate new PTY input.
 	s.replay.Append(data)
 	s.mu.Unlock()
+	// Detection receives the original bytes in order, before client fanout.
+	s.detector.ObserveOutput(data)
+
 	if s.events.Output != nil {
 		s.events.Output(s.TerminalID, s.RunID, seq, data)
 	}
@@ -295,6 +327,7 @@ func (s *Session) Resize(columns, rows uint16) error {
 	}
 	s.columns = columns
 	s.rows = rows
+	s.detector.ResizeScreen(columns, rows)
 	return nil
 }
 
@@ -370,6 +403,13 @@ func (s *Session) ExitCode() (code int, ok bool) {
 
 // Done closes after the run has fully ended and its resources are released.
 func (s *Session) Done() <-chan struct{} { return s.done }
+
+// AgentReport returns the run's last published agent state.
+func (s *Session) AgentReport() AgentReport { return s.detector.Report() }
+
+// SetAttached tells the detector whether any client is attached. Attaching
+// acknowledges a pending done state.
+func (s *Session) SetAttached(attached bool) { s.detector.SetAttached(attached) }
 
 // PID exposes the shell leader's pid for tests.
 func (s *Session) PID() int {

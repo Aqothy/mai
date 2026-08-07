@@ -152,6 +152,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	}, terminal.Events{
 		Output: s.publishTerminalOutput,
 		Exit:   s.publishTerminalExit,
+		Agent:  s.publishTerminalAgentReport,
 	})
 	if err != nil {
 		if errors.Is(err, terminal.ErrInvalidDimensions) {
@@ -174,6 +175,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	}
 
 	rt.persist(entry, s.logger)
+	session.SetAttached(true)
 	snapshot := s.terminalAttachSnapshot(entry, session)
 	entry.operations.Unlock()
 	s.publishTerminalListUpsert(snapshot.Terminal)
@@ -209,6 +211,9 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	}
 
 	client.subscribeTerminal(params.TerminalID)
+	// Attaching acknowledges a pending done state so the row returns to its
+	// current live activity once someone has looked at the result.
+	session.SetAttached(true)
 	snapshot := s.terminalAttachSnapshot(entry, session)
 	if err := session.Resize(params.Columns, params.Rows); err != nil {
 		if !errors.Is(err, terminal.ErrNotRunning) {
@@ -250,6 +255,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	}, terminal.Events{
 		Output: s.publishTerminalOutput,
 		Exit:   s.publishTerminalExit,
+		Agent:  s.publishTerminalAgentReport,
 	})
 	if err != nil {
 		if addedSubscription {
@@ -268,6 +274,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	rt.mu.Unlock()
 	rt.persist(entry, s.logger)
 
+	session.SetAttached(true)
 	snapshot := s.terminalAttachSnapshot(entry, session)
 	entry.operations.Unlock()
 	// Existing listeners need one explicit new-run signal even when the fresh
@@ -304,6 +311,7 @@ func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachPar
 		return
 	}
 	client.unsubscribeTerminal(params.TerminalID)
+	session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 }
 
 func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.Session) wire.TerminalAttachSnapshot {
@@ -313,6 +321,7 @@ func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.
 	summary.Columns = snapshot.Columns
 	summary.Rows = snapshot.Rows
 	summary.ExitCode = snapshot.ExitCode
+	applyAgentReport(&summary, session.AgentReport())
 	return wire.TerminalAttachSnapshot{
 		Terminal:        summary,
 		RunID:           snapshot.RunID,
@@ -448,8 +457,45 @@ func (s *Server) terminalListSummary(terminalID string, entry *terminalEntry) wi
 		if code, ok := session.ExitCode(); ok {
 			summary.ExitCode = &code
 		}
+		applyAgentReport(&summary, session.AgentReport())
 	}
 	return summary
+}
+
+// applyAgentReport copies the detector's semantic result onto a summary. The
+// report carries only the normalized title and semantic fields; nothing else
+// crosses the wire.
+func applyAgentReport(summary *wire.TerminalSummary, report terminal.AgentReport) {
+	summary.ObservedTitle = report.Title
+	summary.AgentKind = report.Kind
+	summary.AgentActivity = report.Activity
+	if !report.UpdatedAt.IsZero() {
+		at := report.UpdatedAt
+		summary.AgentActivityUpdatedAt = &at
+	}
+}
+
+// publishTerminalAgentReport fans one changed semantic agent state out as a
+// terminal-list upsert. The detector already deduplicated the report; a stale
+// run's report is dropped by the run check.
+func (s *Server) publishTerminalAgentReport(terminalID, runID string, report terminal.AgentReport) {
+	rt := s.terminals
+	if rt == nil {
+		return
+	}
+	rt.mu.Lock()
+	entry, ok := rt.entries[terminalID]
+	rt.mu.Unlock()
+	if !ok {
+		return
+	}
+	session, err := rt.service.Get(terminalID)
+	if err != nil || session.RunID != runID {
+		return
+	}
+	s.logger.Debug("terminal agent activity", "terminal", terminalID, "run", runID,
+		"agent", report.Kind, "activity", report.Activity)
+	s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
 }
 
 // publishTerminalListUpsert fans one changed summary out to list subscribers.

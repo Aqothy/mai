@@ -1436,6 +1436,19 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "observedTitle": {
+          "type": "string"
+        },
+        "agentKind": {
+          "type": "string"
+        },
+        "agentActivity": {
+          "type": "string"
+        },
+        "agentActivityUpdatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       },
       "additionalProperties": false,

@@ -78,4 +78,8 @@ type Events struct {
 	// Exit reports the end of a run after all output has been delivered.
 	// exitCode is nil when the process could not report one.
 	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
+	// Agent reports a changed semantic agent state. Reports carry only the
+	// normalized title and semantic fields, never screen evidence, and are
+	// already deduplicated by the detector.
+	Agent func(terminalID, runID string, report AgentReport)
 }

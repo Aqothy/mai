@@ -2,6 +2,8 @@ github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be h1:yA4FE1tpiNu5QQKS2
 github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be/go.mod h1:9lqEUDjB2oAgqzLYzM6rjMv6GVIpAwgIEFqVX6p8UnA=
 github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505 h1:qaNaiWBumfAkntvzfSPoxW7bh1zK6z8VaONzp93ZRbk=
 github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505/go.mod h1:JYE0H2dW5xBYAFUUF4b/CS/VS/SafdWSz70eIBKTGTM=
+github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
+github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.1.2 h1:frqHqw7otoVbk5M8LlE/L7HTnIq2v9RX6EJ48i9AxJk=
@@ -34,6 +36,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+go.mitchellh.com/libghostty v0.0.0-20260803215605-774494360861 h1:KKW3iix28TNux+cEB8n+k51HUhbRcsbTkpOrQuTVm7w=
+go.mitchellh.com/libghostty v0.0.0-20260803215605-774494360861/go.mod h1:sx8yDvnDrQC/PzsrFfYx7ROmH8my91nz7lOxQb6sbo0=
 go.yaml.in/yaml/v4 v4.0.0-rc.2 h1:/FrI8D64VSr4HtGIlUtlFMGsm7H7pWTbj6vOLVZcA6s=
 go.yaml.in/yaml/v4 v4.0.0-rc.2/go.mod h1:aZqd9kCMsGL7AuUv/m/PvWLdg5sjJsZ4oHDEnfPPfY0=
 golang.org/x/mod v0.36.0 h1:JJjpVx6myfUsUdAzZuOSTTmRE0PfZeNWzzvKrP7amb4=

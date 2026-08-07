@@ -263,7 +263,26 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	// path, and detaching the active sessions makes repeated cleanup harmless.
 	go s.closeClientOptionsSessions(client)
 	// Terminal subscriptions live on the connection and disappear with it;
-	// shells remain alive in the terminal service.
+	// shells remain alive in the terminal service. Each subscribed session
+	// still needs its attachment count refreshed so detached agent runs can
+	// report Done.
+	for _, terminalID := range client.terminalSubscriptionIDs() {
+		s.refreshTerminalAttachment(terminalID)
+	}
+}
+
+// refreshTerminalAttachment re-derives whether any connected client remains
+// attached to the terminal's live run.
+func (s *Server) refreshTerminalAttachment(terminalID string) {
+	rt := s.terminals
+	if rt == nil {
+		return
+	}
+	session, err := rt.service.Get(terminalID)
+	if err != nil {
+		return
+	}
+	session.SetAttached(len(s.terminalSubscribers(terminalID)) > 0)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -370,6 +389,16 @@ func (c *rpcClient) subscribedTerminal(terminalID string) bool {
 	defer c.subscriptionsMu.Unlock()
 	_, ok := c.terminalSubscriptions[terminalID]
 	return ok
+}
+
+func (c *rpcClient) terminalSubscriptionIDs() []string {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	ids := make([]string, 0, len(c.terminalSubscriptions))
+	for terminalID := range c.terminalSubscriptions {
+		ids = append(ids, terminalID)
+	}
+	return ids
 }
 
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
