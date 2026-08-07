@@ -60,7 +60,7 @@ struct ThreadListFilter {
 
     /// Filters terminal rows for the unified Threads list. Driver and
     /// activity presets describe agent threads, so any of them hides
-    /// terminals; the query matches title and working directory.
+    /// terminals; the query matches persisted and observed titles.
     func apply(toTerminals terminals: [TerminalSummary]) -> [TerminalSummary] {
         guard driver == nil, activityFilter == .all else { return [] }
         let query = trimmedQuery
@@ -68,7 +68,7 @@ struct ThreadListFilter {
             (projectCwd == nil || terminal.cwd == projectCwd)
                 && (query.isEmpty
                     || terminal.displayTitle.localizedStandardContains(query)
-                    || terminal.cwd.localizedStandardContains(query))
+                    || terminal.observedTitle?.localizedStandardContains(query) == true)
         }
     }
 
