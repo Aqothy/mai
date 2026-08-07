@@ -3391,25 +3391,47 @@ public extension TerminalAttachSnapshot {
 
 // MARK: - TerminalSummary
 public struct TerminalSummary: Codable {
+    public var agentActivity: String?
+    public var agentActivityUpdatedAt: Date?
+    public var agentKind: String?
     public var columns: Int
     public var createdAt: Date
     public var cwd: String
     public var exitCode: Int?
+    public var observedTitle: String?
     public var rows: Int
     public var status, terminalID, title: String
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case columns, createdAt, cwd, exitCode, rows, status
+        case agentActivity, agentActivityUpdatedAt, agentKind, columns, createdAt, cwd, exitCode, observedTitle, rows, status
         case terminalID = "terminalId"
         case title, updatedAt
     }
 
-    public init(columns: Int, createdAt: Date, cwd: String, exitCode: Int?, rows: Int, status: String, terminalID: String, title: String, updatedAt: Date) {
+    public init(
+        columns: Int,
+        createdAt: Date,
+        cwd: String,
+        exitCode: Int?,
+        rows: Int,
+        status: String,
+        terminalID: String,
+        title: String,
+        updatedAt: Date,
+        agentActivity: String? = nil,
+        agentActivityUpdatedAt: Date? = nil,
+        agentKind: String? = nil,
+        observedTitle: String? = nil
+    ) {
+        self.agentActivity = agentActivity
+        self.agentActivityUpdatedAt = agentActivityUpdatedAt
+        self.agentKind = agentKind
         self.columns = columns
         self.createdAt = createdAt
         self.cwd = cwd
         self.exitCode = exitCode
+        self.observedTitle = observedTitle
         self.rows = rows
         self.status = status
         self.terminalID = terminalID
@@ -3445,7 +3467,11 @@ public extension TerminalSummary {
         status: String? = nil,
         terminalID: String? = nil,
         title: String? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        agentActivity: String?? = nil,
+        agentActivityUpdatedAt: Date?? = nil,
+        agentKind: String?? = nil,
+        observedTitle: String?? = nil
     ) -> TerminalSummary {
         return TerminalSummary(
             columns: columns ?? self.columns,
@@ -3456,7 +3482,11 @@ public extension TerminalSummary {
             status: status ?? self.status,
             terminalID: terminalID ?? self.terminalID,
             title: title ?? self.title,
-            updatedAt: updatedAt ?? self.updatedAt
+            updatedAt: updatedAt ?? self.updatedAt,
+            agentActivity: agentActivity ?? self.agentActivity,
+            agentActivityUpdatedAt: agentActivityUpdatedAt ?? self.agentActivityUpdatedAt,
+            agentKind: agentKind ?? self.agentKind,
+            observedTitle: observedTitle ?? self.observedTitle
         )
     }
 

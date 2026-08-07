@@ -229,3 +229,13 @@ public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseItera
     case terminalUpserted = "terminal-upserted"
     case terminalRemoved = "terminal-removed"
 }
+
+/// Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.
+public enum MaidTerminalAgentActivity: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case idle = "idle"
+    case working = "working"
+    case blocked = "blocked"
+    case done = "done"
+    case unknown = "unknown"
+}

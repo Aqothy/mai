@@ -13,6 +13,10 @@ extension TerminalSummary: Equatable {
             && lhs.exitCode == rhs.exitCode
             && lhs.createdAt == rhs.createdAt
             && lhs.updatedAt == rhs.updatedAt
+            && lhs.observedTitle == rhs.observedTitle
+            && lhs.agentKind == rhs.agentKind
+            && lhs.agentActivity == rhs.agentActivity
+            && lhs.agentActivityUpdatedAt == rhs.agentActivityUpdatedAt
     }
 }
 
@@ -21,6 +25,13 @@ extension TerminalSummary: Equatable {
 extension TerminalSummary {
     var terminalStatus: MaidTerminalStatus? {
         MaidTerminalStatus(rawValue: status)
+    }
+
+    /// The detected agent activity; nil when absent or a future unknown
+    /// value, which must render neutrally.
+    var terminalAgentActivity: MaidTerminalAgentActivity? {
+        guard let agentActivity, !agentActivity.isEmpty else { return nil }
+        return MaidTerminalAgentActivity(rawValue: agentActivity)
     }
 
     /// The persisted title, falling back to the working directory name.
@@ -34,9 +45,58 @@ extension TerminalSummary {
         return URL(filePath: cwd).lastPathComponent
     }
 
-    /// Compact lifecycle label for list rows. Unknown future statuses render
-    /// as a neutral absent label rather than crashing or guessing.
+    /// Row subtitle: the normalized observed terminal title when the daemon
+    /// has one, otherwise the working directory name.
+    var displaySubtitle: String? {
+        if let observedTitle, !observedTitle.isEmpty, observedTitle != displayTitle {
+            return observedTitle
+        }
+        return workingDirectoryName
+    }
+
+    /// Compact status for list rows: the highest-value signal wins. Lifecycle
+    /// state wins when the terminal is not running; for a running terminal,
+    /// agent activity takes priority in the order blocked, done, working,
+    /// idle. Unknown activity and unknown future values render as the plain
+    /// lifecycle label.
     var statusLabel: String? {
+        if isRunning, let activityLabel = agentActivityLabel {
+            return activityLabel
+        }
+        return lifecycleLabel
+    }
+
+    /// Shared thread-list indicator. Running and idle shells stay quiet;
+    /// actionable and active agent states use the same visuals as agent rows.
+    var rowIndicatorStatus: ThreadRowIndicatorStatus? {
+        guard isRunning else {
+            return switch terminalStatus {
+            case .error: .failed
+            case .stopped: .interrupted
+            case .starting, .running, .exited, nil: nil
+            }
+        }
+        guard let terminalAgentActivity else { return nil }
+        return switch terminalAgentActivity {
+        case .blocked: .needsInput
+        case .working: .working
+        case .done: .done
+        case MaidTerminalAgentActivity.none, .idle, .unknown: nil
+        }
+    }
+
+    private var agentActivityLabel: String? {
+        guard let terminalAgentActivity else { return nil }
+        return switch terminalAgentActivity {
+        case .blocked: String(localized: "Needs input")
+        case .done: String(localized: "Done")
+        case .working: String(localized: "Working")
+        case .idle: String(localized: "Agent ready")
+        case MaidTerminalAgentActivity.none, .unknown: nil
+        }
+    }
+
+    private var lifecycleLabel: String? {
         switch terminalStatus {
         case .starting, .running: String(localized: "Running")
         case .exited: String(localized: "Exited")

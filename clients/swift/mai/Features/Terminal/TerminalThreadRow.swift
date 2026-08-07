@@ -27,19 +27,18 @@ struct TerminalThreadRow: View {
             }
 
             HStack(spacing: 6) {
-                if let workingDirectoryName = summary.workingDirectoryName {
+                if let subtitle = summary.displaySubtitle {
                     HStack(spacing: 3) {
-                        Image(systemName: "folder")
-                        Text(workingDirectoryName)
+                        if subtitle == summary.workingDirectoryName {
+                            Image(systemName: "folder")
+                        }
+                        Text(subtitle)
                     }
                 }
 
                 Spacer(minLength: 8)
 
-                if let statusLabel = summary.statusLabel {
-                    Text(statusLabel)
-                        .foregroundStyle(statusStyle)
-                }
+                ThreadRowStatusView(status: summary.rowIndicatorStatus)
             }
             .font(.caption)
             .lineLimit(1)
@@ -48,15 +47,6 @@ struct TerminalThreadRow: View {
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
-    }
-
-    private var statusStyle: HierarchicalShapeStyle {
-        // Continuous lifecycle states stay visually calm; only Error uses
-        // stronger emphasis, applied by the caller's tint if desired.
-        switch summary.terminalStatus {
-        case .error: .primary
-        default: .secondary
-        }
     }
 
     private var accessibilityText: String {

@@ -50,9 +50,7 @@ struct ThreadRow: View {
                 Spacer(minLength: 8)
 
                 ThreadRowStatusView(
-                    hasPendingApprovals: thread.hasPendingApprovals,
-                    turnState: thread.latestTurn?.turnState,
-                    sessionStatus: thread.session?.sessionStatus
+                    status: rowIndicatorStatus
                 )
             }
             .font(.caption)
@@ -65,6 +63,22 @@ struct ThreadRow: View {
     private var workingDirectoryName: String? {
         guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
         return URL(filePath: cwd).lastPathComponent
+    }
+
+    private var rowIndicatorStatus: ThreadRowIndicatorStatus? {
+        if thread.hasPendingApprovals {
+            return .needsInput
+        }
+        if thread.latestTurn?.turnState == .running {
+            return .working
+        }
+        if thread.latestTurn?.turnState == .error || thread.session?.sessionStatus == .error {
+            return .failed
+        }
+        if thread.latestTurn?.turnState == .interrupted {
+            return .interrupted
+        }
+        return nil
     }
 
     private func updatedAtText(now: Date) -> String {

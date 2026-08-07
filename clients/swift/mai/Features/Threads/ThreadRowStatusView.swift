@@ -1,27 +1,40 @@
 import SwiftUI
 
+enum ThreadRowIndicatorStatus: Equatable {
+    case needsInput
+    case working
+    case failed
+    case interrupted
+    case done
+}
+
 struct ThreadRowStatusView: View {
-    let hasPendingApprovals: Bool
-    let turnState: MaidTurnState?
-    let sessionStatus: MaidSessionStatus?
+    let status: ThreadRowIndicatorStatus?
 
     var body: some View {
-        if hasPendingApprovals {
+        switch status {
+        case .needsInput:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)
-                .accessibilityLabel("Approval required")
-        } else if turnState == .running {
+                .accessibilityLabel("Needs input")
+        case .working:
             ProgressView()
                 .controlSize(.mini)
                 .accessibilityLabel("Agent working")
-        } else if turnState == .error || sessionStatus == .error {
+        case .failed:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
                 .accessibilityLabel("Failed")
-        } else if turnState == .interrupted {
+        case .interrupted:
             Image(systemName: "stop.circle.fill")
                 .foregroundStyle(.orange)
                 .accessibilityLabel("Interrupted")
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.blue)
+                .accessibilityLabel("Agent done")
+        case nil:
+            EmptyView()
         }
     }
 }
