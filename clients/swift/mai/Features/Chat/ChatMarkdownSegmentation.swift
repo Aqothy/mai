@@ -215,9 +215,25 @@ private nonisolated struct ChatRichContentWalker: MarkupWalker {
     }
 }
 
+/// One settled message whose segmentation is computed before first render.
+nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
+    let messageID: String
+    let source: String
+}
+
 /// Avoids reparsing unchanged settled messages when the timeline updates.
 final class ChatMarkdownSegmentCache {
-    private static let maximumEntryCount = 256
+    /// `prime` grows this floor to fit the visible transcript, avoiding
+    /// eviction-and-reparse loops during a full render.
+    private static let minimumEntryCount = 256
+    private var entryCapacity = ChatMarkdownSegmentCache.minimumEntryCount
+
+    /// True once `prime(requests:)` has covered a timeline snapshot, so a
+    /// cold open's first body pass finds only cache hits.
+    private(set) var isPrimed = false
+
+    /// Retained message entries; a test seam for retention behavior.
+    var entryCount: Int { entries.count }
 
     private struct Entry {
         let source: String
@@ -231,18 +247,81 @@ final class ChatMarkdownSegmentCache {
         if let entry = entries[messageID], entry.source == source {
             return entry.segments
         }
-        if entries.count >= Self.maximumEntryCount, entries[messageID] == nil,
+        let result = ChatMarkdownSegmenter.segments(of: source)
+        store(result, messageID: messageID, source: source)
+        return result
+    }
+
+    /// Uses fold-aware rows so hidden intermediate messages are not primed.
+    static func primeRequests(
+        rows: [ChatTimelineRowModel],
+        streamingTurnID: String?
+    ) -> [ChatMarkdownPrimeRequest] {
+        rows.compactMap { row in
+            guard case .message(let message) = row,
+                message.role == MaidMessageRole.assistant.rawValue,
+                ChatTextOptimizationPolicy.shouldOptimize(
+                    role: message.role,
+                    messageTurnID: message.turnID,
+                    streamingTurnID: streamingTurnID,
+                    source: message.text
+                )
+            else { return nil }
+            return ChatMarkdownPrimeRequest(
+                messageID: message.id,
+                source: message.text
+            )
+        }
+    }
+
+    /// Batch-parses uncached requests off the main actor. Cancellation keeps
+    /// completed results and leaves the cache unprimed for a later retry.
+    func prime(requests: [ChatMarkdownPrimeRequest]) async {
+        entryCapacity = max(entryCapacity, requests.count)
+        let pending = requests.filter {
+            entries[$0.messageID]?.source != $0.source
+        }
+        if !pending.isEmpty {
+            let worker = Task.detached(priority: .userInitiated) {
+                var computed: [(ChatMarkdownPrimeRequest, [ChatMarkdownSegment]?)] = []
+                computed.reserveCapacity(pending.count)
+                for request in pending {
+                    guard !Task.isCancelled else { break }
+                    computed.append(
+                        (request, ChatMarkdownSegmenter.segments(of: request.source))
+                    )
+                }
+                return computed
+            }
+            let computed = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            for (request, segments) in computed {
+                store(segments, messageID: request.messageID, source: request.source)
+            }
+            guard computed.count == pending.count else { return }
+        }
+        guard !Task.isCancelled else { return }
+        isPrimed = true
+    }
+
+    private func store(
+        _ segments: [ChatMarkdownSegment]?,
+        messageID: String,
+        source: String
+    ) {
+        let isNewEntry = entries[messageID] == nil
+        if entries.count >= entryCapacity, isNewEntry,
             let oldestMessageID = entryOrder.first
         {
             entryOrder.removeFirst()
             entries.removeValue(forKey: oldestMessageID)
         }
-        let isNewEntry = entries[messageID] == nil
-        let result = ChatMarkdownSegmenter.segments(of: source)
-        entries[messageID] = Entry(source: source, segments: result)
+        entries[messageID] = Entry(source: source, segments: segments)
         if isNewEntry {
             entryOrder.append(messageID)
         }
-        return result
     }
 }

@@ -192,23 +192,7 @@
         }
 
         func warm(requests: [ChatTextLayoutRequest]) {
-            var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
-            var seen: Set<Key> = []
-            // Chats open and normally scroll from the bottom. Prepare the
-            // newest rows first so a large visible response does not wait
-            // behind older offscreen history. Sequential layout avoids a
-            // burst of competing TextKit work during interaction.
-            for request in requests.suffix(Self.capacity).reversed()
-            where request.width > 0 {
-                let key = Key(id: request.id, width: request.width)
-                guard seen.insert(key).inserted,
-                    entries[key]?.source != request.source
-                        || entries[key]?.style != request.style,
-                    !warming.contains(key)
-                else { continue }
-                warming.insert(key)
-                pending.append((request, key))
-            }
+            let pending = claimPending(from: requests)
             guard !pending.isEmpty else { return }
 
             Task.detached(priority: .userInitiated) { [self] in
@@ -226,6 +210,69 @@
                     )
                 }
             }
+        }
+
+        /// Awaitable warmup for the rows needed before a cold-open reveal.
+        /// Cancellation retains layouts that already finished.
+        func prepare(requests: [ChatTextLayoutRequest]) async {
+            let pending = claimPending(from: requests)
+            guard !pending.isEmpty else { return }
+
+            let worker = Task.detached(priority: .userInitiated) {
+                var layouts: [ChatTextLayout] = []
+                layouts.reserveCapacity(pending.count)
+                for item in pending {
+                    guard !Task.isCancelled else { break }
+                    layouts.append(
+                        ChatTextLayout(
+                            source: item.request.source,
+                            style: item.request.style,
+                            width: item.request.width
+                        )
+                    )
+                }
+                return layouts
+            }
+            let layouts = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            for (item, layout) in zip(pending, layouts) {
+                finishWarmup(
+                    layout,
+                    source: item.request.source,
+                    style: item.request.style,
+                    key: item.key
+                )
+            }
+            // Unbuilt claims must not block future warmups for these rows.
+            for item in pending.dropFirst(layouts.count) {
+                warming.remove(item.key)
+            }
+        }
+
+        /// Chats open and normally scroll from the bottom. Prepare the
+        /// newest rows first so a large visible response does not wait
+        /// behind older offscreen history. Sequential layout avoids a
+        /// burst of competing TextKit work during interaction.
+        private func claimPending(
+            from requests: [ChatTextLayoutRequest]
+        ) -> [(request: ChatTextLayoutRequest, key: Key)] {
+            var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
+            var seen: Set<Key> = []
+            for request in requests.suffix(Self.capacity).reversed()
+            where request.width > 0 {
+                let key = Key(id: request.id, width: request.width)
+                guard seen.insert(key).inserted,
+                    entries[key]?.source != request.source
+                        || entries[key]?.style != request.style,
+                    !warming.contains(key)
+                else { continue }
+                warming.insert(key)
+                pending.append((request, key))
+            }
+            return pending
         }
 
         private func finishWarmup(
