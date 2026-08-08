@@ -26,39 +26,22 @@ struct ChatView: View {
             } else if let thread = store.selectedThread,
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
-                #if os(iOS)
-                    ChatTimelineColdOpenGate(
-                        threadID: thread.id,
-                        timeline: thread.timeline,
-                        timelineRevision: store.selectedThreadSequence,
-                        plan: thread.plan,
-                        latestTurn: thread.latestTurn,
-                        streamingTurnID: thread.latestTurn?.turnState == .running
-                            ? thread.latestTurn?.turnID
-                            : nil,
-                        segmentCache: segmentCache,
-                        store: store,
-                        scrollState: scrollState
-                    )
-                    .id(thread.id)
-                #else
-                    ChatTimeline(
-                        threadID: thread.id,
-                        sections: ChatTimelineLayout.sections(
-                            timeline: thread.timeline
-                        ),
-                        timelineEntryCount: thread.timeline.count,
-                        plan: thread.plan,
-                        latestTurn: thread.latestTurn,
-                        streamingTurnID: thread.latestTurn?.turnState == .running
-                            ? thread.latestTurn?.turnID
-                            : nil,
-                        segmentCache: segmentCache,
-                        store: store,
-                        scrollState: scrollState
-                    )
-                    .id(thread.id)
-                #endif
+                ChatTimeline(
+                    threadID: thread.id,
+                    sections: ChatTimelineLayout.sections(
+                        timeline: thread.timeline
+                    ),
+                    timelineEntryCount: thread.timeline.count,
+                    plan: thread.plan,
+                    latestTurn: thread.latestTurn,
+                    streamingTurnID: thread.latestTurn?.turnState == .running
+                        ? thread.latestTurn?.turnID
+                        : nil,
+                    segmentCache: segmentCache,
+                    store: store,
+                    scrollState: scrollState
+                )
+                .id(thread.id)
             } else if store.selectedThreadID != nil {
                 ProgressView("Loading Chat…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -307,7 +290,7 @@ nonisolated enum ChatTimelineMetrics {
     #endif
 }
 
-struct ChatTimeline: View {
+private struct ChatTimeline: View {
     static let nearBottomDistance: CGFloat = 24
 
     let threadID: String
@@ -319,27 +302,27 @@ struct ChatTimeline: View {
     let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
     let scrollState: ChatScrollState
-    #if os(iOS)
-        let textLayoutStore: ChatTextLayoutStore
-    #endif
 
     @State private var foldModel = ChatTimelineFoldModel()
     @State private var isAwaitingInitialBottom = true
 
     #if os(iOS)
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @State private var textWarmRowWidth: CGFloat = 0
+
+        /// Owned by this mount: prepared text stays valid while the same
+        /// thread stays open and is released when the timeline unmounts.
+        @State private var textLayoutStore = ChatTextLayoutStore()
     #endif
 
     var body: some View {
-        let rows = Self.renderRows(
+        let rows = renderRows(
             ChatTimelineLayout.rows(
                 sections: sections,
                 streamingTurnID: streamingTurnID,
                 latestTurn: latestTurn,
                 expandedSectionIDs: foldModel.expandedSectionIDs
-            ),
-            streamingTurnID: streamingTurnID,
-            segmentCache: segmentCache
+            )
         )
 
         ScrollViewReader { proxy in
@@ -427,6 +410,12 @@ struct ChatTimeline: View {
                 .onChange(of: foldModel.expandedSectionIDs) { _, _ in
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
+                .onChange(of: dynamicTypeSize) { _, _ in
+                    // Fonts are baked into each layout. A fresh store drops
+                    // every layout built at the previous Dynamic Type size.
+                    textLayoutStore = ChatTextLayoutStore()
+                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                }
             #endif
             .onAppear {
                 // Position before scroll geometry becomes responsible for
@@ -464,11 +453,13 @@ struct ChatTimeline: View {
                 let viewportShrank =
                     newGeometry.bottomInset > oldGeometry.bottomInset
                     || newGeometry.containerHeight < oldGeometry.containerHeight
-                // This remains an after-layout fallback. A fully synchronized
-                // keyboard push requires direct control of the UIKit scroll
-                // surface; SwiftUI List ignores the size-change default anchor.
+                // Pin after layout so content growth uses the final size.
+                // Expansion toggles call noteContentExpansion() first, which
+                // drops shouldFollowBottom so this pin cannot fire for them.
                 let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
-                if (viewportShrank || contentGrew), scrollState.shouldFollowBottom {
+                let shouldPin =
+                    (viewportShrank || contentGrew) && scrollState.shouldFollowBottom
+                if shouldPin {
                     proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 }
             }
@@ -491,10 +482,8 @@ struct ChatTimeline: View {
     /// Expands only settled oversized assistant messages. Streaming keeps one
     /// stable live row; short and uncommon document-wide Markdown features
     /// keep the existing static renderer after the message settles.
-    static func renderRows(
-        _ rows: [ChatTimelineRowModel],
-        streamingTurnID: String?,
-        segmentCache: ChatMarkdownSegmentCache
+    private func renderRows(
+        _ rows: [ChatTimelineRowModel]
     ) -> [ChatTimelineRenderRow] {
         #if !os(iOS)
             return rows.map(ChatTimelineRenderRow.standard)
@@ -555,27 +544,12 @@ struct ChatTimeline: View {
     }
 
     #if os(iOS)
-        static func segmentationRequests(
-            in rows: [ChatTimelineRowModel],
-            streamingTurnID: String?
-        ) -> [ChatMarkdownSegmentationRequest] {
-            rows.compactMap { row in
-                guard case .message(let message) = row else { return nil }
-                return ChatMarkdownSegmentationRequest(
-                    messageID: message.id,
-                    role: message.role,
-                    messageTurnID: message.turnID,
-                    streamingTurnID: streamingTurnID,
-                    source: message.text
-                )
-            }
-        }
-
-        static func textLayoutRequests(
+        private func warmTextLayouts(
             in rows: [ChatTimelineRenderRow],
             rowWidth: CGFloat
-        ) -> [ChatTextLayoutRequest] {
-            rows.compactMap { row in
+        ) {
+            let requests = rows.suffix(ChatTextLayoutStore.capacity).compactMap {
+                row -> ChatTextLayoutRequest? in
                 switch row {
                 case .prose(let segment):
                     ChatTextLayoutRequest(
@@ -601,22 +575,12 @@ struct ChatTimeline: View {
                     nil
                 }
             }
+            textLayoutStore.warm(requests: requests)
         }
-
-        private func warmTextLayouts(
-            in rows: [ChatTimelineRenderRow],
-            rowWidth: CGFloat
-        ) {
-            let retainedRows = Array(rows.suffix(ChatTextLayoutStore.capacity))
-            textLayoutStore.warm(
-                requests: Self.textLayoutRequests(in: retainedRows, rowWidth: rowWidth)
-            )
-        }
-
     #endif
 }
 
-enum ChatTimelineRenderRow: Identifiable {
+private enum ChatTimelineRenderRow: Identifiable {
     case standard(ChatTimelineRowModel)
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
@@ -710,7 +674,7 @@ private struct ChatTimelineRenderRowView: View {
     }
 }
 
-struct ChatMessageSegmentRowModel {
+private struct ChatMessageSegmentRowModel {
     let messageID: String
     let index: Int
     let source: String

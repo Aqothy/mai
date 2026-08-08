@@ -150,26 +150,10 @@
             var idleTextView: UITextView?
         }
 
-        private struct PendingLayout: Sendable {
-            let request: ChatTextLayoutRequest
-            let key: Key
-        }
-
-        private struct PreparedLayout: Sendable {
-            let pending: PendingLayout
-            let layout: ChatTextLayout
-        }
-
         private var entries: [Key: Entry] = [:]
         private var entryOrder: [Key] = []
         private var warming: Set<Key> = []
         private var idleTextViewKeys: [Key] = []
-
-        func containsPreparedLayout(for request: ChatTextLayoutRequest) -> Bool {
-            let key = Key(id: request.id, width: request.width)
-            guard let entry = entries[key] else { return false }
-            return entry.source == request.source && entry.style == request.style
-        }
 
         func layout(
             id: String,
@@ -207,10 +191,8 @@
             return layout
         }
 
-        /// Builds every uncached request on a background executor and returns
-        /// only after the completed layouts are available to visible rows.
-        func prepare(requests: [ChatTextLayoutRequest]) async {
-            var pending: [PendingLayout] = []
+        func warm(requests: [ChatTextLayoutRequest]) {
+            var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
             var seen: Set<Key> = []
             // Chats open and normally scroll from the bottom. Prepare the
             // newest rows first so a large visible response does not wait
@@ -225,56 +207,37 @@
                     !warming.contains(key)
                 else { continue }
                 warming.insert(key)
-                pending.append(PendingLayout(request: request, key: key))
+                pending.append((request, key))
             }
             guard !pending.isEmpty else { return }
 
-            let worker = Task.detached(priority: .userInitiated) {
-                var prepared: [PreparedLayout] = []
-                prepared.reserveCapacity(pending.count)
+            Task.detached(priority: .userInitiated) { [self] in
                 for item in pending {
-                    guard !Task.isCancelled else { break }
-                    prepared.append(
-                        PreparedLayout(
-                            pending: item,
-                            layout: ChatTextLayout(
-                                source: item.request.source,
-                                style: item.request.style,
-                                width: item.request.width
-                            )
-                        )
+                    let layout = ChatTextLayout(
+                        source: item.request.source,
+                        style: item.request.style,
+                        width: item.request.width
+                    )
+                    await finishWarmup(
+                        layout,
+                        source: item.request.source,
+                        style: item.request.style,
+                        key: item.key
                     )
                 }
-                return prepared
-            }
-            let prepared = await withTaskCancellationHandler {
-                await worker.value
-            } onCancel: {
-                worker.cancel()
-            }
-
-            for item in pending {
-                warming.remove(item.key)
-            }
-            guard !Task.isCancelled else { return }
-            for item in prepared {
-                let request = item.pending.request
-                guard entries[item.pending.key]?.source != request.source
-                    || entries[item.pending.key]?.style != request.style
-                else { continue }
-                insert(
-                    item.layout,
-                    source: request.source,
-                    style: request.style,
-                    for: item.pending.key
-                )
             }
         }
 
-        func warm(requests: [ChatTextLayoutRequest]) {
-            Task { [weak self] in
-                await self?.prepare(requests: requests)
-            }
+        private func finishWarmup(
+            _ layout: ChatTextLayout,
+            source: String,
+            style: ChatTextLayoutStyle,
+            key: Key
+        ) {
+            warming.remove(key)
+            guard entries[key]?.source != source || entries[key]?.style != style
+            else { return }
+            insert(layout, source: source, style: style, for: key)
         }
 
         private func insert(

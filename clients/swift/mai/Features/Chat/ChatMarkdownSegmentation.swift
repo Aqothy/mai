@@ -32,14 +32,6 @@ nonisolated enum ChatMessageTextPlan: Equatable, Sendable {
     case segmented([ChatMarkdownSegment])
 }
 
-nonisolated struct ChatMarkdownSegmentationRequest: Sendable {
-    let messageID: String
-    let role: String
-    let messageTurnID: String?
-    let streamingTurnID: String?
-    let source: String
-}
-
 /// Chooses one rendering path for a message. Keeping the decision here makes
 /// production, previews, and performance fixtures exercise the same policy.
 enum ChatMessageTextPlanner {
@@ -232,11 +224,6 @@ final class ChatMarkdownSegmentCache {
         let segments: [ChatMarkdownSegment]?
     }
 
-    private struct PreparedSegments: Sendable {
-        let request: ChatMarkdownSegmentationRequest
-        let segments: [ChatMarkdownSegment]?
-    }
-
     private var entries: [String: Entry] = [:]
     private var entryOrder: [String] = []
 
@@ -244,65 +231,6 @@ final class ChatMarkdownSegmentCache {
         if let entry = entries[messageID], entry.source == source {
             return entry.segments
         }
-        let result = ChatMarkdownSegmenter.segments(of: source)
-        insert(result, messageID: messageID, source: source)
-        return result
-    }
-
-    /// Parses uncached settled assistant messages away from the main actor. The
-    /// cold-open gate awaits this before it constructs any Markdown-backed rows.
-    func prepare(requests: [ChatMarkdownSegmentationRequest]) async {
-        var seen: Set<String> = []
-        let pending = requests.filter { request in
-            guard seen.insert(request.messageID).inserted,
-                entries[request.messageID]?.source != request.source,
-                request.role == MaidMessageRole.assistant.rawValue,
-                ChatTextOptimizationPolicy.shouldOptimize(
-                    role: request.role,
-                    messageTurnID: request.messageTurnID,
-                    streamingTurnID: request.streamingTurnID,
-                    source: request.source
-                )
-            else { return false }
-            return true
-        }
-        guard !pending.isEmpty else { return }
-
-        let worker = Task.detached(priority: .userInitiated) {
-            var prepared: [PreparedSegments] = []
-            prepared.reserveCapacity(pending.count)
-            for request in pending {
-                guard !Task.isCancelled else { break }
-                prepared.append(
-                    PreparedSegments(
-                        request: request,
-                        segments: ChatMarkdownSegmenter.segments(of: request.source)
-                    )
-                )
-            }
-            return prepared
-        }
-        let prepared = await withTaskCancellationHandler {
-            await worker.value
-        } onCancel: {
-            worker.cancel()
-        }
-        guard !Task.isCancelled else { return }
-
-        for result in prepared {
-            insert(
-                result.segments,
-                messageID: result.request.messageID,
-                source: result.request.source
-            )
-        }
-    }
-
-    private func insert(
-        _ segments: [ChatMarkdownSegment]?,
-        messageID: String,
-        source: String
-    ) {
         if entries.count >= Self.maximumEntryCount, entries[messageID] == nil,
             let oldestMessageID = entryOrder.first
         {
@@ -310,9 +238,11 @@ final class ChatMarkdownSegmentCache {
             entries.removeValue(forKey: oldestMessageID)
         }
         let isNewEntry = entries[messageID] == nil
-        entries[messageID] = Entry(source: source, segments: segments)
+        let result = ChatMarkdownSegmenter.segments(of: source)
+        entries[messageID] = Entry(source: source, segments: result)
         if isNewEntry {
             entryOrder.append(messageID)
         }
+        return result
     }
 }
