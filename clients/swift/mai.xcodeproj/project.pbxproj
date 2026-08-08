@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		F352331A301C6D4A004B8A1B /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = F3523319301C6D4A004B8A1B /* MarkdownView */; };
-		F3BC8AC43023B34C0059585E /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F3BC8AC33023B34C0059585E /* GhosttyTerminal */; };
+		F3F7D9B830258968001297A6 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F3F7D9B730258968001297A6 /* GhosttyTerminal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,7 +61,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				F352331A301C6D4A004B8A1B /* MarkdownView in Frameworks */,
-				F3BC8AC43023B34C0059585E /* GhosttyTerminal in Frameworks */,
+				F3F7D9B830258968001297A6 /* GhosttyTerminal in Frameworks */,
 			);
 		};
 		F3C108CC300EB34000EF5F93 /* Frameworks */ = {
@@ -110,7 +110,7 @@
 			name = mai;
 			packageProductDependencies = (
 				F3523319301C6D4A004B8A1B /* MarkdownView */,
-				F3BC8AC33023B34C0059585E /* GhosttyTerminal */,
+				F3F7D9B730258968001297A6 /* GhosttyTerminal */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* mai.app */;
@@ -167,7 +167,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F3523318301C6D4A004B8A1B /* XCRemoteSwiftPackageReference "MarkdownView" */,
-				F3BC8AC23023B34C0059585E /* XCRemoteSwiftPackageReference "libghostty-spm" */,
+				F3F7D9B630258968001297A6 /* XCRemoteSwiftPackageReference "libghostty-spm" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -530,12 +530,12 @@
 				minimumVersion = 3.0.0;
 			};
 		};
-		F3BC8AC23023B34C0059585E /* XCRemoteSwiftPackageReference "libghostty-spm" */ = {
+		F3F7D9B630258968001297A6 /* XCRemoteSwiftPackageReference "libghostty-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "git@github.com:Lakr233/libghostty-spm.git";
+			repositoryURL = "https://github.com/Aqothy/libghostty-spm";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.3.2;
+				minimumVersion = 1.5.2;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -546,9 +546,9 @@
 			package = F3523318301C6D4A004B8A1B /* XCRemoteSwiftPackageReference "MarkdownView" */;
 			productName = MarkdownView;
 		};
-		F3BC8AC33023B34C0059585E /* GhosttyTerminal */ = {
+		F3F7D9B730258968001297A6 /* GhosttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F3BC8AC23023B34C0059585E /* XCRemoteSwiftPackageReference "libghostty-spm" */;
+			package = F3F7D9B630258968001297A6 /* XCRemoteSwiftPackageReference "libghostty-spm" */;
 			productName = GhosttyTerminal;
 		};
 /* End XCSwiftPackageProductDependency section */
