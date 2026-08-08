@@ -150,10 +150,26 @@
             var idleTextView: UITextView?
         }
 
+        private struct PendingLayout: Sendable {
+            let request: ChatTextLayoutRequest
+            let key: Key
+        }
+
+        private struct PreparedLayout: Sendable {
+            let pending: PendingLayout
+            let layout: ChatTextLayout
+        }
+
         private var entries: [Key: Entry] = [:]
         private var entryOrder: [Key] = []
         private var warming: Set<Key> = []
         private var idleTextViewKeys: [Key] = []
+
+        func containsPreparedLayout(for request: ChatTextLayoutRequest) -> Bool {
+            let key = Key(id: request.id, width: request.width)
+            guard let entry = entries[key] else { return false }
+            return entry.source == request.source && entry.style == request.style
+        }
 
         func layout(
             id: String,
@@ -191,8 +207,10 @@
             return layout
         }
 
-        func warm(requests: [ChatTextLayoutRequest]) {
-            var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
+        /// Builds every uncached request on a background executor and returns
+        /// only after the completed layouts are available to visible rows.
+        func prepare(requests: [ChatTextLayoutRequest]) async {
+            var pending: [PendingLayout] = []
             var seen: Set<Key> = []
             // Chats open and normally scroll from the bottom. Prepare the
             // newest rows first so a large visible response does not wait
@@ -207,37 +225,56 @@
                     !warming.contains(key)
                 else { continue }
                 warming.insert(key)
-                pending.append((request, key))
+                pending.append(PendingLayout(request: request, key: key))
             }
             guard !pending.isEmpty else { return }
 
-            Task.detached(priority: .userInitiated) { [self] in
+            let worker = Task.detached(priority: .userInitiated) {
+                var prepared: [PreparedLayout] = []
+                prepared.reserveCapacity(pending.count)
                 for item in pending {
-                    let layout = ChatTextLayout(
-                        source: item.request.source,
-                        style: item.request.style,
-                        width: item.request.width
-                    )
-                    await finishWarmup(
-                        layout,
-                        source: item.request.source,
-                        style: item.request.style,
-                        key: item.key
+                    guard !Task.isCancelled else { break }
+                    prepared.append(
+                        PreparedLayout(
+                            pending: item,
+                            layout: ChatTextLayout(
+                                source: item.request.source,
+                                style: item.request.style,
+                                width: item.request.width
+                            )
+                        )
                     )
                 }
+                return prepared
+            }
+            let prepared = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+
+            for item in pending {
+                warming.remove(item.key)
+            }
+            guard !Task.isCancelled else { return }
+            for item in prepared {
+                let request = item.pending.request
+                guard entries[item.pending.key]?.source != request.source
+                    || entries[item.pending.key]?.style != request.style
+                else { continue }
+                insert(
+                    item.layout,
+                    source: request.source,
+                    style: request.style,
+                    for: item.pending.key
+                )
             }
         }
 
-        private func finishWarmup(
-            _ layout: ChatTextLayout,
-            source: String,
-            style: ChatTextLayoutStyle,
-            key: Key
-        ) {
-            warming.remove(key)
-            guard entries[key]?.source != source || entries[key]?.style != style
-            else { return }
-            insert(layout, source: source, style: style, for: key)
+        func warm(requests: [ChatTextLayoutRequest]) {
+            Task { [weak self] in
+                await self?.prepare(requests: requests)
+            }
         }
 
         private func insert(
@@ -308,62 +345,6 @@
             entry.idleTextView = textView
             entries[key] = entry
             idleTextViewKeys.append(key)
-        }
-    }
-
-    /// Retains the recently used threads' prepared TextKit stacks across
-    /// navigation. `ChatTimeline` is intentionally remounted for each thread,
-    /// but rebuilding identical text layouts on every reopen is unnecessary.
-    enum ChatTextLayoutStoreRegistry {
-        /// A store can retain up to 256 complete TextKit stacks, so keep only
-        /// a small recent working set instead of mirroring every cached thread.
-        private static let capacity = 3
-
-        private struct Entry {
-            let dynamicTypeSize: DynamicTypeSize
-            let store: ChatTextLayoutStore
-        }
-
-        private static var entriesByThreadID: [String: Entry] = [:]
-        private static var threadOrder: [String] = []
-
-        static func store(
-            for threadID: String,
-            dynamicTypeSize: DynamicTypeSize
-        ) -> ChatTextLayoutStore {
-            if let entry = entriesByThreadID[threadID],
-                entry.dynamicTypeSize == dynamicTypeSize
-            {
-                noteUse(threadID)
-                return entry.store
-            }
-
-            if entriesByThreadID[threadID] == nil,
-                entriesByThreadID.count >= capacity,
-                let oldestThreadID = threadOrder.first
-            {
-                threadOrder.removeFirst()
-                entriesByThreadID.removeValue(forKey: oldestThreadID)
-            }
-
-            let store = ChatTextLayoutStore()
-            entriesByThreadID[threadID] = Entry(
-                dynamicTypeSize: dynamicTypeSize,
-                store: store
-            )
-            noteUse(threadID)
-            return store
-        }
-
-        static func removeAll() {
-            entriesByThreadID.removeAll()
-            threadOrder.removeAll()
-        }
-
-        private static func noteUse(_ threadID: String) {
-            guard threadOrder.last != threadID else { return }
-            threadOrder.removeAll { $0 == threadID }
-            threadOrder.append(threadID)
         }
     }
 
