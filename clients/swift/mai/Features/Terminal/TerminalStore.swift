@@ -9,19 +9,13 @@ import Foundation
 /// controller and never enter observation.
 @Observable
 final class TerminalStore {
+    typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
+
     struct Timing: Sendable {
-        let resizeSettleDelay: Duration
         let reconnectDelay: Duration
 
-        static let standard = Timing(
-            resizeSettleDelay: .milliseconds(40),
-            reconnectDelay: .seconds(2)
-        )
-
-        static let immediate = Timing(
-            resizeSettleDelay: .zero,
-            reconnectDelay: .zero
-        )
+        static let standard = Timing(reconnectDelay: .seconds(2))
+        static let immediate = Timing(reconnectDelay: .zero)
     }
 
     enum ConnectionPhase: Equatable {
@@ -43,6 +37,7 @@ final class TerminalStore {
 
     @ObservationIgnored let rpc: any TerminalRPCClient
     @ObservationIgnored let timing: Timing
+    @ObservationIgnored private let snapshotRestorer: SnapshotRestorer
     @ObservationIgnored private var started = false
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
     @ObservationIgnored private var isAwaitingListSnapshot = false
@@ -51,10 +46,14 @@ final class TerminalStore {
 
     init(
         rpc: any TerminalRPCClient = RPCClient(),
-        timing: Timing = .standard
+        timing: Timing = .standard,
+        snapshotRestorer: @escaping SnapshotRestorer = { controller, data in
+            try await controller.restore(snapshot: data)
+        }
     ) {
         self.rpc = rpc
         self.timing = timing
+        self.snapshotRestorer = snapshotRestorer
     }
 
     /// Connects the transport and subscribes to the terminal list.
@@ -189,7 +188,12 @@ final class TerminalStore {
             }
         }
         closeActiveAttachment()
-        let attachment = TerminalAttachment(store: self, origin: request, mode: mode, timing: timing)
+        let attachment = TerminalAttachment(
+            store: self,
+            origin: request,
+            mode: mode,
+            snapshotRestorer: snapshotRestorer
+        )
         activeAttachment = attachment
         return attachment
     }
@@ -198,13 +202,6 @@ final class TerminalStore {
     /// state: containers call this when the visible content is no longer a
     /// terminal.
     func closeActiveTerminal() {
-        closeActiveAttachment()
-    }
-
-    /// Detaches the given attachment if it is still the active one. Called
-    /// when a terminal view disappears; late calls after a switch are no-ops.
-    func closeAttachment(_ attachment: TerminalAttachment) {
-        guard attachment === activeAttachment else { return }
         closeActiveAttachment()
     }
 
@@ -221,7 +218,7 @@ final class TerminalStore {
             store: self,
             origin: active.origin,
             mode: .relaunch(terminalID: terminalID),
-            timing: timing
+            snapshotRestorer: snapshotRestorer
         )
         activeAttachment = attachment
         return attachment

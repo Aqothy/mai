@@ -20,7 +20,6 @@ final class TerminalSessionController {
 
     @ObservationIgnored private let pipeline: TerminalOutputPipeline
     @ObservationIgnored private let backend: any TerminalHostBackend
-    @ObservationIgnored private var fontSize: Float
     /// Last grid the surface reported. Updated only when rows/columns change.
     private(set) var grid: TerminalOutputPipeline.Grid?
 
@@ -35,8 +34,10 @@ final class TerminalSessionController {
         fontSize: Float = TerminalSettings.defaultFontSize
     ) {
         self.backend = backend
-        self.fontSize = fontSize
-        viewState = TerminalViewState(theme: MaidTerminalAppearance.theme)
+        viewState = TerminalViewState(
+            theme: MaidTerminalAppearance.theme,
+            terminalConfiguration: MaidTerminalAppearance.terminalConfiguration
+        )
 
         let pipeline = TerminalOutputPipeline(
             input: { [backend] data in
@@ -54,7 +55,11 @@ final class TerminalSessionController {
             },
             resize: { [pipeline] viewport in
                 pipeline.handleViewport(columns: viewport.columns, rows: viewport.rows)
-            }
+            },
+            // The daemon consumes only the character grid. Let the package
+            // discard pixel-only viewport churn before it reaches our host
+            // callback; genuine row/column changes still forward immediately.
+            suppressesPixelOnlyResizes: true
         )
         self.session = session
         viewState.configuration = TerminalSurfaceOptions(
@@ -84,12 +89,11 @@ final class TerminalSessionController {
         pipeline.deliver(data)
     }
 
-    /// Routes an attach snapshot's replay to the renderer behind the input
-    /// barrier: anything the renderer emits while re-processing historical
-    /// bytes (query answers, mode side effects) is dropped instead of being
-    /// written into the live PTY.
-    nonisolated func receiveReplay(_ data: Data) {
-        pipeline.deliverReplay(data)
+    /// Transactionally replaces the renderer's terminal model and returns
+    /// only after Ghostty has installed it. Live output is delivered after
+    /// this call by the attachment's sequence barrier.
+    func restore(snapshot data: Data) async throws {
+        try await session.restore(snapshot: data)
     }
 
     /// Delivers remote process exit to the surface after all previously
@@ -102,16 +106,16 @@ final class TerminalSessionController {
         markEnded()
     }
 
-    /// Applies a changed terminal font size to the surface configuration.
-    /// The surface reports the resulting grid change through the normal
-    /// resize path.
+    /// Changes font size through Ghostty's live binding action. Updating the
+    /// surface configuration would rebuild the surface and discard its model;
+    /// the native action preserves scrollback and reports the resulting grid
+    /// through the normal resize path.
     func setFontSize(_ size: Float) {
-        guard fontSize != size else { return }
-        fontSize = size
-        viewState.configuration = TerminalSurfaceOptions(
-            backend: .inMemory(session),
-            fontSize: size
-        )
+        // Use Ghostty's absolute action rather than deriving a delta from our
+        // persisted preference. The surface can also be zoomed independently
+        // by pinch or keyboard bindings, so its live size may have moved since
+        // this controller was created.
+        _ = viewState.performBindingAction("set_font_size:\(size)")
     }
 
     /// Enables or disables terminal input forwarding.

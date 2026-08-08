@@ -220,7 +220,6 @@ public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
 public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable {
     case output = "output"
     case status = "status"
-    case controlRevoked = "control-revoked"
 }
 
 /// Payload discriminator of a terminal.subscribeList snapshot or update.

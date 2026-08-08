@@ -13,6 +13,11 @@ enum MaidTerminalAppearance {
         dark: TerminalConfiguration.afterglow.background(darkBackgroundHex)
     )
 
+    /// Coding tools conventionally use Option as terminal Alt/Meta rather
+    /// than as an Apple keyboard-layout character modifier.
+    static let terminalConfiguration = TerminalConfiguration()
+        .custom("macos-option-as-alt", "true")
+
     static func background(for colorScheme: ColorScheme) -> Color {
         switch colorScheme {
         case .dark:

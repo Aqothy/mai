@@ -8,8 +8,6 @@ extension TerminalSummary: Equatable {
             && lhs.title == rhs.title
             && lhs.cwd == rhs.cwd
             && lhs.status == rhs.status
-            && lhs.columns == rhs.columns
-            && lhs.rows == rhs.rows
             && lhs.exitCode == rhs.exitCode
             && lhs.createdAt == rhs.createdAt
             && lhs.updatedAt == rhs.updatedAt

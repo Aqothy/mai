@@ -14,10 +14,7 @@ struct TerminalSurfaceHost: View {
 
     var body: some View {
         #if canImport(UIKit)
-        MaidTerminalSurfaceView(
-            context: controller.viewState,
-            inputSession: controller.session
-        )
+        TerminalSurfaceView(context: controller.viewState)
             .background(backgroundColor)
             .onChange(of: colorScheme) { _, newScheme in
                 controller.viewState.adopt(colorScheme: newScheme)

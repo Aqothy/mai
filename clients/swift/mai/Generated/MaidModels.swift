@@ -3325,23 +3325,25 @@ public extension TerminalAttachParams {
 
 // MARK: - TerminalAttachSnapshot
 public struct TerminalAttachSnapshot: Codable {
-    public var replay: String?
-    public var replayTruncated: Bool?
+    public var columns, rows: Int
     public var runID: String
     public var sequence: Int
+    public var snapshot, snapshotFormat: String
     public var terminal: TerminalSummary
 
     public enum CodingKeys: String, CodingKey {
-        case replay, replayTruncated
+        case columns, rows
         case runID = "runId"
-        case sequence, terminal
+        case sequence, snapshot, snapshotFormat, terminal
     }
 
-    public init(replay: String?, replayTruncated: Bool?, runID: String, sequence: Int, terminal: TerminalSummary) {
-        self.replay = replay
-        self.replayTruncated = replayTruncated
+    public init(columns: Int, rows: Int, runID: String, sequence: Int, snapshot: String, snapshotFormat: String, terminal: TerminalSummary) {
+        self.columns = columns
+        self.rows = rows
         self.runID = runID
         self.sequence = sequence
+        self.snapshot = snapshot
+        self.snapshotFormat = snapshotFormat
         self.terminal = terminal
     }
 }
@@ -3365,17 +3367,21 @@ public extension TerminalAttachSnapshot {
     }
 
     func with(
-        replay: String?? = nil,
-        replayTruncated: Bool?? = nil,
+        columns: Int? = nil,
+        rows: Int? = nil,
         runID: String? = nil,
         sequence: Int? = nil,
+        snapshot: String? = nil,
+        snapshotFormat: String? = nil,
         terminal: TerminalSummary? = nil
     ) -> TerminalAttachSnapshot {
         return TerminalAttachSnapshot(
-            replay: replay ?? self.replay,
-            replayTruncated: replayTruncated ?? self.replayTruncated,
+            columns: columns ?? self.columns,
+            rows: rows ?? self.rows,
             runID: runID ?? self.runID,
             sequence: sequence ?? self.sequence,
+            snapshot: snapshot ?? self.snapshot,
+            snapshotFormat: snapshotFormat ?? self.snapshotFormat,
             terminal: terminal ?? self.terminal
         )
     }
@@ -3394,45 +3400,27 @@ public struct TerminalSummary: Codable {
     public var agentActivity: String?
     public var agentActivityUpdatedAt: Date?
     public var agentKind: String?
-    public var columns: Int
     public var createdAt: Date
     public var cwd: String
     public var exitCode: Int?
     public var observedTitle: String?
-    public var rows: Int
     public var status, terminalID, title: String
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case agentActivity, agentActivityUpdatedAt, agentKind, columns, createdAt, cwd, exitCode, observedTitle, rows, status
+        case agentActivity, agentActivityUpdatedAt, agentKind, createdAt, cwd, exitCode, observedTitle, status
         case terminalID = "terminalId"
         case title, updatedAt
     }
 
-    public init(
-        columns: Int,
-        createdAt: Date,
-        cwd: String,
-        exitCode: Int?,
-        rows: Int,
-        status: String,
-        terminalID: String,
-        title: String,
-        updatedAt: Date,
-        agentActivity: String? = nil,
-        agentActivityUpdatedAt: Date? = nil,
-        agentKind: String? = nil,
-        observedTitle: String? = nil
-    ) {
+    public init(agentActivity: String?, agentActivityUpdatedAt: Date?, agentKind: String?, createdAt: Date, cwd: String, exitCode: Int?, observedTitle: String?, status: String, terminalID: String, title: String, updatedAt: Date) {
         self.agentActivity = agentActivity
         self.agentActivityUpdatedAt = agentActivityUpdatedAt
         self.agentKind = agentKind
-        self.columns = columns
         self.createdAt = createdAt
         self.cwd = cwd
         self.exitCode = exitCode
         self.observedTitle = observedTitle
-        self.rows = rows
         self.status = status
         self.terminalID = terminalID
         self.title = title
@@ -3459,34 +3447,30 @@ public extension TerminalSummary {
     }
 
     func with(
-        columns: Int? = nil,
-        createdAt: Date? = nil,
-        cwd: String? = nil,
-        exitCode: Int?? = nil,
-        rows: Int? = nil,
-        status: String? = nil,
-        terminalID: String? = nil,
-        title: String? = nil,
-        updatedAt: Date? = nil,
         agentActivity: String?? = nil,
         agentActivityUpdatedAt: Date?? = nil,
         agentKind: String?? = nil,
-        observedTitle: String?? = nil
+        createdAt: Date? = nil,
+        cwd: String? = nil,
+        exitCode: Int?? = nil,
+        observedTitle: String?? = nil,
+        status: String? = nil,
+        terminalID: String? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil
     ) -> TerminalSummary {
         return TerminalSummary(
-            columns: columns ?? self.columns,
-            createdAt: createdAt ?? self.createdAt,
-            cwd: cwd ?? self.cwd,
-            exitCode: exitCode ?? self.exitCode,
-            rows: rows ?? self.rows,
-            status: status ?? self.status,
-            terminalID: terminalID ?? self.terminalID,
-            title: title ?? self.title,
-            updatedAt: updatedAt ?? self.updatedAt,
             agentActivity: agentActivity ?? self.agentActivity,
             agentActivityUpdatedAt: agentActivityUpdatedAt ?? self.agentActivityUpdatedAt,
             agentKind: agentKind ?? self.agentKind,
-            observedTitle: observedTitle ?? self.observedTitle
+            createdAt: createdAt ?? self.createdAt,
+            cwd: cwd ?? self.cwd,
+            exitCode: exitCode ?? self.exitCode,
+            observedTitle: observedTitle ?? self.observedTitle,
+            status: status ?? self.status,
+            terminalID: terminalID ?? self.terminalID,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt
         )
     }
 

@@ -3,11 +3,11 @@ import Foundation
 /// One client attachment to one terminal thread run.
 ///
 /// The attachment owns the stable Ghostty controller for the terminal view's
-/// lifetime and implements the attach contract: install the authoritative
-/// snapshot, feed its replay, then apply only live items whose run matches
-/// and whose sequence is greater than the snapshot sequence. Items that
-/// arrive while the attach call is in flight are buffered and applied in
-/// sequence order afterward.
+/// lifetime and implements the attach contract: transactionally install the
+/// authoritative native Ghostty snapshot, then apply only live items whose
+/// run matches and whose sequence is greater than the snapshot sequence.
+/// Items that arrive while the attach call is in flight are buffered and
+/// applied in sequence order afterward.
 ///
 /// Observable properties change only on lifecycle events; raw output bytes go
 /// straight to the controller and never enter observation.
@@ -35,7 +35,7 @@ final class TerminalAttachment {
 
     private(set) var phase: Phase = .attaching
 
-    /// True once this surface has received its first authoritative replay and
+    /// True once this surface has installed its first authoritative snapshot and
     /// all live items buffered behind it. Reconnects keep the rendered screen
     /// visible while a replacement snapshot is in flight.
     private(set) var hasInstalledInitialSnapshot = false
@@ -55,30 +55,28 @@ final class TerminalAttachment {
     @ObservationIgnored private var mode: Mode
     @ObservationIgnored private weak var store: TerminalStore?
     @ObservationIgnored private let backend: TerminalAttachmentBackend
-    @ObservationIgnored private let timing: TerminalStore.Timing
+    @ObservationIgnored private let snapshotRestorer: TerminalStore.SnapshotRestorer
 
     @ObservationIgnored private var lastAppliedSequence = 0
     @ObservationIgnored private var awaitingSnapshot = true
     @ObservationIgnored private var bufferedItems: [TerminalStreamMessage] = []
-    @ObservationIgnored private var hasRenderedRun = false
     @ObservationIgnored private var isClosed = false
 
     @ObservationIgnored private var pendingGrid: TerminalOutputPipeline.Grid?
     @ObservationIgnored private var lastSentGrid: TerminalOutputPipeline.Grid?
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var startInFlight = false
-    @ObservationIgnored private var resizeTask: Task<Void, Never>?
 
     init(
         store: TerminalStore,
         origin: TerminalOpenRequest,
         mode: Mode,
-        timing: TerminalStore.Timing
+        snapshotRestorer: @escaping TerminalStore.SnapshotRestorer
     ) {
         self.store = store
         self.origin = origin
         self.mode = mode
-        self.timing = timing
+        self.snapshotRestorer = snapshotRestorer
         let backend = TerminalAttachmentBackend()
         self.backend = backend
         controller = TerminalSessionController(
@@ -120,13 +118,16 @@ final class TerminalAttachment {
             ))
     }
 
-    /// The first measured grid starts attach; later bursts collapse to their
-    /// latest value.
+    /// The first measured grid starts attach. Synchronous layout bursts use
+    /// their latest value; a later change is handled by the snapshot-grid
+    /// validation in `apply(snapshot:)`.
     func gridChanged(columns: UInt16, rows: UInt16) {
         pendingGrid = .init(columns: columns, rows: rows)
         if runID != nil {
             scheduleResize()
-        } else {
+        } else if !startInFlight {
+            startTask?.cancel()
+            startTask = nil
             scheduleStart()
         }
     }
@@ -161,10 +162,14 @@ final class TerminalAttachment {
     func close() {
         guard !isClosed else { return }
         isClosed = true
-        startTask?.cancel()
-        startTask = nil
-        resizeTask?.cancel()
-        resizeTask = nil
+        // Once an attach RPC has been sent, let it finish so we can detach the
+        // server-side subscription using the identity returned in its snapshot.
+        // Canceling only the local await would discard that identity while the
+        // daemon keeps this connection subscribed.
+        if !startInFlight {
+            startTask?.cancel()
+            startTask = nil
+        }
         if let terminalID, let runID {
             store?.rpc.detachTerminal(
                 TerminalDetachParams(runID: runID, terminalID: terminalID))
@@ -197,7 +202,7 @@ final class TerminalAttachment {
             startTask == nil, pendingGrid != nil
         else { return }
         startTask = Task { [weak self] in
-            guard !Task.isCancelled, let self, !isClosed,
+            guard let self, !Task.isCancelled, !isClosed,
                 awaitingSnapshot, !startInFlight,
                 let grid = pendingGrid
             else { return }
@@ -234,43 +239,87 @@ final class TerminalAttachment {
                         terminalID: terminalID
                     ))
             }
+            // A reconnect or replacement request may have canceled this task
+            // while an RPC implementation was still completing it. Such a
+            // stale response must not clear or overwrite the newer request.
+            guard !Task.isCancelled else { return }
             startInFlight = false
             startTask = nil
-            guard !isClosed else { return }
-            apply(snapshot: snapshot)
+            if isClosed {
+                rpc.detachTerminal(
+                    TerminalDetachParams(
+                        runID: snapshot.runID,
+                        terminalID: snapshot.terminal.terminalID
+                    ))
+                return
+            }
+            await apply(snapshot: snapshot)
         } catch {
+            guard !Task.isCancelled else { return }
             startInFlight = false
             startTask = nil
-            guard !isClosed, !Task.isCancelled, phase == .attaching else { return }
+            guard !isClosed, phase == .attaching else { return }
             phase = .failed(error.localizedDescription)
         }
     }
 
-    /// Installs the authoritative snapshot: reset the renderer when it showed
-    /// an earlier point of the stream, feed replay, then apply buffered items
-    /// above the snapshot sequence in order.
-    private func apply(snapshot: TerminalAttachSnapshot) {
+    /// Installs the authoritative native model, then applies buffered items
+    /// above the snapshot sequence in order. Awaiting Ghostty's completion is
+    /// the visibility barrier that prevents the old/empty buffer from flashing.
+    private func apply(snapshot: TerminalAttachSnapshot) async {
+        let snapshotGrid = TerminalOutputPipeline.Grid(
+            columns: UInt16(clamping: snapshot.columns),
+            rows: UInt16(clamping: snapshot.rows)
+        )
+        // A native model can only be installed at its captured grid. If the
+        // surface's grid moved while the request was in flight (iOS reports a
+        // provisional layout before settling), discard this snapshot and
+        // fetch a fresh one at the settled grid; the run it started
+        // (create/relaunch) is joined with a plain attach. The daemon can also
+        // reflow a naturally exited run's retained model without a live PTY.
+        let canReflowSnapshot: Bool =
+            switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
+            case .running, .starting, .exited: true
+            default: false
+            }
+        if canReflowSnapshot, let pendingGrid, pendingGrid != snapshotGrid {
+            terminalID = snapshot.terminal.terminalID
+            mode = .attach(terminalID: snapshot.terminal.terminalID)
+            scheduleStart()
+            return
+        }
+
         terminalID = snapshot.terminal.terminalID
         runID = snapshot.runID
         lastAppliedSequence = snapshot.sequence
-        lastSentGrid = .init(
-            columns: UInt16(clamping: snapshot.terminal.columns),
-            rows: UInt16(clamping: snapshot.terminal.rows)
-        )
+        lastSentGrid = snapshotGrid
 
-        if hasRenderedRun {
-            // Full reset (RIS) clears the previous run/attach point — modes,
-            // alternate screen, and grid contents — before replay rebuilds
-            // the current screen.
-            controller.receive(Data("\u{1B}c".utf8))
+        guard snapshot.snapshotFormat == TerminalSnapshotContract.format else {
+            failSnapshot(
+                String(localized: "The app and daemon use incompatible terminal snapshot versions."))
+            return
         }
-        hasRenderedRun = true
-        if let replay = snapshot.replay,
-            let data = Data(base64Encoded: replay),
-            !data.isEmpty
-        {
-            controller.receiveReplay(data)
+        guard let data = Data(base64Encoded: snapshot.snapshot), !data.isEmpty else {
+            failSnapshot(String(localized: "The daemon returned an invalid terminal snapshot."))
+            return
         }
+
+        do {
+            try await snapshotRestorer(controller, data)
+        } catch {
+            guard !isClosed else { return }
+            // A layout change can race the native install after the earlier
+            // check. Fetch again only when the measured grid actually moved;
+            // malformed or incompatible snapshots must not retry forever.
+            if canReflowSnapshot, let pendingGrid, pendingGrid != snapshotGrid {
+                mode = .attach(terminalID: snapshot.terminal.terminalID)
+                scheduleStart()
+                return
+            }
+            failSnapshot(error.localizedDescription)
+            return
+        }
+        guard !isClosed else { return }
 
         switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
         case .starting, .running, nil:
@@ -302,6 +351,7 @@ final class TerminalAttachment {
 
     func receive(_ item: TerminalStreamMessage) {
         guard !isClosed else { return }
+        if case .failed = phase { return }
         if awaitingSnapshot {
             bufferedItems.append(item)
             return
@@ -344,9 +394,8 @@ final class TerminalAttachment {
             }
         case .status:
             applyStatus(item)
-        case .controlRevoked, nil:
-            // Kept wire-compatible with older daemons; shared attachments do
-            // not revoke one another.
+        case nil:
+            // Unknown future kinds must not crash the client.
             break
         }
     }
@@ -367,28 +416,27 @@ final class TerminalAttachment {
         }
     }
 
+    private func failSnapshot(_ message: String) {
+        phase = .failed(message)
+        awaitingSnapshot = false
+        bufferedItems.removeAll()
+        controller.setInputEnabled(false)
+        if let terminalID, let runID {
+            store?.rpc.detachTerminal(
+                TerminalDetachParams(runID: runID, terminalID: terminalID))
+        }
+    }
+
     // MARK: - Resize
 
     private func scheduleResize() {
         guard !isClosed, phase == .running, runID != nil,
             pendingGrid != lastSentGrid
         else { return }
-        resizeTask?.cancel()
-        if timing.resizeSettleDelay == .zero {
-            sendPendingResize()
-            return
-        }
-        resizeTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await Task.sleep(for: timing.resizeSettleDelay)
-            } catch { return }
-            sendPendingResize()
-        }
+        sendPendingResize()
     }
 
     private func sendPendingResize() {
-        resizeTask = nil
         guard !isClosed, phase == .running,
             let terminalID, let runID,
             let grid = pendingGrid, grid != lastSentGrid

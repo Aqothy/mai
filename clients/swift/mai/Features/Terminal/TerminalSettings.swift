@@ -13,17 +13,24 @@ final class TerminalSettings {
 
     @ObservationIgnored private let defaults: UserDefaults
 
+    // Clamping lives in the computed setter rather than a didSet: with
+    // @Observable, reassigning a tracked property inside its own didSet
+    // re-enters the synthesized setter and overflows the stack.
+    private var storedFontSize: Float
+
     var fontSize: Float {
-        didSet {
-            fontSize = fontSize.clamped(to: Self.fontSizeRange)
-            defaults.set(Double(fontSize), forKey: Self.fontSizeKey)
+        get { storedFontSize }
+        set {
+            let clamped = newValue.clamped(to: Self.fontSizeRange)
+            storedFontSize = clamped
+            defaults.set(Double(clamped), forKey: Self.fontSizeKey)
         }
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let stored = defaults.object(forKey: Self.fontSizeKey) as? Double
-        fontSize = Float(stored ?? Double(Self.defaultFontSize))
+        storedFontSize = Float(stored ?? Double(Self.defaultFontSize))
             .clamped(to: Self.fontSizeRange)
     }
 
