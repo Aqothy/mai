@@ -56,9 +56,6 @@ struct IOSCompactAppContainer: View {
             }
         }
         .onChange(of: path, initial: true) { _, path in
-            if path.isEmpty {
-                store.startNewDraft()
-            }
             // Detach is navigation-driven: when the visible top of the stack
             // stops being a terminal, release control; the shell keeps
             // running on the daemon.

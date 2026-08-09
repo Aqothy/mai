@@ -75,9 +75,6 @@ struct IOSRegularAppContainer: View {
             }
         }
         .onChange(of: route, initial: true) { _, route in
-            if route == nil {
-                store.startNewDraft()
-            }
             if case .terminal = route {
                 return
             }
@@ -85,7 +82,7 @@ struct IOSRegularAppContainer: View {
         }
         .onChange(of: preferredCompactColumn) { _, column in
             if column == .sidebar {
-                route = nil
+                terminalStore.closeActiveTerminal()
             }
         }
     }
