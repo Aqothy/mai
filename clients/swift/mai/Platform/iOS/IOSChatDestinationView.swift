@@ -23,11 +23,10 @@ struct IOSChatDestinationView: View {
                 EmptyView()
             }
         }
-        // Publishing the selection during the initial update would build a
-        // cached thread's entire timeline before the push transition's first
-        // frame, freezing navigation. task(id:) runs after that frame
-        // commits, so the push starts immediately showing the placeholder
-        // and the transcript builds while it is on screen.
+        // Thread-list routes normally publish their selection before
+        // navigation so the bounded initial page is ready on arrival. The
+        // task remains the fallback for restored routes and owns new-draft
+        // selection after the destination appears.
         .task(id: route) {
             switch route {
             case .newChat:

@@ -70,14 +70,16 @@ enum ChatMessageTextPlanner {
 
 /// Separates native-text prose from blocks that still need MarkdownView.
 ///
-/// The split is semantic rather than size based: adjacent paragraphs,
-/// headings, lists, and quotes remain one selectable text view. Code blocks,
-/// tables, HTML, and images become standalone rich rows. This gives `List`
-/// useful virtualization boundaries without chopping ordinary prose or code.
+/// Code blocks, tables, HTML, and images become standalone rich rows. Long
+/// prose is also divided at top-level Markdown block boundaries so `List` can
+/// virtualize an essay instead of laying out one enormous text view at once.
 nonisolated enum ChatMarkdownSegmenter {
     /// Fresh layout of a representative 2 KB Markdown message costs about a
     /// frame in the existing renderer; smaller messages keep its simpler path.
     static let optimizationThreshold = 2_048
+    /// Keeps each ordinary prose row near one frame of native attachment work.
+    /// A single indivisible Markdown block may exceed this target.
+    static let maximumProseSegmentByteCount = 4_096
 
     static func shouldOptimize(_ source: String) -> Bool {
         source.utf8.count > optimizationThreshold
@@ -116,10 +118,14 @@ nonisolated enum ChatMarkdownSegmenter {
         var runIsRich = first.isRich
 
         for block in blocks.dropFirst() {
-            // Prose coalesces. Every rich block stands alone.
-            guard runIsRich || block.isRich, block.offset > runStart else {
-                continue
-            }
+            let shouldSplitLongProse =
+                !runIsRich && !block.isRich
+                && block.offset - runStart >= maximumProseSegmentByteCount
+            // Every rich block stands alone. Prose coalesces only until the
+            // next semantic block would make one native row too expensive.
+            guard runIsRich || block.isRich || shouldSplitLongProse,
+                block.offset > runStart
+            else { continue }
             segments.append(
                 ChatMarkdownSegment(
                     kind: runIsRich ? .rich : .prose,
@@ -223,14 +229,10 @@ nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
 
 /// Avoids reparsing unchanged settled messages when the timeline updates.
 final class ChatMarkdownSegmentCache {
-    /// `prime` grows this floor to fit the visible transcript, avoiding
-    /// eviction-and-reparse loops during a full render.
-    private static let minimumEntryCount = 256
-    private var entryCapacity = ChatMarkdownSegmentCache.minimumEntryCount
-
-    /// True once `prime(requests:)` has covered a timeline snapshot, so a
-    /// cold open's first body pass finds only cache hits.
-    private(set) var isPrimed = false
+    /// A per-session ceiling. One entry represents one eligible assistant
+    /// message and can contain several Markdown segments. This does not
+    /// preallocate or precompute 512 messages.
+    private static let capacity = 512
 
     /// Retained message entries; a test seam for retention behavior.
     var entryCount: Int { entries.count }
@@ -250,6 +252,12 @@ final class ChatMarkdownSegmentCache {
         let result = ChatMarkdownSegmenter.segments(of: source)
         store(result, messageID: messageID, source: source)
         return result
+    }
+
+    /// Whether preparation has stored a result, including a nil result for a
+    /// message that must keep the existing renderer.
+    func contains(messageID: String, source: String) -> Bool {
+        entries[messageID]?.source == source
     }
 
     /// Uses fold-aware rows so hidden intermediate messages are not primed.
@@ -275,9 +283,8 @@ final class ChatMarkdownSegmentCache {
     }
 
     /// Batch-parses uncached requests off the main actor. Cancellation keeps
-    /// completed results and leaves the cache unprimed for a later retry.
+    /// completed results; missing entries remain eligible for a later retry.
     func prime(requests: [ChatMarkdownPrimeRequest]) async {
-        entryCapacity = max(entryCapacity, requests.count)
         let pending = requests.filter {
             entries[$0.messageID]?.source != $0.source
         }
@@ -301,10 +308,7 @@ final class ChatMarkdownSegmentCache {
             for (request, segments) in computed {
                 store(segments, messageID: request.messageID, source: request.source)
             }
-            guard computed.count == pending.count else { return }
         }
-        guard !Task.isCancelled else { return }
-        isPrimed = true
     }
 
     private func store(
@@ -313,7 +317,7 @@ final class ChatMarkdownSegmentCache {
         source: String
     ) {
         let isNewEntry = entries[messageID] == nil
-        if entries.count >= entryCapacity, isNewEntry,
+        if entries.count >= Self.capacity, isNewEntry,
             let oldestMessageID = entryOrder.first
         {
             entryOrder.removeFirst()

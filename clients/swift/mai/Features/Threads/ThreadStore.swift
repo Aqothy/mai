@@ -118,6 +118,24 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.markdownSegmentCache
     }
 
+    #if os(iOS)
+        var selectedThreadTextLayoutStore: ChatTextLayoutStore? {
+            _ = selectedSessionGeneration
+            guard let selectedThreadID else { return nil }
+            return sessionsByID[selectedThreadID]?.textLayoutStore
+        }
+
+        func resetSelectedThreadTextLayoutStore() {
+            guard let selectedThreadID,
+                var session = sessionsByID[selectedThreadID]
+            else { return }
+            session.textLayoutStore.deactivateTextViewReuse()
+            session.textLayoutStore = ChatTextLayoutStore()
+            sessionsByID[selectedThreadID] = session
+            noteSelectedSessionChanged(selectedThreadID)
+        }
+    #endif
+
     var selectedThreadSequence: Int {
         _ = selectedSessionGeneration
         guard let selectedThreadID else { return 0 }
@@ -433,7 +451,7 @@ final class ThreadStore {
             value: nil
         )
         _ = try await rpc.dispatchCommand(command)
-        prepareThreadForSelection(threadID)
+        prepareThreadSubscription(threadID)
         await subscriptionTasks[threadID]?.task.value
     }
 
@@ -585,19 +603,17 @@ final class ThreadStore {
         selectThread(nil)
     }
 
-    /// Starts an uncached selection's authoritative snapshot before navigation
-    /// publishes it as the visible thread.
-    func prepareThreadForSelection(_ id: String) {
+    /// Starts a snapshot without publishing selection. New-thread creation
+    /// uses this to await its authoritative model before revealing the chat.
+    private func prepareThreadSubscription(_ id: String) {
         guard connectionState == .connected,
-              selectedThreadID != id else {
-            return
-        }
+            selectedThreadID != id
+        else { return }
 
         let session = sessionsByID[id] ?? ThreadSession()
         guard !session.subscriptionState.isSubscribed,
-              !isSubscribing(session.subscriptionState) else {
-            return
-        }
+            !isSubscribing(session.subscriptionState)
+        else { return }
 
         sessionsByID[id] = session
         ensureSubscribed(id)
@@ -1149,6 +1165,13 @@ final class ThreadStore {
 
         session.subscriptionState = .unsubscribed
         session.shouldRestoreAfterReconnect = false
+        // Presentation caches are useful for recent back-navigation, but an
+        // evicted inactive session should not retain prepared content forever.
+        session.markdownSegmentCache = ChatMarkdownSegmentCache()
+        #if os(iOS)
+            session.textLayoutStore.deactivateTextViewReuse()
+            session.textLayoutStore = ChatTextLayoutStore()
+        #endif
         sessionsByID[id] = session
         removeItemDetails(for: id)
         streamingTextByThreadID[id] = nil

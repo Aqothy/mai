@@ -111,6 +111,38 @@ nonisolated enum ChatTimelineLayout {
         return sections
     }
 
+    /// Returns the newest complete turn sections, counting sections that
+    /// contain a user message as page boundaries. Any trailing activity-only
+    /// sections stay attached to the newest page.
+    static func paginatedSections<Sections: RandomAccessCollection>(
+        _ sections: Sections,
+        userMessageLimit: Int
+    ) -> [Section] where Sections.Element == Section {
+        guard userMessageLimit > 0 else { return [] }
+
+        var remainingUserMessages = userMessageLimit
+        var startIndex = sections.endIndex
+        while startIndex > sections.startIndex {
+            let candidateIndex = sections.index(before: startIndex)
+            let section = sections[candidateIndex]
+            startIndex = candidateIndex
+
+            let containsUserMessage = section.blocks.contains { block in
+                guard case .message(let message) = block.row else {
+                    return false
+                }
+                return message.role == MaidMessageRole.user.rawValue
+            }
+            if containsUserMessage {
+                remainingUserMessages -= 1
+                if remainingUserMessages == 0 {
+                    break
+                }
+            }
+        }
+        return Array(sections[startIndex...])
+    }
+
     private static func append(_ entry: TimelineEntry, to section: inout Section) {
         switch entry.entryKind {
         case .message:

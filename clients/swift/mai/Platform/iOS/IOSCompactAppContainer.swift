@@ -20,7 +20,7 @@ struct IOSCompactAppContainer: View {
                     path.append(.terminal(request))
                 },
                 selectThread: { threadID in
-                    store.prepareThreadForSelection(threadID)
+                    store.selectThread(threadID)
                     path.append(.thread(threadID))
                 },
                 selectTerminal: { terminalID in
@@ -40,7 +40,7 @@ struct IOSCompactAppContainer: View {
                     SessionImportView(
                         store: store,
                         openThread: { threadID in
-                            store.prepareThreadForSelection(threadID)
+                            store.selectThread(threadID)
                             path = [.thread(threadID)]
                         }
                     )

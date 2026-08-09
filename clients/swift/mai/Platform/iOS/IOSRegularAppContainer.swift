@@ -23,7 +23,7 @@ struct IOSRegularAppContainer: View {
                     preferredCompactColumn = .detail
                 },
                 selectThread: { threadID in
-                    store.prepareThreadForSelection(threadID)
+                    store.selectThread(threadID)
                     route = .thread(threadID)
                     preferredCompactColumn = .detail
                 },
@@ -48,7 +48,7 @@ struct IOSRegularAppContainer: View {
                 SessionImportView(
                     store: store,
                     openThread: { threadID in
-                        store.prepareThreadForSelection(threadID)
+                        store.selectThread(threadID)
                         route = .thread(threadID)
                     }
                 )

@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 
 struct ChatView: View {
@@ -10,17 +11,21 @@ struct ChatView: View {
 
     #if os(iOS)
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-        /// Owned above the timeline so layouts can be prepared before mount.
-        @State private var textLayoutStore = ChatTextLayoutStore()
-        @State private var preparedThreadID: String?
-        @State private var preparedRowWidth: CGFloat = 0
     #endif
 
     init(store: ThreadStore, draftStore: ThreadDraftStore) {
         self.store = store
         self.draftStore = draftStore
         _draftModel = State(initialValue: DraftPromptModel(store: store, draftStore: draftStore))
+        _chatModel = State(
+            initialValue: store.selectedThreadID.map {
+                ChatPromptModel(
+                    store: store,
+                    draftStore: draftStore,
+                    threadID: $0
+                )
+            }
+        )
     }
 
     var body: some View {
@@ -36,35 +41,12 @@ struct ChatView: View {
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
                 #if os(iOS)
-                    if preparedThreadID == thread.id {
-                        chatTimeline(thread: thread, segmentCache: segmentCache)
-                    } else {
-                        // Prepare segmentation and visible text layouts before
-                        // mounting the timeline.
-                        ProgressView("Loading Chat…")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .onGeometryChange(for: CGFloat.self) { geometry in
-                                max(
-                                    0,
-                                    geometry.size.width
-                                        - 2 * ChatTimelineMetrics.rowHorizontalInset
-                                )
-                            } action: { width in
-                                preparedRowWidth = width
-                            }
-                            .task(
-                                id: ChatPreparationKey(
-                                    threadID: thread.id,
-                                    rowWidth: preparedRowWidth,
-                                    storeID: ObjectIdentifier(textLayoutStore)
-                                )
-                            ) {
-                                await prepareTimeline(
-                                    thread: thread,
-                                    segmentCache: segmentCache,
-                                    rowWidth: preparedRowWidth
-                                )
-                            }
+                    if let textLayoutStore = store.selectedThreadTextLayoutStore {
+                        chatTimeline(
+                            thread: thread,
+                            segmentCache: segmentCache,
+                            textLayoutStore: textLayoutStore
+                        )
                     }
                 #else
                     chatTimeline(thread: thread, segmentCache: segmentCache)
@@ -97,12 +79,12 @@ struct ChatView: View {
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
-        .onChange(of: store.selectedThreadID, initial: true) { _, threadID in
-            scrollState.reset()
-            #if os(iOS)
-                preparedThreadID = nil
-                textLayoutStore = ChatTextLayoutStore()
-            #endif
+        .onChange(of: store.selectedThreadID, initial: true) {
+            previousThreadID,
+            threadID in
+            if previousThreadID != threadID, previousThreadID != nil {
+                scrollState.reset()
+            }
             if let threadID {
                 if chatModel?.threadID != threadID {
                     chatModel = ChatPromptModel(
@@ -117,9 +99,9 @@ struct ChatView: View {
         }
         #if os(iOS)
             .onChange(of: dynamicTypeSize) { _, _ in
-                // Fonts are baked into each layout. A fresh store drops
-                // every layout built at the previous Dynamic Type size.
-                textLayoutStore = ChatTextLayoutStore()
+                // Fonts are baked into each layout. Drop layouts built at
+                // the previous Dynamic Type size.
+                store.resetSelectedThreadTextLayoutStore()
             }
         #endif
         .alert(
@@ -135,12 +117,13 @@ struct ChatView: View {
         }
     }
 
-    private func chatTimeline(
-        thread: Thread,
-        segmentCache: ChatMarkdownSegmentCache
-    ) -> some View {
-        #if os(iOS)
-            return ChatTimeline(
+    #if os(iOS)
+        private func chatTimeline(
+            thread: Thread,
+            segmentCache: ChatMarkdownSegmentCache,
+            textLayoutStore: ChatTextLayoutStore
+        ) -> some View {
+            ChatTimeline(
                 threadID: thread.id,
                 sections: ChatTimelineLayout.sections(
                     timeline: thread.timeline
@@ -155,8 +138,19 @@ struct ChatView: View {
                 textLayoutStore: textLayoutStore
             )
             .id(thread.id)
-        #else
-            return ChatTimeline(
+            .onAppear {
+                textLayoutStore.activateTextViewReuse()
+            }
+            .onDisappear {
+                textLayoutStore.deactivateTextViewReuse()
+            }
+        }
+    #else
+        private func chatTimeline(
+            thread: Thread,
+            segmentCache: ChatMarkdownSegmentCache
+        ) -> some View {
+            ChatTimeline(
                 threadID: thread.id,
                 sections: ChatTimelineLayout.sections(
                     timeline: thread.timeline
@@ -170,58 +164,14 @@ struct ChatView: View {
                 scrollState: scrollState
             )
             .id(thread.id)
-        #endif
-    }
+        }
+    #endif
 
     private static func streamingTurnID(of thread: Thread) -> String? {
         thread.latestTurn?.turnState == .running
             ? thread.latestTurn?.turnID
             : nil
     }
-
-    #if os(iOS)
-        /// Only block reveal on rows near the initial bottom viewport.
-        private static let coldOpenPreparedRowCount = 16
-
-        private func prepareTimeline(
-            thread: Thread,
-            segmentCache: ChatMarkdownSegmentCache,
-            rowWidth: CGFloat
-        ) async {
-            guard rowWidth > 0 else { return }
-            let streamingTurnID = Self.streamingTurnID(of: thread)
-            let timelineRows = ChatTimelineLayout.rows(
-                sections: ChatTimelineLayout.sections(
-                    timeline: thread.timeline
-                ),
-                streamingTurnID: streamingTurnID,
-                latestTurn: thread.latestTurn,
-                expandedSectionIDs: []
-            )
-            await segmentCache.prime(
-                requests: ChatMarkdownSegmentCache.primeRequests(
-                    rows: timelineRows,
-                    streamingTurnID: streamingTurnID
-                )
-            )
-            guard !Task.isCancelled else { return }
-
-            let rows = ChatTimeline.renderRows(
-                timelineRows,
-                streamingTurnID: streamingTurnID,
-                segmentCache: segmentCache
-            )
-            await textLayoutStore.prepare(
-                requests: ChatTimeline.textLayoutRequests(
-                    in: rows,
-                    limit: Self.coldOpenPreparedRowCount,
-                    rowWidth: rowWidth
-                )
-            )
-            guard !Task.isCancelled else { return }
-            preparedThreadID = thread.id
-        }
-    #endif
 
     private var selectedThreadTitle: String {
         if let title = store.selectedThread?.title {
@@ -232,11 +182,10 @@ struct ChatView: View {
 }
 
 #if os(iOS)
-    /// Store identity restarts preparation after a Dynamic Type change.
-    private struct ChatPreparationKey: Equatable {
-        let threadID: String
+    private struct ChatTailTextWarmupKey: Equatable {
+        let timelineEntryCount: Int
+        let streamingTurnID: String?
         let rowWidth: CGFloat
-        let storeID: ObjectIdentifier
     }
 #endif
 
@@ -427,6 +376,7 @@ nonisolated enum ChatTimelineMetrics {
 
 private struct ChatTimeline: View {
     static let nearBottomDistance: CGFloat = 24
+    private static let historyLoadDistance: CGFloat = 1
 
     let threadID: String
     let sections: [ChatTimelineLayout.Section]
@@ -440,30 +390,49 @@ private struct ChatTimeline: View {
 
     @State private var foldModel = ChatTimelineFoldModel()
     @State private var isAwaitingInitialBottom = true
+    @State private var isTimelineNearBottom = true
+    @State private var oldestLoadedSectionID: String?
+    @State private var isTimelineNearTop = false
+    @State private var historyLoadRequest = 0
+    @State private var isLoadingEarlier = false
+    @State private var pendingPrependAnchorID: String?
 
     #if os(iOS)
-        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @State private var textWarmRowWidth: CGFloat = 0
 
-        /// Owned by ChatView so it can be populated before this view mounts.
+        /// Retained by the thread session across short navigation round trips.
         let textLayoutStore: ChatTextLayoutStore
     #endif
 
     var body: some View {
+        let loadedSections = Self.loadedSections(
+            in: sections,
+            oldestSectionID: oldestLoadedSectionID
+        )
+        let timelineRows = ChatTimelineLayout.rows(
+            sections: loadedSections,
+            streamingTurnID: streamingTurnID,
+            latestTurn: latestTurn,
+            expandedSectionIDs: foldModel.expandedSectionIDs
+        )
         let rows = Self.renderRows(
-            ChatTimelineLayout.rows(
-                sections: sections,
-                streamingTurnID: streamingTurnID,
-                latestTurn: latestTurn,
-                expandedSectionIDs: foldModel.expandedSectionIDs
-            ),
+            timelineRows,
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache
         )
+        let hasEarlierSections = loadedSections.first?.id != sections.first?.id
 
         ScrollViewReader { proxy in
             List {
-                if let plan, !plan.entries.isEmpty {
+                if hasEarlierSections {
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.historyMarkerID)
+                        .listRowInsets(.init())
+                        .listRowSeparator(.hidden)
+                }
+
+                if !hasEarlierSections, let plan, !plan.entries.isEmpty {
                     ChatPlanRow(plan: plan)
                         .padding(.vertical, 10)
                         .listRowInsets(
@@ -523,10 +492,16 @@ private struct ChatTimeline: View {
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 0)
             .scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .top) {
+                if isLoadingEarlier {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.top, 8)
+                        .accessibilityLabel("Loading earlier messages")
+                        .allowsHitTesting(false)
+                }
+            }
             #if os(iOS)
-                // A row's content width is the list width minus 16pt insets
-                // on each side. Warm every settled prose segment at that
-                // exact width before List needs to realize it while scrolling.
                 .onGeometryChange(for: CGFloat.self) { geometry in
                     max(
                         0,
@@ -535,26 +510,49 @@ private struct ChatTimeline: View {
                     )
                 } action: { width in
                     textWarmRowWidth = width
-                    warmTextLayouts(in: rows, rowWidth: width)
-                }
-                .onChange(of: timelineEntryCount) { _, _ in
-                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
-                }
-                .onChange(of: streamingTurnID) { _, _ in
-                    warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
                 .onChange(of: foldModel.expandedSectionIDs) { _, _ in
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
-                .onChange(of: dynamicTypeSize) { _, _ in
-                    // ChatView replaces the store with one for the new
-                    // fonts; rebuild the warmup set inside it.
+            #endif
+            .task(id: historyLoadRequest) {
+                guard historyLoadRequest > 0, isTimelineNearTop,
+                    !isAwaitingInitialBottom
+                else { return }
+                await loadEarlier(
+                    loadedSections: loadedSections,
+                    renderedRows: rows,
+                    preservesPosition: !isTimelineNearBottom
+                        || !scrollState.shouldFollowBottom
+                )
+            }
+            #if os(iOS)
+                .task(
+                    id: ChatTailTextWarmupKey(
+                        timelineEntryCount: timelineEntryCount,
+                        streamingTurnID: streamingTurnID,
+                        rowWidth: textWarmRowWidth
+                    )
+                ) {
+                    guard textWarmRowWidth > 0 else { return }
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
             #endif
+            .task(id: oldestLoadedSectionID) {
+                guard let anchorID = pendingPrependAnchorID else { return }
+                await Task.yield()
+                guard pendingPrependAnchorID == anchorID else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo(anchorID, anchor: .top)
+                }
+                pendingPrependAnchorID = nil
+            }
             .onAppear {
-                // Position before scroll geometry becomes responsible for
-                // following subsequent content and viewport changes.
+                if oldestLoadedSectionID == nil {
+                    oldestLoadedSectionID = loadedSections.first?.id
+                }
                 isAwaitingInitialBottom = true
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
@@ -568,15 +566,23 @@ private struct ChatTimeline: View {
                 }
             }
             .onScrollGeometryChange(for: ChatScrollGeometry.self) { geometry in
-                ChatScrollGeometry(
-                    isNearBottom: geometry.contentSize.height
-                        + geometry.contentInsets.bottom
-                        - geometry.visibleRect.maxY <= Self.nearBottomDistance,
+                let hasContentMetrics = geometry.containerSize.height > 0
+                    && geometry.contentSize.height > 0
+                return ChatScrollGeometry(
+                    isNearTop: hasContentMetrics
+                        && geometry.visibleRect.minY
+                            + geometry.contentInsets.top <= Self.historyLoadDistance,
+                    isNearBottom: hasContentMetrics
+                        && geometry.contentSize.height
+                            + geometry.contentInsets.bottom
+                            - geometry.visibleRect.maxY <= Self.nearBottomDistance,
                     containerHeight: geometry.containerSize.height,
                     bottomInset: geometry.contentInsets.bottom,
                     contentHeight: geometry.contentSize.height
                 )
             } action: { oldGeometry, newGeometry in
+                isTimelineNearTop = hasEarlierSections && newGeometry.isNearTop
+                isTimelineNearBottom = newGeometry.isNearBottom
                 scrollState.noteEndVisibility(newGeometry.isNearBottom)
                 if isAwaitingInitialBottom {
                     if newGeometry.isNearBottom {
@@ -584,21 +590,31 @@ private struct ChatTimeline: View {
                     }
                     return
                 }
+                if hasEarlierSections, !oldGeometry.isNearTop,
+                    newGeometry.isNearTop, !isLoadingEarlier
+                {
+                    historyLoadRequest &+= 1
+                }
 
                 let viewportShrank =
                     newGeometry.bottomInset > oldGeometry.bottomInset
                     || newGeometry.containerHeight < oldGeometry.containerHeight
-                // Pin after layout so content growth uses the final size.
-                // Expansion toggles call noteContentExpansion() first, which
-                // drops shouldFollowBottom so this pin cannot fire for them.
                 let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
-                let shouldPin =
-                    (viewportShrank || contentGrew) && scrollState.shouldFollowBottom
-                if shouldPin {
+                if viewportShrank || contentGrew,
+                    scrollState.shouldFollowBottom,
+                    pendingPrependAnchorID == nil
+                {
                     proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 }
             }
-            .onScrollPhaseChange { _, newPhase in
+            .onScrollPhaseChange { oldPhase, newPhase in
+                let wasUserDriven =
+                    switch oldPhase {
+                    case .tracking, .interacting, .decelerating:
+                        true
+                    case .idle, .animating:
+                        false
+                    }
                 let isUserDriven =
                     switch newPhase {
                     case .tracking, .interacting, .decelerating:
@@ -607,12 +623,140 @@ private struct ChatTimeline: View {
                         false
                     }
 
+                if isUserDriven {
+                    if !wasUserDriven, isTimelineNearTop,
+                        !isAwaitingInitialBottom, !isLoadingEarlier
+                    {
+                        // A drag beginning at the top changes no geometry, so
+                        // explicitly restart the structured pagination task.
+                        historyLoadRequest &+= 1
+                    }
+                }
                 scrollState.noteUserScrollActivity(isActive: isUserDriven)
             }
         }
     }
 
     private static let bottomID = "chat-bottom"
+    private static let historyMarkerID = "chat-history-marker"
+    private static let initialTurnCount = 5
+    private static let earlierTurnCount = 5
+
+    /// The first List mount contains only the newest turns. This is the key to
+    /// avoiding List's unavoidable top-first pass over distant history.
+    static func initialSections(
+        in sections: [ChatTimelineLayout.Section]
+    ) -> [ChatTimelineLayout.Section] {
+        ChatTimelineLayout.paginatedSections(
+            sections,
+            userMessageLimit: Self.initialTurnCount
+        )
+    }
+
+    private static func loadedSections(
+        in sections: [ChatTimelineLayout.Section],
+        oldestSectionID: String?
+    ) -> [ChatTimelineLayout.Section] {
+        guard let oldestSectionID,
+            let startIndex = sections.firstIndex(where: {
+                $0.id == oldestSectionID
+            })
+        else {
+            return Self.initialSections(in: sections)
+        }
+        return Array(sections[startIndex...])
+    }
+
+    private func loadEarlier(
+        loadedSections: [ChatTimelineLayout.Section],
+        renderedRows: [ChatTimelineRenderRow],
+        preservesPosition: Bool
+    ) async {
+        guard !isLoadingEarlier,
+            let oldestLoadedSection = loadedSections.first,
+            let oldStartIndex = sections.firstIndex(where: {
+                $0.id == oldestLoadedSection.id
+            }),
+            oldStartIndex > sections.startIndex
+        else { return }
+
+        isLoadingEarlier = true
+        defer { isLoadingEarlier = false }
+
+        let pageSections = ChatTimelineLayout.paginatedSections(
+            sections[..<oldStartIndex],
+            userMessageLimit: Self.earlierTurnCount
+        )
+
+        #if os(iOS)
+            guard textWarmRowWidth > 0 else { return }
+            await Self.prepare(
+                timelineRows: ChatTimelineLayout.rows(
+                    sections: pageSections,
+                    streamingTurnID: streamingTurnID,
+                    latestTurn: latestTurn,
+                    expandedSectionIDs: foldModel.expandedSectionIDs
+                ),
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache,
+                textLayoutStore: textLayoutStore,
+                rowWidth: textWarmRowWidth
+            )
+        #endif
+
+        guard !Task.isCancelled,
+            isTimelineNearTop,
+            !isAwaitingInitialBottom,
+            oldestLoadedSectionID == oldestLoadedSection.id,
+            let newOldestSectionID = pageSections.first?.id,
+            sections.contains(where: { $0.id == newOldestSectionID })
+        else { return }
+
+        if preservesPosition {
+            // Loading only arms at the top edge, so pinning the former first
+            // row to the top preserves the viewport as older rows prepend.
+            pendingPrependAnchorID = renderedRows.first?.id
+        }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            oldestLoadedSectionID = newOldestSectionID
+        }
+    }
+
+    #if os(iOS)
+        /// Prepares a bounded page off the main actor before that page enters
+        /// List. Consequently normal upward scrolling finds segmentation and
+        /// TextKit layouts already cached instead of doing them mid-gesture.
+        static func prepare(
+            timelineRows: [ChatTimelineRowModel],
+            streamingTurnID: String?,
+            segmentCache: ChatMarkdownSegmentCache,
+            textLayoutStore: ChatTextLayoutStore,
+            rowWidth: CGFloat
+        ) async {
+            await segmentCache.prime(
+                requests: ChatMarkdownSegmentCache.primeRequests(
+                    rows: timelineRows,
+                    streamingTurnID: streamingTurnID
+                )
+            )
+            guard !Task.isCancelled else { return }
+
+            let renderedRows = Self.renderRows(
+                timelineRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
+            )
+            await textLayoutStore.prepare(
+                requests: Self.textLayoutRequests(
+                    in: renderedRows,
+                    limit: ChatTextLayoutStore.capacity,
+                    rowWidth: rowWidth
+                )
+            )
+        }
+    #endif
 
     /// Expands only settled oversized assistant messages. Streaming keeps one
     /// stable live row; short and uncommon document-wide Markdown features
@@ -629,7 +773,14 @@ private struct ChatTimeline: View {
                 guard case .message(let message) = row else {
                     return [.standard(row)]
                 }
-
+                guard ChatTextOptimizationPolicy.shouldOptimize(
+                    role: message.role,
+                    messageTurnID: message.turnID,
+                    streamingTurnID: streamingTurnID,
+                    source: message.text
+                ) else {
+                    return [.standard(row)]
+                }
                 let plan = ChatMessageTextPlanner.plan(
                     messageID: message.id,
                     role: message.role,
@@ -749,8 +900,8 @@ private enum ChatTimelineRenderRow: Identifiable {
     }
 }
 
-/// A single concrete row shape lets List derive every row identity without
-/// evaluating the case-specific body for the entire transcript.
+/// One stable shape lets List obtain identities without evaluating expensive
+/// row bodies for the entire transcript.
 private struct ChatTimelineRenderRowView: View {
     let row: ChatTimelineRenderRow
     let streamingTurnID: String?
@@ -888,6 +1039,7 @@ private struct ChatMessageSegmentRowModel {
 #endif
 
 private struct ChatScrollGeometry: Equatable {
+    let isNearTop: Bool
     let isNearBottom: Bool
     let containerHeight: CGFloat
     let bottomInset: CGFloat
