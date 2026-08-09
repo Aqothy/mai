@@ -54,6 +54,11 @@
       "result": "ACPRegistryInstalledAgent"
     },
     {
+      "name": "acp.registry.addCustom",
+      "params": "ACPCustomAgentAddParams",
+      "result": "ACPRegistryInstalledAgent"
+    },
+    {
       "name": "acp.registry.start",
       "params": "ACPRegistryStartParams",
       "result": "InstanceInfo"

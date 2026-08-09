@@ -5,6 +5,62 @@
 
 import Foundation
 
+// MARK: - ACPCustomAgentAddParams
+public struct ACPCustomAgentAddParams: Codable {
+    public var args: [String]?
+    public var command: String
+    public var env: [String: String]?
+    public var name: String
+
+    public init(args: [String]?, command: String, env: [String: String]?, name: String) {
+        self.args = args
+        self.command = command
+        self.env = env
+        self.name = name
+    }
+}
+
+// MARK: ACPCustomAgentAddParams convenience initializers and mutators
+
+public extension ACPCustomAgentAddParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ACPCustomAgentAddParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        args: [String]?? = nil,
+        command: String? = nil,
+        env: [String: String]?? = nil,
+        name: String? = nil
+    ) -> ACPCustomAgentAddParams {
+        return ACPCustomAgentAddParams(
+            args: args ?? self.args,
+            command: command ?? self.command,
+            env: env ?? self.env,
+            name: name ?? self.name
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ACPRegistryAgent
 public struct ACPRegistryAgent: Codable {
     public var args: [String]?
@@ -133,15 +189,16 @@ public struct ACPRegistryInstalledAgent: Codable {
     public var description, icon: String?
     public var id: String
     public var installedAt: Date
-    public var instanceID, name, package, version: String
+    public var instanceID, name, package, source: String
+    public var version: String
 
     public enum CodingKeys: String, CodingKey {
         case args, description, icon, id, installedAt
         case instanceID = "instanceId"
-        case name, package, version
+        case name, package, source, version
     }
 
-    public init(args: [String]?, description: String?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, version: String) {
+    public init(args: [String]?, description: String?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, source: String, version: String) {
         self.args = args
         self.description = description
         self.icon = icon
@@ -150,6 +207,7 @@ public struct ACPRegistryInstalledAgent: Codable {
         self.instanceID = instanceID
         self.name = name
         self.package = package
+        self.source = source
         self.version = version
     }
 }
@@ -181,6 +239,7 @@ public extension ACPRegistryInstalledAgent {
         instanceID: String? = nil,
         name: String? = nil,
         package: String? = nil,
+        source: String? = nil,
         version: String? = nil
     ) -> ACPRegistryInstalledAgent {
         return ACPRegistryInstalledAgent(
@@ -192,6 +251,7 @@ public extension ACPRegistryInstalledAgent {
             instanceID: instanceID ?? self.instanceID,
             name: name ?? self.name,
             package: package ?? self.package,
+            source: source ?? self.source,
             version: version ?? self.version
         )
     }

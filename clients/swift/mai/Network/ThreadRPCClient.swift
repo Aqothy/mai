@@ -14,6 +14,7 @@ protocol ThreadRPCClient: AnyObject {
     func listRegistryAgents() async throws -> [ACPRegistryAgent]
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent]
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
@@ -30,6 +31,10 @@ extension ThreadRPCClient {
 
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         throw RPCError(code: nil, message: "Agent installation is unavailable", data: nil)
+    }
+
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
+        throw RPCError(code: nil, message: "Adding custom agents is unavailable", data: nil)
     }
 
     func startProvider(_ instanceID: String) async throws -> InstanceInfo {
@@ -109,6 +114,10 @@ extension RPCClient: ThreadRPCClient {
             MaidRPCMethod.acpRegistryInstall,
             params: ACPRegistryInstallParams(registryID: registryID)
         )
+    }
+
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
+        try await call(MaidRPCMethod.acpRegistryAddCustom, params: input)
     }
 
     func startProvider(_ instanceID: String) async throws -> InstanceInfo {

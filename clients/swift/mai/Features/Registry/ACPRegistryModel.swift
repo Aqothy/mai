@@ -14,10 +14,13 @@ final class ACPRegistryModel {
     private(set) var errorMessage: String?
     /// Cached so body evaluations don't re-run the merge/sort/filter pipeline
     /// and don't depend on the store's whole installed-agents collection.
-    /// Rebuilt whenever filter, registryAgents, or store.installedAgents can
-    /// have changed.
+    /// Rebuilt whenever the filter, search text, registry agents, or installed
+    /// agents change.
     private(set) var entries: [ACPRegistryEntry] = []
     var filter: ACPRegistryFilter = .all {
+        didSet { rebuildEntries() }
+    }
+    var searchText = "" {
         didSet { rebuildEntries() }
     }
 
@@ -42,38 +45,54 @@ final class ACPRegistryModel {
         let installedByID = Dictionary(
             uniqueKeysWithValues: store.installedAgents.map { ($0.id, $0) }
         )
-        var entries = registryAgents.map { agent in
+        let customIDs = Set(store.installedAgents.lazy.compactMap { agent in
+            ACPRegistryEntry.Source(rawValue: agent.source) == .custom ? agent.id : nil
+        })
+        var entries = registryAgents.filter { !customIDs.contains($0.id) }.map { agent in
             ACPRegistryEntry(
                 id: agent.id,
                 name: agent.name,
                 description: agent.description,
+                source: .registry,
                 availableVersion: agent.version,
                 installedVersion: installedByID[agent.id]?.version
             )
         }
-        // Installed agents the registry no longer lists stay visible so the
-        // user's selection remains discoverable.
+        // Custom definitions take precedence over same-ID registry entries.
+        // Other installed agents stay visible if the registry no longer lists them.
         let registryIDs = Set(registryAgents.map(\.id))
         entries += store.installedAgents
-            .filter { !registryIDs.contains($0.id) }
+            .filter { customIDs.contains($0.id) || !registryIDs.contains($0.id) }
             .map { agent in
-                ACPRegistryEntry(
+                let source = ACPRegistryEntry.Source(rawValue: agent.source) ?? .registry
+                return ACPRegistryEntry(
                     id: agent.id,
                     name: agent.name,
                     description: agent.description,
+                    source: source,
                     availableVersion: nil,
-                    installedVersion: agent.version
+                    installedVersion: source == .custom ? nil : agent.version
                 )
             }
         entries.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         switch filter {
         case .all:
-            self.entries = entries
+            break
         case .installed:
-            self.entries = entries.filter(\.isInstalled)
+            entries = entries.filter(\.isInstalled)
         case .notInstalled:
-            self.entries = entries.filter { !$0.isInstalled }
+            entries = entries.filter { !$0.isInstalled }
         }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            entries = entries.filter { entry in
+                entry.name.localizedStandardContains(query)
+                    || entry.id.localizedStandardContains(query)
+                    || entry.description?.localizedStandardContains(query) == true
+                    || entry.versionLabel.localizedStandardContains(query)
+            }
+        }
+        self.entries = entries
     }
 
     var isErrorPresented: Bool {
@@ -82,7 +101,7 @@ final class ACPRegistryModel {
     }
 
     func load() async {
-        if case .loaded = phase {} else {
+        if phase != .loaded {
             phase = .loading
         }
         do {

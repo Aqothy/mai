@@ -143,6 +143,7 @@ struct SessionImportStatusView: View {
                 instanceID: "registry-claude-code",
                 name: "Claude Code",
                 package: "claude-code-acp@1.0.0",
+                source: "registry",
                 version: "1.0.0"
             )
         ]

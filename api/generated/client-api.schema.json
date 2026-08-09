@@ -3,6 +3,35 @@
   "$id": "https://maid.local/schema/client-api-v1.json",
   "$ref": "#/$defs/contract",
   "$defs": {
+    "ACPCustomAgentAddParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "ACPCustomAgentAddParams"
+    },
     "ACPRegistryAgent": {
       "properties": {
         "id": {
@@ -67,6 +96,9 @@
         "name": {
           "type": "string"
         },
+        "source": {
+          "type": "string"
+        },
         "version": {
           "type": "string"
         },
@@ -96,6 +128,7 @@
         "id",
         "instanceId",
         "name",
+        "source",
         "version",
         "package",
         "installedAt"
@@ -2087,6 +2120,9 @@
         "acpRegistryInstallParams": {
           "$ref": "#/$defs/ACPRegistryInstallParams"
         },
+        "acpCustomAgentAddParams": {
+          "$ref": "#/$defs/ACPCustomAgentAddParams"
+        },
         "terminalSummary": {
           "$ref": "#/$defs/TerminalSummary"
         },
@@ -2175,6 +2211,7 @@
         "acpRegistryAgent",
         "acpRegistryInstalledAgent",
         "acpRegistryInstallParams",
+        "acpCustomAgentAddParams",
         "terminalSummary",
         "terminalAttachSnapshot",
         "terminalStreamItem",

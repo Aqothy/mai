@@ -338,23 +338,45 @@ final class ThreadStore {
     }
 
     /// Installs (or updates) a registry agent at its current registry version.
-    /// If the agent was configured before, starting or restarting it also
-    /// refreshes the provider service's persisted launch command.
+    /// A running process is restarted to adopt an update; a cold agent stays
+    /// cold until it is selected.
     func installRegistryAgent(id: String) async throws -> ACPRegistryInstalledAgent {
         let installed = try await rpc.installRegistryAgent(id)
         installedAgents.removeAll { $0.id == installed.id }
         installedAgents.append(installed)
         installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         rebuildProviderCaches()
-        if let existing = providers.first(where: { $0.instanceID == installed.instanceID }) {
+        if providers.contains(where: {
+            $0.instanceID == installed.instanceID && $0.instanceStatus == .initialized
+        }) {
             let started = try await rpc.startRegistryAgent(
                 installed.id,
-                restart: existing.instanceStatus == .initialized
+                restart: true
             )
             providers.removeAll { $0.instanceID == started.instanceID }
             providers.append(started)
             rebuildProviderCaches()
         }
+        return installed
+    }
+
+    /// Adds a custom ACP definition to the daemon-owned agent manifest. The
+    /// provider remains cold until a thread or session action needs it.
+    func addCustomACPAgent(
+        _ configuration: CustomACPAgentConfiguration
+    ) async throws -> ACPRegistryInstalledAgent {
+        let installed = try await rpc.addCustomACPAgent(
+            ACPCustomAgentAddParams(
+                args: configuration.arguments.isEmpty ? nil : configuration.arguments,
+                command: configuration.command,
+                env: configuration.environment.isEmpty ? nil : configuration.environment,
+                name: configuration.name
+            )
+        )
+        installedAgents.removeAll { $0.id == installed.id }
+        installedAgents.append(installed)
+        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        rebuildProviderCaches()
         return installed
     }
 
@@ -764,8 +786,8 @@ final class ThreadStore {
             return provider.instanceID
         }
 
-        // Installed registry metadata is canonical for cold starts. This also
-        // refreshes the persisted provider command after an explicit update.
+        // Backend-owned installed metadata is canonical for registry and
+        // custom-agent cold starts.
         if let agent = installedAgents.first(where: {
             $0.instanceID == preferredID || $0.id == preferredID
         }) {

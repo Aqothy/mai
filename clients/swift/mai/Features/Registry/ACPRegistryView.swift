@@ -4,6 +4,7 @@ struct ACPRegistryView: View {
     let store: ThreadStore
 
     @State private var model: ACPRegistryModel
+    @State private var isCustomAgentFormPresented = false
 
     init(store: ThreadStore) {
         self.store = store
@@ -34,6 +35,7 @@ struct ACPRegistryView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             ACPRegistryFilterPicker(filter: $model.filter)
         }
+        .searchable(text: $model.searchText, prompt: "Search Agents")
         .overlay {
             ACPRegistryStatusView(model: model)
         }
@@ -42,7 +44,10 @@ struct ACPRegistryView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Add Custom Agent", systemImage: "plus") {
+                    isCustomAgentFormPresented = true
+                }
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await model.load() }
                 }
@@ -51,6 +56,11 @@ struct ACPRegistryView: View {
         .task { await model.load() }
         .refreshable { await model.load() }
         .modifier(ACPRegistryInstalledAgentsSync(store: store, model: model))
+        .sheet(isPresented: $isCustomAgentFormPresented) {
+            NavigationStack {
+                CustomACPAgentForm(store: store)
+            }
+        }
         .alert("Agent Registry Error", isPresented: $model.isErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -80,12 +90,14 @@ private struct InstalledAgentSnapshot: Equatable {
     let id: String
     let name: String
     let description: String?
+    let source: String
     let version: String
 
     init(_ agent: ACPRegistryInstalledAgent) {
         id = agent.id
         name = agent.name
         description = agent.description
+        source = agent.source
         version = agent.version
     }
 }
@@ -135,11 +147,14 @@ struct ACPRegistryStatusView: View {
         }
     }
 
-    private var emptyTitle: String {
+    private var emptyTitle: LocalizedStringResource {
+        if !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No Matching Agents"
+        }
         switch model.filter {
-        case .installed: "No Installed Agents"
-        case .notInstalled: "All Agents Installed"
-        case .all: "No Agents Available"
+        case .installed: return "No Installed Agents"
+        case .notInstalled: return "All Agents Installed"
+        case .all: return "No Agents Available"
         }
     }
 }
@@ -158,6 +173,7 @@ struct ACPRegistryStatusView: View {
                 instanceID: "registry-claude-code",
                 name: "Claude Code",
                 package: "claude-code-acp@1.0.0",
+                source: "registry",
                 version: "1.0.0"
             )
         ]

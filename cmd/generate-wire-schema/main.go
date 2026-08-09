@@ -67,6 +67,7 @@ type contract struct {
 	ACPRegistryAgent            wire.ACPRegistryAgent            `json:"acpRegistryAgent"`
 	ACPRegistryInstalledAgent   wire.ACPRegistryInstalledAgent   `json:"acpRegistryInstalledAgent"`
 	ACPRegistryInstallParams    wire.ACPRegistryInstallParams    `json:"acpRegistryInstallParams"`
+	ACPCustomAgentAddParams     wire.ACPCustomAgentAddParams     `json:"acpCustomAgentAddParams"`
 	TerminalSummary             wire.TerminalSummary             `json:"terminalSummary"`
 	TerminalAttachSnapshot      wire.TerminalAttachSnapshot      `json:"terminalAttachSnapshot"`
 	TerminalStreamItem          wire.TerminalStreamItem          `json:"terminalStreamItem"`

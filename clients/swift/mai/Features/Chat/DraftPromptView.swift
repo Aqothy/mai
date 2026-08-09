@@ -196,6 +196,7 @@ struct DraftProviderGroup: Identifiable {
                             instanceID: "claude-code",
                             name: "Claude",
                             package: "claude-code-acp@1.0.0",
+                            source: "registry",
                             version: "1.0.0"
                         ),
                         ACPRegistryInstalledAgent(
@@ -207,6 +208,7 @@ struct DraftProviderGroup: Identifiable {
                             instanceID: "codex",
                             name: "Codex",
                             package: "codex-acp@1.0.0",
+                            source: "registry",
                             version: "1.0.0"
                         ),
                     ]

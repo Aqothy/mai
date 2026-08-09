@@ -82,6 +82,30 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 	}
 }
 
+func TestManifestInstanceDoesNotPersistLaunchConfiguration(t *testing.T) {
+	st := openRouteStore(t)
+	adapter := &resumeCursorAdapter{}
+	s := New(adapter.StartInstance, WithRouteStore(st))
+	defer s.Close()
+
+	spec := provider.InstanceSpec{
+		InstanceID: "custom-Custom Agent",
+		Name:       "Custom Agent",
+		Driver:     "fake",
+		Config:     json.RawMessage(`{"command":["agent"],"env":{"TOKEN":"secret"}}`),
+	}
+	if _, err := s.StartManifestInstance(context.Background(), spec, false); err != nil {
+		t.Fatalf("StartManifestInstance: %v", err)
+	}
+	specs, err := st.LoadInstances()
+	if err != nil {
+		t.Fatalf("LoadInstances: %v", err)
+	}
+	if len(specs) != 1 || specs[0].InstanceID != spec.InstanceID || len(specs[0].Config) != 0 {
+		t.Fatalf("stored manifest reference = %#v, want identity without config", specs)
+	}
+}
+
 func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	st := openRouteStore(t)
 	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}

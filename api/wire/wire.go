@@ -23,6 +23,7 @@ const (
 	MethodACPRegistryList            = "acp.registry.list"
 	MethodACPRegistryInstalled       = "acp.registry.installed"
 	MethodACPRegistryInstall         = "acp.registry.install"
+	MethodACPRegistryAddCustom       = "acp.registry.addCustom"
 	MethodACPRegistryStart           = "acp.registry.start"
 	MethodProviderAuthenticate       = "provider.authenticate"
 	MethodProviderLogout             = "provider.logout"
@@ -96,6 +97,15 @@ type ACPRegistryInstallParams struct {
 	RegistryID string `json:"registryId"`
 }
 
+// ACPCustomAgentAddParams contains only user-facing launch configuration.
+// Name determines the stable definition identity; the daemon owns persistence.
+type ACPCustomAgentAddParams struct {
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
 type ProviderAuthenticateParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	MethodID   string              `json:"methodId"`
@@ -158,14 +168,15 @@ type ACPRegistryAgent struct {
 	Args        []string            `json:"args,omitempty"`
 }
 
-// ACPRegistryInstalledAgent describes an ACP agent the user enabled from the
-// registry. npm acquires the package lazily when it starts, bounded by Version;
-// selecting Update records a newer registry version ceiling. Environment
-// variables remain server-only and are not represented.
+// ACPRegistryInstalledAgent describes a registry or custom ACP agent persisted
+// by the daemon. npm acquires registry packages lazily when they start, bounded
+// by Version. Custom launch configuration and all environment variables remain
+// server-only and are not represented.
 type ACPRegistryInstalledAgent struct {
 	ID          string              `json:"id"`
 	InstanceID  provider.InstanceID `json:"instanceId"`
 	Name        string              `json:"name"`
+	Source      string              `json:"source"`
 	Version     string              `json:"version"`
 	Description string              `json:"description,omitempty"`
 	Icon        string              `json:"icon,omitempty"`

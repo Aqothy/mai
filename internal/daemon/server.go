@@ -90,6 +90,15 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
 	}
 	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
+	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
+		logger.Warn("load installed ACP agent definitions", "error", err)
+	} else {
+		for _, spec := range specs {
+			if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+				logger.Warn("register installed ACP agent", "provider", spec.InstanceID, "error", err)
+			}
+		}
+	}
 	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
 	go s.ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
@@ -357,7 +366,14 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 		return provider.InstanceInfo{}, err
 	}
 	// npm may need to acquire the package before the agent can initialize.
-	return s.startProvider(ctx, spec, restart, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	started := time.Now()
+	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
+	if err == nil {
+		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
+	}
+	return info, err
 }
 
 func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {

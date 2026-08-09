@@ -32,6 +32,7 @@ const (
 	RPCMethodACPRegistryList       = wire.MethodACPRegistryList
 	RPCMethodACPRegistryInstalled  = wire.MethodACPRegistryInstalled
 	RPCMethodACPRegistryInstall    = wire.MethodACPRegistryInstall
+	RPCMethodACPRegistryAddCustom  = wire.MethodACPRegistryAddCustom
 	RPCMethodACPRegistryStart      = wire.MethodACPRegistryStart
 	RPCMethodProviderAuthenticate  = wire.MethodProviderAuthenticate
 	RPCMethodProviderLogout        = wire.MethodProviderLogout
@@ -58,6 +59,7 @@ const (
 type providerStartRPCParams = wire.ProviderStartParams
 type acpRegistryStartParams = wire.ACPRegistryStartParams
 type acpRegistryInstallParams = wire.ACPRegistryInstallParams
+type acpCustomAgentAddParams = wire.ACPCustomAgentAddParams
 type providerAuthenticateParams = wire.ProviderAuthenticateParams
 type providerInstanceParams = wire.ProviderInstanceParams
 type providerListSessionsParams = wire.ProviderListSessionsParams
@@ -500,6 +502,18 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, fmt.Errorf("ACP registry is unavailable")
 		}
 		return h.server.acpRegistry.install(ctx, params.RegistryID)
+	case RPCMethodACPRegistryAddCustom:
+		var params acpCustomAgentAddParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(params.Name) == "" || strings.TrimSpace(params.Command) == "" {
+			return nil, fmt.Errorf("%w: acp.registry.addCustom requires name and command", jsonrpc2.ErrInvalidParams)
+		}
+		if h.server.acpRegistry == nil {
+			return nil, fmt.Errorf("ACP registry is unavailable")
+		}
+		return h.server.acpRegistry.addCustom(params)
 	case RPCMethodACPRegistryStart:
 		var params acpRegistryStartParams
 		if err := decodeRPCParams(req, &params); err != nil {

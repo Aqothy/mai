@@ -85,11 +85,15 @@ type threadRoute struct {
 type Service struct {
 	mu        sync.Mutex
 	instances map[provider.InstanceID]ProviderInstance // live processes only
-	// instanceSpecs includes persisted specs for instances that are still cold.
+	// instanceSpecs includes persisted and manifest-owned specs for instances
+	// that are still cold.
 	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
-	threadRoutes  map[string]threadRoute
-	startLocks    map[provider.InstanceID]*sync.RWMutex
-	openInstance  InstanceFactory
+	// manifestInstanceIDs identifies specs owned by a backend JSON manifest.
+	// Their executable configuration must never enter the route database.
+	manifestInstanceIDs map[provider.InstanceID]struct{}
+	threadRoutes        map[string]threadRoute
+	startLocks          map[provider.InstanceID]*sync.RWMutex
+	openInstance        InstanceFactory
 
 	activeEventGenerations map[provider.InstanceID]uint64
 	nextEventGeneration    uint64
@@ -125,6 +129,7 @@ func New(openInstance InstanceFactory, opts ...Option) *Service {
 	s := &Service{
 		instances:              make(map[provider.InstanceID]ProviderInstance),
 		instanceSpecs:          make(map[provider.InstanceID]provider.InstanceSpec),
+		manifestInstanceIDs:    make(map[provider.InstanceID]struct{}),
 		threadRoutes:           make(map[string]threadRoute),
 		startLocks:             make(map[provider.InstanceID]*sync.RWMutex),
 		openInstance:           openInstance,
@@ -209,8 +214,49 @@ func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider
 	return err
 }
 
-// StartConfiguredInstance starts a persisted cold instance without replacing
-// its saved command with newer catalog metadata.
+// RegisterManifestInstance makes a backend-owned provider definition
+// available for lazy startup. The full spec remains in memory; it is not
+// written to the route database.
+func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
+	if spec.InstanceID == "" {
+		return fmt.Errorf("register manifest provider requires instanceId")
+	}
+	if spec.Name == "" {
+		spec.Name = string(spec.InstanceID)
+	}
+	if spec.Driver == "" {
+		return fmt.Errorf("register manifest provider %q requires a driver", spec.InstanceID)
+	}
+	spec = cloneInstanceSpec(spec)
+
+	s.mu.Lock()
+	s.manifestInstanceIDs[spec.InstanceID] = struct{}{}
+	// Preserve the spec of a running process until an explicit restart swaps it;
+	// cold definitions can immediately adopt updated manifest configuration.
+	if instance := s.instances[spec.InstanceID]; instance == nil || instance.Info().Status == provider.InstanceStatusExited {
+		s.instanceSpecs[spec.InstanceID] = spec
+	}
+	s.mu.Unlock()
+
+	return nil
+}
+
+func (s *Service) persistManifestInstanceReference(spec provider.InstanceSpec) error {
+	if s.routeStore == nil {
+		return nil
+	}
+	reference := cloneInstanceSpec(spec)
+	reference.Config = nil
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	delete(s.dirtyInstances, spec.InstanceID)
+	if err := s.routeStore.SaveInstance(reference); err != nil {
+		return fmt.Errorf("persist manifest provider %q reference: %w", spec.InstanceID, err)
+	}
+	return nil
+}
+
+// StartConfiguredInstance starts a cold instance from its registered spec.
 func (s *Service) StartConfiguredInstance(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
 	if instanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("start configured provider requires instanceId")
@@ -418,6 +464,27 @@ func (s *Service) startLock(instanceID provider.InstanceID) *sync.RWMutex {
 }
 
 func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+	s.mu.Lock()
+	_, manifestOwned := s.manifestInstanceIDs[spec.InstanceID]
+	s.mu.Unlock()
+	if manifestOwned {
+		if err := s.persistManifestInstanceReference(spec); err != nil {
+			return provider.InstanceInfo{}, err
+		}
+	}
+	return s.startInstance(ctx, spec, restart, !manifestOwned)
+}
+
+// StartManifestInstance starts a manifest-owned definition without persisting
+// its command, arguments, or environment in SQLite.
+func (s *Service) StartManifestInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+	if err := s.RegisterManifestInstance(spec); err != nil {
+		return provider.InstanceInfo{}, err
+	}
+	return s.StartInstance(ctx, spec, restart)
+}
+
+func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec, restart bool, persistConfig bool) (provider.InstanceInfo, error) {
 	action := "provider start"
 	if restart {
 		action = "provider restart"
@@ -506,7 +573,9 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 	if current != nil && current != instance {
 		_ = current.Close()
 	}
-	s.persistInstanceSpec(spec.InstanceID)
+	if persistConfig {
+		s.persistInstanceSpec(spec.InstanceID)
+	}
 	return info, nil
 }
 
@@ -676,9 +745,9 @@ func (s *Service) ListInstances() []provider.InstanceInfo {
 	for _, instance := range s.instances {
 		infos = append(infos, instance.Info())
 	}
-	// Persisted specs without a live instance this run are configured
-	// providers: listed so clients can offer and start them, with a status
-	// that says no process exists yet.
+	// Registered specs without a live instance this run are configured
+	// providers: listed so clients can offer and start them, with a status that
+	// says no process exists yet.
 	for id, spec := range s.instanceSpecs {
 		if s.instances[id] != nil {
 			continue
