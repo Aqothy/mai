@@ -43,7 +43,7 @@ func (h rpcTestClientHandler) Handle(ctx context.Context, req *jsonrpc2.Request)
 	}
 }
 
-func newRPCTestClient(t *testing.T, s *Server, handler jsonrpc2.Handler) *jsonrpc2.Connection {
+func newRPCTestClient(t testing.TB, s *Server, handler jsonrpc2.Handler) *jsonrpc2.Connection {
 	t.Helper()
 	server := httptest.NewServer(s.WebSocketHandler())
 	t.Cleanup(server.Close)

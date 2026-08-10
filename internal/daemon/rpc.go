@@ -54,6 +54,8 @@ const (
 	RPCMethodTerminalResize        = wire.MethodTerminalResize
 	RPCMethodTerminalSubscribe     = wire.MethodTerminalSubscribe
 	RPCMethodTerminalSubscribeList = wire.MethodTerminalSubscribeList
+
+	RPCMethodWorkspaceSearchFiles = wire.MethodWorkspaceSearchFiles
 )
 
 type providerStartRPCParams = wire.ProviderStartParams
@@ -76,6 +78,7 @@ type terminalDetachParams = wire.TerminalDetachParams
 type terminalRenameParams = wire.TerminalRenameParams
 type terminalWriteParams = wire.TerminalWriteParams
 type terminalResizeParams = wire.TerminalResizeParams
+type workspaceSearchFilesParams = wire.WorkspaceSearchFilesParams
 
 var nextRPCClientID atomic.Uint64
 
@@ -632,6 +635,12 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return nil, h.server.resizeTerminal(h.client, params)
+	case RPCMethodWorkspaceSearchFiles:
+		var params workspaceSearchFilesParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.searchWorkspaceFiles(ctx, params)
 	default:
 		return nil, jsonrpc2.ErrNotHandled
 	}

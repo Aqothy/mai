@@ -1,0 +1,27 @@
+{
+  "name": "fff",
+  "description": "FFF fuzzy file finder C library, used by internal/workspacesearch/fff.",
+  "sourceRepository": "https://github.com/dmtrKovalenko/fff",
+  "pinnedTag": "v0.10.1",
+  "license": "MIT",
+  "artifacts": {
+    "include/fff.h": {
+      "sourceUrl": "https://raw.githubusercontent.com/dmtrKovalenko/fff/v0.10.1/crates/fff-c/include/fff.h",
+      "sha256": "4c7422ac1fd21898684c622d37358db63798e7fd2d9f7ff69444c9d37ca55377"
+    },
+    "lib/darwin-arm64/libfff_c.dylib": {
+      "sourceUrl": "https://github.com/dmtrKovalenko/fff/releases/download/v0.10.1/c-lib-aarch64-apple-darwin.dylib",
+      "targetTriple": "aarch64-apple-darwin",
+      "upstreamSha256": "cdb776fc1b0e95682aa4060e431477fb93a4d74745c8e41e7d2887578b3a687e",
+      "sha256": "66f0e78e868ff09e1227a21efc0ac2cf040578a899923fbdc2a5fb208a2ff5fd",
+      "modifications": [
+        "install name normalized to @rpath/libfff_c.dylib with install_name_tool -id",
+        "ad-hoc re-signed with codesign --force --sign -"
+      ]
+    }
+  },
+  "notes": {
+    "mmapCache": "Disabled. Path-only indexing needs no content cache; revisit only with a measured cold-start benefit and an app-owned cache location.",
+    "verification": "Run `make fff-verify` to check checksums, architecture, install name, and staged relocatable loading."
+  }
+}

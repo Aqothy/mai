@@ -1965,6 +1965,64 @@
       ],
       "title": "Turn"
     },
+    "WorkspaceFileEntry": {
+      "properties": {
+        "relativePath": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "relativePath",
+        "displayName"
+      ],
+      "title": "WorkspaceFileEntry"
+    },
+    "WorkspaceSearchFilesParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "title": "WorkspaceSearchFilesParams"
+    },
+    "WorkspaceSearchFilesResult": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceFileEntry"
+          },
+          "type": "array"
+        },
+        "indexing": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "entries"
+      ],
+      "title": "WorkspaceSearchFilesResult"
+    },
     "contract": {
       "properties": {
         "emptyParams": {
@@ -2155,6 +2213,15 @@
         },
         "terminalResizeParams": {
           "$ref": "#/$defs/TerminalResizeParams"
+        },
+        "workspaceSearchFilesParams": {
+          "$ref": "#/$defs/WorkspaceSearchFilesParams"
+        },
+        "workspaceFileEntry": {
+          "$ref": "#/$defs/WorkspaceFileEntry"
+        },
+        "workspaceSearchFilesResult": {
+          "$ref": "#/$defs/WorkspaceSearchFilesResult"
         }
       },
       "additionalProperties": false,
@@ -2222,7 +2289,10 @@
         "terminalAttachParams",
         "terminalDetachParams",
         "terminalWriteParams",
-        "terminalResizeParams"
+        "terminalResizeParams",
+        "workspaceSearchFilesParams",
+        "workspaceFileEntry",
+        "workspaceSearchFilesResult"
       ],
       "title": "contract"
     }

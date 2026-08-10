@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+# Vendored, checksum-pinned native search library (see third_party/fff/MANIFEST.json)
+!third_party/fff/lib/**/*.dylib
 bin/
 tmp/
 

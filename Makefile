@@ -13,7 +13,7 @@ GHOSTTY_VT_BUILD := build/ghostty-vt
 GHOSTTY_VT_STAMP := $(GHOSTTY_VT_BUILD)/.built
 GHOSTTY_VT_PKG_CONFIG := $(CURDIR)/$(GHOSTTY_VT_BUILD)/_deps/ghostty-src/zig-out/share/pkgconfig
 
-.PHONY: client-gen-setup generate build run ghostty-vt test
+.PHONY: client-gen-setup generate build run ghostty-vt test fff-verify
 
 client-gen-setup: $(CLIENT_GEN_STAMP)
 
@@ -41,3 +41,12 @@ $(GHOSTTY_VT_STAMP): tools/ghostty-vt/CMakeLists.txt
 	# pin change must force cgo packages to relink instead of reusing the old VT.
 	go clean -cache
 	@touch $(GHOSTTY_VT_STAMP)
+
+# Deterministic vendored-FFF integrity checks: manifest checksums, arm64
+# architecture, relocatable install name, and staged @loader_path loading.
+# Never touches the network, Cargo, Zig, or npm.
+fff-verify:
+	cd third_party/fff && shasum -a 256 -c CHECKSUMS.sha256
+	lipo -archs third_party/fff/lib/darwin-arm64/libfff_c.dylib | grep -qw arm64
+	otool -D third_party/fff/lib/darwin-arm64/libfff_c.dylib | tail -1 | grep -qx '@rpath/libfff_c.dylib'
+	sh tools/fff-smoke/verify_staged.sh

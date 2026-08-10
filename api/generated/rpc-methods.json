@@ -153,6 +153,11 @@
       "name": "terminal.detach",
       "params": "TerminalDetachParams",
       "resultNull": true
+    },
+    {
+      "name": "workspace.searchFiles",
+      "params": "WorkspaceSearchFilesParams",
+      "result": "WorkspaceSearchFilesResult"
     }
   ],
   "notifications": [
