@@ -28,7 +28,6 @@ nonisolated enum ChatTextOptimizationPolicy {
 
 nonisolated enum ChatMessageTextPlan: Equatable, Sendable {
     case existingRenderer
-    case plainText
     case segmented([ChatMarkdownSegment])
 }
 
@@ -51,10 +50,6 @@ enum ChatMessageTextPlanner {
                 source: source
             )
         else { return .existingRenderer }
-
-        if role == MaidMessageRole.user.rawValue {
-            return .plainText
-        }
 
         guard
             let segments = segmentCache.segments(
@@ -267,7 +262,6 @@ final class ChatMarkdownSegmentCache {
     ) -> [ChatMarkdownPrimeRequest] {
         rows.compactMap { row in
             guard case .message(let message) = row,
-                message.role == MaidMessageRole.assistant.rawValue,
                 ChatTextOptimizationPolicy.shouldOptimize(
                     role: message.role,
                     messageTurnID: message.turnID,

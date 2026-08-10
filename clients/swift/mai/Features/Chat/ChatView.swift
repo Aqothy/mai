@@ -758,9 +758,9 @@ private struct ChatTimeline: View {
         }
     #endif
 
-    /// Expands only settled oversized assistant messages. Streaming keeps one
-    /// stable live row; short and uncommon document-wide Markdown features
-    /// keep the existing static renderer after the message settles.
+    /// Expands oversized user messages and settled oversized assistant
+    /// messages. Streaming keeps one stable live row; short and uncommon
+    /// document-wide Markdown features keep the existing static renderer.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -792,21 +792,6 @@ private struct ChatTimeline: View {
                 switch plan {
                 case .existingRenderer:
                     return [.standard(row)]
-
-                case .plainText:
-                    return [
-                        .plainText(
-                            ChatMessageSegmentRowModel(
-                                messageID: message.id,
-                                index: 0,
-                                source: message.text,
-                                role: message.role,
-                                attachments: message.attachments,
-                                isFirst: true,
-                                isLast: true
-                            )
-                        )
-                    ]
 
                 case .segmented(let segments):
                     return segments.indices.map { index in
@@ -852,16 +837,6 @@ private struct ChatTimeline: View {
                             in: rowWidth
                         )
                     )
-                case .plainText(let message):
-                    ChatTextLayoutRequest(
-                        id: message.rowID,
-                        source: message.source,
-                        style: .plain,
-                        width: ChatTimelineMetrics.textWidth(
-                            for: .plain,
-                            in: rowWidth
-                        )
-                    )
                 case .standard, .richMarkdown:
                     nil
                 }
@@ -888,14 +863,12 @@ private enum ChatTimelineRenderRow: Identifiable {
     case standard(ChatTimelineRowModel)
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
-    case plainText(ChatMessageSegmentRowModel)
 
     var id: String {
         switch self {
         case .standard(let row): row.id
         case .richMarkdown(let segment): "\(segment.rowID)-rich"
         case .prose(let segment): "\(segment.rowID)-prose"
-        case .plainText(let message): "\(message.rowID)-plain"
         }
     }
 }
@@ -953,16 +926,6 @@ private struct ChatTimelineRenderRowView: View {
                         .bottom,
                         segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
                     )
-                #endif
-
-            case .plainText(let message):
-                #if os(iOS)
-                    ChatNativeTextMessageRow(
-                        segment: message,
-                        style: .plain,
-                        layoutStore: textLayoutStore
-                    )
-                    .padding(.vertical, 10)
                 #endif
             }
         }
@@ -1704,10 +1667,7 @@ private struct ChatMessageRow: View {
     var body: some View {
         VStack(alignment: .leading) {
             if !text.isEmpty {
-                if role == MaidMessageRole.user.rawValue {
-                    Text(verbatim: text)
-                        .textSelection(.enabled)
-                } else if let streamingText {
+                if let streamingText {
                     ChatStreamingMarkdownMessageView(
                         messageID: messageID,
                         streamingText: streamingText,
