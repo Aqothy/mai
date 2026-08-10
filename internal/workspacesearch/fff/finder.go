@@ -14,8 +14,8 @@ import (
 var ErrClosed = errors.New("fff: index is closed")
 
 // ErrUnavailable is returned by New on platforms or builds without the
-// native FFF library (anything but a cgo macOS daemon build).
-var ErrUnavailable = errors.New("fff: workspace file search requires the macOS cgo daemon build")
+// native FFF library (anything but a cgo Apple Silicon macOS daemon build).
+var ErrUnavailable = errors.New("fff: workspace file search requires cgo on Apple Silicon macOS")
 
 // FileMatch is one ranked path result, copied into Go-owned memory.
 type FileMatch struct {
@@ -36,8 +36,9 @@ type ScanProgress struct {
 // Implementations are safe for concurrent use; Close is idempotent and
 // serializes against in-flight calls.
 type Finder interface {
-	// WaitReady blocks until the initial workspace scan completes or ctx is
-	// done. Searching before readiness is allowed but sees a partial index.
+	// WaitReady blocks until the initial workspace scan and file watcher are
+	// ready or ctx is done. Searching before readiness is allowed but may see
+	// a partial or stale index.
 	WaitReady(ctx context.Context) error
 	// SearchFiles runs one fuzzy path query and returns at most limit
 	// matches in rank order. An empty query yields FFF's default ordering.

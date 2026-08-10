@@ -1,3 +1,5 @@
+//go:build darwin && arm64 && cgo
+
 // Warm workspace.searchFiles benchmarks against the plan's budget: daemon
 // receive to response p95 under 35ms on a 100,000-path workspace. The
 // handler benchmark isolates daemon cost; the RPC benchmark adds the real

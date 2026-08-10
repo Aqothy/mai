@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && arm64 && cgo
 
 // Warm native path-query benchmarks against the plan's budget:
 // p95 under 20ms on a 100,000-path workspace.

@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && arm64 && cgo
 
 // Integration tests against the real vendored FFF library. They cover the
 // ownership and lifecycle rules the wrapper promises: ranking, ignore rules,
@@ -152,6 +152,13 @@ func TestRepeatedSearchIsStable(t *testing.T) {
 
 func TestWatcherConvergence(t *testing.T) {
 	finder, root := newFixtureFinder(t)
+	progress, err := finder.ScanProgress()
+	if err != nil {
+		t.Fatalf("ScanProgress: %v", err)
+	}
+	if !progress.WatcherReady {
+		t.Fatal("WaitReady returned before the file watcher was ready")
+	}
 
 	waitForPresence := func(query, relative string, present bool) {
 		t.Helper()

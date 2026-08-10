@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && arm64 && cgo
 
 package fff
 
@@ -36,9 +36,8 @@ import (
 	"unsafe"
 )
 
-// waitSliceMillis bounds each blocking fff_wait_for_scan call so WaitReady
-// can observe context cancellation; a native call in progress cannot be
-// interrupted.
+// waitSliceMillis bounds each native readiness wait so WaitReady can observe
+// context cancellation; a native call in progress cannot be interrupted.
 const waitSliceMillis = 100
 
 type finder struct {
@@ -87,11 +86,18 @@ func consumeResult(res *C.FffResult, op string) (unsafe.Pointer, int64, error) {
 }
 
 func (f *finder) WaitReady(ctx context.Context) error {
+	if err := waitUntil(ctx, f.waitForScanSlice); err != nil {
+		return err
+	}
+	return waitUntil(ctx, f.waitForWatcherSlice)
+}
+
+func waitUntil(ctx context.Context, wait func() (bool, error)) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		done, err := f.waitForScanSlice()
+		done, err := wait()
 		if err != nil {
 			return err
 		}
@@ -108,6 +114,19 @@ func (f *finder) waitForScanSlice() (bool, error) {
 		return false, ErrClosed
 	}
 	_, completed, err := consumeResult(C.fff_wait_for_scan(f.handle, waitSliceMillis), "wait for scan")
+	if err != nil {
+		return false, err
+	}
+	return completed == 1, nil
+}
+
+func (f *finder) waitForWatcherSlice() (bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.closed {
+		return false, ErrClosed
+	}
+	_, completed, err := consumeResult(C.fff_wait_for_watcher(f.handle, waitSliceMillis), "wait for watcher")
 	if err != nil {
 		return false, err
 	}

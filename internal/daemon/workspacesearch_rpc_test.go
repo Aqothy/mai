@@ -1,3 +1,5 @@
+//go:build darwin && arm64 && cgo
+
 package daemon
 
 // End-to-end workspace.searchFiles tests drive a live daemon over a real

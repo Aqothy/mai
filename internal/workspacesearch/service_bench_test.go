@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && arm64 && cgo
 
 // Service-layer benchmarks over a real FFF index: what root
 // canonicalization, registry lookup, and result sanitization add on top of
