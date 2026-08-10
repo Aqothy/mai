@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct ACPAgentChoice: Identifiable, Equatable {
+struct ProviderChoice: Identifiable, Equatable {
     let id: String
     let name: String
 }
@@ -78,8 +78,7 @@ final class ThreadStore {
     // every reader a dependency on the whole input collection. They are
     // recomputed in rebuildProviderCaches() / noteThreadsChanged() at every
     // mutation site of `providers`, `installedAgents`, and `threads`.
-    private(set) var nativeProviders: [InstanceInfo] = []
-    private(set) var acpAgentChoices: [ACPAgentChoice] = []
+    private(set) var availableProviders: [ProviderChoice] = []
     private(set) var recentWorkingDirectories: [String] = []
     /// Mirrors `threads.isEmpty` so chrome that only needs the empty bit does
     /// not depend on the whole collection.
@@ -317,11 +316,6 @@ final class ThreadStore {
         Task {
             await start()
         }
-    }
-
-    func isACPProviderID(_ providerID: String) -> Bool {
-        installedAgents.contains { $0.instanceID == providerID }
-            || providers.first(where: { $0.instanceID == providerID }).map(isACPProvider) == true
     }
 
     func ensureProviderAvailable(_ requestedID: String) async throws -> String {
@@ -652,40 +646,31 @@ final class ThreadStore {
         performSubscriptionMaintenance(at: timestamp)
     }
 
-    static let acpDriver = "acp"
-
-    /// Distinct driver identifiers across the configured providers, e.g.
-    /// ["acp", "claude", "codex"]. The server lists every configured provider
-    /// (running or not), so this needs no inference beyond grouping by driver.
-    /// Cached; recomputed in rebuildProviderCaches().
-    private(set) var availableDrivers: [String] = []
-
-    /// The thread's driver id: from its session binding once one exists,
-    /// otherwise from the configured (possibly not running) instance the
-    /// thread is bound to, so restored threads label their rows immediately.
-    func driver(for thread: ThreadListEntry) -> String? {
-        let driver = thread.session?.driver?
+    func providerID(for thread: ThreadListEntry) -> String? {
+        if let providerID = thread.providerInstanceID?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !providerID.isEmpty {
+            return providerID
+        }
+        let providerID = thread.session?.providerInstanceID
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let driver, !driver.isEmpty { return driver }
-        guard let instance = instance(for: thread) else { return nil }
-        let instanceDriver = instance.driver.trimmingCharacters(in: .whitespacesAndNewlines)
-        return instanceDriver.isEmpty ? nil : instanceDriver
+        guard let providerID, !providerID.isEmpty else { return nil }
+        return providerID
     }
 
     func providerDisplayName(for thread: ThreadListEntry) -> String? {
-        guard let driver = driver(for: thread) else { return nil }
-        guard driver == Self.acpDriver else {
-            return driver
+        if let sessionName = thread.session?.providerName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !sessionName.isEmpty {
+            return sessionName
         }
-        let agentName = thread.session?.providerName ?? instance(for: thread)?.name
-        guard let agentName, !agentName.isEmpty else {
-            return Self.acpDriver
+        guard let providerID = providerID(for: thread) else { return nil }
+        if let instanceName = instancesByID[providerID]?.name
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !instanceName.isEmpty {
+            return instanceName
         }
-        return "\(agentName) (ACP)"
-    }
-
-    private func instance(for thread: ThreadListEntry) -> InstanceInfo? {
-        thread.providerInstanceID.flatMap { instancesByID[$0] }
+        return availableProviders.first { $0.id == providerID }?.name ?? providerID
     }
 
     func isThreadUnread(_ id: String) -> Bool {
@@ -745,34 +730,25 @@ final class ThreadStore {
             providers.map { ($0.instanceID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        nativeProviders = providers
-            .filter { !isACPProvider($0) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-
-        let runningAgents = providers.filter(isACPProvider).map {
-            ACPAgentChoice(id: $0.instanceID, name: $0.name)
+        let nativeProviders = providers.filter { !isACPProvider($0) }.map {
+            ProviderChoice(id: $0.instanceID, name: $0.name)
         }
-        let runningIDs = Set(runningAgents.map(\.id))
-        let installedChoices = installedAgents.compactMap { agent -> ACPAgentChoice? in
-            guard !runningIDs.contains(agent.instanceID) else { return nil }
-            return ACPAgentChoice(
+        let installedACPProviders = installedAgents.map { agent in
+            ProviderChoice(
                 id: agent.instanceID,
                 name: agent.name
             )
         }
-        acpAgentChoices = (runningAgents + installedChoices).sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        var seenProviderIDs: Set<String> = []
+        availableProviders = (nativeProviders + installedACPProviders).filter {
+            seenProviderIDs.insert($0.id).inserted
+        }.sorted {
+            let nameOrder = $0.name.localizedStandardCompare($1.name)
+            if nameOrder == .orderedSame {
+                return $0.id.localizedStandardCompare($1.id) == .orderedAscending
+            }
+            return nameOrder == .orderedAscending
         }
-
-        var seenDrivers: Set<String> = []
-        availableDrivers = providers.compactMap { provider -> String? in
-            let driver = isACPProvider(provider)
-                ? Self.acpDriver
-                : provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !driver.isEmpty, seenDrivers.insert(driver).inserted else { return nil }
-            return driver
-        }
-        .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     /// Recomputes every cache derived from `threads`. Must be called after

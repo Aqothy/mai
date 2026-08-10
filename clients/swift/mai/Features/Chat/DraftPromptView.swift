@@ -100,47 +100,23 @@ struct DraftSessionControlsView: View {
 
     var body: some View {
         Menu {
-            ForEach(model.providerGroups) { group in
+            ForEach(model.providerChoices) { provider in
                 Button {
-                    model.selectProviderGroup(group)
+                    model.selectProvider(provider)
                 } label: {
-                    if model.selectedProviderGroup?.id == group.id {
-                        Label(group.name, systemImage: "checkmark")
+                    if model.selectedProviderID == provider.id {
+                        Label(provider.name, systemImage: "checkmark")
                     } else {
-                        Text(group.name)
+                        Text(provider.name)
                     }
                 }
             }
         } label: {
-            Label(model.selectedProviderGroup?.name ?? "Provider", systemImage: "server.rack")
+            Label(model.providerLabel, systemImage: "server.rack")
                 .lineLimit(1)
         }
         .disabled(model.isSending || !model.hasProviderChoices)
         .accessibilityLabel("Provider")
-
-        if !model.selectedProviderGroupChoices.isEmpty {
-            Menu {
-                ForEach(model.selectedProviderGroupChoices) { provider in
-                    Button {
-                        model.selectProvider(provider)
-                    } label: {
-                        if model.selectedProviderChoiceID == provider.id {
-                            Label(provider.name, systemImage: "checkmark")
-                        } else {
-                            Text(provider.name)
-                        }
-                    }
-                }
-            } label: {
-                Label(
-                    model.selectedProviderOptionLabel,
-                    systemImage: "point.3.connected.trianglepath.dotted"
-                )
-                .lineLimit(1)
-            }
-            .disabled(model.isSending)
-            .accessibilityLabel("Provider option")
-        }
 
         Menu {
             ForEach(model.recentWorkingDirectories, id: \.self) { directory in
@@ -163,21 +139,6 @@ struct DraftSessionControlsView: View {
         .disabled(model.isSending)
         .accessibilityLabel("Working directory")
     }
-}
-
-struct DraftProviderChoice: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let providerID: String
-    let acpAgentID: String?
-    let groupID: String
-    let groupName: String
-}
-
-struct DraftProviderGroup: Identifiable {
-    let id: String
-    let name: String
-    let choices: [DraftProviderChoice]
 }
 
 #if DEBUG

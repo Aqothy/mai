@@ -20,11 +20,11 @@ struct IOSThreadFilterMenu: View {
             }
             .pickerStyle(.menu)
 
-            Picker("Provider", systemImage: "cpu", selection: $filter.driver) {
+            Picker("Provider", systemImage: "cpu", selection: $filter.providerID) {
                 Text("All Providers").tag(String?.none)
-                ForEach(store.availableDrivers, id: \.self) { driver in
-                    Text(driver)
-                        .tag(String?.some(driver))
+                ForEach(store.availableProviders) { provider in
+                    Text(provider.name)
+                        .tag(String?.some(provider.id))
                 }
             }
             .pickerStyle(.menu)

@@ -1,13 +1,6 @@
 import Foundation
 import Observation
 
-/// One agent the user can import sessions from: a configured native provider
-/// or an installed/running ACP agent.
-struct SessionImportAgentChoice: Identifiable, Equatable {
-    let id: String
-    let name: String
-}
-
 @Observable
 final class SessionImportModel {
     enum Phase: Equatable {
@@ -36,16 +29,12 @@ final class SessionImportModel {
         self.store = store
         entries = previewSessions.map(SessionImportEntry.init)
         phase = .loaded
-        loadedAgentID = store.acpAgentChoices.first?.id
+        loadedAgentID = store.availableProviders.first?.id
     }
     #endif
 
-    var agentChoices: [SessionImportAgentChoice] {
-        store.nativeProviders.map {
-            SessionImportAgentChoice(id: $0.instanceID, name: $0.name)
-        } + store.acpAgentChoices.map {
-            SessionImportAgentChoice(id: $0.id, name: $0.name)
-        }
+    var agentChoices: [ProviderChoice] {
+        store.availableProviders
     }
 
     /// The agent sessions are listed for: the explicit selection, falling

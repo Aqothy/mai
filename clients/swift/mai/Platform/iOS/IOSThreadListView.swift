@@ -82,7 +82,7 @@ struct IOSThreadListView: View {
             threads: filter.apply(
                 to: store.threads,
                 isUnread: store.isThreadUnread,
-                driver: store.driver(for:)
+                providerID: store.providerID(for:)
             ),
             terminals: filter.apply(toTerminals: terminalStore.terminals)
         )

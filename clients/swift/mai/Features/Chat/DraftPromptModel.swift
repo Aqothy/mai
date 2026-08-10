@@ -5,8 +5,6 @@ import SwiftUI
 
 @Observable
 final class DraftPromptModel {
-    private static let acpProviderID = "acp"
-
     enum OptionsPhase: Equatable {
         case unavailable
         case loading
@@ -20,11 +18,6 @@ final class DraftPromptModel {
     var selectedProviderID: String? {
         didSet {
             if selectedProviderID != oldValue { selectionDidChange() }
-        }
-    }
-    var selectedACPAgentID: String? {
-        didSet {
-            if selectedACPAgentID != oldValue { selectionDidChange() }
         }
     }
     var workingDirectory = "" {
@@ -78,100 +71,12 @@ final class DraftPromptModel {
         attachmentsModel.attachments
     }
 
-    var nativeProviders: [InstanceInfo] {
-        store.nativeProviders
+    var providerChoices: [ProviderChoice] {
+        store.availableProviders
     }
 
-    var acpAgentChoices: [ACPAgentChoice] {
-        store.acpAgentChoices
-    }
-
-    var providerChoices: [DraftProviderChoice] {
-        refreshProviderCatalogIfNeeded()
-        return cachedProviderChoices
-    }
-
-    var providerGroups: [DraftProviderGroup] {
-        refreshProviderCatalogIfNeeded()
-        return cachedProviderGroups
-    }
-
-    // The store exposes no change signal for its provider catalog, so the
-    // sorted/grouped projections are memoized on read: the cheap unsorted
-    // mapping is rebuilt each access and the locale-aware sorts and grouping
-    // re-run only when it actually changed.
-    @ObservationIgnored private var cachedUnsortedChoices: [DraftProviderChoice]?
-    @ObservationIgnored private var cachedProviderChoices: [DraftProviderChoice] = []
-    @ObservationIgnored private var cachedProviderGroups: [DraftProviderGroup] = []
-
-    private func refreshProviderCatalogIfNeeded() {
-        let nativeChoices = nativeProviders.map { provider in
-            let driver = provider.driver.trimmingCharacters(in: .whitespacesAndNewlines)
-            let groupID = driver.isEmpty ? provider.instanceID : driver
-            let groupName = driver.isEmpty
-                ? provider.name
-                : driver
-            return DraftProviderChoice(
-                id: "native:\(provider.instanceID)",
-                name: provider.name,
-                providerID: provider.instanceID,
-                acpAgentID: nil,
-                groupID: groupID,
-                groupName: groupName
-            )
-        }
-        let acpChoices = acpAgentChoices.map { agent in
-            DraftProviderChoice(
-                id: "acp:\(agent.id)",
-                name: agent.name,
-                providerID: Self.acpProviderID,
-                acpAgentID: agent.id,
-                groupID: Self.acpProviderID,
-                groupName: Self.acpProviderID
-            )
-        }
-        let unsortedChoices = nativeChoices + acpChoices
-        guard unsortedChoices != cachedUnsortedChoices else { return }
-        cachedUnsortedChoices = unsortedChoices
-        cachedProviderChoices = unsortedChoices.sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
-        cachedProviderGroups = Dictionary(grouping: cachedProviderChoices, by: \.groupID)
-            .compactMap { groupID, choices in
-                guard let first = choices.first else { return nil }
-                return DraftProviderGroup(
-                    id: groupID,
-                    name: first.groupName,
-                    choices: choices.sorted {
-                        $0.name.localizedStandardCompare($1.name) == .orderedAscending
-                    }
-                )
-            }
-            .sorted {
-                $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
-    }
-
-    var selectedProviderChoiceID: String? {
-        providerChoices.first {
-            $0.providerID == selectedProviderID
-                && $0.acpAgentID == (usesACPProvider ? selectedACPAgentID : nil)
-        }?.id
-    }
-
-    var selectedProviderGroup: DraftProviderGroup? {
-        guard let selectedProviderChoiceID else { return nil }
-        return providerGroups.first {
-            $0.choices.contains { $0.id == selectedProviderChoiceID }
-        }
-    }
-
-    var selectedProviderGroupChoices: [DraftProviderChoice] {
-        selectedProviderGroup?.choices ?? []
-    }
-
-    var selectedProviderOptionLabel: String {
-        providerChoices.first { $0.id == selectedProviderChoiceID }?.name ?? "Provider"
+    var selectedProvider: ProviderChoice? {
+        providerChoices.first { $0.id == selectedProviderID }
     }
 
     var recentWorkingDirectories: [String] {
@@ -197,12 +102,8 @@ final class DraftPromptModel {
         !workingDirectory.isEmpty
     }
 
-    var usesACPProvider: Bool {
-        selectedProviderID == Self.acpProviderID
-    }
-
     var providerLabel: String {
-        selectedProviderGroup?.name ?? "Provider"
+        selectedProvider?.name ?? "Provider"
     }
 
     var directoryLabel: String {
@@ -277,21 +178,20 @@ final class DraftPromptModel {
             isConfiguringInitialSelection = false
             persistSelection()
         }
-        if selectedProviderID == nil {
+        if selectedProviderID.map({ providerIsAvailable($0) }) != true {
             if let providerID = draftStore.preferences.providerID,
                providerIsAvailable(providerID) {
                 selectProvider(providerID)
             } else if let provider = providerChoices.first {
                 selectProvider(provider)
+            } else {
+                selectedProviderID = nil
             }
         }
         if workingDirectory.isEmpty {
             workingDirectory = draftStore.preferences.workingDirectory
                 ?? recentWorkingDirectories.first
                 ?? ""
-        }
-        if usesACPProvider, selectedACPAgentID == nil {
-            selectedACPAgentID = acpAgentChoices.first?.id
         }
     }
 
@@ -300,17 +200,8 @@ final class DraftPromptModel {
         isEnteringDirectory = true
     }
 
-    func selectProvider(_ choice: DraftProviderChoice) {
-        selectedACPAgentID = choice.acpAgentID
-        selectedProviderID = choice.providerID
-    }
-
-    func selectProviderGroup(_ group: DraftProviderGroup) {
-        let choice =
-            group.choices.first { $0.id == selectedProviderChoiceID }
-            ?? group.choices.first
-        guard let choice else { return }
-        selectProvider(choice)
+    func selectProvider(_ choice: ProviderChoice) {
+        selectedProviderID = choice.id
     }
 
     func commitDirectoryInput() {
@@ -454,7 +345,7 @@ final class DraftPromptModel {
     }
 
     private var effectiveProviderID: String? {
-        usesACPProvider ? selectedACPAgentID : selectedProviderID
+        selectedProviderID
     }
 
     private func selectionMatches(providerID: String, cwd: String) -> Bool {
@@ -462,17 +353,11 @@ final class DraftPromptModel {
     }
 
     private func providerIsAvailable(_ providerID: String) -> Bool {
-        nativeProviders.contains { $0.instanceID == providerID }
-            || acpAgentChoices.contains { $0.id == providerID }
+        providerChoices.contains { $0.id == providerID }
     }
 
     private func selectProvider(_ providerID: String) {
-        if store.isACPProviderID(providerID) {
-            selectedProviderID = Self.acpProviderID
-            selectedACPAgentID = providerID
-        } else {
-            selectedProviderID = providerID
-        }
+        selectedProviderID = providerID
     }
 
     private func receiveOptions(_ update: ProviderOptionsResult) {

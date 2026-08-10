@@ -21,13 +21,12 @@ enum ThreadListActivityFilter: String, CaseIterable, Identifiable {
 struct ThreadListFilter {
     var query = ""
     var projectCwd: String?
-    /// Driver identifier to match, e.g. "claude", "codex", or "acp".
-    /// nil matches every driver.
-    var driver: String?
+    /// Provider instance identifier to match. nil matches every provider.
+    var providerID: String?
     var activityFilter: ThreadListActivityFilter = .all
 
     var hasActivePresets: Bool {
-        projectCwd != nil || driver != nil || activityFilter != .all
+        projectCwd != nil || providerID != nil || activityFilter != .all
     }
 
     var trimmedQuery: String {
@@ -40,29 +39,29 @@ struct ThreadListFilter {
 
     mutating func resetPresets() {
         projectCwd = nil
-        driver = nil
+        providerID = nil
         activityFilter = .all
     }
 
     func apply(
         to threads: [ThreadListEntry],
         isUnread: (String) -> Bool,
-        driver driverForThread: (ThreadListEntry) -> String?
+        providerID providerIDForThread: (ThreadListEntry) -> String?
     ) -> [ThreadListEntry] {
         let query = trimmedQuery
         return threads.filter { thread in
             (projectCwd == nil || thread.cwd == projectCwd)
-                && (driver == nil || driverForThread(thread) == driver)
+                && (providerID == nil || providerIDForThread(thread) == providerID)
                 && matchesActivity(thread, isUnread: isUnread)
                 && (query.isEmpty || thread.title.localizedStandardContains(query))
         }
     }
 
-    /// Filters terminal rows for the unified Threads list. Driver and
+    /// Filters terminal rows for the unified Threads list. Provider and
     /// activity presets describe agent threads, so any of them hides
     /// terminals; the query matches persisted and observed titles.
     func apply(toTerminals terminals: [TerminalSummary]) -> [TerminalSummary] {
-        guard driver == nil, activityFilter == .all else { return [] }
+        guard providerID == nil, activityFilter == .all else { return [] }
         let query = trimmedQuery
         return terminals.filter { terminal in
             (projectCwd == nil || terminal.cwd == projectCwd)

@@ -39,7 +39,7 @@ struct SessionImportView: View {
         }
         .listStyle(.plain)
         .safeAreaInset(edge: .top, spacing: 0) {
-            SessionImportAgentPicker(
+            SessionImportProviderPicker(
                 choices: model.agentChoices,
                 selection: $model.agentSelection
             )
@@ -70,15 +70,15 @@ struct SessionImportView: View {
     }
 }
 
-struct SessionImportAgentPicker: View {
-    let choices: [SessionImportAgentChoice]
+struct SessionImportProviderPicker: View {
+    let choices: [ProviderChoice]
     @Binding var selection: String?
 
     var body: some View {
         HStack {
-            Text("Agent")
+            Text("Provider")
             Spacer()
-            Picker("Agent", selection: $selection) {
+            Picker("Provider", selection: $selection) {
                 ForEach(choices) { choice in
                     Text(choice.name).tag(Optional(choice.id))
                 }
@@ -96,9 +96,9 @@ struct SessionImportStatusView: View {
     var body: some View {
         if model.agentChoices.isEmpty {
             ContentUnavailableView(
-                "No Agents Available",
+                "No Providers Available",
                 systemImage: "point.3.connected.trianglepath.dotted",
-                description: Text("Configure an agent before importing sessions.")
+                description: Text("Install a provider before importing sessions.")
             )
         } else {
             switch model.phase {
