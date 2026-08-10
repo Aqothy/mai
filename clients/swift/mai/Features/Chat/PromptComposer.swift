@@ -16,6 +16,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     let isRunning: Bool
     let isStopping: Bool
     let attachments: [ChatPendingAttachment]
+    let workspaceFilePicker: WorkspaceFilePickerModel?
     let submitLabel: String
     let send: () -> Void
     let stop: () -> Void
@@ -32,6 +33,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         isRunning: Bool = false,
         isStopping: Bool = false,
         attachments: [ChatPendingAttachment] = [],
+        workspaceFilePicker: WorkspaceFilePickerModel? = nil,
         submitLabel: String,
         send: @escaping () -> Void,
         stop: @escaping () -> Void = {},
@@ -47,6 +49,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         self.isRunning = isRunning
         self.isStopping = isStopping
         self.attachments = attachments
+        self.workspaceFilePicker = workspaceFilePicker
         self.submitLabel = submitLabel
         self.send = send
         self.stop = stop
@@ -69,7 +72,11 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 isEnabled: isEnabled,
                 focusID: focusID,
                 canSend: canSend,
-                send: send
+                send: send,
+                textChanged: updateWorkspaceFilePicker,
+                moveWorkspaceFileSelection: moveWorkspaceFileSelection,
+                selectWorkspaceFile: selectWorkspaceFile,
+                dismissWorkspaceFilePicker: dismissWorkspaceFilePicker
             )
 
             HStack {
@@ -139,6 +146,26 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     private var sendButtonForeground: Color {
         isRunning || canSend ? .black : .secondary
     }
+
+    private func updateWorkspaceFilePicker(oldText: String, newText: String) {
+        workspaceFilePicker?.textDidChange(from: oldText, to: newText)
+    }
+
+    private func moveWorkspaceFileSelection(by offset: Int) -> Bool {
+        workspaceFilePicker?.moveSelection(by: offset) ?? false
+    }
+
+    private func selectWorkspaceFile() -> Bool {
+        guard let updatedText = workspaceFilePicker?.textBySelectingCurrentMatch(
+            in: text
+        ) else { return false }
+        text = updatedText
+        return true
+    }
+
+    private func dismissWorkspaceFilePicker() -> Bool {
+        workspaceFilePicker?.dismiss() ?? false
+    }
 }
 
 private struct DraftPromptEditor: View {
@@ -148,6 +175,10 @@ private struct DraftPromptEditor: View {
     let focusID: String?
     let canSend: Bool
     let send: () -> Void
+    let textChanged: (String, String) -> Void
+    let moveWorkspaceFileSelection: (Int) -> Bool
+    let selectWorkspaceFile: () -> Bool
+    let dismissWorkspaceFilePicker: () -> Bool
 
     @FocusState private var isFocused: Bool
 
@@ -180,8 +211,24 @@ private struct DraftPromptEditor: View {
         }
         .disabled(!isEnabled)
         .accessibilityLabel("Prompt")
-        #if os(macOS)
-            .onKeyPress(phases: .down) { keyPress in
+        .onKeyPress(phases: .down) { keyPress in
+            if keyPress.key == .downArrow,
+               moveWorkspaceFileSelection(1) {
+                return .handled
+            }
+            if keyPress.key == .upArrow,
+               moveWorkspaceFileSelection(-1) {
+                return .handled
+            }
+            if keyPress.key == .escape,
+               dismissWorkspaceFilePicker() {
+                return .handled
+            }
+            if keyPress.key == .return,
+               selectWorkspaceFile() {
+                return .handled
+            }
+            #if os(macOS)
                 guard keyPress.key == .return,
                     !keyPress.modifiers.contains(.shift),
                     canSend
@@ -191,13 +238,18 @@ private struct DraftPromptEditor: View {
                 isFocused = false
                 send()
                 return .handled
-            }
-        #endif
+            #else
+                return .ignored
+            #endif
+        }
         .onChange(of: focusID, initial: true) { _, focusID in
             // Only a draft prompt auto-focuses. The composer keeps one
             // identity across the draft-to-thread transition, so focus
             // acquired in the draft must be released when a thread opens.
             isFocused = focusID != nil
+        }
+        .onChange(of: text) { oldText, newText in
+            textChanged(oldText, newText)
         }
     }
 }
@@ -207,6 +259,7 @@ struct ComposerAddMenu: View {
     let isImageAttachmentDisabled: Bool
     let maximumImageSelectionCount: Int
     let commands: [SlashCommand]
+    var addWorkspaceFile: (() -> Void)? = nil
     let addImages: ([URL]) async -> Void
     let addPhotos: ([PhotosPickerItem]) -> Void
     let addCameraImage: (ChatComposerThumbnail) -> Void
@@ -220,8 +273,14 @@ struct ComposerAddMenu: View {
 
     var body: some View {
         Menu {
+            if let addWorkspaceFile {
+                Button("Workspace File", systemImage: "at") {
+                    addWorkspaceFile()
+                }
+            }
+
             if isImageAttachmentAvailable {
-                Button("Files", systemImage: "folder") {
+                Button("Image Files", systemImage: "folder") {
                     isImporterPresented = true
                 }
                 .disabled(isImageAttachmentDisabled)
@@ -252,7 +311,7 @@ struct ComposerAddMenu: View {
                 }
             }
 
-            if !isImageAttachmentAvailable, commands.isEmpty {
+            if addWorkspaceFile == nil, !isImageAttachmentAvailable, commands.isEmpty {
                 Button("No actions available", systemImage: "ellipsis") {}
                     .disabled(true)
             }

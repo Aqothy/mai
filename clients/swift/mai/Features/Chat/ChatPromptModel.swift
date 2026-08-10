@@ -7,6 +7,7 @@ import SwiftUI
 final class ChatPromptModel {
     let store: ThreadStore
     let threadID: String
+    let workspaceFilePicker: WorkspaceFilePickerModel
 
     var text: String {
         didSet {
@@ -25,6 +26,10 @@ final class ChatPromptModel {
         self.store = store
         self.draftStore = draftStore
         self.threadID = threadID
+        workspaceFilePicker = WorkspaceFilePickerModel(
+            store: store,
+            scope: .thread(id: threadID)
+        )
         text = draftStore.text(for: threadID)
         attachmentsModel.reportError = { [weak self] message in
             self?.errorMessage = message

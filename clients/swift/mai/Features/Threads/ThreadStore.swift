@@ -338,6 +338,12 @@ final class ThreadStore {
         )
     }
 
+    func searchWorkspaceFiles(
+        _ input: WorkspaceSearchFilesParams
+    ) async throws -> WorkspaceSearchFilesResult {
+        try await rpc.searchWorkspaceFiles(input)
+    }
+
     /// Fetches the public ACP registry index. Network-backed; callers own
     /// loading and error presentation.
     func fetchRegistryAgents() async throws -> [ACPRegistryAgent] {

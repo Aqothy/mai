@@ -21,6 +21,7 @@ protocol ThreadRPCClient: AnyObject {
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
+    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
 }
 
@@ -57,6 +58,10 @@ extension ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
+    }
+
+    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
+        throw RPCError(code: nil, message: "Workspace file search is unavailable", data: nil)
     }
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
@@ -154,6 +159,10 @@ extension RPCClient: ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         try await call(MaidRPCMethod.providerOptionsSet, params: input)
+    }
+
+    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
+        try await call(MaidRPCMethod.workspaceSearchFiles, params: input)
     }
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {

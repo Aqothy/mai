@@ -29,6 +29,9 @@ struct ChatView: View {
     }
 
     var body: some View {
+        let promptText = currentPromptText
+        let workspaceFilePicker = currentWorkspaceFilePicker
+
         Group {
             if let errorMessage = store.selectedThreadLoadErrorMessage {
                 ThreadLoadErrorView(store: store, errorMessage: errorMessage)
@@ -66,12 +69,24 @@ struct ChatView: View {
                 .safeAreaPadding(.bottom)
             }
         }
+        .overlay(alignment: .bottom) {
+            // This overlay belongs to the full chat surface. Rendering it
+            // outside the safe-area bar's bounds would make its visible rows
+            // miss taps and scrolling gestures.
+            ChatWorkspaceFilePickerOverlay(
+                text: promptText,
+                model: workspaceFilePicker
+            )
+            .safeAreaPadding(.bottom)
+        }
         .modifier(
             ChatComposerSafeAreaBar(
                 composer: ChatComposerStack(
                     store: store,
                     draftModel: draftModel,
-                    chatModel: chatModel
+                    chatModel: chatModel,
+                    promptText: promptText,
+                    workspaceFilePicker: workspaceFilePicker
                 )
             )
         )
@@ -82,6 +97,9 @@ struct ChatView: View {
         .onChange(of: store.selectedThreadID, initial: true) {
             previousThreadID,
             threadID in
+            if previousThreadID != threadID {
+                currentWorkspaceFilePicker.dismiss()
+            }
             if previousThreadID != threadID, previousThreadID != nil {
                 scrollState.reset()
             }
@@ -179,6 +197,19 @@ struct ChatView: View {
         }
         return store.selectedThreadTitle ?? ""
     }
+
+    private var currentPromptText: Binding<String> {
+        if let chatModel {
+            @Bindable var chatModel = chatModel
+            return $chatModel.text
+        }
+        @Bindable var draftModel = draftModel
+        return $draftModel.prompt
+    }
+
+    private var currentWorkspaceFilePicker: WorkspaceFilePickerModel {
+        chatModel?.workspaceFilePicker ?? draftModel.workspaceFilePicker
+    }
 }
 
 #if os(iOS)
@@ -194,6 +225,8 @@ private struct ChatComposerStack: View {
     let store: ThreadStore
     let draftModel: DraftPromptModel
     let chatModel: ChatPromptModel?
+    let promptText: Binding<String>
+    let workspaceFilePicker: WorkspaceFilePickerModel
 
     var body: some View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
@@ -226,6 +259,7 @@ private struct ChatComposerStack: View {
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
+                workspaceFilePicker: workspaceFilePicker,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
             ) {
                 if let chatModel {
@@ -254,6 +288,11 @@ private struct ChatComposerStack: View {
                         ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
                     ),
                     commands: state.slashCommands,
+                    addWorkspaceFile: workspaceFilePicker.isAvailable && !isSendingNow
+                        ? {
+                            presentWorkspaceFilePickerAtPromptEnd()
+                        }
+                        : nil,
                     addImages: chatModel?.addImages ?? draftModel.addImages,
                     addPhotos: chatModel?.addPhotos ?? draftModel.addPhotos,
                     addCameraImage: chatModel?.addCameraImage ?? draftModel.addCameraImage,
@@ -273,15 +312,6 @@ private struct ChatComposerStack: View {
         }
     }
 
-    private var promptText: Binding<String> {
-        if let chatModel {
-            @Bindable var chatModel = chatModel
-            return $chatModel.text
-        }
-        @Bindable var draftModel = draftModel
-        return $draftModel.prompt
-    }
-
     private var currentAttachments: [ChatPendingAttachment] {
         chatModel?.attachments ?? draftModel.attachments
     }
@@ -297,6 +327,17 @@ private struct ChatComposerStack: View {
             )?.image == true
         }
         return draftModel.supportsImageAttachments
+    }
+
+    private func presentWorkspaceFilePickerAtPromptEnd() {
+        // Appending `@` reuses the same trigger path as typing it, keeping one
+        // insertion behavior for keyboard and menu-driven use.
+        var prompt = promptText.wrappedValue
+        if !prompt.isEmpty, prompt.last?.isWhitespace != true {
+            prompt += " "
+        }
+        prompt += "@"
+        promptText.wrappedValue = prompt
     }
 }
 
@@ -320,19 +361,48 @@ private struct ChatComposerThreadState {
     }
 }
 
+private struct ChatWorkspaceFilePickerOverlay: View {
+    private static let composerSpacing: CGFloat = 8
+
+    @Binding var text: String
+    let model: WorkspaceFilePickerModel
+
+    var body: some View {
+        if model.isPresented, model.isAvailable {
+            WorkspaceFilePickerView(model: model) { match in
+                insertWorkspaceFile(match.relativePath)
+            }
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal)
+            .padding(.bottom, Self.composerSpacing)
+        }
+    }
+
+    private func insertWorkspaceFile(_ relativePath: String) {
+        guard let updatedText = model.textBySelecting(
+            relativePath: relativePath,
+            in: text
+        ) else { return }
+        text = updatedText
+    }
+}
+
 private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
     let composer: Composer
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, macOS 26.0, *) {
-            content.safeAreaBar(edge: .bottom, spacing: 0) {
-                composer
-            }
+            content
+                .safeAreaBar(edge: .bottom, spacing: 0) {
+                    composer
+                }
         } else {
-            content.safeAreaInset(edge: .bottom, spacing: 0) {
-                composer
-            }
+            content
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    composer
+                }
         }
     }
 }

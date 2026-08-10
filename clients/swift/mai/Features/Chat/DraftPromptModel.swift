@@ -14,6 +14,7 @@ final class DraftPromptModel {
 
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let workspaceFilePicker: WorkspaceFilePickerModel
 
     var selectedProviderID: String? {
         didSet {
@@ -22,7 +23,10 @@ final class DraftPromptModel {
     }
     var workingDirectory = "" {
         didSet {
-            if workingDirectory != oldValue { selectionDidChange() }
+            if workingDirectory != oldValue {
+                workspaceFilePicker.updateScope(.workingDirectory(workingDirectory))
+                selectionDidChange()
+            }
         }
     }
     var directoryInput = ""
@@ -45,6 +49,10 @@ final class DraftPromptModel {
     init(store: ThreadStore, draftStore: ThreadDraftStore) {
         self.store = store
         self.draftStore = draftStore
+        workspaceFilePicker = WorkspaceFilePickerModel(
+            store: store,
+            scope: .workingDirectory("")
+        )
     }
 
     /// Wires the store's provider-option pushes and the attachment pipeline
