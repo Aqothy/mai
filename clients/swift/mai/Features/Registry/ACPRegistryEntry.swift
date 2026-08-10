@@ -11,6 +11,7 @@ struct ACPRegistryEntry: Identifiable, Equatable {
     let id: String
     let name: String
     let description: String?
+    let iconURL: URL?
     let source: Source
     /// Version currently published by the registry; nil when the registry no
     /// longer lists this installed agent.

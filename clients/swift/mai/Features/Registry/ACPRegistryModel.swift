@@ -53,6 +53,7 @@ final class ACPRegistryModel {
                 id: agent.id,
                 name: agent.name,
                 description: agent.description,
+                iconURL: agent.icon.flatMap { URL(string: $0) },
                 source: .registry,
                 availableVersion: agent.version,
                 installedVersion: installedByID[agent.id]?.version
@@ -69,6 +70,7 @@ final class ACPRegistryModel {
                     id: agent.id,
                     name: agent.name,
                     description: agent.description,
+                    iconURL: agent.icon.flatMap { URL(string: $0) },
                     source: source,
                     availableVersion: nil,
                     installedVersion: source == .custom ? nil : agent.version

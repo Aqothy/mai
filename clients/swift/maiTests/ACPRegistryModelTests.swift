@@ -11,7 +11,8 @@ struct ACPRegistryModelTests {
             makeRegistryAgent(
                 id: "codex",
                 name: "Codex",
-                description: "OpenAI coding agent"
+                description: "OpenAI coding agent",
+                icon: "https://cdn.example.test/codex.svg"
             ),
             makeRegistryAgent(
                 id: "claude-code",
@@ -26,6 +27,10 @@ struct ACPRegistryModelTests {
         await model.load()
 
         #expect(model.entries.map(\.name) == ["Claude Code", "Codex", "Local Agent"])
+        #expect(
+            model.entries.first(where: { $0.id == "codex" })?.iconURL
+                == URL(string: "https://cdn.example.test/codex.svg")
+        )
 
         model.searchText = "openai"
         #expect(model.entries.map(\.id) == ["codex"])
@@ -185,12 +190,13 @@ private func makeCustomAgent(id: String, name: String) -> ACPRegistryInstalledAg
 private func makeRegistryAgent(
     id: String,
     name: String,
-    description: String
+    description: String,
+    icon: String? = nil
 ) -> ACPRegistryAgent {
     ACPRegistryAgent(
         args: nil,
         description: description,
-        icon: nil,
+        icon: icon,
         id: id,
         instanceID: "registry-\(id)",
         name: name,

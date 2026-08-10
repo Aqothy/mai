@@ -90,6 +90,7 @@ private struct InstalledAgentSnapshot: Equatable {
     let id: String
     let name: String
     let description: String?
+    let icon: String?
     let source: String
     let version: String
 
@@ -97,6 +98,7 @@ private struct InstalledAgentSnapshot: Equatable {
         id = agent.id
         name = agent.name
         description = agent.description
+        icon = agent.icon
         source = agent.source
         version = agent.version
     }
