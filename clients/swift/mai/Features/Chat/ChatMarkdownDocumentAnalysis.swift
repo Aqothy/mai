@@ -1,5 +1,4 @@
 import Markdown
-import MarkdownView
 
 /// Safety-relevant features found in an already-parsed Markdown document.
 nonisolated struct ChatMarkdownDocumentAnalysis: Equatable, Sendable {
@@ -39,10 +38,6 @@ nonisolated struct ChatMarkdownDocumentAnalysis: Equatable, Sendable {
 
 /// Inspects swift-markdown syntax rather than guessing from source text.
 nonisolated enum ChatMarkdownDocumentAnalyzer {
-    static func analyze(_ parseResult: MarkdownParseResult) -> ChatMarkdownDocumentAnalysis {
-        analyze(parseResult.document)
-    }
-
     static func analyze(_ document: Markdown.Document) -> ChatMarkdownDocumentAnalysis {
         var walker = SafetyMarkupWalker()
         walker.visit(document)

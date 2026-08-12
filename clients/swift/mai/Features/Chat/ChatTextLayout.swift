@@ -74,6 +74,7 @@
         let width: CGFloat
         let height: CGFloat
         let attributedString: NSAttributedString
+        let hasQuoteBars: Bool
 
         init(
             source: String,
@@ -98,9 +99,20 @@
             storage.addLayoutManager(manager)
             manager.ensureLayout(for: container)
 
+            var hasQuoteBars = false
+            attributedString.enumerateAttribute(
+                .chatQuoteBarOffsets,
+                in: NSRange(location: 0, length: attributedString.length)
+            ) { value, _, stop in
+                guard value != nil else { return }
+                hasQuoteBars = true
+                stop.pointee = true
+            }
+
             self.width = width
             self.height = ceil(manager.usedRect(for: container).height)
             self.attributedString = attributedString
+            self.hasQuoteBars = hasQuoteBars
         }
 
         private static func plainAttributedString(
@@ -119,13 +131,12 @@
         }
     }
 
-    /// Cache for completed layouts, in-flight warmups, and a small reuse pool
-    /// of the native views List has already displayed.
+    /// Thread-owned cache for completed layouts and in-flight warmups, plus a
+    /// reuse pool of native views List has already displayed.
     final class ChatTextLayoutStore {
-        /// Bounds both retained layouts and eager warmup work. Callers use the
-        /// same limit so they do not prepare requests the cache cannot retain.
-        static let capacity = 256
-        private static let maximumIdleTextViewCount = 16
+        /// Limits eager work in one batch without evicting layouts that the
+        /// loaded chat has already paid to create.
+        static let maximumWarmupRequestCount = 256
 
         private struct Key: Hashable, Sendable {
             let id: String
@@ -145,7 +156,6 @@
         }
 
         private var entries: [Key: Entry] = [:]
-        private var entryOrder: [Key] = []
         private var warming: Set<Key> = []
         private var idleTextViews: [IdleTextView] = []
         private var acceptsReturnedTextViews = true
@@ -269,7 +279,7 @@
         ) -> [(request: ChatTextLayoutRequest, key: Key)] {
             var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
             var seen: Set<Key> = []
-            for request in requests.suffix(Self.capacity).reversed()
+            for request in requests.suffix(Self.maximumWarmupRequestCount).reversed()
             where request.width > 0 {
                 let key = Key(id: request.id, width: request.width)
                 guard seen.insert(key).inserted,
@@ -301,21 +311,11 @@
             style: ChatTextLayoutStyle,
             for key: Key
         ) {
-            let isNewEntry = entries[key] == nil
-            if entries.count >= Self.capacity, isNewEntry,
-                let oldestKey = entryOrder.first
-            {
-                entryOrder.removeFirst()
-                entries.removeValue(forKey: oldestKey)
-            }
             entries[key] = Entry(
                 source: source,
                 style: style,
                 layout: layout
             )
-            if isNewEntry {
-                entryOrder.append(key)
-            }
         }
 
         /// Prefers the native view that already contains this exact layout.
@@ -343,9 +343,6 @@
             guard acceptsReturnedTextViews,
                 !idleTextViews.contains(where: { $0.view === textView })
             else { return }
-            if idleTextViews.count >= Self.maximumIdleTextViewCount {
-                idleTextViews.removeFirst()
-            }
             idleTextViews.append(
                 IdleTextView(
                     key: Key(id: id, width: layout.width),
@@ -356,20 +353,39 @@
         }
     }
 
+    struct ChatTextSelection: Equatable, Sendable {
+        let layoutID: String
+        let range: NSRange
+        let text: String
+    }
+
     /// Selectable prose whose attributed content and measured height can be
     /// prepared before its `List` row becomes visible and whose native view
     /// can be reused if List later realizes that row again.
+    ///
+    /// The optional callback is the narrow extension point for selection-based
+    /// actions and annotations; normal rows pay no delegate-callback cost.
     struct ChatSelectableText: UIViewRepresentable {
         let layoutID: String
         let source: String
         let style: ChatTextLayoutStyle
         let layoutStore: ChatTextLayoutStore
+        var onSelectionChange: ((ChatTextSelection?) -> Void)? = nil
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
 
         func makeUIView(context: Context) -> ChatSelectableTextHostView {
             ChatSelectableTextHostView()
         }
 
         func updateUIView(_ uiView: ChatSelectableTextHostView, context: Context) {
+            context.coordinator.layoutID = layoutID
+            context.coordinator.onSelectionChange = onSelectionChange
+            uiView.selectionDelegate = onSelectionChange == nil
+                ? nil
+                : context.coordinator
             uiView.update(
                 layoutID: layoutID,
                 source: source,
@@ -380,9 +396,34 @@
 
         static func dismantleUIView(
             _ uiView: ChatSelectableTextHostView,
-            coordinator: Void
+            coordinator: Coordinator
         ) {
             uiView.dismantle()
+        }
+
+        final class Coordinator: NSObject, UITextViewDelegate {
+            var layoutID = ""
+            var onSelectionChange: ((ChatTextSelection?) -> Void)?
+
+            func textViewDidChangeSelection(_ textView: UITextView) {
+                guard let onSelectionChange else { return }
+                let range = textView.selectedRange
+                guard range.length > 0,
+                    NSMaxRange(range) <= textView.attributedText.length
+                else {
+                    onSelectionChange(nil)
+                    return
+                }
+                onSelectionChange(
+                    ChatTextSelection(
+                        layoutID: layoutID,
+                        range: range,
+                        text: textView.attributedText.attributedSubstring(
+                            from: range
+                        ).string
+                    )
+                )
+            }
         }
 
         func sizeThatFits(
@@ -402,10 +443,80 @@
     }
 
     final class ChatSelectableTextHostView: UIView {
+        private final class QuoteBarView: UIView {
+            var attributedText = NSAttributedString()
+            weak var layoutManager: NSLayoutManager?
+            weak var textContainer: NSTextContainer?
+
+            override func draw(_ rect: CGRect) {
+                guard let layoutManager, let textContainer else { return }
+                let origin = CGPoint(
+                    x: 0,
+                    y: 0
+                )
+                var rangesByOffset: [CGFloat: [NSRange]] = [:]
+                var index = 0
+                while index < attributedText.length {
+                    var range = NSRange()
+                    let offsets = attributedText.attribute(
+                        .chatQuoteBarOffsets,
+                        at: index,
+                        effectiveRange: &range
+                    ) as? [CGFloat] ?? []
+                    index = NSMaxRange(range)
+
+                    for offset in offsets {
+                        var ranges = rangesByOffset[offset, default: []]
+                        if let previous = ranges.last,
+                            NSMaxRange(previous) == range.location
+                        {
+                            ranges[ranges.count - 1] = NSUnionRange(previous, range)
+                        } else {
+                            ranges.append(range)
+                        }
+                        rangesByOffset[offset] = ranges
+                    }
+                }
+
+                UIColor.secondaryLabel.withAlphaComponent(0.35).setFill()
+                for (offset, ranges) in rangesByOffset {
+                    for range in ranges {
+                        let glyphRange = layoutManager.glyphRange(
+                            forCharacterRange: range,
+                            actualCharacterRange: nil
+                        )
+                        var bounds = layoutManager.boundingRect(
+                            forGlyphRange: glyphRange,
+                            in: textContainer
+                        )
+                        bounds.origin.x += origin.x
+                        bounds.origin.y += origin.y
+                        guard bounds.intersects(rect) else { continue }
+
+                        let bar = CGRect(
+                            x: origin.x + offset,
+                            y: bounds.minY,
+                            width: ChatMarkdownProseStyle.quoteBarWidth,
+                            height: bounds.height
+                        )
+                        UIBezierPath(
+                            roundedRect: bar,
+                            cornerRadius: ChatMarkdownProseStyle.quoteBarWidth / 2
+                        ).fill()
+                    }
+                }
+            }
+        }
+
+        weak var selectionDelegate: UITextViewDelegate? {
+            didSet { textView?.delegate = selectionDelegate }
+        }
+
         private var layoutID: String?
         private var source: String?
         private var style: ChatTextLayoutStyle?
         private weak var layoutStore: ChatTextLayoutStore?
+        private var quoteBarView: QuoteBarView?
         private var textView: UITextView?
         private var presentedLayout: ChatTextLayout?
         private var presentedLayoutID: String?
@@ -442,6 +553,7 @@
             if presentedLayout !== layout {
                 present(layout, source: source, style: style)
             }
+            quoteBarView?.frame = bounds
             textView?.frame = bounds
         }
 
@@ -485,6 +597,17 @@
                 view.selectedRange = NSRange(location: 0, length: 0)
             }
 
+            view.delegate = selectionDelegate
+            if layout.hasQuoteBars {
+                let bars = QuoteBarView(frame: bounds)
+                bars.backgroundColor = .clear
+                bars.isUserInteractionEnabled = false
+                bars.attributedText = layout.attributedString
+                bars.layoutManager = view.layoutManager
+                bars.textContainer = view.textContainer
+                addSubview(bars)
+                quoteBarView = bars
+            }
             addSubview(view)
             textView = view
             presentedLayout = layout
@@ -502,6 +625,9 @@
 
         private func releasePresentedTextView() {
             guard let textView, let presentedLayout else { return }
+            quoteBarView?.removeFromSuperview()
+            quoteBarView = nil
+            textView.delegate = nil
             textView.removeFromSuperview()
             if let layoutStore, let presentedLayoutID {
                 layoutStore.returnTextView(
@@ -529,4 +655,5 @@
             return view
         }
     }
+
 #endif

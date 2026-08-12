@@ -1,21 +1,11 @@
-import MarkdownView
-import RichText
 import SwiftUI
 
-/// Shared Markdown styling that keeps rendered links display-only.
+/// Shared native-prose behavior. Links remain visible but display-only until
+/// chat navigation has an explicit policy for external destinations.
 struct ChatMarkdownContentStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .textLayoutEngine(.textKit2)
-            .markdownMathRenderingEnabled()
-            .markdownCodeBlockStyle(
-                .default(
-                    lightTheme: "atom-one-light",
-                    darkTheme: "atom-one-dark"
-                )
-            )
-            .markdownTableStyle(ChatMarkdownTableStyle())
-            .tint(.primary, for: .link)
+            .tint(.primary)
             .environment(\.openURL, OpenURLAction { _ in .discarded })
             .lineSpacing(2)
             #if os(iOS) || os(macOS)

@@ -1,7 +1,7 @@
 import Markdown
 
-/// Converts active or remote Markdown nodes into inert code before MarkdownView
-/// sees them. Ordinary Markdown takes the fast path and remains unchanged.
+/// Converts active or remote Markdown nodes into inert code for renderers that
+/// need sanitized source. Ordinary Markdown stays on the unchanged fast path.
 nonisolated enum ChatMarkdownSourceSanitizer {
     static func sanitize(_ source: String) -> String {
         guard source.contains("<") || source.contains("![") else {

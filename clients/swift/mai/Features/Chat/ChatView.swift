@@ -807,7 +807,7 @@ private struct ChatTimeline: View {
             await textLayoutStore.prepare(
                 requests: Self.textLayoutRequests(
                     in: renderedRows,
-                    limit: ChatTextLayoutStore.capacity,
+                    limit: ChatTextLayoutStore.maximumWarmupRequestCount,
                     rowWidth: rowWidth
                 )
             )
@@ -816,7 +816,7 @@ private struct ChatTimeline: View {
 
     /// Expands oversized user messages and settled oversized assistant
     /// messages. Streaming keeps one stable live row; short and uncommon
-    /// document-wide Markdown features keep the existing static renderer.
+    /// document-wide Markdown features stay in one native attributed row.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -907,7 +907,7 @@ private struct ChatTimeline: View {
             textLayoutStore.warm(
                 requests: Self.textLayoutRequests(
                     in: rows,
-                    limit: ChatTextLayoutStore.capacity,
+                    limit: ChatTextLayoutStore.maximumWarmupRequestCount,
                     rowWidth: rowWidth
                 )
             )
@@ -1149,10 +1149,9 @@ private struct ChatTimelineRow: View {
 
 /// The model's reasoning behind a "Thought" disclosure — open while the
 /// thought streams, folding on its own once the item settles.
-/// Rendered with Foundation's inline Markdown parsing rather than the
-/// MarkdownView renderer: inline attributes (bold section titles, code
-/// spans) apply on top of the row's own font and dimmed secondary color,
-/// which the renderer's document styling would override.
+/// Reasoning uses Foundation's inline Markdown parser because it has its own
+/// compact font and secondary color rather than the document-level styling of
+/// assistant messages.
 private struct ChatThoughtRow: View {
     let item: Item
     let streamingText: ThreadStreamingText?

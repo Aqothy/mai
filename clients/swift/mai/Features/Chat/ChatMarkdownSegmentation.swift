@@ -19,9 +19,12 @@ nonisolated enum ChatTextOptimizationPolicy {
         streamingTurnID: String?,
         source: String
     ) -> Bool {
-        guard ChatMarkdownSegmenter.shouldOptimize(source) else { return false }
-        if role == MaidMessageRole.user.rawValue { return true }
+        if role == MaidMessageRole.user.rawValue {
+            return ChatMarkdownSegmenter.shouldOptimize(source)
+        }
         guard role == MaidMessageRole.assistant.rawValue else { return false }
+        // Every settled assistant message uses one selectable native text host
+        // per consecutive prose run. Streaming remains plain and stable.
         return streamingTurnID == nil || messageTurnID != streamingTurnID
     }
 }
@@ -51,40 +54,43 @@ enum ChatMessageTextPlanner {
             )
         else { return .existingRenderer }
 
-        guard
-            let segments = segmentCache.segments(
-                messageID: messageID,
-                source: source
-            ),
-            segments.contains(where: { $0.kind == .prose })
+        if let segments = segmentCache.segments(
+            messageID: messageID,
+            source: source
+        ) {
+            if segments.contains(where: { $0.kind == .prose })
                 || segments.count > 1
-        else { return .existingRenderer }
-        return .segmented(segments)
+            {
+                return .segmented(segments)
+            }
+            // A single rich block has no neighboring prose selection to join.
+            return .existingRenderer
+        }
+
+        // A document-wide prose feature can make independent block parsing
+        // unsafe. It still belongs in one selectable TextKit surface rather
+        // than the iOS 26 SwiftUI Text fallback, which only supports whole-copy.
+        return .segmented([ChatMarkdownSegment(kind: .prose, source: source)])
     }
 }
 
-/// Separates native-text prose from blocks that still need MarkdownView.
+/// Separates native-text prose from blocks that need a richer native fallback.
 ///
-/// Code blocks, tables, HTML, and images become standalone rich rows. Long
-/// prose is also divided at top-level Markdown block boundaries so `List` can
-/// virtualize an essay instead of laying out one enormous text view at once.
+/// Code blocks, tables, HTML, and images become standalone rich rows. All
+/// consecutive prose—including headings, lists, quotes, and rules—coalesces
+/// into one row so an iOS selection can cross the complete prose run.
 nonisolated enum ChatMarkdownSegmenter {
-    /// Fresh layout of a representative 2 KB Markdown message costs about a
-    /// frame in the existing renderer; smaller messages keep its simpler path.
+    /// Long user-authored text uses the same prelaid-out native host without
+    /// paying Markdown parsing costs. Settled assistant prose is always native.
     static let optimizationThreshold = 2_048
-    /// Keeps each ordinary prose row near one frame of native attachment work.
-    /// A single indivisible Markdown block may exceed this target.
-    static let maximumProseSegmentByteCount = 4_096
-
     static func shouldOptimize(_ source: String) -> Bool {
         source.utf8.count > optimizationThreshold
     }
 
     /// Returns nil when splitting could change document-wide Markdown
-    /// behavior. Those uncommon messages stay on the existing renderer.
+    /// behavior. Those uncommon messages stay in one attributed text row.
     static func segments(of source: String) -> [ChatMarkdownSegment]? {
-        guard shouldOptimize(source),
-            !containsReferenceDefinition(source),
+        guard !containsReferenceDefinition(source),
             !containsPotentialMath(source)
         else { return nil }
 
@@ -97,33 +103,33 @@ nonisolated enum ChatMarkdownSegmenter {
         }
 
         let document = Markdown.Document(parsing: source)
-        var blocks: [(offset: Int, isRich: Bool)] = []
+        var blocks: [(offset: Int, kind: ChatMarkdownSegment.Kind)] = []
         for block in document.children {
             guard let location = block.range?.lowerBound,
                 lineStarts.indices.contains(location.line - 1)
             else { continue }
             let offset = lineStarts[location.line - 1] + location.column - 1
             guard offset < bytes.count else { continue }
-            blocks.append((offset, containsRichContent(block)))
+            let kind: ChatMarkdownSegment.Kind = containsRichContent(block)
+                ? .rich
+                : .prose
+            blocks.append((offset, kind))
         }
         guard let first = blocks.first else { return nil }
 
         var segments: [ChatMarkdownSegment] = []
         var runStart = 0
-        var runIsRich = first.isRich
+        var runKind = first.kind
 
         for block in blocks.dropFirst() {
-            let shouldSplitLongProse =
-                !runIsRich && !block.isRich
-                && block.offset - runStart >= maximumProseSegmentByteCount
-            // Every rich block stands alone. Prose coalesces only until the
-            // next semantic block would make one native row too expensive.
-            guard runIsRich || block.isRich || shouldSplitLongProse,
+            // Every rich block stands alone. Adjacent prose deliberately stays
+            // in one segment to preserve continuous range selection.
+            guard runKind != .prose || block.kind != .prose,
                 block.offset > runStart
             else { continue }
             segments.append(
                 ChatMarkdownSegment(
-                    kind: runIsRich ? .rich : .prose,
+                    kind: runKind,
                     source: String(
                         decoding: bytes[runStart..<block.offset],
                         as: UTF8.self
@@ -131,12 +137,12 @@ nonisolated enum ChatMarkdownSegmenter {
                 )
             )
             runStart = block.offset
-            runIsRich = block.isRich
+            runKind = block.kind
         }
 
         segments.append(
             ChatMarkdownSegment(
-                kind: runIsRich ? .rich : .prose,
+                kind: runKind,
                 source: String(decoding: bytes[runStart...], as: UTF8.self)
             )
         )
@@ -149,8 +155,8 @@ nonisolated enum ChatMarkdownSegmenter {
         return walker.foundRichContent
     }
 
-    /// Math stays with MarkdownView because the prose renderer intentionally
-    /// does not duplicate MarkdownView's math implementation.
+    /// Math stays in one row because the prose segmenter intentionally does
+    /// not treat currency and delimiter syntax as independent prose blocks.
     private static func containsPotentialMath(_ source: String) -> Bool {
         if source.contains("$$") || source.contains("\\(")
             || source.contains("\\[")
@@ -224,11 +230,6 @@ nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
 
 /// Avoids reparsing unchanged settled messages when the timeline updates.
 final class ChatMarkdownSegmentCache {
-    /// A per-session ceiling. One entry represents one eligible assistant
-    /// message and can contain several Markdown segments. This does not
-    /// preallocate or precompute 512 messages.
-    private static let capacity = 512
-
     /// Retained message entries; a test seam for retention behavior.
     var entryCount: Int { entries.count }
 
@@ -238,7 +239,6 @@ final class ChatMarkdownSegmentCache {
     }
 
     private var entries: [String: Entry] = [:]
-    private var entryOrder: [String] = []
 
     func segments(messageID: String, source: String) -> [ChatMarkdownSegment]? {
         if let entry = entries[messageID], entry.source == source {
@@ -250,7 +250,7 @@ final class ChatMarkdownSegmentCache {
     }
 
     /// Whether preparation has stored a result, including a nil result for a
-    /// message that must keep the existing renderer.
+    /// message that must stay in one attributed row.
     func contains(messageID: String, source: String) -> Bool {
         entries[messageID]?.source == source
     }
@@ -310,16 +310,6 @@ final class ChatMarkdownSegmentCache {
         messageID: String,
         source: String
     ) {
-        let isNewEntry = entries[messageID] == nil
-        if entries.count >= Self.capacity, isNewEntry,
-            let oldestMessageID = entryOrder.first
-        {
-            entryOrder.removeFirst()
-            entries.removeValue(forKey: oldestMessageID)
-        }
         entries[messageID] = Entry(source: source, segments: segments)
-        if isNewEntry {
-            entryOrder.append(messageID)
-        }
     }
 }
