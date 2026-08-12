@@ -28,6 +28,10 @@ final class ChatScrollState {
         } else if isVisible {
             isNearBottom = true
             shouldFollowBottom = true
+        } else if !shouldFollowBottom {
+            // While following, the loss is transient — the bottom pin lands
+            // next frame — and the jump button must not flash in.
+            isNearBottom = false
         }
     }
 

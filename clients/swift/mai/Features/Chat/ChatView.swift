@@ -608,17 +608,6 @@ private struct ChatTimeline: View {
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
             #endif
-            .task(id: oldestLoadedSectionID) {
-                guard let anchorID = pendingPrependAnchorID else { return }
-                await Task.yield()
-                guard pendingPrependAnchorID == anchorID else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    proxy.scrollTo(anchorID, anchor: .top)
-                }
-                pendingPrependAnchorID = nil
-            }
             .onAppear {
                 if oldestLoadedSectionID == nil {
                     oldestLoadedSectionID = loadedSections.first?.id
@@ -651,6 +640,20 @@ private struct ChatTimeline: View {
                     contentHeight: geometry.contentSize.height
                 )
             } action: { oldGeometry, newGeometry in
+                // Content growing confirms the prepended rows have landed;
+                // pinning any earlier would run against the old layout.
+                if let anchorID = pendingPrependAnchorID {
+                    if newGeometry.contentHeight > oldGeometry.contentHeight {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo(anchorID, anchor: .top)
+                        }
+                        pendingPrependAnchorID = nil
+                    }
+                    return
+                }
+
                 isTimelineNearTop = hasEarlierSections && newGeometry.isNearTop
                 isTimelineNearBottom = newGeometry.isNearBottom
                 scrollState.noteEndVisibility(newGeometry.isNearBottom)
@@ -670,39 +673,22 @@ private struct ChatTimeline: View {
                     newGeometry.bottomInset > oldGeometry.bottomInset
                     || newGeometry.containerHeight < oldGeometry.containerHeight
                 let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
-                if viewportShrank || contentGrew,
-                    scrollState.shouldFollowBottom,
-                    pendingPrependAnchorID == nil
-                {
+                if viewportShrank || contentGrew, scrollState.shouldFollowBottom {
                     proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 }
             }
             .onScrollPhaseChange { oldPhase, newPhase in
-                let wasUserDriven =
-                    switch oldPhase {
-                    case .tracking, .interacting, .decelerating:
-                        true
-                    case .idle, .animating:
-                        false
-                    }
-                let isUserDriven =
-                    switch newPhase {
-                    case .tracking, .interacting, .decelerating:
-                        true
-                    case .idle, .animating:
-                        false
-                    }
-
-                if isUserDriven {
-                    if !wasUserDriven, isTimelineNearTop,
-                        !isAwaitingInitialBottom, !isLoadingEarlier
-                    {
-                        // A drag beginning at the top changes no geometry, so
-                        // explicitly restart the structured pagination task.
-                        historyLoadRequest &+= 1
-                    }
+                if newPhase.isUserDriven, !oldPhase.isUserDriven,
+                    isTimelineNearTop,
+                    !isAwaitingInitialBottom, !isLoadingEarlier
+                {
+                    // A drag beginning at the top changes no geometry, so
+                    // explicitly restart the structured pagination task.
+                    historyLoadRequest &+= 1
                 }
-                scrollState.noteUserScrollActivity(isActive: isUserDriven)
+                scrollState.noteUserScrollActivity(
+                    isActive: newPhase.isUserDriven
+                )
             }
         }
     }
@@ -710,7 +696,7 @@ private struct ChatTimeline: View {
     private static let bottomID = "chat-bottom"
     private static let historyMarkerID = "chat-history-marker"
     private static let initialTurnCount = 5
-    private static let earlierTurnCount = 5
+    private static let earlierTurnCount = 10
 
     /// The first List mount contains only the newest turns. This is the key to
     /// avoiding List's unavoidable top-first pass over distant history.
@@ -1077,6 +1063,17 @@ private struct ChatScrollGeometry: Equatable {
     let containerHeight: CGFloat
     let bottomInset: CGFloat
     let contentHeight: CGFloat
+}
+
+private extension ScrollPhase {
+    var isUserDriven: Bool {
+        switch self {
+        case .tracking, .interacting, .decelerating:
+            true
+        case .idle, .animating:
+            false
+        }
+    }
 }
 
 private struct ChatTimelineRow: View {
