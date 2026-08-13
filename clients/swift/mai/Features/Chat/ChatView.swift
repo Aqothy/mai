@@ -582,6 +582,10 @@ private struct ChatTimeline: View {
                     textWarmRowWidth = width
                 }
                 .onChange(of: foldModel.expandedSectionIDs) { _, _ in
+                    warmMarkdownRenderPlans(
+                        in: rows,
+                        streamingTurnID: streamingTurnID
+                    )
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
             #endif
@@ -604,6 +608,10 @@ private struct ChatTimeline: View {
                         rowWidth: textWarmRowWidth
                     )
                 ) {
+                    warmMarkdownRenderPlans(
+                        in: rows,
+                        streamingTurnID: streamingTurnID
+                    )
                     guard textWarmRowWidth > 0 else { return }
                     warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
                 }
@@ -804,13 +812,20 @@ private struct ChatTimeline: View {
                 streamingTurnID: streamingTurnID,
                 segmentCache: segmentCache
             )
-            await textLayoutStore.prepare(
+            async let planPreparation: Void = ChatMarkdownRenderCache.shared.prime(
+                requests: Self.markdownRenderRequests(
+                    in: renderedRows,
+                    streamingTurnID: streamingTurnID
+                )
+            )
+            async let textPreparation: Void = textLayoutStore.prepare(
                 requests: Self.textLayoutRequests(
                     in: renderedRows,
                     limit: ChatTextLayoutStore.maximumWarmupRequestCount,
                     rowWidth: rowWidth
                 )
             )
+            _ = await (planPreparation, textPreparation)
         }
     #endif
 
@@ -872,6 +887,33 @@ private struct ChatTimeline: View {
         #endif
     }
 
+    static func markdownRenderRequests(
+        in rows: [ChatTimelineRenderRow],
+        streamingTurnID: String?
+    ) -> [ChatMarkdownRenderRequest] {
+        rows.compactMap { row in
+            switch row {
+            case .standard(.message(let message)):
+                guard message.role != MaidMessageRole.assistant.rawValue
+                    || message.turnID != streamingTurnID
+                else { return nil }
+                return ChatMarkdownRenderRequest(
+                    messageID: message.id,
+                    source: message.text
+                )
+
+            case .richMarkdown(let segment):
+                return ChatMarkdownRenderRequest(
+                    messageID: segment.rowID,
+                    source: segment.source
+                )
+
+            case .standard, .prose:
+                return nil
+            }
+        }
+    }
+
     #if os(iOS)
         /// The native-text layout work `rows` need at `rowWidth`, newest
         /// last, capped at `limit` requests.
@@ -898,6 +940,18 @@ private struct ChatTimeline: View {
                 }
             }
             return Array(requests.suffix(limit))
+        }
+
+        private func warmMarkdownRenderPlans(
+            in rows: [ChatTimelineRenderRow],
+            streamingTurnID: String?
+        ) {
+            ChatMarkdownRenderCache.shared.warm(
+                requests: Self.markdownRenderRequests(
+                    in: rows,
+                    streamingTurnID: streamingTurnID
+                )
+            )
         }
 
         private func warmTextLayouts(

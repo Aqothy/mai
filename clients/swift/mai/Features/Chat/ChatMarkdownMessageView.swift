@@ -17,8 +17,8 @@ struct ChatMarkdownMessageView: View {
 }
 
 /// Reads high-frequency text from the stable live-row model at the narrowest
-/// possible SwiftUI boundary. Streaming intentionally stays plain for now so
-/// no cumulative prefix is reparsed on every token update.
+/// possible SwiftUI boundary. Live source stays plain so token updates never
+/// trigger Markdown parsing or syntax highlighting.
 struct ChatStreamingMarkdownMessageView: View {
     let messageID: String
     let streamingText: ThreadStreamingText
@@ -33,9 +33,8 @@ struct ChatStreamingMarkdownMessageView: View {
     }
 }
 
-/// Keeps stable timeline updates at a cheap equality check. Settled assistant
-/// timeline rows normally use the selectable TextKit prose host; this remains
-/// the package-free fallback for document-wide Markdown edge cases.
+/// Keeps stable timeline updates at a cheap equality check. Settled plans are
+/// process-cached so List remounts don't parse unchanged Markdown again.
 private struct ChatMarkdownMessageLifetimeView: Equatable, View {
     let messageID: String
     let source: String
@@ -55,11 +54,12 @@ private struct ChatMarkdownMessageLifetimeView: Equatable, View {
             if presentation.isStreaming {
                 Text(verbatim: source)
             } else {
-                Text(
-                    ChatMarkdownRenderCache.shared.attributedString(
+                ChatMarkdownRichContentView(
+                    plan: ChatMarkdownRenderCache.shared.plan(
                         messageID: messageID,
                         source: source
-                    )
+                    ),
+                    allowsHighlighting: true
                 )
             }
         }
@@ -71,7 +71,7 @@ private struct ChatMarkdownMessageLifetimeView: Equatable, View {
                     Text(
                         presentation.isStreaming
                             ? "plain stream · \(source.count.formatted()) chars"
-                            : "native prose · \(source.count.formatted()) chars"
+                            : "native rich · \(source.count.formatted()) chars"
                     )
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)

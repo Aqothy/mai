@@ -90,9 +90,7 @@ nonisolated enum ChatMarkdownSegmenter {
     /// Returns nil when splitting could change document-wide Markdown
     /// behavior. Those uncommon messages stay in one attributed text row.
     static func segments(of source: String) -> [ChatMarkdownSegment]? {
-        guard !containsReferenceDefinition(source),
-            !containsPotentialMath(source)
-        else { return nil }
+        guard !containsReferenceDefinition(source) else { return nil }
 
         // swift-markdown locations use one-based UTF-8 line and column
         // offsets, so slice the original bytes to preserve the source exactly.
@@ -153,37 +151,6 @@ nonisolated enum ChatMarkdownSegmenter {
         var walker = ChatRichContentWalker()
         walker.visit(block)
         return walker.foundRichContent
-    }
-
-    /// Math stays in one row because the prose segmenter intentionally does
-    /// not treat currency and delimiter syntax as independent prose blocks.
-    private static func containsPotentialMath(_ source: String) -> Bool {
-        if source.contains("$$") || source.contains("\\(")
-            || source.contains("\\[")
-        {
-            return true
-        }
-        guard source.contains("$") else { return false }
-
-        var opener: String.Index?
-        var index = source.startIndex
-        while index < source.endIndex {
-            let character = source[index]
-            if character == "\n" {
-                opener = nil
-            } else if character == "$" {
-                if let opener, source.index(after: opener) < index {
-                    return true
-                }
-                let next = source.index(after: index)
-                opener =
-                    next < source.endIndex && !source[next].isWhitespace
-                    ? index
-                    : nil
-            }
-            index = source.index(after: index)
-        }
-        return false
     }
 
     /// Reference definitions can affect links in later blocks, so splitting

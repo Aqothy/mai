@@ -18,6 +18,23 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
         // empty document. Never make non-empty message source disappear.
         return result.characters.isEmpty ? AttributedString(source) : result
     }
+
+    /// Renders an already-parsed root block without parsing its source again.
+    static func attributedString(from block: Markup) -> AttributedString {
+        var builder = ChatMarkdownAttributedStringBuilder()
+        let result = builder.render(block: block)
+        return result.characters.isEmpty
+            ? AttributedString(block.format())
+            : result
+    }
+
+    /// Table cells contain inline children rather than standalone documents.
+    static func attributedString(
+        fromInlineChildren children: MarkupChildren
+    ) -> AttributedString {
+        var builder = ChatMarkdownAttributedStringBuilder()
+        return builder.renderInlineChildren(children)
+    }
 }
 
 private nonisolated struct ChatMarkdownAttributedStringBuilder {
@@ -34,6 +51,16 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
             document.children.map { render(block: $0, listDepth: 0) },
             separator: "\n\n"
         )
+    }
+
+    mutating func render(block: Markup) -> AttributedString {
+        render(block: block, listDepth: 0)
+    }
+
+    mutating func renderInlineChildren(
+        _ children: MarkupChildren
+    ) -> AttributedString {
+        renderInline(children)
     }
 
     private mutating func render(
@@ -264,10 +291,10 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
                 result.append(attributed("]", environment: nested))
 
             case let html as InlineHTML:
-                var nested = environment
-                nested.presentationIntent.insert(.code)
-                nested.font = .system(.body, design: .monospaced)
-                result.append(attributed(html.rawHTML, environment: nested))
+                // Inline HTML is inert source text, not executable markup.
+                result.append(
+                    attributed(html.rawHTML, environment: environment)
+                )
 
             case is SoftBreak:
                 result.append(attributed(" ", environment: environment))
