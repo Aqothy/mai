@@ -18,6 +18,8 @@ struct QueuedChatPrompt: Identifiable {
 @Observable
 final class ThreadStreamingText {
     private(set) var text: String
+    /// Cheap task identity that avoids hashing the growing text on every chunk.
+    private(set) var revision = 0
 
     init(text: String) {
         self.text = text
@@ -26,6 +28,7 @@ final class ThreadStreamingText {
     func append(_ delta: String) {
         guard !delta.isEmpty else { return }
         text += delta
+        revision += 1
     }
 }
 

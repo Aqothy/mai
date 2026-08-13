@@ -13,7 +13,14 @@ nonisolated enum ChatMarkdownRenderPlanner {
         let parsed = parsedBlocks(from: source)
         if parsed.isEmpty, !source.isEmpty {
             return ChatMarkdownRenderPlan(
-                blocks: [.prose(AttributedString(source))]
+                blocks: [
+                    .prose(
+                        ChatMarkdownProseRun(
+                            source: source,
+                            pieces: [.text(AttributedString(source))]
+                        )
+                    )
+                ]
             )
         }
         return ChatMarkdownRenderPlan(blocks: parsed.map(\.block))
@@ -29,8 +36,8 @@ nonisolated enum ChatMarkdownRenderPlanner {
         }
 
         let document = Markdown.Document(parsing: source)
-        var result: [ParsedBlock] = []
-        result.reserveCapacity(document.childCount)
+        var locatedChildren: [(offset: Int, block: Markup)] = []
+        locatedChildren.reserveCapacity(document.childCount)
 
         for child in document.children {
             guard let location = child.range?.lowerBound,
@@ -39,23 +46,54 @@ nonisolated enum ChatMarkdownRenderPlanner {
 
             let offset = lineStarts[location.line - 1] + location.column - 1
             guard offset <= bytes.count else { continue }
+            locatedChildren.append((offset, child))
+        }
+
+        var result: [ParsedBlock] = []
+        result.reserveCapacity(locatedChildren.count)
+        for index in locatedChildren.indices {
+            let child = locatedChildren[index]
+            let endOffset = locatedChildren.indices.contains(index + 1)
+                ? locatedChildren[index + 1].offset
+                : bytes.count
+            let blockSource = String(
+                decoding: bytes[child.offset..<endOffset],
+                as: UTF8.self
+            )
             result.append(
                 ParsedBlock(
-                    utf8Offset: offset,
-                    block: render(child)
+                    utf8Offset: child.offset,
+                    block: render(child.block, source: blockSource)
                 )
             )
         }
         return result
     }
 
-    private static func render(_ block: Markup) -> ChatMarkdownRenderPlan.Block {
+    private static func render(
+        _ block: Markup,
+        source: String
+    ) -> ChatMarkdownRenderPlan.Block {
         switch block {
+        case let quote as BlockQuote:
+            return .prose(
+                ChatMarkdownProseRun(
+                    source: source,
+                    pieces: [
+                        .quote(
+                            ChatMarkdownAttributedStringRenderer
+                                .attributedString(fromQuoteContents: quote)
+                        )
+                    ]
+                )
+            )
+
         case let codeBlock as CodeBlock:
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: codeBlock.code),
-                    language: codeBlock.language
+                    language: codeBlock.language,
+                    kind: .fenced
                 )
             )
 
@@ -63,17 +101,32 @@ nonisolated enum ChatMarkdownRenderPlanner {
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: htmlBlock.rawHTML),
-                    language: "html"
+                    language: "html",
+                    kind: .html
                 )
             )
 
         case let table as Markdown.Table:
             return .table(render(table))
 
+        case is ThematicBreak:
+            return .prose(
+                ChatMarkdownProseRun(
+                    source: source,
+                    pieces: [.thematicBreak]
+                )
+            )
+
         default:
             return .prose(
-                ChatMarkdownAttributedStringRenderer.attributedString(
-                    from: block
+                ChatMarkdownProseRun(
+                    source: source,
+                    pieces: [
+                        .text(
+                            ChatMarkdownAttributedStringRenderer
+                                .attributedString(from: block)
+                        )
+                    ]
                 )
             )
         }

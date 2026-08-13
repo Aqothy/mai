@@ -1,13 +1,13 @@
 {
-  "originHash" : "118a252242db5ee2bc666803c4228c5b59ed9f19a74cd095b083a0712dcd6388",
+  "originHash" : "100b4fa37523fc768e1cf9656b10adeb12f1fe1eeaa20ed0ad9b44d83b1e542f",
   "pins" : [
     {
-      "identity" : "highlightr",
+      "identity" : "highlighterswift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/raspu/Highlightr.git",
+      "location" : "https://github.com/smittytone/HighlighterSwift",
       "state" : {
-        "revision" : "05e7fcc63b33925cd0c1faaa205cdd5681e7bbef",
-        "version" : "2.3.0"
+        "revision" : "fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0",
+        "version" : "3.1.0"
       }
     },
     {
@@ -20,30 +20,12 @@
       }
     },
     {
-      "identity" : "markdownview",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/LiYanan2004/MarkdownView.git",
-      "state" : {
-        "revision" : "6f452b55635246224a3329362e4e11cd3d592a30",
-        "version" : "3.0.0"
-      }
-    },
-    {
       "identity" : "msdisplaylink",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Lakr233/MSDisplayLink.git",
       "state" : {
         "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
         "version" : "2.1.0"
-      }
-    },
-    {
-      "identity" : "richtext",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/LiYanan2004/RichText.git",
-      "state" : {
-        "revision" : "a2fb191988f6f2ce60574962c96a0e1846c36dae",
-        "version" : "1.0.0"
       }
     },
     {
@@ -62,15 +44,6 @@
       "state" : {
         "revision" : "3c6f9523da3a1ec2fd829673e472d95b8097a3b8",
         "version" : "0.8.0"
-      }
-    },
-    {
-      "identity" : "swiftmath",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mgriebling/SwiftMath.git",
-      "state" : {
-        "revision" : "fa8244ed032f4a1ade4cb0571bf87d2f1a9fd2d7",
-        "version" : "1.7.3"
       }
     }
   ],

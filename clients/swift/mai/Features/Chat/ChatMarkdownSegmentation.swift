@@ -24,7 +24,7 @@ nonisolated enum ChatTextOptimizationPolicy {
         }
         guard role == MaidMessageRole.assistant.rawValue else { return false }
         // Every settled assistant message uses one selectable native text host
-        // per consecutive prose run. Streaming remains plain and stable.
+        // per consecutive prose run. Streaming stays in one stable live row.
         return streamingTurnID == nil || messageTurnID != streamingTurnID
     }
 }
@@ -69,16 +69,16 @@ enum ChatMessageTextPlanner {
 
         // A document-wide prose feature can make independent block parsing
         // unsafe. It still belongs in one selectable TextKit surface rather
-        // than the iOS 26 SwiftUI Text fallback, which only supports whole-copy.
+        // than the iOS 26 SwiftUI Text path, which only supports whole-copy.
         return .segmented([ChatMarkdownSegment(kind: .prose, source: source)])
     }
 }
 
-/// Separates native-text prose from blocks that need a richer native fallback.
+/// Separates native-text prose from blocks that need dedicated rich views.
 ///
-/// Code blocks, tables, HTML, and images become standalone rich rows. All
-/// consecutive prose—including headings, lists, quotes, and rules—coalesces
-/// into one row so an iOS selection can cross the complete prose run.
+/// Code blocks, tables, and block HTML become standalone rich rows. All
+/// consecutive prose—including inert inline HTML, literal images, headings,
+/// lists, quotes, and thematic breaks—coalesces into one selectable run.
 nonisolated enum ChatMarkdownSegmenter {
     /// Long user-authored text uses the same prelaid-out native host without
     /// paying Markdown parsing costs. Settled assistant prose is always native.
@@ -179,8 +179,6 @@ private nonisolated struct ChatRichContentWalker: MarkupWalker {
         if markup is CodeBlock
             || markup is Markdown.Table
             || markup is HTMLBlock
-            || markup is InlineHTML
-            || markup is Markdown.Image
         {
             foundRichContent = true
         } else {

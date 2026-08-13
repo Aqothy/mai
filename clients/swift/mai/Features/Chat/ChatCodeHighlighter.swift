@@ -55,6 +55,7 @@ actor ChatCodeHighlighter {
         language: String?,
         theme: ChatCodeHighlightTheme
     ) -> AttributedString? {
+        guard !Task.isCancelled else { return nil }
         guard !code.isEmpty else { return AttributedString() }
 
         let normalizedLanguage = Self.normalizedLanguage(language)

@@ -4,13 +4,15 @@
 
     extension NSAttributedString.Key {
         nonisolated static let chatQuoteBarOffsets = Self("ChatQuoteBarOffsets")
+        nonisolated static let chatThematicBreakIndent =
+            Self("ChatThematicBreakIndent")
     }
 
     /// Converts the prose subset of Markdown into the attributed string used
     /// by the native selectable text view. Rich blocks never enter this path.
     nonisolated enum ChatProseMarkdownRenderer {
         static func attributedString(from source: String) -> NSAttributedString {
-            var builder = ChatProseAttributedStringBuilder()
+            var builder = ChatProseAttributedStringBuilder(source: source)
             for block in Markdown.Document(parsing: source).children {
                 builder.append(block: block, environment: .root)
             }
@@ -39,16 +41,24 @@
             var isBold = false
             var isItalic = false
             var isStruck = false
-            var isLink = false
+            var link: URL?
         }
 
         private let output = NSMutableAttributedString()
+        private let sourceLines: [String]
         private let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         private let bulletFont = UIFont.preferredFont(forTextStyle: .headline)
         private let codeFont = UIFont.monospacedSystemFont(
             ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize,
             weight: .regular
         )
+
+        init(source: String) {
+            sourceLines = source.split(
+                separator: "\n",
+                omittingEmptySubsequences: false
+            ).map(String.init)
+        }
 
         mutating func append(block: Markup, environment: Environment) {
             switch block {
@@ -93,11 +103,24 @@
                     )
                 }
 
-            case is ThematicBreak:
+            case let thematicBreak as ThematicBreak:
                 var style = inlineStyle(environment)
-                style.color = .secondaryLabel
+                // Retain the source marker for continuous selection/copy;
+                // the text host draws its full-width visual representation.
+                style.color = .clear
+                let text = NSMutableAttributedString(
+                    attributedString: inlineText(
+                        sourceSpelling(for: thematicBreak),
+                        style: style
+                    )
+                )
+                text.addAttribute(
+                    .chatThematicBreakIndent,
+                    value: environment.indent,
+                    range: NSRange(location: 0, length: text.length)
+                )
                 appendParagraph(
-                    inlineText("⎯⎯⎯⎯⎯", style: style),
+                    text,
                     firstLineIndent: environment.indent,
                     remainingLineIndent: environment.indent,
                     quoteBarOffsets: environment.quoteBarOffsets,
@@ -105,8 +128,8 @@
                 )
 
             default:
-                // The segmenter keeps rich nodes away from this fallback.
-                // Formatting an unknown prose node is safer than dropping it.
+                // The segmenter keeps dedicated rich nodes out of this path.
+                // Preserve any future/custom prose node instead of dropping it.
                 appendParagraph(
                     inlineText(block.format(), style: inlineStyle(environment)),
                     firstLineIndent: environment.indent,
@@ -282,6 +305,17 @@
             InlineStyle(font: bodyFont, color: environment.color)
         }
 
+        private func sourceSpelling(for thematicBreak: ThematicBreak) -> String {
+            guard let location = thematicBreak.range?.lowerBound,
+                sourceLines.indices.contains(location.line - 1)
+            else { return thematicBreak.format() }
+
+            let line = Array(sourceLines[location.line - 1].utf8)
+            let offset = min(max(0, location.column - 1), line.count)
+            return String(decoding: line[offset...], as: UTF8.self)
+                .trimmingCharacters(in: .whitespaces)
+        }
+
         private func inlineText(
             _ nodes: some Sequence<Markup>,
             style: InlineStyle
@@ -309,8 +343,18 @@
                     result.append(inlineText(code.code, style: nested))
                 case let link as Markdown.Link:
                     var nested = style
-                    nested.isLink = true
+                    nested.link = ChatMarkdownLinkPolicy.url(
+                        for: link.destination
+                    )
                     result.append(inlineText(link.children, style: nested))
+                case let image as Markdown.Image:
+                    var nested = style
+                    nested.font = codeFont
+                    result.append(inlineText(image.format(), style: nested))
+                case let html as InlineHTML:
+                    var nested = style
+                    nested.font = codeFont
+                    result.append(inlineText(html.rawHTML, style: nested))
                 case is SoftBreak:
                     result.append(inlineText(" ", style: style))
                 case is LineBreak:
@@ -333,9 +377,8 @@
             if style.isStruck {
                 attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             }
-            if style.isLink {
-                // Display-only, matching the chat's discarded OpenURLAction.
-                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            if let link = style.link {
+                attributes[.link] = link
             }
             return NSAttributedString(string: text, attributes: attributes)
         }

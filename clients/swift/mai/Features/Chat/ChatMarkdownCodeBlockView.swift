@@ -8,10 +8,10 @@ import SwiftUI
 
 struct ChatMarkdownCodeBlockView: View {
     let block: ChatMarkdownCodeBlock
-    let allowsHighlighting: Bool
+    let isStreaming: Bool
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var highlightedCode: AttributedString?
+    @State private var highlightedCode: HighlightedCode?
     @State private var copied = false
     @State private var copyResetTask: Task<Void, Never>?
 
@@ -37,29 +37,38 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.bottom, 10)
 
             ScrollView(.horizontal) {
-                #if os(iOS)
-                    ChatSelectableRichText(
-                        attributedString: selectableCode
-                    )
+                if isStreaming {
+                    Text(verbatim: block.code)
+                        .font(.callout.monospaced())
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
-                #else
-                    Group {
-                        if let highlightedCode {
-                            Text(highlightedCode)
-                        } else {
-                            Text(verbatim: block.code)
-                        }
-                    }
-                    .font(.callout.monospaced())
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                #endif
+                } else {
+                    #if os(iOS)
+                        ChatSelectableRichText(
+                            attributedString: selectableCode
+                        )
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                    #else
+                        Text(
+                            displayedHighlightedCode
+                                ?? AttributedString(block.code)
+                        )
+                        .font(.callout.monospaced())
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                    #endif
+                }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.visible, axes: .horizontal)
+            .scrollIndicatorsFlash(onAppear: true)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -71,18 +80,23 @@ struct ChatMarkdownCodeBlockView: View {
             RoundedRectangle(cornerRadius: 18)
                 .strokeBorder(Color.primary.opacity(0.08))
         }
-        .task(id: highlightingConfiguration) {
-            guard allowsHighlighting else {
+        .task(id: highlightingRequest) {
+            guard let request = highlightingRequest else {
                 highlightedCode = nil
                 return
             }
             let result = await ChatCodeHighlighter.shared.highlight(
-                code: block.code,
-                language: block.language,
-                theme: colorScheme == .dark ? .dark : .light
+                code: request.code,
+                language: request.language,
+                theme: request.theme
             )
             guard !Task.isCancelled else { return }
-            highlightedCode = result
+            highlightedCode = result.map {
+                HighlightedCode(
+                    request: request,
+                    attributed: $0
+                )
+            }
         }
         .onDisappear {
             copyResetTask?.cancel()
@@ -92,19 +106,32 @@ struct ChatMarkdownCodeBlockView: View {
         .accessibilityLabel("\(block.displayLanguage) code block")
     }
 
-    private var highlightingConfiguration: HighlightingConfiguration {
-        HighlightingConfiguration(
+    private var highlightingRequest: HighlightingRequest? {
+        guard !isStreaming, !block.code.isEmpty else {
+            return nil
+        }
+        return HighlightingRequest(
             code: block.code,
             language: block.language,
-            theme: colorScheme == .dark ? .dark : .light,
-            allowsHighlighting: allowsHighlighting
+            theme: colorScheme == .dark ? .dark : .light
         )
+    }
+
+    private var displayedHighlightedCode: AttributedString? {
+        guard highlightedCode?.request == highlightingRequest else {
+            return nil
+        }
+        return highlightedCode?.attributed
     }
 
     #if os(iOS)
         private var selectableCode: NSAttributedString {
-            let source = highlightedCode.map(NSAttributedString.init)
-                ?? NSAttributedString(string: block.code)
+            let source: NSAttributedString
+            if let displayedHighlightedCode {
+                source = NSAttributedString(displayedHighlightedCode)
+            } else {
+                source = NSAttributedString(string: block.code)
+            }
             let attributedString = NSMutableAttributedString(
                 attributedString: source
             )
@@ -123,7 +150,7 @@ struct ChatMarkdownCodeBlockView: View {
                 ],
                 range: range
             )
-            if highlightedCode == nil {
+            if displayedHighlightedCode == nil {
                 attributedString.addAttribute(
                     .foregroundColor,
                     value: UIColor.label,
@@ -162,11 +189,13 @@ struct ChatMarkdownCodeBlockView: View {
     }
 }
 
-private extension ChatMarkdownCodeBlockView {
-    struct HighlightingConfiguration: Hashable {
-        let code: String
-        let language: String?
-        let theme: ChatCodeHighlightTheme
-        let allowsHighlighting: Bool
-    }
+private struct HighlightingRequest: Hashable {
+    let code: String
+    let language: String?
+    let theme: ChatCodeHighlightTheme
+}
+
+private struct HighlightedCode {
+    let request: HighlightingRequest
+    let attributed: AttributedString
 }

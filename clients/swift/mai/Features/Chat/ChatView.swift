@@ -562,6 +562,13 @@ private struct ChatTimeline: View {
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 0)
             .scrollDismissesKeyboard(.interactively)
+            .modifier(
+                ChatBottomScrollRequestModifier(
+                    scrollState: scrollState,
+                    proxy: proxy,
+                    bottomID: Self.bottomID
+                )
+            )
             .overlay(alignment: .top) {
                 if isLoadingEarlier {
                     ProgressView()
@@ -622,15 +629,6 @@ private struct ChatTimeline: View {
                 }
                 isAwaitingInitialBottom = true
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
-            }
-            .onChange(of: scrollState.bottomScrollRequest) { _, request in
-                if request.animated {
-                    withAnimation(.smooth) {
-                        proxy.scrollTo(Self.bottomID, anchor: .bottom)
-                    }
-                } else {
-                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
-                }
             }
             .onScrollGeometryChange(for: ChatScrollGeometry.self) { geometry in
                 let hasContentMetrics = geometry.containerSize.height > 0
@@ -1117,6 +1115,26 @@ private struct ChatScrollGeometry: Equatable {
     let containerHeight: CGFloat
     let bottomInset: CGFloat
     let contentHeight: CGFloat
+}
+
+/// Handles explicit jump-to-bottom requests without storing a scroll proxy in
+/// shared state. Automatic following is driven by post-layout geometry below.
+private struct ChatBottomScrollRequestModifier: ViewModifier {
+    let scrollState: ChatScrollState
+    let proxy: ScrollViewProxy
+    let bottomID: String
+
+    func body(content: Content) -> some View {
+        content.onChange(of: scrollState.bottomScrollRequest) { _, request in
+            if request.animated {
+                withAnimation(.smooth) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
+        }
+    }
 }
 
 private extension ScrollPhase {

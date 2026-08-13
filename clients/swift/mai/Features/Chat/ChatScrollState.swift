@@ -10,10 +10,11 @@ final class ChatScrollState {
     var isNearBottom = true
     private(set) var shouldFollowBottom = true
     private var isEndZoneVisible = true
-    private var isUserScrolling = false
+    private(set) var isUserScrolling = false
     private(set) var bottomScrollRequest = BottomScrollRequest()
 
     func requestScrollToBottom(animated: Bool = false) {
+        shouldFollowBottom = true
         bottomScrollRequest = BottomScrollRequest(
             count: bottomScrollRequest.count + 1,
             animated: animated

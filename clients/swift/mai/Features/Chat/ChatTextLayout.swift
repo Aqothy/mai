@@ -74,7 +74,7 @@
         let width: CGFloat
         let height: CGFloat
         let attributedString: NSAttributedString
-        let hasQuoteBars: Bool
+        let hasMarkdownDecorations: Bool
 
         init(
             source: String,
@@ -99,20 +99,33 @@
             storage.addLayoutManager(manager)
             manager.ensureLayout(for: container)
 
-            var hasQuoteBars = false
+            var hasMarkdownDecorations = false
             attributedString.enumerateAttribute(
                 .chatQuoteBarOffsets,
                 in: NSRange(location: 0, length: attributedString.length)
             ) { value, _, stop in
                 guard value != nil else { return }
-                hasQuoteBars = true
+                hasMarkdownDecorations = true
                 stop.pointee = true
+            }
+            if !hasMarkdownDecorations {
+                attributedString.enumerateAttribute(
+                    .chatThematicBreakIndent,
+                    in: NSRange(
+                        location: 0,
+                        length: attributedString.length
+                    )
+                ) { value, _, stop in
+                    guard value != nil else { return }
+                    hasMarkdownDecorations = true
+                    stop.pointee = true
+                }
             }
 
             self.width = width
             self.height = ceil(manager.usedRect(for: container).height)
             self.attributedString = attributedString
-            self.hasQuoteBars = hasQuoteBars
+            self.hasMarkdownDecorations = hasMarkdownDecorations
         }
 
         private static func plainAttributedString(
@@ -443,13 +456,15 @@
     }
 
     final class ChatSelectableTextHostView: UIView {
-        private final class QuoteBarView: UIView {
+        private final class MarkdownDecorationView: UIView {
             var attributedText = NSAttributedString()
             weak var layoutManager: NSLayoutManager?
             weak var textContainer: NSTextContainer?
 
             override func draw(_ rect: CGRect) {
-                guard let layoutManager, let textContainer else { return }
+                guard let layoutManager, let textContainer,
+                    let context = UIGraphicsGetCurrentContext()
+                else { return }
                 let origin = CGPoint(
                     x: 0,
                     y: 0
@@ -505,6 +520,31 @@
                         ).fill()
                     }
                 }
+
+                context.setFillColor(UIColor.separator.cgColor)
+                attributedText.enumerateAttribute(
+                    .chatThematicBreakIndent,
+                    in: NSRange(location: 0, length: attributedText.length)
+                ) { value, range, _ in
+                    guard let indent = value as? CGFloat else { return }
+                    let glyphRange = layoutManager.glyphRange(
+                        forCharacterRange: range,
+                        actualCharacterRange: nil
+                    )
+                    guard glyphRange.length > 0 else { return }
+                    let line = layoutManager.lineFragmentRect(
+                        forGlyphAt: glyphRange.location,
+                        effectiveRange: nil
+                    )
+                    let rule = CGRect(
+                        x: indent,
+                        y: line.midY,
+                        width: max(0, textContainer.size.width - indent),
+                        height: 1
+                    )
+                    guard rule.intersects(rect) else { return }
+                    context.fill(rule)
+                }
             }
         }
 
@@ -516,7 +556,7 @@
         private var source: String?
         private var style: ChatTextLayoutStyle?
         private weak var layoutStore: ChatTextLayoutStore?
-        private var quoteBarView: QuoteBarView?
+        private var decorationView: MarkdownDecorationView?
         private var textView: UITextView?
         private var presentedLayout: ChatTextLayout?
         private var presentedLayoutID: String?
@@ -553,7 +593,7 @@
             if presentedLayout !== layout {
                 present(layout, source: source, style: style)
             }
-            quoteBarView?.frame = bounds
+            decorationView?.frame = bounds
             textView?.frame = bounds
         }
 
@@ -573,6 +613,8 @@
             #if DEBUG
                 let attachmentStart = CACurrentMediaTime()
             #endif
+            let preservedSelection = presentedLayoutID == layoutID
+                ? textView?.selectedRange : nil
             releasePresentedTextView()
 
             let reuse = layoutStore?.takeTextView(
@@ -594,19 +636,22 @@
                     view.frame = bounds
                 }
                 view.attributedText = layout.attributedString
-                view.selectedRange = NSRange(location: 0, length: 0)
             }
+            view.selectedRange = preservedSelection.flatMap { selection in
+                NSMaxRange(selection) <= layout.attributedString.length
+                    ? selection : nil
+            } ?? NSRange(location: 0, length: 0)
 
             view.delegate = selectionDelegate
-            if layout.hasQuoteBars {
-                let bars = QuoteBarView(frame: bounds)
-                bars.backgroundColor = .clear
-                bars.isUserInteractionEnabled = false
-                bars.attributedText = layout.attributedString
-                bars.layoutManager = view.layoutManager
-                bars.textContainer = view.textContainer
-                addSubview(bars)
-                quoteBarView = bars
+            if layout.hasMarkdownDecorations {
+                let decorations = MarkdownDecorationView(frame: bounds)
+                decorations.backgroundColor = .clear
+                decorations.isUserInteractionEnabled = false
+                decorations.attributedText = layout.attributedString
+                decorations.layoutManager = view.layoutManager
+                decorations.textContainer = view.textContainer
+                addSubview(decorations)
+                decorationView = decorations
             }
             addSubview(view)
             textView = view
@@ -625,8 +670,8 @@
 
         private func releasePresentedTextView() {
             guard let textView, let presentedLayout else { return }
-            quoteBarView?.removeFromSuperview()
-            quoteBarView = nil
+            decorationView?.removeFromSuperview()
+            decorationView = nil
             textView.delegate = nil
             textView.removeFromSuperview()
             if let layoutStore, let presentedLayoutID {
@@ -643,14 +688,7 @@
 
         private static func makeTextView(frame: CGRect) -> UITextView {
             let view = UITextView(usingTextLayoutManager: false)
-            view.isScrollEnabled = false
-            view.isEditable = false
-            view.isSelectable = true
-            view.backgroundColor = .clear
-            view.textContainerInset = .zero
-            view.textContainer.lineFragmentPadding = 0
-            view.contentInset = .zero
-            view.adjustsFontForContentSizeCategory = false
+            ChatSelectableTextViewConfiguration.apply(to: view)
             view.frame = frame
             return view
         }

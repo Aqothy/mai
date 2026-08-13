@@ -21,7 +21,9 @@ struct ChatMarkdownTableView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.top, 32)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.visible, axes: .horizontal)
+            .scrollIndicatorsFlash(onAppear: true)
+            .scrollIndicatorsFlash(trigger: table)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
 

@@ -7,7 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F352331A301C6D4A004B8A1B /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = F3523319301C6D4A004B8A1B /* MarkdownView */; };
+		F30691CA302E5503007A8505 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = F30691C9302E5503007A8505 /* Markdown */; };
+		F38633F5302D118B00319432 /* Highlighter in Frameworks */ = {isa = PBXBuildFile; productRef = F38633F4302D118B00319432 /* Highlighter */; };
 		F3F7D9B830258968001297A6 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F3F7D9B730258968001297A6 /* GhosttyTerminal */; };
 /* End PBXBuildFile section */
 
@@ -60,7 +61,8 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				F352331A301C6D4A004B8A1B /* MarkdownView in Frameworks */,
+				F30691CA302E5503007A8505 /* Markdown in Frameworks */,
+				F38633F5302D118B00319432 /* Highlighter in Frameworks */,
 				F3F7D9B830258968001297A6 /* GhosttyTerminal in Frameworks */,
 			);
 		};
@@ -109,8 +111,9 @@
 			);
 			name = mai;
 			packageProductDependencies = (
-				F3523319301C6D4A004B8A1B /* MarkdownView */,
 				F3F7D9B730258968001297A6 /* GhosttyTerminal */,
+				F38633F4302D118B00319432 /* Highlighter */,
+				F30691C9302E5503007A8505 /* Markdown */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* mai.app */;
@@ -166,8 +169,9 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F3523318301C6D4A004B8A1B /* XCRemoteSwiftPackageReference "MarkdownView" */,
 				F3F7D9B630258968001297A6 /* XCRemoteSwiftPackageReference "libghostty-spm" */,
+				F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */,
+				F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -359,7 +363,17 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = mai/Info.plist;
@@ -402,7 +416,17 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = mai/Info.plist;
@@ -522,12 +546,20 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		F3523318301C6D4A004B8A1B /* XCRemoteSwiftPackageReference "MarkdownView" */ = {
+		F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/LiYanan2004/MarkdownView.git";
+			repositoryURL = "https://github.com/swiftlang/swift-markdown.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 3.0.0;
+				minimumVersion = 0.8.0;
+			};
+		};
+		F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/smittytone/HighlighterSwift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.1.0;
 			};
 		};
 		F3F7D9B630258968001297A6 /* XCRemoteSwiftPackageReference "libghostty-spm" */ = {
@@ -541,10 +573,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		F3523319301C6D4A004B8A1B /* MarkdownView */ = {
+		F30691C9302E5503007A8505 /* Markdown */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F3523318301C6D4A004B8A1B /* XCRemoteSwiftPackageReference "MarkdownView" */;
-			productName = MarkdownView;
+			package = F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */;
+			productName = Markdown;
+		};
+		F38633F4302D118B00319432 /* Highlighter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */;
+			productName = Highlighter;
 		};
 		F3F7D9B730258968001297A6 /* GhosttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;

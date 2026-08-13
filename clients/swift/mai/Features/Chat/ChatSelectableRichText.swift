@@ -2,6 +2,38 @@
     import SwiftUI
     import UIKit
 
+    enum ChatSelectableTextViewConfiguration {
+        static func apply(to view: UITextView) {
+            view.isScrollEnabled = false
+            view.isEditable = false
+            view.isSelectable = true
+            view.backgroundColor = .clear
+            view.textContainerInset = .zero
+            view.textContainer.lineFragmentPadding = 0
+            view.contentInset = .zero
+            view.adjustsFontForContentSizeCategory = false
+            view.linkTextAttributes = [
+                .foregroundColor: UIColor.label,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ]
+            view.accessibilityTraits.insert(.staticText)
+        }
+
+        static func update(
+            _ view: UITextView,
+            attributedString: NSAttributedString
+        ) {
+            guard !view.attributedText.isEqual(to: attributedString) else {
+                return
+            }
+            let selection = view.selectedRange
+            view.attributedText = attributedString
+            if NSMaxRange(selection) <= attributedString.length {
+                view.selectedRange = selection
+            }
+        }
+    }
+
     /// Selectable code content for a horizontal SwiftUI ScrollView.
     struct ChatSelectableRichText: UIViewRepresentable {
         let attributedString: NSAttributedString
@@ -14,27 +46,15 @@
 
         func makeUIView(context: Context) -> UITextView {
             let view = UITextView(usingTextLayoutManager: false)
-            view.isScrollEnabled = false
-            view.isEditable = false
-            view.isSelectable = true
-            view.backgroundColor = .clear
-            view.textContainerInset = .zero
-            view.textContainer.lineFragmentPadding = 0
-            view.contentInset = .zero
-            view.adjustsFontForContentSizeCategory = false
-            view.accessibilityTraits.insert(.staticText)
+            ChatSelectableTextViewConfiguration.apply(to: view)
             return view
         }
 
         func updateUIView(_ view: UITextView, context: Context) {
-            guard !view.attributedText.isEqual(to: attributedString) else {
-                return
-            }
-            let selection = view.selectedRange
-            view.attributedText = attributedString
-            if NSMaxRange(selection) <= attributedString.length {
-                view.selectedRange = selection
-            }
+            ChatSelectableTextViewConfiguration.update(
+                view,
+                attributedString: attributedString
+            )
         }
 
         func sizeThatFits(
@@ -68,4 +88,5 @@
             )
         }
     }
+
 #endif

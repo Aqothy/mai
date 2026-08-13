@@ -2,9 +2,9 @@ import Foundation
 import Markdown
 import SwiftUI
 
-/// Builds the SwiftUI attributed-string fallback used for isolated rich
-/// blocks and document-wide edge cases. The main iOS prose path uses
-/// `ChatProseMarkdownRenderer` and TextKit for true range selection.
+/// Builds SwiftUI attributed strings for prose inside the semantic rich-block
+/// plan. The main iOS settled-prose path uses TextKit for continuous range
+/// selection.
 nonisolated enum ChatMarkdownAttributedStringRenderer {
     static func attributedString(from source: String) -> AttributedString {
         guard !source.isEmpty else { return AttributedString() }
@@ -26,6 +26,15 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
         return result.characters.isEmpty
             ? AttributedString(block.format())
             : result
+    }
+
+    /// Root block quotes ask for content only; their semantic view owns the
+    /// non-text decoration so it never enters selection or copied text.
+    static func attributedString(
+        fromQuoteContents quote: BlockQuote
+    ) -> AttributedString {
+        var builder = ChatMarkdownAttributedStringBuilder()
+        return builder.renderQuoteContents(quote, listDepth: 0)
     }
 
     /// Table cells contain inline children rather than standalone documents.
@@ -91,7 +100,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
             return result
 
         case let quote as BlockQuote:
-            return renderQuote(quote, listDepth: listDepth)
+            return renderQuoteContents(quote, listDepth: listDepth)
 
         case let list as UnorderedList:
             return render(
@@ -122,29 +131,22 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
             return render(table: table)
 
         default:
-            if block.childCount > 0 {
-                return joined(
-                    block.children.map {
-                        render(block: $0, listDepth: listDepth)
-                    },
-                    separator: "\n\n"
-                )
-            }
+            // Defensive handling for future or custom swift-markdown node
+            // types. Normal CommonMark/GFM nodes are handled above.
             return AttributedString(block.format())
         }
     }
 
-    private mutating func renderQuote(
+    mutating func renderQuoteContents(
         _ quote: BlockQuote,
         listDepth: Int
     ) -> AttributedString {
-        let content = joined(
+        joined(
             quote.children.map {
                 render(block: $0, listDepth: listDepth)
             },
             separator: "\n\n"
         )
-        return prefixLines(in: content, with: "▏  ")
     }
 
     private mutating func render(
@@ -276,19 +278,21 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
 
             case let link as Markdown.Link:
                 var nested = environment
-                nested.link = link.destination.flatMap(URL.init(string:))
-                nested.isUnderlined = true
+                nested.link = ChatMarkdownLinkPolicy.url(
+                    for: link.destination
+                )
+                nested.isUnderlined = nested.link != nil
                 result.append(renderInline(link.children, environment: nested))
 
             case let image as Markdown.Image:
-                // Never fetch remote media through the prose renderer. Keep
-                // useful, selectable alt text instead.
+                // Images intentionally stay as literal Markdown in chat;
+                // never fetch, drop, or rewrite their source here.
                 var nested = environment
                 nested.presentationIntent.insert(.code)
                 nested.font = .system(.body, design: .monospaced)
-                result.append(attributed("[Image: ", environment: nested))
-                result.append(renderInline(image.children, environment: nested))
-                result.append(attributed("]", environment: nested))
+                result.append(
+                    attributed(image.format(), environment: nested)
+                )
 
             case let html as InlineHTML:
                 // Inline HTML is inert source text, not executable markup.
@@ -303,15 +307,10 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
                 result.append(attributed("\n", environment: environment))
 
             default:
-                if node.childCount > 0 {
-                    result.append(
-                        renderInline(node.children, environment: environment)
-                    )
-                } else {
-                    result.append(
-                        attributed(node.format(), environment: environment)
-                    )
-                }
+                // Defensive handling for future or custom inline node types.
+                result.append(
+                    attributed(node.format(), environment: environment)
+                )
             }
         }
         return result
@@ -340,38 +339,6 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         )
         result.font = .system(.body, design: .monospaced)
         result.backgroundColor = .primary.opacity(0.06)
-        return result
-    }
-
-    private mutating func prefixLines(
-        in source: AttributedString,
-        with prefix: String
-    ) -> AttributedString {
-        guard !source.characters.isEmpty else { return source }
-
-        var result = AttributedString()
-        var lineStart = source.startIndex
-        while lineStart < source.endIndex {
-            var marker = AttributedString(prefix)
-            marker.foregroundColor = .secondary
-            marker.font = .system(.body, design: .monospaced)
-            result.append(marker)
-
-            if let newline = source.characters[lineStart...]
-                .firstIndex(of: "\n")
-            {
-                let afterNewline = source.characters.index(after: newline)
-                result.append(
-                    AttributedString(source[lineStart..<afterNewline])
-                )
-                lineStart = afterNewline
-            } else {
-                result.append(
-                    AttributedString(source[lineStart..<source.endIndex])
-                )
-                break
-            }
-        }
         return result
     }
 

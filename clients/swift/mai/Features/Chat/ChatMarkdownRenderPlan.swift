@@ -4,7 +4,7 @@ import Foundation
 /// small value models instead of retaining swift-markdown's reference tree.
 nonisolated struct ChatMarkdownRenderPlan: Equatable, Sendable {
     enum Block: Equatable, Sendable {
-        case prose(AttributedString)
+        case prose(ChatMarkdownProseRun)
         case code(ChatMarkdownCodeBlock)
         case table(ChatMarkdownTable)
     }
@@ -15,31 +15,85 @@ nonisolated struct ChatMarkdownRenderPlan: Equatable, Sendable {
         self.blocks = Self.coalescingProse(in: blocks)
     }
 
+    /// Completed prose is one selectable TextKit run. The active trailing
+    /// block stays separate so token updates never relayout that text view.
+    init(
+        streamingStableBlocks: [Block],
+        activeBlocks: [Block]
+    ) {
+        self.blocks = streamingStableBlocks + activeBlocks
+    }
+
     private static func coalescingProse(
         in blocks: [Block]
     ) -> [Block] {
         var result: [Block] = []
         result.reserveCapacity(blocks.count)
+        var proseSources: [String] = []
+        var prosePieces: [ChatMarkdownProseRun.Piece] = []
 
         for block in blocks {
-            guard case .prose(let prose) = block,
-                case .prose(var previous)? = result.last
-            else {
+            if case .prose(let prose) = block {
+                proseSources.append(prose.source)
+                prosePieces.append(contentsOf: prose.pieces)
+            } else {
+                appendProseRun(
+                    sources: &proseSources,
+                    pieces: &prosePieces,
+                    to: &result
+                )
                 result.append(block)
-                continue
             }
-
-            previous.append(AttributedString("\n\n"))
-            previous.append(prose)
-            result[result.count - 1] = .prose(previous)
         }
+        appendProseRun(
+            sources: &proseSources,
+            pieces: &prosePieces,
+            to: &result
+        )
         return result
+    }
+
+    private static func appendProseRun(
+        sources: inout [String],
+        pieces: inout [ChatMarkdownProseRun.Piece],
+        to blocks: inout [Block]
+    ) {
+        guard !sources.isEmpty else { return }
+        blocks.append(
+            .prose(
+                ChatMarkdownProseRun(
+                    source: sources.joined(),
+                    pieces: pieces
+                )
+            )
+        )
+        sources.removeAll(keepingCapacity: true)
+        pieces.removeAll(keepingCapacity: true)
     }
 }
 
+/// Source is retained for the existing selectable TextKit prose renderer.
+/// Pieces keep the active streaming tail cheap and semantically decorated.
+nonisolated struct ChatMarkdownProseRun: Equatable, Sendable {
+    enum Piece: Equatable, Sendable {
+        case text(AttributedString)
+        case quote(AttributedString)
+        case thematicBreak
+    }
+
+    let source: String
+    let pieces: [Piece]
+}
+
 nonisolated struct ChatMarkdownCodeBlock: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case fenced
+        case html
+    }
+
     let code: String
     let language: String?
+    let kind: Kind
 
     var displayLanguage: String {
         guard let language = language?.trimmingCharacters(
