@@ -24,6 +24,8 @@ struct ThreadSession {
     var markdownSegmentCache = ChatMarkdownSegmentCache()
     #if os(iOS)
         var textLayoutStore = ChatTextLayoutStore()
+    #elseif os(macOS)
+        var macTextLayoutStore = ChatMacTextLayoutStore()
     #endif
     var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed

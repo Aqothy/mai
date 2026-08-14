@@ -136,6 +136,12 @@ final class ThreadStore {
             sessionsByID[selectedThreadID] = session
             noteSelectedSessionChanged(selectedThreadID)
         }
+    #elseif os(macOS)
+        var selectedThreadMacTextLayoutStore: ChatMacTextLayoutStore? {
+            _ = selectedSessionGeneration
+            guard let selectedThreadID else { return nil }
+            return sessionsByID[selectedThreadID]?.macTextLayoutStore
+        }
     #endif
 
     var selectedThreadSequence: Int {
@@ -1156,6 +1162,8 @@ final class ThreadStore {
         #if os(iOS)
             session.textLayoutStore.deactivateTextViewReuse()
             session.textLayoutStore = ChatTextLayoutStore()
+        #elseif os(macOS)
+            session.macTextLayoutStore = ChatMacTextLayoutStore()
         #endif
         sessionsByID[id] = session
         removeItemDetails(for: id)

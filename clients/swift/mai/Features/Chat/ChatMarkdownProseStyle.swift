@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+    import AppKit
+#endif
 
 /// The typography and spacing for native chat prose.
 ///
@@ -34,6 +37,23 @@ nonisolated enum ChatMarkdownProseStyle {
 
     #if os(iOS)
         static func headingTextStyle(level: Int) -> UIFont.TextStyle {
+            switch max(1, min(6, level)) {
+            case 1:
+                .title2
+            case 2:
+                .title3
+            case 3:
+                .headline
+            case 4:
+                .body
+            case 5:
+                .callout
+            default:
+                .subheadline
+            }
+        }
+    #elseif os(macOS)
+        static func headingTextStyle(level: Int) -> NSFont.TextStyle {
             switch max(1, min(6, level)) {
             case 1:
                 .title2

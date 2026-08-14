@@ -46,7 +46,7 @@ struct ChatMarkdownCodeBlockView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
                 } else {
-                    #if os(iOS)
+                    #if os(iOS) || os(macOS)
                         ChatSelectableRichText(
                             attributedString: selectableCode
                         )
@@ -124,7 +124,7 @@ struct ChatMarkdownCodeBlockView: View {
         return highlightedCode?.attributed
     }
 
-    #if os(iOS)
+    #if os(iOS) || os(macOS)
         private var selectableCode: NSAttributedString {
             let source: NSAttributedString
             if let displayedHighlightedCode {
@@ -141,11 +141,7 @@ struct ChatMarkdownCodeBlockView: View {
             )
             attributedString.addAttributes(
                 [
-                    .font: UIFont.monospacedSystemFont(
-                        ofSize: UIFont.preferredFont(forTextStyle: .callout)
-                            .pointSize,
-                        weight: .regular
-                    ),
+                    .font: codeFont,
                     .paragraphStyle: codeParagraphStyle,
                 ],
                 range: range
@@ -153,11 +149,35 @@ struct ChatMarkdownCodeBlockView: View {
             if displayedHighlightedCode == nil {
                 attributedString.addAttribute(
                     .foregroundColor,
-                    value: UIColor.label,
+                    value: defaultCodeColor,
                     range: range
                 )
             }
             return attributedString
+        }
+
+        private var codeFont: Any {
+            #if os(iOS)
+                UIFont.monospacedSystemFont(
+                    ofSize: UIFont.preferredFont(forTextStyle: .callout)
+                        .pointSize,
+                    weight: .regular
+                )
+            #else
+                NSFont.monospacedSystemFont(
+                    ofSize: NSFont.preferredFont(forTextStyle: .callout)
+                        .pointSize,
+                    weight: .regular
+                )
+            #endif
+        }
+
+        private var defaultCodeColor: Any {
+            #if os(iOS)
+                UIColor.label
+            #else
+                NSColor.labelColor
+            #endif
         }
 
         private var codeParagraphStyle: NSParagraphStyle {

@@ -1,6 +1,14 @@
-#if os(iOS)
+#if os(iOS) || os(macOS)
     import Markdown
-    import UIKit
+    #if os(iOS)
+        import UIKit
+        private typealias ChatPlatformColor = UIColor
+        private typealias ChatPlatformFont = UIFont
+    #else
+        import AppKit
+        private typealias ChatPlatformColor = NSColor
+        private typealias ChatPlatformFont = NSFont
+    #endif
 
     extension NSAttributedString.Key {
         nonisolated static let chatQuoteBarOffsets = Self("ChatQuoteBarOffsets")
@@ -24,7 +32,13 @@
         struct Environment {
             var indent: CGFloat = 0
             var quoteBarOffsets: [CGFloat] = []
-            var color: UIColor = .label
+            var color: ChatPlatformColor = {
+                #if os(iOS)
+                    .label
+                #else
+                    .labelColor
+                #endif
+            }()
             var blockSpacing = ChatMarkdownProseStyle.blockSpacing
 
             static let root = Environment()
@@ -36,8 +50,8 @@
         }
 
         private struct InlineStyle {
-            var font: UIFont
-            var color: UIColor
+            var font: ChatPlatformFont
+            var color: ChatPlatformColor
             var isBold = false
             var isItalic = false
             var isStruck = false
@@ -46,10 +60,10 @@
 
         private let output = NSMutableAttributedString()
         private let sourceLines: [String]
-        private let bodyFont = UIFont.preferredFont(forTextStyle: .body)
-        private let bulletFont = UIFont.preferredFont(forTextStyle: .headline)
-        private let codeFont = UIFont.monospacedSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize,
+        private let bodyFont = ChatPlatformFont.preferredFont(forTextStyle: .body)
+        private let bulletFont = ChatPlatformFont.preferredFont(forTextStyle: .headline)
+        private let codeFont = ChatPlatformFont.monospacedSystemFont(
+            ofSize: ChatPlatformFont.preferredFont(forTextStyle: .callout).pointSize,
             weight: .regular
         )
 
@@ -246,13 +260,15 @@
                     range: range
                 )
             }
-            if let accessibilityHeadingLevel {
-                output.addAttribute(
-                    .accessibilityTextHeadingLevel,
-                    value: accessibilityHeadingLevel,
-                    range: range
-                )
-            }
+            #if os(iOS)
+                if let accessibilityHeadingLevel {
+                    output.addAttribute(
+                        .accessibilityTextHeadingLevel,
+                        value: accessibilityHeadingLevel,
+                        range: range
+                    )
+                }
+            #endif
             output.addAttribute(
                 .paragraphStyle,
                 value: paragraph,
@@ -274,7 +290,7 @@
                 NSAttributedString(
                     string: "\n",
                     attributes: [
-                        .font: UIFont.systemFont(ofSize: 1),
+                        .font: ChatPlatformFont.systemFont(ofSize: 1),
                         .paragraphStyle: spacerStyle,
                     ]
                 )
@@ -383,7 +399,7 @@
             return NSAttributedString(string: text, attributes: attributes)
         }
 
-        private func headingFont(level: Int) -> UIFont {
+        private func headingFont(level: Int) -> ChatPlatformFont {
             .preferredFont(
                 forTextStyle: ChatMarkdownProseStyle.headingTextStyle(
                     level: level
@@ -391,14 +407,26 @@
             )
         }
 
-        private func resolvedFont(_ style: InlineStyle) -> UIFont {
+        private func resolvedFont(_ style: InlineStyle) -> ChatPlatformFont {
             guard style.isBold || style.isItalic else { return style.font }
             var traits = style.font.fontDescriptor.symbolicTraits
-            if style.isBold { traits.insert(.traitBold) }
-            if style.isItalic { traits.insert(.traitItalic) }
-            guard let descriptor = style.font.fontDescriptor.withSymbolicTraits(traits)
-            else { return style.font }
-            return UIFont(descriptor: descriptor, size: style.font.pointSize)
+            #if os(iOS)
+                if style.isBold { traits.insert(.traitBold) }
+                if style.isItalic { traits.insert(.traitItalic) }
+                guard let descriptor = style.font.fontDescriptor
+                    .withSymbolicTraits(traits)
+                else { return style.font }
+                return UIFont(descriptor: descriptor, size: style.font.pointSize)
+            #else
+                if style.isBold { traits.insert(.bold) }
+                if style.isItalic { traits.insert(.italic) }
+                let descriptor = style.font.fontDescriptor
+                    .withSymbolicTraits(traits)
+                return NSFont(
+                    descriptor: descriptor,
+                    size: style.font.pointSize
+                ) ?? style.font
+            #endif
         }
     }
 #endif

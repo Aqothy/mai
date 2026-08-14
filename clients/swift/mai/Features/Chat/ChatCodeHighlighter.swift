@@ -14,7 +14,7 @@ nonisolated enum ChatCodeHighlightTheme: String, Hashable, Sendable {
     var highlighterThemeName: String {
         switch self {
         case .light:
-            "xcode"
+            "atom-one-light"
         case .dark:
             "atom-one-dark"
         }
@@ -150,9 +150,11 @@ actor ChatCodeHighlighter {
     }
 
     private static func normalizedLanguage(_ language: String?) -> String? {
-        guard let language = language?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ).lowercased(), !language.isEmpty else {
+        guard
+            let language = language?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).lowercased(), !language.isEmpty
+        else {
             return nil
         }
 

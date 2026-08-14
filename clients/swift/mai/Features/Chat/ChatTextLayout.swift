@@ -1,21 +1,41 @@
+import SwiftUI
+
+nonisolated enum ChatTextLayoutStyle: Hashable, Sendable {
+    case markdownProse
+    case plain
+}
+
+nonisolated struct ChatTextLayoutRequest: Sendable {
+    let id: String
+    let source: String
+    let style: ChatTextLayoutStyle
+    let width: CGFloat
+}
+
+nonisolated enum ChatTextLayoutWarmup {
+    /// Bounds eager work in one batch without evicting layouts the loaded chat
+    /// has already paid to create. Both native text backends use this budget.
+    static let maximumRequestCount = 256
+}
+
+/// The small shared surface used by the timeline. UIKit and AppKit keep their
+/// platform-specific cache and view-reuse strategies behind this boundary.
+@MainActor protocol ChatNativeTextLayoutStore: AnyObject, Sendable {
+    func warm(requests: [ChatTextLayoutRequest])
+    func prepare(requests: [ChatTextLayoutRequest]) async
+}
+
+struct ChatTextSelection: Equatable, Sendable {
+    let layoutID: String
+    let range: NSRange
+    let text: String
+}
+
 #if os(iOS)
-    import SwiftUI
     import UIKit
     #if DEBUG
         import OSLog
     #endif
-
-    nonisolated enum ChatTextLayoutStyle: Hashable, Sendable {
-        case markdownProse
-        case plain
-    }
-
-    nonisolated struct ChatTextLayoutRequest: Sendable {
-        let id: String
-        let source: String
-        let style: ChatTextLayoutStyle
-        let width: CGFloat
-    }
 
     #if DEBUG
         /// DEBUG-only breadcrumbs for correlating a visible hitch with the
@@ -146,11 +166,7 @@
 
     /// Thread-owned cache for completed layouts and in-flight warmups, plus a
     /// reuse pool of native views List has already displayed.
-    final class ChatTextLayoutStore {
-        /// Limits eager work in one batch without evicting layouts that the
-        /// loaded chat has already paid to create.
-        static let maximumWarmupRequestCount = 256
-
+    final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
         private struct Key: Hashable, Sendable {
             let id: String
             let width: CGFloat
@@ -292,7 +308,8 @@
         ) -> [(request: ChatTextLayoutRequest, key: Key)] {
             var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
             var seen: Set<Key> = []
-            for request in requests.suffix(Self.maximumWarmupRequestCount).reversed()
+            for request in requests.suffix(ChatTextLayoutWarmup.maximumRequestCount)
+                .reversed()
             where request.width > 0 {
                 let key = Key(id: request.id, width: request.width)
                 guard seen.insert(key).inserted,
@@ -364,12 +381,6 @@
                 )
             )
         }
-    }
-
-    struct ChatTextSelection: Equatable, Sendable {
-        let layoutID: String
-        let range: NSRange
-        let text: String
     }
 
     /// Selectable prose whose attributed content and measured height can be
