@@ -90,8 +90,35 @@ nonisolated enum ChatMarkdownSegmenter {
     /// Returns nil when splitting could change document-wide Markdown
     /// behavior. Those uncommon messages stay in one attributed text row.
     static func segments(of source: String) -> [ChatMarkdownSegment]? {
-        guard !containsReferenceDefinition(source) else { return nil }
+        guard canSegment(source) else { return nil }
 
+        // This is only a conservative prefilter, not Markdown detection. A
+        // possible rich-block introducer always falls through to swift-markdown,
+        // which remains the source of truth for the actual block types.
+        guard mayContainRichBlock(source) else {
+            return [ChatMarkdownSegment(kind: .prose, source: source)]
+        }
+        return parsedSegments(of: source)
+    }
+
+    /// Full-parser equivalent retained as a benchmark seam. Keeping the
+    /// semantic result directly comparable prevents the prefilter from
+    /// becoming an unverified collection of syntax assumptions.
+    static func segmentsUsingFullParser(
+        of source: String
+    ) -> [ChatMarkdownSegment]? {
+        guard canSegment(source) else { return nil }
+        return parsedSegments(of: source)
+    }
+
+    private static func canSegment(_ source: String) -> Bool {
+        !containsReferenceDefinition(source)
+            && source.contains(where: { !$0.isWhitespace })
+    }
+
+    private static func parsedSegments(
+        of source: String
+    ) -> [ChatMarkdownSegment]? {
         // swift-markdown locations use one-based UTF-8 line and column
         // offsets, so slice the original bytes to preserve the source exactly.
         let bytes = Array(source.utf8)
@@ -145,6 +172,20 @@ nonisolated enum ChatMarkdownSegmenter {
             )
         )
         return segments
+    }
+
+    private static func mayContainRichBlock(_ source: String) -> Bool {
+        let mayContainFencedCode = source.contains("```")
+            || source.contains("~~~")
+        let mayContainTable = source.contains("|")
+        let mayContainBlockHTML = source.contains("<")
+        // Indented code may also be nested after a quote or list marker.
+        // Searching anywhere is intentionally broader than Markdown's exact
+        // line-prefix rule; false positives simply use the semantic parser.
+        let mayContainIndentedCode = source.contains("    ")
+            || source.contains("\t")
+        return mayContainFencedCode || mayContainTable
+            || mayContainBlockHTML || mayContainIndentedCode
     }
 
     private static func containsRichContent(_ block: Markup) -> Bool {

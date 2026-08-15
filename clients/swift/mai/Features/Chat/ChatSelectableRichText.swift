@@ -3,6 +3,12 @@
     import UIKit
 
     enum ChatSelectableTextViewConfiguration {
+        static func makeTextView() -> UITextView {
+            let view = UITextView(usingTextLayoutManager: false)
+            apply(to: view)
+            return view
+        }
+
         static func apply(to view: UITextView) {
             view.isScrollEnabled = false
             view.isEditable = false
@@ -45,9 +51,7 @@
         }
 
         func makeUIView(context: Context) -> UITextView {
-            let view = UITextView(usingTextLayoutManager: false)
-            ChatSelectableTextViewConfiguration.apply(to: view)
-            return view
+            ChatSelectableTextViewConfiguration.makeTextView()
         }
 
         func updateUIView(_ view: UITextView, context: Context) {

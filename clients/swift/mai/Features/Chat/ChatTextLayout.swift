@@ -698,8 +698,7 @@ struct ChatTextSelection: Equatable, Sendable {
         }
 
         private static func makeTextView(frame: CGRect) -> UITextView {
-            let view = UITextView(usingTextLayoutManager: false)
-            ChatSelectableTextViewConfiguration.apply(to: view)
+            let view = ChatSelectableTextViewConfiguration.makeTextView()
             view.frame = frame
             return view
         }
