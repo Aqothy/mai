@@ -16,16 +16,25 @@ struct ChatMarkdownTableView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            ScrollView(.horizontal) {
-                ChatMarkdownTableGrid(table: table)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.top, 32)
-            }
-            .scrollIndicators(.visible, axes: .horizontal)
-            .scrollIndicatorsFlash(onAppear: true)
-            .scrollIndicatorsFlash(trigger: table)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            #if os(macOS)
+                ChatMacHorizontalScrollView {
+                    ChatMarkdownTableGrid(table: table)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.top, 32)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #else
+                ScrollView(.horizontal) {
+                    ChatMarkdownTableGrid(table: table)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.top, 32)
+                }
+                .scrollIndicators(.visible, axes: .horizontal)
+                .scrollIndicatorsFlash(onAppear: true)
+                .scrollIndicatorsFlash(trigger: table)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #endif
 
             Button(
                 "Copy table",

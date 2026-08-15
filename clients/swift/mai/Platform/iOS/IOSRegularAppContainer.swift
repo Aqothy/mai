@@ -40,7 +40,7 @@ struct IOSRegularAppContainer: View {
                     preferredCompactColumn = .detail
                 }
             )
-            .navigationSplitViewColumnWidth(280)
+            .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 400)
         } detail: {
             if route == .agentRegistry {
                 ACPRegistryView(store: store)
@@ -68,10 +68,17 @@ struct IOSRegularAppContainer: View {
                 )
                 .id(route)
             } else {
-                ContentUnavailableView(
-                    "Select a Thread",
-                    systemImage: "bubble.left.and.bubble.right"
-                )
+                ContentUnavailableView {
+                    Label("No Thread Selected", systemImage: "bubble.left.and.bubble.right")
+                } description: {
+                    Text("Choose a thread from the sidebar, or start a new chat.")
+                } actions: {
+                    Button("New Chat", systemImage: "square.and.pencil") {
+                        route = .newChat
+                        preferredCompactColumn = .detail
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
         }
         .onChange(of: route, initial: true) { _, route in

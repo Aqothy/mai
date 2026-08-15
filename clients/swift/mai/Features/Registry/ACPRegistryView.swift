@@ -115,6 +115,9 @@ struct ACPRegistryFilterPicker: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        // Reads poorly stretched across a full iPad or Mac sheet width.
+        .frame(maxWidth: 440)
+        .frame(maxWidth: .infinity)
         .padding([.horizontal, .bottom])
         .background(.bar)
     }
@@ -177,7 +180,19 @@ struct ACPRegistryStatusView: View {
                 package: "claude-code-acp@1.0.0",
                 source: "registry",
                 version: "1.0.0"
-            )
+            ),
+            ACPRegistryInstalledAgent(
+                args: nil,
+                description: nil,
+                icon: nil,
+                id: "my-codex",
+                installedAt: .now,
+                instanceID: "custom-my-codex",
+                name: "My Codex",
+                package: "",
+                source: "custom",
+                version: ""
+            ),
         ]
     )
     NavigationStack {

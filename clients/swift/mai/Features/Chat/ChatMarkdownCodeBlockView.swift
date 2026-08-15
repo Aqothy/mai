@@ -36,40 +36,34 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
-            ScrollView(.horizontal) {
-                if isStreaming {
-                    Text(verbatim: block.code)
-                        .font(.callout.monospaced())
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                } else {
-                    #if os(iOS) || os(macOS)
-                        ChatSelectableRichText(
-                            attributedString: selectableCode
+            #if os(macOS)
+                ChatMacHorizontalScrollView {
+                    ChatMarkdownCodeScrollContent(
+                        code: block.code,
+                        isStreaming: isStreaming,
+                        selectableCode: selectableCode
+                    )
+                }
+            #else
+                ScrollView(.horizontal) {
+                    #if os(iOS)
+                        ChatMarkdownCodeScrollContent(
+                            code: block.code,
+                            isStreaming: isStreaming,
+                            selectableCode: selectableCode
                         )
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
                     #else
-                        Text(
-                            displayedHighlightedCode
-                                ?? AttributedString(block.code)
+                        ChatMarkdownCodeScrollContent(
+                            code: block.code,
+                            isStreaming: isStreaming,
+                            displayedHighlightedCode: displayedHighlightedCode
                         )
-                        .font(.callout.monospaced())
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
                     #endif
                 }
-            }
-            .scrollIndicators(.visible, axes: .horizontal)
-            .scrollIndicatorsFlash(onAppear: true)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .scrollIndicators(.visible, axes: .horizontal)
+                .scrollIndicatorsFlash(onAppear: true)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -205,6 +199,44 @@ struct ChatMarkdownCodeBlockView: View {
             }
             guard !Task.isCancelled else { return }
             copied = false
+        }
+    }
+}
+
+private struct ChatMarkdownCodeScrollContent: View {
+    let code: String
+    let isStreaming: Bool
+
+    #if os(iOS) || os(macOS)
+        let selectableCode: NSAttributedString
+    #else
+        let displayedHighlightedCode: AttributedString?
+    #endif
+
+    var body: some View {
+        if isStreaming {
+            Text(verbatim: code)
+                .font(.callout.monospaced())
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+        } else {
+            #if os(iOS) || os(macOS)
+                ChatSelectableRichText(attributedString: selectableCode)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            #else
+                Text(displayedHighlightedCode ?? AttributedString(code))
+                    .font(.callout.monospaced())
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            #endif
         }
     }
 }

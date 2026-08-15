@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 #endif
 
 struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @Binding var text: String
 
     let isEnabled: Bool
@@ -139,12 +141,16 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         isRunning && !canSend
     }
 
+    // High-contrast fill that inverts with the color scheme, so the button
+    // reads against the composer surface in both appearances.
     private var sendButtonBackground: Color {
-        isRunning || canSend ? .white : .secondary.opacity(0.18)
+        guard isRunning || canSend else { return .secondary.opacity(0.18) }
+        return colorScheme == .dark ? .white : .black
     }
 
     private var sendButtonForeground: Color {
-        isRunning || canSend ? .black : .secondary
+        guard isRunning || canSend else { return .secondary }
+        return colorScheme == .dark ? .black : .white
     }
 
     private func updateWorkspaceFilePicker(oldText: String, newText: String) {

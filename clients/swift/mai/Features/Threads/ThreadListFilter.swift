@@ -18,7 +18,7 @@ enum ThreadListActivityFilter: String, CaseIterable, Identifiable {
     }
 }
 
-struct ThreadListFilter {
+struct ThreadListFilter: Equatable {
     var query = ""
     var projectCwd: String?
     /// Provider instance identifier to match. nil matches every provider.

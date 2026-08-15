@@ -52,6 +52,61 @@ enum WorkspaceListItem: Identifiable {
         case .terminal(let summary): summary.terminalID
         }
     }
+
+    /// The project directory this item belongs to, or nil when it has none.
+    var projectDirectory: String? {
+        switch self {
+        case .agentThread(let thread):
+            guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
+            return cwd
+        case .terminal(let summary):
+            return summary.cwd.isEmpty ? nil : summary.cwd
+        }
+    }
+}
+
+/// One project's worth of Threads-list rows.
+struct WorkspaceListSection: Identifiable {
+    /// The project's working directory; doubles as stable identity.
+    let id: String
+    let items: [WorkspaceListItem]
+
+    var name: String {
+        URL(filePath: id).lastPathComponent
+    }
+}
+
+/// The Threads list grouped for the "By Project" display mode: items
+/// without a project first, then one section per project directory.
+struct WorkspaceListGroups {
+    let ungrouped: [WorkspaceListItem]
+    let projects: [WorkspaceListSection]
+
+    /// Groups pre-merged rows (already updatedAt-descending). Section order
+    /// follows each project's most recent activity, which is its first item
+    /// thanks to the incoming sort; ties cannot reorder because grouping is
+    /// insertion-ordered over a deterministic input.
+    init(items: [WorkspaceListItem]) {
+        var ungrouped: [WorkspaceListItem] = []
+        var itemsByProject: [String: [WorkspaceListItem]] = [:]
+        var projectOrder: [String] = []
+
+        for item in items {
+            guard let projectDirectory = item.projectDirectory else {
+                ungrouped.append(item)
+                continue
+            }
+            if itemsByProject[projectDirectory] == nil {
+                projectOrder.append(projectDirectory)
+            }
+            itemsByProject[projectDirectory, default: []].append(item)
+        }
+
+        self.ungrouped = ungrouped
+        self.projects = projectOrder.map { cwd in
+            WorkspaceListSection(id: cwd, items: itemsByProject[cwd] ?? [])
+        }
+    }
 }
 
 /// What a terminal navigation destination should open.

@@ -13,44 +13,70 @@ struct IOSThreadListView: View {
 
     @State private var filter = ThreadListFilter()
 
+    @AppStorage(ThreadListDisplayMode.appStorageKey)
+    private var displayModeRaw = ThreadListDisplayMode.recent.rawValue
+
+    @AppStorage(CollapsedProjectDirectories.appStorageKey)
+    private var collapsedProjects = CollapsedProjectDirectories()
+
+    private var displayMode: ThreadListDisplayMode {
+        ThreadListDisplayMode(rawValue: displayModeRaw) ?? .recent
+    }
+
     var body: some View {
         // Hoisted so the filter/merge runs once per body evaluation; the
         // overlay below reads it as well.
         let items = self.filteredItems
         List {
-            IOSWorkspaceRows(
-                store: store,
-                items: items,
-                selectThread: selectThread,
-                selectTerminal: selectTerminal,
-                openTerminalHere: { cwd in
-                    newTerminal(
-                        .new(
-                            cwd: cwd,
-                            title: URL(filePath: cwd).lastPathComponent
-                        ))
+            switch displayMode {
+            case .recent:
+                workspaceRows(items: items, isCompact: false)
+            case .byProject:
+                let groups = WorkspaceListGroups(items: items)
+                workspaceRows(items: groups.ungrouped, isCompact: true)
+                ForEach(groups.projects) { section in
+                    Section {
+                        if collapsedProjects.isExpanded(section.id) {
+                            workspaceRows(items: section.items, isCompact: true)
+                        }
+                    } header: {
+                        IOSProjectSectionHeader(
+                            name: section.name,
+                            isExpanded: collapsedProjects.isExpanded(section.id),
+                            toggle: {
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    collapsedProjects.setExpanded(
+                                        !collapsedProjects.isExpanded(section.id),
+                                        for: section.id
+                                    )
+                                }
+                            }
+                        )
+                    }
                 }
-            )
+            }
         }
         .listStyle(.plain)
         .navigationTitle("Threads")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $filter.query, prompt: "Search Threads")
         .toolbar {
-            ToolbarItemGroup(placement: .topBarLeading) {
-                Button(
-                    "Agent Registry",
-                    systemImage: "puzzlepiece.extension",
-                    action: openAgentRegistry
-                )
-                Button(
-                    "Import Session",
-                    systemImage: "square.and.arrow.down",
-                    action: openSessionImport
-                )
+            ToolbarItem(placement: .topBarLeading) {
+                Menu("Settings", systemImage: "gear") {
+                    Button(
+                        "Agent Registry",
+                        systemImage: "puzzlepiece.extension",
+                        action: openAgentRegistry
+                    )
+                    Button(
+                        "Import Session",
+                        systemImage: "square.and.arrow.down",
+                        action: openSessionImport
+                    )
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                IOSThreadFilterMenu(store: store, filter: $filter)
+                ThreadFilterMenu(store: store, filter: $filter)
             }
         }
         .modifier(
@@ -77,6 +103,23 @@ struct IOSThreadListView: View {
         .modifier(ThreadListStatusModifier(store: store))
     }
 
+    private func workspaceRows(items: [WorkspaceListItem], isCompact: Bool) -> some View {
+        IOSWorkspaceRows(
+            store: store,
+            items: items,
+            isCompact: isCompact,
+            selectThread: selectThread,
+            selectTerminal: selectTerminal,
+            openTerminalHere: { cwd in
+                newTerminal(
+                    .new(
+                        cwd: cwd,
+                        title: URL(filePath: cwd).lastPathComponent
+                    ))
+            }
+        )
+    }
+
     private var filteredItems: [WorkspaceListItem] {
         WorkspaceListItem.merged(
             threads: filter.apply(
@@ -86,6 +129,31 @@ struct IOSThreadListView: View {
             ),
             terminals: filter.apply(toTerminals: terminalStore.terminals)
         )
+    }
+}
+
+/// A tappable project header carrying the fold chevron, mirroring the
+/// desktop sidebar's collapsible sections.
+private struct IOSProjectSectionHeader: View {
+    let name: String
+    let isExpanded: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack {
+                Text(name)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), \(isExpanded ? "expanded" : "collapsed")")
+        .accessibilityHint("Double tap to \(isExpanded ? "collapse" : "expand")")
     }
 }
 

@@ -11,9 +11,9 @@ struct ACPRegistryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let iconURL = entry.iconURL {
-                ACPRegistryIcon(iconURL: iconURL)
-            }
+            // Always present so text lines up across rows with remote
+            // icons, rows whose icon failed to load, and custom agents.
+            ACPRegistryIcon(iconURL: entry.iconURL)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.name)
@@ -46,14 +46,25 @@ struct ACPRegistryRow: View {
 }
 
 private struct ACPRegistryIcon: View {
-    let iconURL: URL
+    let iconURL: URL?
 
     var body: some View {
-        ACPRegistryIconContent(iconURL: iconURL)
-            .frame(width: 28, height: 28)
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
+        Group {
+            if let iconURL {
+                ACPRegistryIconContent(iconURL: iconURL)
+            } else {
+                fallbackGlyph
+            }
+        }
+        .frame(width: 28, height: 28)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
     }
+}
+
+private var fallbackGlyph: some View {
+    Image(systemName: "puzzlepiece.extension")
+        .imageScale(.large)
 }
 
 private struct ACPRegistryIconContent: View {
@@ -69,7 +80,8 @@ private struct ACPRegistryIconContent: View {
                 .resizable()
                 .scaledToFit()
         } placeholder: {
-            EmptyView()
+            // Persists when the load fails, so the slot never goes blank.
+            fallbackGlyph
         }
         #endif
     }

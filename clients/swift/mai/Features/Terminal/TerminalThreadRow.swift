@@ -18,12 +18,7 @@ struct TerminalThreadRow: View {
 
                 Spacer(minLength: 8)
 
-                TimelineView(.everyMinute) { context in
-                    Text(updatedAtText(now: context.date))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
-                }
+                ThreadRowTimestampText(updatedAt: summary.updatedAt)
             }
 
             HStack(spacing: 6) {
@@ -55,16 +50,5 @@ struct TerminalThreadRow: View {
             parts.append(statusLabel)
         }
         return parts.joined(separator: ", ")
-    }
-
-    private func updatedAtText(now: Date) -> String {
-        let minutes = Int(max(0, now.timeIntervalSince(summary.updatedAt)) / 60)
-        if minutes < 1 { return "now" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        let days = hours / 24
-        if days < 7 { return "\(days)d" }
-        return summary.updatedAt.formatted(.dateTime.day().month(.abbreviated))
     }
 }

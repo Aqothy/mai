@@ -22,14 +22,7 @@ struct ThreadRow: View {
 
                 Spacer(minLength: 8)
 
-                // Driven by the schedule's date rather than Date.now so the
-                // relative timestamp keeps ticking while the row is on screen.
-                TimelineView(.everyMinute) { context in
-                    Text(updatedAtText(now: context.date))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
-                }
+                ThreadRowTimestampText(updatedAt: thread.updatedAt)
             }
 
             HStack(spacing: 6) {
@@ -50,7 +43,7 @@ struct ThreadRow: View {
                 Spacer(minLength: 8)
 
                 ThreadRowStatusView(
-                    status: rowIndicatorStatus
+                    status: thread.rowIndicatorStatus
                 )
             }
             .font(.caption)
@@ -63,33 +56,6 @@ struct ThreadRow: View {
     private var workingDirectoryName: String? {
         guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
         return URL(filePath: cwd).lastPathComponent
-    }
-
-    private var rowIndicatorStatus: ThreadRowIndicatorStatus? {
-        if thread.hasPendingApprovals {
-            return .needsInput
-        }
-        if thread.latestTurn?.turnState == .running {
-            return .working
-        }
-        if thread.latestTurn?.turnState == .error || thread.session?.sessionStatus == .error {
-            return .failed
-        }
-        if thread.latestTurn?.turnState == .interrupted {
-            return .interrupted
-        }
-        return nil
-    }
-
-    private func updatedAtText(now: Date) -> String {
-        let minutes = Int(max(0, now.timeIntervalSince(thread.updatedAt)) / 60)
-        if minutes < 1 { return "now" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        let days = hours / 24
-        if days < 7 { return "\(days)d" }
-        return thread.updatedAt.formatted(.dateTime.day().month(.abbreviated))
     }
 }
 

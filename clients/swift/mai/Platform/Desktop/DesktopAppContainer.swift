@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct DesktopAppContainer: View {
@@ -16,7 +17,7 @@ struct DesktopAppContainer: View {
                 terminalStore: terminalStore,
                 terminalRoute: $terminalRoute
             )
-            .navigationSplitViewColumnWidth(260)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
         } detail: {
             if let terminalRoute {
                 TerminalThreadScreen(
@@ -52,4 +53,5 @@ struct DesktopAppContainer: View {
         terminalStore: TerminalStore()
     )
 }
+#endif
 #endif

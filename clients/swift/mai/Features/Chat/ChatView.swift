@@ -513,8 +513,6 @@ private struct ChatTimeline: View {
         @State private var textWarmRowWidth: CGFloat = 0
         @State private var macScrollPositionPreserver =
             ChatMacScrollPositionPreserver()
-        @State private var macNestedScrollRouter =
-            ChatMacNestedScrollRouter()
         let macTextLayoutStore: ChatMacTextLayoutStore
     #endif
 
@@ -558,7 +556,6 @@ private struct ChatTimeline: View {
                 .background {
                     ChatMacTableViewIntrospector { tableView in
                         macScrollPositionPreserver.attach(to: tableView)
-                        macNestedScrollRouter.attach(to: tableView)
                     }
                     .allowsHitTesting(false)
                 }
