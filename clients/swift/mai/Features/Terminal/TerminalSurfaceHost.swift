@@ -8,12 +8,8 @@ struct TerminalSurfaceHost: View {
     let controller: TerminalSessionController
     let backgroundColor: Color
     @Environment(\.colorScheme) private var colorScheme
-    #if !canImport(UIKit)
-    @FocusState private var isTerminalFocused: Bool
-    #endif
 
     var body: some View {
-        #if canImport(UIKit)
         TerminalSurfaceView(context: controller.viewState)
             .background(backgroundColor)
             .onChange(of: colorScheme) { _, newScheme in
@@ -22,10 +18,5 @@ struct TerminalSurfaceHost: View {
             .onAppear {
                 controller.viewState.adopt(colorScheme: colorScheme)
             }
-        #else
-        TerminalSurfaceView(context: controller.viewState)
-            .terminalFocusOnAppear($isTerminalFocused)
-            .background(backgroundColor)
-        #endif
     }
 }

@@ -4,15 +4,10 @@ import ImageIO
 import Observation
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
-#if canImport(UIKit)
-import UIKit
 typealias PlatformImage = UIImage
-#else
-import AppKit
-typealias PlatformImage = NSImage
-#endif
 
 struct ChatPendingAttachment: Identifiable {
     let id: UUID
@@ -258,11 +253,7 @@ final class ChatComposerThumbnail: @unchecked Sendable {
 
 extension Image {
     init(platformImage: PlatformImage) {
-        #if canImport(UIKit)
         self.init(uiImage: platformImage)
-        #else
-        self.init(nsImage: platformImage)
-        #endif
     }
 }
 
@@ -326,14 +317,7 @@ enum ChatAttachmentLoader {
                 else {
                     throw ChatAttachmentLoadingError.invalidImage(name: url.lastPathComponent)
                 }
-                #if canImport(UIKit)
                 let platformImage = UIImage(cgImage: image)
-                #else
-                let platformImage = NSImage(
-                    cgImage: image,
-                    size: NSSize(width: image.width, height: image.height)
-                )
-                #endif
                 return ChatComposerThumbnail(image: platformImage)
             }
         }.value
@@ -352,7 +336,8 @@ enum ChatAttachmentLoader {
                 }
 
                 if let byteCount = values.fileSize,
-                   byteCount > maximumImageBytes {
+                    byteCount > maximumImageBytes
+                {
                     throw ChatAttachmentLoadingError.imageTooLarge(name: url.lastPathComponent)
                 }
 
@@ -408,14 +393,7 @@ enum ChatAttachmentLoader {
             else {
                 throw ChatAttachmentLoadingError.invalidImage(name: name)
             }
-            #if canImport(UIKit)
             let platformImage = UIImage(cgImage: image)
-            #else
-            let platformImage = NSImage(
-                cgImage: image,
-                size: NSSize(width: image.width, height: image.height)
-            )
-            #endif
             return ChatLoadedImageAttachment(
                 data: data.base64EncodedString(),
                 mimeType: "image/jpeg",
@@ -426,13 +404,7 @@ enum ChatAttachmentLoader {
     }
 
     nonisolated private static func jpegData(from image: PlatformImage) -> Data? {
-        #if canImport(UIKit)
-        return image.jpegData(compressionQuality: 0.92)
-        #else
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
-        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
-        #endif
+        image.jpegData(compressionQuality: 0.92)
     }
 
     nonisolated private static func withSecurityScope<Value>(
@@ -522,20 +494,20 @@ private enum ChatAttachmentLoadingError: LocalizedError {
     }
 }
 
-#if DEBUG && canImport(UIKit)
-#Preview("Composer Attachments") {
-    ChatComposerAttachmentStrip(
-        attachments: [
-            ChatPendingAttachment(
-                name: "Example photo",
-                thumbnail: ChatComposerThumbnail(
-                    image: UIImage(systemName: "photo.fill") ?? UIImage()
+#if DEBUG
+    #Preview("Composer Attachments") {
+        ChatComposerAttachmentStrip(
+            attachments: [
+                ChatPendingAttachment(
+                    name: "Example photo",
+                    thumbnail: ChatComposerThumbnail(
+                        image: UIImage(systemName: "photo.fill") ?? UIImage()
+                    )
                 )
-            )
-        ],
-        remove: { _ in }
-    )
-    .padding()
-    .background(.background)
-}
+            ],
+            remove: { _ in }
+        )
+        .padding()
+        .background(.background)
+    }
 #endif

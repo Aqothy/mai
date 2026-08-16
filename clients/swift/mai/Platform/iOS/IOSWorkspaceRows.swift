@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 /// Rows for the unified Threads list: agent chats and terminals merged in
@@ -64,29 +63,6 @@ private struct IOSWorkspaceRow: View {
     }
 }
 
-/// Agent-thread rows for surfaces that only show chats (slide-out sidebar).
-struct IOSThreadRows: View {
-    let store: ThreadStore
-    let threads: [ThreadListEntry]
-    let selectThread: (String) -> Void
-
-    var body: some View {
-        ForEach(threads, id: \.id) { thread in
-            IOSThreadRowButton(
-                thread: thread,
-                isUnread: store.isThreadUnread(thread.id),
-                isCompact: false,
-                providerName: store.providerDisplayName(for: thread),
-                select: { selectThread(thread.id) },
-                markRead: { store.markThreadRead(thread.id) },
-                markUnread: { store.markThreadUnread(thread.id) },
-                openTerminalHere: nil
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// One row's chrome, kept unary (a single top-level Button) to preserve the
 /// List fast path and give each row its own invalidation boundary.
 private struct IOSThreadRowButton: View {
@@ -149,4 +125,3 @@ private struct IOSTerminalRowButton: View {
         )
     }
 }
-#endif

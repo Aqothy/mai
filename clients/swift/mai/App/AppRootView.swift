@@ -6,10 +6,6 @@ struct AppRootView: View {
     let terminalStore: TerminalStore
 
     var body: some View {
-        #if os(iOS)
         IOSAppContainer(store: store, draftStore: draftStore, terminalStore: terminalStore)
-        #else
-        DesktopAppContainer(store: store, draftStore: draftStore, terminalStore: terminalStore)
-        #endif
     }
 }

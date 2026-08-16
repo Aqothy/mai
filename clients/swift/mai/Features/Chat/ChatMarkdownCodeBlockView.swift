@@ -1,10 +1,5 @@
 import SwiftUI
-
-#if os(iOS)
-    import UIKit
-#elseif os(macOS)
-    import AppKit
-#endif
+import UIKit
 
 struct ChatMarkdownCodeBlockView: View {
     let block: ChatMarkdownCodeBlock
@@ -36,34 +31,16 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
-            #if os(macOS)
-                ChatMacHorizontalScrollView {
-                    ChatMarkdownCodeScrollContent(
-                        code: block.code,
-                        isStreaming: isStreaming,
-                        selectableCode: selectableCode
-                    )
-                }
-            #else
-                ScrollView(.horizontal) {
-                    #if os(iOS)
-                        ChatMarkdownCodeScrollContent(
-                            code: block.code,
-                            isStreaming: isStreaming,
-                            selectableCode: selectableCode
-                        )
-                    #else
-                        ChatMarkdownCodeScrollContent(
-                            code: block.code,
-                            isStreaming: isStreaming,
-                            displayedHighlightedCode: displayedHighlightedCode
-                        )
-                    #endif
-                }
-                .scrollIndicators(.visible, axes: .horizontal)
-                .scrollIndicatorsFlash(onAppear: true)
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            #endif
+            ScrollView(.horizontal) {
+                ChatMarkdownCodeScrollContent(
+                    code: block.code,
+                    isStreaming: isStreaming,
+                    selectableCode: selectableCode
+                )
+            }
+            .scrollIndicators(.visible, axes: .horizontal)
+            .scrollIndicatorsFlash(onAppear: true)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -118,76 +95,56 @@ struct ChatMarkdownCodeBlockView: View {
         return highlightedCode?.attributed
     }
 
-    #if os(iOS) || os(macOS)
-        private var selectableCode: NSAttributedString {
-            let source: NSAttributedString
-            if let displayedHighlightedCode {
-                source = NSAttributedString(displayedHighlightedCode)
-            } else {
-                source = NSAttributedString(string: block.code)
-            }
-            let attributedString = NSMutableAttributedString(
-                attributedString: source
-            )
-            let range = NSRange(
-                location: 0,
-                length: attributedString.length
-            )
-            attributedString.addAttributes(
-                [
-                    .font: codeFont,
-                    .paragraphStyle: codeParagraphStyle,
-                ],
+    private var selectableCode: NSAttributedString {
+        let source: NSAttributedString
+        if let displayedHighlightedCode {
+            source = NSAttributedString(displayedHighlightedCode)
+        } else {
+            source = NSAttributedString(string: block.code)
+        }
+        let attributedString = NSMutableAttributedString(
+            attributedString: source
+        )
+        let range = NSRange(
+            location: 0,
+            length: attributedString.length
+        )
+        attributedString.addAttributes(
+            [
+                .font: codeFont,
+                .paragraphStyle: codeParagraphStyle,
+            ],
+            range: range
+        )
+        if displayedHighlightedCode == nil {
+            attributedString.addAttribute(
+                .foregroundColor,
+                value: defaultCodeColor,
                 range: range
             )
-            if displayedHighlightedCode == nil {
-                attributedString.addAttribute(
-                    .foregroundColor,
-                    value: defaultCodeColor,
-                    range: range
-                )
-            }
-            return attributedString
         }
+        return attributedString
+    }
 
-        private var codeFont: Any {
-            #if os(iOS)
-                UIFont.monospacedSystemFont(
-                    ofSize: UIFont.preferredFont(forTextStyle: .callout)
-                        .pointSize,
-                    weight: .regular
-                )
-            #else
-                NSFont.monospacedSystemFont(
-                    ofSize: NSFont.preferredFont(forTextStyle: .callout)
-                        .pointSize,
-                    weight: .regular
-                )
-            #endif
-        }
+    private var codeFont: Any {
+        UIFont.monospacedSystemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize,
+            weight: .regular
+        )
+    }
 
-        private var defaultCodeColor: Any {
-            #if os(iOS)
-                UIColor.label
-            #else
-                NSColor.labelColor
-            #endif
-        }
+    private var defaultCodeColor: Any {
+        UIColor.label
+    }
 
-        private var codeParagraphStyle: NSParagraphStyle {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = 4
-            return paragraph
-        }
-    #endif
+    private var codeParagraphStyle: NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 4
+        return paragraph
+    }
 
     private func copyCode() {
-        #if os(iOS)
-            UIPasteboard.general.string = block.code
-        #elseif os(macOS)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(block.code, forType: .string)
-        #endif
+        UIPasteboard.general.string = block.code
 
         copied = true
         copyResetTask?.cancel()
@@ -207,11 +164,7 @@ private struct ChatMarkdownCodeScrollContent: View {
     let code: String
     let isStreaming: Bool
 
-    #if os(iOS) || os(macOS)
-        let selectableCode: NSAttributedString
-    #else
-        let displayedHighlightedCode: AttributedString?
-    #endif
+    let selectableCode: NSAttributedString
 
     var body: some View {
         if isStreaming {
@@ -223,20 +176,10 @@ private struct ChatMarkdownCodeScrollContent: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
         } else {
-            #if os(iOS) || os(macOS)
-                ChatSelectableRichText(attributedString: selectableCode)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-            #else
-                Text(displayedHighlightedCode ?? AttributedString(code))
-                    .font(.callout.monospaced())
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-            #endif
+            ChatSelectableRichText(attributedString: selectableCode)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
         }
     }
 }

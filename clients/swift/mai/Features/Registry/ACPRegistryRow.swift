@@ -1,8 +1,6 @@
 import Foundation
 import SwiftUI
-#if os(iOS)
 import WebKit
-#endif
 
 struct ACPRegistryRow: View {
     let entry: ACPRegistryEntry
@@ -71,23 +69,10 @@ private struct ACPRegistryIconContent: View {
     let iconURL: URL
 
     var body: some View {
-        #if os(iOS)
         ACPRegistrySVGIcon(iconURL: iconURL)
-        #else
-        AsyncImage(url: iconURL) { image in
-            image
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-        } placeholder: {
-            // Persists when the load fails, so the slot never goes blank.
-            fallbackGlyph
-        }
-        #endif
     }
 }
 
-#if os(iOS)
 private struct ACPRegistrySVGIcon: UIViewRepresentable {
     let iconURL: URL
 
@@ -149,7 +134,6 @@ private struct ACPRegistrySVGIcon: UIViewRepresentable {
         }
     }
 }
-#endif
 
 struct ACPRegistryRowAction: View {
     let entry: ACPRegistryEntry

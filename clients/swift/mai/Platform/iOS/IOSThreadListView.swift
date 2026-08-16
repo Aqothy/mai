@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 struct IOSThreadListView: View {
@@ -132,8 +131,7 @@ struct IOSThreadListView: View {
     }
 }
 
-/// A tappable project header carrying the fold chevron, mirroring the
-/// desktop sidebar's collapsible sections.
+/// A tappable project header carrying the fold chevron.
 private struct IOSProjectSectionHeader: View {
     let name: String
     let isExpanded: Bool
@@ -158,34 +156,33 @@ private struct IOSProjectSectionHeader: View {
 }
 
 #if DEBUG
-#Preview("iOS Thread List") {
-    NavigationStack {
-        IOSThreadListView(
-            store: PreviewData.threadStore(),
-            terminalStore: TerminalStore(),
-            newChat: {},
-            newTerminal: { _ in },
-            selectThread: { _ in },
-            selectTerminal: { _ in },
-            openAgentRegistry: {},
-            openSessionImport: {}
-        )
+    #Preview("iOS Thread List") {
+        NavigationStack {
+            IOSThreadListView(
+                store: PreviewData.threadStore(),
+                terminalStore: TerminalStore(),
+                newChat: {},
+                newTerminal: { _ in },
+                selectThread: { _ in },
+                selectTerminal: { _ in },
+                openAgentRegistry: {},
+                openSessionImport: {}
+            )
+        }
     }
-}
 
-#Preview("iOS Thread List Loading") {
-    NavigationStack {
-        IOSThreadListView(
-            store: ThreadStore(),
-            terminalStore: TerminalStore(),
-            newChat: {},
-            newTerminal: { _ in },
-            selectThread: { _ in },
-            selectTerminal: { _ in },
-            openAgentRegistry: {},
-            openSessionImport: {}
-        )
+    #Preview("iOS Thread List Loading") {
+        NavigationStack {
+            IOSThreadListView(
+                store: ThreadStore(),
+                terminalStore: TerminalStore(),
+                newChat: {},
+                newTerminal: { _ in },
+                selectThread: { _ in },
+                selectTerminal: { _ in },
+                openAgentRegistry: {},
+                openSessionImport: {}
+            )
+        }
     }
-}
-#endif
 #endif

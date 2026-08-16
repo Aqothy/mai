@@ -1,10 +1,5 @@
 import SwiftUI
-
-#if os(iOS)
-    import UIKit
-#elseif os(macOS)
-    import AppKit
-#endif
+import UIKit
 
 /// A small SwiftUI table whose copy control stays pinned to the visible
 /// top-right edge while wide content scrolls underneath it.
@@ -16,25 +11,16 @@ struct ChatMarkdownTableView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            #if os(macOS)
-                ChatMacHorizontalScrollView {
-                    ChatMarkdownTableGrid(table: table)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.top, 32)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            #else
-                ScrollView(.horizontal) {
-                    ChatMarkdownTableGrid(table: table)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.top, 32)
-                }
-                .scrollIndicators(.visible, axes: .horizontal)
-                .scrollIndicatorsFlash(onAppear: true)
-                .scrollIndicatorsFlash(trigger: table)
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            #endif
+            ScrollView(.horizontal) {
+                ChatMarkdownTableGrid(table: table)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.top, 32)
+            }
+            .scrollIndicators(.visible, axes: .horizontal)
+            .scrollIndicatorsFlash(onAppear: true)
+            .scrollIndicatorsFlash(trigger: table)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(
                 "Copy table",
@@ -59,15 +45,7 @@ struct ChatMarkdownTableView: View {
     }
 
     private func copyTable() {
-        #if os(iOS)
-            UIPasteboard.general.string = table.tabSeparatedText
-        #elseif os(macOS)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(
-                table.tabSeparatedText,
-                forType: .string
-            )
-        #endif
+        UIPasteboard.general.string = table.tabSeparatedText
 
         copied = true
         copyResetTask?.cancel()

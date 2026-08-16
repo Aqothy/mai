@@ -1,10 +1,7 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
-
-#if canImport(UIKit)
-    import UIKit
-#endif
 
 struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -92,14 +89,12 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                     if showsStop {
                         stop()
                     } else {
-                        #if canImport(UIKit)
-                            UIApplication.shared.sendAction(
-                                #selector(UIResponder.resignFirstResponder),
-                                to: nil,
-                                from: nil,
-                                for: nil
-                            )
-                        #endif
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
                         send()
                     }
                 } label: {
@@ -129,7 +124,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
             .padding(.bottom, 8)
         }
         .glassSurface(in: .rect(cornerRadius: 24), isShadowed: true)
-        .frame(maxWidth: 760)
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
         .frame(maxWidth: .infinity)
         .padding(.horizontal)
         .padding(.bottom, 12)
@@ -162,9 +157,11 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     }
 
     private func selectWorkspaceFile() -> Bool {
-        guard let updatedText = workspaceFilePicker?.textBySelectingCurrentMatch(
-            in: text
-        ) else { return false }
+        guard
+            let updatedText = workspaceFilePicker?.textBySelectingCurrentMatch(
+                in: text
+            )
+        else { return false }
         text = updatedText
         return true
     }
@@ -219,34 +216,26 @@ private struct DraftPromptEditor: View {
         .accessibilityLabel("Prompt")
         .onKeyPress(phases: .down) { keyPress in
             if keyPress.key == .downArrow,
-               moveWorkspaceFileSelection(1) {
+                moveWorkspaceFileSelection(1)
+            {
                 return .handled
             }
             if keyPress.key == .upArrow,
-               moveWorkspaceFileSelection(-1) {
+                moveWorkspaceFileSelection(-1)
+            {
                 return .handled
             }
             if keyPress.key == .escape,
-               dismissWorkspaceFilePicker() {
+                dismissWorkspaceFilePicker()
+            {
                 return .handled
             }
             if keyPress.key == .return,
-               selectWorkspaceFile() {
+                selectWorkspaceFile()
+            {
                 return .handled
             }
-            #if os(macOS)
-                guard keyPress.key == .return,
-                    !keyPress.modifiers.contains(.shift),
-                    canSend
-                else {
-                    return .ignored
-                }
-                isFocused = false
-                send()
-                return .handled
-            #else
-                return .ignored
-            #endif
+            return .ignored
         }
         .onChange(of: focusID, initial: true) { _, focusID in
             // Only a draft prompt auto-focuses. The composer keeps one
@@ -296,15 +285,13 @@ struct ComposerAddMenu: View {
                 }
                 .disabled(isImageAttachmentDisabled)
 
-                #if os(iOS)
-                    Button("Camera", systemImage: "camera") {
-                        isCameraPresented = true
-                    }
-                    .disabled(
-                        isImageAttachmentDisabled
-                            || !UIImagePickerController.isSourceTypeAvailable(.camera)
-                    )
-                #endif
+                Button("Camera", systemImage: "camera") {
+                    isCameraPresented = true
+                }
+                .disabled(
+                    isImageAttachmentDisabled
+                        || !UIImagePickerController.isSourceTypeAvailable(.camera)
+                )
             }
 
             if !commands.isEmpty {
@@ -355,71 +342,67 @@ struct ComposerAddMenu: View {
             selectedPhotos = []
             addPhotos(photos)
         }
-        #if os(iOS)
-            .fullScreenCover(isPresented: $isCameraPresented) {
-                ComposerCameraPicker {
-                    isCameraPresented = false
-                    addCameraImage(ChatComposerThumbnail(image: $0))
-                } cancel: {
-                    isCameraPresented = false
-                }
-                .ignoresSafeArea()
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            ComposerCameraPicker {
+                isCameraPresented = false
+                addCameraImage(ChatComposerThumbnail(image: $0))
+            } cancel: {
+                isCameraPresented = false
             }
-        #endif
+            .ignoresSafeArea()
+        }
     }
 }
 
-#if os(iOS)
-    private struct ComposerCameraPicker: UIViewControllerRepresentable {
-        let capture: (UIImage) -> Void
-        let cancel: () -> Void
+private struct ComposerCameraPicker: UIViewControllerRepresentable {
+    let capture: (UIImage) -> Void
+    let cancel: () -> Void
 
-        func makeCoordinator() -> Coordinator {
-            Coordinator(parent: self)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let controller = UIImagePickerController()
+        controller.sourceType = .camera
+        controller.mediaTypes = [UTType.image.identifier]
+        controller.cameraCaptureMode = .photo
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIImagePickerController,
+        context: Context
+    ) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate,
+        UINavigationControllerDelegate
+    {
+        var parent: ComposerCameraPicker
+
+        init(parent: ComposerCameraPicker) {
+            self.parent = parent
         }
 
-        func makeUIViewController(context: Context) -> UIImagePickerController {
-            let controller = UIImagePickerController()
-            controller.sourceType = .camera
-            controller.mediaTypes = [UTType.image.identifier]
-            controller.cameraCaptureMode = .photo
-            controller.delegate = context.coordinator
-            return controller
-        }
-
-        func updateUIViewController(
-            _ uiViewController: UIImagePickerController,
-            context: Context
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
-            context.coordinator.parent = self
+            guard let image = info[.originalImage] as? UIImage else {
+                parent.cancel()
+                return
+            }
+            parent.capture(image)
         }
 
-        final class Coordinator: NSObject, UIImagePickerControllerDelegate,
-            UINavigationControllerDelegate
-        {
-            var parent: ComposerCameraPicker
-
-            init(parent: ComposerCameraPicker) {
-                self.parent = parent
-            }
-
-            func imagePickerController(
-                _ picker: UIImagePickerController,
-                didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-            ) {
-                guard let image = info[.originalImage] as? UIImage else {
-                    parent.cancel()
-                    return
-                }
-                parent.capture(image)
-            }
-
-            func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-                parent.cancel()
-            }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.cancel()
         }
     }
-#endif
+}
 
 #if DEBUG
     #Preview("Composer Add Menu") {
@@ -440,42 +423,40 @@ struct ComposerAddMenu: View {
         .padding()
     }
 
-    #if canImport(UIKit)
-        #Preview("Composer With Attachment") {
-            @Previewable @State var text = ""
+    #Preview("Composer With Attachment") {
+        @Previewable @State var text = ""
 
-            PromptComposer(
-                text: $text,
-                isEnabled: true,
-                focusID: nil,
-                canSend: false,
-                isSending: false,
-                attachments: [
-                    ChatPendingAttachment(
-                        name: "Example photo",
-                        thumbnail: ChatComposerThumbnail(
-                            image: UIImage(systemName: "photo.fill") ?? UIImage()
-                        )
+        PromptComposer(
+            text: $text,
+            isEnabled: true,
+            focusID: nil,
+            canSend: false,
+            isSending: false,
+            attachments: [
+                ChatPendingAttachment(
+                    name: "Example photo",
+                    thumbnail: ChatComposerThumbnail(
+                        image: UIImage(systemName: "photo.fill") ?? UIImage()
                     )
-                ],
-                submitLabel: "Send",
-                send: {}
-            ) {
-                ComposerAddMenu(
-                    isImageAttachmentAvailable: true,
-                    isImageAttachmentDisabled: false,
-                    maximumImageSelectionCount: 7,
-                    commands: [],
-                    addImages: { _ in },
-                    addPhotos: { _ in },
-                    addCameraImage: { _ in },
-                    insertCommand: { _ in },
-                    showError: { _ in }
                 )
-            } trailingControls: {
-                Text("Model")
-            }
-            .padding()
+            ],
+            submitLabel: "Send",
+            send: {}
+        ) {
+            ComposerAddMenu(
+                isImageAttachmentAvailable: true,
+                isImageAttachmentDisabled: false,
+                maximumImageSelectionCount: 7,
+                commands: [],
+                addImages: { _ in },
+                addPhotos: { _ in },
+                addCameraImage: { _ in },
+                insertCommand: { _ in },
+                showError: { _ in }
+            )
+        } trailingControls: {
+            Text("Model")
         }
-    #endif
+        .padding()
+    }
 #endif

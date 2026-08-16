@@ -12,10 +12,10 @@ struct ACPRegistryView: View {
     }
 
     #if DEBUG
-    init(store: ThreadStore, model: ACPRegistryModel) {
-        self.store = store
-        _model = State(initialValue: model)
-    }
+        init(store: ThreadStore, model: ACPRegistryModel) {
+            self.store = store
+            _model = State(initialValue: model)
+        }
     #endif
 
     var body: some View {
@@ -40,9 +40,7 @@ struct ACPRegistryView: View {
             ACPRegistryStatusView(model: model)
         }
         .navigationTitle("Agent Registry")
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Add Custom Agent", systemImage: "plus") {
@@ -132,7 +130,7 @@ struct ACPRegistryStatusView: View {
             if model.entries.isEmpty {
                 ProgressView("Loading Agents…")
             }
-        case let .failed(message):
+        case .failed(let message):
             ContentUnavailableView {
                 Label("Registry Unavailable", systemImage: "wifi.exclamationmark")
             } description: {
@@ -165,65 +163,65 @@ struct ACPRegistryStatusView: View {
 }
 
 #if DEBUG
-#Preview("Agent Registry") {
-    let store = ThreadStore(
-        previewThreads: [],
-        installedAgents: [
-            ACPRegistryInstalledAgent(
-                args: nil,
-                description: nil,
-                icon: nil,
-                id: "claude-code",
-                installedAt: .now,
-                instanceID: "registry-claude-code",
-                name: "Claude Code",
-                package: "claude-code-acp@1.0.0",
-                source: "registry",
-                version: "1.0.0"
-            ),
-            ACPRegistryInstalledAgent(
-                args: nil,
-                description: nil,
-                icon: nil,
-                id: "my-codex",
-                installedAt: .now,
-                instanceID: "custom-my-codex",
-                name: "My Codex",
-                package: "",
-                source: "custom",
-                version: ""
-            ),
-        ]
-    )
-    NavigationStack {
-        ACPRegistryView(
-            store: store,
-            model: ACPRegistryModel(
-                store: store,
-                previewAgents: [
-                    ACPRegistryAgent(
-                        args: nil,
-                        description: "Use Claude Code from any ACP client.",
-                        icon: nil,
-                        id: "claude-code",
-                        instanceID: "registry-claude-code",
-                        name: "Claude Code",
-                        package: "claude-code-acp@1.2.0",
-                        version: "1.2.0"
-                    ),
-                    ACPRegistryAgent(
-                        args: nil,
-                        description: "OpenAI Codex agent.",
-                        icon: nil,
-                        id: "codex",
-                        instanceID: "registry-codex",
-                        name: "Codex",
-                        package: "codex-acp@0.4.1",
-                        version: "0.4.1"
-                    ),
-                ]
-            )
+    #Preview("Agent Registry") {
+        let store = ThreadStore(
+            previewThreads: [],
+            installedAgents: [
+                ACPRegistryInstalledAgent(
+                    args: nil,
+                    description: nil,
+                    icon: nil,
+                    id: "claude-code",
+                    installedAt: .now,
+                    instanceID: "registry-claude-code",
+                    name: "Claude Code",
+                    package: "claude-code-acp@1.0.0",
+                    source: "registry",
+                    version: "1.0.0"
+                ),
+                ACPRegistryInstalledAgent(
+                    args: nil,
+                    description: nil,
+                    icon: nil,
+                    id: "my-codex",
+                    installedAt: .now,
+                    instanceID: "custom-my-codex",
+                    name: "My Codex",
+                    package: "",
+                    source: "custom",
+                    version: ""
+                ),
+            ]
         )
+        NavigationStack {
+            ACPRegistryView(
+                store: store,
+                model: ACPRegistryModel(
+                    store: store,
+                    previewAgents: [
+                        ACPRegistryAgent(
+                            args: nil,
+                            description: "Use Claude Code from any ACP client.",
+                            icon: nil,
+                            id: "claude-code",
+                            instanceID: "registry-claude-code",
+                            name: "Claude Code",
+                            package: "claude-code-acp@1.2.0",
+                            version: "1.2.0"
+                        ),
+                        ACPRegistryAgent(
+                            args: nil,
+                            description: "OpenAI Codex agent.",
+                            icon: nil,
+                            id: "codex",
+                            instanceID: "registry-codex",
+                            name: "Codex",
+                            package: "codex-acp@0.4.1",
+                            version: "0.4.1"
+                        ),
+                    ]
+                )
+            )
+        }
     }
-}
 #endif

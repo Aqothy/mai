@@ -1,4 +1,3 @@
-#if os(iOS)
 enum IOSNavigationRoute: Hashable {
     case newChat
     case thread(String)
@@ -6,4 +5,3 @@ enum IOSNavigationRoute: Hashable {
     case agentRegistry
     case sessionImport
 }
-#endif

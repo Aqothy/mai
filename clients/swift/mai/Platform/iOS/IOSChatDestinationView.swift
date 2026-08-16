@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 struct IOSChatDestinationView: View {
@@ -11,7 +10,7 @@ struct IOSChatDestinationView: View {
             switch route {
             case .newChat:
                 ChatView(store: store, draftStore: draftStore)
-            case let .thread(threadID):
+            case .thread(let threadID):
                 if store.selectedThreadID == threadID {
                     ChatView(store: store, draftStore: draftStore)
                 } else {
@@ -31,7 +30,7 @@ struct IOSChatDestinationView: View {
             switch route {
             case .newChat:
                 store.startNewDraft()
-            case let .thread(threadID):
+            case .thread(let threadID):
                 guard store.selectedThreadID != threadID else { return }
                 store.selectThread(threadID)
             case .terminal, .agentRegistry, .sessionImport:
@@ -40,4 +39,3 @@ struct IOSChatDestinationView: View {
         }
     }
 }
-#endif

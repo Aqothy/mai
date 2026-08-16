@@ -103,19 +103,15 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     var body: some View {
         switch block {
         case .prose(let prose):
-            #if os(iOS)
-                if usesSelectableProse {
-                    ChatSelectableMarkdownProseRun(
-                        layoutID: proseLayoutID,
-                        prose: prose
-                    )
-                    .equatable()
-                } else {
-                    ChatStreamingMarkdownProseView(prose: prose)
-                }
-            #else
+            if usesSelectableProse {
+                ChatSelectableMarkdownProseRun(
+                    layoutID: proseLayoutID,
+                    prose: prose
+                )
+                .equatable()
+            } else {
                 ChatStreamingMarkdownProseView(prose: prose)
-            #endif
+            }
 
         case .code(let codeBlock):
             ChatMarkdownCodeBlockView(
@@ -129,32 +125,30 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     }
 }
 
-#if os(iOS)
-    /// Gives each completed prose run the existing selectable renderer and a
-    /// small local cache. The actively changing tail never enters this view.
-    private struct ChatSelectableMarkdownProseRun: Equatable, View {
-        let layoutID: String
-        let prose: ChatMarkdownProseRun
+/// Gives each completed prose run the existing selectable renderer and a
+/// small local cache. The actively changing tail never enters this view.
+private struct ChatSelectableMarkdownProseRun: Equatable, View {
+    let layoutID: String
+    let prose: ChatMarkdownProseRun
 
-        @State private var layoutStore = ChatTextLayoutStore()
+    @State private var layoutStore = ChatTextLayoutStore()
 
-        nonisolated static func == (
-            lhs: ChatSelectableMarkdownProseRun,
-            rhs: ChatSelectableMarkdownProseRun
-        ) -> Bool {
-            lhs.layoutID == rhs.layoutID && lhs.prose == rhs.prose
-        }
-
-        var body: some View {
-            ChatSelectableText(
-                layoutID: layoutID,
-                source: prose.source,
-                style: .markdownProse,
-                layoutStore: layoutStore
-            )
-        }
+    nonisolated static func == (
+        lhs: ChatSelectableMarkdownProseRun,
+        rhs: ChatSelectableMarkdownProseRun
+    ) -> Bool {
+        lhs.layoutID == rhs.layoutID && lhs.prose == rhs.prose
     }
-#endif
+
+    var body: some View {
+        ChatSelectableText(
+            layoutID: layoutID,
+            source: prose.source,
+            style: .markdownProse,
+            layoutStore: layoutStore
+        )
+    }
+}
 
 private struct ChatStreamingMarkdownProseView: Equatable, View {
     let prose: ChatMarkdownProseRun

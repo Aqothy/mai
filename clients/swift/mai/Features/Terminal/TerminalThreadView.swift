@@ -27,26 +27,24 @@ struct TerminalThreadView: View {
                 .padding(.bottom)
         }
         .navigationTitle(title)
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
     }
 }
 
 #if DEBUG
-/// Development-only harness: renders the adapter against the fake echo
-/// backend so the Ghostty integration can be exercised without a daemon.
-private struct TerminalPreviewHarness: View {
-    @State private var context = TerminalPreviewBackend.makeContext()
+    /// Development-only harness: renders the adapter against the fake echo
+    /// backend so the Ghostty integration can be exercised without a daemon.
+    private struct TerminalPreviewHarness: View {
+        @State private var context = TerminalPreviewBackend.makeContext()
 
-    var body: some View {
-        NavigationStack {
-            TerminalThreadView(controller: context.controller, title: "Preview Terminal")
+        var body: some View {
+            NavigationStack {
+                TerminalThreadView(controller: context.controller, title: "Preview Terminal")
+            }
         }
     }
-}
 
-#Preview("Terminal") {
-    TerminalPreviewHarness()
-}
+    #Preview("Terminal") {
+        TerminalPreviewHarness()
+    }
 #endif

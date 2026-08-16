@@ -91,13 +91,6 @@ final class ThreadStore {
     /// thread is selected.
     private(set) var selectedThreadTitle: String?
 
-    /// Binding projection for the sidebar's List selection: reads the
-    /// selected thread id and routes writes through selectThread(_:).
-    var sidebarSelection: String? {
-        get { selectedThreadID }
-        set { selectThread(newValue) }
-    }
-
     var isReconnectScheduled: Bool {
         nextReconnectAt != nil
     }
@@ -120,29 +113,21 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.markdownSegmentCache
     }
 
-    #if os(iOS)
-        var selectedThreadTextLayoutStore: ChatTextLayoutStore? {
-            _ = selectedSessionGeneration
-            guard let selectedThreadID else { return nil }
-            return sessionsByID[selectedThreadID]?.textLayoutStore
-        }
+    var selectedThreadTextLayoutStore: ChatTextLayoutStore? {
+        _ = selectedSessionGeneration
+        guard let selectedThreadID else { return nil }
+        return sessionsByID[selectedThreadID]?.textLayoutStore
+    }
 
-        func resetSelectedThreadTextLayoutStore() {
-            guard let selectedThreadID,
-                var session = sessionsByID[selectedThreadID]
-            else { return }
-            session.textLayoutStore.deactivateTextViewReuse()
-            session.textLayoutStore = ChatTextLayoutStore()
-            sessionsByID[selectedThreadID] = session
-            noteSelectedSessionChanged(selectedThreadID)
-        }
-    #elseif os(macOS)
-        var selectedThreadMacTextLayoutStore: ChatMacTextLayoutStore? {
-            _ = selectedSessionGeneration
-            guard let selectedThreadID else { return nil }
-            return sessionsByID[selectedThreadID]?.macTextLayoutStore
-        }
-    #endif
+    func resetSelectedThreadTextLayoutStore() {
+        guard let selectedThreadID,
+            var session = sessionsByID[selectedThreadID]
+        else { return }
+        session.textLayoutStore.deactivateTextViewReuse()
+        session.textLayoutStore = ChatTextLayoutStore()
+        sessionsByID[selectedThreadID] = session
+        noteSelectedSessionChanged(selectedThreadID)
+    }
 
     var selectedThreadSequence: Int {
         _ = selectedSessionGeneration
@@ -213,30 +198,30 @@ final class ThreadStore {
     }
 
     #if DEBUG
-    init(
-        previewThreads: [ThreadListEntry],
-        selectedThread: Thread? = nil,
-        providers: [InstanceInfo] = [],
-        installedAgents: [ACPRegistryInstalledAgent] = []
-    ) {
-        rpc = RPCClient()
-        cachePolicy = CachePolicy()
-        readState = ThreadReadStateStore(defaults: nil)
-        now = Date.init
-        threads = previewThreads
-        self.providers = providers
-        self.installedAgents = installedAgents
-        selectedThreadID = selectedThread?.id
-        if let selectedThread {
-            var session = ThreadSession(thread: selectedThread)
-            session.subscriptionState = .visible
-            session.shouldRestoreAfterReconnect = true
-            sessionsByID[selectedThread.id] = session
+        init(
+            previewThreads: [ThreadListEntry],
+            selectedThread: Thread? = nil,
+            providers: [InstanceInfo] = [],
+            installedAgents: [ACPRegistryInstalledAgent] = []
+        ) {
+            rpc = RPCClient()
+            cachePolicy = CachePolicy()
+            readState = ThreadReadStateStore(defaults: nil)
+            now = Date.init
+            threads = previewThreads
+            self.providers = providers
+            self.installedAgents = installedAgents
+            selectedThreadID = selectedThread?.id
+            if let selectedThread {
+                var session = ThreadSession(thread: selectedThread)
+                session.subscriptionState = .visible
+                session.shouldRestoreAfterReconnect = true
+                sessionsByID[selectedThread.id] = session
+            }
+            connectionState = .connected
+            rebuildProviderCaches()
+            noteThreadsChanged()
         }
-        connectionState = .connected
-        rebuildProviderCaches()
-        noteThreadsChanged()
-    }
     #endif
 
     func start() async {
@@ -307,8 +292,9 @@ final class ThreadStore {
             guard connectionState == .connected, let selectedThreadID else { return }
             selectedThreadLoadErrorMessage = nil
             if let session = sessionsByID[selectedThreadID],
-               session.subscriptionState.isSubscribed,
-               session.canPrepareHistoryRestore {
+                session.subscriptionState.isSubscribed,
+                session.canPrepareHistoryRestore
+            {
                 Task {
                     await prepareSelectedRestoredThreadIfNeeded(selectedThreadID)
                 }
@@ -341,9 +327,12 @@ final class ThreadStore {
         )
     }
 
-    func setProviderOption(optionsSessionID: String, optionID: String, value: JSONAny) async throws -> ProviderOptionsResult {
+    func setProviderOption(optionsSessionID: String, optionID: String, value: JSONAny) async throws
+        -> ProviderOptionsResult
+    {
         try await rpc.setProviderOption(
-            ProviderOptionsSetParams(optionID: optionID, optionsSessionID: optionsSessionID, value: value)
+            ProviderOptionsSetParams(
+                optionID: optionID, optionsSessionID: optionsSessionID, value: value)
         )
     }
 
@@ -412,11 +401,15 @@ final class ThreadStore {
     func fetchProviderSessions(agentID: String) async throws -> [SessionSummary] {
         let instanceID = try await ensureProviderAvailable(agentID)
         guard let provider = providers.first(where: { $0.instanceID == instanceID }),
-              provider.capabilities.sessionList == true else {
-            throw RPCError(code: nil, message: "This agent does not support listing sessions", data: nil)
+            provider.capabilities.sessionList == true
+        else {
+            throw RPCError(
+                code: nil, message: "This agent does not support listing sessions", data: nil)
         }
-        guard provider.capabilities.loadReplay == true || provider.capabilities.resume == true else {
-            throw RPCError(code: nil, message: "This agent does not support restoring sessions", data: nil)
+        guard provider.capabilities.loadReplay == true || provider.capabilities.resume == true
+        else {
+            throw RPCError(
+                code: nil, message: "This agent does not support restoring sessions", data: nil)
         }
         return try await rpc.listProviderSessions(
             ProviderListSessionsParams(cwd: nil, instanceID: instanceID)
@@ -492,8 +485,9 @@ final class ThreadStore {
     /// Dispatches a queued prompt into the running turn immediately, removing
     /// it from the queue once the dispatch succeeds.
     func steerQueuedPrompt(threadID: String, promptID: String) async throws {
-        guard let prompt = queuedPromptsByThreadID[threadID]?
-            .first(where: { $0.id == promptID }),
+        guard
+            let prompt = queuedPromptsByThreadID[threadID]?
+                .first(where: { $0.id == promptID }),
             !dispatchingQueuedPromptThreadIDs.contains(threadID)
         else { return }
 
@@ -576,11 +570,13 @@ final class ThreadStore {
 
     func itemDetail(threadID: String, item: Item) async throws -> Item {
         let id = ItemDetailID(threadID: threadID, itemID: item.id)
-        let requestedSequence = currentItem(threadID: threadID, itemID: item.id)?.sequence
+        let requestedSequence =
+            currentItem(threadID: threadID, itemID: item.id)?.sequence
             ?? item.sequence
         if let requestedSequence,
-           let cached = itemDetailsByID[id],
-           cached.sequence == requestedSequence {
+            let cached = itemDetailsByID[id],
+            cached.sequence == requestedSequence
+        {
             return cached.item
         }
 
@@ -598,8 +594,9 @@ final class ThreadStore {
                 threadID: threadID,
                 itemID: item.id
             )?.sequence,
-               let detailSequence = detail.sequence,
-               detailSequence < currentSequence {
+                let detailSequence = detail.sequence,
+                detailSequence < currentSequence
+            {
                 continue
             }
 
@@ -651,8 +648,9 @@ final class ThreadStore {
             sessionsByID[id] = session
 
             if connectionState == .connected,
-               !session.subscriptionState.isSubscribed,
-               !isSubscribing(session.subscriptionState) {
+                !session.subscriptionState.isSubscribed,
+                !isSubscribing(session.subscriptionState)
+            {
                 ensureSubscribed(id)
             }
         }
@@ -664,7 +662,8 @@ final class ThreadStore {
     func providerID(for thread: ThreadListEntry) -> String? {
         if let providerID = thread.providerInstanceID?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-           !providerID.isEmpty {
+            !providerID.isEmpty
+        {
             return providerID
         }
         let providerID = thread.session?.providerInstanceID
@@ -676,13 +675,15 @@ final class ThreadStore {
     func providerDisplayName(for thread: ThreadListEntry) -> String? {
         if let sessionName = thread.session?.providerName?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-           !sessionName.isEmpty {
+            !sessionName.isEmpty
+        {
             return sessionName
         }
         guard let providerID = providerID(for: thread) else { return nil }
         if let instanceName = instancesByID[providerID]?.name
             .trimmingCharacters(in: .whitespacesAndNewlines),
-           !instanceName.isEmpty {
+            !instanceName.isEmpty
+        {
             return instanceName
         }
         return availableProviders.first { $0.id == providerID }?.name ?? providerID
@@ -704,7 +705,8 @@ final class ThreadStore {
         let timestamp = timestamp ?? now()
         let inactive = sessionsByID.compactMap { id, session -> (String, Date)? in
             guard case .inactive = session.subscriptionState,
-                  let inactiveSince = session.inactiveSince else { return nil }
+                let inactiveSince = session.inactiveSince
+            else { return nil }
             return (id, inactiveSince)
         }.sorted { left, right in
             if left.1 == right.1 {
@@ -783,13 +785,15 @@ final class ThreadStore {
             selectedThreadTitle = nil
             return
         }
-        selectedThreadTitle = sessionsByID[selectedThreadID]?.thread?.title
+        selectedThreadTitle =
+            sessionsByID[selectedThreadID]?.thread?.title
             ?? threads.first { $0.id == selectedThreadID }?.title
     }
 
     private func resolveProvider(_ preferredID: String) async throws -> String {
         if let provider = providers.first(where: { $0.instanceID == preferredID }),
-           provider.instanceStatus == .initialized {
+            provider.instanceStatus == .initialized
+        {
             return provider.instanceID
         }
 
@@ -857,12 +861,13 @@ final class ThreadStore {
 
     private func dispatchNextQueuedPromptIfPossible(_ threadID: String) {
         guard connectionState == .connected,
-              !dispatchingQueuedPromptThreadIDs.contains(threadID),
-              let thread = sessionsByID[threadID]?.thread,
-              thread.latestTurn?.turnState != .running,
-              thread.session?.sessionStatus == .ready
+            !dispatchingQueuedPromptThreadIDs.contains(threadID),
+            let thread = sessionsByID[threadID]?.thread,
+            thread.latestTurn?.turnState != .running,
+            thread.session?.sessionStatus == .ready
                 || thread.session?.sessionStatus == .interrupted,
-              let prompt = queuedPromptsByThreadID[threadID]?.first else {
+            let prompt = queuedPromptsByThreadID[threadID]?.first
+        else {
             return
         }
 
@@ -887,7 +892,8 @@ final class ThreadStore {
 
                 let currentTurn = sessionsByID[threadID]?.thread?.latestTurn
                 if currentTurn?.turnID != turnBeforeDispatch,
-                   currentTurn?.turnState != .running {
+                    currentTurn?.turnState != .running
+                {
                     dispatchNextQueuedPromptIfPossible(threadID)
                 }
             } catch is CancellationError {
@@ -942,7 +948,8 @@ final class ThreadStore {
 
         for id in sessionsByID.keys {
             guard var session = sessionsByID[id] else { continue }
-            session.shouldRestoreAfterReconnect = session.shouldRestoreAfterReconnect
+            session.shouldRestoreAfterReconnect =
+                session.shouldRestoreAfterReconnect
                 || session.subscriptionState != .unsubscribed
             session.subscriptionState = .unsubscribed
             session.bufferedItems.removeAll()
@@ -998,10 +1005,12 @@ final class ThreadStore {
 
         let inactiveIDs = sessionsByID.compactMap { id, session -> (String, Date)? in
             guard id != selectedThreadID,
-                  !session.isProtected,
-                  session.shouldRestoreAfterReconnect,
-                  let inactiveSince = session.inactiveSince,
-                  timestamp.timeIntervalSince(inactiveSince) < cachePolicy.inactiveSubscriptionLifetime else {
+                !session.isProtected,
+                session.shouldRestoreAfterReconnect,
+                let inactiveSince = session.inactiveSince,
+                timestamp.timeIntervalSince(inactiveSince)
+                    < cachePolicy.inactiveSubscriptionLifetime
+            else {
                 return nil
             }
             return (id, inactiveSince)
@@ -1017,7 +1026,8 @@ final class ThreadStore {
     private func ensureSubscribed(_ id: String) {
         guard connectionState == .connected else { return }
         if let session = sessionsByID[id],
-           session.subscriptionState.isSubscribed || isSubscribing(session.subscriptionState) {
+            session.subscriptionState.isSubscribed || isSubscribing(session.subscriptionState)
+        {
             return
         }
         guard subscriptionTasks[id]?.operation != .subscribe else { return }
@@ -1054,13 +1064,15 @@ final class ThreadStore {
                 SubscribeThreadInput(threadID: id)
             )
             guard connectionState == .connected,
-                  var current = sessionsByID[id],
-                  case .subscribing(recoveryID) = current.subscriptionState else {
+                var current = sessionsByID[id],
+                case .subscribing(recoveryID) = current.subscriptionState
+            else {
                 return
             }
             guard item.streamKind == .snapshot,
-                  let snapshot = item.snapshot,
-                  snapshot.thread.id == id else {
+                let snapshot = item.snapshot,
+                snapshot.thread.id == id
+            else {
                 throw ThreadStoreError.invalidSnapshot
             }
 
@@ -1090,7 +1102,8 @@ final class ThreadStore {
             return
         } catch {
             guard var failed = sessionsByID[id],
-                  case .subscribing(recoveryID) = failed.subscriptionState else { return }
+                case .subscribing(recoveryID) = failed.subscriptionState
+            else { return }
             failed.subscriptionState = .unsubscribed
             failed.bufferedItems.removeAll()
             sessionsByID[id] = failed
@@ -1102,9 +1115,10 @@ final class ThreadStore {
 
     private func prepareSelectedRestoredThreadIfNeeded(_ id: String) async {
         guard connectionState == .connected,
-              selectedThreadID == id,
-              let session = sessionsByID[id],
-              session.canPrepareHistoryRestore else {
+            selectedThreadID == id,
+            let session = sessionsByID[id],
+            session.canPrepareHistoryRestore
+        else {
             return
         }
         do {
@@ -1129,7 +1143,8 @@ final class ThreadStore {
 
     private func reconcileSubscriptionState(_ id: String, at timestamp: Date) {
         guard var session = sessionsByID[id],
-              session.subscriptionState.isSubscribed || isSubscribing(session.subscriptionState) else {
+            session.subscriptionState.isSubscribed || isSubscribing(session.subscriptionState)
+        else {
             return
         }
 
@@ -1152,19 +1167,16 @@ final class ThreadStore {
 
     private func unsubscribe(_ id: String) {
         guard var session = sessionsByID[id],
-              session.subscriptionState.isSubscribed else { return }
+            session.subscriptionState.isSubscribed
+        else { return }
 
         session.subscriptionState = .unsubscribed
         session.shouldRestoreAfterReconnect = false
         // Presentation caches are useful for recent back-navigation, but an
         // evicted inactive session should not retain prepared content forever.
         session.markdownSegmentCache = ChatMarkdownSegmentCache()
-        #if os(iOS)
-            session.textLayoutStore.deactivateTextViewReuse()
-            session.textLayoutStore = ChatTextLayoutStore()
-        #elseif os(macOS)
-            session.macTextLayoutStore = ChatMacTextLayoutStore()
-        #endif
+        session.textLayoutStore.deactivateTextViewReuse()
+        session.textLayoutStore = ChatTextLayoutStore()
         sessionsByID[id] = session
         removeItemDetails(for: id)
         streamingTextByThreadID[id] = nil
@@ -1204,7 +1216,8 @@ final class ThreadStore {
         let timestamp = now()
         let nextExpiration = sessionsByID.values.compactMap { session -> Date? in
             guard case .inactive = session.subscriptionState,
-                  let inactiveSince = session.inactiveSince else { return nil }
+                let inactiveSince = session.inactiveSince
+            else { return nil }
             return inactiveSince.addingTimeInterval(cachePolicy.inactiveSubscriptionLifetime)
         }.min()
         guard let nextExpiration else { return }
@@ -1257,7 +1270,8 @@ final class ThreadStore {
 
     private func receiveThreadItem(_ item: ThreadStreamItem) {
         guard let threadID = item.event?.payload.threadID,
-              var session = sessionsByID[threadID] else { return }
+            var session = sessionsByID[threadID]
+        else { return }
         if case .subscribing = session.subscriptionState {
             session.bufferedItems.append(item)
             sessionsByID[threadID] = session
@@ -1334,8 +1348,9 @@ final class ThreadStore {
                 return event.payload.attachments?.isEmpty != false
             }
 
-            guard let text = sessionsByID[threadID]?.thread?.timeline
-                .last(where: { $0.message?.id == messageID })?.message?.text
+            guard
+                let text = sessionsByID[threadID]?.thread?.timeline
+                    .last(where: { $0.message?.id == messageID })?.message?.text
             else { return false }
             streamingTextByThreadID[threadID, default: [:]][id] =
                 ThreadStreamingText(text: text)
@@ -1362,10 +1377,12 @@ final class ThreadStore {
                 return true
             }
 
-            guard let text = currentReasoningText(
-                threadID: threadID,
-                itemID: item.id
-            ) else { return false }
+            guard
+                let text = currentReasoningText(
+                    threadID: threadID,
+                    itemID: item.id
+                )
+            else { return false }
             streamingTextByThreadID[threadID, default: [:]][id] =
                 ThreadStreamingText(text: text)
             return false
@@ -1379,8 +1396,9 @@ final class ThreadStore {
         threadID: String,
         itemID: String
     ) -> String? {
-        guard let item = sessionsByID[threadID]?.thread?.timeline
-            .last(where: { $0.item?.id == itemID })?.item,
+        guard
+            let item = sessionsByID[threadID]?.thread?.timeline
+                .last(where: { $0.item?.id == itemID })?.item,
             let object = item.payload?.value as? [String: Any]
         else { return nil }
         return object["text"] as? String
@@ -1426,10 +1444,12 @@ final class ThreadStore {
     ) {
         guard selectedThreadID != threadID else { return }
 
-        let completedFinalQueuedTurn = hadActiveTurn
+        let completedFinalQueuedTurn =
+            hadActiveTurn
             && !hasActiveTurn
             && queuedPromptsByThreadID[threadID]?.isEmpty != false
-        let requiresAttention = event.eventType == .threadApprovalOpened
+        let requiresAttention =
+            event.eventType == .threadApprovalOpened
             || event.eventType == .threadSessionStatusSet
                 && event.payload.session?.sessionStatus == .error
 
@@ -1459,7 +1479,8 @@ final class ThreadStore {
         sortThreads()
         readState.retainThreadIDs(Set(snapshot.threads.map(\.id)))
         if let selectedThreadID,
-           !snapshot.threads.contains(where: { $0.id == selectedThreadID }) {
+            !snapshot.threads.contains(where: { $0.id == selectedThreadID })
+        {
             self.selectedThreadID = nil
             selectedThreadLoadErrorMessage = nil
             sessionsByID[selectedThreadID] = nil
@@ -1516,31 +1537,33 @@ final class ThreadStore {
     }
 
     #if DEBUG
-    var cachedThreadIDs: Set<String> {
-        Set(sessionsByID.compactMap { $0.value.thread == nil ? nil : $0.key })
-    }
+        var cachedThreadIDs: Set<String> {
+            Set(sessionsByID.compactMap { $0.value.thread == nil ? nil : $0.key })
+        }
 
-    func cachedThread(for id: String) -> Thread? {
-        sessionsByID[id]?.thread
-    }
+        func cachedThread(for id: String) -> Thread? {
+            sessionsByID[id]?.thread
+        }
 
-    var subscribedThreadIDs: Set<String> {
-        Set(sessionsByID.compactMap { $0.value.subscriptionState.isSubscribed ? $0.key : nil })
-    }
+        var subscribedThreadIDs: Set<String> {
+            Set(sessionsByID.compactMap { $0.value.subscriptionState.isSubscribed ? $0.key : nil })
+        }
 
-    var inactiveSubscribedThreadIDs: Set<String> {
-        Set(sessionsByID.compactMap {
-            if case .inactive = $0.value.subscriptionState { return $0.key }
-            return nil
-        })
-    }
+        var inactiveSubscribedThreadIDs: Set<String> {
+            Set(
+                sessionsByID.compactMap {
+                    if case .inactive = $0.value.subscriptionState { return $0.key }
+                    return nil
+                })
+        }
 
-    var protectedSubscribedThreadIDs: Set<String> {
-        Set(sessionsByID.compactMap {
-            if case .protected = $0.value.subscriptionState { return $0.key }
-            return nil
-        })
-    }
+        var protectedSubscribedThreadIDs: Set<String> {
+            Set(
+                sessionsByID.compactMap {
+                    if case .protected = $0.value.subscriptionState { return $0.key }
+                    return nil
+                })
+        }
     #endif
 
     private struct Notification<Params: Decodable>: Decodable {

@@ -62,9 +62,7 @@ struct CustomACPAgentForm: View {
         }
         .onSubmit { isTextFieldFocused = false }
         .navigationTitle("Add Custom Agent")
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .interactiveDismissDisabled(model.isSaving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -222,12 +220,13 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
             String(localized: "Agent name is required.")
         case .missingCommand:
             String(localized: "Command is required.")
-        case let .duplicateAgentName(name):
+        case .duplicateAgentName(let name):
             String(
                 localized: "An agent named \(name) already exists.",
-                comment: "Validation error shown when adding an ACP agent whose name is already used."
+                comment:
+                    "Validation error shown when adding an ACP agent whose name is already used."
             )
-        case let .duplicateEnvironmentVariable(key):
+        case .duplicateEnvironmentVariable(let key):
             String(
                 localized: "Duplicate environment variable \(key).",
                 comment: "Validation error. The variable is an environment variable name."

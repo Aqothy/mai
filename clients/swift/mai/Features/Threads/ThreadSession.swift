@@ -22,11 +22,7 @@ struct ThreadSession {
     /// Presentation caches survive short navigation round trips and are
     /// discarded when subscription maintenance evicts this session.
     var markdownSegmentCache = ChatMarkdownSegmentCache()
-    #if os(iOS)
-        var textLayoutStore = ChatTextLayoutStore()
-    #elseif os(macOS)
-        var macTextLayoutStore = ChatMacTextLayoutStore()
-    #endif
+    var textLayoutStore = ChatTextLayoutStore()
     var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
@@ -103,10 +99,10 @@ struct ThreadSession {
     private static func canChangeProtection(_ eventType: MaidEventType?) -> Bool {
         switch eventType {
         case .threadMessageSent,
-             .threadItemUpserted,
-             .threadPlanUpdated,
-             .threadTokenUsageUpdated,
-             .threadSlashCommandsUpdated:
+            .threadItemUpserted,
+            .threadPlanUpdated,
+            .threadTokenUsageUpdated,
+            .threadSlashCommandsUpdated:
             false
         default:
             true

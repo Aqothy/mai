@@ -82,9 +82,7 @@ struct ComposerOptionsSheet: View {
             }
             .formStyle(.grouped)
             .navigationTitle("Advanced")
-            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -113,57 +111,57 @@ struct ComposerOptionsSheet: View {
 }
 
 #if DEBUG
-#Preview("Provider Options") {
-    ComposerOptionsSheet(
-        options: [
-            ConfigOption(
-                category: MaidConfigOptionCategory.model.rawValue,
-                choices: [
-                    ConfigChoice(label: "5.6 Terra", value: "terra"),
-                    ConfigChoice(label: "5.6 Sol", value: "sol"),
-                ],
-                currentValue: JSONAny("terra"),
-                description: "The model used for this chat",
-                id: "model",
-                label: "Model",
-                type: MaidConfigOptionType.select.rawValue
+    #Preview("Provider Options") {
+        ComposerOptionsSheet(
+            options: [
+                ConfigOption(
+                    category: MaidConfigOptionCategory.model.rawValue,
+                    choices: [
+                        ConfigChoice(label: "5.6 Terra", value: "terra"),
+                        ConfigChoice(label: "5.6 Sol", value: "sol"),
+                    ],
+                    currentValue: JSONAny("terra"),
+                    description: "The model used for this chat",
+                    id: "model",
+                    label: "Model",
+                    type: MaidConfigOptionType.select.rawValue
+                ),
+                ConfigOption(
+                    category: MaidConfigOptionCategory.thoughtLevel.rawValue,
+                    choices: [
+                        ConfigChoice(label: "Low", value: "low"),
+                        ConfigChoice(label: "Medium", value: "medium"),
+                        ConfigChoice(label: "High", value: "high"),
+                    ],
+                    currentValue: JSONAny("medium"),
+                    description: "How deeply the model reasons",
+                    id: "thinking",
+                    label: "Thinking",
+                    type: MaidConfigOptionType.select.rawValue
+                ),
+                ConfigOption(
+                    category: MaidConfigOptionCategory.modelConfig.rawValue,
+                    choices: nil,
+                    currentValue: JSONAny(true),
+                    description: "Use the provider's faster response path",
+                    id: "fast_mode",
+                    label: "Fast mode",
+                    type: MaidConfigOptionType.boolean.rawValue
+                ),
+            ],
+            commands: [
+                SlashCommand(description: nil, hasInput: false, name: "compact")
+            ],
+            tokenUsage: TokenUsage(
+                cost: nil,
+                currency: nil,
+                maxTokens: 200_000,
+                usedTokens: 48_200
             ),
-            ConfigOption(
-                category: MaidConfigOptionCategory.thoughtLevel.rawValue,
-                choices: [
-                    ConfigChoice(label: "Low", value: "low"),
-                    ConfigChoice(label: "Medium", value: "medium"),
-                    ConfigChoice(label: "High", value: "high"),
-                ],
-                currentValue: JSONAny("medium"),
-                description: "How deeply the model reasons",
-                id: "thinking",
-                label: "Thinking",
-                type: MaidConfigOptionType.select.rawValue
-            ),
-            ConfigOption(
-                category: MaidConfigOptionCategory.modelConfig.rawValue,
-                choices: nil,
-                currentValue: JSONAny(true),
-                description: "Use the provider's faster response path",
-                id: "fast_mode",
-                label: "Fast mode",
-                type: MaidConfigOptionType.boolean.rawValue
-            ),
-        ],
-        commands: [
-            SlashCommand(description: nil, hasInput: false, name: "compact"),
-        ],
-        tokenUsage: TokenUsage(
-            cost: nil,
-            currency: nil,
-            maxTokens: 200_000,
-            usedTokens: 48_200
-        ),
-        setValue: { _, _ in },
-        insertCommand: { _ in }
-    )
-}
+            setValue: { _, _ in },
+            insertCommand: { _ in }
+        )
+    }
 #endif
 
 private struct DraftConfigOptionView: View {

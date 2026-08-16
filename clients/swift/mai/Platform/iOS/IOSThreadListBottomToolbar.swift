@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 /// Places the searchable field and the create buttons in the bottom toolbar
@@ -35,4 +34,3 @@ struct IOSThreadListBottomToolbar: ViewModifier {
         Button("New Chat", systemImage: "square.and.pencil", action: newChat)
     }
 }
-#endif

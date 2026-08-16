@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// View options for the Threads list: display mode plus preset filters.
-/// Shared by the desktop sidebar and the iOS toolbar.
 struct ThreadFilterMenu: View {
     let store: ThreadStore
     @Binding var filter: ThreadListFilter

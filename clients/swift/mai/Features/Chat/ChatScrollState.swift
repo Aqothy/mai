@@ -22,14 +22,22 @@ final class ChatScrollState {
     }
 
     func noteEndVisibility(_ isVisible: Bool) {
-        isEndZoneVisible = isVisible
+        if isEndZoneVisible != isVisible {
+            isEndZoneVisible = isVisible
+        }
 
         if isUserScrolling {
-            isNearBottom = isVisible
+            if isNearBottom != isVisible {
+                isNearBottom = isVisible
+            }
         } else if isVisible {
-            isNearBottom = true
-            shouldFollowBottom = true
-        } else if !shouldFollowBottom {
+            if !isNearBottom {
+                isNearBottom = true
+            }
+            if !shouldFollowBottom {
+                shouldFollowBottom = true
+            }
+        } else if !shouldFollowBottom, isNearBottom {
             // While following, the loss is transient — the bottom pin lands
             // next frame — and the jump button must not flash in.
             isNearBottom = false
@@ -41,32 +49,54 @@ final class ChatScrollState {
     /// yank the viewport. Following resumes via `noteEndVisibility` if the
     /// end of the timeline is still on screen afterwards.
     func noteContentExpansion() {
-        shouldFollowBottom = false
+        if shouldFollowBottom {
+            shouldFollowBottom = false
+        }
     }
 
-    /// Keyboard, accessibility, and scrollbar scrolling do not always enter a
-    /// user-driven `ScrollPhase` on macOS. Geometry can still prove that the
-    /// viewport moved toward older content, so record the same user intent
-    /// without leaving the state stuck in an active-scroll phase.
+    /// Keyboard and accessibility scrolling do not always enter a user-driven
+    /// `ScrollPhase`. Geometry can still prove that the viewport moved toward
+    /// older content, so record the same user intent without leaving the state
+    /// stuck in an active-scroll phase.
     func noteScrollAwayFromEnd() {
-        isNearBottom = false
-        shouldFollowBottom = false
+        if isNearBottom {
+            isNearBottom = false
+        }
+        if shouldFollowBottom {
+            shouldFollowBottom = false
+        }
     }
 
     func noteUserScrollActivity(isActive: Bool) {
-        isUserScrolling = isActive
+        if isUserScrolling != isActive {
+            isUserScrolling = isActive
+        }
         if isActive {
-            shouldFollowBottom = false
+            if shouldFollowBottom {
+                shouldFollowBottom = false
+            }
         } else if isEndZoneVisible {
-            isNearBottom = true
-            shouldFollowBottom = true
+            if !isNearBottom {
+                isNearBottom = true
+            }
+            if !shouldFollowBottom {
+                shouldFollowBottom = true
+            }
         }
     }
 
     func reset() {
-        isNearBottom = true
-        shouldFollowBottom = true
-        isEndZoneVisible = true
-        isUserScrolling = false
+        if !isNearBottom {
+            isNearBottom = true
+        }
+        if !shouldFollowBottom {
+            shouldFollowBottom = true
+        }
+        if !isEndZoneVisible {
+            isEndZoneVisible = true
+        }
+        if isUserScrolling {
+            isUserScrolling = false
+        }
     }
 }

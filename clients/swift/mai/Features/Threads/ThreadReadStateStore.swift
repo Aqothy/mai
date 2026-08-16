@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Client-local sidebar read state. It is intentionally independent from
+/// Client-local thread read state. It is intentionally independent from
 /// conversation snapshots and live subscriptions.
 @Observable
 final class ThreadReadStateStore {

@@ -13,11 +13,12 @@ struct SessionImportView: View {
     }
 
     #if DEBUG
-    init(store: ThreadStore, model: SessionImportModel, openThread: @escaping (String) -> Void) {
-        self.store = store
-        self.openThread = openThread
-        _model = State(initialValue: model)
-    }
+        init(store: ThreadStore, model: SessionImportModel, openThread: @escaping (String) -> Void)
+        {
+            self.store = store
+            self.openThread = openThread
+            _model = State(initialValue: model)
+        }
     #endif
 
     var body: some View {
@@ -48,9 +49,7 @@ struct SessionImportView: View {
             SessionImportStatusView(model: model)
         }
         .navigationTitle("Import Session")
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Refresh", systemImage: "arrow.clockwise") {
@@ -106,7 +105,7 @@ struct SessionImportStatusView: View {
                 if model.entries.isEmpty {
                     ProgressView("Loading Sessions…")
                 }
-            case let .failed(message):
+            case .failed(let message):
                 ContentUnavailableView {
                     Label("Sessions Unavailable", systemImage: "exclamationmark.triangle")
                 } description: {
@@ -130,46 +129,46 @@ struct SessionImportStatusView: View {
 }
 
 #if DEBUG
-#Preview("Import Session") {
-    let store = ThreadStore(
-        previewThreads: [],
-        installedAgents: [
-            ACPRegistryInstalledAgent(
-                args: nil,
-                description: nil,
-                icon: nil,
-                id: "claude-code",
-                installedAt: .now,
-                instanceID: "registry-claude-code",
-                name: "Claude Code",
-                package: "claude-code-acp@1.0.0",
-                source: "registry",
-                version: "1.0.0"
-            )
-        ]
-    )
-    NavigationStack {
-        SessionImportView(
-            store: store,
-            model: SessionImportModel(
-                store: store,
-                previewSessions: [
-                    SessionSummary(
-                        cwd: "/Users/me/Code/maiD",
-                        sessionID: "sess-1",
-                        title: "Fix reconnect loop",
-                        updatedAt: "2026-08-01T10:15:30Z"
-                    ),
-                    SessionSummary(
-                        cwd: "/Users/me/Code/side-project",
-                        sessionID: "sess-2",
-                        title: nil,
-                        updatedAt: nil
-                    ),
-                ]
-            ),
-            openThread: { _ in }
+    #Preview("Import Session") {
+        let store = ThreadStore(
+            previewThreads: [],
+            installedAgents: [
+                ACPRegistryInstalledAgent(
+                    args: nil,
+                    description: nil,
+                    icon: nil,
+                    id: "claude-code",
+                    installedAt: .now,
+                    instanceID: "registry-claude-code",
+                    name: "Claude Code",
+                    package: "claude-code-acp@1.0.0",
+                    source: "registry",
+                    version: "1.0.0"
+                )
+            ]
         )
+        NavigationStack {
+            SessionImportView(
+                store: store,
+                model: SessionImportModel(
+                    store: store,
+                    previewSessions: [
+                        SessionSummary(
+                            cwd: "/Users/me/Code/maiD",
+                            sessionID: "sess-1",
+                            title: "Fix reconnect loop",
+                            updatedAt: "2026-08-01T10:15:30Z"
+                        ),
+                        SessionSummary(
+                            cwd: "/Users/me/Code/side-project",
+                            sessionID: "sess-2",
+                            title: nil,
+                            updatedAt: nil
+                        ),
+                    ]
+                ),
+                openThread: { _ in }
+            )
+        }
     }
-}
 #endif
