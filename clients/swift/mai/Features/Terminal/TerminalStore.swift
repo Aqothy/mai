@@ -1,31 +1,12 @@
 import Foundation
 
-/// Owns terminal transport state on its own RPC connection, separate from
-/// ThreadStore, so terminal bytes and reconnect behavior never affect
-/// agent-thread streaming.
-///
-/// The store manages the connection and this window's active attachment. Raw output
-/// bytes flow straight from the transport to the attachment's session
+/// Owns terminal domain state and this window's active attachment. Connection
+/// lifecycle is shared with ThreadStore through RPCConnectionCoordinator. Raw
+/// output bytes flow straight from the transport to the attachment's session
 /// controller and never enter observation.
 @Observable
 final class TerminalStore {
     typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
-
-    struct Timing: Sendable {
-        let reconnectDelay: Duration
-
-        static let standard = Timing(reconnectDelay: .seconds(2))
-        static let immediate = Timing(reconnectDelay: .zero)
-    }
-
-    enum ConnectionPhase: Equatable {
-        case idle
-        case connecting
-        case connected
-        case disconnected
-    }
-
-    private(set) var connectionPhase: ConnectionPhase = .idle
 
     /// Terminal summaries ordered by updatedAt descending, then id — the
     /// same deterministic order the daemon persists.
@@ -36,55 +17,54 @@ final class TerminalStore {
     private(set) var activeAttachment: TerminalAttachment?
 
     @ObservationIgnored let rpc: any TerminalRPCClient
-    @ObservationIgnored let timing: Timing
+    @ObservationIgnored private let connection: RPCConnectionCoordinator
     @ObservationIgnored private let snapshotRestorer: SnapshotRestorer
-    @ObservationIgnored private var started = false
-    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
     @ObservationIgnored private var isAwaitingListSnapshot = false
     @ObservationIgnored private var bufferedListItems: [TerminalListStreamItem] = []
     @ObservationIgnored private var listSubscriptionGeneration = 0
 
     init(
         rpc: any TerminalRPCClient = RPCClient(),
-        timing: Timing = .standard,
+        connection: RPCConnectionCoordinator? = nil,
         snapshotRestorer: @escaping SnapshotRestorer = { controller, data in
             try await controller.restore(snapshot: data)
         }
     ) {
+        let connection = connection ?? RPCConnectionCoordinator(rpc: rpc)
+        precondition(connection.uses(rpc), "TerminalStore must use the coordinator's RPC client")
         self.rpc = rpc
-        self.timing = timing
+        self.connection = connection
         self.snapshotRestorer = snapshotRestorer
-    }
 
-    /// Connects the transport and subscribes to the terminal list.
-    /// Attachments start when their Ghostty surface reports its real grid.
-    func start() {
-        guard !started else { return }
-        started = true
-        connectionPhase = .connecting
         rpc.onTerminalStreamItem = { [weak self] item in
             self?.receiveStreamItem(item)
         }
         rpc.onTerminalListItem = { [weak self] item in
             self?.receiveListItem(item)
         }
-        rpc.onDisconnect = { [weak self] _ in
-            self?.handleDisconnect()
-        }
-        rpc.connect()
-        subscribeList()
+        connection.register(
+            prepare: { [weak self] in
+                self?.prepareConnectionAttempt()
+            },
+            synchronize: { [weak self] in
+                guard let self else { return }
+                try await synchronizeConnection()
+            },
+            connected: { [weak self] in
+                self?.connectionDidConnect()
+            },
+            disconnected: { [weak self] _ in
+                self?.connectionDidDisconnect()
+            }
+        )
     }
 
-    func stop() {
-        started = false
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        closeActiveAttachment()
-        listSubscriptionGeneration += 1
-        isAwaitingListSnapshot = false
-        bufferedListItems.removeAll(keepingCapacity: true)
-        connectionPhase = .idle
-        rpc.disconnect()
+    /// Starts the shared app connection. Attachments begin when their Ghostty
+    /// surface reports its real grid.
+    func start() {
+        Task { [weak self] in
+            await self?.connection.start()
+        }
     }
 
     // MARK: - Terminal list
@@ -93,33 +73,26 @@ final class TerminalStore {
         terminals.first { $0.terminalID == terminalID }
     }
 
-    private func subscribeList() {
+    private func prepareConnectionAttempt() {
         listSubscriptionGeneration += 1
-        let generation = listSubscriptionGeneration
         isAwaitingListSnapshot = true
         bufferedListItems.removeAll(keepingCapacity: true)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let snapshot = try await rpc.subscribeTerminalList()
-                guard started, generation == listSubscriptionGeneration else { return }
-                applyListItem(snapshot)
-                let buffered = bufferedListItems
-                bufferedListItems.removeAll(keepingCapacity: true)
-                isAwaitingListSnapshot = false
-                for item in buffered {
-                    applyListItem(item)
-                }
-                hasLoadedTerminalList = true
-                connectionPhase = .connected
-            } catch {
-                guard generation == listSubscriptionGeneration else { return }
-                isAwaitingListSnapshot = false
-                bufferedListItems.removeAll(keepingCapacity: true)
-                // Connection loss is handled by the reconnect path; a failed
-                // subscribe on a live connection retries on the next connect.
-            }
+    }
+
+    private func synchronizeConnection() async throws {
+        let generation = listSubscriptionGeneration
+        let snapshot = try await rpc.subscribeTerminalList()
+        guard generation == listSubscriptionGeneration else {
+            throw CancellationError()
         }
+        applyListItem(snapshot)
+        let buffered = bufferedListItems
+        bufferedListItems.removeAll(keepingCapacity: true)
+        isAwaitingListSnapshot = false
+        for item in buffered {
+            applyListItem(item)
+        }
+        hasLoadedTerminalList = true
     }
 
     private func receiveListItem(_ item: TerminalListStreamItem) {
@@ -260,42 +233,20 @@ final class TerminalStore {
 
     // MARK: - Transport events
 
-    /// Called by an attachment when its attach snapshot was installed,
-    /// proving the connection is live.
-    func attachmentDidAttach(_ attachment: TerminalAttachment) {
-        guard started, attachment === activeAttachment else { return }
-        connectionPhase = .connected
-    }
-
     private func receiveStreamItem(_ item: TerminalStreamMessage) {
         activeAttachment?.receive(item)
     }
 
-    private func handleDisconnect() {
-        guard started else { return }
+    private func connectionDidConnect() {
+        guard activeAttachment?.phase == .disconnected else { return }
+        activeAttachment?.reattachAfterReconnect()
+    }
+
+    private func connectionDidDisconnect() {
         listSubscriptionGeneration += 1
         isAwaitingListSnapshot = false
         bufferedListItems.removeAll(keepingCapacity: true)
-        connectionPhase = .disconnected
         activeAttachment?.connectionLost()
-        scheduleReconnect()
-    }
-
-    private func scheduleReconnect() {
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
-            guard let self else { return }
-            if timing.reconnectDelay != .zero {
-                do {
-                    try await Task.sleep(for: timing.reconnectDelay)
-                } catch { return }
-            }
-            guard started else { return }
-            connectionPhase = .connecting
-            rpc.connect()
-            subscribeList()
-            activeAttachment?.reattachAfterReconnect()
-        }
     }
 
     private func closeActiveAttachment() {

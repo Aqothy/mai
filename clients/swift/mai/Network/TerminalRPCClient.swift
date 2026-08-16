@@ -1,15 +1,10 @@
 import Foundation
 
-/// Terminal-thread RPC surface. Kept separate from ThreadRPCClient so the
-/// terminal store can own an independent connection whose lifecycle never
-/// affects agent-thread streaming.
-protocol TerminalRPCClient: AnyObject {
+/// Terminal RPC surface. Thread and terminal stores keep separate domain
+/// protocols while sharing one RPCClient and connection lifecycle.
+protocol TerminalRPCClient: RPCTransportClient {
     var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)? { get set }
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)? { get set }
-    var onDisconnect: ((Error?) -> Void)? { get set }
-
-    func connect()
-    func disconnect()
 
     /// Returns the full snapshot and registers this connection for
     /// subsequent list notifications.

@@ -34,20 +34,7 @@ final class ThreadStreamingText {
 
 @Observable
 final class ThreadStore {
-    static let maximumReconnectAttempts = 5
-    /// Upper bound on one connect attempt (socket handshake through the
-    /// thread-list snapshot). Without it, an unresponsive daemon can hold an
-    /// attempt in flight for URLSession's default 60s handshake timeout — or
-    /// forever once the socket is up — leaving the store wedged in
-    /// `.connecting` instead of advancing to the retry countdown or the
-    /// Disconnected/Retry state.
-    static let connectAttemptTimeout: Duration = .seconds(15)
-
-    enum ConnectionState {
-        case disconnected
-        case connecting
-        case connected
-    }
+    typealias ConnectionState = RPCConnectionCoordinator.State
 
     struct CachePolicy {
         var maximumInactiveSubscriptions = 5
@@ -66,11 +53,8 @@ final class ThreadStore {
 
     private(set) var threads: [ThreadListEntry] = []
     private(set) var selectedThreadID: String?
-    private(set) var connectionState: ConnectionState = .disconnected
     private(set) var errorMessage: String?
     private(set) var selectedThreadLoadErrorMessage: String?
-    private(set) var reconnectAttempt = 0
-    private(set) var nextReconnectAt: Date?
     private(set) var providers: [InstanceInfo] = []
     private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
     var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
@@ -91,11 +75,10 @@ final class ThreadStore {
     /// thread is selected.
     private(set) var selectedThreadTitle: String?
 
-    var automaticReconnectsExhausted: Bool {
-        connectionState == .disconnected
-            && reconnectAttempt >= Self.maximumReconnectAttempts
-            && nextReconnectAt == nil
-    }
+    var connectionState: ConnectionState { connection.state }
+    var reconnectAttempt: Int { connection.reconnectAttempt }
+    var nextReconnectAt: Date? { connection.nextReconnectAt }
+    var automaticReconnectsExhausted: Bool { connection.automaticReconnectsExhausted }
 
     var selectedThread: Thread? {
         _ = selectedSessionGeneration
@@ -144,6 +127,7 @@ final class ThreadStore {
     }
 
     private let rpc: any ThreadRPCClient
+    private let connection: RPCConnectionCoordinator
     private let cachePolicy: CachePolicy
     private let readState: ThreadReadStateStore
     private let now: () -> Date
@@ -163,7 +147,6 @@ final class ThreadStore {
     /// value-typed thread snapshot and its full timeline projection.
     @ObservationIgnored private var streamingTextByThreadID:
         [String: [StreamingTextID: ThreadStreamingText]] = [:]
-    private var isStarted = false
     private var lastThreadListSequence = 0
     private var isLoadingThreadListSnapshot = false
     private var bufferedThreadListItems: [ThreadListStreamItem] = []
@@ -171,26 +154,44 @@ final class ThreadStore {
     private var itemDetailsByID: [ItemDetailID: CachedItemDetail] = [:]
     private var queuedPromptsByThreadID: [String: [QueuedChatPrompt]] = [:]
     private var dispatchingQueuedPromptThreadIDs: Set<String> = []
-    private var reconnectTask: Task<Void, Never>?
     private var maintenanceTask: Task<Void, Never>?
 
-    init() {
-        rpc = RPCClient()
-        cachePolicy = CachePolicy()
-        readState = ThreadReadStateStore()
-        now = Date.init
+    convenience init() {
+        self.init(rpc: RPCClient())
     }
 
     init(
         rpc: any ThreadRPCClient,
+        connection: RPCConnectionCoordinator? = nil,
         cachePolicy: CachePolicy = CachePolicy(),
         readState: ThreadReadStateStore = ThreadReadStateStore(defaults: nil),
         now: @escaping () -> Date = Date.init
     ) {
+        let connection = connection ?? RPCConnectionCoordinator(rpc: rpc)
+        precondition(connection.uses(rpc), "ThreadStore must use the coordinator's RPC client")
         self.rpc = rpc
+        self.connection = connection
         self.cachePolicy = cachePolicy
         self.readState = readState
         self.now = now
+
+        rpc.onNotification = { [weak self] method, data in
+            self?.receiveNotification(method: method, data: data)
+        }
+        connection.register(
+            prepare: { [weak self] in
+                self?.prepareConnectionAttempt()
+            },
+            synchronize: { [weak self] in
+                try await self?.synchronizeConnection()
+            },
+            connected: { [weak self] in
+                self?.connectionDidConnect()
+            },
+            disconnected: { [weak self] error in
+                self?.connectionDidDisconnect(error)
+            }
+        )
     }
 
     #if DEBUG
@@ -200,7 +201,9 @@ final class ThreadStore {
             providers: [InstanceInfo] = [],
             installedAgents: [ACPRegistryInstalledAgent] = []
         ) {
-            rpc = RPCClient()
+            let rpc = RPCClient()
+            self.rpc = rpc
+            connection = RPCConnectionCoordinator(rpc: rpc, initiallyConnected: true)
             cachePolicy = CachePolicy()
             readState = ThreadReadStateStore(defaults: nil)
             now = Date.init
@@ -214,98 +217,59 @@ final class ThreadStore {
                 session.shouldRestoreAfterReconnect = true
                 sessionsByID[selectedThread.id] = session
             }
-            connectionState = .connected
             rebuildProviderCaches()
             noteThreadsChanged()
         }
     #endif
 
     func start() async {
-        guard !isStarted else { return }
+        await connection.start()
+    }
 
-        isStarted = true
-        connectionState = .connecting
-        nextReconnectAt = nil
+    func retry() {
+        guard connectionState == .connected else {
+            connection.retry()
+            return
+        }
+        guard let selectedThreadID else { return }
+
+        selectedThreadLoadErrorMessage = nil
+        if let session = sessionsByID[selectedThreadID],
+            session.subscriptionState.isSubscribed,
+            session.canPrepareHistoryRestore
+        {
+            Task {
+                await prepareSelectedRestoredThreadIfNeeded(selectedThreadID)
+            }
+            return
+        }
+        ensureSubscribed(selectedThreadID)
+    }
+
+    private func prepareConnectionAttempt() {
         errorMessage = nil
         selectedThreadLoadErrorMessage = nil
         isLoadingThreadListSnapshot = true
         bufferedThreadListItems.removeAll()
-
-        rpc.onNotification = { [weak self] method, data in
-            self?.receiveNotification(method: method, data: data)
-        }
-        rpc.onDisconnect = { [weak self] error in
-            self?.handleDisconnect(error)
-        }
-        rpc.connect()
-
-        // A stalled attempt fails over to the scheduled-retry countdown
-        // instead of wedging silently in `.connecting`. Disconnecting fails
-        // the pending snapshot request, so the catch below runs the normal
-        // failure path.
-        let watchdog = Task { [weak self] in
-            do {
-                try await Task.sleep(for: Self.connectAttemptTimeout)
-            } catch {
-                return
-            }
-            guard let self, connectionState == .connecting else { return }
-            rpc.disconnect()
-        }
-        defer { watchdog.cancel() }
-
-        do {
-            let item = try await rpc.subscribeThreadList()
-            guard applyThreadListSnapshot(item) else {
-                connectionState = .disconnected
-                isStarted = false
-                rpc.disconnect()
-                scheduleReconnect()
-                return
-            }
-            providers = try await rpc.listProviders()
-            installedAgents = (try? await rpc.listInstalledAgents()) ?? []
-            rebuildProviderCaches()
-
-            connectionState = .connected
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            reconnectAttempt = 0
-            nextReconnectAt = nil
-            await restoreSubscriptions()
-        } catch {
-            isLoadingThreadListSnapshot = false
-            bufferedThreadListItems.removeAll()
-            connectionState = .disconnected
-            errorMessage = error.localizedDescription
-            isStarted = false
-            rpc.disconnect()
-            scheduleReconnect()
-        }
     }
 
-    func retry() {
-        if isStarted {
-            guard connectionState == .connected, let selectedThreadID else { return }
-            selectedThreadLoadErrorMessage = nil
-            if let session = sessionsByID[selectedThreadID],
-                session.subscriptionState.isSubscribed,
-                session.canPrepareHistoryRestore
-            {
-                Task {
-                    await prepareSelectedRestoredThreadIfNeeded(selectedThreadID)
-                }
-                return
-            }
-            ensureSubscribed(selectedThreadID)
-            return
+    private func synchronizeConnection() async throws {
+        let item = try await rpc.subscribeThreadList()
+        guard applyThreadListSnapshot(item) else {
+            throw RPCError(
+                code: nil,
+                message: "maiD returned an invalid thread-list snapshot",
+                data: nil
+            )
         }
+        providers = try await rpc.listProviders()
+        installedAgents = (try? await rpc.listInstalledAgents()) ?? []
+        rebuildProviderCaches()
+    }
 
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        reconnectAttempt = 0
-        Task {
-            await start()
+    private func connectionDidConnect() {
+        Task { [weak self] in
+            await self?.restoreSubscriptions()
         }
     }
 
@@ -928,11 +892,9 @@ final class ThreadStore {
         )
     }
 
-    private func handleDisconnect(_ error: Error?) {
-        guard isStarted || connectionState != .disconnected else { return }
-
-        isStarted = false
-        connectionState = .disconnected
+    private func connectionDidDisconnect(_ error: (any Error)?) {
+        isLoadingThreadListSnapshot = false
+        bufferedThreadListItems.removeAll()
         selectedThreadLoadErrorMessage = nil
         maintenanceTask?.cancel()
         maintenanceTask = nil
@@ -954,32 +916,6 @@ final class ThreadStore {
 
         if let error {
             errorMessage = error.localizedDescription
-        }
-        scheduleReconnect()
-    }
-
-    private func scheduleReconnect() {
-        guard reconnectTask == nil else { return }
-        guard reconnectAttempt < Self.maximumReconnectAttempts else {
-            nextReconnectAt = nil
-            return
-        }
-
-        let attempt = reconnectAttempt + 1
-        let baseDelay = min(pow(2, Double(reconnectAttempt)), 30)
-        let delay = min(baseDelay * Double.random(in: 0.8...1.2), 30)
-        nextReconnectAt = Date().addingTimeInterval(delay)
-
-        reconnectTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(delay))
-            } catch {
-                return
-            }
-            guard let self else { return }
-            reconnectTask = nil
-            reconnectAttempt = attempt
-            await start()
         }
     }
 

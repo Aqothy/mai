@@ -99,7 +99,12 @@ struct IOSThreadListView: View {
                 }
             }
         }
-        .modifier(ThreadListStatusModifier(store: store))
+        .modifier(
+            ThreadListStatusModifier(
+                store: store,
+                contentIsEmpty: store.threads.isEmpty && terminalStore.terminals.isEmpty
+            )
+        )
     }
 
     private func workspaceRows(items: [WorkspaceListItem], isCompact: Bool) -> some View {

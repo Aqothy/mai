@@ -9,7 +9,7 @@ struct ThreadListStatusModifier: ViewModifier {
         content
             .overlay {
                 if contentIsEmpty ?? store.isThreadListEmpty {
-                    ThreadListEmptyStateView(store: store)
+                    ThreadListEmptyStateView()
                 }
             }
             .safeAreaInset(edge: .bottom) {

@@ -344,7 +344,6 @@ final class TerminalAttachment {
         }
         hasInstalledInitialSnapshot = true
         scheduleResize()
-        store?.attachmentDidAttach(self)
     }
 
     // MARK: - Stream items

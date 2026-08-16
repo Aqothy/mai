@@ -3,9 +3,22 @@ import SwiftUI
 @main
 struct MaiApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @State private var threadStore = ThreadStore()
+    @State private var connection: RPCConnectionCoordinator
+    @State private var threadStore: ThreadStore
     @State private var threadDraftStore = ThreadDraftStore()
-    @State private var terminalStore = TerminalStore()
+    @State private var terminalStore: TerminalStore
+
+    init() {
+        let rpc = RPCClient()
+        let connection = RPCConnectionCoordinator(rpc: rpc)
+        _connection = State(initialValue: connection)
+        _threadStore = State(
+            initialValue: ThreadStore(rpc: rpc, connection: connection)
+        )
+        _terminalStore = State(
+            initialValue: TerminalStore(rpc: rpc, connection: connection)
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -15,10 +28,7 @@ struct MaiApp: App {
                 terminalStore: terminalStore
             )
             .task {
-                // Independent connections: a terminal transport failure must
-                // not disconnect agent threads, and vice versa.
-                terminalStore.start()
-                await threadStore.start()
+                await connection.start()
             }
             .onChange(of: scenePhase) {
                 if scenePhase != .active {

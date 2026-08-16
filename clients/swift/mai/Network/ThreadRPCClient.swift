@@ -1,11 +1,7 @@
 import Foundation
 
-protocol ThreadRPCClient: AnyObject {
+protocol ThreadRPCClient: RPCTransportClient {
     var onNotification: ((String, Data) -> Void)? { get set }
-    var onDisconnect: ((Error?) -> Void)? { get set }
-
-    func connect()
-    func disconnect()
     func subscribeThreadList() async throws -> ThreadListStreamItem
     func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem
     func unsubscribeThread(_ input: SubscribeThreadInput) async throws

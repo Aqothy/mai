@@ -62,7 +62,6 @@ struct TerminalThreadScreen: View {
                         } else {
                             TerminalAttachmentOverlay(
                                 phase: attachment.phase,
-                                connection: store.connectionPhase,
                                 canRelaunch: attachment.terminalID != nil,
                                 relaunch: { store.relaunchActiveTerminal() }
                             )
@@ -228,7 +227,6 @@ private struct TerminalTextSizeMenu: View {
 /// rebuild the terminal surface.
 struct TerminalAttachmentOverlay: View {
     let phase: TerminalAttachment.Phase
-    let connection: TerminalStore.ConnectionPhase
     var canRelaunch = true
     var relaunch: () -> Void = {}
 
