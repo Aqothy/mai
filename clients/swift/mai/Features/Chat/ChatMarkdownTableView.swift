@@ -8,12 +8,18 @@ struct ChatMarkdownTableView: View {
 
     @State private var copied = false
     @State private var copyResetTask: Task<Void, Never>?
+    @State private var tableContentWidth: CGFloat?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             ScrollView(.horizontal) {
                 ChatMarkdownTableGrid(table: table)
                     .fixedSize(horizontal: true, vertical: false)
+                    .onGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.size.width
+                    } action: { width in
+                        tableContentWidth = width
+                    }
                     .padding(.top, 32)
             }
             .scrollIndicators(.visible, axes: .horizontal)
@@ -35,6 +41,7 @@ struct ChatMarkdownTableView: View {
             .background(.background)
             .accessibilityHint("Copies the table to the Clipboard")
         }
+        .frame(maxWidth: tableContentWidth, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Markdown table")
         .accessibilityValue(table.tabSeparatedText)
