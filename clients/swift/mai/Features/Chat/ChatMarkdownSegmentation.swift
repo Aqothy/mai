@@ -67,10 +67,10 @@ enum ChatMessageTextPlanner {
             return .existingRenderer
         }
 
-        // A document-wide prose feature can make independent block parsing
-        // unsafe. It still belongs in one selectable TextKit surface rather
-        // than the iOS 26 SwiftUI Text path, which only supports whole-copy.
-        return .segmented([ChatMarkdownSegment(kind: .prose, source: source)])
+        // Document-wide Markdown features make independent block parsing
+        // unsafe. Keep the full rich renderer: routing the whole document
+        // through the prose-only TextKit path would flatten code and tables.
+        return .existingRenderer
     }
 }
 

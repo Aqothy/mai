@@ -883,8 +883,8 @@ private struct ChatTimeline: View {
     }
 
     /// Expands oversized user messages and settled oversized assistant
-    /// messages. Streaming keeps one stable live row; short and uncommon
-    /// document-wide Markdown features stay in one native attributed row.
+    /// messages. Streaming keeps one stable live row; uncommon document-wide
+    /// Markdown features keep the full rich renderer.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
