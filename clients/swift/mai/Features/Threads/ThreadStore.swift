@@ -39,8 +39,8 @@ final class ThreadStore {
     /// thread-list snapshot). Without it, an unresponsive daemon can hold an
     /// attempt in flight for URLSession's default 60s handshake timeout — or
     /// forever once the socket is up — leaving the store wedged in
-    /// `.connecting`, where nothing is shown and neither the retry countdown
-    /// nor the Disconnected/Retry pill can ever appear.
+    /// `.connecting` instead of advancing to the retry countdown or the
+    /// Disconnected/Retry state.
     static let connectAttemptTimeout: Duration = .seconds(15)
 
     enum ConnectionState {
@@ -91,14 +91,10 @@ final class ThreadStore {
     /// thread is selected.
     private(set) var selectedThreadTitle: String?
 
-    var isReconnectScheduled: Bool {
-        nextReconnectAt != nil
-    }
-
     var automaticReconnectsExhausted: Bool {
         connectionState == .disconnected
             && reconnectAttempt >= Self.maximumReconnectAttempts
-            && !isReconnectScheduled
+            && nextReconnectAt == nil
     }
 
     var selectedThread: Thread? {
@@ -229,6 +225,7 @@ final class ThreadStore {
 
         isStarted = true
         connectionState = .connecting
+        nextReconnectAt = nil
         errorMessage = nil
         selectedThreadLoadErrorMessage = nil
         isLoadingThreadListSnapshot = true
@@ -307,7 +304,6 @@ final class ThreadStore {
         reconnectTask?.cancel()
         reconnectTask = nil
         reconnectAttempt = 0
-        nextReconnectAt = nil
         Task {
             await start()
         }
@@ -982,7 +978,6 @@ final class ThreadStore {
             }
             guard let self else { return }
             reconnectTask = nil
-            nextReconnectAt = nil
             reconnectAttempt = attempt
             await start()
         }

@@ -1,36 +1,45 @@
 import SwiftUI
 
-/// Places the searchable field and the create buttons in the bottom toolbar
-/// on iOS 26, where all receive the system glass treatment. New Chat and
-/// New Terminal sit together as one grouped pair, each a single tap.
-/// Earlier systems keep the search field in its default navigation-bar
-/// placement.
+/// Places the searchable field and create buttons in the bottom toolbar.
+/// On iOS 26, fixed toolbar spacing gives New Chat and New Terminal separate
+/// circular glass backgrounds. Earlier systems keep the search field in its
+/// default navigation-bar placement.
 struct IOSThreadListBottomToolbar: ViewModifier {
     let newChat: () -> Void
     let newTerminal: () -> Void
 
     func body(content: Content) -> some View {
+        let terminalButton = Button(
+            "New Terminal",
+            systemImage: "terminal",
+            action: newTerminal
+        )
+        let chatButton = Button(
+            "New Chat",
+            systemImage: "square.and.pencil",
+            action: newChat
+        )
+
         if #available(iOS 26.0, *) {
             content.toolbar {
                 DefaultToolbarItem(kind: .search, placement: .bottomBar)
                 ToolbarSpacer(.flexible, placement: .bottomBar)
-                ToolbarItemGroup(placement: .bottomBar) {
-                    newButtons
+                ToolbarItem(placement: .bottomBar) {
+                    terminalButton
+                }
+                ToolbarSpacer(.fixed, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    chatButton
                 }
             }
         } else {
             content.toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Spacer()
-                    newButtons
+                    terminalButton
+                    chatButton
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private var newButtons: some View {
-        Button("New Terminal", systemImage: "terminal", action: newTerminal)
-        Button("New Chat", systemImage: "square.and.pencil", action: newChat)
     }
 }

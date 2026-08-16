@@ -4,21 +4,19 @@ struct ConnectionStatusView: View {
     let store: ThreadStore
 
     var body: some View {
-        // In-flight connect attempts show nothing here — the list's loading
-        // skeleton already covers them. The pill appears only when there is
-        // something to say: a scheduled retry counting down, or automatic
-        // retries exhausted.
-        if showsPill {
+        // Keep one pill mounted throughout retries. Only its contents change
+        // between the countdown, connection attempt, and manual retry states.
+        if store.connectionState != .connected {
             HStack(spacing: 8) {
                 if store.automaticReconnectsExhausted {
                     Image(systemName: "wifi.slash")
                         .foregroundStyle(.secondary)
                     Text("Disconnected")
                     Button("Retry", action: store.retry)
-                } else if let nextReconnectAt = store.nextReconnectAt {
+                } else {
                     ProgressView()
                         .controlSize(.small)
-                    ReconnectCountdownView(nextReconnectAt: nextReconnectAt)
+                    ReconnectCountdownView(nextReconnectAt: store.nextReconnectAt)
                 }
             }
             .font(.footnote)
@@ -26,10 +24,5 @@ struct ConnectionStatusView: View {
             .padding(.vertical, 8)
             .glassSurface(in: .capsule)
         }
-    }
-
-    private var showsPill: Bool {
-        store.automaticReconnectsExhausted
-            || (store.connectionState == .disconnected && store.nextReconnectAt != nil)
     }
 }
