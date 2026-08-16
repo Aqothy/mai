@@ -27,6 +27,7 @@ execFileSync(
     "MaidClientAPI",
     "--access-level",
     "public",
+    "--mutable-properties",
     "--out",
     swiftModelsPath,
   ],
@@ -42,19 +43,9 @@ if (catalogStart < 0 || catalogModel < 0 || firstModel < 0) {
 }
 swiftSource = swiftSource.slice(0, catalogStart) + swiftSource.slice(firstModel);
 
-// quicktype declares every stored property `let`, which would force the reducer
-// to rebuild the struct and copy the whole `timeline` array per streamed event.
-// Scoped to the model section so the helpers below (notably JSONAny's `value`)
-// stay immutable.
-const helpersStart = swiftSource.indexOf("// MARK: - Encode/decode helpers");
-if (helpersStart < 0) throw new Error("quicktype Encode/decode helpers section was not found");
-const mutableModels = swiftSource
-  .slice(0, helpersStart)
-  .replace(/^(\s*)public let /gm, "$1public var ");
-if (!mutableModels.includes("public var timeline: [TimelineEntry]")) {
-  throw new Error("expected Thread.timeline to become mutable");
+if (!swiftSource.includes("public var timeline: [TimelineEntry]")) {
+  throw new Error("quicktype did not generate mutable model properties");
 }
-swiftSource = mutableModels + swiftSource.slice(helpersStart);
 
 const jsonAnyDecoder = "    public required init(from decoder: Decoder) throws {";
 const decoderIndex = swiftSource.lastIndexOf(jsonAnyDecoder);
