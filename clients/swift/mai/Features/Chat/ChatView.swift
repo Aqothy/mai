@@ -180,9 +180,11 @@ struct ChatView: View {
     }
 }
 
-private struct ChatTailTextWarmupKey: Equatable {
+private struct ChatTimelinePreparationKey: Equatable {
     let timelineEntryCount: Int
     let streamingTurnID: String?
+    let rowWidth: CGFloat
+    let expandedSectionIDs: Set<String>
 }
 
 /// Keeps one composer identity across draft-to-thread transitions.
@@ -460,7 +462,7 @@ private struct ChatTimeline: View {
 
     @State private var isViewportNearBottom = true
     @State private var pendingPrependAnchorID: String?
-    @State private var textWarmRowWidth: CGFloat = 0
+    @State private var rowWidth: CGFloat = 0
 
     /// Retained by the thread session across short navigation round trips.
     let textLayoutStore: ChatTextLayoutStore
@@ -504,7 +506,7 @@ private struct ChatTimeline: View {
                 )
             )
             .overlay(alignment: .top) {
-                if showsHistoryLoadingIndicator {
+                if isLoadingEarlier {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.top, 8)
@@ -515,14 +517,7 @@ private struct ChatTimeline: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 ChatTimelineMetrics.rowWidth(in: geometry.size.width)
             } action: { width in
-                textWarmRowWidth = width
-            }
-            .onChange(of: foldModel.expandedSectionIDs) { _, _ in
-                warmMarkdownRenderPlans(
-                    in: rows,
-                    streamingTurnID: streamingTurnID
-                )
-                warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
+                rowWidth = width
             }
             .task(id: historyLoadRequest) {
                 guard historyLoadRequest > 0, isTimelineNearTop,
@@ -536,28 +531,20 @@ private struct ChatTimeline: View {
                 )
             }
             .task(
-                id: ChatTailTextWarmupKey(
+                id: ChatTimelinePreparationKey(
                     timelineEntryCount: timelineEntryCount,
-                    streamingTurnID: streamingTurnID
+                    streamingTurnID: streamingTurnID,
+                    rowWidth: rowWidth,
+                    expandedSectionIDs: foldModel.expandedSectionIDs
                 )
             ) {
-                warmMarkdownRenderPlans(
-                    in: rows,
-                    streamingTurnID: streamingTurnID
-                )
-                guard textWarmRowWidth > 0 else { return }
-                warmTextLayouts(in: rows, rowWidth: textWarmRowWidth)
-            }
-            .task(id: textWarmRowWidth) {
-                guard textWarmRowWidth > 0 else { return }
-                do {
-                    try await Task.sleep(for: .milliseconds(150))
-                } catch {
-                    return
-                }
-                await prepareTextLayouts(
-                    in: rows,
-                    rowWidth: textWarmRowWidth
+                guard rowWidth > 0 else { return }
+                await Self.prepare(
+                    timelineRows: timelineRows,
+                    streamingTurnID: streamingTurnID,
+                    segmentCache: segmentCache,
+                    textLayoutStore: textLayoutStore,
+                    rowWidth: rowWidth
                 )
             }
             .onAppear {
@@ -582,10 +569,6 @@ private struct ChatTimeline: View {
                 handleScrollPhaseChange(from: oldPhase, to: newPhase)
             }
         }
-    }
-
-    private var showsHistoryLoadingIndicator: Bool {
-        isLoadingEarlier
     }
 
     private static func scrollGeometry(
@@ -785,7 +768,7 @@ private struct ChatTimeline: View {
         guard
             let page = await prepareEarlierPage(
                 loadedSections: loadedSections,
-                rowWidth: textWarmRowWidth
+                rowWidth: rowWidth
             )
         else { return }
 
@@ -861,30 +844,45 @@ private struct ChatTimeline: View {
         )
         guard !Task.isCancelled else { return }
 
+        // Reference definitions and other document-wide Markdown cannot be
+        // source-segmented safely. Resolve those documents once before
+        // splitting their already-parsed blocks into lazy List rows.
+        await ChatMarkdownRenderCache.shared.prime(
+            requests: Self.wholeDocumentMarkdownRenderRequests(
+                in: timelineRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
+            )
+        )
+        guard !Task.isCancelled else { return }
+
         let renderedRows = Self.renderRows(
             timelineRows,
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache
         )
-        async let planPreparation: Void = ChatMarkdownRenderCache.shared.prime(
-            requests: Self.markdownRenderRequests(
-                in: renderedRows,
-                streamingTurnID: streamingTurnID
-            )
+        let markdownRequests = Self.markdownRenderRequests(
+            in: renderedRows,
+            streamingTurnID: streamingTurnID
         )
-        async let textPreparation: Void = textLayoutStore.prepare(
+        await ChatMarkdownRenderCache.shared.prime(
+            requests: markdownRequests
+        )
+        guard !Task.isCancelled else { return }
+
+        await textLayoutStore.prepare(
             requests: Self.textLayoutRequests(
                 in: renderedRows,
-                limit: ChatTextLayoutWarmup.maximumRequestCount,
+                streamingTurnID: streamingTurnID,
                 rowWidth: rowWidth
             )
         )
-        _ = await (planPreparation, textPreparation)
     }
 
-    /// Expands oversized user messages and settled oversized assistant
-    /// messages. Streaming keeps one stable live row; uncommon document-wide
-    /// Markdown features keep the full rich renderer.
+    /// Expands oversized user messages and every settled assistant message.
+    /// Streaming keeps one stable live row. Documents that cannot be
+    /// source-segmented are parsed once as a whole, then their resolved blocks
+    /// become lazy timeline rows without changing reference-link semantics.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -914,7 +912,39 @@ private struct ChatTimeline: View {
             )
             switch plan {
             case .existingRenderer:
-                return [.standard(row)]
+                guard message.role == MaidMessageRole.assistant.rawValue,
+                    message.turnID != streamingTurnID
+                else { return [.standard(row)] }
+
+                let renderPlan = ChatMarkdownRenderCache.shared.plan(
+                    messageID: message.id,
+                    source: message.text
+                )
+                let contents = renderPlan.blocks.flatMap { block in
+                    switch block {
+                    case .prose(let prose):
+                        prose.pieces.map(ChatResolvedMarkdownRowContent.prose)
+                    case .code(let code):
+                        [ChatResolvedMarkdownRowContent.code(code)]
+                    case .table(let table):
+                        [ChatResolvedMarkdownRowContent.table(table)]
+                    }
+                }
+                guard !contents.isEmpty else { return [.standard(row)] }
+                return contents.indices.map { index in
+                    .resolvedMarkdown(
+                        ChatResolvedMarkdownBlockRowModel(
+                            messageID: message.id,
+                            index: index,
+                            content: contents[index],
+                            attachments: index == contents.count - 1
+                                ? message.attachments
+                                : nil,
+                            isFirst: index == 0,
+                            isLast: index == contents.count - 1
+                        )
+                    )
+                }
 
             case .segmented(let segments):
                 return segments.indices.map { index in
@@ -935,6 +965,31 @@ private struct ChatTimeline: View {
                         : .richMarkdown(model)
                 }
             }
+        }
+    }
+
+    static func wholeDocumentMarkdownRenderRequests(
+        in rows: [ChatTimelineRowModel],
+        streamingTurnID: String?,
+        segmentCache: ChatMarkdownSegmentCache
+    ) -> [ChatMarkdownRenderRequest] {
+        rows.compactMap { row in
+            guard case .message(let message) = row,
+                message.role == MaidMessageRole.assistant.rawValue,
+                message.turnID != streamingTurnID,
+                case .existingRenderer = ChatMessageTextPlanner.plan(
+                    messageID: message.id,
+                    role: message.role,
+                    messageTurnID: message.turnID,
+                    streamingTurnID: streamingTurnID,
+                    source: message.text,
+                    segmentCache: segmentCache
+                )
+            else { return nil }
+            return ChatMarkdownRenderRequest(
+                messageID: message.id,
+                source: message.text
+            )
         }
     }
 
@@ -960,88 +1015,104 @@ private struct ChatTimeline: View {
                     source: segment.source
                 )
 
-            case .standard, .prose:
+            case .standard, .prose, .resolvedMarkdown:
                 return nil
             }
         }
     }
 
-    private func warmMarkdownRenderPlans(
-        in rows: [ChatTimelineRenderRow],
-        streamingTurnID: String?
-    ) {
-        ChatMarkdownRenderCache.shared.warm(
-            requests: Self.markdownRenderRequests(
-                in: rows,
-                streamingTurnID: streamingTurnID
-            )
-        )
-    }
-
-    /// The native-text layout work `rows` need at `rowWidth`, newest
-    /// last, capped at `limit` requests.
+    /// All native-text layouts needed by one bounded set of timeline rows.
+    /// Complete preparation prevents rapid scrolling from outrunning a
+    /// newest-only preparation and falling back to synchronous main-thread layout.
     static func textLayoutRequests(
         in rows: [ChatTimelineRenderRow],
-        limit: Int,
+        streamingTurnID: String?,
         rowWidth: CGFloat
     ) -> [ChatTextLayoutRequest] {
-        let requests = rows.compactMap {
-            row -> ChatTextLayoutRequest? in
-            switch row {
-            case .prose(let segment):
-                ChatTextLayoutRequest(
-                    id: segment.rowID,
-                    source: segment.source,
-                    style: .markdownProse,
-                    width: ChatTimelineMetrics.proseTextWidth(
-                        role: segment.role,
-                        in: rowWidth
+        var requests: [ChatTextLayoutRequest] = []
+
+        func appendRichRequests(
+            messageID: String,
+            source: String,
+            role: String
+        ) {
+            guard let plan = ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: messageID,
+                source: source
+            ) else { return }
+
+            for (index, block) in plan.blocks.enumerated() {
+                let id = "\(messageID)-block-\(index)"
+                switch block {
+                case .prose(let prose):
+                    requests.append(
+                        ChatTextLayoutRequest(
+                            id: id,
+                            source: prose.source,
+                            style: .markdownProse,
+                            width: ChatTimelineMetrics.proseTextWidth(
+                                role: role,
+                                in: rowWidth
+                            )
+                        )
                     )
-                )
-            case .standard, .richMarkdown:
-                nil
+                case .code, .table:
+                    break
+                }
             }
         }
-        return Array(requests.suffix(limit))
+
+        for row in rows {
+            switch row {
+            case .prose(let segment):
+                requests.append(
+                    ChatTextLayoutRequest(
+                        id: segment.rowID,
+                        source: segment.source,
+                        style: .markdownProse,
+                        width: ChatTimelineMetrics.proseTextWidth(
+                            role: segment.role,
+                            in: rowWidth
+                        )
+                    )
+                )
+            case .richMarkdown(let segment):
+                appendRichRequests(
+                    messageID: segment.rowID,
+                    source: segment.source,
+                    role: segment.role
+                )
+            case .standard(.message(let message)):
+                guard
+                    message.role != MaidMessageRole.assistant.rawValue
+                        || message.turnID != streamingTurnID
+                else { continue }
+                appendRichRequests(
+                    messageID: message.id,
+                    source: message.text,
+                    role: message.role
+                )
+            case .standard, .resolvedMarkdown:
+                break
+            }
+        }
+        return requests
     }
 
-    private func warmTextLayouts(
-        in rows: [ChatTimelineRenderRow],
-        rowWidth: CGFloat
-    ) {
-        textLayoutStore.warm(
-            requests: Self.textLayoutRequests(
-                in: rows,
-                limit: ChatTextLayoutWarmup.maximumRequestCount,
-                rowWidth: rowWidth
-            )
-        )
-    }
-
-    private func prepareTextLayouts(
-        in rows: [ChatTimelineRenderRow],
-        rowWidth: CGFloat
-    ) async {
-        await textLayoutStore.prepare(
-            requests: Self.textLayoutRequests(
-                in: rows,
-                limit: ChatTextLayoutWarmup.maximumRequestCount,
-                rowWidth: rowWidth
-            )
-        )
-    }
 }
 
 enum ChatTimelineRenderRow: Identifiable {
     case standard(ChatTimelineRowModel)
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
+    case resolvedMarkdown(ChatResolvedMarkdownBlockRowModel)
 
     var id: String {
         switch self {
         case .standard(let row): row.id
         case .richMarkdown(let segment): "\(segment.rowID)-rich"
         case .prose(let segment): "\(segment.rowID)-prose"
+        case .resolvedMarkdown(let block): block.rowID
         }
     }
 }
@@ -1067,7 +1138,8 @@ struct ChatTimelineRenderRowView: View {
                     threadID: threadID,
                     store: store,
                     foldModel: foldModel,
-                    scrollState: scrollState
+                    scrollState: scrollState,
+                    textLayoutStore: textLayoutStore
                 )
 
             case .richMarkdown(let segment):
@@ -1077,7 +1149,8 @@ struct ChatTimelineRenderRowView: View {
                     role: segment.role,
                     attachments: segment.attachments,
                     streamingText: nil,
-                    presentation: ChatMarkdownPresentation(isStreaming: false)
+                    presentation: ChatMarkdownPresentation(isStreaming: false),
+                    textLayoutStore: textLayoutStore
                 )
                 .padding(.top, segment.isFirst ? 10 : 0)
                 .padding(
@@ -1099,6 +1172,14 @@ struct ChatTimelineRenderRowView: View {
                     .bottom,
                     segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
                 )
+
+            case .resolvedMarkdown(let block):
+                ChatResolvedMarkdownBlockRow(model: block)
+                    .padding(
+                        .top,
+                        block.isFirst ? 10 : ChatMarkdownProseStyle.blockSpacing
+                    )
+                    .padding(.bottom, block.isLast ? 10 : 0)
             }
         }
         .frame(
@@ -1216,6 +1297,7 @@ private struct ChatTimelineRow: View {
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
+    let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1234,7 +1316,8 @@ private struct ChatTimelineRow: View {
                         role: message.role,
                         turnID: message.turnID,
                         streamingTurnID: streamingTurnID
-                    )
+                    ),
+                    textLayoutStore: textLayoutStore
                 )
                 .padding(.vertical, 10)
             case .thought(let item):
@@ -1857,6 +1940,7 @@ private struct ChatMessageRow: View {
     let attachments: [Attachment]?
     let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
+    let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -1865,13 +1949,15 @@ private struct ChatMessageRow: View {
                     ChatStreamingMarkdownMessageView(
                         messageID: messageID,
                         streamingText: streamingText,
-                        presentation: presentation
+                        presentation: presentation,
+                        textLayoutStore: textLayoutStore
                     )
                 } else {
                     ChatMarkdownMessageView(
                         messageID: messageID,
                         source: text,
-                        presentation: presentation
+                        presentation: presentation,
+                        textLayoutStore: textLayoutStore
                     )
                 }
             }

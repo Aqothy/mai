@@ -439,6 +439,16 @@ func (e *Engine) ThreadListEntry(threadID ThreadID) (ThreadListEntry, bool) {
 	return e.projection.ThreadListEntry(threadID)
 }
 
+// ThreadHistoryRestorePending reports whether the thread is still the
+// metadata-only stub (or is currently rebuilding that stub from provider
+// history). It is intentionally a clone-free query for notification fan-out.
+func (e *Engine) ThreadHistoryRestorePending(threadID ThreadID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	thread := e.projection.liveThread(threadID)
+	return thread != nil && thread.ReplayHistoryPending
+}
+
 // Thread returns a detached complete thread snapshot for diagnostics and tests.
 // Client and runtime paths should use bounded projections/views instead.
 func (e *Engine) Thread(threadID ThreadID) (Thread, bool) {

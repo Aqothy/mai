@@ -67,9 +67,9 @@ enum ChatMessageTextPlanner {
             return .existingRenderer
         }
 
-        // Document-wide Markdown features make independent block parsing
-        // unsafe. Keep the full rich renderer: routing the whole document
-        // through the prose-only TextKit path would flatten code and tables.
+        // Document-wide Markdown features make independent source parsing
+        // unsafe. The timeline may still parse the complete document once and
+        // lazily display its already-resolved blocks.
         return .existingRenderer
     }
 }
@@ -88,7 +88,7 @@ nonisolated enum ChatMarkdownSegmenter {
     }
 
     /// Returns nil when splitting could change document-wide Markdown
-    /// behavior. Those uncommon messages stay in one attributed text row.
+    /// behavior. Callers must parse those uncommon documents as a whole.
     static func segments(of source: String) -> [ChatMarkdownSegment]? {
         guard canSegment(source) else { return nil }
 

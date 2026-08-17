@@ -29,13 +29,14 @@ nonisolated enum ChatMarkdownLinkPolicy {
     }
 }
 
-/// Shared native-prose behavior. Attributed links use the platform's default
-/// URL opening behavior and remain compatible with range selection.
+/// Shared rich-content styling. Selection is attached by the prose and code
+/// leaf renderers; applying it here makes every table cell and control build
+/// SwiftUI's selectable-text graph even though tables already have one copy
+/// action. Attributed links use the platform's default URL opening behavior.
 struct ChatMarkdownContentStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .tint(.primary)
             .lineSpacing(2)
-            .textSelection(.enabled)
     }
 }

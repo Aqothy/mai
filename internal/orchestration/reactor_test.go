@@ -425,6 +425,7 @@ func TestReactorRetriesPendingReplayWithTimelineContent(t *testing.T) {
 func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
 	fake := newFakeProviderRuntime()
 	fake.startErr = errors.New("agent unreachable")
 	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
@@ -443,6 +444,15 @@ func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	thread, _ := engine.Thread(threadID)
 	if !thread.ReplayHistoryPending {
 		t.Fatal("failed preparation consumed restored replay intent")
+	}
+	var restoreFailurePublished bool
+	for _, event := range events.matching(threadID, first.Sequence) {
+		if event.Type == EventThreadSessionStatusSet && event.EndsHistoryReplay() {
+			restoreFailurePublished = true
+		}
+	}
+	if !restoreFailurePublished {
+		t.Fatal("failed preparation did not close its history replay publication window")
 	}
 
 	fake.mu.Lock()

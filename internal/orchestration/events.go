@@ -51,6 +51,11 @@ type Event struct {
 	Actor      ActorKind     `json:"actor,omitempty"`
 	Metadata   EventMetadata `json:"metadata,omitzero"`
 	Payload    EventPayload  `json:"payload"`
+
+	// historyReplayFailed distinguishes a failed restore attempt from a
+	// runtime error contained in otherwise valid provider history. It stays
+	// internal because clients receive the resulting authoritative snapshot.
+	historyReplayFailed bool
 }
 
 type EventMetadata struct {
@@ -101,6 +106,12 @@ type EventPayload struct {
 // stamps Payload.ThreadID; all current events are thread-scoped.
 func (e Event) ThreadID() ThreadID {
 	return e.Payload.ThreadID
+}
+
+// EndsHistoryReplay reports whether this event closes the current replay
+// publication window. A failed attempt remains pending so the user can retry.
+func (e Event) EndsHistoryReplay() bool {
+	return e.Type == EventThreadHistoryReplayCompleted || e.historyReplayFailed
 }
 
 // normalizeEvent completes sparse item metadata before the event is applied or

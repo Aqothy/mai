@@ -23,14 +23,15 @@ const (
 )
 
 type sessionUpdate struct {
-	threadID   ThreadID
-	occurredAt time.Time
-	Kind       sessionUpdateKind
-	Binding    *SessionBinding
-	TurnID     TurnID
-	TurnState  provider.RuntimeTurnState
-	StopReason string
-	Error      string
+	threadID            ThreadID
+	occurredAt          time.Time
+	Kind                sessionUpdateKind
+	Binding             *SessionBinding
+	TurnID              TurnID
+	TurnState           provider.RuntimeTurnState
+	StopReason          string
+	Error               string
+	historyReplayFailed bool
 }
 
 func (e *Engine) sessionUpdateRecovered(update sessionUpdate) (DispatchResult, error) {
@@ -62,7 +63,13 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 		if update.Kind != sessionUpdateStopped || activeTurnID(*thread) != "" {
 			stopReason = update.StopReason
 		}
-		appended := appendEvent(Event{Type: EventThreadSessionStatusSet, OccurredAt: update.occurredAt, Actor: ActorKindServer, Payload: EventPayload{ThreadID: update.threadID, Session: session, StopReason: stopReason}})
+		appended := appendEvent(Event{
+			Type:                EventThreadSessionStatusSet,
+			OccurredAt:          update.occurredAt,
+			Actor:               ActorKindServer,
+			Payload:             EventPayload{ThreadID: update.threadID, Session: session, StopReason: stopReason},
+			historyReplayFailed: update.historyReplayFailed,
+		})
 		sequence = appended.Sequence
 		return nil
 	})

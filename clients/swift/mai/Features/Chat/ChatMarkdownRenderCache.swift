@@ -16,20 +16,27 @@ nonisolated final class ChatMarkdownRenderCache: Sendable {
 
     private struct State: Sendable {
         var entries: [String: Entry] = [:]
-        var warming: Set<ChatMarkdownRenderRequest> = []
+        var inFlight: Set<ChatMarkdownRenderRequest> = []
     }
 
     private let state = Mutex(State())
+
+    func cachedPlan(
+        messageID: String,
+        source: String
+    ) -> ChatMarkdownRenderPlan? {
+        state.withLock { state in
+            state.entries[messageID].flatMap {
+                $0.source == source ? $0.plan : nil
+            }
+        }
+    }
 
     func plan(
         messageID: String,
         source: String
     ) -> ChatMarkdownRenderPlan {
-        if let cached = state.withLock({ state in
-            state.entries[messageID].flatMap {
-                $0.source == source ? $0.plan : nil
-            }
-        }) {
+        if let cached = cachedPlan(messageID: messageID, source: source) {
             return cached
         }
 
@@ -39,31 +46,6 @@ nonisolated final class ChatMarkdownRenderCache: Sendable {
             messageID: messageID,
             source: source
         )
-    }
-
-    /// Starts best-effort background preparation without tying the work to a
-    /// view's lifetime. Duplicate requests are claimed once.
-    func warm(requests: [ChatMarkdownRenderRequest]) {
-        let pending = claim(requests)
-        guard !pending.isEmpty else { return }
-
-        Task.detached(priority: .utility) { [self] in
-            for request in pending {
-                guard !Task.isCancelled else { break }
-                let plan = ChatMarkdownRenderPlanner.plan(from: request.source)
-                _ = store(
-                    plan,
-                    messageID: request.messageID,
-                    source: request.source
-                )
-                finish(request)
-            }
-            if Task.isCancelled {
-                for request in pending {
-                    finish(request)
-                }
-            }
-        }
     }
 
     /// Awaitable preparation used before an older transcript page is inserted.
@@ -108,7 +90,7 @@ nonisolated final class ChatMarkdownRenderCache: Sendable {
             pending.reserveCapacity(requests.count)
             for request in requests {
                 guard state.entries[request.messageID]?.source != request.source,
-                    state.warming.insert(request).inserted
+                    state.inFlight.insert(request).inserted
                 else { continue }
                 pending.append(request)
             }
@@ -118,7 +100,7 @@ nonisolated final class ChatMarkdownRenderCache: Sendable {
 
     private func finish(_ request: ChatMarkdownRenderRequest) {
         state.withLock { state in
-            _ = state.warming.remove(request)
+            _ = state.inFlight.remove(request)
         }
     }
 

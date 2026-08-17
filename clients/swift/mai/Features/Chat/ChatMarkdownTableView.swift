@@ -1,70 +1,35 @@
 import SwiftUI
-import UIKit
 
-/// A small SwiftUI table whose copy control stays pinned to the visible
-/// top-right edge while wide content scrolls underneath it.
+/// A lightweight Markdown table. Individual cells are intentionally not
+/// selectable; the explicit copy action copies the complete table.
 struct ChatMarkdownTableView: View {
     let table: ChatMarkdownTable
 
-    @State private var copied = false
-    @State private var copyResetTask: Task<Void, Never>?
-    @State private var tableContentWidth: CGFloat?
-
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Spacer()
+                ChatCopyButton(
+                    title: "Copy table",
+                    accessibilityHint: "Copies the table to the Clipboard",
+                    text: table.tabSeparatedText
+                )
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+            }
+
             ScrollView(.horizontal) {
                 ChatMarkdownTableGrid(table: table)
                     .fixedSize(horizontal: true, vertical: false)
-                    .onGeometryChange(for: CGFloat.self) { geometry in
-                        geometry.size.width
-                    } action: { width in
-                        tableContentWidth = width
-                    }
-                    .padding(.top, 32)
             }
             .scrollIndicators(.visible, axes: .horizontal)
-            .scrollIndicatorsFlash(onAppear: true)
-            .scrollIndicatorsFlash(trigger: table)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(
-                "Copy table",
-                systemImage: copied ? "checkmark" : "square.on.square",
-                action: copyTable
-            )
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, height: 44)
-            .contentShape(.rect)
-            .background(.background)
-            .accessibilityHint("Copies the table to the Clipboard")
         }
-        .frame(maxWidth: tableContentWidth, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Markdown table")
         .accessibilityValue(table.tabSeparatedText)
-        .onDisappear {
-            copyResetTask?.cancel()
-            copyResetTask = nil
-        }
-    }
-
-    private func copyTable() {
-        UIPasteboard.general.string = table.tabSeparatedText
-
-        copied = true
-        copyResetTask?.cancel()
-        copyResetTask = Task {
-            do {
-                try await Task.sleep(for: .seconds(1.5))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            copied = false
-        }
     }
 }
 

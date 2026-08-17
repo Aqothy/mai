@@ -206,7 +206,11 @@ func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
 		}
 	}
 	if err != nil {
-		r.recordSessionUpdate(view.ID, sessionUpdate{Kind: sessionUpdateError, Error: err.Error()})
+		r.recordSessionUpdate(view.ID, sessionUpdate{
+			Kind:                sessionUpdateError,
+			Error:               err.Error(),
+			historyReplayFailed: input.ReplayHistory,
+		})
 	}
 }
 

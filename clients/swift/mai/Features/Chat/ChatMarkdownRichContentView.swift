@@ -3,9 +3,10 @@ import SwiftUI
 /// Renders an immutable Markdown plan. Each block is equatable so an appended
 /// streaming tail doesn't rebuild stable code, table, or prose views.
 struct ChatMarkdownRichContentView: View {
+    let layoutIDPrefix: String
     let plan: ChatMarkdownRenderPlan
     let streamingStableBlockCount: Int?
-    let hasOpenCodeFence: Bool
+    let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
         VStack(
@@ -14,16 +15,15 @@ struct ChatMarkdownRichContentView: View {
         ) {
             ForEach(plan.blocks.indices, id: \.self) { index in
                 let block = plan.blocks[index]
+                let isStreamingBlock = streamingStableBlockCount.map {
+                    index >= $0
+                } ?? false
                 ChatMarkdownRenderBlockView(
                     block: block,
-                    isStreamingCode: isStreamingCode(
-                        block,
-                        at: index
-                    ),
-                    usesSelectableProse: streamingStableBlockCount.map {
-                        index < $0
-                    } ?? true,
-                    proseLayoutID: "markdown-prose-\(index)"
+                    usesSelectableProse: !isStreamingBlock,
+                    isStreaming: isStreamingBlock,
+                    layoutID: "\(layoutIDPrefix)-block-\(index)",
+                    textLayoutStore: textLayoutStore
                 )
                 .equatable()
                 .padding(
@@ -33,23 +33,6 @@ struct ChatMarkdownRichContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func isStreamingCode(
-        _ block: ChatMarkdownRenderPlan.Block,
-        at index: Int
-    ) -> Bool {
-        guard let stableBlockCount = streamingStableBlockCount,
-            index >= stableBlockCount,
-            case .code(let code) = block
-        else { return false }
-
-        return switch code.kind {
-        case .fenced:
-            hasOpenCodeFence && index == plan.blocks.indices.last
-        case .html:
-            true
-        }
     }
 }
 
@@ -87,7 +70,8 @@ struct ChatMarkdownRichContentView: View {
 
                 <div>HTML remains inert.</div>
                 """#,
-            presentation: ChatMarkdownPresentation(isStreaming: false)
+            presentation: ChatMarkdownPresentation(isStreaming: false),
+            textLayoutStore: ChatTextLayoutStore()
         )
         .padding()
     }
@@ -96,27 +80,40 @@ struct ChatMarkdownRichContentView: View {
 
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
-    let isStreamingCode: Bool
     let usesSelectableProse: Bool
-    let proseLayoutID: String
+    let isStreaming: Bool
+    let layoutID: String
+    let textLayoutStore: ChatTextLayoutStore
+
+    nonisolated static func == (
+        lhs: ChatMarkdownRenderBlockView,
+        rhs: ChatMarkdownRenderBlockView
+    ) -> Bool {
+        lhs.block == rhs.block
+            && lhs.usesSelectableProse == rhs.usesSelectableProse
+            && lhs.isStreaming == rhs.isStreaming
+            && lhs.layoutID == rhs.layoutID
+            && lhs.textLayoutStore === rhs.textLayoutStore
+    }
 
     var body: some View {
         switch block {
         case .prose(let prose):
             if usesSelectableProse {
                 ChatSelectableMarkdownProseRun(
-                    layoutID: proseLayoutID,
-                    prose: prose
+                    layoutID: layoutID,
+                    prose: prose,
+                    textLayoutStore: textLayoutStore
                 )
                 .equatable()
             } else {
-                ChatStreamingMarkdownProseView(prose: prose)
+                ChatMarkdownResolvedProseView(prose: prose)
             }
 
         case .code(let codeBlock):
             ChatMarkdownCodeBlockView(
                 block: codeBlock,
-                isStreaming: isStreamingCode
+                isStreaming: isStreaming
             )
 
         case .table(let table):
@@ -125,19 +122,20 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     }
 }
 
-/// Gives each completed prose run the existing selectable renderer and a
-/// small local cache. The actively changing tail never enters this view.
+/// Completed prose uses the thread-owned layout and native-view cache. The
+/// actively changing tail never enters this view.
 private struct ChatSelectableMarkdownProseRun: Equatable, View {
     let layoutID: String
     let prose: ChatMarkdownProseRun
-
-    @State private var layoutStore = ChatTextLayoutStore()
+    let textLayoutStore: ChatTextLayoutStore
 
     nonisolated static func == (
         lhs: ChatSelectableMarkdownProseRun,
         rhs: ChatSelectableMarkdownProseRun
     ) -> Bool {
-        lhs.layoutID == rhs.layoutID && lhs.prose == rhs.prose
+        lhs.layoutID == rhs.layoutID
+            && lhs.prose == rhs.prose
+            && lhs.textLayoutStore === rhs.textLayoutStore
     }
 
     var body: some View {
@@ -145,28 +143,78 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
             layoutID: layoutID,
             source: prose.source,
             style: .markdownProse,
-            layoutStore: layoutStore
+            layoutStore: textLayoutStore
         )
     }
 }
 
-private struct ChatStreamingMarkdownProseView: Equatable, View {
+private struct ChatMarkdownResolvedProseView: Equatable, View {
     let prose: ChatMarkdownProseRun
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatMarkdownProseStyle.blockSpacing) {
             ForEach(prose.pieces.indices, id: \.self) { index in
-                ChatStreamingMarkdownProsePieceView(
+                ChatMarkdownResolvedProsePieceView(
                     piece: prose.pieces[index]
                 )
                 .equatable()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 }
 
-private struct ChatStreamingMarkdownProsePieceView: Equatable, View {
+enum ChatResolvedMarkdownRowContent: Equatable {
+    case prose(ChatMarkdownProseRun.Piece)
+    case code(ChatMarkdownCodeBlock)
+    case table(ChatMarkdownTable)
+}
+
+struct ChatResolvedMarkdownBlockRowModel {
+    let messageID: String
+    let index: Int
+    let content: ChatResolvedMarkdownRowContent
+    let attachments: [Attachment]?
+    let isFirst: Bool
+    let isLast: Bool
+
+    var rowID: String { "\(messageID)#resolved-block-\(index)" }
+}
+
+/// One parser-resolved block promoted to a lazy timeline row when source-level
+/// segmentation would change document-wide Markdown semantics.
+struct ChatResolvedMarkdownBlockRow: View {
+    let model: ChatResolvedMarkdownBlockRowModel
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            switch model.content {
+            case .prose(let piece):
+                ChatMarkdownResolvedProsePieceView(piece: piece)
+                    .equatable()
+                    .textSelection(.enabled)
+            case .code(let code):
+                ChatMarkdownCodeBlockView(block: code, isStreaming: false)
+            case .table(let table):
+                ChatMarkdownTableView(table: table)
+            }
+
+            if let attachments = model.attachments, !attachments.isEmpty {
+                Text(
+                    attachments.map { $0.name ?? $0.kind }
+                        .joined(separator: " · ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(ChatMarkdownContentStyle())
+    }
+}
+
+struct ChatMarkdownResolvedProsePieceView: Equatable, View {
     let piece: ChatMarkdownProseRun.Piece
 
     var body: some View {

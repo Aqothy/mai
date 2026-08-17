@@ -1007,12 +1007,8 @@ final class ThreadStore {
                 throw ThreadStoreError.invalidSnapshot
             }
 
-            removeItemDetails(for: id)
-            streamingTextByThreadID[id] = nil
-            current.thread = snapshot.thread
-            current.lastSequence = snapshot.snapshotSequence
+            replaceThreadContents(with: snapshot, session: &current)
             current.shouldRestoreAfterReconnect = true
-            current.historyRestorePending = snapshot.historyRestorePending == true
             sessionsByID[id] = current
             noteSelectedSessionChanged(id)
             if selectedThreadID == id {
@@ -1025,7 +1021,7 @@ final class ThreadStore {
             recovered.bufferedItems.removeAll()
             sessionsByID[id] = recovered
             for bufferedItem in buffered.sorted(by: threadStreamSequenceAscending) {
-                applyThreadEventItem(bufferedItem)
+                applyThreadStreamItem(bufferedItem)
             }
             performSubscriptionMaintenance()
             await prepareSelectedRestoredThreadIfNeeded(id)
@@ -1200,20 +1196,60 @@ final class ThreadStore {
     }
 
     private func receiveThreadItem(_ item: ThreadStreamItem) {
-        guard let threadID = item.event?.payload.threadID,
+        guard let threadID = item.snapshot?.thread.id
+            ?? item.event?.payload.threadID,
             var session = sessionsByID[threadID]
         else { return }
         if case .subscribing = session.subscriptionState {
             session.bufferedItems.append(item)
             sessionsByID[threadID] = session
         } else {
-            applyThreadEventItem(item)
+            applyThreadStreamItem(item)
         }
     }
 
-    private func applyThreadEventItem(_ item: ThreadStreamItem) {
-        guard item.streamKind == .event, let event = item.event else { return }
-        applyThreadEvent(event)
+    private func applyThreadStreamItem(_ item: ThreadStreamItem) {
+        switch item.streamKind {
+        case .snapshot:
+            guard let snapshot = item.snapshot else { return }
+            applyThreadRefreshSnapshot(snapshot)
+        case .event:
+            guard let event = item.event else { return }
+            applyThreadEvent(event)
+        default:
+            break
+        }
+    }
+
+    private func applyThreadRefreshSnapshot(_ snapshot: ThreadDetailSnapshot) {
+        let threadID = snapshot.thread.id
+        guard var session = sessionsByID[threadID],
+            snapshot.snapshotSequence > session.lastSequence
+        else { return }
+
+        replaceThreadContents(with: snapshot, session: &session)
+        sessionsByID[threadID] = session
+        noteSelectedSessionChanged(threadID)
+        if selectedThreadID == threadID {
+            selectedThreadLoadErrorMessage = nil
+        }
+        reconcileSubscriptionState(threadID, at: now())
+        performSubscriptionMaintenance()
+        dispatchNextQueuedPromptIfPossible(threadID)
+    }
+
+    /// Replaces only server-owned thread data, preserving local subscription,
+    /// presentation-cache, and queued-prompt state.
+    private func replaceThreadContents(
+        with snapshot: ThreadDetailSnapshot,
+        session: inout ThreadSession
+    ) {
+        let threadID = snapshot.thread.id
+        removeItemDetails(for: threadID)
+        streamingTextByThreadID[threadID] = nil
+        session.thread = snapshot.thread
+        session.lastSequence = snapshot.snapshotSequence
+        session.historyRestorePending = snapshot.historyRestorePending == true
     }
 
     private func applyThreadEvent(_ event: Event) {
@@ -1457,7 +1493,13 @@ final class ThreadStore {
         _ left: ThreadStreamItem,
         _ right: ThreadStreamItem
     ) -> Bool {
-        (left.event?.sequence ?? .min) < (right.event?.sequence ?? .min)
+        let leftSequence = left.snapshot?.snapshotSequence
+            ?? left.event?.sequence
+            ?? .min
+        let rightSequence = right.snapshot?.snapshotSequence
+            ?? right.event?.sequence
+            ?? .min
+        return leftSequence < rightSequence
     }
 
     private func streamSequenceAscending(

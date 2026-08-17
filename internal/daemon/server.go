@@ -55,8 +55,9 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
-	rpcMu      sync.Mutex
-	rpcClients map[string]*rpcClient
+	rpcMu                  sync.Mutex
+	rpcClients             map[string]*rpcClient
+	historyReplayCoalescing map[orchestration.ThreadID]struct{}
 
 	closeOnce sync.Once
 	closeErr  error
@@ -72,7 +73,15 @@ func NewServer() *Server {
 
 func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{logger: logger, rpcClients: make(map[string]*rpcClient), ctx: ctx, ctxCancel: cancel, metadataStore: metadata, acpRegistry: newACPRegistry()}
+	s := &Server{
+		logger:                  logger,
+		rpcClients:              make(map[string]*rpcClient),
+		historyReplayCoalescing: make(map[orchestration.ThreadID]struct{}),
+		ctx:                     ctx,
+		ctxCancel:               cancel,
+		metadataStore:           metadata,
+		acpRegistry:             newACPRegistry(),
+	}
 	var terminalMeta store.TerminalStore
 	if metadata != nil {
 		terminalMeta = metadata

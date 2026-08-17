@@ -13,15 +13,8 @@ nonisolated struct ChatTextLayoutRequest: Sendable {
     let width: CGFloat
 }
 
-nonisolated enum ChatTextLayoutWarmup {
-    /// Bounds eager work in one batch without evicting layouts the loaded chat
-    /// has already paid to create. Both native text backends use this budget.
-    static let maximumRequestCount = 256
-}
-
 /// The small surface used by the timeline to prepare and cache native text.
 @MainActor protocol ChatNativeTextLayoutStore: AnyObject, Sendable {
-    func warm(requests: [ChatTextLayoutRequest])
     func prepare(requests: [ChatTextLayoutRequest]) async
 }
 
@@ -37,7 +30,7 @@ struct ChatTextSelection: Equatable, Sendable {
 
 #if DEBUG
     /// DEBUG-only breadcrumbs for correlating a visible hitch with the
-    /// row that appeared, a missed warmup, or expensive native attachment.
+    /// row that appeared, missed preparation, or expensive native attachment.
     nonisolated enum ChatTextLayoutDiagnostics {
         private static let logger = Logger(
             subsystem: "com.aqothy.mai",
@@ -162,7 +155,7 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
     }
 }
 
-/// Thread-owned cache for completed layouts and in-flight warmups, plus a
+/// Thread-owned cache for completed and in-flight layouts, plus a
 /// reuse pool of native views List has already displayed.
 final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
     private struct Key: Hashable, Sendable {
@@ -183,7 +176,7 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
     }
 
     private var entries: [Key: Entry] = [:]
-    private var warming: Set<Key> = []
+    private var inFlightKeys: Set<Key> = []
     private var idleTextViews: [IdleTextView] = []
     private var acceptsReturnedTextViews = true
 
@@ -213,7 +206,7 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
             return entry.layout
         }
 
-        // A visible row can beat its warmup, especially during the first
+        // A visible row can beat background preparation, especially during the first
         // bounded mount. Build synchronously so the transcript never
         // flashes a placeholder or temporarily reports the wrong height.
         #if DEBUG
@@ -236,28 +229,7 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
         return layout
     }
 
-    func warm(requests: [ChatTextLayoutRequest]) {
-        let pending = claimPending(from: requests)
-        guard !pending.isEmpty else { return }
-
-        Task.detached(priority: .userInitiated) { [self] in
-            for item in pending {
-                let layout = ChatTextLayout(
-                    source: item.request.source,
-                    style: item.request.style,
-                    width: item.request.width
-                )
-                await finishWarmup(
-                    layout,
-                    source: item.request.source,
-                    style: item.request.style,
-                    key: item.key
-                )
-            }
-        }
-    }
-
-    /// Awaitable warmup for the rows needed before a cold-open reveal.
+    /// Prepares rows before they enter the timeline whenever possible.
     /// Cancellation retains layouts that already finished.
     func prepare(requests: [ChatTextLayoutRequest]) async {
         let pending = claimPending(from: requests)
@@ -284,16 +256,16 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
             worker.cancel()
         }
         for (item, layout) in zip(pending, layouts) {
-            finishWarmup(
+            finishPreparation(
                 layout,
                 source: item.request.source,
                 style: item.request.style,
                 key: item.key
             )
         }
-        // Unbuilt claims must not block future warmups for these rows.
+        // Unbuilt claims must not block future preparation for these rows.
         for item in pending.dropFirst(layouts.count) {
-            warming.remove(item.key)
+            inFlightKeys.remove(item.key)
         }
     }
 
@@ -306,28 +278,26 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
     ) -> [(request: ChatTextLayoutRequest, key: Key)] {
         var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
         var seen: Set<Key> = []
-        for request in requests.suffix(ChatTextLayoutWarmup.maximumRequestCount)
-            .reversed()
-        where request.width > 0 {
+        for request in requests.reversed() where request.width > 0 {
             let key = Key(id: request.id, width: request.width)
             guard seen.insert(key).inserted,
                 entries[key]?.source != request.source
                     || entries[key]?.style != request.style,
-                !warming.contains(key)
+                !inFlightKeys.contains(key)
             else { continue }
-            warming.insert(key)
+            inFlightKeys.insert(key)
             pending.append((request, key))
         }
         return pending
     }
 
-    private func finishWarmup(
+    private func finishPreparation(
         _ layout: ChatTextLayout,
         source: String,
         style: ChatTextLayoutStyle,
         key: Key
     ) {
-        warming.remove(key)
+        inFlightKeys.remove(key)
         guard entries[key]?.source != source || entries[key]?.style != style
         else { return }
         insert(layout, source: source, style: style, for: key)
@@ -649,11 +619,12 @@ final class ChatSelectableTextHostView: UIView {
             }
             view.attributedText = layout.attributedString
         }
-        view.selectedRange =
-            preservedSelection.flatMap { selection in
-                NSMaxRange(selection) <= layout.attributedString.length
-                    ? selection : nil
-            } ?? NSRange(location: 0, length: 0)
+        let selection = preservedSelection
+            ?? (reuse?.hasExactContent == true ? view.selectedRange : nil)
+        view.selectedRange = selection.flatMap { selection in
+            NSMaxRange(selection) <= layout.attributedString.length
+                ? selection : nil
+        } ?? NSRange(location: 0, length: 0)
 
         view.delegate = selectionDelegate
         if layout.hasMarkdownDecorations {

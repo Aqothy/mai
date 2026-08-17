@@ -836,14 +836,31 @@ func decodeRPCParams(req *jsonrpc2.Request, dst any) error {
 //   - collect subscribers first and bail before building anything nobody wants;
 //   - marshal each notification ONCE and fan out the bytes, instead of
 //     re-marshaling per client;
-//   - build the sidebar projection only for thread-list-visible events.
+//   - collapse provider history replay into one authoritative snapshot. A
+//     replay can contain thousands of intermediate item updates even when its
+//     final timeline has only a few dozen entries; sending those transient
+//     states can overflow a healthy client's bounded outbound queue and make
+//     the UI repeatedly render content that is immediately replaced.
 func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	threadID := event.ThreadID()
 	if threadID == "" {
 		return
 	}
 
+	beginsHistoryReplay := event.Type == orchestration.EventThreadSessionPrepareRequested &&
+		s.orchestration.ThreadHistoryRestorePending(threadID)
+	endsHistoryReplay := event.EndsHistoryReplay()
+
 	s.rpcMu.Lock()
+	if beginsHistoryReplay {
+		s.historyReplayCoalescing[threadID] = struct{}{}
+	}
+	_, suppressForHistoryReplay := s.historyReplayCoalescing[threadID]
+	refreshAfterHistoryReplay := suppressForHistoryReplay && endsHistoryReplay
+	if refreshAfterHistoryReplay {
+		delete(s.historyReplayCoalescing, threadID)
+	}
+
 	var threadClients, threadListClients []*rpcClient
 	for _, client := range s.rpcClients {
 		if client.subscribedThread(threadID) {
@@ -854,7 +871,16 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 		}
 	}
 	s.rpcMu.Unlock()
+
+	if suppressForHistoryReplay && !refreshAfterHistoryReplay {
+		return
+	}
 	if len(threadClients) == 0 && len(threadListClients) == 0 {
+		return
+	}
+
+	if refreshAfterHistoryReplay {
+		s.publishThreadRefresh(threadID, event.Sequence, threadClients, threadListClients)
 		return
 	}
 
@@ -869,12 +895,35 @@ func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
 	if len(threadListClients) == 0 || !orchestration.ThreadListVisible(event) {
 		return
 	}
+	s.publishThreadListUpsert(threadID, event.Sequence, threadListClients)
+}
+
+// publishThreadRefresh replaces every suppressed replay update with one final
+// detail snapshot and one sidebar upsert. Internal engine listeners still see
+// every replay event; only the client transport is coalesced.
+func (s *Server) publishThreadRefresh(threadID orchestration.ThreadID, sequence uint64, threadClients, threadListClients []*rpcClient) {
+	if len(threadClients) > 0 {
+		item, err := s.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: threadID})
+		if err != nil {
+			s.logger.Error("history replay snapshot failed", "thread", threadID, "error", err)
+		} else if params, ok := s.marshalNotification(item, RPCMethodOrchestrationSubscribeThread); ok {
+			for _, client := range threadClients {
+				client.notify(RPCMethodOrchestrationSubscribeThread, params)
+			}
+		}
+	}
+	if len(threadListClients) > 0 {
+		s.publishThreadListUpsert(threadID, sequence, threadListClients)
+	}
+}
+
+func (s *Server) publishThreadListUpsert(threadID orchestration.ThreadID, sequence uint64, clients []*rpcClient) {
 	entry, ok := s.orchestration.ThreadListEntry(threadID)
 	if !ok {
 		return
 	}
-	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: orchestration.StreamItemThreadUpserted, Sequence: event.Sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
-		for _, client := range threadListClients {
+	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: orchestration.StreamItemThreadUpserted, Sequence: sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
+		for _, client := range clients {
 			client.notify(RPCMethodOrchestrationSubscribeThreadList, params)
 		}
 	}

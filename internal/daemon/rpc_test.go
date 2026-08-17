@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -731,16 +732,9 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("prepare imported thread: %v", err)
 	}
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
-		return event.Type == orchestration.EventThreadHistoryReplayCompleted
+	refreshed := waitForThreadSnapshot(t, threadItems, func(snapshot orchestration.ThreadDetailSnapshot) bool {
+		return snapshot.Thread.ID == first.ThreadID && !snapshot.HistoryRestorePending
 	})
-	var refreshed orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &refreshed); err != nil {
-		t.Fatalf("resubscribe imported thread: %v", err)
-	}
-	if refreshed.Snapshot == nil {
-		t.Fatalf("resubscribe imported thread = %#v, want snapshot", refreshed)
-	}
 	encoded, err := json.Marshal(refreshed.Snapshot.Thread.Timeline)
 	if err != nil {
 		t.Fatalf("encode replayed timeline: %v", err)
@@ -953,6 +947,136 @@ func TestRPCErrorPreservesAgentRequestError(t *testing.T) {
 	}
 	if wireErr.Code != -32000 || wireErr.Message != "Authentication required" || string(wireErr.Data) != `{"method":"login"}` {
 		t.Fatalf("wire error = %#v", wireErr)
+	}
+}
+
+func TestRPCHistoryReplayPublishesOneAuthoritativeRefresh(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+
+	threadID := orchestration.ThreadID("thread-replay-refresh")
+	s.orchestration.RestoreThreads([]orchestration.RestoredThread{{
+		ThreadID: threadID,
+		Title:    "Replay refresh",
+	}})
+	client := &rpcClient{
+		id:                  "client-replay-refresh",
+		outbound:            make(chan rpcOutbound, 4),
+		done:                make(chan struct{}),
+		threadSubscriptions: map[orchestration.ThreadID]struct{}{threadID: {}},
+	}
+	s.rpcMu.Lock()
+	s.rpcClients[client.id] = client
+	s.rpcMu.Unlock()
+	defer func() {
+		s.rpcMu.Lock()
+		delete(s.rpcClients, client.id)
+		s.rpcMu.Unlock()
+		client.closeOutbound()
+	}()
+
+	// The real prepare event is what opens the replay publication window. Call
+	// the publisher directly here so the provider reactor cannot race this
+	// focused transport test.
+	s.publishOrchestrationEvent(orchestration.Event{
+		Type: orchestration.EventThreadSessionPrepareRequested,
+		Payload: orchestration.EventPayload{
+			ThreadID: threadID,
+		},
+	})
+	for index := range 16 {
+		if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
+			Type:     orchestration.EventThreadMessageSent,
+			ThreadID: threadID,
+			Payload: orchestration.EventPayload{
+				MessageID: "message-replay",
+				Role:      orchestration.MessageRoleAssistant,
+				Text:      fmt.Sprintf("chunk-%02d ", index),
+			},
+		}); err != nil {
+			t.Fatalf("append replay chunk: %v", err)
+		}
+	}
+	// A runtime error can be part of successfully loaded history. It must be
+	// included in the final snapshot without ending transport coalescing.
+	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
+		Type:     orchestration.EventThreadSessionStatusSet,
+		ThreadID: threadID,
+		Payload: orchestration.EventPayload{
+			Session: &orchestration.SessionBinding{
+				Status:    orchestration.SessionStatusError,
+				LastError: "historical runtime error",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("append historical runtime error: %v", err)
+	}
+	if got := len(client.outbound); got != 0 {
+		t.Fatalf("outbound replay updates = %d, want 0", got)
+	}
+	for index := 16; index < 32; index++ {
+		if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
+			Type:     orchestration.EventThreadMessageSent,
+			ThreadID: threadID,
+			Payload: orchestration.EventPayload{
+				MessageID: "message-replay",
+				Role:      orchestration.MessageRoleAssistant,
+				Text:      fmt.Sprintf("chunk-%02d ", index),
+			},
+		}); err != nil {
+			t.Fatalf("append replay chunk after historical error: %v", err)
+		}
+	}
+
+	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
+		Type:     orchestration.EventThreadHistoryReplayCompleted,
+		ThreadID: threadID,
+	}); err != nil {
+		t.Fatalf("complete replay: %v", err)
+	}
+	if client.closed.Load() {
+		t.Fatal("client closed while publishing collapsed replay")
+	}
+	if got := len(client.outbound); got != 1 {
+		t.Fatalf("outbound terminal updates = %d, want one snapshot", got)
+	}
+
+	msg := <-client.outbound
+	raw, ok := msg.params.(json.RawMessage)
+	if !ok {
+		t.Fatalf("snapshot params = %T, want json.RawMessage", msg.params)
+	}
+	var refresh orchestration.ThreadStreamItem
+	if err := json.Unmarshal(raw, &refresh); err != nil {
+		t.Fatal(err)
+	}
+	if refresh.Kind != orchestration.StreamItemSnapshot || refresh.Snapshot == nil {
+		t.Fatalf("refresh = %#v, want snapshot", refresh)
+	}
+	encoded, err := json.Marshal(refresh.Snapshot.Thread.Timeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "chunk-31") {
+		t.Fatalf("refresh timeline = %s, want final replay content", encoded)
+	}
+}
+
+func waitForThreadSnapshot(t *testing.T, items <-chan orchestration.ThreadStreamItem, match func(orchestration.ThreadDetailSnapshot) bool) orchestration.ThreadStreamItem {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case item := <-items:
+			if item.Kind != orchestration.StreamItemSnapshot || item.Snapshot == nil {
+				continue
+			}
+			if match(*item.Snapshot) {
+				return item
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for orchestration thread snapshot")
+		}
 	}
 }
 
