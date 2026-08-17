@@ -3,7 +3,8 @@ import SwiftUI
 struct IOSThreadListView: View {
     let store: ThreadStore
     let terminalStore: TerminalStore
-    let newChat: () -> Void
+    let projectFolders: ProjectFolderStore
+    let newChat: (String?) -> Void
     let newTerminal: (TerminalOpenRequest) -> Void
     let selectThread: (String) -> Void
     let selectTerminal: (String) -> Void
@@ -11,6 +12,7 @@ struct IOSThreadListView: View {
     let openSessionImport: () -> Void
 
     @State private var filter = ThreadListFilter()
+    @State private var isTerminalFolderSelectionPresented = false
 
     @AppStorage(ThreadListDisplayMode.appStorageKey)
     private var displayModeRaw = ThreadListDisplayMode.recent.rawValue
@@ -31,17 +33,27 @@ struct IOSThreadListView: View {
             case .recent:
                 workspaceRows(items: items, isCompact: false)
             case .byProject:
-                let groups = WorkspaceListGroups(items: items)
+                let groups = WorkspaceListGroups(
+                    items: items,
+                    projectDirectories: projectFolders.folders
+                )
                 workspaceRows(items: groups.ungrouped, isCompact: true)
                 ForEach(groups.projects) { section in
                     Section {
                         if collapsedProjects.isExpanded(section.id) {
-                            workspaceRows(items: section.items, isCompact: true)
+                            if section.items.isEmpty {
+                                Button("New Chat", systemImage: "square.and.pencil") {
+                                    newChat(section.id)
+                                }
+                            } else {
+                                workspaceRows(items: section.items, isCompact: true)
+                            }
                         }
                     } header: {
                         IOSProjectSectionHeader(
                             name: section.name,
                             isExpanded: collapsedProjects.isExpanded(section.id),
+                            isSaved: projectFolders.contains(section.id),
                             toggle: {
                                 withAnimation(.snappy(duration: 0.2)) {
                                     collapsedProjects.setExpanded(
@@ -49,6 +61,12 @@ struct IOSThreadListView: View {
                                         for: section.id
                                     )
                                 }
+                            },
+                            newChat: {
+                                newChat(section.id)
+                            },
+                            remove: {
+                                projectFolders.remove(section.id)
                             }
                         )
                     }
@@ -75,13 +93,17 @@ struct IOSThreadListView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                ThreadFilterMenu(store: store, filter: $filter)
+                ThreadFilterMenu(
+                    store: store,
+                    projectFolders: projectFolders,
+                    filter: $filter
+                )
             }
         }
         .modifier(
             IOSThreadListBottomToolbar(
-                newChat: newChat,
-                newTerminal: { newTerminal(.new(cwd: "", title: nil)) }
+                newChat: { newChat(nil) },
+                newTerminal: { isTerminalFolderSelectionPresented = true }
             )
         )
         .overlay {
@@ -102,9 +124,26 @@ struct IOSThreadListView: View {
         .modifier(
             ThreadListStatusModifier(
                 store: store,
-                contentIsEmpty: store.threads.isEmpty && terminalStore.terminals.isEmpty
+                contentIsEmpty: store.threads.isEmpty
+                    && terminalStore.terminals.isEmpty
+                    && (displayMode != .byProject || projectFolders.folders.isEmpty)
             )
         )
+        .sheet(isPresented: $isTerminalFolderSelectionPresented) {
+            FolderSelectionSheet(
+                store: store,
+                projectFolders: projectFolders,
+                title: "New Terminal",
+                selectedFolder: nil,
+                onSelectExisting: openNewTerminal(at:),
+                onSelectBrowsed: { directory, parentDirectory in
+                    if let parentDirectory {
+                        projectFolders.rememberParentFolder(parentDirectory)
+                    }
+                    openNewTerminal(at: directory)
+                }
+            )
+        }
     }
 
     private func workspaceRows(items: [WorkspaceListItem], isCompact: Bool) -> some View {
@@ -114,13 +153,16 @@ struct IOSThreadListView: View {
             isCompact: isCompact,
             selectThread: selectThread,
             selectTerminal: selectTerminal,
-            openTerminalHere: { cwd in
-                newTerminal(
-                    .new(
-                        cwd: cwd,
-                        title: URL(filePath: cwd).lastPathComponent
-                    ))
-            }
+            openTerminalHere: openNewTerminal(at:)
+        )
+    }
+
+    private func openNewTerminal(at directory: String) {
+        newTerminal(
+            .new(
+                cwd: directory,
+                title: URL(filePath: directory).lastPathComponent
+            )
         )
     }
 
@@ -128,7 +170,6 @@ struct IOSThreadListView: View {
         WorkspaceListItem.merged(
             threads: filter.apply(
                 to: store.threads,
-                isUnread: store.isThreadUnread,
                 providerID: store.providerID(for:)
             ),
             terminals: filter.apply(toTerminals: terminalStore.terminals)
@@ -140,7 +181,10 @@ struct IOSThreadListView: View {
 private struct IOSProjectSectionHeader: View {
     let name: String
     let isExpanded: Bool
+    let isSaved: Bool
     let toggle: () -> Void
+    let newChat: () -> Void
+    let remove: () -> Void
 
     var body: some View {
         Button(action: toggle) {
@@ -155,6 +199,18 @@ private struct IOSProjectSectionHeader: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("New Chat", systemImage: "square.and.pencil", action: newChat)
+            if isSaved {
+                Divider()
+                Button(
+                    "Remove Project Folder",
+                    systemImage: "folder.badge.minus",
+                    role: .destructive,
+                    action: remove
+                )
+            }
+        }
         .accessibilityLabel("\(name), \(isExpanded ? "expanded" : "collapsed")")
         .accessibilityHint("Double tap to \(isExpanded ? "collapse" : "expand")")
     }
@@ -166,7 +222,8 @@ private struct IOSProjectSectionHeader: View {
             IOSThreadListView(
                 store: PreviewData.threadStore(),
                 terminalStore: TerminalStore(),
-                newChat: {},
+                projectFolders: ProjectFolderStore(defaults: nil),
+                newChat: { _ in },
                 newTerminal: { _ in },
                 selectThread: { _ in },
                 selectTerminal: { _ in },
@@ -181,7 +238,8 @@ private struct IOSProjectSectionHeader: View {
             IOSThreadListView(
                 store: ThreadStore(),
                 terminalStore: TerminalStore(),
-                newChat: {},
+                projectFolders: ProjectFolderStore(defaults: nil),
+                newChat: { _ in },
                 newTerminal: { _ in },
                 selectThread: { _ in },
                 selectTerminal: { _ in },

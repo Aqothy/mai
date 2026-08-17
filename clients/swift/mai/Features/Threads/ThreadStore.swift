@@ -296,6 +296,14 @@ final class ThreadStore {
         )
     }
 
+    func browseWorkspaceDirectories(
+        at path: String?
+    ) async throws -> WorkspaceBrowseDirectoriesResult {
+        try await rpc.browseWorkspaceDirectories(
+            WorkspaceBrowseDirectoriesParams(path: path)
+        )
+    }
+
     func searchWorkspaceFiles(
         _ input: WorkspaceSearchFilesParams
     ) async throws -> WorkspaceSearchFilesResult {

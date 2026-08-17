@@ -4528,6 +4528,149 @@ public extension ThreadStreamItem {
     }
 }
 
+// MARK: - WorkspaceBrowseDirectoriesParams
+public struct WorkspaceBrowseDirectoriesParams: Codable {
+    public var path: String?
+
+    public init(path: String?) {
+        self.path = path
+    }
+}
+
+// MARK: WorkspaceBrowseDirectoriesParams convenience initializers and mutators
+
+public extension WorkspaceBrowseDirectoriesParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceBrowseDirectoriesParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        path: String?? = nil
+    ) -> WorkspaceBrowseDirectoriesParams {
+        return WorkspaceBrowseDirectoriesParams(
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - WorkspaceBrowseDirectoriesResult
+public struct WorkspaceBrowseDirectoriesResult: Codable {
+    public var entries: [WorkspaceDirectoryEntry]
+    public var parentPath: String?
+    public var path: String
+
+    public init(entries: [WorkspaceDirectoryEntry], parentPath: String?, path: String) {
+        self.entries = entries
+        self.parentPath = parentPath
+        self.path = path
+    }
+}
+
+// MARK: WorkspaceBrowseDirectoriesResult convenience initializers and mutators
+
+public extension WorkspaceBrowseDirectoriesResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceBrowseDirectoriesResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        entries: [WorkspaceDirectoryEntry]? = nil,
+        parentPath: String?? = nil,
+        path: String? = nil
+    ) -> WorkspaceBrowseDirectoriesResult {
+        return WorkspaceBrowseDirectoriesResult(
+            entries: entries ?? self.entries,
+            parentPath: parentPath ?? self.parentPath,
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - WorkspaceDirectoryEntry
+public struct WorkspaceDirectoryEntry: Codable {
+    public var name, path: String
+
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
+    }
+}
+
+// MARK: WorkspaceDirectoryEntry convenience initializers and mutators
+
+public extension WorkspaceDirectoryEntry {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkspaceDirectoryEntry.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        name: String? = nil,
+        path: String? = nil
+    ) -> WorkspaceDirectoryEntry {
+        return WorkspaceDirectoryEntry(
+            name: name ?? self.name,
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - WorkspaceFileEntry
 public struct WorkspaceFileEntry: Codable {
     public var displayName, relativePath: String

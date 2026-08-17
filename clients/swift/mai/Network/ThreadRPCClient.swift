@@ -17,6 +17,9 @@ protocol ThreadRPCClient: RPCTransportClient {
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
+    func browseWorkspaceDirectories(
+        _ input: WorkspaceBrowseDirectoriesParams
+    ) async throws -> WorkspaceBrowseDirectoriesResult
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
 }
@@ -54,6 +57,12 @@ extension ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
+    }
+
+    func browseWorkspaceDirectories(
+        _ input: WorkspaceBrowseDirectoriesParams
+    ) async throws -> WorkspaceBrowseDirectoriesResult {
+        throw RPCError(code: nil, message: "Workspace folder browsing is unavailable", data: nil)
     }
 
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
@@ -155,6 +164,12 @@ extension RPCClient: ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         try await call(MaidRPCMethod.providerOptionsSet, params: input)
+    }
+
+    func browseWorkspaceDirectories(
+        _ input: WorkspaceBrowseDirectoriesParams
+    ) async throws -> WorkspaceBrowseDirectoriesResult {
+        try await call(MaidRPCMethod.workspaceBrowseDirectories, params: input)
     }
 
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {

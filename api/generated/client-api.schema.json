@@ -1965,6 +1965,56 @@
       ],
       "title": "Turn"
     },
+    "WorkspaceBrowseDirectoriesParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "WorkspaceBrowseDirectoriesParams"
+    },
+    "WorkspaceBrowseDirectoriesResult": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "parentPath": {
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceDirectoryEntry"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "entries"
+      ],
+      "title": "WorkspaceBrowseDirectoriesResult"
+    },
+    "WorkspaceDirectoryEntry": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "path"
+      ],
+      "title": "WorkspaceDirectoryEntry"
+    },
     "WorkspaceFileEntry": {
       "properties": {
         "relativePath": {
@@ -2214,6 +2264,15 @@
         "terminalResizeParams": {
           "$ref": "#/$defs/TerminalResizeParams"
         },
+        "workspaceBrowseDirectoriesParams": {
+          "$ref": "#/$defs/WorkspaceBrowseDirectoriesParams"
+        },
+        "workspaceDirectoryEntry": {
+          "$ref": "#/$defs/WorkspaceDirectoryEntry"
+        },
+        "workspaceBrowseDirectoriesResult": {
+          "$ref": "#/$defs/WorkspaceBrowseDirectoriesResult"
+        },
         "workspaceSearchFilesParams": {
           "$ref": "#/$defs/WorkspaceSearchFilesParams"
         },
@@ -2290,6 +2349,9 @@
         "terminalDetachParams",
         "terminalWriteParams",
         "terminalResizeParams",
+        "workspaceBrowseDirectoriesParams",
+        "workspaceDirectoryEntry",
+        "workspaceBrowseDirectoriesResult",
         "workspaceSearchFilesParams",
         "workspaceFileEntry",
         "workspaceSearchFilesResult"

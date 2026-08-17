@@ -6,6 +6,7 @@ struct MaiApp: App {
     @State private var connection: RPCConnectionCoordinator
     @State private var threadStore: ThreadStore
     @State private var threadDraftStore = ThreadDraftStore()
+    @State private var projectFolderStore = ProjectFolderStore()
     @State private var terminalStore: TerminalStore
 
     init() {
@@ -25,6 +26,7 @@ struct MaiApp: App {
             AppRootView(
                 store: threadStore,
                 draftStore: threadDraftStore,
+                projectFolders: projectFolderStore,
                 terminalStore: terminalStore
             )
             .task {

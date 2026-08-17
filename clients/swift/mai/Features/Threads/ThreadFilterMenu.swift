@@ -1,15 +1,25 @@
 import SwiftUI
 
-/// View options for the Threads list: display mode plus preset filters.
+/// View arrangement plus project and provider filters for the Threads list.
 struct ThreadFilterMenu: View {
     let store: ThreadStore
+    let projectFolders: ProjectFolderStore
     @Binding var filter: ThreadListFilter
-    var showsActivityFilter = true
 
     @AppStorage(ThreadListDisplayMode.appStorageKey)
     private var displayModeRaw = ThreadListDisplayMode.recent.rawValue
 
+    @State private var isProjectFilterPresented = false
+    @State private var isProviderFilterPresented = false
+
     var body: some View {
+        let projectName = filter.projectCwd.map { URL(filePath: $0).lastPathComponent }
+        let providerName = filter.providerID.flatMap { selectedID in
+            store.availableProviders.first { $0.id == selectedID }?.name
+        }
+        let projectPaths = projectFolders.folders
+            + store.recentWorkingDirectories.filter { !projectFolders.contains($0) }
+
         Menu(
             "Filter Threads",
             systemImage: filter.hasActivePresets
@@ -26,30 +36,16 @@ struct ThreadFilterMenu: View {
 
             Divider()
 
-            Picker("Project", systemImage: "folder", selection: $filter.projectCwd) {
-                Text("All Projects").tag(String?.none)
-                ForEach(store.recentWorkingDirectories, id: \.self) { cwd in
-                    Text(URL(filePath: cwd).lastPathComponent).tag(String?.some(cwd))
-                }
+            Button {
+                isProjectFilterPresented = true
+            } label: {
+                Label(projectName ?? "All Projects", systemImage: "folder")
             }
-            .pickerStyle(.menu)
 
-            Picker("Provider", systemImage: "cpu", selection: $filter.providerID) {
-                Text("All Providers").tag(String?.none)
-                ForEach(store.availableProviders) { provider in
-                    Text(provider.name)
-                        .tag(String?.some(provider.id))
-                }
-            }
-            .pickerStyle(.menu)
-
-            if showsActivityFilter {
-                Picker("Activity", selection: $filter.activityFilter) {
-                    ForEach(ThreadListActivityFilter.allCases) { activityFilter in
-                        Text(activityFilter.title).tag(activityFilter)
-                    }
-                }
-                .pickerStyle(.inline)
+            Button {
+                isProviderFilterPresented = true
+            } label: {
+                Label(providerName ?? "All Providers", systemImage: "cpu")
             }
 
             if filter.hasActivePresets {
@@ -57,6 +53,40 @@ struct ThreadFilterMenu: View {
                     filter.resetPresets()
                 }
             }
+        }
+        .sheet(isPresented: $isProjectFilterPresented) {
+            SearchableSelectionSheet(
+                title: "Project",
+                choices: projectPaths.map { path in
+                    SearchableSelectionChoice(
+                        id: path,
+                        title: URL(filePath: path).lastPathComponent,
+                        subtitle: path,
+                        systemImage: "folder"
+                    )
+                },
+                selectedID: filter.projectCwd,
+                clearSelectionTitle: "All Projects",
+                emptyTitle: "No Projects",
+                onSelect: { filter.projectCwd = $0 }
+            )
+        }
+        .sheet(isPresented: $isProviderFilterPresented) {
+            SearchableSelectionSheet(
+                title: "Provider",
+                choices: store.availableProviders.map { provider in
+                    SearchableSelectionChoice(
+                        id: provider.id,
+                        title: provider.name,
+                        subtitle: nil,
+                        systemImage: "server.rack"
+                    )
+                },
+                selectedID: filter.providerID,
+                clearSelectionTitle: "All Providers",
+                emptyTitle: "No Providers",
+                onSelect: { filter.providerID = $0 }
+            )
         }
     }
 }

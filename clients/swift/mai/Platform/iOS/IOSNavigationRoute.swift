@@ -1,5 +1,5 @@
 enum IOSNavigationRoute: Hashable {
-    case newChat
+    case newChat(workingDirectory: String?)
     case thread(String)
     case terminal(TerminalOpenRequest)
     case agentRegistry

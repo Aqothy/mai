@@ -27,18 +27,22 @@ final class DraftPreferencesStore {
         configByProviderID = stored?.configByProviderID ?? [:]
     }
 
-    func rememberProvider(_ providerID: String) {
-        guard self.providerID != providerID else { return }
-        self.providerID = providerID
-        save()
-    }
+    func rememberSelection(providerID: String?, workingDirectory: String) {
+        var didChange = false
+        if let providerID, !providerID.isEmpty, self.providerID != providerID {
+            self.providerID = providerID
+            didChange = true
+        }
 
-    func rememberWorkingDirectory(_ workingDirectory: String?) {
-        let trimmed = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed?.isEmpty == false ? trimmed : nil
-        guard self.workingDirectory != value else { return }
-        self.workingDirectory = value
-        save()
+        let workingDirectory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !workingDirectory.isEmpty, self.workingDirectory != workingDirectory {
+            self.workingDirectory = workingDirectory
+            didChange = true
+        }
+
+        if didChange {
+            save()
+        }
     }
 
     func configValue(providerID: String, optionID: String) -> JSONAny? {

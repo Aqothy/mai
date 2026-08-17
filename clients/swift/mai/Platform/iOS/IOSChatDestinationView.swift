@@ -4,15 +4,25 @@ struct IOSChatDestinationView: View {
     let route: IOSNavigationRoute
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let projectFolders: ProjectFolderStore
 
     var body: some View {
         Group {
             switch route {
-            case .newChat:
-                ChatView(store: store, draftStore: draftStore)
+            case .newChat(let workingDirectory):
+                ChatView(
+                    store: store,
+                    draftStore: draftStore,
+                    projectFolders: projectFolders,
+                    initialWorkingDirectory: workingDirectory
+                )
             case .thread(let threadID):
                 if store.selectedThreadID == threadID {
-                    ChatView(store: store, draftStore: draftStore)
+                    ChatView(
+                        store: store,
+                        draftStore: draftStore,
+                        projectFolders: projectFolders
+                    )
                 } else {
                     ProgressView("Opening Chat…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

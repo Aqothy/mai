@@ -155,6 +155,11 @@
       "resultNull": true
     },
     {
+      "name": "workspace.browseDirectories",
+      "params": "WorkspaceBrowseDirectoriesParams",
+      "result": "WorkspaceBrowseDirectoriesResult"
+    },
+    {
       "name": "workspace.searchFiles",
       "params": "WorkspaceSearchFilesParams",
       "result": "WorkspaceSearchFilesResult"

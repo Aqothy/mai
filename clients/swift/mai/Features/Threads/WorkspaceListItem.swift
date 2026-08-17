@@ -86,7 +86,10 @@ struct WorkspaceListGroups {
     /// follows each project's most recent activity, which is its first item
     /// thanks to the incoming sort; ties cannot reorder because grouping is
     /// insertion-ordered over a deterministic input.
-    init(items: [WorkspaceListItem]) {
+    init(
+        items: [WorkspaceListItem],
+        projectDirectories: [String] = []
+    ) {
         var ungrouped: [WorkspaceListItem] = []
         var itemsByProject: [String: [WorkspaceListItem]] = [:]
         var projectOrder: [String] = []
@@ -100,6 +103,15 @@ struct WorkspaceListGroups {
                 projectOrder.append(projectDirectory)
             }
             itemsByProject[projectDirectory, default: []].append(item)
+        }
+
+        // Explicitly added folders stay visible before their first thread.
+        // Active project sections retain activity order; empty additions follow
+        // in the user's most-recently-added order.
+        for projectDirectory in projectDirectories
+        where !projectDirectory.isEmpty && itemsByProject[projectDirectory] == nil {
+            projectOrder.append(projectDirectory)
+            itemsByProject[projectDirectory] = []
         }
 
         self.ungrouped = ungrouped

@@ -14,12 +14,19 @@ struct DraftPromptView: View {
             .scrollDismissesKeyboard(.interactively)
 
             VStack {
-                (Text("What should we build in ")
-                    + Text(model.directoryLabel).underline()
-                    + Text("?"))
-                    .font(.largeTitle)
-                    .multilineTextAlignment(.center)
-                    .accessibilityHeading(.h1)
+                if model.hasWorkingDirectory {
+                    (Text("What should we build in ")
+                        + Text(model.directoryLabel).underline()
+                        + Text("?"))
+                        .font(.largeTitle)
+                        .multilineTextAlignment(.center)
+                        .accessibilityHeading(.h1)
+                } else {
+                    Text("Choose a project folder to start")
+                        .font(.largeTitle)
+                        .multilineTextAlignment(.center)
+                        .accessibilityHeading(.h1)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -38,15 +45,6 @@ struct DraftPromptView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "An unknown error occurred.")
-        }
-        .alert("Working Directory", isPresented: $model.isEnteringDirectory) {
-            TextField("/path/to/project", text: $model.directoryInput)
-            Button("Done") {
-                model.commitDirectoryInput()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Enter the path mai should use for this chat.")
         }
     }
 }
@@ -98,46 +96,61 @@ struct DraftComposerControlsView: View {
 struct DraftSessionControlsView: View {
     let model: DraftPromptModel
 
+    @State private var isProviderSelectionPresented = false
+    @State private var isFolderSelectionPresented = false
+
     var body: some View {
-        Menu {
-            ForEach(model.providerChoices) { provider in
-                Button {
-                    model.selectProvider(provider)
-                } label: {
-                    if model.selectedProviderID == provider.id {
-                        Label(provider.name, systemImage: "checkmark")
-                    } else {
-                        Text(provider.name)
-                    }
-                }
-            }
+        Button {
+            isProviderSelectionPresented = true
         } label: {
             Label(model.providerLabel, systemImage: "server.rack")
                 .lineLimit(1)
         }
         .disabled(model.isSending || !model.hasProviderChoices)
         .accessibilityLabel("Provider")
-
-        Menu {
-            ForEach(model.recentWorkingDirectories, id: \.self) { directory in
-                Button(directory) {
-                    model.workingDirectory = directory
+        .sheet(isPresented: $isProviderSelectionPresented) {
+            SearchableSelectionSheet(
+                title: "Provider",
+                choices: model.providerChoices.map { provider in
+                    SearchableSelectionChoice(
+                        id: provider.id,
+                        title: provider.name,
+                        subtitle: nil,
+                        systemImage: "server.rack"
+                    )
+                },
+                selectedID: model.selectedProviderID,
+                emptyTitle: "No Providers",
+                onSelect: { providerID in
+                    guard let providerID else { return }
+                    model.selectProvider(id: providerID)
                 }
-            }
+            )
+        }
 
-            if !model.recentWorkingDirectories.isEmpty {
-                Divider()
-            }
-
-            Button("Enter a path…") {
-                model.beginEnteringDirectory()
-            }
+        Button {
+            isFolderSelectionPresented = true
         } label: {
             Label(model.directoryLabel, systemImage: "folder")
                 .lineLimit(1)
         }
         .disabled(model.isSending)
         .accessibilityLabel("Working directory")
+        .sheet(isPresented: $isFolderSelectionPresented) {
+            FolderSelectionSheet(
+                store: model.store,
+                projectFolders: model.projectFolders,
+                title: "Project Folder",
+                selectedFolder: model.workingDirectory,
+                onSelectExisting: model.selectWorkingDirectory,
+                onSelectBrowsed: { directory, parentDirectory in
+                    model.addProjectFolder(
+                        directory,
+                        parentDirectory: parentDirectory
+                    )
+                }
+            )
+        }
     }
 }
 

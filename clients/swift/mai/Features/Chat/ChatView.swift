@@ -11,10 +11,22 @@ struct ChatView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(store: ThreadStore, draftStore: ThreadDraftStore) {
+    init(
+        store: ThreadStore,
+        draftStore: ThreadDraftStore,
+        projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
+        initialWorkingDirectory: String? = nil
+    ) {
         self.store = store
         self.draftStore = draftStore
-        _draftModel = State(initialValue: DraftPromptModel(store: store, draftStore: draftStore))
+        _draftModel = State(
+            initialValue: DraftPromptModel(
+                store: store,
+                draftStore: draftStore,
+                projectFolders: projectFolders,
+                initialWorkingDirectory: initialWorkingDirectory
+            )
+        )
         _chatModel = State(
             initialValue: store.selectedThreadID.map {
                 ChatPromptModel(

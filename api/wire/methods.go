@@ -51,6 +51,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodTerminalWrite, Params: "TerminalWriteParams", ResultNull: true},
 	{Name: MethodTerminalResize, Params: "TerminalResizeParams", ResultNull: true},
 	{Name: MethodTerminalDetach, Params: "TerminalDetachParams", ResultNull: true},
+	{Name: MethodWorkspaceBrowseDirectories, Params: "WorkspaceBrowseDirectoriesParams", Result: "WorkspaceBrowseDirectoriesResult"},
 	{Name: MethodWorkspaceSearchFiles, Params: "WorkspaceSearchFilesParams", Result: "WorkspaceSearchFilesResult"},
 }
 

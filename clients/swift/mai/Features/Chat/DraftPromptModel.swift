@@ -14,6 +14,7 @@ final class DraftPromptModel {
 
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let projectFolders: ProjectFolderStore
     let workspaceFilePicker: WorkspaceFilePickerModel
 
     var selectedProviderID: String? {
@@ -29,9 +30,6 @@ final class DraftPromptModel {
             }
         }
     }
-    var directoryInput = ""
-    var isEnteringDirectory = false
-
     private(set) var configOptions: [ConfigOption] = []
     private(set) var optionsPhase: OptionsPhase = .unavailable
     private(set) var isSending = false
@@ -46,12 +44,30 @@ final class DraftPromptModel {
 
     private let attachmentsModel = ComposerAttachmentsModel()
 
-    init(store: ThreadStore, draftStore: ThreadDraftStore) {
+    init(
+        store: ThreadStore,
+        draftStore: ThreadDraftStore,
+        projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
+        initialWorkingDirectory: String? = nil
+    ) {
         self.store = store
         self.draftStore = draftStore
+        self.projectFolders = projectFolders
+
+        let requestedWorkingDirectory = initialWorkingDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rememberedWorkingDirectory = draftStore.preferences.workingDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let initialWorkingDirectory = requestedWorkingDirectory.isEmpty
+            ? rememberedWorkingDirectory
+            : requestedWorkingDirectory
+        selectedProviderID = draftStore.preferences.providerID.flatMap { providerID in
+            store.availableProviders.contains { $0.id == providerID } ? providerID : nil
+        }
+        workingDirectory = initialWorkingDirectory
         workspaceFilePicker = WorkspaceFilePickerModel(
             store: store,
-            scope: .workingDirectory("")
+            scope: .workingDirectory(initialWorkingDirectory)
         )
     }
 
@@ -85,10 +101,6 @@ final class DraftPromptModel {
 
     var selectedProvider: ProviderChoice? {
         providerChoices.first { $0.id == selectedProviderID }
-    }
-
-    var recentWorkingDirectories: [String] {
-        store.recentWorkingDirectories
     }
 
     var prompt: String {
@@ -181,6 +193,7 @@ final class DraftPromptModel {
     func configureInitialSelection() {
         if reconcileAcceptedDraft() { return }
         ensureLocalDraft()
+        guard !providerChoices.isEmpty else { return }
         isConfiguringInitialSelection = true
         defer {
             isConfiguringInitialSelection = false
@@ -189,31 +202,30 @@ final class DraftPromptModel {
         if selectedProviderID.map({ providerIsAvailable($0) }) != true {
             if let providerID = draftStore.preferences.providerID,
                providerIsAvailable(providerID) {
-                selectProvider(providerID)
-            } else if let provider = providerChoices.first {
-                selectProvider(provider)
+                selectedProviderID = providerID
             } else {
-                selectedProviderID = nil
+                selectedProviderID = providerChoices.first?.id
             }
         }
-        if workingDirectory.isEmpty {
-            workingDirectory = draftStore.preferences.workingDirectory
-                ?? recentWorkingDirectories.first
-                ?? ""
-        }
     }
 
-    func beginEnteringDirectory() {
-        directoryInput = workingDirectory
-        isEnteringDirectory = true
+    func selectProvider(id: String) {
+        guard providerIsAvailable(id) else { return }
+        selectedProviderID = id
     }
 
-    func selectProvider(_ choice: ProviderChoice) {
-        selectedProviderID = choice.id
+    func selectWorkingDirectory(_ directory: String) {
+        let directory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !directory.isEmpty else { return }
+        workingDirectory = directory
     }
 
-    func commitDirectoryInput() {
-        workingDirectory = directoryInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    func addProjectFolder(_ directory: String, parentDirectory: String?) {
+        guard let directory = projectFolders.add(
+            directory,
+            parentPath: parentDirectory
+        ) else { return }
+        workingDirectory = directory
     }
 
     func retryOptions() {
@@ -364,10 +376,6 @@ final class DraftPromptModel {
         providerChoices.contains { $0.id == providerID }
     }
 
-    private func selectProvider(_ providerID: String) {
-        selectedProviderID = providerID
-    }
-
     private func receiveOptions(_ update: ProviderOptionsResult) {
         // While our own config updates are queued or in flight, a pushed
         // options list may predate them; the queue applies the authoritative
@@ -494,10 +502,10 @@ final class DraftPromptModel {
     }
 
     private func persistSelection() {
-        if let providerID = effectiveProviderID {
-            draftStore.preferences.rememberProvider(providerID)
-        }
-        draftStore.preferences.rememberWorkingDirectory(workingDirectory)
+        draftStore.preferences.rememberSelection(
+            providerID: effectiveProviderID,
+            workingDirectory: workingDirectory
+        )
     }
 
     private func currentSelections(providerID: String) -> [ConfigOptionSelection] {
