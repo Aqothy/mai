@@ -195,50 +195,6 @@ private struct ChatMarkdownResolvedProseView: Equatable, View {
     }
 }
 
-enum ChatResolvedMarkdownRowContent: Equatable {
-    case prose(ChatMarkdownProseRun.Piece)
-    case code(ChatMarkdownCodeBlock)
-    case table(ChatMarkdownTable)
-}
-
-struct ChatResolvedMarkdownBlockRowModel {
-    let messageID: String
-    let index: Int
-    let content: ChatResolvedMarkdownRowContent
-    let attachments: [Attachment]?
-    let isFirst: Bool
-    let isLast: Bool
-
-    var rowID: String { "\(messageID)#resolved-block-\(index)" }
-}
-
-/// One parser-resolved block promoted to a lazy timeline row when source-level
-/// segmentation would change document-wide Markdown semantics.
-struct ChatResolvedMarkdownBlockRow: View {
-    let model: ChatResolvedMarkdownBlockRowModel
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            switch model.content {
-            case .prose(let piece):
-                ChatMarkdownResolvedProsePieceView(piece: piece)
-                    .equatable()
-                    .textSelection(.enabled)
-            case .code(let code):
-                ChatMarkdownCodeBlockView(block: code, isStreaming: false)
-            case .table(let table):
-                ChatMarkdownTableView(table: table)
-            }
-
-            if let attachments = model.attachments, !attachments.isEmpty {
-                ChatMessageAttachmentsView(attachments: attachments)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(ChatMarkdownContentStyle())
-    }
-}
-
 struct ChatMarkdownResolvedProsePieceView: Equatable, View {
     let piece: ChatMarkdownProseRun.Piece
     let revealBatches: [ChatStreamingTextRevealBatch]

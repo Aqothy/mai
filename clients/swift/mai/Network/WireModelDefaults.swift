@@ -91,6 +91,12 @@ extension Command {
     }
 }
 
+extension CommandMessage {
+    init(attachments: [Attachment]?, messageID: String?, text: String) {
+        self.init(annotations: nil, attachments: attachments, messageID: messageID, text: text)
+    }
+}
+
 extension ConfigChoice {
     init(label: String?, value: String) {
         self.init(description: nil, group: nil, groupLabel: nil, label: label, value: value)
@@ -127,6 +133,7 @@ extension EventPayload {
     ) {
         self.init(
             additionalDirectories: nil,
+            annotations: nil,
             approval: approval,
             attachments: attachments,
             configOptions: configOptions,
@@ -153,6 +160,29 @@ extension EventPayload {
             turnID: turnID,
             updatedAt: updatedAt,
             value: value
+        )
+    }
+}
+
+extension Message {
+    init(
+        attachments: [Attachment]?,
+        createdAt: Date,
+        id: String,
+        role: String,
+        text: String,
+        turnID: String?,
+        updatedAt: Date
+    ) {
+        self.init(
+            annotations: nil,
+            attachments: attachments,
+            createdAt: createdAt,
+            id: id,
+            role: role,
+            text: text,
+            turnID: turnID,
+            updatedAt: updatedAt
         )
     }
 }

@@ -349,7 +349,8 @@ type Attachment struct {
 }
 
 // ContentAnnotations are ACP/MCP display hints attached to provider content.
-// They are deliberately distinct from user-authored chat annotations.
+// They are deliberately distinct from PromptAnnotation, which is authored by
+// a user to quote and comment on transcript text.
 type ContentAnnotations struct {
 	Audience     []string       `json:"audience,omitempty"`
 	Priority     *float64       `json:"priority,omitempty"`
@@ -357,13 +358,25 @@ type ContentAnnotations struct {
 	Metadata     map[string]any `json:"_meta,omitempty"`
 }
 
+// PromptAnnotation is quoted conversation context selected by the user. It is
+// kept separate from the visible draft so clients can render and persist
+// annotation cards without injecting hidden markup.
+type PromptAnnotation struct {
+	ID        string `json:"id"`
+	MessageID string `json:"messageId,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Quote     string `json:"quote"`
+	Note      string `json:"note,omitempty"`
+}
+
 type SendTurnInput struct {
-	ThreadID       string          `json:"threadId"`
-	TurnID         string          `json:"turnId,omitempty"`
-	Input          string          `json:"input,omitempty"`
-	Attachments    []Attachment    `json:"attachments,omitempty"`
-	ModelSelection *ModelSelection `json:"modelSelection,omitempty"`
-	Options        json.RawMessage `json:"options,omitempty"`
+	ThreadID       string             `json:"threadId"`
+	TurnID         string             `json:"turnId,omitempty"`
+	Input          string             `json:"input,omitempty"`
+	Attachments    []Attachment       `json:"attachments,omitempty"`
+	Annotations    []PromptAnnotation `json:"annotations,omitempty"`
+	ModelSelection *ModelSelection    `json:"modelSelection,omitempty"`
+	Options        json.RawMessage    `json:"options,omitempty"`
 }
 
 type InterruptTurnInput struct {

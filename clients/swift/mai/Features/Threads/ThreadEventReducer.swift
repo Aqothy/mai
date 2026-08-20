@@ -40,6 +40,12 @@ enum ThreadEventReducer {
                     let merged = (thread.timeline[index].message?.attachments ?? []) + attachments
                     thread.timeline[index].message?.attachments = merged
                 }
+                if let annotations = payload.annotations, !annotations.isEmpty {
+                    let existing = thread.timeline[index].message?.annotations ?? []
+                    let existingIDs = Set(existing.map(\.id))
+                    thread.timeline[index].message?.annotations = existing
+                        + annotations.filter { !existingIDs.contains($0.id) }
+                }
                 if let text = payload.text, !text.isEmpty {
                     thread.timeline[index].message?.text += text
                 }
@@ -49,6 +55,7 @@ enum ThreadEventReducer {
                 thread.timeline[index].message?.updatedAt = occurredAt
             } else {
                 let message = Message(
+                    annotations: payload.annotations,
                     attachments: payload.attachments,
                     createdAt: payload.createdAt ?? occurredAt,
                     id: id,

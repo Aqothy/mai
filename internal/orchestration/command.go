@@ -51,9 +51,10 @@ type Command struct {
 // It carries no role: a client-authored message is always a user message, and
 // the engine stamps MessageRoleUser itself.
 type CommandMessage struct {
-	MessageID   string                `json:"messageId,omitempty"`
-	Text        string                `json:"text"`
-	Attachments []provider.Attachment `json:"attachments,omitempty"`
+	MessageID   string                      `json:"messageId,omitempty"`
+	Text        string                      `json:"text"`
+	Attachments []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
 }
 
 // DispatchResult is the receipt returned for a dispatched command: the

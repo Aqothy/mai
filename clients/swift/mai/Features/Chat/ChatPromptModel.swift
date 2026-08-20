@@ -49,9 +49,14 @@ final class ChatPromptModel {
     }
 
     var canSend: Bool {
+        canSend(annotations: [])
+    }
+
+    func canSend(annotations: [ChatPendingAnnotation]) -> Bool {
         store.connectionState == .connected
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !attachments.isEmpty)
+                || !attachments.isEmpty
+                || !annotations.isEmpty)
             && attachments.allSatisfy { !$0.isProcessing }
             && !isSending
     }
@@ -94,8 +99,8 @@ final class ChatPromptModel {
         }
     }
 
-    func send() async {
-        await submit()
+    func send(annotations: ChatAnnotationModel? = nil) async {
+        await submit(annotations: annotations)
     }
 
     func removeQueuedPrompt(_ promptID: String) {
@@ -112,13 +117,17 @@ final class ChatPromptModel {
         }
     }
 
-    private func submit() async {
+    private func submit(annotations annotationModel: ChatAnnotationModel?) async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
-        guard canSend,
-              !submittedText.isEmpty || !submittedAttachments.isEmpty else { return }
+        let submittedAnnotations = annotationModel?.annotations ?? []
+        let submittedAnnotationIDs = Set(submittedAnnotations.map(\.id))
+        guard canSend(annotations: submittedAnnotations),
+            !submittedText.isEmpty || !submittedAttachments.isEmpty
+                || !submittedAnnotations.isEmpty
+        else { return }
 
         isSending = true
         defer { isSending = false }
@@ -127,13 +136,15 @@ final class ChatPromptModel {
             try await store.submitTurn(
                 threadID: threadID,
                 text: submittedText,
-                attachments: submittedAttachments.compactMap(\.attachment)
+                attachments: submittedAttachments.compactMap(\.attachment),
+                annotations: submittedAnnotations.map(\.promptAnnotation)
             )
             if text == submittedDraft,
                draftStore.text(for: threadID) == submittedDraft {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
+            annotationModel?.removeSent(ids: submittedAnnotationIDs)
         } catch is CancellationError {
             return
         } catch {

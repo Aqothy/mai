@@ -499,6 +499,12 @@
             "$ref": "#/$defs/Attachment"
           },
           "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -715,6 +721,12 @@
         "attachments": {
           "items": {
             "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
           },
           "type": "array"
         },
@@ -970,6 +982,12 @@
           },
           "type": "array"
         },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
+        },
         "turnId": {
           "type": "string"
         },
@@ -1043,6 +1061,32 @@
         "content"
       ],
       "title": "PlanEntry"
+    },
+    "PromptAnnotation": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "quote"
+      ],
+      "title": "PromptAnnotation"
     },
     "PromptContentCapabilities": {
       "properties": {
@@ -2375,6 +2419,9 @@
         "attachment": {
           "$ref": "#/$defs/Attachment"
         },
+        "promptAnnotation": {
+          "$ref": "#/$defs/PromptAnnotation"
+        },
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
         },
@@ -2535,6 +2582,7 @@
         "authenticationResult",
         "sessionSummary",
         "attachment",
+        "promptAnnotation",
         "modelSelection",
         "configOption",
         "configChoice",

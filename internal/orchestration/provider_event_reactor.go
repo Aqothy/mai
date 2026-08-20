@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -275,9 +276,45 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: view.Message.Text, Attachments: view.Message.Attachments, ModelSelection: cloneModelSelection(view.ModelSelection)}); err != nil {
+	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: promptTextWithAnnotations(view.Message.Text, view.Message.Annotations), Attachments: view.Message.Attachments, Annotations: view.Message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection)}); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
+}
+
+func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotation) string {
+	if len(annotations) == 0 {
+		return text
+	}
+	var prompt strings.Builder
+	prompt.WriteString("The user selected these passages from earlier in the chat as context:\n")
+	for index, annotation := range annotations {
+		if strings.TrimSpace(annotation.Quote) == "" {
+			continue
+		}
+		fmt.Fprintf(&prompt, "\nSelection %d", index+1)
+		if annotation.Role != "" {
+			fmt.Fprintf(&prompt, " (%s)", annotation.Role)
+		}
+		prompt.WriteString(":\n")
+		for _, line := range strings.Split(annotation.Quote, "\n") {
+			prompt.WriteString("> ")
+			prompt.WriteString(line)
+			prompt.WriteByte('\n')
+		}
+		if note := strings.TrimSpace(annotation.Note); note != "" {
+			prompt.WriteString("Comment:\n")
+			for _, line := range strings.Split(note, "\n") {
+				prompt.WriteString("> ")
+				prompt.WriteString(line)
+				prompt.WriteByte('\n')
+			}
+		}
+	}
+	if strings.TrimSpace(text) != "" {
+		prompt.WriteString("\nUser message:\n")
+		prompt.WriteString(text)
+	}
+	return prompt.String()
 }
 
 // requeueSettledTurnStart closes the narrow steering race where the command was

@@ -46,6 +46,7 @@ type contract struct {
 	AuthenticationResult             wire.AuthenticationResult             `json:"authenticationResult"`
 	SessionSummary                   wire.SessionSummary                   `json:"sessionSummary"`
 	Attachment                       wire.Attachment                       `json:"attachment"`
+	PromptAnnotation                 wire.PromptAnnotation                 `json:"promptAnnotation"`
 	ModelSelection                   wire.ModelSelection                   `json:"modelSelection"`
 	ConfigOption                     wire.ConfigOption                     `json:"configOption"`
 	ConfigChoice                     wire.ConfigChoice                     `json:"configChoice"`

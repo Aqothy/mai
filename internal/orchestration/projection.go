@@ -286,10 +286,11 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 	if thread == nil || event.Payload.MessageID == "" {
 		return
 	}
-	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
+	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, Annotations: event.Payload.Annotations, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
 	if existing := thread.Timeline.Message(message.ID); existing != nil {
 		existing.Text += message.Text
 		existing.Attachments = append(existing.Attachments, message.Attachments...)
+		existing.Annotations = append(existing.Annotations, message.Annotations...)
 		if message.TurnID != "" {
 			existing.TurnID = message.TurnID
 		}

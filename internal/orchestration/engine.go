@@ -559,6 +559,7 @@ func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadPro
 		if message := thread.Timeline.Message(messageID); message != nil {
 			clone := *message
 			clone.Attachments = cloneAttachments(message.Attachments)
+			clone.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
 			view.Message = &clone
 		}
 	}
@@ -675,7 +676,7 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 	if command.ProviderInstanceID == "" {
 		return DispatchResult{}, fmt.Errorf("thread.start requires providerInstanceId")
 	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
+	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0 && len(command.Message.Annotations) == 0) {
 		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
 	}
 	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
@@ -722,7 +723,7 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 		}})
 		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
 			ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text,
-			Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt,
+			Attachments: command.Message.Attachments, Annotations: command.Message.Annotations, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt,
 		}})
 		started := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
 			ThreadID: command.ThreadID, Title: title, MessageID: messageID, TurnID: turnID,
@@ -790,7 +791,7 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 	if err := validateTurnStartBoundary(command); err != nil {
 		return DispatchResult{}, err
 	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
+	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0 && len(command.Message.Annotations) == 0) {
 		return DispatchResult{}, fmt.Errorf("thread.turn.start requires message.text or message.attachments")
 	}
 	messageID := MessageID(command.Message.MessageID)
@@ -823,7 +824,7 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 			}
 			selectionChange = providerSelectionChange{}
 		}
-		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text, Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt}})
+		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text, Attachments: command.Message.Attachments, Annotations: command.Message.Annotations, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt}})
 		turnEvent := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: command.Title, MessageID: messageID, TurnID: turnID, Steering: steering, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}})
 		sequence = turnEvent.Sequence
 		return nil

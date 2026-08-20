@@ -74,14 +74,15 @@ type EventPayload struct {
 	Cwd                string                   `json:"cwd,omitempty"`
 	// AdditionalDirectories is a patch field: a non-nil empty slice explicitly
 	// clears the roots and must survive event serialization.
-	AdditionalDirectories []string              `json:"additionalDirectories,omitzero"`
-	Session               *SessionBinding       `json:"session,omitempty"`
-	SessionCleared        bool                  `json:"sessionCleared,omitempty"`
-	MessageID             MessageID             `json:"messageId,omitempty"`
-	Role                  MessageRole           `json:"role,omitempty"`
-	Text                  string                `json:"text,omitempty"`
-	Attachments           []provider.Attachment `json:"attachments,omitempty"`
-	TurnID                TurnID                `json:"turnId,omitempty"`
+	AdditionalDirectories []string                    `json:"additionalDirectories,omitzero"`
+	Session               *SessionBinding             `json:"session,omitempty"`
+	SessionCleared        bool                        `json:"sessionCleared,omitempty"`
+	MessageID             MessageID                   `json:"messageId,omitempty"`
+	Role                  MessageRole                 `json:"role,omitempty"`
+	Text                  string                      `json:"text,omitempty"`
+	Attachments           []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations           []provider.PromptAnnotation `json:"annotations,omitempty"`
+	TurnID                TurnID                      `json:"turnId,omitempty"`
 	// StopReason is the provider's reason a turn settled (end_turn, max_tokens,
 	// refusal, ...), carried on session-status-set settle events so clients can
 	// surface latestTurn.stopReason.

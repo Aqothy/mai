@@ -392,6 +392,7 @@ final class DraftPromptModel {
                 cwd: requestedCwd,
                 additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
+                    annotations: nil,
                     attachments: attachments.compactMap(\.attachment),
                     messageID: UUID().uuidString,
                     text: text

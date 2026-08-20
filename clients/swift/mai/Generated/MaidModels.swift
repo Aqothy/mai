@@ -1345,17 +1345,19 @@ public extension ConfigOptionSelection {
 
 // MARK: - CommandMessage
 public struct CommandMessage: Codable {
+    public var annotations: [PromptAnnotation]?
     public var attachments: [Attachment]?
     public var messageID: String?
     public var text: String
 
     public enum CodingKeys: String, CodingKey {
-        case attachments
+        case annotations, attachments
         case messageID = "messageId"
         case text
     }
 
-    public init(attachments: [Attachment]?, messageID: String?, text: String) {
+    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, messageID: String?, text: String) {
+        self.annotations = annotations
         self.attachments = attachments
         self.messageID = messageID
         self.text = text
@@ -1381,14 +1383,81 @@ public extension CommandMessage {
     }
 
     func with(
+        annotations: [PromptAnnotation]?? = nil,
         attachments: [Attachment]?? = nil,
         messageID: String?? = nil,
         text: String? = nil
     ) -> CommandMessage {
         return CommandMessage(
+            annotations: annotations ?? self.annotations,
             attachments: attachments ?? self.attachments,
             messageID: messageID ?? self.messageID,
             text: text ?? self.text
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PromptAnnotation
+public struct PromptAnnotation: Codable {
+    public var id: String
+    public var messageID, note: String?
+    public var quote: String
+    public var role: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case messageID = "messageId"
+        case note, quote, role
+    }
+
+    public init(id: String, messageID: String?, note: String?, quote: String, role: String?) {
+        self.id = id
+        self.messageID = messageID
+        self.note = note
+        self.quote = quote
+        self.role = role
+    }
+}
+
+// MARK: PromptAnnotation convenience initializers and mutators
+
+public extension PromptAnnotation {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PromptAnnotation.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        messageID: String?? = nil,
+        note: String?? = nil,
+        quote: String? = nil,
+        role: String?? = nil
+    ) -> PromptAnnotation {
+        return PromptAnnotation(
+            id: id ?? self.id,
+            messageID: messageID ?? self.messageID,
+            note: note ?? self.note,
+            quote: quote ?? self.quote,
+            role: role ?? self.role
         )
     }
 
@@ -1787,6 +1856,7 @@ public extension EventMetadata {
 // MARK: - EventPayload
 public struct EventPayload: Codable {
     public var additionalDirectories: [String]?
+    public var annotations: [PromptAnnotation]?
     public var approval: ApprovalEvent?
     public var attachments: [Attachment]?
     public var configOptions: [ConfigOption]?
@@ -1809,7 +1879,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories, approval, attachments, configOptions, createdAt, cwd, decision, item
+        case additionalDirectories, annotations, approval, attachments, configOptions, createdAt, cwd, decision, item
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -1823,8 +1893,9 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
+        self.annotations = annotations
         self.approval = approval
         self.attachments = attachments
         self.configOptions = configOptions
@@ -1874,6 +1945,7 @@ public extension EventPayload {
 
     func with(
         additionalDirectories: [String]?? = nil,
+        annotations: [PromptAnnotation]?? = nil,
         approval: ApprovalEvent?? = nil,
         attachments: [Attachment]?? = nil,
         configOptions: [ConfigOption]?? = nil,
@@ -1903,6 +1975,7 @@ public extension EventPayload {
     ) -> EventPayload {
         return EventPayload(
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
+            annotations: annotations ?? self.annotations,
             approval: approval ?? self.approval,
             attachments: attachments ?? self.attachments,
             configOptions: configOptions ?? self.configOptions,
@@ -2884,6 +2957,7 @@ public extension GetItemDetailInput {
 
 // MARK: - Message
 public struct Message: Codable {
+    public var annotations: [PromptAnnotation]?
     public var attachments: [Attachment]?
     public var createdAt: Date
     public var id, role, text: String
@@ -2891,12 +2965,13 @@ public struct Message: Codable {
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case attachments, createdAt, id, role, text
+        case annotations, attachments, createdAt, id, role, text
         case turnID = "turnId"
         case updatedAt
     }
 
-    public init(attachments: [Attachment]?, createdAt: Date, id: String, role: String, text: String, turnID: String?, updatedAt: Date) {
+    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, id: String, role: String, text: String, turnID: String?, updatedAt: Date) {
+        self.annotations = annotations
         self.attachments = attachments
         self.createdAt = createdAt
         self.id = id
@@ -2926,6 +3001,7 @@ public extension Message {
     }
 
     func with(
+        annotations: [PromptAnnotation]?? = nil,
         attachments: [Attachment]?? = nil,
         createdAt: Date? = nil,
         id: String? = nil,
@@ -2935,6 +3011,7 @@ public extension Message {
         updatedAt: Date? = nil
     ) -> Message {
         return Message(
+            annotations: annotations ?? self.annotations,
             attachments: attachments ?? self.attachments,
             createdAt: createdAt ?? self.createdAt,
             id: id ?? self.id,

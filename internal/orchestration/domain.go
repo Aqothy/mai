@@ -86,13 +86,14 @@ type Turn struct {
 }
 
 type Message struct {
-	ID          MessageID             `json:"id"`
-	Role        MessageRole           `json:"role"`
-	Text        string                `json:"text"`
-	Attachments []provider.Attachment `json:"attachments,omitempty"`
-	TurnID      TurnID                `json:"turnId,omitempty"`
-	CreatedAt   time.Time             `json:"createdAt"`
-	UpdatedAt   time.Time             `json:"updatedAt"`
+	ID          MessageID                   `json:"id"`
+	Role        MessageRole                 `json:"role"`
+	Text        string                      `json:"text"`
+	Attachments []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
+	TurnID      TurnID                      `json:"turnId,omitempty"`
+	CreatedAt   time.Time                   `json:"createdAt"`
+	UpdatedAt   time.Time                   `json:"updatedAt"`
 }
 
 type Approval struct {

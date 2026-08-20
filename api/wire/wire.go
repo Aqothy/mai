@@ -75,6 +75,7 @@ type InstanceInfo = provider.InstanceInfo
 type AuthenticationResult = provider.AuthenticationResult
 type SessionSummary = provider.SessionSummary
 type Attachment = provider.Attachment
+type PromptAnnotation = provider.PromptAnnotation
 type ModelSelection = provider.ModelSelection
 type ConfigOption = provider.ConfigOption
 type ConfigChoice = provider.ConfigChoice

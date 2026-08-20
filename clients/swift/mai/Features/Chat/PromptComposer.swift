@@ -18,6 +18,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     let isRunning: Bool
     let isStopping: Bool
     let attachments: [ChatPendingAttachment]
+    let annotations: [ChatPendingAnnotation]
     let promptCompletion: PromptCompletionModel?
     let commands: [SlashCommand]
     let skills: [Skill]
@@ -25,6 +26,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     let send: () -> Void
     let stop: () -> Void
     let removeAttachment: (UUID) -> Void
+    let removeAnnotation: (String) -> Void
     let leadingControls: LeadingControls
     let trailingControls: TrailingControls
 
@@ -37,6 +39,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         isRunning: Bool = false,
         isStopping: Bool = false,
         attachments: [ChatPendingAttachment] = [],
+        annotations: [ChatPendingAnnotation] = [],
         promptCompletion: PromptCompletionModel? = nil,
         commands: [SlashCommand] = [],
         skills: [Skill] = [],
@@ -44,6 +47,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         send: @escaping () -> Void,
         stop: @escaping () -> Void = {},
         removeAttachment: @escaping (UUID) -> Void = { _ in },
+        removeAnnotation: @escaping (String) -> Void = { _ in },
         @ViewBuilder leadingControls: () -> LeadingControls,
         @ViewBuilder trailingControls: () -> TrailingControls
     ) {
@@ -55,6 +59,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         self.isRunning = isRunning
         self.isStopping = isStopping
         self.attachments = attachments
+        self.annotations = annotations
         self.promptCompletion = promptCompletion
         self.commands = commands
         self.skills = skills
@@ -62,6 +67,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         self.send = send
         self.stop = stop
         self.removeAttachment = removeAttachment
+        self.removeAnnotation = removeAnnotation
         self.leadingControls = leadingControls()
         self.trailingControls = trailingControls()
     }
@@ -79,6 +85,13 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 ChatComposerAttachmentStrip(
                     attachments: attachments,
                     remove: removeAttachment
+                )
+            }
+
+            if !annotations.isEmpty {
+                ChatComposerAnnotationStrip(
+                    annotations: annotations,
+                    remove: removeAnnotation
                 )
             }
 

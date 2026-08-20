@@ -10,6 +10,7 @@ struct QueuedChatPrompt: Identifiable {
     let id: String
     let text: String
     let attachments: [Attachment]
+    let annotations: [PromptAnnotation]
 }
 
 /// Stable text storage for one actively streaming timeline entry. The thread
@@ -594,8 +595,8 @@ final class ThreadStore {
     }
 
     /// Retries the daemon's failed turn in place. The orchestration command
-    /// reuses the original user message so its text and attachments are not
-    /// appended to the transcript a second time.
+    /// rebinds the original user message to the new turn, preserving its text,
+    /// attachments, and annotations without appending a duplicate message.
     func retryFailedTurn(threadID: String) async throws {
         guard connectionState == .connected else {
             throw RPCError(
@@ -650,11 +651,13 @@ final class ThreadStore {
     func submitTurn(
         threadID: String,
         text: String,
-        attachments: [Attachment] = []
+        attachments: [Attachment] = [],
+        annotations: [PromptAnnotation] = []
     ) async throws {
         let prompt = try validatedPrompt(
             text: text,
             attachments: attachments,
+            annotations: annotations,
             messageID: UUID().uuidString
         )
         let isRunning = sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
@@ -1051,17 +1054,23 @@ final class ThreadStore {
     private func validatedPrompt(
         text: String,
         attachments: [Attachment],
+        annotations: [PromptAnnotation],
         messageID: String
     ) throws -> QueuedChatPrompt {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty else {
+        guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
             throw RPCError(
                 code: nil,
-                message: "Sending a message requires text or an attachment",
+                message: "Sending a message requires text, an attachment, or an annotation",
                 data: nil
             )
         }
-        return QueuedChatPrompt(id: messageID, text: text, attachments: attachments)
+        return QueuedChatPrompt(
+            id: messageID,
+            text: text,
+            attachments: attachments,
+            annotations: annotations
+        )
     }
 
     private func enqueue(_ prompt: QueuedChatPrompt, threadID: String) {
@@ -1079,6 +1088,7 @@ final class ThreadStore {
                 type: MaidCommandType.threadTurnStart.rawValue,
                 threadID: threadID,
                 message: CommandMessage(
+                    annotations: prompt.annotations.isEmpty ? nil : prompt.annotations,
                     attachments: prompt.attachments.isEmpty ? nil : prompt.attachments,
                     messageID: prompt.id,
                     text: prompt.text
