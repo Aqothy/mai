@@ -1290,12 +1290,7 @@ private struct ChatNativeTextMessageRow<NativeText: View>: View {
             nativeText()
 
             if let attachments = segment.attachments, !attachments.isEmpty {
-                Text(
-                    attachments.map { $0.name ?? $0.kind }
-                        .joined(separator: " · ")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .padding(
@@ -1728,7 +1723,7 @@ private struct ChatActivityItemRow: View {
         VStack(alignment: .leading, spacing: 8) {
             if isFileChangeStep || hasExpandableContent {
                 Button {
-                    if isFileChangeStep {
+                    if opensDiffDirectly {
                         Task { await openDiff() }
                     } else {
                         scrollState.noteContentExpansion()
@@ -1813,15 +1808,53 @@ private struct ChatActivityItemRow: View {
                 .foregroundStyle(.secondary)
             }
         } else {
-            // Summary previews render instantly; the fetched detail replaces
-            // them in place, so expansion never flashes a loading state.
-            ChatStepOutputBox(
-                command: toolCall?.command ?? summary?.commandPreview,
-                query: toolCall?.query ?? summary?.queryPreview,
-                output: toolCall?.output ?? summary?.outputPreview,
-                error: toolCall?.error ?? summary?.errorPreview,
-                metadata: metadata
-            )
+            if hasOutputContent {
+                // Summary previews render instantly; fetched detail replaces
+                // them in place without hiding already available output.
+                ChatStepOutputBox(
+                    command: toolCall?.command ?? summary?.commandPreview,
+                    query: toolCall?.query ?? summary?.queryPreview,
+                    output: toolCall?.output ?? summary?.outputPreview,
+                    error: toolCall?.error ?? summary?.errorPreview,
+                    metadata: metadata
+                )
+            }
+
+            if let attachments = toolCall?.attachments, !attachments.isEmpty {
+                ChatMessageAttachmentsView(attachments: attachments)
+            } else if hasAttachmentSummary, detail == nil,
+                item.detailAvailable == true
+            {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading attachments…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            } else if hasAttachmentSummary {
+                Label(
+                    "Attachments unavailable",
+                    systemImage: "photo.badge.exclamationmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if isFileChangeStep,
+                let changes = toolCall?.changes,
+                !changes.isEmpty
+            {
+                Button(
+                    "View Changes",
+                    systemImage: "doc.text.magnifyingglass"
+                ) {
+                    presentedChanges = changes
+                }
+                .font(.caption)
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -1832,6 +1865,27 @@ private struct ChatActivityItemRow: View {
         ChatActivityVerb(item: item) == .edited
     }
 
+    private var opensDiffDirectly: Bool {
+        isFileChangeStep && !hasAttachmentSummary
+    }
+
+    private var hasAttachmentSummary: Bool {
+        (summary?.attachmentCount ?? 0) > 0
+            || summary?.attachments?.isEmpty == false
+    }
+
+    private var hasOutputContent: Bool {
+        toolCall?.command != nil
+            || summary?.commandPreview != nil
+            || toolCall?.query != nil
+            || summary?.queryPreview != nil
+            || toolCall?.output != nil
+            || summary?.outputPreview != nil
+            || toolCall?.error != nil
+            || summary?.errorPreview != nil
+            || metadata != nil
+    }
+
     /// Expandable only when there is genuinely more to show; a bare read
     /// with no output would otherwise expand into an empty box.
     private var hasExpandableContent: Bool {
@@ -1839,6 +1893,7 @@ private struct ChatActivityItemRow: View {
             || summary?.queryPreview != nil
             || summary?.outputPreview != nil
             || summary?.errorPreview != nil
+            || hasAttachmentSummary
     }
 
     private func openDiff() async {
@@ -2033,9 +2088,7 @@ private struct ChatMessageRow: View {
             }
 
             if let attachments, !attachments.isEmpty {
-                Text(attachments.map { $0.name ?? $0.kind }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .padding(

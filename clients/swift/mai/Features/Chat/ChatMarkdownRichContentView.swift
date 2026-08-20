@@ -231,12 +231,7 @@ struct ChatResolvedMarkdownBlockRow: View {
             }
 
             if let attachments = model.attachments, !attachments.isEmpty {
-                Text(
-                    attachments.map { $0.name ?? $0.kind }
-                        .joined(separator: " · ")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

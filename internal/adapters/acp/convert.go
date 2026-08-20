@@ -87,19 +87,21 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 		blocks = append(blocks, schema.TextBlock(input.Input))
 	}
 	for _, attachment := range input.Attachments {
+		var block schema.ContentBlock
 		switch attachment.Kind {
 		case "", "text":
-			blocks = append(blocks, schema.TextBlock(attachment.Data))
+			block = schema.TextBlock(attachment.Data)
 		case "image":
 			if !caps.Image {
 				return nil, fmt.Errorf("ACP agent does not accept image content")
 			}
-			blocks = append(blocks, schema.ImageBlock(attachment.Data, attachment.MimeType))
+			block = schema.ImageBlock(attachment.Data, attachment.MimeType)
+			block.URI = stringPtr(attachment.URI)
 		case "audio":
 			if !caps.Audio {
 				return nil, fmt.Errorf("ACP agent does not accept audio content")
 			}
-			blocks = append(blocks, schema.AudioBlock(attachment.Data, attachment.MimeType))
+			block = schema.AudioBlock(attachment.Data, attachment.MimeType)
 		case "resource", "embedded_context", "embeddedContext":
 			if !caps.EmbeddedContext {
 				return nil, fmt.Errorf("ACP agent does not accept embedded resource content")
@@ -107,24 +109,32 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 			if attachment.URI == "" {
 				return nil, fmt.Errorf("ACP embedded resource requires a URI")
 			}
-			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType)}
+			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType), Meta: cloneMetadata(attachment.ResourceMetadata)}
 			if strings.HasPrefix(attachment.MimeType, "text/") || attachment.MimeType == "application/json" || attachment.MimeType == "" {
 				resource.Text = stringPtr(attachment.Data)
 			} else {
 				resource.Blob = stringPtr(attachment.Data)
 			}
-			blocks = append(blocks, schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource})
+			block = schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource}
 		case "resource_link", "resourceLink":
 			name := attachment.Name
 			if name == "" {
 				name = attachment.URI
 			}
-			block := schema.ResourceLinkBlock(name, attachment.URI)
+			block = schema.ResourceLinkBlock(name, attachment.URI)
 			block.MimeType = stringPtr(attachment.MimeType)
-			blocks = append(blocks, block)
+			block.Title = stringPtr(attachment.Title)
+			block.Description = stringPtr(attachment.Description)
+			if attachment.Size != 0 {
+				size := attachment.Size
+				block.Size = &size
+			}
 		default:
 			return nil, fmt.Errorf("unsupported generic attachment kind %q for ACP", attachment.Kind)
 		}
+		block.Annotations = annotationsToACP(attachment.Annotations)
+		block.Meta = cloneMetadata(attachment.Metadata)
+		blocks = append(blocks, block)
 	}
 	if len(blocks) == 0 {
 		return []schema.ContentBlock{schema.TextBlock("")}, nil
@@ -306,7 +316,22 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 }
 
 func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, bool) {
-	attachment := provider.Attachment{}
+	attachment := provider.Attachment{
+		Annotations: annotationsFromACP(block.Annotations),
+		Metadata:    cloneMetadata(block.Meta),
+	}
+	if block.Title != nil {
+		attachment.Title = *block.Title
+	}
+	if block.Description != nil {
+		attachment.Description = *block.Description
+	}
+	if block.Size != nil {
+		attachment.Size = *block.Size
+	}
+	if block.URI != nil {
+		attachment.URI = *block.URI
+	}
 	switch block.Type {
 	case schema.ContentBlockTypeImage, schema.ContentBlockTypeAudio:
 		attachment.Kind = block.Type
@@ -321,9 +346,6 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		if block.Name != nil {
 			attachment.Name = *block.Name
 		}
-		if block.URI != nil {
-			attachment.URI = *block.URI
-		}
 		if block.MimeType != nil {
 			attachment.MimeType = *block.MimeType
 		}
@@ -333,6 +355,7 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		}
 		attachment.Kind = "resource"
 		attachment.URI = block.Resource.URI
+		attachment.ResourceMetadata = cloneMetadata(block.Resource.Meta)
 		if block.Resource.MimeType != nil {
 			attachment.MimeType = *block.Resource.MimeType
 		}
@@ -345,6 +368,52 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		return provider.Attachment{}, false
 	}
 	return attachment, true
+}
+
+func annotationsFromACP(value *schema.Annotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]string, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, string(role))
+	}
+	annotations := &provider.ContentAnnotations{
+		Audience: audience,
+		Priority: value.Priority,
+		Metadata: cloneMetadata(value.Meta),
+	}
+	if value.LastModified != nil {
+		annotations.LastModified = *value.LastModified
+	}
+	return annotations
+}
+
+func annotationsToACP(value *provider.ContentAnnotations) *schema.Annotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]schema.Role, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, schema.Role(role))
+	}
+	return &schema.Annotations{
+		Audience:     audience,
+		Priority:     value.Priority,
+		LastModified: stringPtr(value.LastModified),
+		Meta:         cloneMetadata(value.Metadata),
+	}
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = entry
+	}
+	return cloned
 }
 
 func itemKindFromToolKind(kind string) provider.ItemKind {

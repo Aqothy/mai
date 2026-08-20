@@ -432,6 +432,45 @@ func TestContentBlocksGateImageOnCapability(t *testing.T) {
 	}
 }
 
+func TestContentBlocksPreserveStableResourceAndAnnotationMetadata(t *testing.T) {
+	priority := 0.75
+	size := int64(42)
+	block := schema.ContentBlock{
+		Type:        schema.ContentBlockTypeResourceLink,
+		Name:        stringPtr("Spec"),
+		Title:       stringPtr("ACP specification"),
+		Description: stringPtr("Protocol reference"),
+		URI:         stringPtr("https://agentclientprotocol.com"),
+		MimeType:    stringPtr("text/html"),
+		Size:        &size,
+		Meta:        map[string]any{"source": "agent"},
+		Annotations: &schema.Annotations{
+			Audience:     []schema.Role{schema.RoleAssistant},
+			Priority:     &priority,
+			LastModified: stringPtr("2026-08-20T00:00:00Z"),
+			Meta:         map[string]any{"hint": "reference"},
+		},
+	}
+	attachment, ok := attachmentFromACPBlock(block)
+	if !ok {
+		t.Fatal("resource link was not converted")
+	}
+	if attachment.Title != "ACP specification" || attachment.Description != "Protocol reference" || attachment.Size != size || attachment.URI != "https://agentclientprotocol.com" {
+		t.Fatalf("attachment metadata = %#v", attachment)
+	}
+	if attachment.Annotations == nil || len(attachment.Annotations.Audience) != 1 || attachment.Annotations.Audience[0] != "assistant" || attachment.Annotations.Priority == nil || *attachment.Annotations.Priority != priority || attachment.Annotations.LastModified == "" {
+		t.Fatalf("attachment annotations = %#v", attachment.Annotations)
+	}
+
+	blocks, err := contentBlocks(provider.SendTurnInput{Attachments: []provider.Attachment{attachment}}, provider.PromptContentCapabilities{})
+	if err != nil {
+		t.Fatalf("round-trip resource link: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0].Title == nil || *blocks[0].Title != "ACP specification" || blocks[0].Annotations == nil || blocks[0].Annotations.Priority == nil || *blocks[0].Annotations.Priority != priority {
+		t.Fatalf("round-trip blocks = %#v", blocks)
+	}
+}
+
 func TestConfigChoicesPreserveDescriptionsAndGroups(t *testing.T) {
 	description := "Use the faster model"
 	choices := configChoices([]schema.SessionConfigSelectGroup{{
