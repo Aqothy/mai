@@ -30,6 +30,7 @@ const (
 	EventThreadApprovalResolved          EventType = "thread.approval-resolved"
 	EventThreadConfigOptionsUpdated      EventType = "thread.config-options-updated"
 	EventThreadSlashCommandsUpdated      EventType = "thread.slash-commands-updated"
+	EventThreadSkillsUpdated             EventType = "thread.skills-updated"
 	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
 	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
 )
@@ -102,6 +103,7 @@ type EventPayload struct {
 	ConfigOptions    []provider.ConfigOption          `json:"configOptions,omitzero"`
 	ConfigSelections []provider.ConfigOptionSelection `json:"-"`
 	SlashCommands    []provider.SlashCommand          `json:"slashCommands,omitzero"`
+	Skills           []provider.Skill                 `json:"skills,omitzero"`
 	TokenUsage       *provider.TokenUsage             `json:"tokenUsage,omitempty"`
 }
 

@@ -69,9 +69,21 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadConfigOptionsUpdated(event)
 	case EventThreadSlashCommandsUpdated:
 		p.applyThreadSlashCommandsUpdated(event)
+	case EventThreadSkillsUpdated:
+		p.applyThreadSkillsUpdated(event)
 	case EventThreadTokenUsageUpdated:
 		p.applyThreadTokenUsageUpdated(event)
 	}
+}
+
+func (p *Projection) applyThreadSkillsUpdated(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	session := ensureSessionBinding(thread, event)
+	session.Skills = cloneSkills(event.Payload.Skills)
+	session.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) Thread(id ThreadID) (Thread, bool) {

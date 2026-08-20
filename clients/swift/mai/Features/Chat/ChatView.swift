@@ -43,7 +43,7 @@ struct ChatView: View {
 
     var body: some View {
         let promptText = currentPromptText
-        let workspaceFilePicker = currentWorkspaceFilePicker
+        let promptCompletion = currentPromptCompletion
 
         Group {
             if let errorMessage = store.selectedThreadLoadErrorMessage {
@@ -82,9 +82,9 @@ struct ChatView: View {
             // This overlay belongs to the full chat surface. Rendering it
             // outside the safe-area bar's bounds would make its visible rows
             // miss taps and scrolling gestures.
-            ChatWorkspaceFilePickerOverlay(
+            ChatPromptCompletionOverlay(
                 text: promptText,
-                model: workspaceFilePicker
+                model: promptCompletion
             )
             .safeAreaPadding(.bottom)
         }
@@ -95,7 +95,7 @@ struct ChatView: View {
                     draftModel: draftModel,
                     chatModel: chatModel,
                     promptText: promptText,
-                    workspaceFilePicker: workspaceFilePicker
+                    promptCompletion: promptCompletion
                 )
             )
         )
@@ -125,7 +125,7 @@ struct ChatView: View {
             previousThreadID,
             threadID in
             if previousThreadID != threadID {
-                currentWorkspaceFilePicker.dismiss()
+                currentPromptCompletion.dismiss()
             }
             if previousThreadID != threadID, previousThreadID != nil {
                 scrollState.reset()
@@ -210,8 +210,8 @@ struct ChatView: View {
         return $draftModel.prompt
     }
 
-    private var currentWorkspaceFilePicker: WorkspaceFilePickerModel {
-        chatModel?.workspaceFilePicker ?? draftModel.workspaceFilePicker
+    private var currentPromptCompletion: PromptCompletionModel {
+        chatModel?.promptCompletion ?? draftModel.promptCompletion
     }
 }
 
@@ -228,7 +228,7 @@ private struct ChatComposerStack: View {
     let draftModel: DraftPromptModel
     let chatModel: ChatPromptModel?
     let promptText: Binding<String>
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var body: some View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
@@ -268,7 +268,9 @@ private struct ChatComposerStack: View {
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
-                workspaceFilePicker: workspaceFilePicker,
+                promptCompletion: promptCompletion,
+                commands: state.slashCommands,
+                skills: state.skills,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
             ) {
                 if let chatModel {
@@ -297,9 +299,9 @@ private struct ChatComposerStack: View {
                         ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
                     ),
                     commands: state.slashCommands,
-                    addWorkspaceFile: workspaceFilePicker.isAvailable && !isSendingNow
+                    addWorkspaceFile: promptCompletion.isFileCompletionAvailable && !isSendingNow
                         ? {
-                            presentWorkspaceFilePickerAtPromptEnd()
+                            presentWorkspaceFileCompletionAtPromptEnd()
                         }
                         : nil,
                     addImages: chatModel?.addImages ?? draftModel.addImages,
@@ -338,15 +340,10 @@ private struct ChatComposerStack: View {
         return draftModel.supportsImageAttachments
     }
 
-    private func presentWorkspaceFilePickerAtPromptEnd() {
-        // Appending `@` reuses the same trigger path as typing it, keeping one
-        // insertion behavior for keyboard and menu-driven use.
-        var prompt = promptText.wrappedValue
-        if !prompt.isEmpty, prompt.last?.isWhitespace != true {
-            prompt += " "
-        }
-        prompt += "@"
-        promptText.wrappedValue = prompt
+    private func presentWorkspaceFileCompletionAtPromptEnd() {
+        promptText.wrappedValue = promptCompletion.textByPresentingFileCompletion(
+            in: promptText.wrappedValue
+        )
     }
 }
 
@@ -391,6 +388,7 @@ private struct ChatComposerThreadState {
     let isRunning: Bool
     let session: SessionBinding?
     let slashCommands: [SlashCommand]
+    let skills: [Skill]
 
     init(thread: Thread?) {
         exists = thread != nil
@@ -398,19 +396,20 @@ private struct ChatComposerThreadState {
         isRunning = thread?.latestTurn?.turnState == .running
         session = thread?.session
         slashCommands = thread?.session?.slashCommands ?? []
+        skills = thread?.session?.skills ?? []
     }
 }
 
-private struct ChatWorkspaceFilePickerOverlay: View {
+private struct ChatPromptCompletionOverlay: View {
     private static let composerSpacing: CGFloat = 8
 
     @Binding var text: String
-    let model: WorkspaceFilePickerModel
+    let model: PromptCompletionModel
 
     var body: some View {
-        if model.isPresented, model.isAvailable {
-            WorkspaceFilePickerView(model: model) { match in
-                insertWorkspaceFile(match.relativePath)
+        if model.isPresented {
+            PromptCompletionView(model: model) { match in
+                insertCompletion(match)
             }
             .frame(maxWidth: ChatContentMetrics.maximumWidth)
             .frame(maxWidth: .infinity)
@@ -419,14 +418,9 @@ private struct ChatWorkspaceFilePickerOverlay: View {
         }
     }
 
-    private func insertWorkspaceFile(_ relativePath: String) {
-        guard
-            let updatedText = model.textBySelecting(
-                relativePath: relativePath,
-                in: text
-            )
-        else { return }
-        text = updatedText
+    private func insertCompletion(_ match: PromptCompletionMatch) {
+        guard let edit = model.edit(selecting: match, in: text) else { return }
+        text = edit.text
     }
 }
 

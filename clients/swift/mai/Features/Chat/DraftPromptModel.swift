@@ -15,7 +15,7 @@ final class DraftPromptModel {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
     let projectFolders: ProjectFolderStore
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var selectedProviderID: String? {
         didSet {
@@ -26,7 +26,7 @@ final class DraftPromptModel {
         didSet {
             if workingDirectory != oldValue {
                 additionalDirectories.removeAll { $0 == workingDirectory }
-                workspaceFilePicker.updateScope(.workingDirectory(workingDirectory))
+                promptCompletion.updateScope(.workingDirectory(workingDirectory))
                 selectionDidChange()
             }
         }
@@ -67,7 +67,7 @@ final class DraftPromptModel {
             store.availableProviders.contains { $0.id == providerID } ? providerID : nil
         }
         workingDirectory = initialWorkingDirectory
-        workspaceFilePicker = WorkspaceFilePickerModel(
+        promptCompletion = PromptCompletionModel(
             store: store,
             scope: .workingDirectory(initialWorkingDirectory)
         )
@@ -261,7 +261,7 @@ final class DraftPromptModel {
     func loadOptions() async {
         if reconcileAcceptedDraft() { return }
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         guard connectionState == .connected,
               let requestedProviderID = effectiveProviderID,
               !workingDirectory.isEmpty else {
@@ -278,7 +278,9 @@ final class DraftPromptModel {
                 return
             }
 
-            guard store.providerSupportsConfigOptions(providerID) else {
+            guard store.providerSupportsConfigOptions(providerID)
+                || store.providerSupportsSkills(providerID)
+            else {
                 optionsPhase = .live
                 return
             }
@@ -289,7 +291,7 @@ final class DraftPromptModel {
                 return
             }
             optionsSessionID = result.optionsSessionID
-            configOptions = result.configOptions
+            applyProviderOptions(result)
             await sendRememberedValues(providerID: providerID)
             try Task.checkCancellation()
             guard selectionMatches(providerID: requestedProviderID, cwd: requestedCwd),
@@ -422,7 +424,7 @@ final class DraftPromptModel {
         // options list may predate them; the queue applies the authoritative
         // result when it drains.
         guard optionsSessionID == update.optionsSessionID, configUpdateTask == nil else { return }
-        configOptions = update.configOptions
+        applyProviderOptions(update)
         if optionsPhase != .loading {
             optionsPhase = .live
         }
@@ -430,7 +432,7 @@ final class DraftPromptModel {
 
     private func selectionDidChange() {
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         configUpdates.removeAll()
         optionsPhase = effectiveProviderID == nil || workingDirectory.isEmpty
             ? .unavailable
@@ -453,7 +455,7 @@ final class DraftPromptModel {
     private func receiveInvalidation(_ invalidation: ProviderOptionsInvalidated) {
         guard optionsSessionID == invalidation.optionsSessionID else { return }
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         optionsPhase = .failed("The agent stopped. Retry settings when it is available.")
     }
 
@@ -493,7 +495,7 @@ final class DraftPromptModel {
                 )
                 try Task.checkCancellation()
                 guard self.optionsSessionID == result.optionsSessionID else { return false }
-                configOptions = result.configOptions
+                applyProviderOptions(result)
             } catch is CancellationError {
                 return false
             } catch {
@@ -531,7 +533,7 @@ final class DraftPromptModel {
         configUpdateTask = nil
         if let latestSuccessfulResult,
            optionsSessionID == latestSuccessfulResult.optionsSessionID {
-            configOptions = latestSuccessfulResult.configOptions
+            applyProviderOptions(latestSuccessfulResult)
             for update in failedUpdatesByOptionID.values {
                 guard let option = configOptions.first(where: { $0.id == update.optionID }),
                       configValueIsValid(update.value, for: option) else {
@@ -547,6 +549,16 @@ final class DraftPromptModel {
             providerID: effectiveProviderID,
             workingDirectory: workingDirectory
         )
+    }
+
+    private func applyProviderOptions(_ result: ProviderOptionsResult) {
+        configOptions = result.configOptions
+        promptCompletion.updateCatalog(commands: [], skills: result.skills ?? [])
+    }
+
+    private func clearProviderOptions() {
+        configOptions = []
+        promptCompletion.updateCatalog(commands: [], skills: [])
     }
 
     private func currentSelections(providerID: String) -> [ConfigOptionSelection] {

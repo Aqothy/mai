@@ -38,6 +38,7 @@ var Vocabularies = []VocabularyDefinition{
 			string(orchestration.EventThreadApprovalResolved),
 			string(orchestration.EventThreadConfigOptionsUpdated),
 			string(orchestration.EventThreadSlashCommandsUpdated),
+			string(orchestration.EventThreadSkillsUpdated),
 			string(orchestration.EventThreadTokenUsageUpdated),
 			string(orchestration.EventThreadHistoryReplayCompleted),
 		),

@@ -7,7 +7,7 @@ import SwiftUI
 final class ChatPromptModel {
     let store: ThreadStore
     let threadID: String
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var text: String {
         didSet {
@@ -30,7 +30,7 @@ final class ChatPromptModel {
         self.store = store
         self.draftStore = draftStore
         self.threadID = threadID
-        workspaceFilePicker = WorkspaceFilePickerModel(
+        promptCompletion = PromptCompletionModel(
             store: store,
             scope: .thread(id: threadID)
         )

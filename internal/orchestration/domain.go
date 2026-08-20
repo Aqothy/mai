@@ -128,6 +128,7 @@ type SessionBinding struct {
 	// preserve explicit empty lists after provider metadata is cleared.
 	ConfigOptions []provider.ConfigOption `json:"configOptions,omitzero"`
 	SlashCommands []provider.SlashCommand `json:"slashCommands,omitzero"`
+	Skills        []provider.Skill        `json:"skills,omitzero"`
 	TokenUsage    *provider.TokenUsage    `json:"tokenUsage,omitempty"`
 	LastError     string                  `json:"lastError,omitempty"`
 	UpdatedAt     time.Time               `json:"updatedAt"`

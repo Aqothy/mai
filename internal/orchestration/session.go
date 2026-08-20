@@ -251,6 +251,9 @@ func overlaySessionIdentity(session *SessionBinding, binding *SessionBinding) {
 	if binding.SlashCommands != nil {
 		session.SlashCommands = cloneSlashCommands(binding.SlashCommands)
 	}
+	if binding.Skills != nil {
+		session.Skills = cloneSkills(binding.Skills)
+	}
 	if binding.TokenUsage != nil {
 		usage := *binding.TokenUsage
 		session.TokenUsage = &usage

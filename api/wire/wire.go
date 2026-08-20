@@ -80,6 +80,7 @@ type ConfigOption = provider.ConfigOption
 type ConfigChoice = provider.ConfigChoice
 type ConfigOptionSelection = provider.ConfigOptionSelection
 type SlashCommand = provider.SlashCommand
+type Skill = provider.Skill
 type TokenUsage = provider.TokenUsage
 type ApprovalOption = provider.ApprovalOption
 
@@ -156,6 +157,7 @@ type ProviderOptionsSetParams struct {
 type ProviderOptionsResult struct {
 	OptionsSessionID string                  `json:"optionsSessionId"`
 	ConfigOptions    []provider.ConfigOption `json:"configOptions"`
+	Skills           []provider.Skill        `json:"skills,omitempty"`
 }
 
 type ProviderOptionsInvalidated struct {

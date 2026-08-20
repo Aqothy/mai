@@ -163,6 +163,13 @@ func cloneSlashCommands(commands []provider.SlashCommand) []provider.SlashComman
 	return append([]provider.SlashCommand{}, commands...)
 }
 
+func cloneSkills(skills []provider.Skill) []provider.Skill {
+	if skills == nil {
+		return nil
+	}
+	return append([]provider.Skill{}, skills...)
+}
+
 func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	if value == nil {
 		return nil
@@ -171,6 +178,7 @@ func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	clone.AdditionalDirectories = append([]string(nil), value.AdditionalDirectories...)
 	clone.ConfigOptions = cloneConfigOptions(value.ConfigOptions)
 	clone.SlashCommands = cloneSlashCommands(value.SlashCommands)
+	clone.Skills = cloneSkills(value.Skills)
 	if value.TokenUsage != nil {
 		usage := *value.TokenUsage
 		clone.TokenUsage = &usage

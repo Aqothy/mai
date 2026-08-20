@@ -1800,6 +1800,7 @@ public struct EventPayload: Codable {
     public var providerInstanceID, requestID, role: String?
     public var session: SessionBinding?
     public var sessionCleared: Bool?
+    public var skills: [Skill]?
     public var slashCommands: [SlashCommand]?
     public var stopReason, text, threadID, title: String?
     public var tokenUsage: TokenUsage?
@@ -1815,14 +1816,14 @@ public struct EventPayload: Codable {
         case plan
         case providerInstanceID = "providerInstanceId"
         case requestID = "requestId"
-        case role, session, sessionCleared, slashCommands, stopReason, text
+        case role, session, sessionCleared, skills, slashCommands, stopReason, text
         case threadID = "threadId"
         case title, tokenUsage
         case turnID = "turnId"
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.approval = approval
         self.attachments = attachments
@@ -1840,6 +1841,7 @@ public struct EventPayload: Codable {
         self.role = role
         self.session = session
         self.sessionCleared = sessionCleared
+        self.skills = skills
         self.slashCommands = slashCommands
         self.stopReason = stopReason
         self.text = text
@@ -1888,6 +1890,7 @@ public extension EventPayload {
         role: String?? = nil,
         session: SessionBinding?? = nil,
         sessionCleared: Bool?? = nil,
+        skills: [Skill]?? = nil,
         slashCommands: [SlashCommand]?? = nil,
         stopReason: String?? = nil,
         text: String?? = nil,
@@ -1916,6 +1919,7 @@ public extension EventPayload {
             role: role ?? self.role,
             session: session ?? self.session,
             sessionCleared: sessionCleared ?? self.sessionCleared,
+            skills: skills ?? self.skills,
             slashCommands: slashCommands ?? self.slashCommands,
             stopReason: stopReason ?? self.stopReason,
             text: text ?? self.text,
@@ -2553,6 +2557,7 @@ public struct SessionBinding: Codable {
     public var cwd, driver, lastError: String?
     public var providerInstanceID: String
     public var providerName: String?
+    public var skills: [Skill]?
     public var slashCommands: [SlashCommand]?
     public var status: String
     public var stopRequested: Bool?
@@ -2564,12 +2569,12 @@ public struct SessionBinding: Codable {
         case activeTurnID = "activeTurnId"
         case additionalDirectories, configOptions, cwd, driver, lastError
         case providerInstanceID = "providerInstanceId"
-        case providerName, slashCommands, status, stopRequested
+        case providerName, skills, slashCommands, status, stopRequested
         case threadID = "threadId"
         case tokenUsage, updatedAt
     }
 
-    public init(activeTurnID: String?, additionalDirectories: [String]?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
+    public init(activeTurnID: String?, additionalDirectories: [String]?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, skills: [Skill]?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
         self.activeTurnID = activeTurnID
         self.additionalDirectories = additionalDirectories
         self.configOptions = configOptions
@@ -2578,6 +2583,7 @@ public struct SessionBinding: Codable {
         self.lastError = lastError
         self.providerInstanceID = providerInstanceID
         self.providerName = providerName
+        self.skills = skills
         self.slashCommands = slashCommands
         self.status = status
         self.stopRequested = stopRequested
@@ -2614,6 +2620,7 @@ public extension SessionBinding {
         lastError: String?? = nil,
         providerInstanceID: String? = nil,
         providerName: String?? = nil,
+        skills: [Skill]?? = nil,
         slashCommands: [SlashCommand]?? = nil,
         status: String? = nil,
         stopRequested: Bool?? = nil,
@@ -2630,12 +2637,75 @@ public extension SessionBinding {
             lastError: lastError ?? self.lastError,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             providerName: providerName ?? self.providerName,
+            skills: skills ?? self.skills,
             slashCommands: slashCommands ?? self.slashCommands,
             status: status ?? self.status,
             stopRequested: stopRequested ?? self.stopRequested,
             threadID: threadID ?? self.threadID,
             tokenUsage: tokenUsage ?? self.tokenUsage,
             updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Skill
+public struct Skill: Codable {
+    public var description: String?
+    public var enabled: Bool
+    public var name: String
+    public var path, scope, shortDescription: String?
+
+    public init(description: String?, enabled: Bool, name: String, path: String?, scope: String?, shortDescription: String?) {
+        self.description = description
+        self.enabled = enabled
+        self.name = name
+        self.path = path
+        self.scope = scope
+        self.shortDescription = shortDescription
+    }
+}
+
+// MARK: Skill convenience initializers and mutators
+
+public extension Skill {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Skill.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        description: String?? = nil,
+        enabled: Bool? = nil,
+        name: String? = nil,
+        path: String?? = nil,
+        scope: String?? = nil,
+        shortDescription: String?? = nil
+    ) -> Skill {
+        return Skill(
+            description: description ?? self.description,
+            enabled: enabled ?? self.enabled,
+            name: name ?? self.name,
+            path: path ?? self.path,
+            scope: scope ?? self.scope,
+            shortDescription: shortDescription ?? self.shortDescription
         )
     }
 
@@ -3365,15 +3435,18 @@ public extension ProviderOptionsInvalidated {
 public struct ProviderOptionsResult: Codable {
     public var configOptions: [ConfigOption]
     public var optionsSessionID: String
+    public var skills: [Skill]?
 
     public enum CodingKeys: String, CodingKey {
         case configOptions
         case optionsSessionID = "optionsSessionId"
+        case skills
     }
 
-    public init(configOptions: [ConfigOption], optionsSessionID: String) {
+    public init(configOptions: [ConfigOption], optionsSessionID: String, skills: [Skill]?) {
         self.configOptions = configOptions
         self.optionsSessionID = optionsSessionID
+        self.skills = skills
     }
 }
 
@@ -3397,11 +3470,13 @@ public extension ProviderOptionsResult {
 
     func with(
         configOptions: [ConfigOption]? = nil,
-        optionsSessionID: String? = nil
+        optionsSessionID: String? = nil,
+        skills: [Skill]?? = nil
     ) -> ProviderOptionsResult {
         return ProviderOptionsResult(
             configOptions: configOptions ?? self.configOptions,
-            optionsSessionID: optionsSessionID ?? self.optionsSessionID
+            optionsSessionID: optionsSessionID ?? self.optionsSessionID,
+            skills: skills ?? self.skills
         )
     }
 

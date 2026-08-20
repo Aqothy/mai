@@ -534,6 +534,9 @@ func (i *ProviderRuntimeIngestion) ingestThreadMetadata(event provider.RuntimeEv
 	if event.Payload.SlashCommands != nil {
 		i.record(EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{SlashCommands: event.Payload.SlashCommands}})
 	}
+	if event.Payload.Skills != nil {
+		i.record(EventInput{Type: EventThreadSkillsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Skills: event.Payload.Skills}})
+	}
 	if event.Payload.Title != "" {
 		i.record(EventInput{Type: EventThreadMetaUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Title: event.Payload.Title}})
 	}

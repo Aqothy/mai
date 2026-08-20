@@ -221,6 +221,12 @@ enum ThreadEventReducer {
             session.updatedAt = occurredAt
             thread.session = session
 
+        case .threadSkillsUpdated:
+            var session = ensureSession(thread, event)
+            session.skills = payload.skills ?? []
+            session.updatedAt = occurredAt
+            thread.session = session
+
         case .threadTokenUsageUpdated:
             var session = ensureSession(thread, event)
             session.tokenUsage = payload.tokenUsage
@@ -264,6 +270,7 @@ enum ThreadEventReducer {
             providerInstanceID: event.payload.providerInstanceID
                 ?? thread.providerInstanceID ?? "",
             providerName: nil,
+            skills: nil,
             slashCommands: nil,
             status: MaidSessionStatus.starting.rawValue,
             stopRequested: false,

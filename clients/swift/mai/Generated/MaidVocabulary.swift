@@ -27,6 +27,7 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadApprovalResolved = "thread.approval-resolved"
     case threadConfigOptionsUpdated = "thread.config-options-updated"
     case threadSlashCommandsUpdated = "thread.slash-commands-updated"
+    case threadSkillsUpdated = "thread.skills-updated"
     case threadTokenUsageUpdated = "thread.token-usage-updated"
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
 }

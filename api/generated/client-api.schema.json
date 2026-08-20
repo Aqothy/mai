@@ -763,6 +763,12 @@
           },
           "type": "array"
         },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
+        },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
         }
@@ -1190,6 +1196,12 @@
             "$ref": "#/$defs/ConfigOption"
           },
           "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -1300,6 +1312,12 @@
           },
           "type": "array"
         },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
+        },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
         },
@@ -1348,6 +1366,35 @@
         "sessionId"
       ],
       "title": "SessionSummary"
+    },
+    "Skill": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "shortDescription": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "title": "Skill"
     },
     "SlashCommand": {
       "properties": {
@@ -2343,6 +2390,9 @@
         "slashCommand": {
           "$ref": "#/$defs/SlashCommand"
         },
+        "skill": {
+          "$ref": "#/$defs/Skill"
+        },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
         },
@@ -2490,6 +2540,7 @@
         "configChoice",
         "configOptionSelection",
         "slashCommand",
+        "skill",
         "tokenUsage",
         "approvalOption",
         "providerStartParams",

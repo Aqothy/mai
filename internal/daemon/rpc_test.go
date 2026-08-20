@@ -286,6 +286,9 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first get: %v", err)
 	}
+	if len(first.Skills) != 1 || first.Skills[0].Name != "review" {
+		t.Fatalf("first options skills = %#v", first.Skills)
+	}
 	_, err = handler.getProviderOptions(context.Background(), providerOptionsGetParams{
 		ProviderInstanceID: "provider-b", Cwd: "/other",
 	})
@@ -303,6 +306,9 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		instances["provider-b"].openCount() != 1 {
 		t.Fatalf("warm switch-back opened another session: first=%#v reused=%#v", first, reused)
 	}
+	if len(reused.Skills) != 1 || reused.Skills[0].Name != "review" {
+		t.Fatalf("reused options skills = %#v", reused.Skills)
+	}
 	instances["provider-a"].publishOptions("handle-/first", []provider.ConfigOption{{
 		ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow",
 	}})
@@ -313,11 +319,22 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 			!ok ||
 			update.OptionsSessionID != first.OptionsSessionID ||
 			len(update.ConfigOptions) != 1 ||
-			update.ConfigOptions[0].CurrentValue != "slow" {
+			update.ConfigOptions[0].CurrentValue != "slow" ||
+			len(update.Skills) != 1 ||
+			update.Skills[0].Name != "review" {
 			t.Fatalf("options update notification = %#v", message)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("spontaneous options update was not routed to the client")
+	}
+	setResult, err := handler.setProviderOption(context.Background(), providerOptionsSetParams{
+		OptionsSessionID: first.OptionsSessionID, OptionID: "model", Value: "fast",
+	})
+	if err != nil {
+		t.Fatalf("set provider option: %v", err)
+	}
+	if len(setResult.Skills) != 1 || setResult.Skills[0].Name != "review" {
+		t.Fatalf("set options skills = %#v", setResult.Skills)
 	}
 
 	closeStarted := make(chan struct{}, 1)
@@ -472,7 +489,10 @@ func (p *optionsRPCProvider) OpenOptionsSession(_ context.Context, cwd string, c
 	}}
 	p.sessions[handle] = options
 	p.callbacks[handle] = callbacks
-	return provider.OptionsSession{Handle: handle, ConfigOptions: options}, nil
+	return provider.OptionsSession{
+		Handle: handle, ConfigOptions: options,
+		Skills: []provider.Skill{{Name: "review", ShortDescription: "Review changes", Path: "/skills/review", Scope: "user", Enabled: true}},
+	}, nil
 }
 func (p *optionsRPCProvider) SetOptionsSessionValue(_ context.Context, handle string, _ string, _ any) ([]provider.ConfigOption, error) {
 	p.mu.Lock()

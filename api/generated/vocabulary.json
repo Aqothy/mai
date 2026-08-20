@@ -24,6 +24,7 @@
         "thread.approval-resolved",
         "thread.config-options-updated",
         "thread.slash-commands-updated",
+        "thread.skills-updated",
         "thread.token-usage-updated",
         "thread.history-replay-completed"
       ]

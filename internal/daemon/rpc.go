@@ -121,6 +121,7 @@ type clientOptionsSession struct {
 	handle             string
 	cwd                string
 	configOptions      []provider.ConfigOption
+	skills             []provider.Skill
 }
 
 type rpcOutbound struct {
@@ -692,6 +693,7 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOpti
 		result := providerOptionsResult{
 			OptionsSessionID: current.optionsSessionID,
 			ConfigOptions:    append([]provider.ConfigOption(nil), current.configOptions...),
+			Skills:           append([]provider.Skill(nil), current.skills...),
 		}
 		h.client.optionsMu.Unlock()
 		return result, nil
@@ -719,6 +721,7 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOpti
 		optionsSessionID: optionsSessionID, providerInstanceID: params.ProviderInstanceID,
 		handle: opened.Handle, cwd: params.Cwd,
 		configOptions: append([]provider.ConfigOption(nil), opened.ConfigOptions...),
+		skills:        append([]provider.Skill(nil), opened.Skills...),
 	}
 	h.client.optionsMu.Lock()
 	if h.client.closed.Load() {
@@ -728,7 +731,11 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOpti
 	}
 	h.client.optionsSessions[params.ProviderInstanceID] = entry
 	h.client.optionsMu.Unlock()
-	return providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: opened.ConfigOptions}, nil
+	return providerOptionsResult{
+		OptionsSessionID: optionsSessionID,
+		ConfigOptions:    append([]provider.ConfigOption(nil), opened.ConfigOptions...),
+		Skills:           append([]provider.Skill(nil), opened.Skills...),
+	}, nil
 }
 
 func (h *rpcHandler) setProviderOption(ctx context.Context, params providerOptionsSetParams) (providerOptionsResult, error) {
@@ -764,8 +771,13 @@ func (h *rpcHandler) setProviderOption(ctx context.Context, params providerOptio
 		return providerOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
 	}
 	current.configOptions = append([]provider.ConfigOption(nil), options...)
+	skills := append([]provider.Skill(nil), current.skills...)
 	h.client.optionsMu.Unlock()
-	return providerOptionsResult{OptionsSessionID: snapshot.optionsSessionID, ConfigOptions: options}, nil
+	return providerOptionsResult{
+		OptionsSessionID: snapshot.optionsSessionID,
+		ConfigOptions:    append([]provider.ConfigOption(nil), options...),
+		Skills:           skills,
+	}, nil
 }
 
 func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, optionsSessionID string, options []provider.ConfigOption) {
@@ -775,9 +787,17 @@ func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, option
 	if active {
 		current.configOptions = append([]provider.ConfigOption(nil), options...)
 	}
+	var skills []provider.Skill
+	if active {
+		skills = append([]provider.Skill(nil), current.skills...)
+	}
 	h.client.optionsMu.Unlock()
 	if active {
-		h.client.notify(wire.MethodProviderOptionsUpdated, providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: options})
+		h.client.notify(wire.MethodProviderOptionsUpdated, providerOptionsResult{
+			OptionsSessionID: optionsSessionID,
+			ConfigOptions:    append([]provider.ConfigOption(nil), options...),
+			Skills:           skills,
+		})
 	}
 }
 

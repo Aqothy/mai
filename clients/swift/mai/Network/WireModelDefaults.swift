@@ -143,6 +143,7 @@ extension EventPayload {
             role: role,
             session: session,
             sessionCleared: sessionCleared,
+            skills: nil,
             slashCommands: slashCommands,
             stopReason: stopReason,
             text: text,
@@ -152,6 +153,16 @@ extension EventPayload {
             turnID: turnID,
             updatedAt: updatedAt,
             value: value
+        )
+    }
+}
+
+extension ProviderOptionsResult {
+    init(configOptions: [ConfigOption], optionsSessionID: String) {
+        self.init(
+            configOptions: configOptions,
+            optionsSessionID: optionsSessionID,
+            skills: nil
         )
     }
 }
@@ -181,6 +192,7 @@ extension SessionBinding {
             lastError: lastError,
             providerInstanceID: providerInstanceID,
             providerName: providerName,
+            skills: nil,
             slashCommands: slashCommands,
             status: status,
             stopRequested: stopRequested,
