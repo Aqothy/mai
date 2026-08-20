@@ -55,8 +55,8 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
-	rpcMu                  sync.Mutex
-	rpcClients             map[string]*rpcClient
+	rpcMu                   sync.Mutex
+	rpcClients              map[string]*rpcClient
 	historyReplayCoalescing map[orchestration.ThreadID]struct{}
 
 	closeOnce sync.Once
@@ -289,6 +289,9 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
 		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
 	}
+	if len(summary.AdditionalDirectories) > 0 && !info.Capabilities.AdditionalDirectories {
+		return "", false, fmt.Errorf("provider does not support additional directories")
+	}
 
 	s.importMu.Lock()
 	defer s.importMu.Unlock()
@@ -298,6 +301,11 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		return "", false, err
 	}
 	summary.Cwd = cwd
+	additionalDirectories, err := s.orchestration.ResolveAdditionalDirectories(summary.AdditionalDirectories, cwd)
+	if err != nil {
+		return "", false, err
+	}
+	summary.AdditionalDirectories = additionalDirectories
 
 	now := time.Now()
 	updatedAt := now
@@ -308,17 +316,19 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	}
 	threadID := orchestration.NewThreadID()
 	startInput := provider.StartSessionInput{
-		ThreadID:           string(threadID),
-		ProviderInstanceID: instanceID,
-		Cwd:                summary.Cwd,
+		ThreadID:              string(threadID),
+		ProviderInstanceID:    instanceID,
+		Cwd:                   summary.Cwd,
+		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
 	}
 	meta := store.ThreadMeta{
-		ThreadID:           string(threadID),
-		Title:              summary.Title,
-		Cwd:                summary.Cwd,
-		ProviderInstanceID: instanceID,
-		CreatedAt:          updatedAt,
-		UpdatedAt:          updatedAt,
+		ThreadID:              string(threadID),
+		Title:                 summary.Title,
+		Cwd:                   summary.Cwd,
+		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
+		ProviderInstanceID:    instanceID,
+		CreatedAt:             updatedAt,
+		UpdatedAt:             updatedAt,
 	}
 	route := store.RouteRecord{
 		InstanceID:        instanceID,
@@ -362,13 +372,14 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	// client disconnects. A canceled RPC must not leave the durable import
 	// invisible until the next daemon restart.
 	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
-		ThreadID:           threadID,
-		Title:              meta.Title,
-		Cwd:                meta.Cwd,
-		ProviderInstanceID: meta.ProviderInstanceID,
-		ModelSelection:     meta.ModelSelection,
-		CreatedAt:          meta.CreatedAt,
-		UpdatedAt:          meta.UpdatedAt,
+		ThreadID:              threadID,
+		Title:                 meta.Title,
+		Cwd:                   meta.Cwd,
+		AdditionalDirectories: append([]string(nil), meta.AdditionalDirectories...),
+		ProviderInstanceID:    meta.ProviderInstanceID,
+		ModelSelection:        meta.ModelSelection,
+		CreatedAt:             meta.CreatedAt,
+		UpdatedAt:             meta.UpdatedAt,
 	}); err != nil {
 		return "", false, err
 	}

@@ -15,6 +15,8 @@ protocol ThreadRPCClient: RPCTransportClient {
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws
+    func closeProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
     func browseWorkspaceDirectories(
@@ -49,6 +51,14 @@ extension ThreadRPCClient {
 
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
         throw RPCError(code: nil, message: "Session import is unavailable", data: nil)
+    }
+
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws {
+        throw RPCError(code: nil, message: "Session deletion is unavailable", data: nil)
+    }
+
+    func closeProviderSession(_ input: ProviderSessionParams) async throws {
+        throw RPCError(code: nil, message: "Session closing is unavailable", data: nil)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
@@ -156,6 +166,14 @@ extension RPCClient: ThreadRPCClient {
 
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
         try await call(MaidRPCMethod.providerImportSession, params: input)
+    }
+
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws {
+        try await callVoid(MaidRPCMethod.providerDeleteSession, params: input)
+    }
+
+    func closeProviderSession(_ input: ProviderSessionParams) async throws {
+        try await callVoid(MaidRPCMethod.providerCloseSession, params: input)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {

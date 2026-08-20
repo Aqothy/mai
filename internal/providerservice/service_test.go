@@ -190,7 +190,10 @@ type eventingAdapter struct {
 func (a *resumeCursorAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
 	a.mu.Lock()
 	seq := len(a.instances) + 1
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
 		cursor := input.ResumeCursor
 		if len(cursor) == 0 {
@@ -218,7 +221,10 @@ func (a *cursorRebindAdapter) StartInstance(_ context.Context, req provider.Inst
 	if a.instances == nil {
 		a.instances = make(map[provider.InstanceID]*fakeProviderInstance)
 	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	switch req.InstanceID {
 	case "old":
 		instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
@@ -248,7 +254,10 @@ func (a *eventingAdapter) StartInstance(_ context.Context, req provider.Instance
 	if a.listeners == nil {
 		a.listeners = make(map[provider.InstanceID]provider.RuntimeEventListener)
 	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	a.instances[req.InstanceID] = instance
 	a.listeners[req.InstanceID] = emit
 	return instance, nil
@@ -1482,6 +1491,40 @@ func TestSetConfigOptionWithNonModelValueDoesNotFailAfterProviderApplied(t *test
 	input := adapter.instance(1).lastStartInput()
 	if input.ModelSelection == nil || input.ModelSelection.Model != "slow" {
 		t.Fatalf("recovered model selection = %#v, want unchanged slow", input.ModelSelection)
+	}
+}
+
+func TestServiceGatesProviderSpecificSessionCapabilities(t *testing.T) {
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: "limited", Name: "Limited", Driver: "limited", Status: provider.InstanceStatusInitialized,
+	}}
+	s := New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (ProviderInstance, error) {
+		return instance, nil
+	})
+	defer s.Close()
+	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "limited", Name: "Limited", Driver: "limited"}, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+
+	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
+		ThreadID: "thread-1", ProviderInstanceID: "limited", AdditionalDirectories: []string{"/extra"},
+	}); err == nil || !strings.Contains(err.Error(), "additional directories") {
+		t.Fatalf("unsupported additional directories err = %v", err)
+	}
+	if instance.startInputCount() != 0 {
+		t.Fatal("unsupported additional directories reached adapter StartSession")
+	}
+	if _, err := s.ListSessions(context.Background(), "limited", ""); err == nil || !strings.Contains(err.Error(), "session list") {
+		t.Fatalf("unsupported list err = %v", err)
+	}
+	if err := s.DeleteSession(context.Background(), "limited", "session-1"); err == nil || !strings.Contains(err.Error(), "session delete") {
+		t.Fatalf("unsupported delete err = %v", err)
+	}
+	if err := s.CloseSession(context.Background(), "limited", "session-1"); err == nil || !strings.Contains(err.Error(), "session close") {
+		t.Fatalf("unsupported close err = %v", err)
+	}
+	if instance.operationCount("DeleteSession") != 0 || instance.operationCount("CloseSession") != 0 {
+		t.Fatal("unsupported lifecycle operation reached adapter")
 	}
 }
 

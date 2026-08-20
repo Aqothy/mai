@@ -31,6 +31,7 @@ struct SessionImportEntry: Identifiable, Equatable {
 extension SessionSummary: Equatable {
     public static func == (lhs: SessionSummary, rhs: SessionSummary) -> Bool {
         lhs.sessionID == rhs.sessionID
+            && lhs.additionalDirectories == rhs.additionalDirectories
             && lhs.title == rhs.title
             && lhs.cwd == rhs.cwd
             && lhs.updatedAt == rhs.updatedAt

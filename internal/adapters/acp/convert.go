@@ -39,11 +39,14 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		mcp = *capabilities.MCPCapabilities
 	}
 	return provider.Capabilities{
-		SessionList: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
-		LoadReplay:  boolValue(capabilities.LoadSession),
-		Resume:      sessionResumeSupported(capabilities),
-		Auth:        hasStableAuthMethod(initResp.AuthMethods),
-		Logout:      capabilities.Auth != nil && capabilities.Auth.Logout != nil,
+		SessionList:           capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
+		SessionDelete:         capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Delete != nil,
+		SessionClose:          capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Close != nil,
+		LoadReplay:            boolValue(capabilities.LoadSession),
+		Resume:                sessionResumeSupported(capabilities),
+		AdditionalDirectories: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.AdditionalDirectories != nil,
+		Auth:                  hasStableAuthMethod(initResp.AuthMethods),
+		Logout:                capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
 			Audio:           boolValue(prompt.Audio),
@@ -819,7 +822,11 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 func slashCommandsFromACP(commands []schema.AvailableCommand) []provider.SlashCommand {
 	converted := make([]provider.SlashCommand, 0, len(commands))
 	for _, command := range commands {
-		converted = append(converted, provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil})
+		convertedCommand := provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil}
+		if command.Input != nil {
+			convertedCommand.InputHint = command.Input.Hint
+		}
+		converted = append(converted, convertedCommand)
 	}
 	return converted
 }
@@ -889,10 +896,11 @@ func sessionSummariesFromACP(sessions []schema.SessionInfo) []provider.SessionSu
 	converted := make([]provider.SessionSummary, 0, len(sessions))
 	for _, session := range sessions {
 		converted = append(converted, provider.SessionSummary{
-			SessionID: string(session.SessionID),
-			Title:     stringValue(session.Title),
-			Cwd:       session.CWD,
-			UpdatedAt: stringValue(session.UpdatedAt),
+			SessionID:             string(session.SessionID),
+			Title:                 stringValue(session.Title),
+			Cwd:                   session.CWD,
+			AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...),
+			UpdatedAt:             stringValue(session.UpdatedAt),
 		})
 	}
 	return converted
@@ -936,17 +944,17 @@ func configChoices(options schema.SessionConfigSelectOptions) []provider.ConfigC
 	}
 	var grouped []schema.SessionConfigSelectGroup
 	if err := json.Unmarshal(raw, &grouped); err == nil && hasGroupedOptions(grouped) {
-		var flattened []schema.SessionConfigSelectOption
+		var choices []provider.ConfigChoice
 		for _, group := range grouped {
-			flattened = append(flattened, group.Options...)
+			choices = append(choices, configChoicesFromOptions(group.Options, string(group.Group), group.Name)...)
 		}
-		return configChoicesFromOptions(flattened)
+		return choices
 	}
 	var ungrouped []schema.SessionConfigSelectOption
 	if err := json.Unmarshal(raw, &ungrouped); err != nil {
 		return nil
 	}
-	return configChoicesFromOptions(ungrouped)
+	return configChoicesFromOptions(ungrouped, "", "")
 }
 
 func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
@@ -958,13 +966,17 @@ func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
 	return false
 }
 
-func configChoicesFromOptions(options []schema.SessionConfigSelectOption) []provider.ConfigChoice {
+func configChoicesFromOptions(options []schema.SessionConfigSelectOption, group, groupLabel string) []provider.ConfigChoice {
 	if len(options) == 0 {
 		return nil
 	}
 	choices := make([]provider.ConfigChoice, 0, len(options))
 	for _, option := range options {
-		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name})
+		description := ""
+		if option.Description != nil {
+			description = *option.Description
+		}
+		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name, Description: description, Group: group, GroupLabel: groupLabel})
 	}
 	return choices
 }

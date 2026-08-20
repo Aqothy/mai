@@ -24,6 +24,9 @@ enum ThreadEventReducer {
         case .threadMetaUpdated:
             applyProviderSelection(payload, to: &thread)
             if let cwd = nonEmpty(payload.cwd) { thread.cwd = cwd }
+            if payload.additionalDirectories != nil {
+                thread.additionalDirectories = payload.additionalDirectories
+            }
             if let title = nonEmpty(payload.title) { thread.title = title }
 
         case .threadMessageSent:
@@ -134,6 +137,10 @@ enum ThreadEventReducer {
             }
 
             if thread.cwd == nil, let cwd = session.cwd { thread.cwd = cwd }
+            if thread.additionalDirectories == nil,
+               session.additionalDirectories != nil {
+                thread.additionalDirectories = session.additionalDirectories
+            }
             if thread.providerInstanceID == nil { thread.providerInstanceID = session.providerInstanceID }
             thread.session = session
 
@@ -247,7 +254,23 @@ enum ThreadEventReducer {
 
     private static func ensureSession(_ thread: Thread, _ event: Event) -> SessionBinding {
         if let session = thread.session { return session }
-        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, driver: nil, lastError: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
+        return SessionBinding(
+            activeTurnID: nil,
+            additionalDirectories: thread.additionalDirectories,
+            configOptions: nil,
+            cwd: thread.cwd,
+            driver: nil,
+            lastError: nil,
+            providerInstanceID: event.payload.providerInstanceID
+                ?? thread.providerInstanceID ?? "",
+            providerName: nil,
+            slashCommands: nil,
+            status: MaidSessionStatus.starting.rawValue,
+            stopRequested: false,
+            threadID: thread.id,
+            tokenUsage: nil,
+            updatedAt: event.occurredAt
+        )
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

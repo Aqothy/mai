@@ -7,16 +7,17 @@ import (
 )
 
 type ThreadListEntry struct {
-	ID                  ThreadID                 `json:"id"`
-	Title               string                   `json:"title"`
-	ProviderInstanceID  provider.InstanceID      `json:"providerInstanceId,omitempty"`
-	ModelSelection      *provider.ModelSelection `json:"modelSelection,omitempty"`
-	Cwd                 string                   `json:"cwd,omitempty"`
-	LatestTurn          *Turn                    `json:"latestTurn,omitempty"`
-	CreatedAt           time.Time                `json:"createdAt"`
-	UpdatedAt           time.Time                `json:"updatedAt"`
-	Session             *SessionBinding          `json:"session,omitempty"`
-	HasPendingApprovals bool                     `json:"hasPendingApprovals"`
+	ID                    ThreadID                 `json:"id"`
+	Title                 string                   `json:"title"`
+	ProviderInstanceID    provider.InstanceID      `json:"providerInstanceId,omitempty"`
+	ModelSelection        *provider.ModelSelection `json:"modelSelection,omitempty"`
+	Cwd                   string                   `json:"cwd,omitempty"`
+	AdditionalDirectories []string                 `json:"additionalDirectories,omitempty"`
+	LatestTurn            *Turn                    `json:"latestTurn,omitempty"`
+	CreatedAt             time.Time                `json:"createdAt"`
+	UpdatedAt             time.Time                `json:"updatedAt"`
+	Session               *SessionBinding          `json:"session,omitempty"`
+	HasPendingApprovals   bool                     `json:"hasPendingApprovals"`
 }
 
 type ThreadDetailSnapshot struct {

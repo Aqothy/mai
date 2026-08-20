@@ -639,10 +639,12 @@ func (s *Service) Info(instanceID provider.InstanceID) (provider.InstanceInfo, e
 }
 
 func (s *Service) ListSessions(ctx context.Context, instanceID provider.InstanceID, cwd string) ([]provider.SessionSummary, error) {
-	manager, err := s.sessionManager(instanceID)
+	manager, err := s.sessionManager(instanceID, "list")
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	defer cancel()
 	return manager.ListSessions(ctx, cwd)
 }
 
@@ -703,7 +705,7 @@ func (s *Service) manageSession(ctx context.Context, instanceID provider.Instanc
 	if sessionID == "" {
 		return fmt.Errorf("provider session %s requires sessionId", action)
 	}
-	manager, err := s.sessionManager(instanceID)
+	manager, err := s.sessionManager(instanceID, action)
 	if err != nil {
 		return err
 	}
@@ -726,10 +728,23 @@ func (s *Service) boundThreadForProviderSession(instanceID provider.InstanceID, 
 	return ""
 }
 
-func (s *Service) sessionManager(instanceID provider.InstanceID) (SessionManager, error) {
+func (s *Service) sessionManager(instanceID provider.InstanceID, operation string) (SessionManager, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
 		return nil, err
+	}
+	capabilities := instance.Info().Capabilities
+	supported := false
+	switch operation {
+	case "list":
+		supported = capabilities.SessionList
+	case "delete":
+		supported = capabilities.SessionDelete
+	case "close":
+		supported = capabilities.SessionClose
+	}
+	if !supported {
+		return nil, fmt.Errorf("provider does not support session %s", operation)
 	}
 	manager, ok := instance.(SessionManager)
 	if !ok {
@@ -837,6 +852,9 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 	instance, generation, err := s.instanceWithGeneration(input.ProviderInstanceID)
 	if err != nil {
 		return provider.StartSessionResult{}, nil, 0, err
+	}
+	if len(input.AdditionalDirectories) > 0 && !instance.Info().Capabilities.AdditionalDirectories {
+		return provider.StartSessionResult{}, nil, 0, fmt.Errorf("provider does not support additional directories")
 	}
 	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
 		if input.ProviderSessionID == "" {
@@ -1171,6 +1189,7 @@ func (s *Service) instanceWithGeneration(instanceID provider.InstanceID) (Provid
 
 func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
 	cloned := input
+	cloned.AdditionalDirectories = append([]string(nil), input.AdditionalDirectories...)
 	cloned.ResumeCursor = append(json.RawMessage(nil), input.ResumeCursor...)
 	cloned.Options = append(json.RawMessage(nil), input.Options...)
 	cloned.ConfigSelections = append([]provider.ConfigOptionSelection(nil), input.ConfigSelections...)

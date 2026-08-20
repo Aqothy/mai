@@ -25,11 +25,13 @@ final class DraftPromptModel {
     var workingDirectory = "" {
         didSet {
             if workingDirectory != oldValue {
+                additionalDirectories.removeAll { $0 == workingDirectory }
                 workspaceFilePicker.updateScope(.workingDirectory(workingDirectory))
                 selectionDidChange()
             }
         }
     }
+    private(set) var additionalDirectories: [String] = []
     private(set) var configOptions: [ConfigOption] = []
     private(set) var optionsPhase: OptionsPhase = .unavailable
     private(set) var isSending = false
@@ -163,6 +165,11 @@ final class DraftPromptModel {
         store.promptContentCapabilities(for: effectiveProviderID)?.image == true
     }
 
+    var supportsAdditionalDirectories: Bool {
+        guard let effectiveProviderID else { return false }
+        return store.providerSupportsAdditionalDirectories(effectiveProviderID)
+    }
+
     var connectionState: ThreadStore.ConnectionState {
         store.connectionState
     }
@@ -226,6 +233,25 @@ final class DraftPromptModel {
             parentPath: parentDirectory
         ) else { return }
         workingDirectory = directory
+    }
+
+    func addAdditionalDirectory(_ directory: String) {
+        let directory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !directory.isEmpty, directory != workingDirectory else { return }
+        additionalDirectories.removeAll { $0 == directory }
+        additionalDirectories.append(directory)
+    }
+
+    func addAdditionalProjectFolder(_ directory: String, parentDirectory: String?) {
+        guard let directory = projectFolders.add(
+            directory,
+            parentPath: parentDirectory
+        ) else { return }
+        addAdditionalDirectory(directory)
+    }
+
+    func removeAdditionalDirectory(_ directory: String) {
+        additionalDirectories.removeAll { $0 == directory }
     }
 
     func retryOptions() {
@@ -331,6 +357,7 @@ final class DraftPromptModel {
               let threadID = draftStore.activeDraftThreadID else { return }
 
         let requestedCwd = workingDirectory
+        let requestedAdditionalDirectories = additionalDirectories
         let selections = currentSelections(providerID: requestedProviderID)
         isSending = true
         defer { isSending = false }
@@ -343,11 +370,25 @@ final class DraftPromptModel {
             return
         }
 
+        guard requestedAdditionalDirectories.isEmpty
+            || store.providerSupportsAdditionalDirectories(providerID)
+        else {
+            showError(
+                RPCError(
+                    code: nil,
+                    message: "This provider does not support additional project folders",
+                    data: nil
+                )
+            )
+            return
+        }
+
         do {
             try await store.startThread(
                 threadID: threadID,
                 providerInstanceID: providerID,
                 cwd: requestedCwd,
+                additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
                     attachments: attachments.compactMap(\.attachment),
                     messageID: UUID().uuidString,

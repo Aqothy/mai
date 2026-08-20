@@ -473,15 +473,16 @@ type ThreadSessionView struct {
 // work. It deliberately excludes the timeline except for the addressed prompt,
 // avoiding an O(thread size) clone on every session/turn start.
 type ThreadProviderView struct {
-	ID                   ThreadID
-	ReplayHistoryPending bool
-	ProviderInstanceID   provider.InstanceID
-	Cwd                  string
-	ModelSelection       *provider.ModelSelection
-	ConfigSelections     []provider.ConfigOptionSelection
-	Session              *SessionBinding
-	LatestTurn           *Turn
-	Message              *Message
+	ID                    ThreadID
+	ReplayHistoryPending  bool
+	ProviderInstanceID    provider.InstanceID
+	Cwd                   string
+	AdditionalDirectories []string
+	ModelSelection        *provider.ModelSelection
+	ConfigSelections      []provider.ConfigOptionSelection
+	Session               *SessionBinding
+	LatestTurn            *Turn
+	Message               *Message
 }
 
 // ThreadApprovalView is SessionView plus one approval, read under a single lock
@@ -544,14 +545,15 @@ func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadPro
 		return ThreadProviderView{}, false
 	}
 	view := ThreadProviderView{
-		ID:                   thread.ID,
-		ReplayHistoryPending: thread.ReplayHistoryPending,
-		ProviderInstanceID:   thread.ProviderInstanceID,
-		Cwd:                  thread.Cwd,
-		ModelSelection:       cloneModelSelection(thread.ModelSelection),
-		ConfigSelections:     append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...),
-		Session:              cloneSessionPtr(thread.Session),
-		LatestTurn:           cloneTurnPtr(thread.LatestTurn),
+		ID:                    thread.ID,
+		ReplayHistoryPending:  thread.ReplayHistoryPending,
+		ProviderInstanceID:    thread.ProviderInstanceID,
+		Cwd:                   thread.Cwd,
+		AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...),
+		ModelSelection:        cloneModelSelection(thread.ModelSelection),
+		ConfigSelections:      append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...),
+		Session:               cloneSessionPtr(thread.Session),
+		LatestTurn:            cloneTurnPtr(thread.LatestTurn),
 	}
 	if messageID != "" {
 		if message := thread.Timeline.Message(messageID); message != nil {
@@ -579,6 +581,37 @@ func (e *Engine) existingThreadSequence(threadID ThreadID) (uint64, bool) {
 // thread state installed outside the command path, such as imported sessions.
 func (e *Engine) ResolveThreadCwd(cwd string) (string, error) {
 	return e.resolveThreadCwd("thread import", cwd)
+}
+
+// ResolveAdditionalDirectories validates and normalizes the ordered workspace
+// roots that accompany a thread's primary cwd. Duplicate roots and the primary
+// cwd are removed while preserving the caller's order.
+func (e *Engine) ResolveAdditionalDirectories(directories []string, cwd string) ([]string, error) {
+	return e.resolveAdditionalDirectories("thread import", directories, cwd)
+}
+
+func (e *Engine) resolveAdditionalDirectories(commandType string, directories []string, cwd string) ([]string, error) {
+	if directories == nil {
+		return nil, nil
+	}
+	seen := map[string]struct{}{filepath.Clean(cwd): {}}
+	resolved := make([]string, 0, len(directories))
+	for _, directory := range directories {
+		if directory == "" {
+			continue
+		}
+		root, err := e.resolveThreadCwd(commandType+" additional directory", directory)
+		if err != nil {
+			return nil, err
+		}
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		resolved = append(resolved, root)
+	}
+	return resolved, nil
 }
 
 // resolveThreadCwd enforces the daemon-wide cwd rule in one place: a thread's
@@ -621,7 +654,11 @@ func (e *Engine) dispatchThreadCreate(command Command) (DispatchResult, error) {
 	if err != nil {
 		return DispatchResult{}, err
 	}
-	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), Cwd: cwd}})
+	additionalDirectories, err := e.resolveAdditionalDirectories(command.Type, command.AdditionalDirectories, cwd)
+	if err != nil {
+		return DispatchResult{}, err
+	}
+	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), Cwd: cwd, AdditionalDirectories: additionalDirectories}})
 	return DispatchResult{Sequence: appended.Sequence}, nil
 }
 
@@ -642,6 +679,10 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
 	}
 	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
+	if err != nil {
+		return DispatchResult{}, err
+	}
+	additionalDirectories, err := e.resolveAdditionalDirectories(command.Type, command.AdditionalDirectories, cwd)
 	if err != nil {
 		return DispatchResult{}, err
 	}
@@ -677,7 +718,7 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 	err = e.withLockNotify(func(appendEvent func(Event) Event) error {
 		appendEvent(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
 			ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID,
-			ModelSelection: modelSelection, Cwd: cwd, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
+			ModelSelection: modelSelection, Cwd: cwd, AdditionalDirectories: additionalDirectories, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
 		}})
 		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
 			ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text,
@@ -698,20 +739,47 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 }
 
 func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, error) {
+	var additionalDirectories []string
 	if command.Cwd != "" {
 		if _, err := e.resolveThreadCwd(command.Type, command.Cwd); err != nil {
 			return DispatchResult{}, err
 		}
 	}
+	if command.AdditionalDirectories != nil {
+		cwd := command.Cwd
+		if cwd == "" {
+			if thread, ok := e.Thread(command.ThreadID); ok {
+				cwd = thread.Cwd
+			}
+		}
+		var err error
+		additionalDirectories, err = e.resolveAdditionalDirectories(command.Type, command.AdditionalDirectories, cwd)
+		if err != nil {
+			return DispatchResult{}, err
+		}
+	}
 	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateMetaCwdChange(*thread, command.Cwd); err != nil {
+		changesAdditionalDirectories := command.AdditionalDirectories != nil
+		// Changing the primary root can turn one of the existing additional
+		// roots into a duplicate. Normalize the retained roots against the new
+		// cwd and publish that patch even when the client omitted the optional
+		// additionalDirectories field.
+		if command.Cwd != "" && command.Cwd != thread.Cwd && !changesAdditionalDirectories {
+			var err error
+			additionalDirectories, err = e.resolveAdditionalDirectories(command.Type, thread.AdditionalDirectories, command.Cwd)
+			if err != nil {
+				return Event{}, err
+			}
+			changesAdditionalDirectories = true
+		}
+		if err := validateMetaDirectoriesChange(*thread, command.Cwd, additionalDirectories, changesAdditionalDirectories); err != nil {
 			return Event{}, err
 		}
 		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
 		if err := selectionChange.validateMetaUpdate(*thread); err != nil {
 			return Event{}, err
 		}
-		return threadEvent(command, EventThreadMetaUpdated, ActorKindClient, EventPayload{Title: command.Title, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, Cwd: command.Cwd, SessionCleared: selectionChange.ClearsSession}), nil
+		return threadEvent(command, EventThreadMetaUpdated, ActorKindClient, EventPayload{Title: command.Title, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, Cwd: command.Cwd, AdditionalDirectories: additionalDirectories, SessionCleared: selectionChange.ClearsSession}), nil
 	})
 }
 

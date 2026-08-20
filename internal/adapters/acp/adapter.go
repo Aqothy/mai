@@ -317,9 +317,13 @@ func (h *Instance) resolveAuthMethodID(methodID string) (string, error) {
 	methods := append([]schema.AuthMethod(nil), h.initialize.AuthMethods...)
 	h.mu.Unlock()
 	for _, method := range methods {
-		if authMethodID(method) == methodID {
-			return methodID, nil
+		if string(method.ID) != methodID {
+			continue
 		}
+		if !isStableAuthMethod(method) {
+			return "", fmt.Errorf("ACP auth method %q is an unstable client-driven %q method", methodID, stringValue(method.Type))
+		}
+		return methodID, nil
 	}
 	return "", fmt.Errorf("ACP auth method %q was not advertised as a supported agent auth method", methodID)
 }

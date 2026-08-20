@@ -89,17 +89,24 @@ type MCPCapabilities struct {
 type Capabilities struct {
 	// SessionList reports whether the provider can enumerate existing sessions.
 	SessionList bool `json:"sessionList,omitempty"`
+	// SessionDelete and SessionClose are advertised independently because ACP
+	// agents may support one lifecycle operation without the other.
+	SessionDelete bool `json:"sessionDelete,omitempty"`
+	SessionClose  bool `json:"sessionClose,omitempty"`
 	// LoadReplay reports whether the provider can rebuild display history for a stored session.
 	LoadReplay bool `json:"loadReplay,omitempty"`
 	// Resume reports whether the provider can restore agent context without
 	// replaying display history.
-	Resume        bool                      `json:"resume,omitempty"`
-	Auth          bool                      `json:"auth,omitempty"`
-	Logout        bool                      `json:"logout,omitempty"`
-	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
-	ModelSwitch   ModelSwitchSupport        `json:"modelSwitch,omitempty"`
-	ConfigOptions bool                      `json:"configOptions,omitempty"`
-	MCP           MCPCapabilities           `json:"mcp,omitzero"`
+	Resume bool `json:"resume,omitempty"`
+	// AdditionalDirectories allows a session to expose more workspace roots in
+	// addition to its primary cwd.
+	AdditionalDirectories bool                      `json:"additionalDirectories,omitempty"`
+	Auth                  bool                      `json:"auth,omitempty"`
+	Logout                bool                      `json:"logout,omitempty"`
+	PromptContent         PromptContentCapabilities `json:"promptContent,omitzero"`
+	ModelSwitch           ModelSwitchSupport        `json:"modelSwitch,omitempty"`
+	ConfigOptions         bool                      `json:"configOptions,omitempty"`
+	MCP                   MCPCapabilities           `json:"mcp,omitzero"`
 }
 
 type AuthStatus string
@@ -145,6 +152,7 @@ type SlashCommand struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	HasInput    bool   `json:"hasInput,omitempty"`
+	InputHint   string `json:"inputHint,omitempty"`
 }
 
 type TokenUsage struct {
@@ -155,10 +163,11 @@ type TokenUsage struct {
 }
 
 type SessionSummary struct {
-	SessionID string `json:"sessionId"`
-	Title     string `json:"title,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	SessionID             string   `json:"sessionId"`
+	Title                 string   `json:"title,omitempty"`
+	Cwd                   string   `json:"cwd,omitempty"`
+	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+	UpdatedAt             string   `json:"updatedAt,omitempty"`
 }
 
 // ModelSelection is WHAT a provider instance runs (model + provider-shaped
@@ -184,8 +193,11 @@ const (
 )
 
 type ConfigChoice struct {
-	Value string `json:"value"`
-	Label string `json:"label,omitempty"`
+	Value       string `json:"value"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Group       string `json:"group,omitempty"`
+	GroupLabel  string `json:"groupLabel,omitempty"`
 }
 
 type ConfigOptionType string
@@ -222,11 +234,12 @@ type Session struct {
 	// ProviderSessionID identifies this session to the optional provider session-
 	// management API. It is retained server-side for binding safety and is never
 	// exposed in the thread/session projection.
-	ProviderSessionID string          `json:"-"`
-	ProviderName      string          `json:"providerName,omitempty"`
-	Cwd               string          `json:"cwd,omitempty"`
-	ThreadID          string          `json:"threadId"`
-	ResumeCursor      json.RawMessage `json:"resumeCursor,omitempty"`
+	ProviderSessionID     string          `json:"-"`
+	ProviderName          string          `json:"providerName,omitempty"`
+	Cwd                   string          `json:"cwd,omitempty"`
+	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
+	ThreadID              string          `json:"threadId"`
+	ResumeCursor          json.RawMessage `json:"resumeCursor,omitempty"`
 	// ConfigOptions uses omitzero, not omitempty: provider session snapshots can
 	// intentionally report an empty set of provider metadata.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
@@ -256,11 +269,12 @@ type StartSessionInput struct {
 	ProviderInstanceID InstanceID `json:"providerInstanceId,omitempty"`
 	// ProviderSessionID is supplied internally when an external session was
 	// imported. It is adapter-owned routing data and is never exposed to clients.
-	ProviderSessionID string                  `json:"-"`
-	Cwd               string                  `json:"cwd,omitempty"`
-	ModelSelection    *ModelSelection         `json:"modelSelection,omitempty"`
-	ConfigSelections  []ConfigOptionSelection `json:"configSelections,omitempty"`
-	ResumeCursor      json.RawMessage         `json:"resumeCursor,omitempty"`
+	ProviderSessionID     string                  `json:"-"`
+	Cwd                   string                  `json:"cwd,omitempty"`
+	AdditionalDirectories []string                `json:"additionalDirectories,omitempty"`
+	ModelSelection        *ModelSelection         `json:"modelSelection,omitempty"`
+	ConfigSelections      []ConfigOptionSelection `json:"configSelections,omitempty"`
+	ResumeCursor          json.RawMessage         `json:"resumeCursor,omitempty"`
 	// ReplayHistory asks the provider to rebuild display history while restoring
 	// the session. On success, StartSessionResult.Replay contains the complete
 	// ordered replay batch. A failed start must not expose partial replay events.
@@ -281,11 +295,26 @@ type StartSessionResult struct {
 }
 
 type Attachment struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name,omitempty"`
-	MimeType string `json:"mimeType,omitempty"`
-	Data     string `json:"data,omitempty"`
-	URI      string `json:"uri,omitempty"`
+	Kind             string              `json:"kind"`
+	Name             string              `json:"name,omitempty"`
+	Title            string              `json:"title,omitempty"`
+	Description      string              `json:"description,omitempty"`
+	MimeType         string              `json:"mimeType,omitempty"`
+	Data             string              `json:"data,omitempty"`
+	URI              string              `json:"uri,omitempty"`
+	Size             int64               `json:"size,omitempty"`
+	Annotations      *ContentAnnotations `json:"annotations,omitempty"`
+	Metadata         map[string]any      `json:"_meta,omitempty"`
+	ResourceMetadata map[string]any      `json:"resourceMeta,omitempty"`
+}
+
+// ContentAnnotations are ACP/MCP display hints attached to provider content.
+// They are deliberately distinct from user-authored chat annotations.
+type ContentAnnotations struct {
+	Audience     []string       `json:"audience,omitempty"`
+	Priority     *float64       `json:"priority,omitempty"`
+	LastModified string         `json:"lastModified,omitempty"`
+	Metadata     map[string]any `json:"_meta,omitempty"`
 }
 
 type SendTurnInput struct {

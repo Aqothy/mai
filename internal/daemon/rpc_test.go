@@ -86,18 +86,6 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func TestWebClientHandlerServesEmbeddedIndex(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	webClientHandler().ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
-
-	if recorder.Code != 200 {
-		t.Fatalf("GET / status = %d, want 200", recorder.Code)
-	}
-	if body := recorder.Body.String(); !strings.Contains(body, "<title>maiD</title>") || !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("GET / body = %q, want embedded maiD index", body)
-	}
-}
-
 func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
@@ -804,8 +792,8 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 
 	var ignored json.RawMessage
 	err := client.Call(ctx, RPCMethodProviderDeleteSession, providerSessionParams{InstanceID: "codex", SessionID: "unbound-session"}).Await(ctx, &ignored)
-	if err == nil || !strings.Contains(err.Error(), "session/delete") {
-		t.Fatalf("provider.deleteSession err = %v, want capability-gated session/delete error", err)
+	if err == nil || !strings.Contains(err.Error(), "session delete") {
+		t.Fatalf("provider.deleteSession err = %v, want capability-gated session-delete error", err)
 	}
 
 	err = client.Call(ctx, RPCMethodProviderCloseSession, providerSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored)

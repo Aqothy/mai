@@ -542,15 +542,31 @@ public extension ApprovalEvent {
 
 // MARK: - Attachment
 public struct Attachment: Codable {
-    public var data: String?
+    public var meta: [String: JSONAny]?
+    public var annotations: ContentAnnotations?
+    public var data, description: String?
     public var kind: String
-    public var mimeType, name, uri: String?
+    public var mimeType, name: String?
+    public var resourceMeta: [String: JSONAny]?
+    public var size: Int?
+    public var title, uri: String?
 
-    public init(data: String?, kind: String, mimeType: String?, name: String?, uri: String?) {
+    public enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+        case annotations, data, description, kind, mimeType, name, resourceMeta, size, title, uri
+    }
+
+    public init(meta: [String: JSONAny]?, annotations: ContentAnnotations?, data: String?, description: String?, kind: String, mimeType: String?, name: String?, resourceMeta: [String: JSONAny]?, size: Int?, title: String?, uri: String?) {
+        self.meta = meta
+        self.annotations = annotations
         self.data = data
+        self.description = description
         self.kind = kind
         self.mimeType = mimeType
         self.name = name
+        self.resourceMeta = resourceMeta
+        self.size = size
+        self.title = title
         self.uri = uri
     }
 }
@@ -574,18 +590,91 @@ public extension Attachment {
     }
 
     func with(
+        meta: [String: JSONAny]?? = nil,
+        annotations: ContentAnnotations?? = nil,
         data: String?? = nil,
+        description: String?? = nil,
         kind: String? = nil,
         mimeType: String?? = nil,
         name: String?? = nil,
+        resourceMeta: [String: JSONAny]?? = nil,
+        size: Int?? = nil,
+        title: String?? = nil,
         uri: String?? = nil
     ) -> Attachment {
         return Attachment(
+            meta: meta ?? self.meta,
+            annotations: annotations ?? self.annotations,
             data: data ?? self.data,
+            description: description ?? self.description,
             kind: kind ?? self.kind,
             mimeType: mimeType ?? self.mimeType,
             name: name ?? self.name,
+            resourceMeta: resourceMeta ?? self.resourceMeta,
+            size: size ?? self.size,
+            title: title ?? self.title,
             uri: uri ?? self.uri
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ContentAnnotations
+public struct ContentAnnotations: Codable {
+    public var meta: [String: JSONAny]?
+    public var audience: [String]?
+    public var lastModified: String?
+    public var priority: Double?
+
+    public enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+        case audience, lastModified, priority
+    }
+
+    public init(meta: [String: JSONAny]?, audience: [String]?, lastModified: String?, priority: Double?) {
+        self.meta = meta
+        self.audience = audience
+        self.lastModified = lastModified
+        self.priority = priority
+    }
+}
+
+// MARK: ContentAnnotations convenience initializers and mutators
+
+public extension ContentAnnotations {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ContentAnnotations.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        meta: [String: JSONAny]?? = nil,
+        audience: [String]?? = nil,
+        lastModified: String?? = nil,
+        priority: Double?? = nil
+    ) -> ContentAnnotations {
+        return ContentAnnotations(
+            meta: meta ?? self.meta,
+            audience: audience ?? self.audience,
+            lastModified: lastModified ?? self.lastModified,
+            priority: priority ?? self.priority
         )
     }
 
@@ -600,6 +689,7 @@ public extension Attachment {
 
 // MARK: - Command
 public struct Command: Codable {
+    public var additionalDirectories: [String]?
     public var commandID: String?
     public var configSelections: [ConfigOptionSelection]?
     public var createdAt: Date?
@@ -612,6 +702,7 @@ public struct Command: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
+        case additionalDirectories
         case commandID = "commandId"
         case configSelections, createdAt, cwd, decision, message, modelSelection
         case optionID = "optionId"
@@ -623,7 +714,8 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+        self.additionalDirectories = additionalDirectories
         self.commandID = commandID
         self.configSelections = configSelections
         self.createdAt = createdAt
@@ -661,6 +753,7 @@ public extension Command {
     }
 
     func with(
+        additionalDirectories: [String]?? = nil,
         commandID: String?? = nil,
         configSelections: [ConfigOptionSelection]?? = nil,
         createdAt: Date?? = nil,
@@ -678,6 +771,7 @@ public extension Command {
         value: JSONAny?? = nil
     ) -> Command {
         return Command(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             commandID: commandID ?? self.commandID,
             configSelections: configSelections ?? self.configSelections,
             createdAt: createdAt ?? self.createdAt,
@@ -871,10 +965,13 @@ public extension ModelSelection {
 
 // MARK: - ConfigChoice
 public struct ConfigChoice: Codable {
-    public var label: String?
+    public var description, group, groupLabel, label: String?
     public var value: String
 
-    public init(label: String?, value: String) {
+    public init(description: String?, group: String?, groupLabel: String?, label: String?, value: String) {
+        self.description = description
+        self.group = group
+        self.groupLabel = groupLabel
         self.label = label
         self.value = value
     }
@@ -899,10 +996,16 @@ public extension ConfigChoice {
     }
 
     func with(
+        description: String?? = nil,
+        group: String?? = nil,
+        groupLabel: String?? = nil,
         label: String?? = nil,
         value: String? = nil
     ) -> ConfigChoice {
         return ConfigChoice(
+            description: description ?? self.description,
+            group: group ?? self.group,
+            groupLabel: groupLabel ?? self.groupLabel,
             label: label ?? self.label,
             value: value ?? self.value
         )
@@ -1197,6 +1300,7 @@ public extension EventMetadata {
 
 // MARK: - EventPayload
 public struct EventPayload: Codable {
+    public var additionalDirectories: [String]?
     public var approval: ApprovalEvent?
     public var attachments: [Attachment]?
     public var configOptions: [ConfigOption]?
@@ -1218,7 +1322,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case approval, attachments, configOptions, createdAt, cwd, decision, item
+        case additionalDirectories, approval, attachments, configOptions, createdAt, cwd, decision, item
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -1232,7 +1336,8 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+        self.additionalDirectories = additionalDirectories
         self.approval = approval
         self.attachments = attachments
         self.configOptions = configOptions
@@ -1280,6 +1385,7 @@ public extension EventPayload {
     }
 
     func with(
+        additionalDirectories: [String]?? = nil,
         approval: ApprovalEvent?? = nil,
         attachments: [Attachment]?? = nil,
         configOptions: [ConfigOption]?? = nil,
@@ -1307,6 +1413,7 @@ public extension EventPayload {
         value: JSONAny?? = nil
     ) -> EventPayload {
         return EventPayload(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             approval: approval ?? self.approval,
             attachments: attachments ?? self.attachments,
             configOptions: configOptions ?? self.configOptions,
@@ -1955,6 +2062,7 @@ public extension PlanEntry {
 // MARK: - SessionBinding
 public struct SessionBinding: Codable {
     public var activeTurnID: String?
+    public var additionalDirectories: [String]?
     public var configOptions: [ConfigOption]?
     public var cwd, driver, lastError: String?
     public var providerInstanceID: String
@@ -1968,15 +2076,16 @@ public struct SessionBinding: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case activeTurnID = "activeTurnId"
-        case configOptions, cwd, driver, lastError
+        case additionalDirectories, configOptions, cwd, driver, lastError
         case providerInstanceID = "providerInstanceId"
         case providerName, slashCommands, status, stopRequested
         case threadID = "threadId"
         case tokenUsage, updatedAt
     }
 
-    public init(activeTurnID: String?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
+    public init(activeTurnID: String?, additionalDirectories: [String]?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
         self.activeTurnID = activeTurnID
+        self.additionalDirectories = additionalDirectories
         self.configOptions = configOptions
         self.cwd = cwd
         self.driver = driver
@@ -2012,6 +2121,7 @@ public extension SessionBinding {
 
     func with(
         activeTurnID: String?? = nil,
+        additionalDirectories: [String]?? = nil,
         configOptions: [ConfigOption]?? = nil,
         cwd: String?? = nil,
         driver: String?? = nil,
@@ -2027,6 +2137,7 @@ public extension SessionBinding {
     ) -> SessionBinding {
         return SessionBinding(
             activeTurnID: activeTurnID ?? self.activeTurnID,
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             configOptions: configOptions ?? self.configOptions,
             cwd: cwd ?? self.cwd,
             driver: driver ?? self.driver,
@@ -2055,11 +2166,13 @@ public extension SessionBinding {
 public struct SlashCommand: Codable {
     public var description: String?
     public var hasInput: Bool?
+    public var inputHint: String?
     public var name: String
 
-    public init(description: String?, hasInput: Bool?, name: String) {
+    public init(description: String?, hasInput: Bool?, inputHint: String?, name: String) {
         self.description = description
         self.hasInput = hasInput
+        self.inputHint = inputHint
         self.name = name
     }
 }
@@ -2085,11 +2198,13 @@ public extension SlashCommand {
     func with(
         description: String?? = nil,
         hasInput: Bool?? = nil,
+        inputHint: String?? = nil,
         name: String? = nil
     ) -> SlashCommand {
         return SlashCommand(
             description: description ?? self.description,
             hasInput: hasInput ?? self.hasInput,
+            inputHint: inputHint ?? self.inputHint,
             name: name ?? self.name
         )
     }
@@ -2394,13 +2509,15 @@ public extension AuthMethod {
 
 // MARK: - Capabilities
 public struct Capabilities: Codable {
-    public var auth, configOptions, loadReplay, logout: Bool?
+    public var additionalDirectories, auth, configOptions, loadReplay: Bool?
+    public var logout: Bool?
     public var mcp: MCPCapabilities?
     public var modelSwitch: String?
     public var promptContent: PromptContentCapabilities?
-    public var resume, sessionList: Bool?
+    public var resume, sessionClose, sessionDelete, sessionList: Bool?
 
-    public init(auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionList: Bool?) {
+    public init(additionalDirectories: Bool?, auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?) {
+        self.additionalDirectories = additionalDirectories
         self.auth = auth
         self.configOptions = configOptions
         self.loadReplay = loadReplay
@@ -2409,6 +2526,8 @@ public struct Capabilities: Codable {
         self.modelSwitch = modelSwitch
         self.promptContent = promptContent
         self.resume = resume
+        self.sessionClose = sessionClose
+        self.sessionDelete = sessionDelete
         self.sessionList = sessionList
     }
 }
@@ -2432,6 +2551,7 @@ public extension Capabilities {
     }
 
     func with(
+        additionalDirectories: Bool?? = nil,
         auth: Bool?? = nil,
         configOptions: Bool?? = nil,
         loadReplay: Bool?? = nil,
@@ -2440,9 +2560,12 @@ public extension Capabilities {
         modelSwitch: String?? = nil,
         promptContent: PromptContentCapabilities?? = nil,
         resume: Bool?? = nil,
+        sessionClose: Bool?? = nil,
+        sessionDelete: Bool?? = nil,
         sessionList: Bool?? = nil
     ) -> Capabilities {
         return Capabilities(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             auth: auth ?? self.auth,
             configOptions: configOptions ?? self.configOptions,
             loadReplay: loadReplay ?? self.loadReplay,
@@ -2451,6 +2574,8 @@ public extension Capabilities {
             modelSwitch: modelSwitch ?? self.modelSwitch,
             promptContent: promptContent ?? self.promptContent,
             resume: resume ?? self.resume,
+            sessionClose: sessionClose ?? self.sessionClose,
+            sessionDelete: sessionDelete ?? self.sessionDelete,
             sessionList: sessionList ?? self.sessionList
         )
     }
@@ -2740,17 +2865,19 @@ public extension ProviderImportSessionParams {
 
 // MARK: - SessionSummary
 public struct SessionSummary: Codable {
+    public var additionalDirectories: [String]?
     public var cwd: String?
     public var sessionID: String
     public var title, updatedAt: String?
 
     public enum CodingKeys: String, CodingKey {
-        case cwd
+        case additionalDirectories, cwd
         case sessionID = "sessionId"
         case title, updatedAt
     }
 
-    public init(cwd: String?, sessionID: String, title: String?, updatedAt: String?) {
+    public init(additionalDirectories: [String]?, cwd: String?, sessionID: String, title: String?, updatedAt: String?) {
+        self.additionalDirectories = additionalDirectories
         self.cwd = cwd
         self.sessionID = sessionID
         self.title = title
@@ -2777,12 +2904,14 @@ public extension SessionSummary {
     }
 
     func with(
+        additionalDirectories: [String]?? = nil,
         cwd: String?? = nil,
         sessionID: String? = nil,
         title: String?? = nil,
         updatedAt: String?? = nil
     ) -> SessionSummary {
         return SessionSummary(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             cwd: cwd ?? self.cwd,
             sessionID: sessionID ?? self.sessionID,
             title: title ?? self.title,
@@ -4009,6 +4138,7 @@ public extension TerminalWriteParams {
 
 // MARK: - Thread
 public struct Thread: Codable {
+    public var additionalDirectories: [String]?
     public var createdAt: Date
     public var cwd: String?
     public var id: String
@@ -4022,12 +4152,13 @@ public struct Thread: Codable {
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, cwd, id, latestTurn, modelSelection, plan
+        case additionalDirectories, createdAt, cwd, id, latestTurn, modelSelection, plan
         case providerInstanceID = "providerInstanceId"
         case session, timeline, title, updatedAt
     }
 
-    public init(createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+        self.additionalDirectories = additionalDirectories
         self.createdAt = createdAt
         self.cwd = cwd
         self.id = id
@@ -4061,6 +4192,7 @@ public extension Thread {
     }
 
     func with(
+        additionalDirectories: [String]?? = nil,
         createdAt: Date? = nil,
         cwd: String?? = nil,
         id: String? = nil,
@@ -4074,6 +4206,7 @@ public extension Thread {
         updatedAt: Date? = nil
     ) -> Thread {
         return Thread(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             id: id ?? self.id,
@@ -4284,6 +4417,7 @@ public extension ThreadDetailSnapshot {
 
 // MARK: - ThreadListEntry
 public struct ThreadListEntry: Codable {
+    public var additionalDirectories: [String]?
     public var createdAt: Date
     public var cwd: String?
     public var hasPendingApprovals: Bool
@@ -4296,12 +4430,13 @@ public struct ThreadListEntry: Codable {
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, cwd, hasPendingApprovals, id, latestTurn, modelSelection
+        case additionalDirectories, createdAt, cwd, hasPendingApprovals, id, latestTurn, modelSelection
         case providerInstanceID = "providerInstanceId"
         case session, title, updatedAt
     }
 
-    public init(createdAt: Date, cwd: String?, hasPendingApprovals: Bool, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, providerInstanceID: String?, session: SessionBinding?, title: String, updatedAt: Date) {
+    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, hasPendingApprovals: Bool, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, providerInstanceID: String?, session: SessionBinding?, title: String, updatedAt: Date) {
+        self.additionalDirectories = additionalDirectories
         self.createdAt = createdAt
         self.cwd = cwd
         self.hasPendingApprovals = hasPendingApprovals
@@ -4334,6 +4469,7 @@ public extension ThreadListEntry {
     }
 
     func with(
+        additionalDirectories: [String]?? = nil,
         createdAt: Date? = nil,
         cwd: String?? = nil,
         hasPendingApprovals: Bool? = nil,
@@ -4346,6 +4482,7 @@ public extension ThreadListEntry {
         updatedAt: Date? = nil
     ) -> ThreadListEntry {
         return ThreadListEntry(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             hasPendingApprovals: hasPendingApprovals ?? self.hasPendingApprovals,

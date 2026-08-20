@@ -134,11 +134,12 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 
 func startSessionInputFromProviderView(view ThreadProviderView) provider.StartSessionInput {
 	return provider.StartSessionInput{
-		ThreadID:           string(view.ID),
-		ProviderInstanceID: view.ProviderInstanceID,
-		Cwd:                view.Cwd,
-		ModelSelection:     cloneModelSelection(view.ModelSelection),
-		ConfigSelections:   configSelectionsFromProviderView(view),
+		ThreadID:              string(view.ID),
+		ProviderInstanceID:    view.ProviderInstanceID,
+		Cwd:                   view.Cwd,
+		AdditionalDirectories: append([]string(nil), view.AdditionalDirectories...),
+		ModelSelection:        cloneModelSelection(view.ModelSelection),
+		ConfigSelections:      configSelectionsFromProviderView(view),
 	}
 }
 
@@ -317,7 +318,7 @@ func bindingFromProviderSession(providerInstanceID provider.InstanceID, session 
 	if providerInstanceID == "" {
 		providerInstanceID = session.ProviderInstanceID
 	}
-	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, ConfigOptions: cloneConfigOptions(session.ConfigOptions)}
+	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...), ConfigOptions: cloneConfigOptions(session.ConfigOptions)}
 }
 
 func (r *ProviderEventReactor) dispatchProviderSessionMetadata(threadID ThreadID, session provider.Session, createdAt time.Time) {

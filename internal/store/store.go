@@ -34,13 +34,14 @@ type RouteStore interface {
 
 // ThreadMeta contains durable thread-list metadata.
 type ThreadMeta struct {
-	ThreadID           string
-	Title              string
-	Cwd                string
-	ProviderInstanceID provider.InstanceID
-	ModelSelection     *provider.ModelSelection
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ThreadID              string
+	Title                 string
+	Cwd                   string
+	AdditionalDirectories []string
+	ProviderInstanceID    provider.InstanceID
+	ModelSelection        *provider.ModelSelection
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // ThreadStore persists thread-list metadata.

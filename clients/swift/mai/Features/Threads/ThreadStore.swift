@@ -278,7 +278,36 @@ final class ThreadStore {
     }
 
     func providerSupportsConfigOptions(_ providerID: String) -> Bool {
-        providers.first { $0.instanceID == providerID }?.capabilities.configOptions == true
+        providerInfo(for: providerID)?.capabilities.configOptions == true
+    }
+
+    func providerSupportsAdditionalDirectories(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.additionalDirectories == true
+    }
+
+    func providerInfo(for providerID: String) -> InstanceInfo? {
+        if let instance = instancesByID[providerID] {
+            return instance
+        }
+        guard
+            let instanceID = installedAgents.first(where: {
+                $0.id == providerID || $0.instanceID == providerID
+            })?.instanceID
+        else { return nil }
+        return instancesByID[instanceID]
+    }
+
+    func providerSupportsSessionImport(_ providerID: String) -> Bool {
+        guard let capabilities = providerInfo(for: providerID)?.capabilities else { return false }
+        return capabilities.loadReplay == true || capabilities.resume == true
+    }
+
+    func providerSupportsSessionClose(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.sessionClose == true
+    }
+
+    func providerSupportsSessionDelete(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.sessionDelete == true
     }
 
     func getProviderOptions(providerID: String, cwd: String) async throws -> ProviderOptionsResult {
@@ -364,20 +393,15 @@ final class ThreadStore {
         return installed
     }
 
-    /// Lists importable sessions reported by an agent, starting it first when
-    /// needed. Network-backed; callers own loading and error presentation.
+    /// Lists sessions reported by an agent, starting it first when needed.
+    /// Import, close, and delete remain independently capability-gated.
     func fetchProviderSessions(agentID: String) async throws -> [SessionSummary] {
         let instanceID = try await ensureProviderAvailable(agentID)
-        guard let provider = providers.first(where: { $0.instanceID == instanceID }),
+        guard let provider = providerInfo(for: instanceID),
             provider.capabilities.sessionList == true
         else {
             throw RPCError(
                 code: nil, message: "This agent does not support listing sessions", data: nil)
-        }
-        guard provider.capabilities.loadReplay == true || provider.capabilities.resume == true
-        else {
-            throw RPCError(
-                code: nil, message: "This agent does not support restoring sessions", data: nil)
         }
         return try await rpc.listProviderSessions(
             ProviderListSessionsParams(cwd: nil, instanceID: instanceID)
@@ -390,20 +414,54 @@ final class ThreadStore {
     /// stream; its history is replayed when it is first selected.
     func importProviderSession(agentID: String, session: SessionSummary) async throws -> String {
         let instanceID = try await ensureProviderAvailable(agentID)
+        guard providerSupportsSessionImport(instanceID) else {
+            throw RPCError(
+                code: nil, message: "This agent does not support restoring sessions", data: nil)
+        }
         let result = try await rpc.importProviderSession(
             ProviderImportSessionParams(instanceID: instanceID, session: session)
         )
         return result.threadID
     }
 
+    func closeProviderSession(agentID: String, sessionID: String) async throws {
+        let instanceID = try await ensureProviderAvailable(agentID)
+        guard providerSupportsSessionClose(instanceID) else {
+            throw RPCError(
+                code: nil,
+                message: "This agent does not support closing sessions",
+                data: nil
+            )
+        }
+        try await rpc.closeProviderSession(
+            ProviderSessionParams(instanceID: instanceID, sessionID: sessionID)
+        )
+    }
+
+    func deleteProviderSession(agentID: String, sessionID: String) async throws {
+        let instanceID = try await ensureProviderAvailable(agentID)
+        guard providerSupportsSessionDelete(instanceID) else {
+            throw RPCError(
+                code: nil,
+                message: "This agent does not support deleting sessions",
+                data: nil
+            )
+        }
+        try await rpc.deleteProviderSession(
+            ProviderSessionParams(instanceID: instanceID, sessionID: sessionID)
+        )
+    }
+
     func startThread(
         threadID: String,
         providerInstanceID: String,
         cwd: String,
+        additionalDirectories: [String] = [],
         message: CommandMessage,
         configSelections: [ConfigOptionSelection]
     ) async throws {
         let command = Command(
+            additionalDirectories: additionalDirectories.isEmpty ? nil : additionalDirectories,
             commandID: UUID().uuidString,
             configSelections: configSelections,
             createdAt: now(),

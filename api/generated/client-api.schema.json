@@ -260,6 +260,12 @@
         "name": {
           "type": "string"
         },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
         "mimeType": {
           "type": "string"
         },
@@ -268,6 +274,18 @@
         },
         "uri": {
           "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "annotations": {
+          "$ref": "#/$defs/ContentAnnotations"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "resourceMeta": {
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -317,10 +335,19 @@
         "sessionList": {
           "type": "boolean"
         },
+        "sessionDelete": {
+          "type": "boolean"
+        },
+        "sessionClose": {
+          "type": "boolean"
+        },
         "loadReplay": {
           "type": "boolean"
         },
         "resume": {
+          "type": "boolean"
+        },
+        "additionalDirectories": {
           "type": "boolean"
         },
         "auth": {
@@ -368,6 +395,12 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
@@ -432,6 +465,15 @@
         },
         "label": {
           "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "groupLabel": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -491,6 +533,28 @@
         "value"
       ],
       "title": "ConfigOptionSelection"
+    },
+    "ContentAnnotations": {
+      "properties": {
+        "audience": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "lastModified": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ContentAnnotations"
     },
     "DispatchResult": {
       "properties": {
@@ -576,6 +640,12 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "session": {
           "$ref": "#/$defs/SessionBinding"
@@ -1137,6 +1207,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "status": {
           "type": "string"
         },
@@ -1190,6 +1266,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "updatedAt": {
           "type": "string"
         }
@@ -1211,6 +1293,9 @@
         },
         "hasInput": {
           "type": "boolean"
+        },
+        "inputHint": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1539,6 +1624,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "session": {
           "$ref": "#/$defs/SessionBinding"
         },
@@ -1607,6 +1698,12 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "latestTurn": {
           "$ref": "#/$defs/Turn"
