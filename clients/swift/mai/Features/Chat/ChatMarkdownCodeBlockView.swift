@@ -3,6 +3,17 @@ import SwiftUI
 struct ChatMarkdownCodeBlockView: View {
     let block: ChatMarkdownCodeBlock
     let isStreaming: Bool
+    let revealBatches: [ChatStreamingTextRevealBatch]
+
+    init(
+        block: ChatMarkdownCodeBlock,
+        isStreaming: Bool,
+        revealBatches: [ChatStreamingTextRevealBatch] = []
+    ) {
+        self.block = block
+        self.isStreaming = isStreaming
+        self.revealBatches = revealBatches
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var highlightedCode: HighlightedCode?
@@ -26,12 +37,15 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.bottom, 10)
 
             ScrollView(.horizontal) {
-                Text(displayedCode)
-                    .font(.callout.monospaced())
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                ChatStreamingTextRevealView(
+                    text: displayedCode,
+                    batches: revealBatches
+                )
+                .font(.callout.monospaced())
+                .lineSpacing(4)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
             .scrollIndicators(.visible, axes: .horizontal)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
