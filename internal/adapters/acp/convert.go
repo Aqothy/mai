@@ -871,12 +871,6 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 			}
 			convertedOption.CurrentValue = current
 			convertedOption.Choices = configChoices(option.Options)
-		case schema.SessionConfigOptionTypeBoolean:
-			current, ok := option.CurrentValue.(bool)
-			if !ok {
-				continue
-			}
-			convertedOption.CurrentValue = current
 		default:
 			continue
 		}
@@ -934,13 +928,6 @@ func hasStableAuthMethod(methods []schema.AuthMethod) bool {
 		}
 	}
 	return false
-}
-
-func authMethodID(method schema.AuthMethod) string {
-	if !isStableAuthMethod(method) {
-		return ""
-	}
-	return string(method.ID)
 }
 
 func authMethodsFromACP(methods []schema.AuthMethod) []provider.AuthMethod {

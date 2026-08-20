@@ -691,13 +691,8 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 		ConfigID:  schema.SessionConfigId(optionID),
 		Value:     value,
 	}
-	switch value.(type) {
-	case string:
-	case bool:
-		optionType := schema.SetSessionConfigOptionRequestTypeBoolean
-		request.Type = &optionType
-	default:
-		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
+	if _, ok := value.(string); !ok {
+		return fmt.Errorf("ACP config option %q requires a string value", optionID)
 	}
 	resp, err := h.agent().SetSessionConfigOption(ctx, request)
 	if err != nil {

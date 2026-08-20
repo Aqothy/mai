@@ -187,14 +187,7 @@ func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeR
 	title := "Mai Daemon"
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
-		ClientCapabilities: &schema.ClientCapabilities{
-			Session: &schema.ClientSessionCapabilities{
-				ConfigOptions: &schema.SessionConfigOptionsCapabilities{
-					Boolean: &schema.BooleanConfigOptionCapabilities{},
-				},
-			},
-		},
-		ClientInfo: &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
+		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
 	initResp, err := h.agent().Initialize(ctx, initReq)
 	if err != nil {

@@ -78,6 +78,8 @@ func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadS
 			if ok {
 				if restored[index].ProviderInstanceID != route.InstanceID {
 					restored[index].ProviderInstanceID = route.InstanceID
+				}
+				if route.StartInput.ModelSelection != nil {
 					restored[index].ModelSelection = route.StartInput.ModelSelection
 				}
 				continue

@@ -1202,7 +1202,8 @@ final class ThreadStore {
         performSubscriptionMaintenance(at: timestamp)
 
         if let selectedThreadID {
-            await subscribe(selectedThreadID)
+            ensureSubscribed(selectedThreadID)
+            await subscriptionTasks[selectedThreadID]?.task.value
         }
 
         let protectedIDs = sessionsByID.compactMap { id, session in
@@ -1246,7 +1247,7 @@ final class ThreadStore {
         let task = Task { [weak self] in
             await previousTask?.value
             guard !Task.isCancelled else { return }
-            await self?.subscribe(id)
+            await self?.subscribe(id, operationID: operationID)
             self?.finishSubscriptionTask(id, operationID: operationID)
         }
         subscriptionTasks[id] = SubscriptionTask(
@@ -1256,7 +1257,7 @@ final class ThreadStore {
         )
     }
 
-    private func subscribe(_ id: String) async {
+    private func subscribe(_ id: String, operationID: UUID) async {
         guard connectionState == .connected else { return }
 
         if selectedThreadID == id {
@@ -1313,6 +1314,9 @@ final class ThreadStore {
             failed.bufferedItems.removeAll()
             sessionsByID[id] = failed
             if selectedThreadID == id {
+                // Publish retryable failure only after the task slot is free;
+                // retry() may run as soon as observers see this error.
+                finishSubscriptionTask(id, operationID: operationID)
                 selectedThreadLoadErrorMessage = error.localizedDescription
             }
         }
