@@ -15,7 +15,57 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 }
 
 func cloneAttachments(values []provider.Attachment) []provider.Attachment {
-	return append([]provider.Attachment(nil), values...)
+	if values == nil {
+		return nil
+	}
+	cloned := make([]provider.Attachment, len(values))
+	for index, value := range values {
+		cloned[index] = value
+		cloned[index].Annotations = cloneContentAnnotations(value.Annotations)
+		cloned[index].Metadata = cloneMetadata(value.Metadata)
+		cloned[index].ResourceMetadata = cloneMetadata(value.ResourceMetadata)
+	}
+	return cloned
+}
+
+func cloneContentAnnotations(value *provider.ContentAnnotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Audience = append([]string(nil), value.Audience...)
+	cloned.Metadata = cloneMetadata(value.Metadata)
+	return &cloned
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = cloneMetadataValue(entry)
+	}
+	return cloned
+}
+
+func cloneMetadataValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMetadata(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, entry := range typed {
+			cloned[index] = cloneMetadataValue(entry)
+		}
+		return cloned
+	case json.RawMessage:
+		return cloneRawMessage(typed)
+	case []byte:
+		return append([]byte(nil), typed...)
+	default:
+		return value
+	}
 }
 
 // cloneToolCall isolates a public thread snapshot from projection-owned state.

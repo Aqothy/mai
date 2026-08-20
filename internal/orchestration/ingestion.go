@@ -314,7 +314,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 	}
 	ts.reasoning = append(ts.reasoning, event.Payload.Delta...)
 	ts.reasoningPending = append(ts.reasoningPending, event.Payload.Delta...)
-	ts.reasoningAttachments = append(ts.reasoningAttachments, event.Payload.Attachments...)
+	ts.reasoningAttachments = append(ts.reasoningAttachments, cloneAttachments(event.Payload.Attachments)...)
 	ts.reasoningActive = true
 	itemID := reasoningItemID(event, ts.reasoningSegment)
 	var full *reasoningPayload
@@ -322,7 +322,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 		// Non-text content (ACP thought chunks are full ContentBlocks) flushes
 		// immediately as the COMPLETE replacement payload, so an attachment is
 		// never hidden until the settle checkpoint.
-		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: append([]provider.Attachment(nil), ts.reasoningAttachments...)}
+		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: cloneAttachments(ts.reasoningAttachments)}
 		ts.reasoningPending = ts.reasoningPending[:0]
 	}
 	i.mu.Unlock()
