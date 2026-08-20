@@ -311,6 +311,28 @@
       "type": "object",
       "title": "Auth"
     },
+    "AuthChallenge": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "loginId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "userCode": {
+          "type": "string"
+        },
+        "verificationUrl": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "AuthChallenge"
+    },
     "AuthMethod": {
       "properties": {
         "id": {
@@ -321,6 +343,12 @@
         },
         "description": {
           "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "requiresSecret": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -329,6 +357,22 @@
         "id"
       ],
       "title": "AuthMethod"
+    },
+    "AuthenticationResult": {
+      "properties": {
+        "instance": {
+          "$ref": "#/$defs/InstanceInfo"
+        },
+        "challenge": {
+          "$ref": "#/$defs/AuthChallenge"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ],
+      "title": "AuthenticationResult"
     },
     "Capabilities": {
       "properties": {
@@ -348,6 +392,12 @@
           "type": "boolean"
         },
         "additionalDirectories": {
+          "type": "boolean"
+        },
+        "fork": {
+          "type": "boolean"
+        },
+        "skills": {
           "type": "boolean"
         },
         "auth": {
@@ -1011,6 +1061,9 @@
         },
         "methodId": {
           "type": "string"
+        },
+        "secret": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1020,6 +1073,19 @@
         "methodId"
       ],
       "title": "ProviderAuthenticateParams"
+    },
+    "ProviderForkThreadParams": {
+      "properties": {
+        "sourceThreadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sourceThreadId"
+      ],
+      "title": "ProviderForkThreadParams"
     },
     "ProviderImportSessionParams": {
       "properties": {
@@ -2253,6 +2319,9 @@
         "instanceInfo": {
           "$ref": "#/$defs/InstanceInfo"
         },
+        "authenticationResult": {
+          "$ref": "#/$defs/AuthenticationResult"
+        },
         "sessionSummary": {
           "$ref": "#/$defs/SessionSummary"
         },
@@ -2288,6 +2357,9 @@
         },
         "providerAuthenticateParams": {
           "$ref": "#/$defs/ProviderAuthenticateParams"
+        },
+        "providerForkThreadParams": {
+          "$ref": "#/$defs/ProviderForkThreadParams"
         },
         "providerInstanceParams": {
           "$ref": "#/$defs/ProviderInstanceParams"
@@ -2410,6 +2482,7 @@
         "timelineEntry",
         "plan",
         "instanceInfo",
+        "authenticationResult",
         "sessionSummary",
         "attachment",
         "modelSelection",
@@ -2422,6 +2495,7 @@
         "providerStartParams",
         "acpRegistryStartParams",
         "providerAuthenticateParams",
+        "providerForkThreadParams",
         "providerInstanceParams",
         "providerListSessionsParams",
         "providerSessionParams",

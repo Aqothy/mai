@@ -390,6 +390,12 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 		i.ingestAssistantMessageStatus(event, createdAt, status)
 		return
 	}
+	if event.Payload.ItemType == provider.ItemKindReasoning {
+		if status != "" && status != provider.ItemStatusInProgress {
+			i.settleReasoning(event, status, createdAt)
+		}
+		return
+	}
 	kind := event.Payload.ItemType
 	if kind == "" {
 		return

@@ -40,6 +40,7 @@ const (
 	RPCMethodProviderImportSession = wire.MethodProviderImportSession
 	RPCMethodProviderDeleteSession = wire.MethodProviderDeleteSession
 	RPCMethodProviderCloseSession  = wire.MethodProviderCloseSession
+	RPCMethodProviderForkThread    = wire.MethodProviderForkThread
 	RPCMethodProviderOptionsGet    = wire.MethodProviderOptionsGet
 	RPCMethodProviderOptionsSet    = wire.MethodProviderOptionsSet
 
@@ -69,6 +70,7 @@ type providerListSessionsParams = wire.ProviderListSessionsParams
 type providerSessionParams = wire.ProviderSessionParams
 type providerImportSessionParams = wire.ProviderImportSessionParams
 type providerImportSessionResult = wire.ProviderImportSessionResult
+type providerForkThreadParams = wire.ProviderForkThreadParams
 type providerOptionsGetParams = wire.ProviderOptionsGetParams
 type providerOptionsSetParams = wire.ProviderOptionsSetParams
 type providerOptionsResult = wire.ProviderOptionsResult
@@ -533,7 +535,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.providerService.Authenticate(ctx, params.InstanceID, params.MethodID)
+		return h.server.providerService.Authenticate(ctx, params.InstanceID, provider.AuthenticateInput{MethodID: params.MethodID, Secret: params.Secret})
 	case RPCMethodProviderLogout:
 		var params providerInstanceParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -568,6 +570,16 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return nil, h.server.providerService.CloseSession(ctx, params.InstanceID, params.SessionID)
+	case RPCMethodProviderForkThread:
+		var params providerForkThreadParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		threadID, imported, err := h.server.ForkProviderThread(ctx, params.SourceThreadID)
+		if err != nil {
+			return nil, err
+		}
+		return providerImportSessionResult{ThreadID: threadID, Imported: imported}, nil
 	case RPCMethodProviderOptionsGet:
 		var params providerOptionsGetParams
 		if err := decodeRPCParams(req, &params); err != nil {

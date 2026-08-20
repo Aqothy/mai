@@ -156,6 +156,10 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.ItemKindToolCall),
 			string(provider.ItemKindWarning),
 			string(provider.ItemKindError),
+			string(provider.ItemKindWebSearch),
+			string(provider.ItemKindImageView),
+			string(provider.ItemKindImageGeneration),
+			string(provider.ItemKindContextCompaction),
 		),
 	},
 	{

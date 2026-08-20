@@ -100,13 +100,17 @@ type Capabilities struct {
 	Resume bool `json:"resume,omitempty"`
 	// AdditionalDirectories allows a session to expose more workspace roots in
 	// addition to its primary cwd.
-	AdditionalDirectories bool                      `json:"additionalDirectories,omitempty"`
-	Auth                  bool                      `json:"auth,omitempty"`
-	Logout                bool                      `json:"logout,omitempty"`
-	PromptContent         PromptContentCapabilities `json:"promptContent,omitzero"`
-	ModelSwitch           ModelSwitchSupport        `json:"modelSwitch,omitempty"`
-	ConfigOptions         bool                      `json:"configOptions,omitempty"`
-	MCP                   MCPCapabilities           `json:"mcp,omitzero"`
+	AdditionalDirectories bool `json:"additionalDirectories,omitempty"`
+	// Fork is intentionally provider-specific. Stable Codex app-server exposes
+	// it; ACP's similarly named operation remains experimental and is not used.
+	Fork          bool                      `json:"fork,omitempty"`
+	Skills        bool                      `json:"skills,omitempty"`
+	Auth          bool                      `json:"auth,omitempty"`
+	Logout        bool                      `json:"logout,omitempty"`
+	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
+	ModelSwitch   ModelSwitchSupport        `json:"modelSwitch,omitempty"`
+	ConfigOptions bool                      `json:"configOptions,omitempty"`
+	MCP           MCPCapabilities           `json:"mcp,omitzero"`
 }
 
 type AuthStatus string
@@ -118,9 +122,32 @@ const (
 )
 
 type AuthMethod struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	RequiresSecret bool   `json:"requiresSecret,omitempty"`
+}
+
+type AuthenticateInput struct {
+	MethodID string `json:"methodId"`
+	Secret   string `json:"secret,omitempty"`
+}
+
+// AuthChallenge describes a browser or device-code login that continues after
+// provider.authenticate returns. Credentials are accepted in requests but are
+// never echoed through this value or persisted by the daemon.
+type AuthChallenge struct {
+	Kind            string `json:"kind,omitempty"`
+	LoginID         string `json:"loginId,omitempty"`
+	URL             string `json:"url,omitempty"`
+	UserCode        string `json:"userCode,omitempty"`
+	VerificationURL string `json:"verificationUrl,omitempty"`
+}
+
+type AuthenticationResult struct {
+	Instance  InstanceInfo   `json:"instance"`
+	Challenge *AuthChallenge `json:"challenge,omitempty"`
 }
 
 // Auth is the provider-neutral auth state surfaced to clients (for a provider
@@ -153,6 +180,17 @@ type SlashCommand struct {
 	Description string `json:"description,omitempty"`
 	HasInput    bool   `json:"hasInput,omitempty"`
 	InputHint   string `json:"inputHint,omitempty"`
+}
+
+// Skill is a provider-advertised, cwd-scoped prompt capability. A selected
+// skill is sent as structured input by adapters that support it.
+type Skill struct {
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ShortDescription string `json:"shortDescription,omitempty"`
+	Path             string `json:"path,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	Enabled          bool   `json:"enabled"`
 }
 
 type TokenUsage struct {
@@ -243,6 +281,7 @@ type Session struct {
 	// ConfigOptions uses omitzero, not omitempty: provider session snapshots can
 	// intentionally report an empty set of provider metadata.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
+	Skills        []Skill        `json:"skills,omitzero"`
 }
 
 type ConfigOptionSelection struct {
@@ -256,6 +295,7 @@ type ConfigOptionSelection struct {
 type OptionsSession struct {
 	Handle        string
 	ConfigOptions []ConfigOption
+	Skills        []Skill
 }
 
 type OptionsSessionCallbacks struct {
@@ -333,6 +373,14 @@ type InterruptTurnInput struct {
 
 type StopSessionInput struct {
 	ThreadID string `json:"threadId"`
+}
+
+type ForkSessionInput struct {
+	ProviderSessionID string `json:"-"`
+}
+
+type ForkSessionResult struct {
+	Summary SessionSummary `json:"summary"`
 }
 
 type SetConfigOptionInput struct {
@@ -421,15 +469,19 @@ const (
 type ItemKind string
 
 const (
-	ItemKindUserMessage      ItemKind = "user_message"
-	ItemKindAssistantMessage ItemKind = "assistant_message"
-	ItemKindReasoning        ItemKind = "reasoning"
-	ItemKindCommandExecution ItemKind = "command_execution"
-	ItemKindFileChange       ItemKind = "file_change"
-	ItemKindMCPToolCall      ItemKind = "mcp_tool_call"
-	ItemKindToolCall         ItemKind = "tool_call"
-	ItemKindWarning          ItemKind = "warning"
-	ItemKindError            ItemKind = "error"
+	ItemKindUserMessage       ItemKind = "user_message"
+	ItemKindAssistantMessage  ItemKind = "assistant_message"
+	ItemKindReasoning         ItemKind = "reasoning"
+	ItemKindCommandExecution  ItemKind = "command_execution"
+	ItemKindFileChange        ItemKind = "file_change"
+	ItemKindMCPToolCall       ItemKind = "mcp_tool_call"
+	ItemKindToolCall          ItemKind = "tool_call"
+	ItemKindWarning           ItemKind = "warning"
+	ItemKindError             ItemKind = "error"
+	ItemKindWebSearch         ItemKind = "web_search"
+	ItemKindImageView         ItemKind = "image_view"
+	ItemKindImageGeneration   ItemKind = "image_generation"
+	ItemKindContextCompaction ItemKind = "context_compaction"
 )
 
 // ToolAction is the provider-neutral semantic action performed by a tool.
@@ -559,6 +611,7 @@ type RuntimeEventPayload struct {
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
 	SlashCommands []SlashCommand `json:"slashCommands,omitzero"`
+	Skills        []Skill        `json:"skills,omitzero"`
 	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
 	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
 }

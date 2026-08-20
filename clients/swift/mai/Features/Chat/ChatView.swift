@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let openThread: ((String) -> Void)?
 
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
@@ -15,10 +16,12 @@ struct ChatView: View {
         store: ThreadStore,
         draftStore: ThreadDraftStore,
         projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
-        initialWorkingDirectory: String? = nil
+        initialWorkingDirectory: String? = nil,
+        openThread: ((String) -> Void)? = nil
     ) {
         self.store = store
         self.draftStore = draftStore
+        self.openThread = openThread
         _draftModel = State(
             initialValue: DraftPromptModel(
                 store: store,
@@ -98,6 +101,26 @@ struct ChatView: View {
         )
         .navigationTitle(selectedThreadTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let chatModel, openThread != nil,
+                store.threadSupportsFork(chatModel.threadID)
+            {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Fork Chat", systemImage: "arrow.triangle.branch") {
+                        Task {
+                            guard let threadID = await chatModel.forkThread() else { return }
+                            openThread?(threadID)
+                        }
+                    }
+                    .disabled(!chatModel.canForkThread)
+                    .accessibilityHint(
+                        store.threadIsRunning(chatModel.threadID)
+                            ? "Available after the current response finishes"
+                            : "Creates a new chat from this conversation"
+                    )
+                }
+            }
+        }
         .onChange(of: store.selectedThreadID, initial: true) {
             previousThreadID,
             threadID in
@@ -211,6 +234,10 @@ private struct ChatComposerStack: View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
 
         VStack(alignment: .leading) {
+            if let chatModel, chatModel.showsFailedTurnRetry {
+                ChatFailedTurnRetryView(model: chatModel)
+            }
+
             if chatModel == nil {
                 HStack(spacing: 16) {
                     DraftSessionControlsView(model: draftModel)
@@ -320,6 +347,37 @@ private struct ChatComposerStack: View {
         }
         prompt += "@"
         promptText.wrappedValue = prompt
+    }
+}
+
+private struct ChatFailedTurnRetryView: View {
+    let model: ChatPromptModel
+
+    var body: some View {
+        HStack {
+            Label(
+                model.failedTurnError ?? "The response failed.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+
+            Spacer()
+
+            Button(
+                model.isRetryingFailedTurn ? "Retrying…" : "Retry",
+                systemImage: "arrow.clockwise"
+            ) {
+                Task { await model.retryFailedTurn() }
+            }
+            .disabled(!model.canRetryFailedTurn)
+        }
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom)
+        .accessibilityElement(children: .contain)
     }
 }
 

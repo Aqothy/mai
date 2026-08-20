@@ -31,6 +31,7 @@ const (
 	MethodProviderImportSession      = "provider.importSession"
 	MethodProviderDeleteSession      = "provider.deleteSession"
 	MethodProviderCloseSession       = "provider.closeSession"
+	MethodProviderForkThread         = "provider.forkThread"
 	MethodProviderOptionsGet         = "provider.options.get"
 	MethodProviderOptionsSet         = "provider.options.set"
 	MethodProviderOptionsUpdated     = "provider.options.updated"
@@ -71,6 +72,7 @@ type Plan = orchestration.Plan
 
 // Client-visible provider types.
 type InstanceInfo = provider.InstanceInfo
+type AuthenticationResult = provider.AuthenticationResult
 type SessionSummary = provider.SessionSummary
 type Attachment = provider.Attachment
 type ModelSelection = provider.ModelSelection
@@ -109,6 +111,11 @@ type ACPCustomAgentAddParams struct {
 type ProviderAuthenticateParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	MethodID   string              `json:"methodId"`
+	Secret     string              `json:"secret,omitempty"`
+}
+
+type ProviderForkThreadParams struct {
+	SourceThreadID orchestration.ThreadID `json:"sourceThreadId"`
 }
 
 type ProviderInstanceParams struct {

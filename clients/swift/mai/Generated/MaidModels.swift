@@ -687,6 +687,492 @@ public extension ContentAnnotations {
     }
 }
 
+// MARK: - AuthenticationResult
+public struct AuthenticationResult: Codable {
+    public var challenge: AuthChallenge?
+    public var instance: InstanceInfo
+
+    public init(challenge: AuthChallenge?, instance: InstanceInfo) {
+        self.challenge = challenge
+        self.instance = instance
+    }
+}
+
+// MARK: AuthenticationResult convenience initializers and mutators
+
+public extension AuthenticationResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AuthenticationResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        challenge: AuthChallenge?? = nil,
+        instance: InstanceInfo? = nil
+    ) -> AuthenticationResult {
+        return AuthenticationResult(
+            challenge: challenge ?? self.challenge,
+            instance: instance ?? self.instance
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - AuthChallenge
+public struct AuthChallenge: Codable {
+    public var kind, loginID, url, userCode: String?
+    public var verificationURL: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case kind
+        case loginID = "loginId"
+        case url, userCode
+        case verificationURL = "verificationUrl"
+    }
+
+    public init(kind: String?, loginID: String?, url: String?, userCode: String?, verificationURL: String?) {
+        self.kind = kind
+        self.loginID = loginID
+        self.url = url
+        self.userCode = userCode
+        self.verificationURL = verificationURL
+    }
+}
+
+// MARK: AuthChallenge convenience initializers and mutators
+
+public extension AuthChallenge {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AuthChallenge.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: String?? = nil,
+        loginID: String?? = nil,
+        url: String?? = nil,
+        userCode: String?? = nil,
+        verificationURL: String?? = nil
+    ) -> AuthChallenge {
+        return AuthChallenge(
+            kind: kind ?? self.kind,
+            loginID: loginID ?? self.loginID,
+            url: url ?? self.url,
+            userCode: userCode ?? self.userCode,
+            verificationURL: verificationURL ?? self.verificationURL
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - InstanceInfo
+public struct InstanceInfo: Codable {
+    public var auth: Auth
+    public var capabilities: Capabilities
+    public var driver: String
+    public var initializedAt: Date
+    public var instanceID, name: String
+    public var pid: Int?
+    public var startedAt: Date
+    public var status: String
+
+    public enum CodingKeys: String, CodingKey {
+        case auth, capabilities, driver, initializedAt
+        case instanceID = "instanceId"
+        case name, pid, startedAt, status
+    }
+
+    public init(auth: Auth, capabilities: Capabilities, driver: String, initializedAt: Date, instanceID: String, name: String, pid: Int?, startedAt: Date, status: String) {
+        self.auth = auth
+        self.capabilities = capabilities
+        self.driver = driver
+        self.initializedAt = initializedAt
+        self.instanceID = instanceID
+        self.name = name
+        self.pid = pid
+        self.startedAt = startedAt
+        self.status = status
+    }
+}
+
+// MARK: InstanceInfo convenience initializers and mutators
+
+public extension InstanceInfo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InstanceInfo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        auth: Auth? = nil,
+        capabilities: Capabilities? = nil,
+        driver: String? = nil,
+        initializedAt: Date? = nil,
+        instanceID: String? = nil,
+        name: String? = nil,
+        pid: Int?? = nil,
+        startedAt: Date? = nil,
+        status: String? = nil
+    ) -> InstanceInfo {
+        return InstanceInfo(
+            auth: auth ?? self.auth,
+            capabilities: capabilities ?? self.capabilities,
+            driver: driver ?? self.driver,
+            initializedAt: initializedAt ?? self.initializedAt,
+            instanceID: instanceID ?? self.instanceID,
+            name: name ?? self.name,
+            pid: pid ?? self.pid,
+            startedAt: startedAt ?? self.startedAt,
+            status: status ?? self.status
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Auth
+public struct Auth: Codable {
+    public var methods: [AuthMethod]?
+    public var status: String?
+
+    public init(methods: [AuthMethod]?, status: String?) {
+        self.methods = methods
+        self.status = status
+    }
+}
+
+// MARK: Auth convenience initializers and mutators
+
+public extension Auth {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Auth.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        methods: [AuthMethod]?? = nil,
+        status: String?? = nil
+    ) -> Auth {
+        return Auth(
+            methods: methods ?? self.methods,
+            status: status ?? self.status
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - AuthMethod
+public struct AuthMethod: Codable {
+    public var description: String?
+    public var id: String
+    public var kind, name: String?
+    public var requiresSecret: Bool?
+
+    public init(description: String?, id: String, kind: String?, name: String?, requiresSecret: Bool?) {
+        self.description = description
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.requiresSecret = requiresSecret
+    }
+}
+
+// MARK: AuthMethod convenience initializers and mutators
+
+public extension AuthMethod {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AuthMethod.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        description: String?? = nil,
+        id: String? = nil,
+        kind: String?? = nil,
+        name: String?? = nil,
+        requiresSecret: Bool?? = nil
+    ) -> AuthMethod {
+        return AuthMethod(
+            description: description ?? self.description,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            name: name ?? self.name,
+            requiresSecret: requiresSecret ?? self.requiresSecret
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Capabilities
+public struct Capabilities: Codable {
+    public var additionalDirectories, auth, configOptions, fork: Bool?
+    public var loadReplay, logout: Bool?
+    public var mcp: MCPCapabilities?
+    public var modelSwitch: String?
+    public var promptContent: PromptContentCapabilities?
+    public var resume, sessionClose, sessionDelete, sessionList: Bool?
+    public var skills: Bool?
+
+    public init(additionalDirectories: Bool?, auth: Bool?, configOptions: Bool?, fork: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?, skills: Bool?) {
+        self.additionalDirectories = additionalDirectories
+        self.auth = auth
+        self.configOptions = configOptions
+        self.fork = fork
+        self.loadReplay = loadReplay
+        self.logout = logout
+        self.mcp = mcp
+        self.modelSwitch = modelSwitch
+        self.promptContent = promptContent
+        self.resume = resume
+        self.sessionClose = sessionClose
+        self.sessionDelete = sessionDelete
+        self.sessionList = sessionList
+        self.skills = skills
+    }
+}
+
+// MARK: Capabilities convenience initializers and mutators
+
+public extension Capabilities {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Capabilities.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        additionalDirectories: Bool?? = nil,
+        auth: Bool?? = nil,
+        configOptions: Bool?? = nil,
+        fork: Bool?? = nil,
+        loadReplay: Bool?? = nil,
+        logout: Bool?? = nil,
+        mcp: MCPCapabilities?? = nil,
+        modelSwitch: String?? = nil,
+        promptContent: PromptContentCapabilities?? = nil,
+        resume: Bool?? = nil,
+        sessionClose: Bool?? = nil,
+        sessionDelete: Bool?? = nil,
+        sessionList: Bool?? = nil,
+        skills: Bool?? = nil
+    ) -> Capabilities {
+        return Capabilities(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
+            auth: auth ?? self.auth,
+            configOptions: configOptions ?? self.configOptions,
+            fork: fork ?? self.fork,
+            loadReplay: loadReplay ?? self.loadReplay,
+            logout: logout ?? self.logout,
+            mcp: mcp ?? self.mcp,
+            modelSwitch: modelSwitch ?? self.modelSwitch,
+            promptContent: promptContent ?? self.promptContent,
+            resume: resume ?? self.resume,
+            sessionClose: sessionClose ?? self.sessionClose,
+            sessionDelete: sessionDelete ?? self.sessionDelete,
+            sessionList: sessionList ?? self.sessionList,
+            skills: skills ?? self.skills
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MCPCapabilities
+public struct MCPCapabilities: Codable {
+    public var http, sse: Bool?
+
+    public init(http: Bool?, sse: Bool?) {
+        self.http = http
+        self.sse = sse
+    }
+}
+
+// MARK: MCPCapabilities convenience initializers and mutators
+
+public extension MCPCapabilities {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MCPCapabilities.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        http: Bool?? = nil,
+        sse: Bool?? = nil
+    ) -> MCPCapabilities {
+        return MCPCapabilities(
+            http: http ?? self.http,
+            sse: sse ?? self.sse
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PromptContentCapabilities
+public struct PromptContentCapabilities: Codable {
+    public var audio, embeddedContext, image: Bool?
+
+    public init(audio: Bool?, embeddedContext: Bool?, image: Bool?) {
+        self.audio = audio
+        self.embeddedContext = embeddedContext
+        self.image = image
+    }
+}
+
+// MARK: PromptContentCapabilities convenience initializers and mutators
+
+public extension PromptContentCapabilities {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PromptContentCapabilities.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        audio: Bool?? = nil,
+        embeddedContext: Bool?? = nil,
+        image: Bool?? = nil
+    ) -> PromptContentCapabilities {
+        return PromptContentCapabilities(
+            audio: audio ?? self.audio,
+            embeddedContext: embeddedContext ?? self.embeddedContext,
+            image: image ?? self.image
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Command
 public struct Command: Codable {
     public var additionalDirectories: [String]?
@@ -2326,366 +2812,6 @@ public extension GetItemDetailInput {
     }
 }
 
-// MARK: - InstanceInfo
-public struct InstanceInfo: Codable {
-    public var auth: Auth
-    public var capabilities: Capabilities
-    public var driver: String
-    public var initializedAt: Date
-    public var instanceID, name: String
-    public var pid: Int?
-    public var startedAt: Date
-    public var status: String
-
-    public enum CodingKeys: String, CodingKey {
-        case auth, capabilities, driver, initializedAt
-        case instanceID = "instanceId"
-        case name, pid, startedAt, status
-    }
-
-    public init(auth: Auth, capabilities: Capabilities, driver: String, initializedAt: Date, instanceID: String, name: String, pid: Int?, startedAt: Date, status: String) {
-        self.auth = auth
-        self.capabilities = capabilities
-        self.driver = driver
-        self.initializedAt = initializedAt
-        self.instanceID = instanceID
-        self.name = name
-        self.pid = pid
-        self.startedAt = startedAt
-        self.status = status
-    }
-}
-
-// MARK: InstanceInfo convenience initializers and mutators
-
-public extension InstanceInfo {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(InstanceInfo.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        auth: Auth? = nil,
-        capabilities: Capabilities? = nil,
-        driver: String? = nil,
-        initializedAt: Date? = nil,
-        instanceID: String? = nil,
-        name: String? = nil,
-        pid: Int?? = nil,
-        startedAt: Date? = nil,
-        status: String? = nil
-    ) -> InstanceInfo {
-        return InstanceInfo(
-            auth: auth ?? self.auth,
-            capabilities: capabilities ?? self.capabilities,
-            driver: driver ?? self.driver,
-            initializedAt: initializedAt ?? self.initializedAt,
-            instanceID: instanceID ?? self.instanceID,
-            name: name ?? self.name,
-            pid: pid ?? self.pid,
-            startedAt: startedAt ?? self.startedAt,
-            status: status ?? self.status
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - Auth
-public struct Auth: Codable {
-    public var methods: [AuthMethod]?
-    public var status: String?
-
-    public init(methods: [AuthMethod]?, status: String?) {
-        self.methods = methods
-        self.status = status
-    }
-}
-
-// MARK: Auth convenience initializers and mutators
-
-public extension Auth {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(Auth.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        methods: [AuthMethod]?? = nil,
-        status: String?? = nil
-    ) -> Auth {
-        return Auth(
-            methods: methods ?? self.methods,
-            status: status ?? self.status
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - AuthMethod
-public struct AuthMethod: Codable {
-    public var description: String?
-    public var id: String
-    public var name: String?
-
-    public init(description: String?, id: String, name: String?) {
-        self.description = description
-        self.id = id
-        self.name = name
-    }
-}
-
-// MARK: AuthMethod convenience initializers and mutators
-
-public extension AuthMethod {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(AuthMethod.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        description: String?? = nil,
-        id: String? = nil,
-        name: String?? = nil
-    ) -> AuthMethod {
-        return AuthMethod(
-            description: description ?? self.description,
-            id: id ?? self.id,
-            name: name ?? self.name
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - Capabilities
-public struct Capabilities: Codable {
-    public var additionalDirectories, auth, configOptions, loadReplay: Bool?
-    public var logout: Bool?
-    public var mcp: MCPCapabilities?
-    public var modelSwitch: String?
-    public var promptContent: PromptContentCapabilities?
-    public var resume, sessionClose, sessionDelete, sessionList: Bool?
-
-    public init(additionalDirectories: Bool?, auth: Bool?, configOptions: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?) {
-        self.additionalDirectories = additionalDirectories
-        self.auth = auth
-        self.configOptions = configOptions
-        self.loadReplay = loadReplay
-        self.logout = logout
-        self.mcp = mcp
-        self.modelSwitch = modelSwitch
-        self.promptContent = promptContent
-        self.resume = resume
-        self.sessionClose = sessionClose
-        self.sessionDelete = sessionDelete
-        self.sessionList = sessionList
-    }
-}
-
-// MARK: Capabilities convenience initializers and mutators
-
-public extension Capabilities {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(Capabilities.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        additionalDirectories: Bool?? = nil,
-        auth: Bool?? = nil,
-        configOptions: Bool?? = nil,
-        loadReplay: Bool?? = nil,
-        logout: Bool?? = nil,
-        mcp: MCPCapabilities?? = nil,
-        modelSwitch: String?? = nil,
-        promptContent: PromptContentCapabilities?? = nil,
-        resume: Bool?? = nil,
-        sessionClose: Bool?? = nil,
-        sessionDelete: Bool?? = nil,
-        sessionList: Bool?? = nil
-    ) -> Capabilities {
-        return Capabilities(
-            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
-            auth: auth ?? self.auth,
-            configOptions: configOptions ?? self.configOptions,
-            loadReplay: loadReplay ?? self.loadReplay,
-            logout: logout ?? self.logout,
-            mcp: mcp ?? self.mcp,
-            modelSwitch: modelSwitch ?? self.modelSwitch,
-            promptContent: promptContent ?? self.promptContent,
-            resume: resume ?? self.resume,
-            sessionClose: sessionClose ?? self.sessionClose,
-            sessionDelete: sessionDelete ?? self.sessionDelete,
-            sessionList: sessionList ?? self.sessionList
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - MCPCapabilities
-public struct MCPCapabilities: Codable {
-    public var http, sse: Bool?
-
-    public init(http: Bool?, sse: Bool?) {
-        self.http = http
-        self.sse = sse
-    }
-}
-
-// MARK: MCPCapabilities convenience initializers and mutators
-
-public extension MCPCapabilities {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(MCPCapabilities.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        http: Bool?? = nil,
-        sse: Bool?? = nil
-    ) -> MCPCapabilities {
-        return MCPCapabilities(
-            http: http ?? self.http,
-            sse: sse ?? self.sse
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - PromptContentCapabilities
-public struct PromptContentCapabilities: Codable {
-    public var audio, embeddedContext, image: Bool?
-
-    public init(audio: Bool?, embeddedContext: Bool?, image: Bool?) {
-        self.audio = audio
-        self.embeddedContext = embeddedContext
-        self.image = image
-    }
-}
-
-// MARK: PromptContentCapabilities convenience initializers and mutators
-
-public extension PromptContentCapabilities {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(PromptContentCapabilities.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        audio: Bool?? = nil,
-        embeddedContext: Bool?? = nil,
-        image: Bool?? = nil
-    ) -> PromptContentCapabilities {
-        return PromptContentCapabilities(
-            audio: audio ?? self.audio,
-            embeddedContext: embeddedContext ?? self.embeddedContext,
-            image: image ?? self.image
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - Message
 public struct Message: Codable {
     public var attachments: [Attachment]?
@@ -2761,15 +2887,18 @@ public extension Message {
 // MARK: - ProviderAuthenticateParams
 public struct ProviderAuthenticateParams: Codable {
     public var instanceID, methodID: String
+    public var secret: String?
 
     public enum CodingKeys: String, CodingKey {
         case instanceID = "instanceId"
         case methodID = "methodId"
+        case secret
     }
 
-    public init(instanceID: String, methodID: String) {
+    public init(instanceID: String, methodID: String, secret: String?) {
         self.instanceID = instanceID
         self.methodID = methodID
+        self.secret = secret
     }
 }
 
@@ -2793,11 +2922,61 @@ public extension ProviderAuthenticateParams {
 
     func with(
         instanceID: String? = nil,
-        methodID: String? = nil
+        methodID: String? = nil,
+        secret: String?? = nil
     ) -> ProviderAuthenticateParams {
         return ProviderAuthenticateParams(
             instanceID: instanceID ?? self.instanceID,
-            methodID: methodID ?? self.methodID
+            methodID: methodID ?? self.methodID,
+            secret: secret ?? self.secret
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderForkThreadParams
+public struct ProviderForkThreadParams: Codable {
+    public var sourceThreadID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case sourceThreadID = "sourceThreadId"
+    }
+
+    public init(sourceThreadID: String) {
+        self.sourceThreadID = sourceThreadID
+    }
+}
+
+// MARK: ProviderForkThreadParams convenience initializers and mutators
+
+public extension ProviderForkThreadParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderForkThreadParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sourceThreadID: String? = nil
+    ) -> ProviderForkThreadParams {
+        return ProviderForkThreadParams(
+            sourceThreadID: sourceThreadID ?? self.sourceThreadID
         )
     }
 

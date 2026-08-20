@@ -141,7 +141,11 @@
         "mcp_tool_call",
         "tool_call",
         "warning",
-        "error"
+        "error",
+        "web_search",
+        "image_view",
+        "image_generation",
+        "context_compaction"
       ]
     },
     {

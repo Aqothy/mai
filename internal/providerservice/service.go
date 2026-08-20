@@ -41,6 +41,14 @@ type Authenticator interface {
 	Logout(ctx context.Context) (provider.InstanceInfo, error)
 }
 
+// LoginProvider is the richer authentication facet used by providers with
+// browser/device-code flows or secret-bearing methods. Authenticator remains
+// supported for ACP's stable agent-handled authentication surface.
+type LoginProvider interface {
+	AuthenticateWithInput(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error)
+	Logout(ctx context.Context) (provider.InstanceInfo, error)
+}
+
 // SessionManager is an optional capability for adapters whose providers support
 // session management (ACP session/list, /delete, /close). The Service
 // type-asserts it; providers that don't implement it report "not supported".
@@ -48,6 +56,13 @@ type SessionManager interface {
 	ListSessions(ctx context.Context, cwd string) ([]provider.SessionSummary, error)
 	DeleteSession(ctx context.Context, sessionID string) error
 	CloseSession(ctx context.Context, sessionID string) error
+}
+
+// SessionForker is optional and is capability-gated. The service supplies the
+// provider-native session id from its private thread route; clients never see
+// that identifier.
+type SessionForker interface {
+	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
 }
 
 // OptionsSessionProvider is optional. Providers with a static catalog can
@@ -606,22 +621,38 @@ func objectsEqual(a any, b any) bool {
 	return aErr == nil && bErr == nil && bytes.Equal(aJSON, bJSON)
 }
 
-func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, methodID string) (provider.InstanceInfo, error) {
+func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
-		return provider.InstanceInfo{}, err
+		return provider.AuthenticationResult{}, err
+	}
+	if !instance.Info().Capabilities.Auth {
+		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
+	}
+	if loginProvider, ok := instance.(LoginProvider); ok {
+		return loginProvider.AuthenticateWithInput(ctx, input)
 	}
 	authenticator, supportsAuth := instance.(Authenticator)
 	if !supportsAuth {
-		return provider.InstanceInfo{}, fmt.Errorf("provider does not support authentication")
+		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
 	}
-	return authenticator.Authenticate(ctx, methodID)
+	if input.Secret != "" {
+		return provider.AuthenticationResult{}, fmt.Errorf("provider authentication method does not accept a secret")
+	}
+	info, err := authenticator.Authenticate(ctx, input.MethodID)
+	return provider.AuthenticationResult{Instance: info}, err
 }
 
 func (s *Service) Logout(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
+	}
+	if !instance.Info().Capabilities.Logout {
+		return provider.InstanceInfo{}, fmt.Errorf("provider does not support logout")
+	}
+	if loginProvider, ok := instance.(LoginProvider); ok {
+		return loginProvider.Logout(ctx)
 	}
 	authenticator, supportsAuth := instance.(Authenticator)
 	if !supportsAuth {
@@ -696,6 +727,52 @@ func (s *Service) CloseSession(ctx context.Context, instanceID provider.Instance
 	return s.manageSession(ctx, instanceID, sessionID, "close", func(ctx context.Context, manager SessionManager) error {
 		return manager.CloseSession(ctx, sessionID)
 	})
+}
+
+// ForkSession forks the provider-owned session bound to sourceThreadID. The
+// returned summary can be committed through the same atomic import path used
+// for sessions discovered by provider.listSessions.
+func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (provider.InstanceID, provider.SessionSummary, error) {
+	if sourceThreadID == "" {
+		return "", provider.SessionSummary{}, fmt.Errorf("provider session fork requires sourceThreadId")
+	}
+	route := s.routeForThread(sourceThreadID)
+	if route.InstanceID == "" || route.ProviderSessionID == "" {
+		return "", provider.SessionSummary{}, fmt.Errorf("thread %q has no forkable provider session", sourceThreadID)
+	}
+	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
+		return "", provider.SessionSummary{}, err
+	}
+	instance, err := s.instance(route.InstanceID)
+	if err != nil {
+		return "", provider.SessionSummary{}, err
+	}
+	if !instance.Info().Capabilities.Fork {
+		return "", provider.SessionSummary{}, fmt.Errorf("provider does not support session fork")
+	}
+	forker, ok := instance.(SessionForker)
+	if !ok {
+		return "", provider.SessionSummary{}, fmt.Errorf("provider does not support session fork")
+	}
+	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	defer cancel()
+	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{ProviderSessionID: route.ProviderSessionID})
+	if err != nil {
+		return "", provider.SessionSummary{}, err
+	}
+	if result.Summary.SessionID == "" {
+		return "", provider.SessionSummary{}, fmt.Errorf("provider fork returned an empty session id")
+	}
+	if result.Summary.SessionID == route.ProviderSessionID {
+		return "", provider.SessionSummary{}, fmt.Errorf("provider fork returned the source session id")
+	}
+	if result.Summary.Cwd == "" {
+		result.Summary.Cwd = route.StartInput.Cwd
+	}
+	if result.Summary.AdditionalDirectories == nil {
+		result.Summary.AdditionalDirectories = append([]string(nil), route.StartInput.AdditionalDirectories...)
+	}
+	return route.InstanceID, result.Summary, nil
 }
 
 // The bound-session guard is best-effort against a concurrent bind. The adapter

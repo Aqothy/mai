@@ -43,6 +43,7 @@ type contract struct {
 	TimelineEntry                    wire.TimelineEntry                    `json:"timelineEntry"`
 	Plan                             wire.Plan                             `json:"plan"`
 	InstanceInfo                     wire.InstanceInfo                     `json:"instanceInfo"`
+	AuthenticationResult             wire.AuthenticationResult             `json:"authenticationResult"`
 	SessionSummary                   wire.SessionSummary                   `json:"sessionSummary"`
 	Attachment                       wire.Attachment                       `json:"attachment"`
 	ModelSelection                   wire.ModelSelection                   `json:"modelSelection"`
@@ -55,6 +56,7 @@ type contract struct {
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`
+	ProviderForkThreadParams         wire.ProviderForkThreadParams         `json:"providerForkThreadParams"`
 	ProviderInstanceParams           wire.ProviderInstanceParams           `json:"providerInstanceParams"`
 	ProviderListSessionsParams       wire.ProviderListSessionsParams       `json:"providerListSessionsParams"`
 	ProviderSessionParams            wire.ProviderSessionParams            `json:"providerSessionParams"`

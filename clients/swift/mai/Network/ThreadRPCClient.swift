@@ -13,8 +13,13 @@ protocol ThreadRPCClient: RPCTransportClient {
     func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws
+        -> ProviderImportSessionResult
     func deleteProviderSession(_ input: ProviderSessionParams) async throws
     func closeProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
@@ -47,10 +52,26 @@ extension ThreadRPCClient {
         throw RPCError(code: nil, message: "Agent startup is unavailable", data: nil)
     }
 
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    {
+        throw RPCError(code: nil, message: "Provider authentication is unavailable", data: nil)
+    }
+
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo {
+        throw RPCError(code: nil, message: "Provider logout is unavailable", data: nil)
+    }
+
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
 
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
         throw RPCError(code: nil, message: "Session import is unavailable", data: nil)
+    }
+
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws
+        -> ProviderImportSessionResult
+    {
+        throw RPCError(code: nil, message: "Chat forking is unavailable", data: nil)
     }
 
     func deleteProviderSession(_ input: ProviderSessionParams) async throws {
@@ -160,12 +181,28 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    {
+        try await call(MaidRPCMethod.providerAuthenticate, params: input)
+    }
+
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo {
+        try await call(MaidRPCMethod.providerLogout, params: input)
+    }
+
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] {
         try await call(MaidRPCMethod.providerListSessions, params: input)
     }
 
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
         try await call(MaidRPCMethod.providerImportSession, params: input)
+    }
+
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws
+        -> ProviderImportSessionResult
+    {
+        try await call(MaidRPCMethod.providerForkThread, params: input)
     }
 
     func deleteProviderSession(_ input: ProviderSessionParams) async throws {

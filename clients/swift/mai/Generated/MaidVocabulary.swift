@@ -123,6 +123,10 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case toolCall = "tool_call"
     case warning = "warning"
     case error = "error"
+    case webSearch = "web_search"
+    case imageView = "image_view"
+    case imageGeneration = "image_generation"
+    case contextCompaction = "context_compaction"
 }
 
 /// Lifecycle status of a timeline item.

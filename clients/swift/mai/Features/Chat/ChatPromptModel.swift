@@ -16,8 +16,12 @@ final class ChatPromptModel {
     }
     private(set) var isSending = false
     private(set) var isInterrupting = false
+    private(set) var isForking = false
+    private(set) var isRetryingFailedTurn = false
     private(set) var settingConfigOptionIDs: Set<String> = []
     private(set) var errorMessage: String?
+
+    private var retryRequestedTurnID: String?
 
     private let draftStore: ThreadDraftStore
     private let attachmentsModel = ComposerAttachmentsModel()
@@ -54,6 +58,31 @@ final class ChatPromptModel {
 
     var isPromptEnabled: Bool {
         store.connectionState == .connected && !isSending
+    }
+
+    var showsFailedTurnRetry: Bool {
+        store.failedTurnID(for: threadID) != nil
+    }
+
+    var canRetryFailedTurn: Bool {
+        guard let failedTurnID = store.failedTurnID(for: threadID) else { return false }
+        return store.connectionState == .connected
+            && retryRequestedTurnID != failedTurnID
+            && !isSending
+            && !isRetryingFailedTurn
+    }
+
+    var failedTurnError: String? {
+        store.failedTurnError(for: threadID)
+    }
+
+    var canForkThread: Bool {
+        store.connectionState == .connected
+            && store.threadSupportsFork(threadID)
+            && !store.threadIsRunning(threadID)
+            && !isSending
+            && !isForking
+            && !isRetryingFailedTurn
     }
 
     var isErrorPresented: Bool {
@@ -143,6 +172,41 @@ final class ChatPromptModel {
         } catch is CancellationError {
             return
         } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func forkThread() async -> String? {
+        guard canForkThread else { return nil }
+
+        isForking = true
+        defer { isForking = false }
+
+        do {
+            return try await store.forkThread(threadID)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func retryFailedTurn() async {
+        guard canRetryFailedTurn,
+            let failedTurnID = store.failedTurnID(for: threadID)
+        else { return }
+
+        retryRequestedTurnID = failedTurnID
+        isRetryingFailedTurn = true
+        defer { isRetryingFailedTurn = false }
+
+        do {
+            try await store.retryFailedTurn(threadID: threadID)
+        } catch is CancellationError {
+            retryRequestedTurnID = nil
+        } catch {
+            retryRequestedTurnID = nil
             errorMessage = error.localizedDescription
         }
     }

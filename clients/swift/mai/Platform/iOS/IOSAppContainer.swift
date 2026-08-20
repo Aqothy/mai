@@ -52,7 +52,11 @@ struct IOSAppContainer: View {
                         route: route,
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        projectFolders: projectFolders,
+                        openThread: { threadID in
+                            store.selectThread(threadID)
+                            path.append(.thread(threadID))
+                        }
                     )
                 }
             }

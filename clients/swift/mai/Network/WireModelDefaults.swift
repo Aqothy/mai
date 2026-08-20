@@ -37,6 +37,7 @@ extension Capabilities {
             additionalDirectories: nil,
             auth: auth,
             configOptions: configOptions,
+            fork: nil,
             loadReplay: loadReplay,
             logout: logout,
             mcp: mcp,
@@ -45,7 +46,8 @@ extension Capabilities {
             resume: resume,
             sessionClose: nil,
             sessionDelete: nil,
-            sessionList: sessionList
+            sessionList: sessionList,
+            skills: nil
         )
     }
 }
