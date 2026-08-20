@@ -5,6 +5,7 @@ struct ACPRegistryView: View {
 
     @State private var model: ACPRegistryModel
     @State private var isCustomAgentFormPresented = false
+    @State private var areProviderAccountsPresented = false
 
     init(store: ThreadStore) {
         self.store = store
@@ -43,6 +44,9 @@ struct ACPRegistryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button("Provider Accounts", systemImage: "person.crop.circle") {
+                    areProviderAccountsPresented = true
+                }
                 Button("Add Custom Agent", systemImage: "plus") {
                     isCustomAgentFormPresented = true
                 }
@@ -57,6 +61,11 @@ struct ACPRegistryView: View {
         .sheet(isPresented: $isCustomAgentFormPresented) {
             NavigationStack {
                 CustomACPAgentForm(store: store)
+            }
+        }
+        .sheet(isPresented: $areProviderAccountsPresented) {
+            NavigationStack {
+                ProviderAccountsView(store: store)
             }
         }
         .alert("Agent Registry Error", isPresented: $model.isErrorPresented) {

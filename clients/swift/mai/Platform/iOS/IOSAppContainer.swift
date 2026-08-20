@@ -52,19 +52,12 @@ struct IOSAppContainer: View {
                         route: route,
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
-                    )
-                }
-            }
-            .toolbar {
-                if ChatPerformanceLab.isEnabled {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            MockChatView()
-                        } label: {
-                            Label("Mock Chat", systemImage: "ladybug")
+                        projectFolders: projectFolders,
+                        openThread: { threadID in
+                            store.selectThread(threadID)
+                            path.append(.thread(threadID))
                         }
-                    }
+                    )
                 }
             }
         }

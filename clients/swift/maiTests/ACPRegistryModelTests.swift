@@ -61,7 +61,7 @@ struct ACPRegistryModelTests {
 
         #expect(installed.id == "My Agent")
         #expect(installed.instanceID == "custom-My Agent")
-        #expect(store.acpAgentChoices.map(\.id) == ["custom-My Agent"])
+        #expect(store.availableProviders.map(\.id) == ["custom-My Agent"])
         #expect(rpc.providers.isEmpty)
         let input = try #require(rpc.customAgentInput)
         #expect(input.name == "My Agent")

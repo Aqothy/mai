@@ -187,14 +187,7 @@ func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeR
 	title := "Mai Daemon"
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
-		ClientCapabilities: &schema.ClientCapabilities{
-			Session: &schema.ClientSessionCapabilities{
-				ConfigOptions: &schema.SessionConfigOptionsCapabilities{
-					Boolean: &schema.BooleanConfigOptionCapabilities{},
-				},
-			},
-		},
-		ClientInfo: &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
+		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
 	initResp, err := h.agent().Initialize(ctx, initReq)
 	if err != nil {
@@ -317,9 +310,13 @@ func (h *Instance) resolveAuthMethodID(methodID string) (string, error) {
 	methods := append([]schema.AuthMethod(nil), h.initialize.AuthMethods...)
 	h.mu.Unlock()
 	for _, method := range methods {
-		if authMethodID(method) == methodID {
-			return methodID, nil
+		if string(method.ID) != methodID {
+			continue
 		}
+		if !isStableAuthMethod(method) {
+			return "", fmt.Errorf("ACP auth method %q is an unstable client-driven %q method", methodID, stringValue(method.Type))
+		}
+		return methodID, nil
 	}
 	return "", fmt.Errorf("ACP auth method %q was not advertised as a supported agent auth method", methodID)
 }

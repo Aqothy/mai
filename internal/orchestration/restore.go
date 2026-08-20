@@ -12,13 +12,14 @@ import (
 // sidebar fields only. History stays provider-owned — the timeline starts
 // empty and is rebuilt by provider replay when the thread is reopened.
 type RestoredThread struct {
-	ThreadID           ThreadID
-	Title              string
-	Cwd                string
-	ProviderInstanceID provider.InstanceID
-	ModelSelection     *provider.ModelSelection
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ThreadID              ThreadID
+	Title                 string
+	Cwd                   string
+	AdditionalDirectories []string
+	ProviderInstanceID    provider.InstanceID
+	ModelSelection        *provider.ModelSelection
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // RestoreThreads seeds the projection with thread stubs at boot, before the
@@ -52,6 +53,11 @@ func (e *Engine) importThreadRecovered(thread RestoredThread) (DispatchResult, e
 			return DispatchResult{}, err
 		}
 		thread.Cwd = cwd
+		additionalDirectories, err := e.ResolveAdditionalDirectories(thread.AdditionalDirectories, cwd)
+		if err != nil {
+			return DispatchResult{}, err
+		}
+		thread.AdditionalDirectories = additionalDirectories
 		if sequence, exists := e.existingThreadSequence(thread.ThreadID); exists {
 			return DispatchResult{Sequence: sequence}, nil
 		}
@@ -62,13 +68,14 @@ func (e *Engine) importThreadRecovered(thread RestoredThread) (DispatchResult, e
 				OccurredAt: time.Now(),
 				Actor:      ActorKindServer,
 				Payload: EventPayload{
-					ThreadID:           thread.ThreadID,
-					Title:              thread.Title,
-					Cwd:                thread.Cwd,
-					ProviderInstanceID: thread.ProviderInstanceID,
-					ModelSelection:     cloneModelSelection(thread.ModelSelection),
-					CreatedAt:          thread.CreatedAt,
-					UpdatedAt:          thread.UpdatedAt,
+					ThreadID:              thread.ThreadID,
+					Title:                 thread.Title,
+					Cwd:                   thread.Cwd,
+					AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...),
+					ProviderInstanceID:    thread.ProviderInstanceID,
+					ModelSelection:        cloneModelSelection(thread.ModelSelection),
+					CreatedAt:             thread.CreatedAt,
+					UpdatedAt:             thread.UpdatedAt,
 				},
 			})
 			return nil
@@ -91,15 +98,16 @@ func (p *Projection) restoreThread(stub RestoredThread) {
 		title = "Untitled thread"
 	}
 	p.threads[stub.ThreadID] = &Thread{
-		ID:                   stub.ThreadID,
-		ReplayHistoryPending: true,
-		Title:                title,
-		ProviderInstanceID:   stub.ProviderInstanceID,
-		ModelSelection:       cloneModelSelection(stub.ModelSelection),
-		Cwd:                  stub.Cwd,
-		Timeline:             Timeline{},
-		CreatedAt:            stub.CreatedAt,
-		UpdatedAt:            stub.UpdatedAt,
+		ID:                    stub.ThreadID,
+		ReplayHistoryPending:  true,
+		Title:                 title,
+		ProviderInstanceID:    stub.ProviderInstanceID,
+		ModelSelection:        cloneModelSelection(stub.ModelSelection),
+		Cwd:                   stub.Cwd,
+		AdditionalDirectories: append([]string(nil), stub.AdditionalDirectories...),
+		Timeline:              Timeline{},
+		CreatedAt:             stub.CreatedAt,
+		UpdatedAt:             stub.UpdatedAt,
 	}
 	if stub.UpdatedAt.After(p.updatedAt) {
 		p.updatedAt = stub.UpdatedAt

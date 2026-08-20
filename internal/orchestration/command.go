@@ -29,30 +29,32 @@ const (
 )
 
 type Command struct {
-	Type               string                           `json:"type"`
-	CommandID          CommandID                        `json:"commandId,omitempty"`
-	ThreadID           ThreadID                         `json:"threadId,omitempty"`
-	TurnID             TurnID                           `json:"turnId,omitempty"`
-	Title              string                           `json:"title,omitempty"`
-	ProviderInstanceID provider.InstanceID              `json:"providerInstanceId,omitempty"`
-	Cwd                string                           `json:"cwd,omitempty"`
-	ModelSelection     *provider.ModelSelection         `json:"modelSelection,omitempty"`
-	Message            *CommandMessage                  `json:"message,omitempty"`
-	RequestID          ApprovalID                       `json:"requestId,omitempty"`
-	Decision           provider.ApprovalDecision        `json:"decision,omitempty"`
-	OptionID           string                           `json:"optionId,omitempty"`
-	Value              any                              `json:"value,omitempty"`
-	ConfigSelections   []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
-	CreatedAt          time.Time                        `json:"createdAt,omitzero"`
+	Type                  string                           `json:"type"`
+	CommandID             CommandID                        `json:"commandId,omitempty"`
+	ThreadID              ThreadID                         `json:"threadId,omitempty"`
+	TurnID                TurnID                           `json:"turnId,omitempty"`
+	Title                 string                           `json:"title,omitempty"`
+	ProviderInstanceID    provider.InstanceID              `json:"providerInstanceId,omitempty"`
+	Cwd                   string                           `json:"cwd,omitempty"`
+	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
+	ModelSelection        *provider.ModelSelection         `json:"modelSelection,omitempty"`
+	Message               *CommandMessage                  `json:"message,omitempty"`
+	RequestID             ApprovalID                       `json:"requestId,omitempty"`
+	Decision              provider.ApprovalDecision        `json:"decision,omitempty"`
+	OptionID              string                           `json:"optionId,omitempty"`
+	Value                 any                              `json:"value,omitempty"`
+	ConfigSelections      []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
+	CreatedAt             time.Time                        `json:"createdAt,omitzero"`
 }
 
 // CommandMessage is the prompt a client sends with thread.start/thread.turn.start.
 // It carries no role: a client-authored message is always a user message, and
 // the engine stamps MessageRoleUser itself.
 type CommandMessage struct {
-	MessageID   string                `json:"messageId,omitempty"`
-	Text        string                `json:"text"`
-	Attachments []provider.Attachment `json:"attachments,omitempty"`
+	MessageID   string                      `json:"messageId,omitempty"`
+	Text        string                      `json:"text"`
+	Attachments []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
 }
 
 // DispatchResult is the receipt returned for a dispatched command: the

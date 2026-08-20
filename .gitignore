@@ -21,6 +21,11 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+node_modules/
+.agents/
+.claude/
+.codex/
+
 # Go workspace file
 go.work
 go.work.sum
@@ -35,6 +40,11 @@ go.work.sum
 xcuserdata/
 buildServer.json
 Local.xcconfig
+
+# Local agent configuration
+.mcp.json
+AGENTS.md
+clients/swift/AGENTS.md
 
 # Native libghostty-vt build tree (make ghostty-vt)
 build/

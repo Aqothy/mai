@@ -35,15 +35,16 @@ type wireMsg struct {
 }
 
 type wireSessionParams struct {
-	SessionID string `json:"sessionId"`
-	Cwd       string `json:"cwd"`
-	Cursor    string `json:"cursor"`
-	ConfigID  string `json:"configId"`
-	Type      string `json:"type"`
-	Value     any    `json:"value"`
-	ModeID    string `json:"modeId"`
-	MethodID  string `json:"methodId"`
-	Prompt    []struct {
+	SessionID             string   `json:"sessionId"`
+	Cwd                   string   `json:"cwd"`
+	AdditionalDirectories []string `json:"additionalDirectories"`
+	Cursor                string   `json:"cursor"`
+	ConfigID              string   `json:"configId"`
+	Type                  string   `json:"type"`
+	Value                 any      `json:"value"`
+	ModeID                string   `json:"modeId"`
+	MethodID              string   `json:"methodId"`
+	Prompt                []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"prompt"`
@@ -431,6 +432,56 @@ func TestContentBlocksGateImageOnCapability(t *testing.T) {
 	}
 }
 
+func TestContentBlocksPreserveStableResourceAndAnnotationMetadata(t *testing.T) {
+	priority := 0.75
+	size := int64(42)
+	block := schema.ContentBlock{
+		Type:        schema.ContentBlockTypeResourceLink,
+		Name:        stringPtr("Spec"),
+		Title:       stringPtr("ACP specification"),
+		Description: stringPtr("Protocol reference"),
+		URI:         stringPtr("https://agentclientprotocol.com"),
+		MimeType:    stringPtr("text/html"),
+		Size:        &size,
+		Meta:        map[string]any{"source": "agent"},
+		Annotations: &schema.Annotations{
+			Audience:     []schema.Role{schema.RoleAssistant},
+			Priority:     &priority,
+			LastModified: stringPtr("2026-08-20T00:00:00Z"),
+			Meta:         map[string]any{"hint": "reference"},
+		},
+	}
+	attachment, ok := attachmentFromACPBlock(block)
+	if !ok {
+		t.Fatal("resource link was not converted")
+	}
+	if attachment.Title != "ACP specification" || attachment.Description != "Protocol reference" || attachment.Size != size || attachment.URI != "https://agentclientprotocol.com" {
+		t.Fatalf("attachment metadata = %#v", attachment)
+	}
+	if attachment.Annotations == nil || len(attachment.Annotations.Audience) != 1 || attachment.Annotations.Audience[0] != "assistant" || attachment.Annotations.Priority == nil || *attachment.Annotations.Priority != priority || attachment.Annotations.LastModified == "" {
+		t.Fatalf("attachment annotations = %#v", attachment.Annotations)
+	}
+
+	blocks, err := contentBlocks(provider.SendTurnInput{Attachments: []provider.Attachment{attachment}}, provider.PromptContentCapabilities{})
+	if err != nil {
+		t.Fatalf("round-trip resource link: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0].Title == nil || *blocks[0].Title != "ACP specification" || blocks[0].Annotations == nil || blocks[0].Annotations.Priority == nil || *blocks[0].Annotations.Priority != priority {
+		t.Fatalf("round-trip blocks = %#v", blocks)
+	}
+}
+
+func TestConfigChoicesPreserveDescriptionsAndGroups(t *testing.T) {
+	description := "Use the faster model"
+	choices := configChoices([]schema.SessionConfigSelectGroup{{
+		Group: "speed", Name: "Speed",
+		Options: []schema.SessionConfigSelectOption{{Value: "fast", Name: "Fast", Description: &description}},
+	}})
+	if len(choices) != 1 || choices[0].Value != "fast" || choices[0].Description != description || choices[0].Group != "speed" || choices[0].GroupLabel != "Speed" {
+		t.Fatalf("choices = %#v", choices)
+	}
+}
+
 func permissionOptions() []schema.PermissionOption {
 	return []schema.PermissionOption{
 		{Kind: schema.PermissionOptionKindAllowOnce, Name: "Allow", OptionID: "allow"},
@@ -532,6 +583,21 @@ func TestSessionUpdateMapsEmptyAvailableCommands(t *testing.T) {
 	}
 	if string(payload["slashCommands"]) != "[]" {
 		t.Fatalf("payload JSON = %s, want slashCommands:[]", raw)
+	}
+}
+
+func TestSessionUpdatePreservesAvailableCommandInputHint(t *testing.T) {
+	var notification schema.SessionNotification
+	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"[commit]"}}]}}`), &notification); err != nil {
+		t.Fatalf("decode available commands update: %v", err)
+	}
+	event := sessionRuntimeEvent(notification)
+	if len(event.Payload.SlashCommands) != 1 {
+		t.Fatalf("slash commands = %#v, want one command", event.Payload.SlashCommands)
+	}
+	command := event.Payload.SlashCommands[0]
+	if command.Name != "review" || !command.HasInput || command.InputHint != "[commit]" {
+		t.Fatalf("slash command = %#v, want input hint preserved", command)
 	}
 }
 
@@ -1231,6 +1297,97 @@ func TestStopSessionClosesNeverUsedSessionWhenSupported(t *testing.T) {
 	}
 }
 
+func TestStopSessionCancelsThenClosesActiveSessionWhenSupported(t *testing.T) {
+	promptStarted := make(chan struct{})
+	promptRelease := make(chan struct{})
+	cancelled := make(chan struct{})
+	closed := make(chan string, 1)
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"close": map[string]any{}}},
+		onPrompt: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			close(promptStarted)
+			<-promptRelease
+			a.respond(id, map[string]any{"stopReason": "cancelled"})
+		},
+		onCancel: func(_ *fakeWireAgent, _ wireSessionParams) {
+			close(cancelled)
+		},
+		onCloseSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			select {
+			case <-cancelled:
+			case <-time.After(time.Second):
+				a.t.Error("session/close arrived before session/cancel")
+			}
+			closed <- params.SessionID
+			close(promptRelease)
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	select {
+	case <-promptStarted:
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not start")
+	}
+	if err := h.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	select {
+	case sessionID := <-closed:
+		if sessionID != "sess" {
+			t.Fatalf("closed session = %q, want sess", sessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("active session was cancelled but not closed")
+	}
+	if got := h.sessionIDForThread("thread-1"); got != "" {
+		t.Fatalf("thread binding after close = %q, want unbound", got)
+	}
+}
+
+func TestStopSessionCloseTimeoutKeepsBindingForRetry(t *testing.T) {
+	promptStarted := make(chan struct{})
+	promptRelease := make(chan struct{})
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"close": map[string]any{}}},
+		onPrompt: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			close(promptStarted)
+			<-promptRelease
+			a.respond(id, map[string]any{"stopReason": "cancelled"})
+		},
+		onCloseSession: func(_ *fakeWireAgent, _ json.RawMessage, _ wireSessionParams) {
+			// Deliberately leave the request pending until its context expires.
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	t.Cleanup(func() { close(promptRelease) })
+	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	select {
+	case <-promptStarted:
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := h.StopSession(ctx, provider.StopSessionInput{ThreadID: "thread-1"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("StopSession err = %v, want context deadline", err)
+	}
+	if got := h.sessionIDForThread("thread-1"); got != "sess" {
+		t.Fatalf("thread binding after timed-out close = %q, want sess retained for retry", got)
+	}
+}
+
 func TestInterruptTurnCancelFailureLeavesTurnLive(t *testing.T) {
 	promptStarted := make(chan struct{})
 	promptRelease := make(chan struct{})
@@ -1544,7 +1701,12 @@ func TestListSessionsFollowsPagination(t *testing.T) {
 	var mu sync.Mutex
 	var cursors []string
 	agent := &fakeWireAgent{
-		capabilities: map[string]any{"sessionCapabilities": map[string]any{"list": map[string]any{}}},
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{
+			"list":                  map[string]any{},
+			"delete":                map[string]any{},
+			"close":                 map[string]any{},
+			"additionalDirectories": map[string]any{},
+		}},
 		onListSessions: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			mu.Lock()
 			cursors = append(cursors, params.Cursor)
@@ -1553,12 +1715,13 @@ func TestListSessionsFollowsPagination(t *testing.T) {
 				a.respond(id, map[string]any{"sessions": []any{map[string]any{"sessionId": "one", "cwd": "/tmp"}}, "nextCursor": "page-2"})
 				return
 			}
-			a.respond(id, map[string]any{"sessions": []any{map[string]any{"sessionId": "two", "cwd": "/tmp"}}})
+			a.respond(id, map[string]any{"sessions": []any{map[string]any{"sessionId": "two", "cwd": "/tmp", "additionalDirectories": []string{"/workspace-b", "/workspace-c"}}}})
 		},
 	}
 	h := newWireTestHandle(t, agent)
-	if !h.Info().Capabilities.SessionList {
-		t.Fatal("SessionList capability = false, want true")
+	caps := h.Info().Capabilities
+	if !caps.SessionList || !caps.SessionDelete || !caps.SessionClose || !caps.AdditionalDirectories {
+		t.Fatalf("session capabilities = %#v, want list/delete/close/additionalDirectories", caps)
 	}
 	sessions, err := h.ListSessions(context.Background(), "/tmp")
 	if err != nil {
@@ -1567,10 +1730,115 @@ func TestListSessionsFollowsPagination(t *testing.T) {
 	if len(sessions) != 2 || sessions[0].SessionID != "one" || sessions[1].SessionID != "two" {
 		t.Fatalf("sessions = %#v, want both pages", sessions)
 	}
+	if got := sessions[1].AdditionalDirectories; len(got) != 2 || got[0] != "/workspace-b" || got[1] != "/workspace-c" {
+		t.Fatalf("additional directories = %#v, want ordered roots from session/list", got)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "page-2" {
 		t.Fatalf("cursors = %#v, want empty then page-2", cursors)
+	}
+}
+
+func TestStartSessionSendsAdditionalDirectoriesAcrossLifecycleMethods(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities map[string]any
+		cursor       json.RawMessage
+		configure    func(*fakeWireAgent, *callRecorder)
+	}{
+		{
+			name:         "new",
+			capabilities: map[string]any{"sessionCapabilities": map[string]any{"additionalDirectories": map[string]any{}}},
+			configure: func(agent *fakeWireAgent, recorder *callRecorder) {
+				agent.onNewSession = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+					recorder.recordConfig(params)
+					a.respond(id, map[string]any{"sessionId": "sess"})
+				}
+			},
+		},
+		{
+			name: "load",
+			capabilities: map[string]any{
+				"loadSession":         true,
+				"sessionCapabilities": map[string]any{"additionalDirectories": map[string]any{}},
+			},
+			cursor: marshalRaw(map[string]string{"sessionId": "old"}),
+			configure: func(agent *fakeWireAgent, recorder *callRecorder) {
+				agent.onLoadSession = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+					recorder.recordConfig(params)
+					a.respond(id, map[string]any{})
+				}
+			},
+		},
+		{
+			name: "resume",
+			capabilities: map[string]any{
+				"sessionCapabilities": map[string]any{
+					"resume":                map[string]any{},
+					"additionalDirectories": map[string]any{},
+				},
+			},
+			cursor: marshalRaw(map[string]string{"sessionId": "old"}),
+			configure: func(agent *fakeWireAgent, recorder *callRecorder) {
+				agent.onResumeSession = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+					recorder.recordConfig(params)
+					a.respond(id, map[string]any{})
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := &callRecorder{}
+			agent := &fakeWireAgent{capabilities: test.capabilities}
+			test.configure(agent, recorder)
+			h := newWireTestHandle(t, agent)
+			result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+				ThreadID:              "thread-1",
+				Cwd:                   "/workspace-a",
+				AdditionalDirectories: []string{"/workspace-b", "/workspace-c"},
+				ResumeCursor:          test.cursor,
+			})
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			calls := recorder.configCalls()
+			if len(calls) != 1 {
+				t.Fatalf("lifecycle calls = %d, want 1", len(calls))
+			}
+			if got := calls[0].AdditionalDirectories; len(got) != 2 || got[0] != "/workspace-b" || got[1] != "/workspace-c" {
+				t.Fatalf("wire additional directories = %#v, want ordered roots", got)
+			}
+			if got := result.Session.AdditionalDirectories; len(got) != 2 || got[0] != "/workspace-b" || got[1] != "/workspace-c" {
+				t.Fatalf("session projection additional directories = %#v, want ordered roots", got)
+			}
+		})
+	}
+}
+
+func TestStartSessionOmitsAdditionalDirectoriesWithoutCapability(t *testing.T) {
+	recorder := &callRecorder{}
+	agent := &fakeWireAgent{
+		onNewSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			recorder.recordConfig(params)
+			a.respond(id, map[string]any{"sessionId": "sess"})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID:              "thread-1",
+		Cwd:                   "/workspace-a",
+		AdditionalDirectories: []string{"/workspace-b"},
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if calls := recorder.configCalls(); len(calls) != 1 || len(calls[0].AdditionalDirectories) != 0 {
+		t.Fatalf("session/new calls = %#v, want unsupported additional directories omitted", calls)
+	}
+	if len(result.Session.AdditionalDirectories) != 0 {
+		t.Fatalf("session projection = %#v, want unsupported additional directories omitted", result.Session)
 	}
 }
 

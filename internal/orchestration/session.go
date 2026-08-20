@@ -131,6 +131,9 @@ func deriveSessionBound(thread *Thread, update sessionUpdate, occurredAt time.Ti
 	if session.Cwd == "" {
 		session.Cwd = thread.Cwd
 	}
+	if session.AdditionalDirectories == nil {
+		session.AdditionalDirectories = append([]string(nil), thread.AdditionalDirectories...)
+	}
 	switch {
 	case update.TurnID == "":
 		session.Status = SessionStatusReady
@@ -221,7 +224,7 @@ func deriveSessionError(thread *Thread, update sessionUpdate, occurredAt time.Ti
 }
 
 func sessionScaffold(thread *Thread, providerInstanceID provider.InstanceID, occurredAt time.Time) *SessionBinding {
-	return &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, UpdatedAt: occurredAt}
+	return &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), UpdatedAt: occurredAt}
 }
 
 // overlaySessionIdentity applies the provider-session identity fields of a
@@ -239,11 +242,17 @@ func overlaySessionIdentity(session *SessionBinding, binding *SessionBinding) {
 	if binding.Cwd != "" {
 		session.Cwd = binding.Cwd
 	}
+	if binding.AdditionalDirectories != nil {
+		session.AdditionalDirectories = append([]string(nil), binding.AdditionalDirectories...)
+	}
 	if binding.ConfigOptions != nil {
 		session.ConfigOptions = cloneConfigOptions(binding.ConfigOptions)
 	}
 	if binding.SlashCommands != nil {
 		session.SlashCommands = cloneSlashCommands(binding.SlashCommands)
+	}
+	if binding.Skills != nil {
+		session.Skills = cloneSkills(binding.Skills)
 	}
 	if binding.TokenUsage != nil {
 		usage := *binding.TokenUsage

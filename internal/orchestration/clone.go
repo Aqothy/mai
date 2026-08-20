@@ -72,6 +72,7 @@ func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
 
 func cloneThread(thread Thread) Thread {
 	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
+	thread.AdditionalDirectories = append([]string(nil), thread.AdditionalDirectories...)
 	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
 	thread.Session = cloneSessionPtr(thread.Session)
 	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
@@ -117,13 +118,22 @@ func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 		return nil
 	}
 	clone := *value
+	clone.AdditionalDirectories = append([]string(nil), value.AdditionalDirectories...)
 	clone.ConfigOptions = cloneConfigOptions(value.ConfigOptions)
 	clone.SlashCommands = cloneSlashCommands(value.SlashCommands)
+	clone.Skills = cloneSkills(value.Skills)
 	if value.TokenUsage != nil {
 		usage := *value.TokenUsage
 		clone.TokenUsage = &usage
 	}
 	return &clone
+}
+
+func cloneSkills(skills []provider.Skill) []provider.Skill {
+	if skills == nil {
+		return nil
+	}
+	return append([]provider.Skill{}, skills...)
 }
 
 func cloneTurnPtr(value *Turn) *Turn {

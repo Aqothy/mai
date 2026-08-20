@@ -287,6 +287,57 @@ struct ThreadEventReducerTests {
     }
 
     @Test
+    func statusOnlyToolUpdatePreservesCompactSummaryAndDetailMarker() {
+        let summary = ToolCallSummary(
+            action: MaidToolAction.execute.rawValue,
+            attachmentCount: nil,
+            attachments: nil,
+            changeCount: nil,
+            changes: nil,
+            commandPreview: "swift test",
+            cwd: nil,
+            durationMilliseconds: nil,
+            errorPreview: nil,
+            exitCode: nil,
+            locationCount: nil,
+            locations: nil,
+            name: nil,
+            namespace: nil,
+            outputPreview: nil,
+            providerKind: nil,
+            queryPreview: nil,
+            truncated: nil
+        )
+        var thread = makeThread()
+        thread.apply(
+            makeEvent(.threadItemUpserted, payload: makePayload(
+                item: makeItem(
+                    id: "tool-1",
+                    detailAvailable: true,
+                    kind: MaidItemKind.commandExecution.rawValue,
+                    status: MaidItemStatus.inProgress.rawValue,
+                    sequence: 1,
+                    toolCallSummary: summary
+                )
+            ))
+        )
+
+        thread.apply(
+            makeEvent(.threadItemUpserted, payload: makePayload(
+                item: makeItem(
+                    id: "tool-1",
+                    kind: MaidItemKind.commandExecution.rawValue,
+                    status: MaidItemStatus.completed.rawValue
+                )
+            ))
+        )
+
+        #expect(thread.timeline[0].item?.detailAvailable == true)
+        #expect(thread.timeline[0].item?.sequence == 1)
+        #expect(thread.timeline[0].item?.toolCallSummary?.commandPreview == "swift test")
+    }
+
+    @Test
     func newItemWithoutStatusDefaultsToInProgress() {
         var thread = makeThread()
         thread.apply(
@@ -361,6 +412,25 @@ struct ThreadEventReducerTests {
         #expect(thread.session?.slashCommands?.count == 1)
 
         thread.apply(
+            makeEvent(
+                .threadSkillsUpdated,
+                payload: makePayload(
+                    skills: [
+                        Skill(
+                            description: "Review the current changes",
+                            enabled: true,
+                            name: "review",
+                            path: nil,
+                            scope: "workspace",
+                            shortDescription: "Review changes"
+                        )
+                    ]
+                )
+            )
+        )
+        #expect(thread.session?.skills?.map(\.name) == ["review"])
+
+        thread.apply(
             makeEvent(.threadTokenUsageUpdated, payload: makePayload(
                 tokenUsage: TokenUsage(cost: nil, currency: nil, maxTokens: 200, usedTokens: 100)
             ))
@@ -410,10 +480,25 @@ struct ThreadEventReducerTests {
         #expect(thread.cwd == "/original")
 
         thread.apply(
-            makeEvent(.threadMetaUpdated, payload: makePayload(cwd: "/moved"))
+            makeEvent(
+                .threadMetaUpdated,
+                payload: makePayload(
+                    additionalDirectories: ["/extra"],
+                    cwd: "/moved"
+                )
+            )
         )
         #expect(thread.title == "Renamed")
         #expect(thread.cwd == "/moved")
+        #expect(thread.additionalDirectories == ["/extra"])
+
+        thread.apply(
+            makeEvent(
+                .threadMetaUpdated,
+                payload: makePayload(additionalDirectories: [])
+            )
+        )
+        #expect(thread.additionalDirectories == [])
     }
 
     // MARK: Lookup
@@ -532,23 +617,29 @@ private func makeTurn(
 private func makeItem(
     id: String,
     createdAt: Date = Date(timeIntervalSince1970: 0),
+    detailAvailable: Bool? = nil,
     kind: String,
     status: String,
     payload: JSONAny? = nil,
+    sequence: Int? = nil,
     textDelta: String? = nil,
     title: String? = nil,
     toolCall: ToolCall? = nil,
+    toolCallSummary: ToolCallSummary? = nil,
     turnID: String? = nil
 ) -> Item {
     Item(
         createdAt: createdAt,
+        detailAvailable: detailAvailable,
         id: id,
         kind: kind,
         payload: payload,
+        sequence: sequence,
         status: status,
         textDelta: textDelta,
         title: title,
         toolCall: toolCall,
+        toolCallSummary: toolCallSummary,
         turnID: turnID,
         updatedAt: Date(timeIntervalSince1970: 0)
     )
@@ -594,7 +685,9 @@ private func makeApprovalEvent(
 
 private func makePayload(
     threadID: String = "t",
+    additionalDirectories: [String]? = nil,
     approval: ApprovalEvent? = nil,
+    annotations: [PromptAnnotation]? = nil,
     configOptions: [ConfigOption]? = nil,
     cwd: String? = nil,
     decision: String? = nil,
@@ -606,6 +699,7 @@ private func makePayload(
     requestID: String? = nil,
     role: String? = nil,
     session: SessionBinding? = nil,
+    skills: [Skill]? = nil,
     slashCommands: [SlashCommand]? = nil,
     stopReason: String? = nil,
     text: String? = nil,
@@ -614,6 +708,8 @@ private func makePayload(
     turnID: String? = nil
 ) -> EventPayload {
     EventPayload(
+        additionalDirectories: additionalDirectories,
+        annotations: annotations,
         approval: approval,
         attachments: nil,
         configOptions: configOptions,
@@ -630,6 +726,7 @@ private func makePayload(
         role: role,
         session: session,
         sessionCleared: nil,
+        skills: skills,
         slashCommands: slashCommands,
         stopReason: stopReason,
         text: text,

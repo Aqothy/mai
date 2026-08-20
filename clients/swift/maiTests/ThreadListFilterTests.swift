@@ -11,7 +11,7 @@ struct ThreadListFilterTests {
             makeEntry(id: "a", title: "Build the SwiftUI client"),
             makeEntry(id: "b", title: "Review the WebSocket API")
         ]
-        let result = filter.apply(to: threads, isUnread: { _ in false }, driver: { _ in nil })
+        let result = filter.apply(to: threads, providerID: { _ in nil })
         #expect(result.count == 2)
     }
 
@@ -23,7 +23,7 @@ struct ThreadListFilterTests {
             makeEntry(id: "match", title: "Build the SwiftUI client"),
             makeEntry(id: "other", title: "Review the WebSocket API")
         ]
-        let result = filter.apply(to: threads, isUnread: { _ in false }, driver: { _ in nil })
+        let result = filter.apply(to: threads, providerID: { _ in nil })
         #expect(result.map(\.id) == ["match"])
     }
 
@@ -37,57 +37,34 @@ struct ThreadListFilterTests {
 
         var filter = ThreadListFilter()
         filter.projectCwd = "/Users/example/App"
-        let result = filter.apply(to: threads, isUnread: { _ in false }, driver: { _ in nil })
+        let result = filter.apply(to: threads, providerID: { _ in nil })
         #expect(result.map(\.id) == ["app"])
     }
 
     @Test
-    func driverFilterMatchesNativeDriverOrACP() {
+    func providerFilterMatchesExactProviderInstance() {
         let threads = [
             makeEntry(id: "claude", title: "Claude", providerInstanceID: "claude-main"),
             makeEntry(id: "codex", title: "Codex", providerInstanceID: "codex-main"),
             makeEntry(id: "acp", title: "ACP", providerInstanceID: "registry-codex"),
             makeEntry(id: "none", title: "None", providerInstanceID: nil)
         ]
-        let driverForThread: (ThreadListEntry) -> String? = { thread in
-            switch thread.providerInstanceID {
-            case "claude-main": "claude"
-            case "codex-main": "codex"
-            case "registry-codex": "acp"
-            default: nil
-            }
-        }
+        let providerIDForThread: (ThreadListEntry) -> String? = { $0.providerInstanceID }
 
         var filter = ThreadListFilter()
-        filter.driver = "codex"
-        let native = filter.apply(to: threads, isUnread: { _ in false }, driver: driverForThread)
+        filter.providerID = "codex-main"
+        let native = filter.apply(
+            to: threads,
+            providerID: providerIDForThread
+        )
         #expect(native.map(\.id) == ["codex"])
 
-        filter.driver = "acp"
-        let acp = filter.apply(to: threads, isUnread: { _ in false }, driver: driverForThread)
+        filter.providerID = "registry-codex"
+        let acp = filter.apply(
+            to: threads,
+            providerID: providerIDForThread
+        )
         #expect(acp.map(\.id) == ["acp"])
-    }
-
-    @Test
-    func activityFilterMatchesThreadState() {
-        let threads = [
-            makeEntry(id: "idle", title: "Idle"),
-            makeEntry(id: "working", title: "Working", turnState: .running),
-            makeEntry(id: "approval", title: "Approval", hasPendingApprovals: true)
-        ]
-
-        var filter = ThreadListFilter()
-        filter.activityFilter = .working
-        let working = filter.apply(to: threads, isUnread: { _ in false }, driver: { _ in nil })
-        #expect(working.map(\.id) == ["working"])
-
-        filter.activityFilter = .needsApproval
-        let approvals = filter.apply(to: threads, isUnread: { _ in false }, driver: { _ in nil })
-        #expect(approvals.map(\.id) == ["approval"])
-
-        filter.activityFilter = .unread
-        let unread = filter.apply(to: threads, isUnread: { $0 == "idle" }, driver: { _ in nil })
-        #expect(unread.map(\.id) == ["idle"])
     }
 
     @Test
@@ -104,8 +81,7 @@ struct ThreadListFilterTests {
 
         filter.query = ""
         filter.projectCwd = "/Users/example/App"
-        filter.driver = "codex"
-        filter.activityFilter = .unread
+        filter.providerID = "codex"
         #expect(filter.isActive)
         #expect(filter.hasActivePresets)
 
@@ -113,36 +89,119 @@ struct ThreadListFilterTests {
         #expect(!filter.isActive)
     }
 
+    @Test
+    func providerCatalogIsFlatAndExcludesUninstalledACPProviders() {
+        let installedACP = makeInstalledAgent(
+            id: "claude-code",
+            instanceID: "registry-claude-code",
+            name: "Claude Code"
+        )
+        let store = ThreadStore(
+            previewThreads: [],
+            providers: [
+                makeProvider(
+                    instanceID: "native-codex",
+                    name: "Codex",
+                    driver: "codex"
+                ),
+                makeProvider(
+                    instanceID: installedACP.instanceID,
+                    name: installedACP.name,
+                    driver: "acp"
+                ),
+                makeProvider(
+                    instanceID: "uninstalled-acp",
+                    name: "Uninstalled",
+                    driver: "acp"
+                ),
+            ],
+            installedAgents: [installedACP]
+        )
+
+        #expect(store.availableProviders.map(\.id) == ["registry-claude-code", "native-codex"])
+        #expect(store.availableProviders.map(\.name) == ["Claude Code", "Codex"])
+    }
+
+    @Test
+    func threadRowsUseProviderNamesInsteadOfDriverNames() {
+        let provider = makeProvider(
+            instanceID: "native-codex",
+            name: "Codex",
+            driver: "codex-native-driver"
+        )
+        let store = ThreadStore(
+            previewThreads: [],
+            providers: [provider]
+        )
+        let thread = makeEntry(
+            id: "thread",
+            title: "Thread",
+            providerInstanceID: provider.instanceID
+        )
+
+        #expect(store.providerDisplayName(for: thread) == "Codex")
+    }
+
     private func makeEntry(
         id: String,
         title: String,
         cwd: String? = nil,
-        providerInstanceID: String? = nil,
-        hasPendingApprovals: Bool = false,
-        turnState: MaidTurnState? = nil
+        providerInstanceID: String? = nil
     ) -> ThreadListEntry {
         ThreadListEntry(
             createdAt: .now,
             cwd: cwd,
-            hasPendingApprovals: hasPendingApprovals,
+            hasPendingApprovals: false,
             id: id,
-            latestTurn: turnState.map {
-                Turn(
-                    completedAt: nil,
-                    error: nil,
-                    interruptRequested: nil,
-                    requestedAt: .now,
-                    startedAt: nil,
-                    state: $0.rawValue,
-                    stopReason: nil,
-                    turnID: "turn-\(id)"
-                )
-            },
+            latestTurn: nil,
             modelSelection: nil,
             providerInstanceID: providerInstanceID,
             session: nil,
             title: title,
             updatedAt: .now
+        )
+    }
+
+    private func makeProvider(instanceID: String, name: String, driver: String) -> InstanceInfo {
+        InstanceInfo(
+            auth: Auth(methods: nil, status: "unknown"),
+            capabilities: Capabilities(
+                auth: nil,
+                configOptions: nil,
+                loadReplay: nil,
+                logout: nil,
+                mcp: nil,
+                modelSwitch: nil,
+                promptContent: nil,
+                resume: nil,
+                sessionList: nil
+            ),
+            driver: driver,
+            initializedAt: .now,
+            instanceID: instanceID,
+            name: name,
+            pid: nil,
+            startedAt: .now,
+            status: "configured"
+        )
+    }
+
+    private func makeInstalledAgent(
+        id: String,
+        instanceID: String,
+        name: String
+    ) -> ACPRegistryInstalledAgent {
+        ACPRegistryInstalledAgent(
+            args: nil,
+            description: nil,
+            icon: nil,
+            id: id,
+            installedAt: .now,
+            instanceID: instanceID,
+            name: name,
+            package: "\(id)@1.0.0",
+            source: "registry",
+            version: "1.0.0"
         )
     }
 }

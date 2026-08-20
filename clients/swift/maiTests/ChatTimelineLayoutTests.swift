@@ -7,6 +7,102 @@ import Testing
 /// that hides a finished turn's work behind a "Worked for Ns" header.
 struct ChatTimelineLayoutTests {
 
+    // MARK: Pagination
+
+    @Test
+    func jumpToBottomRestoresStreamingFollowIntent() {
+        let scrollState = ChatScrollState()
+        scrollState.noteUserScrollActivity(isActive: true)
+
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.requestScrollToBottom(animated: true)
+
+        #expect(scrollState.shouldFollowBottom)
+        #expect(scrollState.bottomScrollRequest.animated)
+    }
+
+    @Test
+    func userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteUserScrollActivity(isActive: true)
+        scrollState.noteEndVisibility(false)
+        scrollState.noteUserScrollActivity(isActive: false)
+
+        #expect(!scrollState.isUserScrolling)
+        #expect(!scrollState.isNearBottom)
+        #expect(!scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func endingAUserScrollAtTheBottomResumesFollowing() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteUserScrollActivity(isActive: true)
+        scrollState.noteEndVisibility(true)
+        scrollState.noteUserScrollActivity(isActive: false)
+
+        #expect(!scrollState.isUserScrolling)
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteEndVisibility(false)
+
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteContentExpansion()
+
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.noteEndVisibility(false)
+        #expect(!scrollState.isNearBottom)
+
+        scrollState.noteEndVisibility(true)
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func paginatesByCompleteUserTurns() {
+        var timeline: [TimelineEntry] = []
+        for index in 1...7 {
+            let turnID = "turn-\(index)"
+            timeline.append(
+                userMessageEntry(id: "user-\(index)", turnID: turnID)
+            )
+            timeline.append(
+                assistantMessageEntry(id: "assistant-\(index)", turnID: turnID)
+            )
+        }
+
+        let sections = ChatTimelineLayout.sections(timeline: timeline)
+        let firstPage = ChatTimelineLayout.paginatedSections(
+            sections,
+            userMessageLimit: 5
+        )
+        let secondPage = ChatTimelineLayout.paginatedSections(
+            sections,
+            userMessageLimit: 10
+        )
+
+        #expect(firstPage.map(\.id) == [
+            "turn-3", "turn-4", "turn-5", "turn-6", "turn-7",
+        ])
+        #expect(secondPage.map(\.id) == sections.map(\.id))
+    }
+
     // MARK: Grouping
 
     @Test

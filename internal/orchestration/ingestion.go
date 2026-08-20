@@ -92,10 +92,12 @@ type assistantFlush struct {
 	attachments []provider.Attachment
 }
 
-// textFlushInterval is the cadence of the single ingestion-owned flush ticker.
-// Semantic boundaries still flush immediately. A shared tick keeps concurrent
-// providers bounded without per-stream goroutines or timers.
-var textFlushInterval = 200 * time.Millisecond
+// textFlushInterval is the transport/persistence coalescing cadence, not the
+// UI render cadence. Fifty milliseconds keeps first paint and incremental
+// layout responsive while bounding projection, persistence, and multi-client
+// fan-out to 20 text events per second per active ingestion loop. Semantic
+// boundaries still flush immediately.
+var textFlushInterval = 50 * time.Millisecond
 
 func (t *turnState) streamByKey(key string) *assistantStream {
 	for _, stream := range t.assistants {
@@ -390,6 +392,12 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 		i.ingestAssistantMessageStatus(event, createdAt, status)
 		return
 	}
+	if event.Payload.ItemType == provider.ItemKindReasoning {
+		if status != "" && status != provider.ItemStatusInProgress {
+			i.settleReasoning(event, status, createdAt)
+		}
+		return
+	}
 	kind := event.Payload.ItemType
 	if kind == "" {
 		return
@@ -525,6 +533,9 @@ func (i *ProviderRuntimeIngestion) ingestConfigOptions(event provider.RuntimeEve
 func (i *ProviderRuntimeIngestion) ingestThreadMetadata(event provider.RuntimeEvent, createdAt time.Time) {
 	if event.Payload.SlashCommands != nil {
 		i.record(EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{SlashCommands: event.Payload.SlashCommands}})
+	}
+	if event.Payload.Skills != nil {
+		i.record(EventInput{Type: EventThreadSkillsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Skills: event.Payload.Skills}})
 	}
 	if event.Payload.Title != "" {
 		i.record(EventInput{Type: EventThreadMetaUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Title: event.Payload.Title}})

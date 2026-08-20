@@ -27,6 +27,7 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadApprovalResolved = "thread.approval-resolved"
     case threadConfigOptionsUpdated = "thread.config-options-updated"
     case threadSlashCommandsUpdated = "thread.slash-commands-updated"
+    case threadSkillsUpdated = "thread.skills-updated"
     case threadTokenUsageUpdated = "thread.token-usage-updated"
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
 }
@@ -123,6 +124,10 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case toolCall = "tool_call"
     case warning = "warning"
     case error = "error"
+    case webSearch = "web_search"
+    case imageView = "image_view"
+    case imageGeneration = "image_generation"
+    case contextCompaction = "context_compaction"
 }
 
 /// Lifecycle status of a timeline item.

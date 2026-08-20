@@ -86,18 +86,6 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func TestWebClientHandlerServesEmbeddedIndex(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	webClientHandler().ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
-
-	if recorder.Code != 200 {
-		t.Fatalf("GET / status = %d, want 200", recorder.Code)
-	}
-	if body := recorder.Body.String(); !strings.Contains(body, "<title>maiD</title>") || !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("GET / body = %q, want embedded maiD index", body)
-	}
-}
-
 func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
@@ -172,6 +160,94 @@ func TestRPCGetItemDetailReturnsCanonicalToolData(t *testing.T) {
 	}
 }
 
+func installForkRPCProvider(t *testing.T, s *Server, adapter *optionsRPCProvider, cwd string) {
+	t.Helper()
+	s.providerService.Close()
+	s.providerService = providerservice.New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
+		return adapter, nil
+	})
+	if _, err := s.providerService.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: adapter.info.InstanceID, Driver: "test", Name: "Fork test"}, false); err != nil {
+		t.Fatalf("start fork provider: %v", err)
+	}
+	if err := s.providerService.RegisterImportedSession("source", adapter.info.InstanceID, "native-source", provider.StartSessionInput{ThreadID: "source", ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd}); err != nil {
+		t.Fatalf("register source route: %v", err)
+	}
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: "source", Cwd: cwd}); err != nil {
+		t.Fatalf("create source thread: %v", err)
+	}
+}
+
+func newForkRPCProvider() *optionsRPCProvider {
+	return &optionsRPCProvider{info: provider.InstanceInfo{
+		InstanceID: "fork-provider",
+		Status:     provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{
+			Fork:          true,
+			SessionDelete: true,
+			LoadReplay:    true,
+		},
+	}}
+}
+
+func TestForkProviderThreadPreflightsPersistenceAndActiveTurn(t *testing.T) {
+	t.Run("persistence unavailable", func(t *testing.T) {
+		s := newServer(newLoggerFromEnv(), nil)
+		defer s.Close()
+		adapter := newForkRPCProvider()
+		installForkRPCProvider(t, s, adapter, t.TempDir())
+
+		if _, _, err := s.ForkProviderThread(context.Background(), "source", ""); err == nil {
+			t.Fatal("fork without persistence succeeded")
+		}
+		if adapter.forkCalls != 0 {
+			t.Fatalf("native fork calls = %d, want none", adapter.forkCalls)
+		}
+	})
+
+	t.Run("turn running", func(t *testing.T) {
+		s := newTestServer(t)
+		defer s.Close()
+		adapter := newForkRPCProvider()
+		installForkRPCProvider(t, s, adapter, t.TempDir())
+		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
+			Type:               orchestration.CommandThreadTurnStart,
+			ThreadID:           "source",
+			ProviderInstanceID: adapter.info.InstanceID,
+			Message:            &orchestration.CommandMessage{Text: "still working"},
+		}); err != nil {
+			t.Fatalf("start source turn: %v", err)
+		}
+
+		if _, _, err := s.ForkProviderThread(context.Background(), "source", ""); err == nil {
+			t.Fatal("fork while turn was running succeeded")
+		}
+		if adapter.forkCalls != 0 {
+			t.Fatalf("native fork calls = %d, want none", adapter.forkCalls)
+		}
+	})
+}
+
+func TestForkProviderThreadDeletesUnpersistedNativeFork(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	adapter := newForkRPCProvider()
+	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork", Cwd: "relative-path"}
+	adapter.deleted = make(chan string, 1)
+	installForkRPCProvider(t, s, adapter, t.TempDir())
+
+	if _, _, err := s.ForkProviderThread(context.Background(), "source", ""); err == nil {
+		t.Fatal("fork with invalid imported cwd succeeded")
+	}
+	select {
+	case sessionID := <-adapter.deleted:
+		if sessionID != "native-fork" {
+			t.Fatalf("deleted session = %q, want native-fork", sessionID)
+		}
+	default:
+		t.Fatal("unpersisted native fork was not deleted")
+	}
+}
+
 func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	s := newTestServer(t)
 	s.providerService.Close()
@@ -210,6 +286,9 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first get: %v", err)
 	}
+	if len(first.Skills) != 1 || first.Skills[0].Name != "review" {
+		t.Fatalf("first options skills = %#v", first.Skills)
+	}
 	_, err = handler.getProviderOptions(context.Background(), providerOptionsGetParams{
 		ProviderInstanceID: "provider-b", Cwd: "/other",
 	})
@@ -227,6 +306,9 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		instances["provider-b"].openCount() != 1 {
 		t.Fatalf("warm switch-back opened another session: first=%#v reused=%#v", first, reused)
 	}
+	if len(reused.Skills) != 1 || reused.Skills[0].Name != "review" {
+		t.Fatalf("reused options skills = %#v", reused.Skills)
+	}
 	instances["provider-a"].publishOptions("handle-/first", []provider.ConfigOption{{
 		ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow",
 	}})
@@ -237,11 +319,22 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 			!ok ||
 			update.OptionsSessionID != first.OptionsSessionID ||
 			len(update.ConfigOptions) != 1 ||
-			update.ConfigOptions[0].CurrentValue != "slow" {
+			update.ConfigOptions[0].CurrentValue != "slow" ||
+			len(update.Skills) != 1 ||
+			update.Skills[0].Name != "review" {
 			t.Fatalf("options update notification = %#v", message)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("spontaneous options update was not routed to the client")
+	}
+	setResult, err := handler.setProviderOption(context.Background(), providerOptionsSetParams{
+		OptionsSessionID: first.OptionsSessionID, OptionID: "model", Value: "fast",
+	})
+	if err != nil {
+		t.Fatalf("set provider option: %v", err)
+	}
+	if len(setResult.Skills) != 1 || setResult.Skills[0].Name != "review" {
+		t.Fatalf("set options skills = %#v", setResult.Skills)
 	}
 
 	closeStarted := make(chan struct{}, 1)
@@ -344,6 +437,9 @@ type optionsRPCProvider struct {
 	closeStarted chan struct{}
 	closeBlock   <-chan struct{}
 	closed       chan string
+	forkCalls    int
+	forkSummary  provider.SessionSummary
+	deleted      chan string
 }
 
 func (p *optionsRPCProvider) Info() provider.InstanceInfo { return p.info }
@@ -364,6 +460,24 @@ func (p *optionsRPCProvider) RespondToRequest(context.Context, provider.RespondT
 func (p *optionsRPCProvider) StopSession(context.Context, provider.StopSessionInput) error {
 	return nil
 }
+func (p *optionsRPCProvider) ListSessions(context.Context, string) ([]provider.SessionSummary, error) {
+	return nil, nil
+}
+func (p *optionsRPCProvider) DeleteSession(_ context.Context, sessionID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.deleted != nil {
+		p.deleted <- sessionID
+	}
+	return nil
+}
+func (p *optionsRPCProvider) CloseSession(context.Context, string) error { return nil }
+func (p *optionsRPCProvider) ForkSession(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.forkCalls++
+	return provider.ForkSessionResult{Summary: p.forkSummary}, nil
+}
 func (p *optionsRPCProvider) OpenOptionsSession(_ context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -375,7 +489,10 @@ func (p *optionsRPCProvider) OpenOptionsSession(_ context.Context, cwd string, c
 	}}
 	p.sessions[handle] = options
 	p.callbacks[handle] = callbacks
-	return provider.OptionsSession{Handle: handle, ConfigOptions: options}, nil
+	return provider.OptionsSession{
+		Handle: handle, ConfigOptions: options,
+		Skills: []provider.Skill{{Name: "review", ShortDescription: "Review changes", Path: "/skills/review", Scope: "user", Enabled: true}},
+	}, nil
 }
 func (p *optionsRPCProvider) SetOptionsSessionValue(_ context.Context, handle string, _ string, _ any) ([]provider.ConfigOption, error) {
 	p.mu.Lock()
@@ -647,8 +764,15 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodProviderList, nil).Await(ctx, &list); err != nil {
 		t.Fatalf("provider.list: %v", err)
 	}
-	if len(list) != 1 || list[0].InstanceID != "codex" {
-		t.Fatalf("provider.list = %#v, want one codex instance", list)
+	if len(list) != 2 {
+		t.Fatalf("provider.list = %#v, want started ACP and configured Codex app-server instances", list)
+	}
+	listed := make(map[provider.InstanceID]provider.InstanceInfo, len(list))
+	for _, instance := range list {
+		listed[instance.InstanceID] = instance
+	}
+	if listed["codex"].Status != provider.InstanceStatusInitialized || listed["codex-app-server"].Driver != "codex-app-server" || listed["codex-app-server"].Status != provider.InstanceStatusConfigured {
+		t.Fatalf("provider.list = %#v, want initialized codex ACP and configured codex-app-server", list)
 	}
 }
 
@@ -666,17 +790,17 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 		t.Fatalf("auth state = %#v, want unknown status with the advertised agent-login method", started.Auth)
 	}
 
-	var rejected provider.InstanceInfo
+	var rejected provider.AuthenticationResult
 	if err := client.Call(ctx, RPCMethodProviderAuthenticate, providerAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}).Await(ctx, &rejected); err == nil {
 		t.Fatal("authenticate with unadvertised method err = nil, want error")
 	}
 
-	var authenticated provider.InstanceInfo
+	var authenticated provider.AuthenticationResult
 	if err := client.Call(ctx, RPCMethodProviderAuthenticate, providerAuthenticateParams{InstanceID: "codex", MethodID: "agent-login"}).Await(ctx, &authenticated); err != nil {
 		t.Fatalf("provider.authenticate: %v", err)
 	}
-	if authenticated.Auth.Status != provider.AuthStatusAuthenticated {
-		t.Fatalf("auth status after authenticate = %q, want authenticated", authenticated.Auth.Status)
+	if authenticated.Instance.Auth.Status != provider.AuthStatusAuthenticated {
+		t.Fatalf("auth status after authenticate = %q, want authenticated", authenticated.Instance.Auth.Status)
 	}
 
 	var loggedOut provider.InstanceInfo
@@ -804,8 +928,8 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 
 	var ignored json.RawMessage
 	err := client.Call(ctx, RPCMethodProviderDeleteSession, providerSessionParams{InstanceID: "codex", SessionID: "unbound-session"}).Await(ctx, &ignored)
-	if err == nil || !strings.Contains(err.Error(), "session/delete") {
-		t.Fatalf("provider.deleteSession err = %v, want capability-gated session/delete error", err)
+	if err == nil || !strings.Contains(err.Error(), "session delete") {
+		t.Fatalf("provider.deleteSession err = %v, want capability-gated session-delete error", err)
 	}
 
 	err = client.Call(ctx, RPCMethodProviderCloseSession, providerSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored)

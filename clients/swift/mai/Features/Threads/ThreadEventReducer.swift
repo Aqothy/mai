@@ -24,6 +24,9 @@ enum ThreadEventReducer {
         case .threadMetaUpdated:
             applyProviderSelection(payload, to: &thread)
             if let cwd = nonEmpty(payload.cwd) { thread.cwd = cwd }
+            if payload.additionalDirectories != nil {
+                thread.additionalDirectories = payload.additionalDirectories
+            }
             if let title = nonEmpty(payload.title) { thread.title = title }
 
         case .threadMessageSent:
@@ -37,6 +40,12 @@ enum ThreadEventReducer {
                     let merged = (thread.timeline[index].message?.attachments ?? []) + attachments
                     thread.timeline[index].message?.attachments = merged
                 }
+                if let annotations = payload.annotations, !annotations.isEmpty {
+                    let existing = thread.timeline[index].message?.annotations ?? []
+                    let existingIDs = Set(existing.map(\.id))
+                    thread.timeline[index].message?.annotations = existing
+                        + annotations.filter { !existingIDs.contains($0.id) }
+                }
                 if let text = payload.text, !text.isEmpty {
                     thread.timeline[index].message?.text += text
                 }
@@ -46,6 +55,7 @@ enum ThreadEventReducer {
                 thread.timeline[index].message?.updatedAt = occurredAt
             } else {
                 let message = Message(
+                    annotations: payload.annotations,
                     attachments: payload.attachments,
                     createdAt: payload.createdAt ?? occurredAt,
                     id: id,
@@ -134,6 +144,10 @@ enum ThreadEventReducer {
             }
 
             if thread.cwd == nil, let cwd = session.cwd { thread.cwd = cwd }
+            if thread.additionalDirectories == nil,
+               session.additionalDirectories != nil {
+                thread.additionalDirectories = session.additionalDirectories
+            }
             if thread.providerInstanceID == nil { thread.providerInstanceID = session.providerInstanceID }
             thread.session = session
 
@@ -214,6 +228,12 @@ enum ThreadEventReducer {
             session.updatedAt = occurredAt
             thread.session = session
 
+        case .threadSkillsUpdated:
+            var session = ensureSession(thread, event)
+            session.skills = payload.skills ?? []
+            session.updatedAt = occurredAt
+            thread.session = session
+
         case .threadTokenUsageUpdated:
             var session = ensureSession(thread, event)
             session.tokenUsage = payload.tokenUsage
@@ -247,7 +267,24 @@ enum ThreadEventReducer {
 
     private static func ensureSession(_ thread: Thread, _ event: Event) -> SessionBinding {
         if let session = thread.session { return session }
-        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, driver: nil, lastError: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
+        return SessionBinding(
+            activeTurnID: nil,
+            additionalDirectories: thread.additionalDirectories,
+            configOptions: nil,
+            cwd: thread.cwd,
+            driver: nil,
+            lastError: nil,
+            providerInstanceID: event.payload.providerInstanceID
+                ?? thread.providerInstanceID ?? "",
+            providerName: nil,
+            skills: nil,
+            slashCommands: nil,
+            status: MaidSessionStatus.starting.rawValue,
+            stopRequested: false,
+            threadID: thread.id,
+            tokenUsage: nil,
+            updatedAt: event.occurredAt
+        )
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

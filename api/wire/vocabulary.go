@@ -38,6 +38,7 @@ var Vocabularies = []VocabularyDefinition{
 			string(orchestration.EventThreadApprovalResolved),
 			string(orchestration.EventThreadConfigOptionsUpdated),
 			string(orchestration.EventThreadSlashCommandsUpdated),
+			string(orchestration.EventThreadSkillsUpdated),
 			string(orchestration.EventThreadTokenUsageUpdated),
 			string(orchestration.EventThreadHistoryReplayCompleted),
 		),
@@ -156,6 +157,10 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.ItemKindToolCall),
 			string(provider.ItemKindWarning),
 			string(provider.ItemKindError),
+			string(provider.ItemKindWebSearch),
+			string(provider.ItemKindImageView),
+			string(provider.ItemKindImageGeneration),
+			string(provider.ItemKindContextCompaction),
 		),
 	},
 	{

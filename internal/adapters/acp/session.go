@@ -196,7 +196,11 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		// do not silently lose provider context.
 	}
 
-	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{
+		CWD:                   input.Cwd,
+		AdditionalDirectories: h.supportedAdditionalDirectories(input.AdditionalDirectories),
+		MCPServers:            []schema.McpServer{},
+	})
 	if err != nil {
 		return provider.StartSessionResult{}, acpRequestError(err)
 	}
@@ -227,7 +231,12 @@ func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionI
 	}
 	stream, _ := h.ensureSessionStream(sessionID)
 	h.beginSessionLoad(sessionID)
-	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{
+		SessionID:             schema.SessionId(sessionID),
+		CWD:                   input.Cwd,
+		AdditionalDirectories: h.supportedAdditionalDirectories(input.AdditionalDirectories),
+		MCPServers:            []schema.McpServer{},
+	})
 	if err != nil {
 		h.unbindSessionID(sessionID)
 		return provider.StartSessionResult{}, acpRequestError(err)
@@ -346,7 +355,11 @@ func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOpti
 	}
 	choices := make([]provider.ConfigChoice, 0, len(modes.AvailableModes))
 	for _, mode := range modes.AvailableModes {
-		choices = append(choices, provider.ConfigChoice{Value: string(mode.ID), Label: mode.Name})
+		description := ""
+		if mode.Description != nil {
+			description = *mode.Description
+		}
+		choices = append(choices, provider.ConfigChoice{Value: string(mode.ID), Label: mode.Name, Description: description})
 	}
 	return []provider.ConfigOption{{ID: acpSessionModeOptionID, Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryMode, Label: "Mode", Choices: choices, CurrentValue: string(modes.CurrentModeID)}}
 }
@@ -354,14 +367,15 @@ func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOpti
 func (h *Instance) sessionProjection(input provider.StartSessionInput, sessionID string) provider.Session {
 	info := h.Info()
 	return provider.Session{
-		Provider:           DriverKind,
-		ProviderInstanceID: info.InstanceID,
-		ProviderSessionID:  sessionID,
-		ProviderName:       info.Name,
-		Cwd:                input.Cwd,
-		ThreadID:           input.ThreadID,
-		ResumeCursor:       marshalRaw(map[string]string{"sessionId": sessionID}),
-		ConfigOptions:      h.combinedConfigOptions(sessionID),
+		Provider:              DriverKind,
+		ProviderInstanceID:    info.InstanceID,
+		ProviderSessionID:     sessionID,
+		ProviderName:          info.Name,
+		Cwd:                   input.Cwd,
+		AdditionalDirectories: h.supportedAdditionalDirectories(input.AdditionalDirectories),
+		ThreadID:              input.ThreadID,
+		ResumeCursor:          marshalRaw(map[string]string{"sessionId": sessionID}),
+		ConfigOptions:         h.combinedConfigOptions(sessionID),
 	}
 }
 
@@ -395,6 +409,16 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 	}
 	if dropped != nil {
 		h.settlePrompt(stream, dropped, schema.PromptResponse{}, nil)
+	}
+	// session/cancel is only a notification and does not release the agent's
+	// session resources. Once local turn state reflects the accepted cancel,
+	// follow it with the stable session/close request when advertised. Keep the
+	// binding on a close failure so a later stop can retry instead of silently
+	// leaking a provider-side session.
+	if h.sessionCapabilities().Close != nil {
+		if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+			return acpRequestError(err)
+		}
 	}
 	h.unbindSessionID(sessionID)
 	return nil
@@ -469,7 +493,12 @@ func (h *Instance) resumeSession(ctx context.Context, input provider.StartSessio
 		return provider.Session{}, err
 	}
 	stream, _ := h.ensureSessionStream(sessionID)
-	resp, err := h.agent().ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agent().ResumeSession(ctx, schema.ResumeSessionRequest{
+		SessionID:             schema.SessionId(sessionID),
+		CWD:                   input.Cwd,
+		AdditionalDirectories: h.supportedAdditionalDirectories(input.AdditionalDirectories),
+		MCPServers:            []schema.McpServer{},
+	})
 	if err != nil {
 		h.unbindSessionID(sessionID)
 		return provider.Session{}, acpRequestError(err)
@@ -505,6 +534,13 @@ func (h *Instance) supportsLoadSession() bool {
 
 func (h *Instance) supportsResumeSession() bool {
 	return h.sessionCapabilities().Resume != nil
+}
+
+func (h *Instance) supportedAdditionalDirectories(directories []string) []string {
+	if h.sessionCapabilities().AdditionalDirectories == nil || len(directories) == 0 {
+		return nil
+	}
+	return append([]string(nil), directories...)
 }
 
 // unbindSessionLocked drops the session's entire state — one sessions entry
@@ -655,13 +691,8 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 		ConfigID:  schema.SessionConfigId(optionID),
 		Value:     value,
 	}
-	switch value.(type) {
-	case string:
-	case bool:
-		optionType := schema.SetSessionConfigOptionRequestTypeBoolean
-		request.Type = &optionType
-	default:
-		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
+	if _, ok := value.(string); !ok {
+		return fmt.Errorf("ACP config option %q requires a string value", optionID)
 	}
 	resp, err := h.agent().SetSessionConfigOption(ctx, request)
 	if err != nil {

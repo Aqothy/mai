@@ -7,6 +7,9 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @Binding var text: String
+    @State private var textSelection: TextSelection?
+    @State private var appliedCursorRequestRevision = 0
+    @State private var appliedCursorRequestModelID: ObjectIdentifier?
 
     let isEnabled: Bool
     let focusID: String?
@@ -15,11 +18,15 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     let isRunning: Bool
     let isStopping: Bool
     let attachments: [ChatPendingAttachment]
-    let workspaceFilePicker: WorkspaceFilePickerModel?
+    let annotations: [ChatPendingAnnotation]
+    let promptCompletion: PromptCompletionModel?
+    let commands: [SlashCommand]
+    let skills: [Skill]
     let submitLabel: String
     let send: () -> Void
     let stop: () -> Void
     let removeAttachment: (UUID) -> Void
+    let removeAnnotation: (String) -> Void
     let leadingControls: LeadingControls
     let trailingControls: TrailingControls
 
@@ -32,11 +39,15 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         isRunning: Bool = false,
         isStopping: Bool = false,
         attachments: [ChatPendingAttachment] = [],
-        workspaceFilePicker: WorkspaceFilePickerModel? = nil,
+        annotations: [ChatPendingAnnotation] = [],
+        promptCompletion: PromptCompletionModel? = nil,
+        commands: [SlashCommand] = [],
+        skills: [Skill] = [],
         submitLabel: String,
         send: @escaping () -> Void,
         stop: @escaping () -> Void = {},
         removeAttachment: @escaping (UUID) -> Void = { _ in },
+        removeAnnotation: @escaping (String) -> Void = { _ in },
         @ViewBuilder leadingControls: () -> LeadingControls,
         @ViewBuilder trailingControls: () -> TrailingControls
     ) {
@@ -48,16 +59,27 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         self.isRunning = isRunning
         self.isStopping = isStopping
         self.attachments = attachments
-        self.workspaceFilePicker = workspaceFilePicker
+        self.annotations = annotations
+        self.promptCompletion = promptCompletion
+        self.commands = commands
+        self.skills = skills
         self.submitLabel = submitLabel
         self.send = send
         self.stop = stop
         self.removeAttachment = removeAttachment
+        self.removeAnnotation = removeAnnotation
         self.leadingControls = leadingControls()
         self.trailingControls = trailingControls()
     }
 
     var body: some View {
+        let catalogKey = PromptCompletionCatalogKey(
+            commands: commands,
+            skills: skills
+        )
+        let cursorRequest = promptCompletion?.cursorRequest
+        let completionModelID = promptCompletion.map(ObjectIdentifier.init)
+
         VStack(alignment: .leading) {
             if !attachments.isEmpty {
                 ChatComposerAttachmentStrip(
@@ -66,16 +88,24 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 )
             }
 
+            if !annotations.isEmpty {
+                ChatComposerAnnotationStrip(
+                    annotations: annotations,
+                    remove: removeAnnotation
+                )
+            }
+
             DraftPromptEditor(
                 text: $text,
+                selection: $textSelection,
                 isEnabled: isEnabled,
                 focusID: focusID,
                 canSend: canSend,
                 send: send,
-                textChanged: updateWorkspaceFilePicker,
-                moveWorkspaceFileSelection: moveWorkspaceFileSelection,
-                selectWorkspaceFile: selectWorkspaceFile,
-                dismissWorkspaceFilePicker: dismissWorkspaceFilePicker
+                inputChanged: updatePromptCompletion,
+                moveCompletionSelection: moveCompletionSelection,
+                selectCompletion: selectCompletion,
+                dismissCompletion: dismissCompletion
             )
 
             HStack {
@@ -128,6 +158,21 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal)
         .padding(.bottom, 12)
+        .onChange(of: catalogKey, initial: true) { _, _ in
+            promptCompletion?.updateCatalog(commands: commands, skills: skills)
+        }
+        .onChange(of: cursorRequest, initial: true) { _, request in
+            applyCursorRequest(request)
+        }
+        .onChange(of: completionModelID, initial: true) { oldID, newID in
+            guard oldID != newID else { return }
+            appliedCursorRequestRevision = 0
+            appliedCursorRequestModelID = nil
+            textSelection = nil
+            promptCompletion?.updateCatalog(commands: commands, skills: skills)
+            updatePromptCompletion(text: text, selection: nil)
+            applyCursorRequest(promptCompletion?.cursorRequest)
+        }
     }
 
     /// While a turn is running the button stops it, unless there is a draft to
@@ -148,40 +193,92 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         return colorScheme == .dark ? .black : .white
     }
 
-    private func updateWorkspaceFilePicker(oldText: String, newText: String) {
-        workspaceFilePicker?.textDidChange(from: oldText, to: newText)
+    private func updatePromptCompletion(
+        text: String,
+        selection: TextSelection?
+    ) {
+        guard let promptCompletion else { return }
+
+        let cursorOffset: Int?
+        if let request = promptCompletion.cursorRequest,
+           (request.revision != appliedCursorRequestRevision
+                || appliedCursorRequestModelID != ObjectIdentifier(promptCompletion)),
+           request.text == text,
+           request.cursorOffset >= 0,
+           request.cursorOffset <= text.count {
+            applyCursorRequest(request)
+            cursorOffset = request.cursorOffset
+        } else {
+            cursorOffset = Self.cursorOffset(for: selection, in: text)
+        }
+        promptCompletion.update(text: text, cursorOffset: cursorOffset)
     }
 
-    private func moveWorkspaceFileSelection(by offset: Int) -> Bool {
-        workspaceFilePicker?.moveSelection(by: offset) ?? false
+    private func moveCompletionSelection(by offset: Int) -> Bool {
+        promptCompletion?.moveSelection(by: offset) ?? false
     }
 
-    private func selectWorkspaceFile() -> Bool {
-        guard
-            let updatedText = workspaceFilePicker?.textBySelectingCurrentMatch(
-                in: text
-            )
-        else { return false }
-        text = updatedText
+    private func selectCompletion() -> Bool {
+        guard let promptCompletion,
+              let edit = promptCompletion.editBySelectingCurrentMatch(in: text) else {
+            return false
+        }
+        text = edit.text
+        applyCursorRequest(promptCompletion.cursorRequest)
         return true
     }
 
-    private func dismissWorkspaceFilePicker() -> Bool {
-        workspaceFilePicker?.dismiss() ?? false
+    private func dismissCompletion() -> Bool {
+        promptCompletion?.dismiss() ?? false
+    }
+
+    private func applyCursorRequest(_ request: PromptCompletionCursorRequest?) {
+        guard let promptCompletion,
+              let request,
+              request.revision != appliedCursorRequestRevision
+                || appliedCursorRequestModelID != ObjectIdentifier(promptCompletion),
+              request.text == text,
+              request.cursorOffset >= 0,
+              request.cursorOffset <= text.count else { return }
+
+        let insertionPoint = text.index(
+            text.startIndex,
+            offsetBy: request.cursorOffset
+        )
+        textSelection = TextSelection(insertionPoint: insertionPoint)
+        appliedCursorRequestRevision = request.revision
+        appliedCursorRequestModelID = ObjectIdentifier(promptCompletion)
+    }
+
+    private static func cursorOffset(
+        for selection: TextSelection?,
+        in text: String
+    ) -> Int? {
+        guard let selection else { return text.count }
+        switch selection.indices {
+        case .selection(let range):
+            guard range.isEmpty else { return nil }
+            return text.distance(from: text.startIndex, to: range.lowerBound)
+        case .multiSelection(_):
+            return nil
+        @unknown default:
+            return nil
+        }
     }
 }
 
 private struct DraftPromptEditor: View {
     @Binding var text: String
+    @Binding var selection: TextSelection?
 
     let isEnabled: Bool
     let focusID: String?
     let canSend: Bool
     let send: () -> Void
-    let textChanged: (String, String) -> Void
-    let moveWorkspaceFileSelection: (Int) -> Bool
-    let selectWorkspaceFile: () -> Bool
-    let dismissWorkspaceFilePicker: () -> Bool
+    let inputChanged: (String, TextSelection?) -> Void
+    let moveCompletionSelection: (Int) -> Bool
+    let selectCompletion: () -> Bool
+    let dismissCompletion: () -> Bool
 
     @FocusState private var isFocused: Bool
 
@@ -190,9 +287,12 @@ private struct DraftPromptEditor: View {
     }
 
     var body: some View {
+        let input = DraftPromptInput(text: text, selection: selection)
+
         TextField(
             "Ask anything",
             text: $text,
+            selection: $selection,
             axis: .vertical
         )
         .textFieldStyle(.plain)
@@ -216,22 +316,27 @@ private struct DraftPromptEditor: View {
         .accessibilityLabel("Prompt")
         .onKeyPress(phases: .down) { keyPress in
             if keyPress.key == .downArrow,
-                moveWorkspaceFileSelection(1)
+                moveCompletionSelection(1)
             {
                 return .handled
             }
             if keyPress.key == .upArrow,
-                moveWorkspaceFileSelection(-1)
+                moveCompletionSelection(-1)
             {
                 return .handled
             }
             if keyPress.key == .escape,
-                dismissWorkspaceFilePicker()
+                dismissCompletion()
             {
                 return .handled
             }
             if keyPress.key == .return,
-                selectWorkspaceFile()
+                selectCompletion()
+            {
+                return .handled
+            }
+            if keyPress.key == .tab,
+                selectCompletion()
             {
                 return .handled
             }
@@ -242,11 +347,17 @@ private struct DraftPromptEditor: View {
             // identity across the draft-to-thread transition, so focus
             // acquired in the draft must be released when a thread opens.
             isFocused = focusID != nil
+            selection = nil
         }
-        .onChange(of: text) { oldText, newText in
-            textChanged(oldText, newText)
+        .onChange(of: input, initial: true) { _, input in
+            inputChanged(input.text, input.selection)
         }
     }
+}
+
+private struct DraftPromptInput: Equatable {
+    let text: String
+    let selection: TextSelection?
 }
 
 struct ComposerAddMenu: View {
@@ -411,8 +522,18 @@ private struct ComposerCameraPicker: UIViewControllerRepresentable {
             isImageAttachmentDisabled: false,
             maximumImageSelectionCount: 8,
             commands: [
-                SlashCommand(description: nil, hasInput: false, name: "compact"),
-                SlashCommand(description: nil, hasInput: true, name: "review"),
+                SlashCommand(
+                    description: nil,
+                    hasInput: false,
+                    inputHint: nil,
+                    name: "compact"
+                ),
+                SlashCommand(
+                    description: nil,
+                    hasInput: true,
+                    inputHint: "instructions",
+                    name: "review"
+                ),
             ],
             addImages: { _ in },
             addPhotos: { _ in },

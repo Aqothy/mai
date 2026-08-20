@@ -55,14 +55,15 @@ type Thread struct {
 	ID ThreadID `json:"id"`
 	// ReplayHistoryPending is internal restart state. Restored threads consume
 	// it only after the provider's history replay has been fully ingested.
-	ReplayHistoryPending bool                             `json:"-"`
-	Title                string                           `json:"title"`
-	ProviderInstanceID   provider.InstanceID              `json:"providerInstanceId,omitempty"`
-	ModelSelection       *provider.ModelSelection         `json:"modelSelection,omitempty"`
-	ConfigSelections     []provider.ConfigOptionSelection `json:"-"`
-	Cwd                  string                           `json:"cwd,omitempty"`
-	Session              *SessionBinding                  `json:"session,omitempty"`
-	LatestTurn           *Turn                            `json:"latestTurn,omitempty"`
+	ReplayHistoryPending  bool                             `json:"-"`
+	Title                 string                           `json:"title"`
+	ProviderInstanceID    provider.InstanceID              `json:"providerInstanceId,omitempty"`
+	ModelSelection        *provider.ModelSelection         `json:"modelSelection,omitempty"`
+	ConfigSelections      []provider.ConfigOptionSelection `json:"-"`
+	Cwd                   string                           `json:"cwd,omitempty"`
+	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
+	Session               *SessionBinding                  `json:"session,omitempty"`
+	LatestTurn            *Turn                            `json:"latestTurn,omitempty"`
 	// Timeline is the canonical conversation order. New entries append; updates
 	// mutate their existing entry without moving it.
 	Timeline  Timeline  `json:"timeline"`
@@ -85,13 +86,14 @@ type Turn struct {
 }
 
 type Message struct {
-	ID          MessageID             `json:"id"`
-	Role        MessageRole           `json:"role"`
-	Text        string                `json:"text"`
-	Attachments []provider.Attachment `json:"attachments,omitempty"`
-	TurnID      TurnID                `json:"turnId,omitempty"`
-	CreatedAt   time.Time             `json:"createdAt"`
-	UpdatedAt   time.Time             `json:"updatedAt"`
+	ID          MessageID                   `json:"id"`
+	Role        MessageRole                 `json:"role"`
+	Text        string                      `json:"text"`
+	Attachments []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
+	TurnID      TurnID                      `json:"turnId,omitempty"`
+	CreatedAt   time.Time                   `json:"createdAt"`
+	UpdatedAt   time.Time                   `json:"updatedAt"`
 }
 
 type Approval struct {
@@ -115,17 +117,19 @@ type SessionBinding struct {
 	ProviderInstanceID provider.InstanceID `json:"providerInstanceId"`
 	// ProviderGeneration fences events from a replaced process that reused the
 	// same provider instance and turn ids. It is server-internal projection state.
-	ProviderGeneration uint64              `json:"-"`
-	ProviderName       string              `json:"providerName,omitempty"`
-	Driver             provider.DriverKind `json:"driver,omitempty"`
-	Cwd                string              `json:"cwd,omitempty"`
-	Status             SessionStatus       `json:"status"`
-	ActiveTurnID       TurnID              `json:"activeTurnId,omitempty"`
-	StopRequested      bool                `json:"stopRequested,omitempty"`
+	ProviderGeneration    uint64              `json:"-"`
+	ProviderName          string              `json:"providerName,omitempty"`
+	Driver                provider.DriverKind `json:"driver,omitempty"`
+	Cwd                   string              `json:"cwd,omitempty"`
+	AdditionalDirectories []string            `json:"additionalDirectories,omitempty"`
+	Status                SessionStatus       `json:"status"`
+	ActiveTurnID          TurnID              `json:"activeTurnId,omitempty"`
+	StopRequested         bool                `json:"stopRequested,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: snapshots must
 	// preserve explicit empty lists after provider metadata is cleared.
 	ConfigOptions []provider.ConfigOption `json:"configOptions,omitzero"`
 	SlashCommands []provider.SlashCommand `json:"slashCommands,omitzero"`
+	Skills        []provider.Skill        `json:"skills,omitzero"`
 	TokenUsage    *provider.TokenUsage    `json:"tokenUsage,omitempty"`
 	LastError     string                  `json:"lastError,omitempty"`
 	UpdatedAt     time.Time               `json:"updatedAt"`

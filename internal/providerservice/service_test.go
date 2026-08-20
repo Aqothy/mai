@@ -54,6 +54,8 @@ type fakeProviderInstance struct {
 	sendTurn           func(context.Context, provider.SendTurnInput) error
 	stopSession        func(context.Context, provider.StopSessionInput) error
 	deleteSess         func(context.Context, string) error
+	forkInputs         []provider.ForkSessionInput
+	forkSession        func(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error)
 }
 
 func (i *fakeProviderInstance) Info() provider.InstanceInfo {
@@ -132,6 +134,18 @@ func (i *fakeProviderInstance) CloseSession(context.Context, string) error {
 	return nil
 }
 
+func (i *fakeProviderInstance) ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
+	i.mu.Lock()
+	i.calls = append(i.calls, "ForkSession")
+	i.forkInputs = append(i.forkInputs, input)
+	fork := i.forkSession
+	i.mu.Unlock()
+	if fork != nil {
+		return fork(ctx, input)
+	}
+	return provider.ForkSessionResult{}, nil
+}
+
 func (i *fakeProviderInstance) recordCall(name string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -190,7 +204,10 @@ type eventingAdapter struct {
 func (a *resumeCursorAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
 	a.mu.Lock()
 	seq := len(a.instances) + 1
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
 		cursor := input.ResumeCursor
 		if len(cursor) == 0 {
@@ -218,7 +235,10 @@ func (a *cursorRebindAdapter) StartInstance(_ context.Context, req provider.Inst
 	if a.instances == nil {
 		a.instances = make(map[provider.InstanceID]*fakeProviderInstance)
 	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	switch req.InstanceID {
 	case "old":
 		instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
@@ -248,7 +268,10 @@ func (a *eventingAdapter) StartInstance(_ context.Context, req provider.Instance
 	if a.listeners == nil {
 		a.listeners = make(map[provider.InstanceID]provider.RuntimeEventListener)
 	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized}}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
 	a.instances[req.InstanceID] = instance
 	a.listeners[req.InstanceID] = emit
 	return instance, nil
@@ -1482,6 +1505,92 @@ func TestSetConfigOptionWithNonModelValueDoesNotFailAfterProviderApplied(t *test
 	input := adapter.instance(1).lastStartInput()
 	if input.ModelSelection == nil || input.ModelSelection.Model != "slow" {
 		t.Fatalf("recovered model selection = %#v, want unchanged slow", input.ModelSelection)
+	}
+}
+
+func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: "codex", Name: "Codex", Driver: "codex-app-server",
+		Status:       provider.InstanceStatusInitialized,
+		Capabilities: provider.Capabilities{Fork: true, AdditionalDirectories: true},
+	}}
+	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		return provider.Session{
+			ProviderInstanceID: input.ProviderInstanceID,
+			ProviderSessionID:  "native-source",
+			ThreadID:           input.ThreadID,
+			Cwd:                input.Cwd,
+		}, nil
+	}
+	instance.forkSession = func(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
+		if input.ProviderSessionID != "native-source" || input.TurnID != "turn-2" {
+			t.Fatalf("fork input = %#v", input)
+		}
+		return provider.ForkSessionResult{Summary: provider.SessionSummary{SessionID: "native-fork"}}, nil
+	}
+	s := New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (ProviderInstance, error) {
+		return instance, nil
+	})
+	defer s.Close()
+	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "codex-app-server"}, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+	additional := []string{"/workspace/two", "/workspace/three"}
+	if _, err := s.StartSession(context.Background(), "thread-source", provider.StartSessionInput{ThreadID: "thread-source", ProviderInstanceID: "codex", Cwd: "/workspace/one", AdditionalDirectories: additional}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	instanceID, summary, err := s.ForkSession(context.Background(), "thread-source", "turn-2")
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	if instanceID != "codex" || summary.SessionID != "native-fork" || summary.Cwd != "/workspace/one" || len(summary.AdditionalDirectories) != 2 || summary.AdditionalDirectories[1] != "/workspace/three" {
+		t.Fatalf("fork result = %q, %#v", instanceID, summary)
+	}
+	additional[1] = "mutated"
+	if summary.AdditionalDirectories[1] != "/workspace/three" {
+		t.Fatal("fork summary aliases caller workspace roots")
+	}
+	instance.mu.Lock()
+	instance.forkSession = func(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error) {
+		return provider.ForkSessionResult{Summary: provider.SessionSummary{SessionID: "native-source"}}, nil
+	}
+	instance.mu.Unlock()
+	if _, _, err := s.ForkSession(context.Background(), "thread-source", ""); err == nil || !strings.Contains(err.Error(), "source session id") {
+		t.Fatalf("same-session fork err = %v, want source-id rejection", err)
+	}
+}
+
+func TestServiceGatesProviderSpecificSessionCapabilities(t *testing.T) {
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: "limited", Name: "Limited", Driver: "limited", Status: provider.InstanceStatusInitialized,
+	}}
+	s := New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (ProviderInstance, error) {
+		return instance, nil
+	})
+	defer s.Close()
+	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "limited", Name: "Limited", Driver: "limited"}, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+
+	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
+		ThreadID: "thread-1", ProviderInstanceID: "limited", AdditionalDirectories: []string{"/extra"},
+	}); err == nil || !strings.Contains(err.Error(), "additional directories") {
+		t.Fatalf("unsupported additional directories err = %v", err)
+	}
+	if instance.startInputCount() != 0 {
+		t.Fatal("unsupported additional directories reached adapter StartSession")
+	}
+	if _, err := s.ListSessions(context.Background(), "limited", ""); err == nil || !strings.Contains(err.Error(), "session list") {
+		t.Fatalf("unsupported list err = %v", err)
+	}
+	if err := s.DeleteSession(context.Background(), "limited", "session-1"); err == nil || !strings.Contains(err.Error(), "session delete") {
+		t.Fatalf("unsupported delete err = %v", err)
+	}
+	if err := s.CloseSession(context.Background(), "limited", "session-1"); err == nil || !strings.Contains(err.Error(), "session close") {
+		t.Fatalf("unsupported close err = %v", err)
+	}
+	if instance.operationCount("DeleteSession") != 0 || instance.operationCount("CloseSession") != 0 {
+		t.Fatal("unsupported lifecycle operation reached adapter")
 	}
 }
 

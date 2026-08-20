@@ -98,6 +98,7 @@ struct DraftSessionControlsView: View {
 
     @State private var isProviderSelectionPresented = false
     @State private var isFolderSelectionPresented = false
+    @State private var isAdditionalFolderSelectionPresented = false
 
     var body: some View {
         Button {
@@ -150,6 +151,54 @@ struct DraftSessionControlsView: View {
                     )
                 }
             )
+        }
+
+        if model.supportsAdditionalDirectories || !model.additionalDirectories.isEmpty {
+            Menu {
+                ForEach(model.additionalDirectories, id: \.self) { directory in
+                    Button(
+                        "Remove \(URL(filePath: directory).lastPathComponent)",
+                        systemImage: "xmark"
+                    ) {
+                        model.removeAdditionalDirectory(directory)
+                    }
+                }
+                if !model.additionalDirectories.isEmpty,
+                    model.supportsAdditionalDirectories
+                {
+                    Divider()
+                }
+                if model.supportsAdditionalDirectories {
+                    Button("Add Folder", systemImage: "folder.badge.plus") {
+                        isAdditionalFolderSelectionPresented = true
+                    }
+                }
+            } label: {
+                Label(
+                    model.additionalDirectories.isEmpty
+                        ? "Add folder"
+                        : "\(model.additionalDirectories.count + 1) folders",
+                    systemImage: "folder.badge.plus"
+                )
+                .lineLimit(1)
+            }
+            .disabled(model.isSending)
+            .accessibilityLabel("Additional project folders")
+            .sheet(isPresented: $isAdditionalFolderSelectionPresented) {
+                FolderSelectionSheet(
+                    store: model.store,
+                    projectFolders: model.projectFolders,
+                    title: "Additional Project Folder",
+                    selectedFolder: nil,
+                    onSelectExisting: model.addAdditionalDirectory,
+                    onSelectBrowsed: { directory, parentDirectory in
+                        model.addAdditionalProjectFolder(
+                            directory,
+                            parentDirectory: parentDirectory
+                        )
+                    }
+                )
+            }
         }
     }
 }

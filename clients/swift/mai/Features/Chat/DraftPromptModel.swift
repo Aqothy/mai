@@ -15,7 +15,7 @@ final class DraftPromptModel {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
     let projectFolders: ProjectFolderStore
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var selectedProviderID: String? {
         didSet {
@@ -25,11 +25,13 @@ final class DraftPromptModel {
     var workingDirectory = "" {
         didSet {
             if workingDirectory != oldValue {
-                workspaceFilePicker.updateScope(.workingDirectory(workingDirectory))
+                additionalDirectories.removeAll { $0 == workingDirectory }
+                promptCompletion.updateScope(.workingDirectory(workingDirectory))
                 selectionDidChange()
             }
         }
     }
+    private(set) var additionalDirectories: [String] = []
     private(set) var configOptions: [ConfigOption] = []
     private(set) var optionsPhase: OptionsPhase = .unavailable
     private(set) var isSending = false
@@ -65,7 +67,7 @@ final class DraftPromptModel {
             store.availableProviders.contains { $0.id == providerID } ? providerID : nil
         }
         workingDirectory = initialWorkingDirectory
-        workspaceFilePicker = WorkspaceFilePickerModel(
+        promptCompletion = PromptCompletionModel(
             store: store,
             scope: .workingDirectory(initialWorkingDirectory)
         )
@@ -163,6 +165,11 @@ final class DraftPromptModel {
         store.promptContentCapabilities(for: effectiveProviderID)?.image == true
     }
 
+    var supportsAdditionalDirectories: Bool {
+        guard let effectiveProviderID else { return false }
+        return store.providerSupportsAdditionalDirectories(effectiveProviderID)
+    }
+
     var connectionState: ThreadStore.ConnectionState {
         store.connectionState
     }
@@ -228,6 +235,25 @@ final class DraftPromptModel {
         workingDirectory = directory
     }
 
+    func addAdditionalDirectory(_ directory: String) {
+        let directory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !directory.isEmpty, directory != workingDirectory else { return }
+        additionalDirectories.removeAll { $0 == directory }
+        additionalDirectories.append(directory)
+    }
+
+    func addAdditionalProjectFolder(_ directory: String, parentDirectory: String?) {
+        guard let directory = projectFolders.add(
+            directory,
+            parentPath: parentDirectory
+        ) else { return }
+        addAdditionalDirectory(directory)
+    }
+
+    func removeAdditionalDirectory(_ directory: String) {
+        additionalDirectories.removeAll { $0 == directory }
+    }
+
     func retryOptions() {
         optionsLoadAttempt += 1
     }
@@ -235,7 +261,7 @@ final class DraftPromptModel {
     func loadOptions() async {
         if reconcileAcceptedDraft() { return }
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         guard connectionState == .connected,
               let requestedProviderID = effectiveProviderID,
               !workingDirectory.isEmpty else {
@@ -252,7 +278,9 @@ final class DraftPromptModel {
                 return
             }
 
-            guard store.providerSupportsConfigOptions(providerID) else {
+            guard store.providerSupportsConfigOptions(providerID)
+                || store.providerSupportsSkills(providerID)
+            else {
                 optionsPhase = .live
                 return
             }
@@ -263,7 +291,7 @@ final class DraftPromptModel {
                 return
             }
             optionsSessionID = result.optionsSessionID
-            configOptions = result.configOptions
+            applyProviderOptions(result)
             await sendRememberedValues(providerID: providerID)
             try Task.checkCancellation()
             guard selectionMatches(providerID: requestedProviderID, cwd: requestedCwd),
@@ -331,6 +359,7 @@ final class DraftPromptModel {
               let threadID = draftStore.activeDraftThreadID else { return }
 
         let requestedCwd = workingDirectory
+        let requestedAdditionalDirectories = additionalDirectories
         let selections = currentSelections(providerID: requestedProviderID)
         isSending = true
         defer { isSending = false }
@@ -343,12 +372,27 @@ final class DraftPromptModel {
             return
         }
 
+        guard requestedAdditionalDirectories.isEmpty
+            || store.providerSupportsAdditionalDirectories(providerID)
+        else {
+            showError(
+                RPCError(
+                    code: nil,
+                    message: "This provider does not support additional project folders",
+                    data: nil
+                )
+            )
+            return
+        }
+
         do {
             try await store.startThread(
                 threadID: threadID,
                 providerInstanceID: providerID,
                 cwd: requestedCwd,
+                additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
+                    annotations: nil,
                     attachments: attachments.compactMap(\.attachment),
                     messageID: UUID().uuidString,
                     text: text
@@ -381,7 +425,7 @@ final class DraftPromptModel {
         // options list may predate them; the queue applies the authoritative
         // result when it drains.
         guard optionsSessionID == update.optionsSessionID, configUpdateTask == nil else { return }
-        configOptions = update.configOptions
+        applyProviderOptions(update)
         if optionsPhase != .loading {
             optionsPhase = .live
         }
@@ -389,7 +433,7 @@ final class DraftPromptModel {
 
     private func selectionDidChange() {
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         configUpdates.removeAll()
         optionsPhase = effectiveProviderID == nil || workingDirectory.isEmpty
             ? .unavailable
@@ -412,7 +456,7 @@ final class DraftPromptModel {
     private func receiveInvalidation(_ invalidation: ProviderOptionsInvalidated) {
         guard optionsSessionID == invalidation.optionsSessionID else { return }
         optionsSessionID = nil
-        configOptions = []
+        clearProviderOptions()
         optionsPhase = .failed("The agent stopped. Retry settings when it is available.")
     }
 
@@ -452,7 +496,7 @@ final class DraftPromptModel {
                 )
                 try Task.checkCancellation()
                 guard self.optionsSessionID == result.optionsSessionID else { return false }
-                configOptions = result.configOptions
+                applyProviderOptions(result)
             } catch is CancellationError {
                 return false
             } catch {
@@ -490,7 +534,7 @@ final class DraftPromptModel {
         configUpdateTask = nil
         if let latestSuccessfulResult,
            optionsSessionID == latestSuccessfulResult.optionsSessionID {
-            configOptions = latestSuccessfulResult.configOptions
+            applyProviderOptions(latestSuccessfulResult)
             for update in failedUpdatesByOptionID.values {
                 guard let option = configOptions.first(where: { $0.id == update.optionID }),
                       configValueIsValid(update.value, for: option) else {
@@ -506,6 +550,16 @@ final class DraftPromptModel {
             providerID: effectiveProviderID,
             workingDirectory: workingDirectory
         )
+    }
+
+    private func applyProviderOptions(_ result: ProviderOptionsResult) {
+        configOptions = result.configOptions
+        promptCompletion.updateCatalog(commands: [], skills: result.skills ?? [])
+    }
+
+    private func clearProviderOptions() {
+        configOptions = []
+        promptCompletion.updateCatalog(commands: [], skills: [])
     }
 
     private func currentSelections(providerID: String) -> [ConfigOptionSelection] {

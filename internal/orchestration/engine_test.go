@@ -148,6 +148,53 @@ func TestEngineRejectsCwdMetaUpdateWhileProviderSessionBound(t *testing.T) {
 	}
 }
 
+func TestAdditionalDirectoriesCanBeClearedAndRenormalizeWhenCwdChanges(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	threadID := ThreadID("thread-additional-directories")
+	primary := t.TempDir()
+	second := t.TempDir()
+	third := t.TempDir()
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadCreate, CommandID: "create-additional-directories", ThreadID: threadID,
+		Cwd: primary, AdditionalDirectories: []string{second, primary, second, third},
+	}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	thread, ok := engine.Thread(threadID)
+	if !ok || len(thread.AdditionalDirectories) != 2 || thread.AdditionalDirectories[0] != second || thread.AdditionalDirectories[1] != third {
+		t.Fatalf("normalized additional directories = %#v", thread.AdditionalDirectories)
+	}
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadMetaUpdate, CommandID: "clear-additional-directories", ThreadID: threadID,
+		AdditionalDirectories: []string{},
+	}); err != nil {
+		t.Fatalf("clear additional directories: %v", err)
+	}
+	thread, _ = engine.Thread(threadID)
+	if len(thread.AdditionalDirectories) != 0 {
+		t.Fatalf("additional directories after clear = %#v", thread.AdditionalDirectories)
+	}
+
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadMetaUpdate, CommandID: "restore-additional-directories", ThreadID: threadID,
+		AdditionalDirectories: []string{second, third},
+	}); err != nil {
+		t.Fatalf("restore additional directories: %v", err)
+	}
+	if _, err := engine.Dispatch(context.Background(), Command{
+		Type: CommandThreadMetaUpdate, CommandID: "move-primary-into-additional", ThreadID: threadID, Cwd: second,
+	}); err != nil {
+		t.Fatalf("change cwd: %v", err)
+	}
+	thread, _ = engine.Thread(threadID)
+	if thread.Cwd != second || len(thread.AdditionalDirectories) != 1 || thread.AdditionalDirectories[0] != third {
+		t.Fatalf("thread roots after cwd change = cwd %q, additional %#v", thread.Cwd, thread.AdditionalDirectories)
+	}
+}
+
 func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()

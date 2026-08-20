@@ -1,0 +1,231 @@
+--- a/clients/swift/mai/Features/Chat/ChatMarkdownMessageView.swift
++++ b/clients/swift/mai/Features/Chat/ChatMarkdownMessageView.swift
+@@ -17,8 +17,8 @@
+ }
+ 
+ /// Reads high-frequency text from the stable live-row model at the narrowest
+-/// possible SwiftUI boundary. Live source stays plain so token updates never
+-/// trigger Markdown parsing or syntax highlighting.
++/// possible SwiftUI boundary. Parsing is incremental, throttled, and performed
++/// by `ChatStreamingMarkdownRenderer` away from the main actor.
+ struct ChatStreamingMarkdownMessageView: View {
+     let messageID: String
+     let streamingText: ThreadStreamingText
+@@ -52,7 +52,7 @@
+     var body: some View {
+         Group {
+             if presentation.isStreaming {
+-                Text(verbatim: source)
++                ChatStreamingMarkdownContentView(source: source)
+             } else {
+                 ChatMarkdownRichContentView(
+                     plan: ChatMarkdownRenderCache.shared.plan(
+@@ -70,7 +70,7 @@
+                 if presentation.showsDiagnostics {
+                     Text(
+                         presentation.isStreaming
+-                            ? "plain stream · \(source.count.formatted()) chars"
++                            ? "incremental stream · \(source.count.formatted()) chars"
+                             : "native rich · \(source.count.formatted()) chars"
+                     )
+                     .font(.caption2.monospaced())
+--- a/clients/swift/mai/Features/Chat/ChatMarkdownRenderPlanner.swift
++++ b/clients/swift/mai/Features/Chat/ChatMarkdownRenderPlanner.swift
+@@ -123,3 +123,51 @@
+         }
+     }
+ }
++
++/// Retains root blocks that can no longer be changed by an appended source
++/// suffix. Continuous streams therefore reparse only the active trailing
++/// block rather than every byte accumulated so far.
++nonisolated struct ChatIncrementalMarkdownRenderPlanner {
++    private var stableUTF8Count = 0
++    private var stableBlocks: [ChatMarkdownRenderPlan.Block] = []
++    private var previousSource = ""
++
++    mutating func plan(from source: String) -> ChatMarkdownRenderPlan {
++        if !source.hasPrefix(previousSource) {
++            reset()
++        }
++
++        let bytes = Array(source.utf8)
++        if stableUTF8Count > bytes.count {
++            reset()
++        }
++
++        let tail = String(
++            decoding: bytes[stableUTF8Count...],
++            as: UTF8.self
++        )
++        let parsed = ChatMarkdownRenderPlanner.parsedBlocks(from: tail)
++
++        let currentBlocks: [ChatMarkdownRenderPlan.Block]
++        if parsed.count > 1, let activeBlock = parsed.last,
++            activeBlock.utf8Offset > 0
++        {
++            stableBlocks.append(contentsOf: parsed.dropLast().map(\.block))
++            stableUTF8Count += activeBlock.utf8Offset
++            currentBlocks = stableBlocks + [activeBlock.block]
++        } else if parsed.isEmpty, !tail.isEmpty {
++            currentBlocks = stableBlocks + [.prose(AttributedString(tail))]
++        } else {
++            currentBlocks = stableBlocks + parsed.map(\.block)
++        }
++
++        previousSource = source
++        return ChatMarkdownRenderPlan(blocks: currentBlocks)
++    }
++
++    mutating func reset() {
++        stableUTF8Count = 0
++        stableBlocks.removeAll(keepingCapacity: true)
++        previousSource = ""
++    }
++}
+--- a/clients/swift/maiTests/ChatMarkdownRichBlockTests.swift
++++ b/clients/swift/maiTests/ChatMarkdownRichBlockTests.swift
+@@ -79,6 +79,50 @@
+     }
+ 
+     @Test
++    func incrementalPlannerMatchesFullPlansAcrossAppendsAndReplacement() {
++        let snapshots = [
++            "# Heading",
++            "# Heading\n\nA **formatted** paragraph.",
++            #"""
++            # Heading
++
++            A **formatted** paragraph.
++
++            ```swift
++            let value = 42
++            ```
++            """#,
++            #"""
++            # Heading
++
++            A **formatted** paragraph.
++
++            ```swift
++            let value = 42
++            ```
++
++            | Value | State |
++            | --- | --- |
++            | 42 | ready |
++            """#,
++        ]
++        var planner = ChatIncrementalMarkdownRenderPlanner()
++
++        for source in snapshots {
++            #expect(
++                planner.plan(from: source)
++                    == ChatMarkdownRenderPlanner.plan(from: source)
++            )
++        }
++
++        let replacement = "Replacement with `inline code`."
++        #expect(
++            planner.plan(from: replacement)
++                == ChatMarkdownRenderPlanner.plan(from: replacement)
++        )
++    }
++
++    @Test
+     func renderPlanCacheReusesAndReplacesValues() {
+         let cache = ChatMarkdownRenderCache()
+         let first = cache.plan(
+--- /dev/null
++++ b/clients/swift/mai/Features/Chat/ChatStreamingMarkdownRenderer.swift
+@@ -0,0 +1,90 @@
++import Observation
++import SwiftUI
++
++/// Owns the throttled, incremental parse loop for one live response.
++@MainActor
++@Observable
++final class ChatStreamingMarkdownRenderer {
++    private(set) var plan: ChatMarkdownRenderPlan?
++    private(set) var renderedSource = ""
++
++    @ObservationIgnored private var latestSource = ""
++    @ObservationIgnored private var renderTask: Task<Void, Never>?
++    @ObservationIgnored private let worker = ChatStreamingMarkdownWorker()
++
++    func submit(_ source: String) {
++        latestSource = source
++        guard renderTask == nil else { return }
++
++        renderTask = Task { [weak self] in
++            guard let self else { return }
++            while !Task.isCancelled {
++                let source = latestSource
++                let plan = await worker.plan(from: source)
++                guard !Task.isCancelled else { break }
++
++                self.plan = plan
++                renderedSource = source
++
++                do {
++                    // A latest-wins throttle caps parsing and List remeasurement
++                    // during rapid token bursts at 12.5 updates per second,
++                    // while slower providers still render immediately.
++                    try await Task.sleep(for: .milliseconds(80))
++                } catch {
++                    break
++                }
++
++                if latestSource == source {
++                    renderTask = nil
++                    return
++                }
++            }
++            renderTask = nil
++        }
++    }
++
++    func cancel() {
++        renderTask?.cancel()
++        renderTask = nil
++    }
++}
++
++private actor ChatStreamingMarkdownWorker {
++    private var planner = ChatIncrementalMarkdownRenderPlanner()
++
++    func plan(from source: String) -> ChatMarkdownRenderPlan {
++        planner.plan(from: source)
++    }
++}
++
++/// Displays the latest coalesced plan. During a rapid burst the visible text
++/// can trail the source by at most one throttle interval, avoiding a temporary
++/// plain suffix that would jump between block layouts.
++struct ChatStreamingMarkdownContentView: View {
++    let source: String
++
++    @State private var renderer = ChatStreamingMarkdownRenderer()
++
++    var body: some View {
++        Group {
++            if let plan = renderer.plan,
++                source.hasPrefix(renderer.renderedSource)
++            {
++                ChatMarkdownRichContentView(
++                    plan: plan,
++                    allowsHighlighting: false
++                )
++            } else {
++                Text(verbatim: source)
++                    .frame(maxWidth: .infinity, alignment: .leading)
++            }
++        }
++        .onChange(of: source, initial: true) { _, newSource in
++            renderer.submit(newSource)
++        }
++        .onDisappear {
++            renderer.cancel()
++        }
++    }
++}

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS threads (
 	thread_id            TEXT PRIMARY KEY,
 	title                TEXT NOT NULL DEFAULT '',
 	cwd                  TEXT NOT NULL DEFAULT '',
+	additional_directories TEXT,
 	provider_instance_id TEXT NOT NULL DEFAULT '',
 	model_selection      TEXT,
 	created_at           TEXT NOT NULL,
@@ -91,7 +92,42 @@ func Open(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: ensure schema: %w", err)
 	}
+	if err := ensureThreadsAdditionalDirectoriesColumn(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &SQLite{db: db}, nil
+}
+
+func ensureThreadsAdditionalDirectoriesColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(threads)`)
+	if err != nil {
+		return fmt.Errorf("store: inspect threads schema: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("store: inspect threads schema row: %w", err)
+		}
+		if name == "additional_directories" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: inspect threads schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE threads ADD COLUMN additional_directories TEXT`); err != nil {
+		return fmt.Errorf("store: add threads.additional_directories: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLite) Close() error {
@@ -103,6 +139,14 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 		return fmt.Errorf("store: upsert thread requires a thread id")
 	}
 	var modelSelection any
+	var additionalDirectories any
+	if len(meta.AdditionalDirectories) > 0 {
+		encoded, err := json.Marshal(meta.AdditionalDirectories)
+		if err != nil {
+			return fmt.Errorf("store: encode thread %q additional directories: %w", meta.ThreadID, err)
+		}
+		additionalDirectories = string(encoded)
+	}
 	if meta.ModelSelection != nil {
 		encoded, err := json.Marshal(meta.ModelSelection)
 		if err != nil {
@@ -110,16 +154,17 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 		}
 		modelSelection = string(encoded)
 	}
-	_, err := s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (thread_id) DO UPDATE SET
 			title = excluded.title,
 			cwd = excluded.cwd,
+			additional_directories = excluded.additional_directories,
 			provider_instance_id = excluded.provider_instance_id,
 			model_selection = excluded.model_selection,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at`,
-		meta.ThreadID, meta.Title, meta.Cwd, string(meta.ProviderInstanceID), modelSelection,
+		meta.ThreadID, meta.Title, meta.Cwd, additionalDirectories, string(meta.ProviderInstanceID), modelSelection,
 		timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: upsert thread %q: %w", meta.ThreadID, err)
@@ -128,7 +173,7 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 }
 
 func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
-	rows, err := s.db.Query(`SELECT thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at
+	rows, err := s.db.Query(`SELECT thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at
 		FROM threads ORDER BY updated_at DESC, thread_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list threads: %w", err)
@@ -138,12 +183,18 @@ func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
 	for rows.Next() {
 		var meta ThreadMeta
 		var instanceID string
+		var additionalDirectories sql.NullString
 		var modelSelection sql.NullString
 		var createdAt, updatedAt string
-		if err := rows.Scan(&meta.ThreadID, &meta.Title, &meta.Cwd, &instanceID, &modelSelection, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&meta.ThreadID, &meta.Title, &meta.Cwd, &additionalDirectories, &instanceID, &modelSelection, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan thread: %w", err)
 		}
 		meta.ProviderInstanceID = provider.InstanceID(instanceID)
+		if additionalDirectories.Valid && additionalDirectories.String != "" {
+			if err := json.Unmarshal([]byte(additionalDirectories.String), &meta.AdditionalDirectories); err != nil {
+				return nil, fmt.Errorf("store: decode thread %q additional directories: %w", meta.ThreadID, err)
+			}
+		}
 		if modelSelection.Valid && modelSelection.String != "" {
 			selection := &provider.ModelSelection{}
 			if err := json.Unmarshal([]byte(modelSelection.String), selection); err != nil {
@@ -177,6 +228,14 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 	}
 	meta.ProviderInstanceID = route.InstanceID
 	var modelSelection any
+	var additionalDirectories any
+	if len(meta.AdditionalDirectories) > 0 {
+		encoded, err := json.Marshal(meta.AdditionalDirectories)
+		if err != nil {
+			return "", false, fmt.Errorf("store: encode imported thread %q additional directories: %w", meta.ThreadID, err)
+		}
+		additionalDirectories = string(encoded)
+	}
 	if meta.ModelSelection != nil {
 		encoded, err := json.Marshal(meta.ModelSelection)
 		if err != nil {
@@ -236,9 +295,9 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 	switch {
 	case err == nil:
 		if _, err := tx.Exec(`INSERT INTO threads
-			(thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (thread_id) DO NOTHING`,
-			existing, meta.Title, meta.Cwd, string(meta.ProviderInstanceID), modelSelection,
+			(thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (thread_id) DO NOTHING`,
+			existing, meta.Title, meta.Cwd, additionalDirectories, string(meta.ProviderInstanceID), modelSelection,
 			timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt)); err != nil {
 			return "", false, fmt.Errorf("store: ensure imported thread %q metadata: %w", existing, err)
 		}
@@ -256,8 +315,8 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 	}
 
 	if _, err := tx.Exec(`INSERT INTO threads
-		(thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, meta.ThreadID, meta.Title, meta.Cwd,
+		(thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, meta.ThreadID, meta.Title, meta.Cwd, additionalDirectories,
 		string(meta.ProviderInstanceID), modelSelection, timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt)); err != nil {
 		return "", false, fmt.Errorf("store: insert imported thread %q: %w", meta.ThreadID, err)
 	}

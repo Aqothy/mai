@@ -69,9 +69,21 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadConfigOptionsUpdated(event)
 	case EventThreadSlashCommandsUpdated:
 		p.applyThreadSlashCommandsUpdated(event)
+	case EventThreadSkillsUpdated:
+		p.applyThreadSkillsUpdated(event)
 	case EventThreadTokenUsageUpdated:
 		p.applyThreadTokenUsageUpdated(event)
 	}
+}
+
+func (p *Projection) applyThreadSkillsUpdated(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	session := ensureSessionBinding(thread, event)
+	session.Skills = cloneSkills(event.Payload.Skills)
+	session.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) Thread(id ThreadID) (Thread, bool) {
@@ -145,15 +157,16 @@ func (p *Projection) applyThreadCreated(event Event) {
 		p.createSequences[threadID] = event.Sequence
 	}
 	p.threads[threadID] = &Thread{
-		ID:                 threadID,
-		Title:              title,
-		ProviderInstanceID: payload.ProviderInstanceID,
-		ModelSelection:     cloneModelSelection(payload.ModelSelection),
-		ConfigSelections:   append([]provider.ConfigOptionSelection(nil), payload.ConfigSelections...),
-		Cwd:                payload.Cwd,
-		Timeline:           Timeline{},
-		CreatedAt:          event.OccurredAt,
-		UpdatedAt:          event.OccurredAt,
+		ID:                    threadID,
+		Title:                 title,
+		ProviderInstanceID:    payload.ProviderInstanceID,
+		ModelSelection:        cloneModelSelection(payload.ModelSelection),
+		ConfigSelections:      append([]provider.ConfigOptionSelection(nil), payload.ConfigSelections...),
+		Cwd:                   payload.Cwd,
+		AdditionalDirectories: append([]string(nil), payload.AdditionalDirectories...),
+		Timeline:              Timeline{},
+		CreatedAt:             event.OccurredAt,
+		UpdatedAt:             event.OccurredAt,
 	}
 }
 
@@ -168,13 +181,14 @@ func (p *Projection) applyThreadImported(event Event) {
 		updatedAt = createdAt
 	}
 	p.restoreThread(RestoredThread{
-		ThreadID:           payload.ThreadID,
-		Title:              payload.Title,
-		Cwd:                payload.Cwd,
-		ProviderInstanceID: payload.ProviderInstanceID,
-		ModelSelection:     payload.ModelSelection,
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
+		ThreadID:              payload.ThreadID,
+		Title:                 payload.Title,
+		Cwd:                   payload.Cwd,
+		AdditionalDirectories: append([]string(nil), payload.AdditionalDirectories...),
+		ProviderInstanceID:    payload.ProviderInstanceID,
+		ModelSelection:        payload.ModelSelection,
+		CreatedAt:             createdAt,
+		UpdatedAt:             updatedAt,
 	})
 	if p.threads[payload.ThreadID] != nil {
 		p.createSequences[payload.ThreadID] = event.Sequence
@@ -193,6 +207,9 @@ func (p *Projection) applyThreadMetaUpdated(event Event) {
 	applyThreadProviderSelectionPatch(thread, payload.ProviderInstanceID, payload.ModelSelection, payload.SessionCleared)
 	if payload.Cwd != "" {
 		thread.Cwd = payload.Cwd
+	}
+	if payload.AdditionalDirectories != nil {
+		thread.AdditionalDirectories = append([]string(nil), payload.AdditionalDirectories...)
 	}
 }
 
@@ -232,6 +249,9 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 	if thread.Cwd == "" {
 		thread.Cwd = session.Cwd
 	}
+	if thread.AdditionalDirectories == nil && session.AdditionalDirectories != nil {
+		thread.AdditionalDirectories = append([]string(nil), session.AdditionalDirectories...)
+	}
 }
 
 func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) {
@@ -266,10 +286,11 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 	if thread == nil || event.Payload.MessageID == "" {
 		return
 	}
-	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
+	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, Annotations: event.Payload.Annotations, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
 	if existing := thread.Timeline.Message(message.ID); existing != nil {
 		existing.Text += message.Text
 		existing.Attachments = append(existing.Attachments, message.Attachments...)
+		existing.Annotations = append(existing.Annotations, message.Annotations...)
 		if message.TurnID != "" {
 			existing.TurnID = message.TurnID
 		}
@@ -533,7 +554,7 @@ func ensureSessionBinding(thread *Thread, event Event) *SessionBinding {
 	if providerInstanceID == "" {
 		providerInstanceID = thread.ProviderInstanceID
 	}
-	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
+	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
 	return thread.Session
 }
 
@@ -649,5 +670,5 @@ func threadListEntryFromThread(thread Thread) ThreadListEntry {
 			break
 		}
 	}
-	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
 }
