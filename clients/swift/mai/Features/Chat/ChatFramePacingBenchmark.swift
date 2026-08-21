@@ -14,12 +14,14 @@ import SwiftUI
     typealias ChatBenchmarkScrollView = UIScrollView
 #endif
 
-/// Measured frame pacing for one benchmark pass.
+/// Display-link callback pacing for one benchmark pass.
 ///
-/// `hitchTimeMillisecondsPerSecond` follows Apple's hitch-ratio metric: the
-/// total time frames arrived late, normalized per second of the run. Values
-/// under 5 ms/s are considered smooth; under 1 ms/s is effectively perfect.
+/// This is a low-overhead regression signal for main-thread stalls while the
+/// benchmark drives the transcript. A callback is not proof that the app's
+/// surface was presented, so production FPS and hitch claims must come from a
+/// bounded Animation Hitches trace rather than these legacy field names.
 nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
+    let measurementKind: String
     let label: String
     let displayMaximumFPS: Int
     let frameCount: Int
@@ -36,9 +38,9 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
     var summary: String {
         """
         \(label) — \(displayMaximumFPS) Hz display
-        frames: \(frameCount) over \(durationSeconds.formatted(.number.precision(.fractionLength(1))))s · avg \(averageFPS.formatted(.number.precision(.fractionLength(1)))) fps
-        frame ms: p50 \(p50FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p95 \(p95FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p99 \(p99FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · max \(maxFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) (budget \(expectedFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))))
-        hitches: \(hitchCount) · \(hitchTimeMillisecondsPerSecond.formatted(.number.precision(.fractionLength(2)))) ms/s
+        display-link callbacks: \(frameCount) over \(durationSeconds.formatted(.number.precision(.fractionLength(1))))s · avg \(averageFPS.formatted(.number.precision(.fractionLength(1))))/s
+        callback interval ms: p50 \(p50FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p95 \(p95FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · p99 \(p99FrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) · max \(maxFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))) (target \(expectedFrameMilliseconds.formatted(.number.precision(.fractionLength(2)))))
+        late callbacks: \(hitchCount) · \(hitchTimeMillisecondsPerSecond.formatted(.number.precision(.fractionLength(2)))) excess ms/s
         """
     }
 
@@ -51,9 +53,8 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
 }
 
 /// Records display-link timestamps while a benchmark runs and reduces them to
-/// a frame-pacing report. The link requests the display's maximum refresh
-/// rate so an adaptive-sync (ProMotion) display is measured at 120 Hz rather
-/// than whatever idle rate it happens to be running.
+/// a callback-pacing report. The link requests the display's maximum refresh
+/// rate so main-thread delivery is sampled against the 120 Hz budget.
 final class ChatFramePacingMonitor: NSObject {
     private var displayLink: CADisplayLink?
     private var timestamps: [CFTimeInterval] = []
@@ -116,8 +117,8 @@ final class ChatFramePacingMonitor: NSObject {
 
         let duration = last - first
         let expected = 1.0 / Double(displayMaximumFPS)
-        // A frame is a hitch when it stayed on screen at least half a refresh
-        // longer than intended; the tolerance absorbs normal timer jitter.
+        // A callback is late when its delivery misses at least half a refresh
+        // interval; the tolerance absorbs normal timer jitter.
         let hitchThreshold = expected * 1.5
         var hitchCount = 0
         var hitchTime = 0.0
@@ -132,6 +133,7 @@ final class ChatFramePacingMonitor: NSObject {
         }
 
         return ChatFramePacingReport(
+            measurementKind: "displayLinkCallbacks",
             label: label,
             displayMaximumFPS: displayMaximumFPS,
             frameCount: timestamps.count,
