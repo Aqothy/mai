@@ -400,8 +400,10 @@ private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
 @Observable
 final class ChatTimelineFoldModel {
     private(set) var expandedSectionIDs: Set<String> = []
+    @ObservationIgnored var prepareForToggle: () -> Void = {}
 
     func toggle(_ sectionID: String) {
+        prepareForToggle()
         withChatContentExpansionTransaction {
             expandedSectionIDs.formSymmetricDifference([sectionID])
         }
@@ -727,6 +729,12 @@ private struct ChatTimeline: View {
                 }
             }
             .onAppear {
+                #if os(macOS)
+                    foldModel.prepareForToggle = {
+                        macScrollPositionPreserver
+                            .captureBeforeContentExpansion()
+                    }
+                #endif
                 if oldestLoadedSectionID == nil {
                     // A real-thread benchmark sweeps the whole transcript;
                     // mounting it fully up front keeps history pagination
