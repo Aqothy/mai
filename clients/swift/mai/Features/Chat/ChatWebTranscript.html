@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Chat transcript</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --font-scale: 1;
+      --background: #ffffff;
+      --primary: rgba(0, 0, 0, 0.88);
+      --secondary: rgba(0, 0, 0, 0.58);
+      --tertiary: rgba(0, 0, 0, 0.38);
+      --separator: rgba(0, 0, 0, 0.10);
+      --surface: rgba(0, 0, 0, 0.055);
+      --surface-hover: rgba(0, 0, 0, 0.08);
+      --user-bubble: color-mix(in srgb, AccentColor 15%, transparent);
+      --code-background: rgba(0, 0, 0, 0.055);
+      --quote-border: rgba(0, 0, 0, 0.22);
+      --link: #0066cc;
+    }
+
+    html[data-theme="dark"] {
+      --background: #1e1e1e;
+      --primary: rgba(255, 255, 255, 0.90);
+      --secondary: rgba(255, 255, 255, 0.62);
+      --tertiary: rgba(255, 255, 255, 0.40);
+      --separator: rgba(255, 255, 255, 0.12);
+      --surface: rgba(255, 255, 255, 0.07);
+      --surface-hover: rgba(255, 255, 255, 0.11);
+      --user-bubble: color-mix(in srgb, AccentColor 20%, transparent);
+      --code-background: rgba(255, 255, 255, 0.065);
+      --quote-border: rgba(255, 255, 255, 0.25);
+      --link: #65a9ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body, #root {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--background);
+      color: var(--primary);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      font-size: calc(15px * var(--font-scale));
+      line-height: 1.47;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    button, a { font: inherit; }
+
+    #transcript {
+      height: 100%;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior-y: none;
+      scrollbar-gutter: stable;
+      overflow-anchor: none;
+    }
+
+    #messages {
+      width: min(100%, 792px);
+      min-height: 100%;
+      margin: 0 auto;
+      padding: 10px 16px;
+    }
+
+    .transcript-row {
+      width: 100%;
+      content-visibility: auto;
+      contain-intrinsic-block-size: auto 88px;
+    }
+
+    .message { padding: 10px 0; }
+
+    .message.user {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .message-inner {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .message.user .message-inner {
+      max-width: min(88%, 680px);
+      padding: 10px 14px;
+      border-radius: 18px;
+      background: var(--user-bubble);
+    }
+
+    .message-label {
+      margin-bottom: 5px;
+      color: var(--tertiary);
+      font-size: 0.78em;
+    }
+
+    .activity, .thought, .working {
+      padding: 6px 0;
+      color: var(--secondary);
+      font-size: 0.92em;
+    }
+
+    .turn-activity {
+      padding-top: 6px;
+      border-bottom: 1px solid var(--separator);
+    }
+
+    .row-button {
+      appearance: none;
+      display: inline-flex;
+      max-width: 100%;
+      align-items: center;
+      gap: 7px;
+      padding: 2px 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .row-button:hover { color: var(--primary); }
+    .row-button .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .disclosure { width: 1em; color: var(--tertiary); text-align: center; }
+    .failure { color: #e98116; }
+
+    .row-detail {
+      margin-top: 8px;
+      padding-left: 23px;
+      color: var(--secondary);
+    }
+
+    .notice, .approval, .plan {
+      margin: 6px 0;
+      padding: 12px;
+      border-radius: 14px;
+      background: var(--surface);
+    }
+
+    .notice.warning, .approval { background: color-mix(in srgb, #f59e0b 12%, transparent); }
+    .notice.error { background: color-mix(in srgb, #ef4444 12%, transparent); }
+    .panel-title { margin-bottom: 7px; font-weight: 650; }
+    .panel-status { margin-top: 7px; color: var(--secondary); font-size: 0.82em; }
+
+    .approval-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .approval-actions button {
+      appearance: none;
+      padding: 5px 10px;
+      border: 1px solid var(--separator);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--primary);
+      cursor: pointer;
+    }
+    .approval-actions button:hover { background: var(--surface-hover); }
+
+    .history-marker { height: 1px; overflow: hidden; }
+
+    .markdown { overflow-wrap: anywhere; }
+    .markdown > :first-child { margin-top: 0; }
+    .markdown > :last-child { margin-bottom: 0; }
+
+    p { margin: 0 0 0.82em; }
+    h1, h2, h3, h4, h5, h6 {
+      margin: 1.12em 0 0.45em;
+      line-height: 1.22;
+      letter-spacing: -0.012em;
+    }
+    h1 { font-size: 1.55em; }
+    h2 { font-size: 1.35em; }
+    h3 { font-size: 1.18em; }
+    h4, h5, h6 { font-size: 1em; }
+
+    ul, ol { margin: 0.45em 0 0.9em; padding-left: 1.55em; }
+    li { margin: 0.22em 0; }
+    li.task { list-style: none; margin-left: -1.28em; }
+    li.task input { margin: 0 0.48em 0 0; vertical-align: -0.08em; }
+
+    blockquote {
+      margin: 0.8em 0;
+      padding: 0.1em 0 0.1em 0.9em;
+      border-left: 3px solid var(--quote-border);
+      color: var(--secondary);
+    }
+
+    hr {
+      height: 1px;
+      margin: 1.15em 0;
+      border: 0;
+      background: var(--separator);
+    }
+
+    a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+
+    :not(pre) > code {
+      padding: 0.12em 0.34em;
+      border-radius: 5px;
+      background: var(--code-background);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.9em;
+    }
+
+    .rich-block {
+      position: relative;
+      max-width: 100%;
+      margin: 0.85em 0;
+      overflow: hidden;
+      border: 1px solid var(--separator);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    .rich-header {
+      position: sticky;
+      left: 0;
+      display: flex;
+      min-height: 34px;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 9px 5px 12px;
+      border-bottom: 1px solid var(--separator);
+      color: var(--secondary);
+      font-size: 0.8em;
+      user-select: none;
+    }
+
+    .rich-header .spacer { flex: 1; }
+    .rich-header button {
+      appearance: none;
+      padding: 2px 7px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--secondary);
+      cursor: pointer;
+    }
+    .rich-header button:hover { background: var(--surface-hover); color: var(--primary); }
+
+    .code-scroll, .table-scroll {
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      overscroll-behavior-x: contain;
+    }
+
+    pre {
+      width: max-content;
+      min-width: 100%;
+      margin: 0;
+      padding: 12px 14px 14px;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.82em;
+      line-height: 1.5;
+      tab-size: 4;
+      white-space: pre;
+    }
+
+    .rich-block.collapsed .code-scroll {
+      max-height: 126px;
+      overflow: hidden;
+      -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent);
+    }
+
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9em;
+    }
+    th, td {
+      max-width: 440px;
+      padding: 8px 11px;
+      border-right: 1px solid var(--separator);
+      border-bottom: 1px solid var(--separator);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child td { border-bottom: 0; }
+    th { background: var(--surface); font-weight: 600; }
+
+    .streaming-caret::after {
+      content: "";
+      display: inline-block;
+      width: 0.46em;
+      height: 1em;
+      margin-left: 0.15em;
+      border-radius: 2px;
+      background: currentColor;
+      vertical-align: -0.14em;
+      animation: caret-pulse 900ms ease-in-out infinite;
+    }
+
+    @keyframes caret-pulse { 50% { opacity: 0.25; } }
+
+    ::selection { background: color-mix(in srgb, AccentColor 34%, transparent); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      min-height: 30px;
+      border: 3px solid transparent;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--secondary) 45%, transparent);
+      background-clip: padding-box;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <main id="root" aria-label="Chat transcript">
+    <div id="transcript" tabindex="0">
+      <div id="messages"></div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const transcript = document.getElementById("transcript");
+      const messagesElement = document.getElementById("messages");
+      const bottomThreshold = 24;
+      let followsBottom = true;
+      let rememberedAnchor = null;
+      let lastNearBottom = true;
+      let scrollActivityTimer = 0;
+      let renderGeneration = 0;
+      let benchmarkRunning = false;
+      let currentRows = new Map();
+      let rowElements = new Map();
+      let historyRetryTimer = 0;
+      let historyObserver = new IntersectionObserver(entries => {
+        if (!benchmarkRunning && entries.some(entry => entry.isIntersecting)) {
+          post({ action: "loadEarlier" });
+        }
+      }, { root: transcript, rootMargin: "240px 0px 0px", threshold: 0 });
+
+      function post(message) {
+        const handler = window.webkit?.messageHandlers?.maiChat;
+        if (handler) handler.postMessage(message);
+      }
+
+      function escapeHTML(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function safeURL(value) {
+        try {
+          const url = new URL(String(value).replaceAll("&amp;", "&"));
+          return url.protocol === "https:" || url.protocol === "http:"
+            ? url.toString()
+            : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function renderInline(source) {
+        const placeholders = [];
+        const hold = html => `\u0000${placeholders.push(html) - 1}\u0000`;
+        let value = String(source ?? "");
+
+        value = value.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, match =>
+          hold(`<code>${escapeHTML(match)}</code>`)
+        );
+        value = value.replace(/`([^`\n]+)`/g, (_, code) =>
+          hold(`<code>${escapeHTML(code)}</code>`)
+        );
+        value = escapeHTML(value);
+        value = value.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g,
+          (match, label, destination) => {
+            const url = safeURL(destination);
+            if (!url) return match;
+            return `<a href="${escapeHTML(url)}">${label}</a>`;
+          }
+        );
+        value = value
+          .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+          .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+          .replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>")
+          .replaceAll("\n", "<br>");
+        return value.replace(/\u0000(\d+)\u0000/g, (_, index) =>
+          placeholders[Number(index)] ?? ""
+        );
+      }
+
+      function splitTableRow(line) {
+        let value = line.trim();
+        if (value.startsWith("|")) value = value.slice(1);
+        if (value.endsWith("|")) value = value.slice(0, -1);
+        return value.split(/(?<!\\)\|/).map(cell => cell.trim().replaceAll("\\|", "|"));
+      }
+
+      function isTableDivider(line) {
+        const cells = splitTableRow(line);
+        return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell));
+      }
+
+      function startsBlock(lines, index) {
+        const line = lines[index] ?? "";
+        if (!line.trim()) return true;
+        if (/^\s{0,3}(```+|~~~+)/.test(line)) return true;
+        if (/^\s{0,3}#{1,6}\s+/.test(line)) return true;
+        if (/^\s{0,3}>/.test(line)) return true;
+        if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) return true;
+        if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) return true;
+        if (index + 1 < lines.length && line.includes("|") && isTableDivider(lines[index + 1])) return true;
+        return false;
+      }
+
+      function renderCode(code, language, blockIndex) {
+        const label = language ? language.trim() : "Code";
+        return `<section class="rich-block code-block" data-block="code-${blockIndex}">
+          <div class="rich-header"><span>${escapeHTML(label || "Code")}</span><span class="spacer"></span><button type="button" data-action="collapse">Collapse</button><button type="button" data-action="copy-code">Copy</button></div>
+          <div class="code-scroll"><pre><code>${escapeHTML(code)}</code></pre></div>
+        </section>`;
+      }
+
+      function renderTable(lines, startIndex, blockIndex) {
+        const header = splitTableRow(lines[startIndex]);
+        const alignments = splitTableRow(lines[startIndex + 1]).map(cell =>
+          cell.startsWith(":") && cell.endsWith(":") ? "center"
+            : cell.endsWith(":") ? "right" : "left"
+        );
+        const rows = [];
+        let index = startIndex + 2;
+        while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
+          rows.push(splitTableRow(lines[index]));
+          index += 1;
+        }
+        const headerHTML = header.map((cell, column) =>
+          `<th style="text-align:${alignments[column] ?? "left"}">${renderInline(cell)}</th>`
+        ).join("");
+        const bodyHTML = rows.map(row => `<tr>${row.map((cell, column) =>
+          `<td style="text-align:${alignments[column] ?? "left"}">${renderInline(cell)}</td>`
+        ).join("")}</tr>`).join("");
+        return {
+          html: `<section class="rich-block table-block" data-block="table-${blockIndex}">
+            <div class="rich-header"><span>Table</span><span class="spacer"></span><button type="button" data-action="copy-table">Copy</button></div>
+            <div class="table-scroll"><table><thead><tr>${headerHTML}</tr></thead><tbody>${bodyHTML}</tbody></table></div>
+          </section>`,
+          nextIndex: index,
+        };
+      }
+
+      function renderMarkdown(source) {
+        const lines = String(source ?? "").replaceAll("\r\n", "\n").split("\n");
+        const output = [];
+        let index = 0;
+        let blockIndex = 0;
+
+        while (index < lines.length) {
+          const line = lines[index];
+          if (!line.trim()) { index += 1; continue; }
+
+          const fence = line.match(/^\s{0,3}(```+|~~~+)\s*([^\s`]*)?.*$/);
+          if (fence) {
+            const delimiter = fence[1];
+            const language = fence[2] ?? "";
+            const code = [];
+            index += 1;
+            while (index < lines.length && !new RegExp(`^\\s{0,3}${delimiter[0]}{${delimiter.length},}\\s*$`).test(lines[index])) {
+              code.push(lines[index]);
+              index += 1;
+            }
+            if (index < lines.length) index += 1;
+            output.push(renderCode(code.join("\n"), language, blockIndex++));
+            continue;
+          }
+
+          const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*$/);
+          if (heading) {
+            const level = heading[1].length;
+            output.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+            index += 1;
+            continue;
+          }
+
+          if (/^\s{0,3}>/.test(line)) {
+            const quoteLines = [];
+            while (index < lines.length && /^\s{0,3}>/.test(lines[index])) {
+              quoteLines.push(lines[index].replace(/^\s{0,3}>\s?/, ""));
+              index += 1;
+            }
+            output.push(`<blockquote>${renderMarkdown(quoteLines.join("\n"))}</blockquote>`);
+            continue;
+          }
+
+          if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+            output.push("<hr>");
+            index += 1;
+            continue;
+          }
+
+          if (index + 1 < lines.length && line.includes("|") && isTableDivider(lines[index + 1])) {
+            const table = renderTable(lines, index, blockIndex++);
+            output.push(table.html);
+            index = table.nextIndex;
+            continue;
+          }
+
+          const listMatch = line.match(/^\s*((?:[-+*])|(?:\d+[.)]))\s+(.+)$/);
+          if (listMatch) {
+            const ordered = /^\d/.test(listMatch[1]);
+            const tag = ordered ? "ol" : "ul";
+            const items = [];
+            while (index < lines.length) {
+              const match = lines[index].match(/^\s*((?:[-+*])|(?:\d+[.)]))\s+(.+)$/);
+              if (!match || /^\d/.test(match[1]) !== ordered) break;
+              let content = match[2];
+              const task = content.match(/^\[([ xX])\]\s+(.*)$/);
+              if (task) {
+                const checked = task[1].toLowerCase() === "x";
+                items.push(`<li class="task"><input type="checkbox" disabled ${checked ? "checked" : ""}>${renderInline(task[2])}</li>`);
+              } else {
+                items.push(`<li>${renderInline(content)}</li>`);
+              }
+              index += 1;
+            }
+            output.push(`<${tag}>${items.join("")}</${tag}>`);
+            continue;
+          }
+
+          const paragraph = [line.trim()];
+          index += 1;
+          while (index < lines.length && !startsBlock(lines, index)) {
+            paragraph.push(lines[index].trim());
+            index += 1;
+          }
+          output.push(`<p>${renderInline(paragraph.join("\n"))}</p>`);
+        }
+
+        return output.join("");
+      }
+
+      function rowSignature(row) {
+        return [
+          row.kind, row.role, row.markdown, row.title, row.detail, row.label,
+          row.sectionID, row.status, row.isStreaming, row.isExpanded,
+          row.isRunning, row.hasFailure, JSON.stringify(row.options ?? []),
+        ].join("\u0001");
+      }
+
+      function renderRow(element, row) {
+        element.dataset.rowId = row.id;
+        element.dataset.signature = rowSignature(row);
+        element.className = "transcript-row";
+
+        switch (row.kind) {
+        case "turnActivity": {
+          element.classList.add("activity", "turn-activity");
+          const failure = row.hasFailure ? `<span class="failure" aria-label="Failed step">⚠</span>` : "";
+          if (row.isRunning) {
+            element.innerHTML = `<span>${escapeHTML(row.title ?? "Working")}</span>`;
+          } else {
+            element.innerHTML = `<button type="button" class="row-button" data-action="toggle-section" data-section-id="${escapeHTML(row.sectionID ?? "")}" aria-expanded="${row.isExpanded ? "true" : "false"}"><span class="title">${escapeHTML(row.title ?? "Worked")}</span>${failure}<span class="disclosure">${row.isExpanded ? "⌄" : "›"}</span></button>`;
+          }
+          break;
+        }
+        case "activityGroup":
+        case "thought": {
+          const isThought = row.kind === "thought";
+          const startsExpanded = Boolean(row.isExpanded);
+          element.classList.add(isThought ? "thought" : "activity");
+          element.innerHTML = `<button type="button" class="row-button" data-action="toggle-detail" aria-expanded="${startsExpanded ? "true" : "false"}"><span aria-hidden="true">${isThought ? "◌" : "◇"}</span><span class="title">${escapeHTML(row.title ?? (isThought ? "Thought" : "Activity"))}</span>${row.hasFailure ? '<span class="failure">Failed</span>' : ""}<span class="disclosure">${startsExpanded ? "⌄" : "›"}</span></button><div class="row-detail markdown${row.isStreaming ? " streaming-caret" : ""}" ${startsExpanded ? "" : "hidden"}>${startsExpanded ? renderMarkdown(row.detail ?? "") : ""}</div>`;
+          break;
+        }
+        case "notice":
+          element.classList.add("notice", row.status === "error" ? "error" : "warning");
+          element.innerHTML = `<div class="panel-title">${escapeHTML(row.title ?? "Notice")}</div>${row.detail ? `<div class="markdown">${renderMarkdown(row.detail)}</div>` : ""}`;
+          break;
+        case "approval": {
+          element.classList.add("approval");
+          const actions = (row.options ?? []).map(option => `<button type="button" data-action="approval" data-request-id="${escapeHTML(row.id.replace(/^approval-/, ""))}" data-decision="${escapeHTML(option.decision)}" ${option.optionID ? `data-option-id="${escapeHTML(option.optionID)}"` : ""}>${escapeHTML(option.title)}</button>`).join("");
+          element.innerHTML = `<div class="panel-title">${escapeHTML(row.title ?? "Permission needed")}</div>${row.detail ? `<div class="markdown">${renderMarkdown(row.detail)}</div>` : ""}${actions ? `<div class="approval-actions">${actions}</div>` : `<div class="panel-status">${escapeHTML(row.status ?? "Resolved")}</div>`}`;
+          break;
+        }
+        case "plan":
+          element.classList.add("plan");
+          element.innerHTML = `<div class="panel-title">${escapeHTML(row.title ?? "Plan")}</div><div class="markdown">${renderMarkdown(row.detail ?? "")}</div>`;
+          break;
+        case "working":
+          element.classList.add("working");
+          element.innerHTML = `<span class="streaming-caret">${escapeHTML(row.title ?? "Working")}</span>`;
+          break;
+        case "history":
+          element.classList.add("history-marker");
+          element.setAttribute("aria-label", row.title ?? "Load earlier messages");
+          element.innerHTML = "";
+          break;
+        default: {
+          element.classList.add("message", row.role === "user" ? "user" : "assistant");
+          const label = row.label
+            ? `<div class="message-label">${escapeHTML(row.label)}</div>`
+            : "";
+          const caretClass = row.isStreaming ? " streaming-caret" : "";
+          element.innerHTML = `<div class="message-inner">${label}<div class="markdown${caretClass}">${renderMarkdown(row.markdown ?? "")}</div></div>`;
+          break;
+        }
+        }
+      }
+
+      function observeHistoryMarker() {
+        clearTimeout(historyRetryTimer);
+        historyObserver.disconnect();
+        const marker = messagesElement.querySelector(".history-marker");
+        if (!marker) return;
+
+        historyObserver.observe(marker);
+        // A prepended page renders while the native bridge is briefly guarding
+        // against duplicate requests. Re-observe once after that guard so a
+        // sentinel that is still visible can request the next page.
+        historyRetryTimer = setTimeout(() => {
+          const currentMarker = messagesElement.querySelector(".history-marker");
+          if (!currentMarker) return;
+          historyObserver.disconnect();
+          historyObserver.observe(currentMarker);
+        }, 320);
+      }
+
+      function isNearBottom() {
+        return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= bottomThreshold;
+      }
+
+      function rememberViewport() {
+        if (followsBottom) { rememberedAnchor = null; return; }
+        const transcriptRect = transcript.getBoundingClientRect();
+        for (const element of messagesElement.children) {
+          const rect = element.getBoundingClientRect();
+          if (rect.bottom > transcriptRect.top + 0.5) {
+            rememberedAnchor = {
+              id: element.dataset.rowId,
+              offset: rect.top - transcriptRect.top,
+            };
+            return;
+          }
+        }
+        rememberedAnchor = null;
+      }
+
+      function restoreViewport() {
+        if (followsBottom) {
+          transcript.scrollTop = transcript.scrollHeight;
+          return;
+        }
+        if (!rememberedAnchor) return;
+        const element = Array.from(messagesElement.children).find(candidate =>
+          candidate.dataset.rowId === rememberedAnchor.id
+        );
+        if (!element) return;
+        const transcriptTop = transcript.getBoundingClientRect().top;
+        const currentOffset = element.getBoundingClientRect().top - transcriptTop;
+        transcript.scrollTop += currentOffset - rememberedAnchor.offset;
+      }
+
+      function notifyScrollState() {
+        const nearBottom = isNearBottom();
+        if (nearBottom !== lastNearBottom) {
+          lastNearBottom = nearBottom;
+          post({ action: "scrollState", nearBottom });
+        }
+      }
+
+      function settleRender(generation) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (generation !== renderGeneration) return;
+          restoreViewport();
+          rememberViewport();
+          notifyScrollState();
+          post({ action: "rendered" });
+        }));
+      }
+
+      function setRows(rows, shouldFollowBottom) {
+        rememberViewport();
+        followsBottom = Boolean(shouldFollowBottom);
+        currentRows.clear();
+        for (const row of rows) currentRows.set(row.id, row);
+        const existing = new Map(Array.from(messagesElement.children).map(element =>
+          [element.dataset.rowId, element]
+        ));
+        const requestedIDs = rows.map(row => row.id);
+        const currentIDs = Array.from(messagesElement.children).map(element => element.dataset.rowId);
+        const sameOrder = requestedIDs.length === currentIDs.length
+          && requestedIDs.every((id, index) => id === currentIDs[index]);
+
+        if (sameOrder) {
+          for (const row of rows) {
+            const element = existing.get(row.id);
+            if (element && element.dataset.signature !== rowSignature(row)) {
+              renderRow(element, row);
+            }
+          }
+        } else {
+          const fragment = document.createDocumentFragment();
+          for (const row of rows) {
+            const element = existing.get(row.id) ?? document.createElement("article");
+            existing.delete(row.id);
+            if (element.dataset.signature !== rowSignature(row)) {
+              renderRow(element, row);
+            }
+            fragment.appendChild(element);
+          }
+          messagesElement.replaceChildren(fragment);
+        }
+
+        rowElements.clear();
+        for (const element of messagesElement.children) {
+          rowElements.set(element.dataset.rowId, element);
+        }
+        observeHistoryMarker();
+        renderGeneration += 1;
+        settleRender(renderGeneration);
+      }
+
+      function patchRows(rows) {
+        rememberViewport();
+        for (const row of rows) {
+          currentRows.set(row.id, row);
+          const element = rowElements.get(row.id);
+          if (element && element.dataset.signature !== rowSignature(row)) {
+            renderRow(element, row);
+          }
+        }
+        observeHistoryMarker();
+        renderGeneration += 1;
+        settleRender(renderGeneration);
+      }
+
+      function appendMessage(id, suffix, isStreaming, label) {
+        const row = currentRows.get(id);
+        if (!row || row.kind !== "message") return false;
+        const next = {
+          ...row,
+          markdown: `${row.markdown ?? ""}${suffix ?? ""}`,
+          isStreaming: Boolean(isStreaming),
+          label: label ?? null,
+        };
+        patchRows([next]);
+        return true;
+      }
+
+      function setFollowing(value) {
+        followsBottom = Boolean(value);
+        if (followsBottom) scrollToBottom(false);
+        else rememberViewport();
+      }
+
+      function scrollToBottom(animated) {
+        followsBottom = true;
+        transcript.scrollTo({
+          top: transcript.scrollHeight,
+          behavior: animated ? "smooth" : "instant",
+        });
+      }
+
+      function setTheme(theme, fontScale) {
+        document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
+        document.documentElement.style.setProperty("--font-scale", String(fontScale || 1));
+      }
+
+      messagesElement.addEventListener("click", event => {
+        const button = event.target.closest("button[data-action]");
+        if (button) {
+          const action = button.dataset.action;
+          if (action === "toggle-section") {
+            post({
+              action: "toggleSection",
+              sectionID: button.dataset.sectionId ?? "",
+            });
+            return;
+          }
+          if (action === "toggle-detail") {
+            rememberViewport();
+            const rowElement = button.closest(".transcript-row");
+            const detail = rowElement?.querySelector(".row-detail");
+            if (!rowElement || !detail) return;
+            const expands = detail.hidden;
+            if (expands && !detail.dataset.rendered) {
+              detail.innerHTML = renderMarkdown(
+                currentRows.get(rowElement.dataset.rowId)?.detail ?? ""
+              );
+              detail.dataset.rendered = "true";
+            }
+            detail.hidden = !expands;
+            button.setAttribute("aria-expanded", expands ? "true" : "false");
+            const disclosure = button.querySelector(".disclosure");
+            if (disclosure) disclosure.textContent = expands ? "⌄" : "›";
+            post({ action: "contentExpansion" });
+            return;
+          }
+          if (action === "approval") {
+            post({
+              action: "approval",
+              requestID: button.dataset.requestId ?? "",
+              decision: button.dataset.decision ?? "",
+              optionID: button.dataset.optionId ?? null,
+            });
+            return;
+          }
+
+          const block = button.closest(".rich-block");
+          if (!block) return;
+          rememberViewport();
+          if (action === "collapse") {
+            block.classList.toggle("collapsed");
+            button.textContent = block.classList.contains("collapsed") ? "Expand" : "Collapse";
+            post({ action: "contentExpansion" });
+          } else if (action === "copy-code") {
+            post({ action: "copy", text: block.querySelector("code")?.textContent ?? "" });
+          } else if (action === "copy-table") {
+            const text = Array.from(block.querySelectorAll("tr")).map(row =>
+              Array.from(row.querySelectorAll("th,td")).map(cell => cell.textContent ?? "").join("\t")
+            ).join("\n");
+            post({ action: "copy", text });
+          }
+          return;
+        }
+
+        const link = event.target.closest("a[href]");
+        if (link) {
+          event.preventDefault();
+          const url = safeURL(link.href);
+          if (url) post({ action: "openLink", url });
+        }
+      });
+
+      transcript.addEventListener("wheel", event => {
+        if (Math.abs(event.deltaY) < 0.1) return;
+        const direction = event.deltaY < 0 ? "away" : "towardEnd";
+        if (direction === "away") followsBottom = false;
+        post({ action: "scrollIntent", direction });
+        post({ action: "scrollActivity", active: true });
+        clearTimeout(scrollActivityTimer);
+        scrollActivityTimer = setTimeout(() => {
+          post({ action: "scrollActivity", active: false });
+        }, 130);
+      }, { passive: true });
+
+      transcript.addEventListener("scroll", () => {
+        if (isNearBottom()) followsBottom = true;
+        rememberViewport();
+        notifyScrollState();
+      }, { passive: true });
+
+      new ResizeObserver(() => {
+        requestAnimationFrame(() => {
+          restoreViewport();
+          rememberViewport();
+          notifyScrollState();
+        });
+      }).observe(messagesElement);
+
+      function percentile(sorted, value) {
+        if (!sorted.length) return 0;
+        return sorted[Math.floor((sorted.length - 1) * value)];
+      }
+
+      function runScrollBenchmark(speed, maximumSeconds, label, displayMaximumFPS) {
+        if (benchmarkRunning || transcript.scrollHeight <= transcript.clientHeight) return false;
+        benchmarkRunning = true;
+        followsBottom = false;
+        transcript.scrollTop = transcript.scrollHeight;
+
+        requestAnimationFrame(() => {
+          const timestamps = [];
+          let direction = -1;
+          let previousTimestamp = null;
+          let firstTimestamp = null;
+          let phaseStartedAt = null;
+
+          function finish() {
+            benchmarkRunning = false;
+            const intervals = [];
+            for (let index = 1; index < timestamps.length; index += 1) {
+              intervals.push(timestamps[index] - timestamps[index - 1]);
+            }
+            intervals.sort((left, right) => left - right);
+            const durationMilliseconds = Math.max(0.001, timestamps.at(-1) - timestamps[0]);
+            const expected = 1000 / displayMaximumFPS;
+            const hitchThreshold = expected * 1.5;
+            const lateTime = intervals.reduce((sum, interval) =>
+              interval > hitchThreshold ? sum + interval - expected : sum, 0
+            );
+            post({
+              action: "benchmarkComplete",
+              label: `web-${label}`,
+              displayMaximumFPS,
+              frameCount: timestamps.length,
+              durationSeconds: durationMilliseconds / 1000,
+              averageFPS: intervals.length / (durationMilliseconds / 1000),
+              expectedFrameMilliseconds: expected,
+              p50FrameMilliseconds: percentile(intervals, 0.5),
+              p95FrameMilliseconds: percentile(intervals, 0.95),
+              p99FrameMilliseconds: percentile(intervals, 0.99),
+              maxFrameMilliseconds: intervals.at(-1) ?? 0,
+              hitchCount: intervals.filter(interval => interval > hitchThreshold).length,
+              hitchTimeMillisecondsPerSecond: lateTime / (durationMilliseconds / 1000),
+            });
+          }
+
+          function step(timestamp) {
+            timestamps.push(timestamp);
+            firstTimestamp ??= timestamp;
+            phaseStartedAt ??= timestamp;
+            const elapsed = previousTimestamp == null ? 0 : (timestamp - previousTimestamp) / 1000;
+            previousTimestamp = timestamp;
+            transcript.scrollTop += direction * speed * elapsed;
+
+            const reachedEnd = direction < 0
+              ? transcript.scrollTop <= 0.5
+              : transcript.scrollTop + transcript.clientHeight >= transcript.scrollHeight - 0.5;
+            const phaseTimedOut = timestamp - phaseStartedAt >= maximumSeconds * 1000;
+            if (reachedEnd || phaseTimedOut) {
+              if (direction < 0) {
+                direction = 1;
+                phaseStartedAt = timestamp;
+              } else {
+                finish();
+                return;
+              }
+            }
+            requestAnimationFrame(step);
+          }
+          requestAnimationFrame(step);
+        });
+        return true;
+      }
+
+      window.maiChat = {
+        setRows,
+        patchRows,
+        appendMessage,
+        setFollowing,
+        scrollToBottom,
+        setTheme,
+        runScrollBenchmark,
+      };
+      post({ action: "ready" });
+      if (!window.webkit?.messageHandlers?.maiChat) {
+        setTheme("dark", 1);
+        setRows([
+          { id: "preview-user", kind: "message", role: "user", markdown: "Show the **WebKit transcript** preview.", isStreaming: false },
+          { id: "preview-activity", kind: "turnActivity", title: "Worked for 12s", sectionID: "preview-turn", isExpanded: false },
+          { id: "preview-assistant", kind: "message", role: "assistant", markdown: "## Local preview\n\nSelection spans this prose, lists, and rich blocks.\n\n- Native shell\n- Keyed DOM updates\n- Exact bottom alignment\n\n| Behavior | State |\n|---|---|\n| Selection | Enabled |\n| Horizontal tables | Native WebKit |\n\n```swift\nstruct Transcript {\n    let renderer = \"WebKit\"\n}\n```\n\n> This preview never loads network content.", isStreaming: true, label: "Performance-lab renderer" },
+        ], true);
+      }
+    })();
+  </script>
+</body>
+</html>

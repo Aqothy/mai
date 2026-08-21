@@ -194,6 +194,23 @@ final class ChatBenchmarkModel {
             Self.note("benchmark skipped: no window")
             return nil
         }
+        #if os(macOS)
+            if let webDriver = ChatWebTranscriptBenchmarkRegistry.activeDriver {
+                Self.note("benchmark start: web-\(label)")
+                isRunning = true
+                defer { isRunning = false }
+                guard let report = await webDriver.runScrollBenchmark(
+                    pointsPerSecond: pointsPerSecond,
+                    maximumSweepSeconds: maximumSweepSeconds,
+                    label: label,
+                    displayMaximumFPS: window.screen?.maximumFramesPerSecond ?? 60
+                ) else {
+                    Self.note("benchmark skipped: web transcript was not ready")
+                    return nil
+                }
+                return finish(report)
+            }
+        #endif
         guard let scrollView = Self.transcriptScrollView(in: window) else {
             Self.note("benchmark skipped: no transcript scroll view")
             return nil
@@ -308,6 +325,12 @@ final class ChatBenchmarkModel {
         label: String
     ) -> ChatFramePacingReport? {
         guard let report = monitor.stop(label: label) else { return nil }
+        return finish(report)
+    }
+
+    private func finish(
+        _ report: ChatFramePacingReport
+    ) -> ChatFramePacingReport {
         reports.append(report)
         latestReport = report
         Self.logger.notice("\(report.summary, privacy: .public)")

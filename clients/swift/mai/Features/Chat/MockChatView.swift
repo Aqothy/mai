@@ -72,12 +72,18 @@ struct MockChatView: View {
                 ProgressView("Loading Chat…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                MockChatTimeline(
-                    messages: messages,
-                    scrollState: scrollState,
-                    showsMessageDiagnostics: showsMessageDiagnostics,
-                    showsRawMarkdown: showsRawMarkdown
-                )
+                #if os(macOS)
+                    if ChatWebTranscriptRenderer.isEnabled {
+                        MockChatWebTimeline(
+                            messages: messages,
+                            scrollState: scrollState
+                        )
+                    } else {
+                        nativeTimeline
+                    }
+                #else
+                    nativeTimeline
+                #endif
             }
         }
         .overlay(alignment: .bottom) {
@@ -338,6 +344,15 @@ struct MockChatView: View {
             loadingTask = nil
             isLoading = false
         }
+    }
+
+    private var nativeTimeline: some View {
+        MockChatTimeline(
+            messages: messages,
+            scrollState: scrollState,
+            showsMessageDiagnostics: showsMessageDiagnostics,
+            showsRawMarkdown: showsRawMarkdown
+        )
     }
 
     private func runManualScrollBenchmark(

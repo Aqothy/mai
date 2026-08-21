@@ -137,7 +137,43 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
     private func chatTimeline(
+        thread: Thread,
+        segmentCache: ChatMarkdownSegmentCache,
+        textLayoutStore: ChatTextLayoutStore
+    ) -> some View {
+        #if os(macOS)
+            if ChatWebTranscriptRenderer.isEnabled {
+                ChatWebThreadTimeline(
+                    threadID: thread.id,
+                    sections: ChatTimelineLayout.sections(
+                        timeline: thread.timeline
+                    ),
+                    plan: thread.plan,
+                    latestTurn: thread.latestTurn,
+                    streamingTurnID: Self.streamingTurnID(of: thread),
+                    store: store,
+                    scrollState: scrollState
+                )
+                .id(thread.id)
+            } else {
+                nativeChatTimeline(
+                    thread: thread,
+                    segmentCache: segmentCache,
+                    textLayoutStore: textLayoutStore
+                )
+            }
+        #else
+            nativeChatTimeline(
+                thread: thread,
+                segmentCache: segmentCache,
+                textLayoutStore: textLayoutStore
+            )
+        #endif
+    }
+
+    private func nativeChatTimeline(
         thread: Thread,
         segmentCache: ChatMarkdownSegmentCache,
         textLayoutStore: ChatTextLayoutStore
