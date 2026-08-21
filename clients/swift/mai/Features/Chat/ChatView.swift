@@ -8,6 +8,10 @@ struct ChatView: View {
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
     @State private var scrollState = ChatScrollState()
+    /// Thread whose initial page has been Markdown-primed off the main actor.
+    /// The timeline mounts only after this, so a cold open never parses
+    /// synchronously inside view construction.
+    @State private var warmedThreadID: String?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -54,11 +58,24 @@ struct ChatView: View {
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
                 if let textLayoutStore = store.selectedThreadTextLayoutStore {
-                    chatTimeline(
-                        thread: thread,
-                        segmentCache: segmentCache,
-                        textLayoutStore: textLayoutStore
-                    )
+                    if warmedThreadID == thread.id {
+                        chatTimeline(
+                            thread: thread,
+                            segmentCache: segmentCache,
+                            textLayoutStore: textLayoutStore
+                        )
+                    } else {
+                        ProgressView("Loading Chat…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .task(id: thread.id) {
+                                await warmInitialPage(
+                                    thread: thread,
+                                    segmentCache: segmentCache
+                                )
+                                guard !Task.isCancelled else { return }
+                                warmedThreadID = thread.id
+                            }
+                    }
                 }
             } else if store.selectedThreadID != nil {
                 ProgressView("Loading Chat…")
@@ -137,6 +154,47 @@ struct ChatView: View {
         }
     }
 
+    /// Projects the timeline incrementally: the store records the lowest
+    /// changed entry index per event, so steady-state streaming reprojects
+    /// only the suffix instead of re-walking the whole transcript.
+    private func projectedSections(for thread: Thread)
+        -> [ChatTimelineLayout.Section]
+    {
+        guard let projection = store.selectedThreadTimelineProjection else {
+            return ChatTimelineLayout.sections(timeline: thread.timeline)
+        }
+        let sections = projection.project(
+            timeline: thread.timeline,
+            firstChangedIndex: store.selectedThreadTimelineFirstChangedIndex
+        )
+        store.consumeSelectedThreadTimelineChanges()
+        return sections
+    }
+
+    /// Parses the initial page's Markdown off the main actor before the
+    /// timeline's first body runs. Without this, every settled message on a
+    /// cold open would parse synchronously during view construction.
+    private func warmInitialPage(
+        thread: Thread,
+        segmentCache: ChatMarkdownSegmentCache
+    ) async {
+        let sections = projectedSections(for: thread)
+        let streamingTurnID = Self.streamingTurnID(of: thread)
+        let pageRows = ChatTimelineLayout.rows(
+            sections: ChatTimeline.initialSections(in: sections),
+            streamingTurnID: streamingTurnID,
+            latestTurn: thread.latestTurn,
+            expandedSectionIDs: []
+        )
+        // The rendered rows are only needed by `prepare`'s layout pass; the
+        // pre-mount warm stops at Markdown parsing.
+        _ = await ChatTimeline.primeMarkdownCaches(
+            timelineRows: pageRows,
+            streamingTurnID: streamingTurnID,
+            segmentCache: segmentCache
+        )
+    }
+
     private func chatTimeline(
         thread: Thread,
         segmentCache: ChatMarkdownSegmentCache,
@@ -144,9 +202,7 @@ struct ChatView: View {
     ) -> some View {
         ChatTimeline(
             threadID: thread.id,
-            sections: ChatTimelineLayout.sections(
-                timeline: thread.timeline
-            ),
+            sections: projectedSections(for: thread),
             timelineEntryCount: thread.timeline.count,
             plan: thread.plan,
             latestTurn: thread.latestTurn,
@@ -507,7 +563,7 @@ private final class ChatStreamingContinuity {
     }
 }
 
-private struct ChatTimeline: View {
+struct ChatTimeline: View {
     #if os(macOS)
         // NSTableView resolves prepended row heights over several layout
         // passes, so the trigger arms earlier and small offset jitter is
@@ -1192,37 +1248,10 @@ private struct ChatTimeline: View {
         textLayoutStore: any ChatNativeTextLayoutStore,
         rowWidth: CGFloat
     ) async {
-        await segmentCache.prime(
-            requests: ChatMarkdownSegmentCache.primeRequests(
-                rows: timelineRows,
-                streamingTurnID: streamingTurnID
-            )
-        )
-        guard !Task.isCancelled else { return }
-
-        // Reference definitions and other document-wide Markdown cannot be
-        // source-segmented safely. Resolve those documents once before
-        // splitting their already-parsed blocks into lazy List rows.
-        await ChatMarkdownRenderCache.shared.prime(
-            requests: Self.wholeDocumentMarkdownRenderRequests(
-                in: timelineRows,
-                streamingTurnID: streamingTurnID,
-                segmentCache: segmentCache
-            )
-        )
-        guard !Task.isCancelled else { return }
-
-        let renderedRows = Self.renderRows(
-            timelineRows,
+        let renderedRows = await primeMarkdownCaches(
+            timelineRows: timelineRows,
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache
-        )
-        let markdownRequests = Self.markdownRenderRequests(
-            in: renderedRows,
-            streamingTurnID: streamingTurnID
-        )
-        await ChatMarkdownRenderCache.shared.prime(
-            requests: markdownRequests
         )
         guard !Task.isCancelled else { return }
 
@@ -1243,6 +1272,51 @@ private struct ChatTimeline: View {
                 rowWidth: rowWidth
             )
         )
+    }
+
+    /// Parses every Markdown representation the rows will request — source
+    /// segmentation, whole-document plans, and per-segment plans — off the
+    /// main actor. Called before the timeline's first body so a cold open
+    /// never parses synchronously inside view construction. Returns the
+    /// rendered rows so callers can derive layout requests without building
+    /// them twice.
+    static func primeMarkdownCaches(
+        timelineRows: [ChatTimelineRowModel],
+        streamingTurnID: String?,
+        segmentCache: ChatMarkdownSegmentCache
+    ) async -> [ChatTimelineRenderRow] {
+        await segmentCache.prime(
+            requests: ChatMarkdownSegmentCache.primeRequests(
+                rows: timelineRows,
+                streamingTurnID: streamingTurnID
+            )
+        )
+        guard !Task.isCancelled else { return [] }
+
+        // Reference definitions and other document-wide Markdown cannot be
+        // source-segmented safely. Resolve those documents once before
+        // splitting their already-parsed blocks into lazy List rows.
+        await ChatMarkdownRenderCache.shared.prime(
+            requests: Self.wholeDocumentMarkdownRenderRequests(
+                in: timelineRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
+            )
+        )
+        guard !Task.isCancelled else { return [] }
+
+        let renderedRows = Self.renderRows(
+            timelineRows,
+            streamingTurnID: streamingTurnID,
+            segmentCache: segmentCache
+        )
+        await ChatMarkdownRenderCache.shared.prime(
+            requests: Self.markdownRenderRequests(
+                in: renderedRows,
+                streamingTurnID: streamingTurnID
+            )
+        )
+        return renderedRows
     }
 
     /// Expands oversized user messages and every settled assistant message.
@@ -1839,14 +1913,23 @@ private struct ChatThoughtText: View {
     let streamingText: ThreadStreamingText?
 
     var body: some View {
-        Text(Self.attributed(streamingText?.text ?? fallbackText))
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if let streamingText {
+                ChatSampledStreamingThoughtText(
+                    streamingText: streamingText,
+                    seedText: fallbackText
+                )
+            } else {
+                Text(Self.attributed(fallbackText))
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func attributed(_ text: String) -> AttributedString {
+    static func attributed(_ text: String) -> AttributedString {
         guard
             let parsed = try? AttributedString(
                 markdown: text,
@@ -1856,6 +1939,65 @@ private struct ChatThoughtText: View {
             return AttributedString(text)
         }
         return parsed
+    }
+}
+
+/// Displays one live reasoning buffer with bounded main-thread cost.
+///
+/// Reasoning text can grow to tens of kilobytes across hundreds of streamed
+/// chunks. The previous leaf observed every append and reparsed the whole
+/// accumulated string inline on the main actor per chunk — O(chunks × size),
+/// several milliseconds per chunk at essay scale. This view instead samples
+/// the shared buffer on a fixed cadence:
+///
+/// - The buffer is dereferenced only inside the sampling task, which runs
+///   outside any SwiftUI body evaluation and therefore registers no
+///   observation. Appends stop invalidating anything; the body re-evaluates
+///   at most once per sample.
+/// - The initial display seeds from `seedText` — the settled-payload
+///   snapshot the parent already carries — instead of reading the buffer:
+///   a read in `init` would execute inside the parent's body and register
+///   the parent as an observer, defeating the sampling.
+/// - Polling (rather than observing revisions) is deliberate: any body-level
+///   read of `revision` — including a `.task(id:)` — would re-register
+///   observation and reintroduce per-chunk invalidation. An idle poll wake
+///   is nanoseconds, and only thoughts with a live buffer mount this view;
+///   `.task` cancels sampling when the row disappears or the item settles.
+/// - The 100 ms interval is a presentation-cadence tuning constant, same
+///   category as `ChatTimelineMetrics.nearBottomDistance`: updates below
+///   ~100 ms are imperceptible for growing dimmed secondary text, while the
+///   cap bounds worst-case parse work no matter how fast chunks arrive.
+/// - Terminal state is exact: when the item settles the store clears the
+///   buffer and the parent swaps to the settled payload text, so the final
+///   render never depends on the last sample.
+private struct ChatSampledStreamingThoughtText: View {
+    let streamingText: ThreadStreamingText
+
+    @State private var sampledText: String
+    @State private var sampledRevision = -1
+
+    /// Maximum display lag behind the stream. 100 ms keeps refreshes
+    /// imperceptible while bounding parsing to at most ten passes per
+    /// second regardless of chunk rate.
+    private static let sampleInterval: Duration = .milliseconds(100)
+
+    init(streamingText: ThreadStreamingText, seedText: String) {
+        self.streamingText = streamingText
+        // Plain-value seed: no observable property is touched here.
+        _sampledText = State(initialValue: seedText)
+    }
+
+    var body: some View {
+        Text(ChatThoughtText.attributed(sampledText))
+            .task {
+                while !Task.isCancelled {
+                    if streamingText.revision != sampledRevision {
+                        sampledRevision = streamingText.revision
+                        sampledText = streamingText.text
+                    }
+                    try? await Task.sleep(for: Self.sampleInterval)
+                }
+            }
     }
 }
 

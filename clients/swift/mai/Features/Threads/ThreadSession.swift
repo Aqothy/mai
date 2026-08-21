@@ -23,6 +23,12 @@ struct ThreadSession {
     /// discarded when subscription maintenance evicts this session.
     var markdownSegmentCache = ChatMarkdownSegmentCache()
     var textLayoutStore = ChatTextLayoutStore()
+    /// Incremental section projection for the chat timeline.
+    var timelineProjection = ChatTimelineProjection()
+    /// Lowest timeline index changed since the chat last projected this
+    /// session's timeline. `Int.max` means nothing is pending. Snapshot
+    /// replacement resets it to zero, forcing a full rebuild.
+    var timelineMutationLowerBound = Int.max
     var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
@@ -82,7 +88,9 @@ struct ThreadSession {
         // not per streamed message/item chunk.
         let tracksProtection = Self.canChangeProtection(event.eventType)
         let wasProtected = tracksProtection && isProtected
-        thread?.apply(event)
+        if let changedIndex = thread?.apply(event) {
+            timelineMutationLowerBound = min(timelineMutationLowerBound, changedIndex)
+        }
         lastSequence = event.sequence
         if event.eventType == .threadHistoryReplayCompleted {
             historyRestorePending = false

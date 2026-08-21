@@ -64,6 +64,46 @@ nonisolated enum ChatTimelineLayout {
         var blocks: [Block] = []
         var earliest: Date?
         var latest: Date?
+        /// Entries projected into this section, so incremental projection
+        /// (`ChatTimelineProjection`) knows where each section begins.
+        var entryCount = 0
+    }
+
+    /// Folds one entry into the section list, opening a new section when the
+    /// entry starts a new turn. Shared by full projection and by
+    /// `ChatTimelineProjection`'s suffix reprojection, so both produce
+    /// identical sections.
+    static func project(_ entry: TimelineEntry, into sections: inout [Section]) {
+        let turnID = entryTurnID(entry)
+        let isUserMessage =
+            entry.message?.role == MaidMessageRole.user.rawValue
+
+        var startsNewSection = sections.isEmpty
+        if let current = sections.last, !startsNewSection {
+            if isUserMessage {
+                // A user message starts the next turn unless it was
+                // steering the turn this section already covers.
+                startsNewSection = turnID == nil || turnID != current.turnID
+            } else if let turnID, let currentTurnID = current.turnID {
+                startsNewSection = turnID != currentTurnID
+            }
+        }
+
+        if startsNewSection {
+            sections.append(
+                Section(
+                    id: turnID ?? "local-\(entryIdentity(entry))",
+                    turnID: turnID
+                )
+            )
+        }
+
+        var section = sections.removeLast()
+        if section.turnID == nil {
+            section.turnID = turnID
+        }
+        append(entry, to: &section)
+        sections.append(section)
     }
 
     /// A section entry tagged with whether it can hide behind the turn fold.
@@ -74,40 +114,10 @@ nonisolated enum ChatTimelineLayout {
 
     static func sections(timeline: [TimelineEntry]) -> [Section] {
         var sections: [Section] = []
-
+        sections.reserveCapacity(timeline.count / 4 + 1)
         for entry in timeline {
-            let turnID = entryTurnID(entry)
-            let isUserMessage =
-                entry.message?.role == MaidMessageRole.user.rawValue
-
-            var startsNewSection = sections.isEmpty
-            if let current = sections.last, !startsNewSection {
-                if isUserMessage {
-                    // A user message starts the next turn unless it was
-                    // steering the turn this section already covers.
-                    startsNewSection = turnID == nil || turnID != current.turnID
-                } else if let turnID, let currentTurnID = current.turnID {
-                    startsNewSection = turnID != currentTurnID
-                }
-            }
-
-            if startsNewSection {
-                sections.append(
-                    Section(
-                        id: turnID ?? "local-\(entryIdentity(entry))",
-                        turnID: turnID
-                    )
-                )
-            }
-
-            var section = sections.removeLast()
-            if section.turnID == nil {
-                section.turnID = turnID
-            }
-            append(entry, to: &section)
-            sections.append(section)
+            project(entry, into: &sections)
         }
-
         return sections
     }
 
@@ -144,6 +154,7 @@ nonisolated enum ChatTimelineLayout {
     }
 
     private static func append(_ entry: TimelineEntry, to section: inout Section) {
+        section.entryCount += 1
         switch entry.entryKind {
         case .message:
             guard let message = entry.message else { return }

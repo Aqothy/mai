@@ -6,7 +6,10 @@ extension Thread {
     /// `timeline` is copy-on-write, so call this through your own storage
     /// (`sessionsByID[id]?.thread?.apply(event)`) rather than a temporary copy —
     /// a second reference forces a full array copy per streamed chunk.
-    mutating func apply(_ event: Event) {
+    /// Returns the lowest timeline index the event changed, so presentation
+    /// can reproject incrementally; nil when the timeline was untouched.
+    @discardableResult
+    mutating func apply(_ event: Event) -> Int? {
         ThreadEventReducer.apply(event, to: &self)
     }
 }
@@ -15,10 +18,19 @@ extension Thread {
 /// daemon streams events, not snapshots, so every branch below must match the
 /// Go projection.
 enum ThreadEventReducer {
-    static func apply(_ event: Event, to thread: inout Thread) {
-        guard event.payload.threadID == thread.id else { return }
+    /// Applies `event` and returns the lowest timeline index it changed
+    /// (appends report the index the new entry occupies). Callers feed this
+    /// to `ChatTimelineProjection` as its invalidation watermark.
+    static func apply(_ event: Event, to thread: inout Thread) -> Int? {
+        guard event.payload.threadID == thread.id else { return nil }
         let payload = event.payload
         let occurredAt = event.occurredAt
+        var firstChangedIndex: Int?
+        // Nested so every branch records without unwinding control flow.
+        func note(_ index: Int?) {
+            guard let index else { return }
+            firstChangedIndex = min(firstChangedIndex ?? index, index)
+        }
 
         switch event.eventType {
         case .threadMetaUpdated:
@@ -30,6 +42,7 @@ enum ThreadEventReducer {
             guard let id = payload.messageID, let role = payload.role else { break }
             if let index = thread.timeline.lastIndex(where: { $0.message?.id == id }),
                thread.timeline[index].message != nil {
+                note(index)
                 // Mutate through the storage subscript: a local `var message`
                 // copy gives the accumulated text a second reference, forcing
                 // a full copy of the whole message per streamed chunk.
@@ -45,6 +58,7 @@ enum ThreadEventReducer {
                 }
                 thread.timeline[index].message?.updatedAt = occurredAt
             } else {
+                note(thread.timeline.count)
                 let message = Message(
                     attachments: payload.attachments,
                     createdAt: payload.createdAt ?? occurredAt,
@@ -62,6 +76,7 @@ enum ThreadEventReducer {
             let turnID = nonEmpty(payload.turnID) ?? event.eventID
             if let messageID = payload.messageID,
                let index = thread.timeline.lastIndex(where: { $0.message?.id == messageID }) {
+                note(index)
                 thread.timeline[index].message?.turnID = turnID
             }
             // A turn.start for the already-running turn is steering: the same
@@ -143,6 +158,7 @@ enum ThreadEventReducer {
             guard var item = payload.item else { break }
             if let index = thread.timeline.lastIndex(where: { $0.item?.id == item.id }),
                let old = thread.timeline[index].item {
+                note(index)
                 item.payload = mergedItemPayload(old: old, incoming: item)
                 item.createdAt = old.createdAt
                 if nonEmpty(item.kind) == nil { item.kind = old.kind }
@@ -157,6 +173,7 @@ enum ThreadEventReducer {
                 item.updatedAt = occurredAt
                 thread.timeline[index].item = item
             } else {
+                note(thread.timeline.count)
                 item.payload = mergedItemPayload(old: nil, incoming: item)
                 if nonEmpty(item.status) == nil { item.status = MaidItemStatus.inProgress.rawValue }
                 item.textDelta = nil
@@ -176,6 +193,7 @@ enum ThreadEventReducer {
             let status = resolved ? MaidApprovalStatus.resolved : .pending
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == update.requestID }),
                var approval = thread.timeline[index].approval {
+                note(index)
                 // Reopening restores the request's arguments and options; a
                 // resolution leaves them as they were.
                 if !resolved {
@@ -189,6 +207,7 @@ enum ThreadEventReducer {
                 approval.updatedAt = occurredAt
                 thread.timeline[index].approval = approval
             } else {
+                note(thread.timeline.count)
                 let approval = Approval(args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt)
                 thread.timeline.append(TimelineEntry(approval: approval, item: nil, kind: MaidTimelineEntryKind.approval.rawValue, message: nil))
             }
@@ -196,6 +215,7 @@ enum ThreadEventReducer {
         case .threadApprovalResponseRequested:
             guard let requestID = payload.requestID else { break }
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == requestID }) {
+                note(index)
                 thread.timeline[index].approval?.decision = payload.decision
                 thread.timeline[index].approval?.optionID = payload.optionID
                 thread.timeline[index].approval?.updatedAt = occurredAt
@@ -225,6 +245,7 @@ enum ThreadEventReducer {
         default:
             break
         }
+        return firstChangedIndex
     }
 
     private static func applyProviderSelection(_ payload: EventPayload, to thread: inout Thread) {
