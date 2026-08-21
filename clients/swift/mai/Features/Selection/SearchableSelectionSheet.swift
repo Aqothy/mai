@@ -118,5 +118,8 @@ struct SearchableSelectionSheet: View {
         }
         .tint(.accentColor)
         .foregroundStyle(.primary)
+        #if os(macOS)
+            .frame(minWidth: 440, minHeight: 360)
+        #endif
     }
 }
