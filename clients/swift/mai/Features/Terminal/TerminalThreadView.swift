@@ -27,7 +27,7 @@ struct TerminalThreadView: View {
                 .padding(.bottom)
         }
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
     }
 }
 

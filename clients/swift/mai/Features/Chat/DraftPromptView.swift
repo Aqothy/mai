@@ -11,7 +11,7 @@ struct DraftPromptView: View {
             // view in draft
             ScrollView {
             }
-            .scrollDismissesKeyboard(.interactively)
+            .dismissesKeyboardInteractively()
 
             VStack {
                 if model.hasWorkingDirectory {

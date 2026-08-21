@@ -10,11 +10,13 @@ final class ChatScrollState {
     var isNearBottom = true
     private(set) var shouldFollowBottom = true
     private var isEndZoneVisible = true
+    private var resumesWhenEndBecomesVisible = true
     private(set) var isUserScrolling = false
     private(set) var bottomScrollRequest = BottomScrollRequest()
 
     func requestScrollToBottom(animated: Bool = false) {
         shouldFollowBottom = true
+        resumesWhenEndBecomesVisible = true
         bottomScrollRequest = BottomScrollRequest(
             count: bottomScrollRequest.count + 1,
             animated: animated
@@ -26,15 +28,11 @@ final class ChatScrollState {
             isEndZoneVisible = isVisible
         }
 
-        if isUserScrolling {
-            if isNearBottom != isVisible {
-                isNearBottom = isVisible
-            }
-        } else if isVisible {
+        if isVisible {
             if !isNearBottom {
                 isNearBottom = true
             }
-            if !shouldFollowBottom {
+            if resumesWhenEndBecomesVisible, !shouldFollowBottom {
                 shouldFollowBottom = true
             }
         } else if !shouldFollowBottom, isNearBottom {
@@ -49,16 +47,17 @@ final class ChatScrollState {
     /// yank the viewport. Following resumes via `noteEndVisibility` if the
     /// end of the timeline is still on screen afterwards.
     func noteContentExpansion() {
+        resumesWhenEndBecomesVisible = true
         if shouldFollowBottom {
             shouldFollowBottom = false
         }
     }
 
-    /// Keyboard and accessibility scrolling do not always enter a user-driven
-    /// `ScrollPhase`. Geometry can still prove that the viewport moved toward
-    /// older content, so record the same user intent without leaving the state
-    /// stuck in an active-scroll phase.
+    /// Records explicit native input toward older content without leaving the
+    /// state stuck in an active-scroll phase. Layout geometry alone must not
+    /// call this: row-height correction can move the viewport without intent.
     func noteScrollAwayFromEnd() {
+        resumesWhenEndBecomesVisible = false
         if isNearBottom {
             isNearBottom = false
         }
@@ -67,25 +66,40 @@ final class ChatScrollState {
         }
     }
 
+    /// Records an explicit keyboard request toward the end without jumping.
+    /// Visibility restores following only if the native scroll actually
+    /// reaches the end.
+    func noteScrollTowardEnd() {
+        resumesWhenEndBecomesVisible = true
+    }
+
     func noteUserScrollActivity(isActive: Bool) {
         if isUserScrolling != isActive {
             isUserScrolling = isActive
         }
         if isActive {
+            resumesWhenEndBecomesVisible = false
             if shouldFollowBottom {
                 shouldFollowBottom = false
-            }
-        } else if isEndZoneVisible {
-            if !isNearBottom {
-                isNearBottom = true
-            }
-            if !shouldFollowBottom {
-                shouldFollowBottom = true
             }
         }
     }
 
+    /// Restores automatic following after keyboard or accessibility scrolling
+    /// reaches the end without participating in a live-scroll phase.
+    func noteScrollReturnedToEnd() {
+        resumesWhenEndBecomesVisible = true
+        isEndZoneVisible = true
+        if !isNearBottom {
+            isNearBottom = true
+        }
+        if !shouldFollowBottom {
+            shouldFollowBottom = true
+        }
+    }
+
     func reset() {
+        resumesWhenEndBecomesVisible = true
         if !isNearBottom {
             isNearBottom = true
         }

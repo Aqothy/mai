@@ -1,6 +1,11 @@
 import Foundation
 @preconcurrency import Highlighter
-import UIKit
+
+#if os(macOS)
+    import AppKit
+#else
+    import UIKit
+#endif
 
 nonisolated enum ChatCodeHighlightTheme: String, Hashable, Sendable {
     case light

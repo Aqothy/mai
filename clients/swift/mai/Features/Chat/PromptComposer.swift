@@ -1,7 +1,10 @@
 import PhotosUI
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
+
+#if os(iOS)
+    import UIKit
+#endif
 
 struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -89,12 +92,16 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                     if showsStop {
                         stop()
                     } else {
-                        UIApplication.shared.sendAction(
-                            #selector(UIResponder.resignFirstResponder),
-                            to: nil,
-                            from: nil,
-                            for: nil
-                        )
+                        #if os(iOS)
+                            // Dismiss the software keyboard before sending;
+                            // macOS has no software keyboard, so nothing to do.
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder),
+                                to: nil,
+                                from: nil,
+                                for: nil
+                            )
+                        #endif
                         send()
                     }
                 } label: {
@@ -263,8 +270,13 @@ struct ComposerAddMenu: View {
 
     @State private var isImporterPresented = false
     @State private var isPhotosPickerPresented = false
-    @State private var isCameraPresented = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
+
+    // The camera entry point is iOS-only; macOS has no UIImagePickerController
+    // equivalent here, so the menu simply omits the item.
+    #if os(iOS)
+        @State private var isCameraPresented = false
+    #endif
 
     var body: some View {
         Menu {
@@ -285,13 +297,15 @@ struct ComposerAddMenu: View {
                 }
                 .disabled(isImageAttachmentDisabled)
 
-                Button("Camera", systemImage: "camera") {
-                    isCameraPresented = true
-                }
-                .disabled(
-                    isImageAttachmentDisabled
-                        || !UIImagePickerController.isSourceTypeAvailable(.camera)
-                )
+                #if os(iOS)
+                    Button("Camera", systemImage: "camera") {
+                        isCameraPresented = true
+                    }
+                    .disabled(
+                        isImageAttachmentDisabled
+                            || !UIImagePickerController.isSourceTypeAvailable(.camera)
+                    )
+                #endif
             }
 
             if !commands.isEmpty {
@@ -342,67 +356,71 @@ struct ComposerAddMenu: View {
             selectedPhotos = []
             addPhotos(photos)
         }
-        .fullScreenCover(isPresented: $isCameraPresented) {
-            ComposerCameraPicker {
-                isCameraPresented = false
-                addCameraImage(ChatComposerThumbnail(image: $0))
-            } cancel: {
-                isCameraPresented = false
+        #if os(iOS)
+            .fullScreenCover(isPresented: $isCameraPresented) {
+                ComposerCameraPicker {
+                    isCameraPresented = false
+                    addCameraImage(ChatComposerThumbnail(image: $0))
+                } cancel: {
+                    isCameraPresented = false
+                }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
-        }
+        #endif
     }
 }
 
-private struct ComposerCameraPicker: UIViewControllerRepresentable {
-    let capture: (UIImage) -> Void
-    let cancel: () -> Void
+#if os(iOS)
+    private struct ComposerCameraPicker: UIViewControllerRepresentable {
+        let capture: (UIImage) -> Void
+        let cancel: () -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let controller = UIImagePickerController()
-        controller.sourceType = .camera
-        controller.mediaTypes = [UTType.image.identifier]
-        controller.cameraCaptureMode = .photo
-        controller.delegate = context.coordinator
-        return controller
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIImagePickerController,
-        context: Context
-    ) {
-        context.coordinator.parent = self
-    }
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate,
-        UINavigationControllerDelegate
-    {
-        var parent: ComposerCameraPicker
-
-        init(parent: ComposerCameraPicker) {
-            self.parent = parent
+        func makeCoordinator() -> Coordinator {
+            Coordinator(parent: self)
         }
 
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        func makeUIViewController(context: Context) -> UIImagePickerController {
+            let controller = UIImagePickerController()
+            controller.sourceType = .camera
+            controller.mediaTypes = [UTType.image.identifier]
+            controller.cameraCaptureMode = .photo
+            controller.delegate = context.coordinator
+            return controller
+        }
+
+        func updateUIViewController(
+            _ uiViewController: UIImagePickerController,
+            context: Context
         ) {
-            guard let image = info[.originalImage] as? UIImage else {
-                parent.cancel()
-                return
-            }
-            parent.capture(image)
+            context.coordinator.parent = self
         }
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.cancel()
+        final class Coordinator: NSObject, UIImagePickerControllerDelegate,
+            UINavigationControllerDelegate
+        {
+            var parent: ComposerCameraPicker
+
+            init(parent: ComposerCameraPicker) {
+                self.parent = parent
+            }
+
+            func imagePickerController(
+                _ picker: UIImagePickerController,
+                didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+            ) {
+                guard let image = info[.originalImage] as? UIImage else {
+                    parent.cancel()
+                    return
+                }
+                parent.capture(image)
+            }
+
+            func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+                parent.cancel()
+            }
         }
     }
-}
+#endif
 
 #if DEBUG
     #Preview("Composer Add Menu") {
@@ -436,7 +454,7 @@ private struct ComposerCameraPicker: UIViewControllerRepresentable {
                 ChatPendingAttachment(
                     name: "Example photo",
                     thumbnail: ChatComposerThumbnail(
-                        image: UIImage(systemName: "photo.fill") ?? UIImage()
+                        image: chatPreviewSymbolImage("photo.fill")
                     )
                 )
             ],

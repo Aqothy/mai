@@ -25,16 +25,30 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
-            ScrollView(.horizontal) {
-                Text(displayedCode)
-                    .font(.callout.monospaced())
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-            }
-            .scrollIndicators(.visible, axes: .horizontal)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            // On macOS, a nested SwiftUI horizontal ScrollView traps vertical
+            // wheel gestures; the AppKit container passes them through to the
+            // enclosing chat timeline.
+            #if os(macOS)
+                ChatMacHorizontalScrollView {
+                    Text(displayedCode)
+                        .font(.callout.monospaced())
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                }
+            #else
+                ScrollView(.horizontal) {
+                    Text(displayedCode)
+                        .font(.callout.monospaced())
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                }
+                .scrollIndicators(.visible, axes: .horizontal)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(

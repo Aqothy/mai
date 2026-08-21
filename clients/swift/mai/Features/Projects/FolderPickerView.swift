@@ -82,7 +82,7 @@ struct FolderPickerView: View {
                 }
             }
             .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(

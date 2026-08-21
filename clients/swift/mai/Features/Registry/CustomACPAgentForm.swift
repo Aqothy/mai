@@ -62,7 +62,7 @@ struct CustomACPAgentForm: View {
         }
         .onSubmit { isTextFieldFocused = false }
         .navigationTitle("Add Custom Agent")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .interactiveDismissDisabled(model.isSaving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

@@ -49,7 +49,7 @@ struct SessionImportView: View {
             SessionImportStatusView(model: model)
         }
         .navigationTitle("Import Session")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Refresh", systemImage: "arrow.clockwise") {

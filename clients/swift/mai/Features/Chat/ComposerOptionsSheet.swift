@@ -82,7 +82,7 @@ struct ComposerOptionsSheet: View {
             }
             .formStyle(.grouped)
             .navigationTitle("Advanced")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {

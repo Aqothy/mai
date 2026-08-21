@@ -4,10 +4,17 @@ import ImageIO
 import Observation
 import PhotosUI
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
-typealias PlatformImage = UIImage
+#if os(macOS)
+    import AppKit
+
+    typealias PlatformImage = NSImage
+#else
+    import UIKit
+
+    typealias PlatformImage = UIImage
+#endif
 
 struct ChatPendingAttachment: Identifiable {
     let id: UUID
@@ -253,7 +260,11 @@ final class ChatComposerThumbnail: @unchecked Sendable {
 
 extension Image {
     init(platformImage: PlatformImage) {
-        self.init(uiImage: platformImage)
+        #if os(macOS)
+            self.init(nsImage: platformImage)
+        #else
+            self.init(uiImage: platformImage)
+        #endif
     }
 }
 
@@ -317,7 +328,14 @@ enum ChatAttachmentLoader {
                 else {
                     throw ChatAttachmentLoadingError.invalidImage(name: url.lastPathComponent)
                 }
-                let platformImage = UIImage(cgImage: image)
+                #if os(macOS)
+                    let platformImage = NSImage(
+                        cgImage: image,
+                        size: NSSize(width: image.width, height: image.height)
+                    )
+                #else
+                    let platformImage = UIImage(cgImage: image)
+                #endif
                 return ChatComposerThumbnail(image: platformImage)
             }
         }.value
@@ -393,7 +411,14 @@ enum ChatAttachmentLoader {
             else {
                 throw ChatAttachmentLoadingError.invalidImage(name: name)
             }
-            let platformImage = UIImage(cgImage: image)
+            #if os(macOS)
+                let platformImage = NSImage(
+                    cgImage: image,
+                    size: NSSize(width: image.width, height: image.height)
+                )
+            #else
+                let platformImage = UIImage(cgImage: image)
+            #endif
             return ChatLoadedImageAttachment(
                 data: data.base64EncodedString(),
                 mimeType: "image/jpeg",
@@ -404,7 +429,16 @@ enum ChatAttachmentLoader {
     }
 
     nonisolated private static func jpegData(from image: PlatformImage) -> Data? {
-        image.jpegData(compressionQuality: 0.92)
+        #if os(macOS)
+            // NSImage has no jpegData(compressionQuality:); encode through a
+            // bitmap rep of the underlying CGImage instead.
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { return nil }
+            let rep = NSBitmapImageRep(cgImage: cgImage)
+            return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
+        #else
+            return image.jpegData(compressionQuality: 0.92)
+        #endif
     }
 
     nonisolated private static func withSecurityScope<Value>(
@@ -495,13 +529,24 @@ private enum ChatAttachmentLoadingError: LocalizedError {
 }
 
 #if DEBUG
+    /// SF Symbol placeholder for composer previews; `#if` cannot appear inside
+    /// an expression, so the platform branch lives in this shared helper.
+    func chatPreviewSymbolImage(_ systemName: String) -> PlatformImage {
+        #if os(macOS)
+            return NSImage(systemSymbolName: systemName, accessibilityDescription: nil)
+                ?? NSImage()
+        #else
+            return UIImage(systemName: systemName) ?? UIImage()
+        #endif
+    }
+
     #Preview("Composer Attachments") {
         ChatComposerAttachmentStrip(
             attachments: [
                 ChatPendingAttachment(
                     name: "Example photo",
                     thumbnail: ChatComposerThumbnail(
-                        image: UIImage(systemName: "photo.fill") ?? UIImage()
+                        image: chatPreviewSymbolImage("photo.fill")
                     )
                 )
             ],

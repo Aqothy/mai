@@ -92,10 +92,12 @@ type assistantFlush struct {
 	attachments []provider.Attachment
 }
 
-// textFlushInterval is the cadence of the single ingestion-owned flush ticker.
-// Semantic boundaries still flush immediately. A shared tick keeps concurrent
-// providers bounded without per-stream goroutines or timers.
-var textFlushInterval = 200 * time.Millisecond
+// textFlushInterval is the transport/persistence coalescing cadence, not the
+// UI render cadence. Fifty milliseconds keeps first paint and incremental
+// layout responsive while bounding projection, persistence, and multi-client
+// fan-out to 20 text events per second per active ingestion loop. Semantic
+// boundaries still flush immediately.
+var textFlushInterval = 50 * time.Millisecond
 
 func (t *turnState) streamByKey(key string) *assistantStream {
 	for _, stream := range t.assistants {

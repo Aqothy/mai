@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 /// Rows for the unified Threads list: agent chats and terminals merged in
@@ -125,3 +126,5 @@ private struct IOSTerminalRowButton: View {
         )
     }
 }
+
+#endif

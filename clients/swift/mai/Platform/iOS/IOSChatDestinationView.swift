@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSChatDestinationView: View {
@@ -49,3 +50,5 @@ struct IOSChatDestinationView: View {
         }
     }
 }
+
+#endif

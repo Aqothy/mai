@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSThreadListView: View {
@@ -248,4 +249,6 @@ private struct IOSProjectSectionHeader: View {
             )
         }
     }
+#endif
+
 #endif

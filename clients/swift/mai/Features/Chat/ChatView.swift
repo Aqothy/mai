@@ -97,7 +97,7 @@ struct ChatView: View {
             )
         )
         .navigationTitle(selectedThreadTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .onChange(of: store.selectedThreadID, initial: true) {
             previousThreadID,
             threadID in
@@ -197,6 +197,10 @@ private struct ChatTimelinePreparationKey: Equatable {
     let streamingTurnID: String?
     let rowWidth: CGFloat
     let expandedSectionIDs: Set<String>
+    /// Loading earlier history changes which rows exist without changing the
+    /// counts above; preparation must re-run over the widened window or a
+    /// later width change only prepares the rows captured at the old window.
+    let oldestLoadedSectionID: String?
 }
 
 /// Keeps one composer identity across draft-to-thread transitions.
@@ -377,7 +381,7 @@ private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .safeAreaBar(edge: .bottom, spacing: 0) {
                     composer
@@ -405,11 +409,16 @@ final class ChatTimelineFoldModel {
 }
 
 /// A disclosure should grow in place without an animated layout transition.
+/// On macOS, List's automatic offset adjustment can move the viewport when a
+/// variable-height row changes internally, so it is disabled for the change.
 private func withChatContentExpansionTransaction(
     _ changes: () -> Void
 ) {
     var transaction = Transaction()
     transaction.disablesAnimations = true
+    #if os(macOS)
+        transaction.scrollContentOffsetAdjustmentBehavior = .disabled
+    #endif
     withTransaction(transaction, changes)
 }
 
@@ -420,11 +429,20 @@ nonisolated enum ChatContentMetrics {
 }
 
 nonisolated enum ChatTimelineMetrics {
+    /// Hysteresis for follow state and the jump-to-bottom control. Native
+    /// bottom alignment itself still pins to the exact content end.
+    static let nearBottomDistance: CGFloat = 24
     static let rowHorizontalInset: CGFloat = 16
     static let userBubbleHorizontalPadding: CGFloat = 14
     static let userBubbleVerticalPadding: CGFloat = 10
     static let interSegmentSpacing: CGFloat = 8
     static let historyMarkerHeight: CGFloat = 1
+    #if os(macOS)
+        /// Keep the pagination marker within AppKit's valid row-height range.
+        static let minimumListRowHeight: CGFloat = 1
+    #else
+        static let minimumListRowHeight: CGFloat = 0
+    #endif
 
     static func rowWidth(in containerWidth: CGFloat) -> CGFloat {
         min(
@@ -451,9 +469,52 @@ nonisolated enum ChatTimelineMetrics {
     }
 }
 
+/// Bridges the gap between a turn finishing and its settled presentation
+/// being ready. Switching a just-finished message to the settled path with
+/// cold caches parses and lays out its entire text synchronously on the main
+/// thread in one frame; instead the message keeps its streaming presentation
+/// until the preparation task has primed everything off the main actor.
+///
+/// Plain non-observable storage: `body` records the live turn here without
+/// triggering another invalidation.
+private final class ChatStreamingContinuity {
+    private var lastStreamingTurnID: String?
+    private var preparedSettledTurnID: String?
+
+    /// Records the live turn and answers which finished turn should keep its
+    /// streaming presentation. Lingers only for the latest turn, and only
+    /// until its settled preparation completes; any other transition (thread
+    /// restored idle, a newer turn already running) uses the settled path.
+    func settlingTurnID(
+        streamingTurnID: String?,
+        latestTurnID: String?
+    ) -> String? {
+        if let streamingTurnID {
+            lastStreamingTurnID = streamingTurnID
+            return nil
+        }
+        guard let lastStreamingTurnID,
+            lastStreamingTurnID == latestTurnID,
+            lastStreamingTurnID != preparedSettledTurnID
+        else { return nil }
+        return lastStreamingTurnID
+    }
+
+    func noteSettledPreparation(turnID: String) {
+        preparedSettledTurnID = turnID
+    }
+}
+
 private struct ChatTimeline: View {
-    static let nearBottomDistance: CGFloat = 24
-    private static let historyLoadDistance: CGFloat = 1
+    #if os(macOS)
+        // NSTableView resolves prepended row heights over several layout
+        // passes, so the trigger arms earlier and small offset jitter is
+        // ignored when deciding that the user scrolled away from the end.
+        private static let historyLoadDistance: CGFloat = 240
+    #else
+        private static let historyLoadDistance: CGFloat = 1
+    #endif
+    private static let scrollMovementTolerance: CGFloat = 0.5
 
     let threadID: String
     let sections: [ChatTimelineLayout.Section]
@@ -476,6 +537,18 @@ private struct ChatTimeline: View {
     @State private var pendingPrependAnchorID: String?
     @State private var rowWidth: CGFloat = 0
 
+    #if os(macOS)
+        @State private var macScrollPositionPreserver =
+            ChatMacScrollPositionPreserver()
+    #else
+        @State private var bottomFollower = ChatListBottomFollower()
+    #endif
+
+    @State private var streamingContinuity = ChatStreamingContinuity()
+    /// Bumped when a finished turn's settled preparation lands, so `body`
+    /// re-evaluates and swaps the lingering message to its settled rows.
+    @State private var settledPreparationGeneration = 0
+
     /// Retained by the thread session across short navigation round trips.
     let textLayoutStore: ChatTextLayoutStore
 
@@ -484,15 +557,23 @@ private struct ChatTimeline: View {
             in: sections,
             oldestSectionID: oldestLoadedSectionID
         )
+        // Read so the settled-preparation bump re-evaluates this body; the
+        // continuity object itself is deliberately not observable.
+        let _ = settledPreparationGeneration
+        let settlingTurnID = streamingContinuity.settlingTurnID(
+            streamingTurnID: streamingTurnID,
+            latestTurnID: latestTurn?.turnID
+        )
+        let effectiveStreamingTurnID = streamingTurnID ?? settlingTurnID
         let timelineRows = ChatTimelineLayout.rows(
             sections: loadedSections,
-            streamingTurnID: streamingTurnID,
+            streamingTurnID: effectiveStreamingTurnID,
             latestTurn: latestTurn,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         let rows = Self.renderRows(
             timelineRows,
-            streamingTurnID: streamingTurnID,
+            streamingTurnID: effectiveStreamingTurnID,
             segmentCache: segmentCache
         )
         let hasEarlierSections = loadedSections.first?.id != sections.first?.id
@@ -501,6 +582,7 @@ private struct ChatTimeline: View {
             List {
                 timelineContent(
                     rows: rows,
+                    effectiveStreamingTurnID: effectiveStreamingTurnID,
                     hasEarlierSections: hasEarlierSections,
                     showsHistoryMarker: true,
                     showsPlan: !hasEarlierSections
@@ -508,13 +590,60 @@ private struct ChatTimeline: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 0)
-            .scrollDismissesKeyboard(.interactively)
+            .environment(
+                \.defaultMinListRowHeight,
+                ChatTimelineMetrics.minimumListRowHeight
+            )
+            .dismissesKeyboardInteractively()
+            #if os(macOS)
+                .opacity(isAwaitingInitialBottom ? 0 : 1)
+                .background {
+                    MacListTableViewIntrospector { tableView in
+                        macScrollPositionPreserver.configure(
+                            isBottomFollowingEnabled: {
+                                scrollState.shouldFollowBottom
+                            },
+                            noteUserScrollActivity: { isActive in
+                                scrollState.noteUserScrollActivity(
+                                    isActive: isActive
+                                )
+                            },
+                            noteUserReachedEnd: {
+                                scrollState.noteScrollReturnedToEnd()
+                            },
+                            noteKeyboardScrollIntent: { towardEnd in
+                                if towardEnd {
+                                    scrollState.noteScrollTowardEnd()
+                                } else {
+                                    scrollState.noteScrollAwayFromEnd()
+                                }
+                            }
+                        )
+                        macScrollPositionPreserver.attach(to: tableView)
+                    }
+                    .allowsHitTesting(false)
+                }
+            #else
+                .background {
+                    ChatListCollectionViewIntrospector { collectionView in
+                        bottomFollower.attach(to: collectionView)
+                    }
+                    .allowsHitTesting(false)
+                }
+            #endif
             .modifier(
                 ChatBottomScrollRequestModifier(
                     scrollState: scrollState,
                     proxy: proxy,
-                    bottomID: Self.bottomID
+                    bottomID: Self.bottomID,
+                    pinToBottom: { animated in
+                        #if os(macOS)
+                            return macScrollPositionPreserver.pinToBottom()
+                        #else
+                            guard !animated else { return false }
+                            return bottomFollower.pinToBottom()
+                        #endif
+                    }
                 )
             )
             .overlay(alignment: .top) {
@@ -535,51 +664,118 @@ private struct ChatTimeline: View {
                 guard historyLoadRequest > 0, isTimelineNearTop,
                     !isAwaitingInitialBottom
                 else { return }
-                await loadEarlier(
-                    loadedSections: loadedSections,
-                    renderedRows: rows,
-                    preservesPosition: !isViewportNearBottom
-                        || !scrollState.shouldFollowBottom
-                )
+                #if os(macOS)
+                    await loadEarlier(
+                        loadedSections: loadedSections,
+                        hasEarlierSections: hasEarlierSections
+                    )
+                #else
+                    await loadEarlier(
+                        loadedSections: loadedSections,
+                        renderedRows: rows,
+                        preservesPosition: !isViewportNearBottom
+                            || !scrollState.shouldFollowBottom
+                    )
+                #endif
             }
             .task(
                 id: ChatTimelinePreparationKey(
                     timelineEntryCount: timelineEntryCount,
                     streamingTurnID: streamingTurnID,
                     rowWidth: rowWidth,
-                    expandedSectionIDs: foldModel.expandedSectionIDs
+                    expandedSectionIDs: foldModel.expandedSectionIDs,
+                    oldestLoadedSectionID: loadedSections.first?.id
                 )
             ) {
                 guard rowWidth > 0 else { return }
+                // A real-thread benchmark waits for this preparation pass so
+                // sweeps measure the production steady state.
+                let signalsBenchmarkWarm =
+                    ChatBenchmarkAutoRun.plan != nil
+                    && ChatBenchmarkAutoRun.threadTitleQuery != nil
+                if signalsBenchmarkWarm {
+                    ChatBenchmarkAutoRun.noteTranscriptWarmStarted()
+                }
+                // While a finished turn lingers in its streaming presentation,
+                // prepare the settled rows it is about to swap to.
+                let preparationRows = settlingTurnID == nil
+                    ? timelineRows
+                    : ChatTimelineLayout.rows(
+                        sections: loadedSections,
+                        streamingTurnID: streamingTurnID,
+                        latestTurn: latestTurn,
+                        expandedSectionIDs: foldModel.expandedSectionIDs
+                    )
                 await Self.prepare(
-                    timelineRows: timelineRows,
+                    timelineRows: preparationRows,
                     streamingTurnID: streamingTurnID,
                     segmentCache: segmentCache,
                     textLayoutStore: textLayoutStore,
                     rowWidth: rowWidth
                 )
+                if signalsBenchmarkWarm, !Task.isCancelled {
+                    ChatBenchmarkAutoRun.noteTranscriptWarm()
+                }
+                guard !Task.isCancelled, let settlingTurnID else { return }
+                streamingContinuity.noteSettledPreparation(
+                    turnID: settlingTurnID
+                )
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    settledPreparationGeneration &+= 1
+                }
             }
             .onAppear {
                 if oldestLoadedSectionID == nil {
-                    oldestLoadedSectionID = loadedSections.first?.id
+                    // A real-thread benchmark sweeps the whole transcript;
+                    // mounting it fully up front keeps history pagination
+                    // from re-anchoring the viewport mid-measurement.
+                    oldestLoadedSectionID =
+                        ChatBenchmarkAutoRun.threadTitleQuery != nil
+                        ? sections.first?.id
+                        : loadedSections.first?.id
                 }
                 isAwaitingInitialBottom = true
-                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                #if os(macOS)
+                    macScrollPositionPreserver.beginInitialBottomAlignment {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            isAwaitingInitialBottom = false
+                        }
+                    }
+                #else
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                #endif
             }
-            .onScrollGeometryChange(for: ChatScrollGeometry.self) {
-                geometry in
-                Self.scrollGeometry(from: geometry)
-            } action: { oldGeometry, newGeometry in
-                handleScrollGeometryChange(
-                    from: oldGeometry,
-                    to: newGeometry,
-                    hasEarlierSections: hasEarlierSections,
-                    proxy: proxy
-                )
-            }
-            .onScrollPhaseChange { oldPhase, newPhase in
-                handleScrollPhaseChange(from: oldPhase, to: newPhase)
-            }
+            #if os(macOS)
+                .onScrollGeometryChange(for: ChatMacScrollGeometry.self) {
+                    geometry in
+                    Self.macScrollGeometry(from: geometry)
+                } action: { oldGeometry, newGeometry in
+                    handleMacScrollGeometryChange(
+                        from: oldGeometry,
+                        to: newGeometry,
+                        hasEarlierSections: hasEarlierSections
+                    )
+                }
+            #else
+                .onScrollGeometryChange(for: ChatScrollGeometry.self) {
+                    geometry in
+                    Self.scrollGeometry(from: geometry)
+                } action: { oldGeometry, newGeometry in
+                    handleScrollGeometryChange(
+                        from: oldGeometry,
+                        to: newGeometry,
+                        hasEarlierSections: hasEarlierSections,
+                        proxy: proxy
+                    )
+                }
+                .onScrollPhaseChange { oldPhase, newPhase in
+                    handleScrollPhaseChange(from: oldPhase, to: newPhase)
+                }
+            #endif
         }
     }
 
@@ -595,12 +791,79 @@ private struct ChatTimeline: View {
                     <= Self.historyLoadDistance,
             isNearBottom: hasContentMetrics
                 && geometry.contentSize.height + geometry.contentInsets.bottom
-                    - geometry.visibleRect.maxY <= Self.nearBottomDistance,
+                    - geometry.visibleRect.maxY
+                    <= ChatTimelineMetrics.nearBottomDistance,
             containerHeight: geometry.containerSize.height,
             bottomInset: geometry.contentInsets.bottom,
-            contentHeight: geometry.contentSize.height
+            contentHeight: geometry.contentSize.height,
+            contentOffsetY: geometry.contentOffset.y
         )
     }
+
+    #if os(macOS)
+        /// Only semantic boundaries cross from the 120 Hz AppKit scroll path
+        /// into SwiftUI. Per-frame offsets, bottom pinning, and prepend
+        /// anchoring stay in the native coordinator.
+        private static func macScrollGeometry(
+            from geometry: ScrollGeometry
+        ) -> ChatMacScrollGeometry {
+            let hasContentMetrics =
+                geometry.containerSize.height > 0
+                && geometry.contentSize.height > 0
+            return ChatMacScrollGeometry(
+                isNearTop: hasContentMetrics
+                    && geometry.visibleRect.minY + geometry.contentInsets.top
+                        <= Self.historyLoadDistance,
+                isNearBottom: hasContentMetrics
+                    && geometry.contentSize.height
+                        + geometry.contentInsets.bottom
+                        - geometry.visibleRect.maxY
+                        <= ChatTimelineMetrics.nearBottomDistance,
+                containerWidth: geometry.containerSize.width.rounded(),
+                containerHeight: geometry.containerSize.height.rounded(),
+                bottomInset: geometry.contentInsets.bottom.rounded(),
+                contentHeight: geometry.contentSize.height.rounded()
+            )
+        }
+
+        private func handleMacScrollGeometryChange(
+            from oldGeometry: ChatMacScrollGeometry,
+            to newGeometry: ChatMacScrollGeometry,
+            hasEarlierSections: Bool
+        ) {
+            let isNearTop = hasEarlierSections && newGeometry.isNearTop
+            if isTimelineNearTop != isNearTop {
+                isTimelineNearTop = isNearTop
+            }
+            if isViewportNearBottom != newGeometry.isNearBottom {
+                isViewportNearBottom = newGeometry.isNearBottom
+            }
+            scrollState.noteEndVisibility(newGeometry.isNearBottom)
+
+            if isAwaitingInitialBottom {
+                if newGeometry.isNearBottom {
+                    isAwaitingInitialBottom = false
+                } else {
+                    _ = macScrollPositionPreserver.pinToBottom()
+                }
+                return
+            }
+
+            // The 24-point end zone is only UI/intent hysteresis. While
+            // following, every projected layout change (resize, reflow, or
+            // content growth) aligns to the exact native document end.
+            if scrollState.shouldFollowBottom {
+                _ = macScrollPositionPreserver.pinToBottom()
+            }
+
+            if hasEarlierSections, !oldGeometry.isNearTop,
+                newGeometry.isNearTop, !isLoadingEarlier
+            {
+                historyLoadRequest &+= 1
+            }
+
+        }
+    #endif
 
     private func handleScrollGeometryChange(
         from oldGeometry: ChatScrollGeometry,
@@ -646,8 +909,32 @@ private struct ChatTimeline: View {
             newGeometry.bottomInset > oldGeometry.bottomInset
             || newGeometry.containerHeight < oldGeometry.containerHeight
         let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
+
+        // Keyboard and accessibility scrolling do not always enter a
+        // user-driven `ScrollPhase`. Offset movement toward older content is
+        // still proof the viewport left the end, so following must stop —
+        // otherwise every content-height correction below yanks the viewport
+        // back down. Same-frame keyboard shifts and streaming growth are
+        // excluded; they move the offset without expressing that intent.
+        if !viewportShrank, !contentGrew,
+            newGeometry.contentOffsetY
+                < oldGeometry.contentOffsetY - Self.scrollMovementTolerance
+        {
+            scrollState.noteScrollAwayFromEnd()
+        }
+
         if viewportShrank || contentGrew, scrollState.shouldFollowBottom {
-            proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            // Pinning through the proxy resolves the row identifier by
+            // walking the entire ForEach identity list per call; the direct
+            // offset write is constant time. The proxy remains the fallback
+            // until the collection view resolves.
+            #if os(macOS)
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            #else
+                if !bottomFollower.pinToBottom() {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
+            #endif
         }
     }
 
@@ -669,6 +956,7 @@ private struct ChatTimeline: View {
     @ViewBuilder
     private func timelineContent(
         rows: [ChatTimelineRenderRow],
+        effectiveStreamingTurnID: String?,
         hasEarlierSections: Bool,
         showsHistoryMarker: Bool,
         showsPlan: Bool
@@ -703,7 +991,7 @@ private struct ChatTimeline: View {
         ForEach(rows) { row in
             ChatTimelineRenderRowView(
                 row: row,
-                streamingTurnID: streamingTurnID,
+                streamingTurnID: effectiveStreamingTurnID,
                 threadID: threadID,
                 store: store,
                 foldModel: foldModel,
@@ -767,34 +1055,82 @@ private struct ChatTimeline: View {
         return Array(sections[startIndex...])
     }
 
-    private func loadEarlier(
-        loadedSections: [ChatTimelineLayout.Section],
-        renderedRows: [ChatTimelineRenderRow],
-        preservesPosition: Bool
-    ) async {
-        guard !isLoadingEarlier else { return }
+    #if os(macOS)
+        private func loadEarlier(
+            loadedSections: [ChatTimelineLayout.Section],
+            hasEarlierSections: Bool
+        ) async {
+            guard !isLoadingEarlier else { return }
 
-        isLoadingEarlier = true
-        defer { isLoadingEarlier = false }
+            isLoadingEarlier = true
+            defer { isLoadingEarlier = false }
 
-        guard
-            let page = await prepareEarlierPage(
-                loadedSections: loadedSections,
-                rowWidth: rowWidth
+            guard
+                let page = await prepareEarlierPage(
+                    loadedSections: loadedSections,
+                    rowWidth: rowWidth
+                )
+            else { return }
+
+            // The preserver needs the exact number of rows entering above the
+            // current anchor: the page's rows plus the change in leading
+            // fixed rows (history marker or plan).
+            let pageRows = Self.renderRows(
+                page.timelineRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
             )
-        else { return }
+            let oldLeadingRowCount = hasEarlierSections
+                ? 1
+                : (plan?.entries.isEmpty == false ? 1 : 0)
+            let hasEarlierSectionsAfterLoad =
+                page.newOldestSectionID != sections.first?.id
+            let newLeadingRowCount = hasEarlierSectionsAfterLoad
+                ? 1
+                : (plan?.entries.isEmpty == false ? 1 : 0)
+            let leadingRowCount = pageRows.count
+                + newLeadingRowCount - oldLeadingRowCount
 
-        if preservesPosition {
-            // Loading only arms at the top edge, so pinning the former first
-            // row to the top preserves the viewport as older rows prepend.
-            pendingPrependAnchorID = renderedRows.first?.id
+            macScrollPositionPreserver.captureBeforePrepend(
+                leadingRowCount: leadingRowCount
+            )
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            transaction.scrollContentOffsetAdjustmentBehavior = .disabled
+            withTransaction(transaction) {
+                oldestLoadedSectionID = page.newOldestSectionID
+            }
         }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            oldestLoadedSectionID = page.newOldestSectionID
+    #else
+        private func loadEarlier(
+            loadedSections: [ChatTimelineLayout.Section],
+            renderedRows: [ChatTimelineRenderRow],
+            preservesPosition: Bool
+        ) async {
+            guard !isLoadingEarlier else { return }
+
+            isLoadingEarlier = true
+            defer { isLoadingEarlier = false }
+
+            guard
+                let page = await prepareEarlierPage(
+                    loadedSections: loadedSections,
+                    rowWidth: rowWidth
+                )
+            else { return }
+
+            if preservesPosition {
+                // Loading only arms at the top edge, so pinning the former first
+                // row to the top preserves the viewport as older rows prepend.
+                pendingPrependAnchorID = renderedRows.first?.id
+            }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                oldestLoadedSectionID = page.newOldestSectionID
+            }
         }
-    }
+    #endif
 
     private func prepareEarlierPage(
         loadedSections: [ChatTimelineLayout.Section],
@@ -882,10 +1218,20 @@ private struct ChatTimeline: View {
         )
         guard !Task.isCancelled else { return }
 
-        await textLayoutStore.prepare(
-            requests: Self.textLayoutRequests(
+        let layoutRequests = Self.textLayoutRequests(
+            in: renderedRows,
+            streamingTurnID: streamingTurnID,
+            rowWidth: rowWidth
+        )
+        if ChatBenchmarkAutoRun.plan != nil {
+            ChatBenchmarkAutoRun.trace(
+                "prepare rows=\(renderedRows.count) requests=\(layoutRequests.count)"
+            )
+        }
+        await textLayoutStore.prepare(requests: layoutRequests)
+        await textLayoutStore.prepareResolvedProse(
+            requests: Self.resolvedProseLayoutRequests(
                 in: renderedRows,
-                streamingTurnID: streamingTurnID,
                 rowWidth: rowWidth
             )
         )
@@ -924,24 +1270,20 @@ private struct ChatTimeline: View {
             )
             switch plan {
             case .existingRenderer:
+                // A restored message can carry no turn ID; `nil != nil` must
+                // not classify it as the streaming message when nothing is
+                // streaming.
                 guard message.role == MaidMessageRole.assistant.rawValue,
-                    message.turnID != streamingTurnID
+                    streamingTurnID == nil || message.turnID != streamingTurnID
                 else { return [.standard(row)] }
 
                 let renderPlan = ChatMarkdownRenderCache.shared.plan(
                     messageID: message.id,
                     source: message.text
                 )
-                let contents = renderPlan.blocks.flatMap { block in
-                    switch block {
-                    case .prose(let prose):
-                        prose.pieces.map(ChatResolvedMarkdownRowContent.prose)
-                    case .code(let code):
-                        [ChatResolvedMarkdownRowContent.code(code)]
-                    case .table(let table):
-                        [ChatResolvedMarkdownRowContent.table(table)]
-                    }
-                }
+                let contents = ChatResolvedMarkdownRowPlanner.contents(
+                    in: renderPlan
+                )
                 guard !contents.isEmpty else { return [.standard(row)] }
                 return contents.indices.map { index in
                     .resolvedMarkdown(
@@ -988,7 +1330,7 @@ private struct ChatTimeline: View {
         rows.compactMap { row in
             guard case .message(let message) = row,
                 message.role == MaidMessageRole.assistant.rawValue,
-                message.turnID != streamingTurnID,
+                streamingTurnID == nil || message.turnID != streamingTurnID,
                 case .existingRenderer = ChatMessageTextPlanner.plan(
                     messageID: message.id,
                     role: message.role,
@@ -1014,6 +1356,7 @@ private struct ChatTimeline: View {
             case .standard(.message(let message)):
                 guard
                     message.role != MaidMessageRole.assistant.rawValue
+                        || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { return nil }
                 return ChatMarkdownRenderRequest(
@@ -1097,6 +1440,7 @@ private struct ChatTimeline: View {
             case .standard(.message(let message)):
                 guard
                     message.role != MaidMessageRole.assistant.rawValue
+                        || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { continue }
                 appendRichRequests(
@@ -1109,6 +1453,31 @@ private struct ChatTimeline: View {
             }
         }
         return requests
+    }
+
+    static func resolvedProseLayoutRequests(
+        in rows: [ChatTimelineRenderRow],
+        rowWidth: CGFloat
+    ) -> [ChatResolvedProseLayoutRequest] {
+        #if os(macOS)
+            rows.compactMap { row in
+                guard case .resolvedMarkdown(let block) = row,
+                    case .proseRun(let prose) = block.content
+                else { return nil }
+                return ChatResolvedProseLayoutRequest(
+                    id: block.rowID,
+                    prose: prose,
+                    width: ChatTimelineMetrics.proseTextWidth(
+                        role: MaidMessageRole.assistant.rawValue,
+                        in: rowWidth
+                    )
+                )
+            }
+        #else
+            _ = rows
+            _ = rowWidth
+            return []
+        #endif
     }
 
 }
@@ -1186,7 +1555,10 @@ struct ChatTimelineRenderRowView: View {
                 )
 
             case .resolvedMarkdown(let block):
-                ChatResolvedMarkdownBlockRow(model: block)
+                ChatResolvedMarkdownBlockRow(
+                    model: block,
+                    textLayoutStore: textLayoutStore
+                )
                     .padding(
                         .top,
                         block.isFirst ? 10 : ChatMarkdownProseStyle.blockSpacing
@@ -1269,17 +1641,34 @@ private struct ChatScrollGeometry: Equatable {
     let containerHeight: CGFloat
     let bottomInset: CGFloat
     let contentHeight: CGFloat
+    let contentOffsetY: CGFloat
 }
+
+#if os(macOS)
+    private struct ChatMacScrollGeometry: Equatable {
+        let isNearTop: Bool
+        let isNearBottom: Bool
+        let containerWidth: CGFloat
+        let containerHeight: CGFloat
+        let bottomInset: CGFloat
+        let contentHeight: CGFloat
+    }
+#endif
 
 /// Handles explicit jump-to-bottom requests without storing a scroll proxy in
 /// shared state. Automatic following is driven by post-layout geometry below.
-private struct ChatBottomScrollRequestModifier: ViewModifier {
+struct ChatBottomScrollRequestModifier: ViewModifier {
     let scrollState: ChatScrollState
     let proxy: ScrollViewProxy
     let bottomID: String
+    let pinToBottom: (_ animated: Bool) -> Bool
 
     func body(content: Content) -> some View {
         content.onChange(of: scrollState.bottomScrollRequest) { _, request in
+            if pinToBottom(request.animated) {
+                scrollState.noteEndVisibility(true)
+                return
+            }
             if request.animated {
                 withAnimation(.smooth) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
@@ -1957,7 +2346,12 @@ private struct ChatMessageRow: View {
     var body: some View {
         VStack(alignment: .leading) {
             if !text.isEmpty {
-                if let streamingText {
+                // A restored thread can retain a replayed streaming buffer
+                // for its final messages. Once the message presents as
+                // settled, the settled renderer must win: its layouts are the
+                // ones preparation primes, and the buffer may lag the
+                // reduced timeline text.
+                if let streamingText, presentation.isStreaming {
                     ChatStreamingMarkdownMessageView(
                         messageID: messageID,
                         streamingText: streamingText,
@@ -2182,7 +2576,7 @@ private struct ChatScrollToBottomButton: View {
 private struct ChatScrollButtonStyle: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content.buttonStyle(.glass)
         } else {
             content

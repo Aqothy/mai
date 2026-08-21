@@ -167,8 +167,30 @@ private struct ChatMarkdownResolvedProseView: Equatable, View {
 
 enum ChatResolvedMarkdownRowContent: Equatable {
     case prose(ChatMarkdownProseRun.Piece)
+    case proseRun(ChatMarkdownProseRun)
     case code(ChatMarkdownCodeBlock)
     case table(ChatMarkdownTable)
+}
+
+nonisolated enum ChatResolvedMarkdownRowPlanner {
+    static func contents(
+        in plan: ChatMarkdownRenderPlan
+    ) -> [ChatResolvedMarkdownRowContent] {
+        plan.blocks.flatMap { block in
+            switch block {
+            case .prose(let prose):
+                #if os(macOS)
+                    [ChatResolvedMarkdownRowContent.proseRun(prose)]
+                #else
+                    prose.pieces.map(ChatResolvedMarkdownRowContent.prose)
+                #endif
+            case .code(let code):
+                [ChatResolvedMarkdownRowContent.code(code)]
+            case .table(let table):
+                [ChatResolvedMarkdownRowContent.table(table)]
+            }
+        }
+    }
 }
 
 struct ChatResolvedMarkdownBlockRowModel {
@@ -186,6 +208,7 @@ struct ChatResolvedMarkdownBlockRowModel {
 /// segmentation would change document-wide Markdown semantics.
 struct ChatResolvedMarkdownBlockRow: View {
     let model: ChatResolvedMarkdownBlockRowModel
+    let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -194,6 +217,16 @@ struct ChatResolvedMarkdownBlockRow: View {
                 ChatMarkdownResolvedProsePieceView(piece: piece)
                     .equatable()
                     .textSelection(.enabled)
+            case .proseRun(let prose):
+                #if os(macOS)
+                    ChatSelectableResolvedProse(
+                        layoutID: model.rowID,
+                        prose: prose,
+                        layoutStore: textLayoutStore
+                    )
+                #else
+                    ChatMarkdownResolvedProseView(prose: prose)
+                #endif
             case .code(let code):
                 ChatMarkdownCodeBlockView(block: code, isStreaming: false)
             case .table(let table):
@@ -222,6 +255,7 @@ struct ChatMarkdownResolvedProsePieceView: Equatable, View {
         case .text(let text):
             Text(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .chatTextPointerStyle()
 
         case .quote(let quote):
             Text(quote)
@@ -239,6 +273,7 @@ struct ChatMarkdownResolvedProsePieceView: Equatable, View {
                     .frame(width: ChatMarkdownProseStyle.quoteBarWidth)
                     .accessibilityHidden(true)
                 }
+                .chatTextPointerStyle()
 
         case .thematicBreak:
             Divider()

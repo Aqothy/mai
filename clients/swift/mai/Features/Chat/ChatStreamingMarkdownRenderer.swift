@@ -523,9 +523,7 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
             let active = parsed.last,
             active.utf8Offset > 0
         {
-            stableBlocks = ChatMarkdownRenderPlan(
-                blocks: stableBlocks + parsed.dropLast().map(\.block)
-            ).blocks
+            appendSettledBlocks(parsed.dropLast().map(\.block))
             stableUTF8Count += active.utf8Offset
             activeBlocks = [active.block]
         } else if parsed.isEmpty {
@@ -546,6 +544,35 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
         )
     }
 
+    /// Settled prose merges into the trailing stable run only while that run
+    /// stays small. Re-coalescing the entire settled prefix would grow one run
+    /// without bound, and every growth re-lays-out that run's whole text view
+    /// synchronously on the main thread — O(n²) over a long streamed message.
+    /// A run past this limit is frozen: its source never changes again, so its
+    /// cached layout and native view stay valid for the rest of the stream.
+    /// The final settled render re-coalesces the complete document as before.
+    static let stableProseRunUTF8Limit = 4_096
+
+    private mutating func appendSettledBlocks(
+        _ blocks: [ChatMarkdownRenderPlan.Block]
+    ) {
+        for block in blocks {
+            if case .prose(let prose) = block,
+                case .prose(let open)? = stableBlocks.last,
+                open.source.utf8.count < Self.stableProseRunUTF8Limit
+            {
+                stableBlocks[stableBlocks.count - 1] = .prose(
+                    ChatMarkdownProseRun(
+                        source: open.source + prose.source,
+                        pieces: open.pieces + prose.pieces
+                    )
+                )
+            } else {
+                stableBlocks.append(block)
+            }
+        }
+    }
+
     mutating func reset() {
         stableUTF8Count = 0
         stableBlocks.removeAll(keepingCapacity: true)
@@ -557,6 +584,39 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
         source.split(separator: "\n").contains { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             return trimmed.hasPrefix("[") && trimmed.contains("]:")
+        }
+    }
+}
+
+/// The last snapshot rendered for each live message. A streaming view can be
+/// recreated with a new identity mid-stream — most importantly while a
+/// finished turn keeps its streaming presentation until its settled form is
+/// prepared. Seeding the new view from the previous snapshot keeps the
+/// message visible instead of collapsing to empty while a fresh worker
+/// re-parses the source off the main actor.
+@MainActor
+final class ChatStreamingSnapshotCache {
+    static let shared = ChatStreamingSnapshotCache()
+
+    /// Only one message streams at a time; a few entries absorb rapid
+    /// back-to-back turns without retaining every message ever streamed.
+    private static let capacity = 4
+
+    private var entries:
+        [(messageID: String, snapshot: ChatStreamingMarkdownSnapshot)] = []
+
+    func snapshot(for messageID: String) -> ChatStreamingMarkdownSnapshot? {
+        entries.last { $0.messageID == messageID }?.snapshot
+    }
+
+    func store(
+        _ snapshot: ChatStreamingMarkdownSnapshot,
+        for messageID: String
+    ) {
+        entries.removeAll { $0.messageID == messageID }
+        entries.append((messageID, snapshot))
+        if entries.count > Self.capacity {
+            entries.removeFirst()
         }
     }
 }

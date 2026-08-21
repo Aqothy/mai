@@ -932,7 +932,7 @@ final class ThreadStore {
         performSubscriptionMaintenance(at: timestamp)
 
         if let selectedThreadID {
-            await subscribe(selectedThreadID)
+            ensureSubscribed(selectedThreadID)
         }
 
         let protectedIDs = sessionsByID.compactMap { id, session in

@@ -40,7 +40,7 @@ struct ACPRegistryView: View {
             ACPRegistryStatusView(model: model)
         }
         .navigationTitle("Agent Registry")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Add Custom Agent", systemImage: "plus") {

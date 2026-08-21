@@ -73,28 +73,61 @@ private struct ACPRegistryIconContent: View {
     }
 }
 
-private struct ACPRegistrySVGIcon: UIViewRepresentable {
-    let iconURL: URL
+#if os(macOS)
+    private struct ACPRegistrySVGIcon: NSViewRepresentable {
+        let iconURL: URL
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
+
+        func makeNSView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            // AppKit WKWebView has no isOpaque/backgroundColor surface;
+            // this documented key is the supported transparency switch.
+            webView.setValue(false, forKey: "drawsBackground")
+            return webView
+        }
+
+        func updateNSView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
     }
+#else
+    private struct ACPRegistrySVGIcon: UIViewRepresentable {
+        let iconURL: URL
 
-    func makeUIView(context: Context) -> WKWebView {
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
+
+        func makeUIView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            webView.isOpaque = false
+            webView.backgroundColor = .clear
+            webView.scrollView.backgroundColor = .clear
+            webView.scrollView.isScrollEnabled = false
+            webView.isUserInteractionEnabled = false
+            return webView
+        }
+
+        func updateUIView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
+    }
+#endif
+
+extension ACPRegistrySVGIcon {
+    fileprivate static func configuration() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.isUserInteractionEnabled = false
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.load(iconURL, in: webView)
+        return configuration
     }
 
     @MainActor

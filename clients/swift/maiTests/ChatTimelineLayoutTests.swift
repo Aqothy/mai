@@ -1,11 +1,274 @@
 import Foundation
 import Testing
+#if os(macOS)
+    import AppKit
+#endif
 @testable import mai
 
 /// `ChatTimelineLayout` turns the wire timeline into the rows the chat List
 /// renders: contiguous turn sections, compact activity groups, and the fold
 /// that hides a finished turn's work behind a "Worked for Ns" header.
 struct ChatTimelineLayoutTests {
+
+    // MARK: Pagination
+
+    #if os(macOS)
+        @Test
+        func macBottomOriginIncludesComposerInset() {
+            let origin = ChatMacScrollPositionPreserver.bottomOrigin(
+                documentMinY: 0,
+                documentMaxY: 27_978,
+                viewportHeight: 928,
+                topInset: 0,
+                bottomInset: 102
+            )
+
+            #expect(origin == 27_152)
+        }
+
+        @Test
+        func macBottomOriginKeepsShortContentAtTopInset() {
+            let origin = ChatMacScrollPositionPreserver.bottomOrigin(
+                documentMinY: 0,
+                documentMaxY: 400,
+                viewportHeight: 928,
+                topInset: 14,
+                bottomInset: 102
+            )
+
+            #expect(origin == -14)
+        }
+
+        @Test
+        func upwardNativeScrollCannotResumeFromTransientBottomGeometry() {
+            let shouldRestore = ChatMacScrollPositionPreserver
+                .shouldRestoreFollowingAfterUserScroll(
+                    startY: 10_000,
+                    endY: 9_000,
+                    isNearBottom: true
+                )
+
+            #expect(!shouldRestore)
+        }
+
+        @Test
+        func nativeScrollEndingAtBottomRestoresFollowing() {
+            let shouldRestore = ChatMacScrollPositionPreserver
+                .shouldRestoreFollowingAfterUserScroll(
+                    startY: 9_000,
+                    endY: 10_000,
+                    isNearBottom: true
+                )
+
+            #expect(shouldRestore)
+        }
+
+        @Test @MainActor
+        func macResolvedProseRunKeepsSelectionContentAndSemantics() async {
+            let source = """
+                [Resolved link][guide]
+
+                ```swift
+                let value = 42
+                ```
+
+                ---
+
+                # Final heading
+
+                > Final quote
+
+                [guide]: https://example.com/guide
+                """
+            let plan = ChatMarkdownRenderPlanner.plan(from: source)
+            let contents = ChatResolvedMarkdownRowPlanner.contents(in: plan)
+
+            #expect(contents.count == 3)
+            guard case .proseRun(let leadingProse) = contents.first,
+                case .proseRun(let trailingProse) = contents.last
+            else {
+                Issue.record("Expected native prose runs around the code block")
+                return
+            }
+
+            let store = ChatTextLayoutStore()
+            await store.prepareResolvedProse(
+                requests: [
+                    ChatResolvedProseLayoutRequest(
+                        id: "leading",
+                        prose: leadingProse,
+                        width: 700
+                    ),
+                    ChatResolvedProseLayoutRequest(
+                        id: "trailing",
+                        prose: trailingProse,
+                        width: 700
+                    ),
+                ]
+            )
+            let leadingLayout = store.resolvedLayout(
+                id: "leading",
+                prose: leadingProse,
+                width: 700
+            )
+            let trailingLayout = store.resolvedLayout(
+                id: "trailing",
+                prose: trailingProse,
+                width: 700
+            )
+
+            #expect(leadingLayout.attributedString.string == "Resolved link")
+            #expect(
+                leadingLayout.attributedString.attribute(
+                    .link,
+                    at: 0,
+                    effectiveRange: nil
+                ) as? URL == URL(string: "https://example.com/guide")
+            )
+            #expect(
+                trailingLayout.attributedString.string.contains(
+                    "Final heading\n\nFinal quote"
+                )
+            )
+            #expect(!trailingLayout.thematicBreakRects.isEmpty)
+            #expect(!trailingLayout.quoteBarRects.isEmpty)
+        }
+    #endif
+
+    @Test
+    func jumpToBottomRestoresStreamingFollowIntent() {
+        let scrollState = ChatScrollState()
+        scrollState.noteUserScrollActivity(isActive: true)
+
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.requestScrollToBottom(animated: true)
+
+        #expect(scrollState.shouldFollowBottom)
+        #expect(scrollState.bottomScrollRequest.animated)
+    }
+
+    @Test
+    func userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteUserScrollActivity(isActive: true)
+        scrollState.noteEndVisibility(false)
+        scrollState.noteUserScrollActivity(isActive: false)
+
+        #expect(!scrollState.isUserScrolling)
+        #expect(!scrollState.isNearBottom)
+        #expect(!scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func endingAUserScrollAtTheBottomResumesFollowing() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteUserScrollActivity(isActive: true)
+        scrollState.noteEndVisibility(true)
+        scrollState.noteUserScrollActivity(isActive: false)
+        scrollState.noteScrollReturnedToEnd()
+
+        #expect(!scrollState.isUserScrolling)
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func transientEndVisibilityDoesNotUndoAUserScrollAway() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteUserScrollActivity(isActive: true)
+        scrollState.noteEndVisibility(false)
+        scrollState.noteEndVisibility(true)
+        scrollState.noteUserScrollActivity(isActive: false)
+
+        #expect(!scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func keyboardScrollTowardEndResumesOnlyAfterReachingIt() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteScrollAwayFromEnd()
+        scrollState.noteScrollTowardEnd()
+
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.noteEndVisibility(true)
+
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteEndVisibility(false)
+
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteContentExpansion()
+
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.noteEndVisibility(false)
+        #expect(!scrollState.isNearBottom)
+
+        scrollState.noteEndVisibility(true)
+        #expect(scrollState.isNearBottom)
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent() {
+        let scrollState = ChatScrollState()
+
+        scrollState.noteScrollAwayFromEnd()
+        scrollState.noteEndVisibility(true)
+
+        #expect(scrollState.isNearBottom)
+        #expect(!scrollState.shouldFollowBottom)
+
+        scrollState.noteScrollReturnedToEnd()
+        #expect(scrollState.shouldFollowBottom)
+    }
+
+    @Test
+    func paginatesByCompleteUserTurns() {
+        var timeline: [TimelineEntry] = []
+        for index in 1...7 {
+            let turnID = "turn-\(index)"
+            timeline.append(
+                userMessageEntry(id: "user-\(index)", turnID: turnID)
+            )
+            timeline.append(
+                assistantMessageEntry(id: "assistant-\(index)", turnID: turnID)
+            )
+        }
+
+        let sections = ChatTimelineLayout.sections(timeline: timeline)
+        let firstPage = ChatTimelineLayout.paginatedSections(
+            sections,
+            userMessageLimit: 5
+        )
+        let secondPage = ChatTimelineLayout.paginatedSections(
+            sections,
+            userMessageLimit: 10
+        )
+
+        #expect(firstPage.map(\.id) == [
+            "turn-3", "turn-4", "turn-5", "turn-6", "turn-7",
+        ])
+        #expect(secondPage.map(\.id) == sections.map(\.id))
+    }
 
     // MARK: Grouping
 

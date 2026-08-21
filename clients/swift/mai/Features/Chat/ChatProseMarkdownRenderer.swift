@@ -1,8 +1,16 @@
 import Markdown
-import UIKit
 
-private typealias ChatPlatformColor = UIColor
-private typealias ChatPlatformFont = UIFont
+#if os(macOS)
+    import AppKit
+
+    private typealias ChatPlatformColor = NSColor
+    private typealias ChatPlatformFont = NSFont
+#else
+    import UIKit
+
+    private typealias ChatPlatformColor = UIColor
+    private typealias ChatPlatformFont = UIFont
+#endif
 
 extension NSAttributedString.Key {
     nonisolated static let chatQuoteBarOffsets = Self("ChatQuoteBarOffsets")
@@ -26,7 +34,13 @@ private nonisolated struct ChatProseAttributedStringBuilder {
     struct Environment {
         var indent: CGFloat = 0
         var quoteBarOffsets: [CGFloat] = []
-        var color: ChatPlatformColor = .label
+        var color: ChatPlatformColor = {
+            #if os(macOS)
+                .labelColor
+            #else
+                .label
+            #endif
+        }()
         var blockSpacing = ChatMarkdownProseStyle.blockSpacing
 
         static let root = Environment()
@@ -249,13 +263,19 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                 range: range
             )
         }
-        if let accessibilityHeadingLevel {
-            output.addAttribute(
-                .accessibilityTextHeadingLevel,
-                value: accessibilityHeadingLevel,
-                range: range
-            )
-        }
+        // AppKit has no attributed-string heading-level key; VoiceOver on
+        // macOS derives structure from the text view itself.
+        #if os(iOS)
+            if let accessibilityHeadingLevel {
+                output.addAttribute(
+                    .accessibilityTextHeadingLevel,
+                    value: accessibilityHeadingLevel,
+                    range: range
+                )
+            }
+        #else
+            _ = accessibilityHeadingLevel
+        #endif
         output.addAttribute(
             .paragraphStyle,
             value: paragraph,
@@ -398,12 +418,23 @@ private nonisolated struct ChatProseAttributedStringBuilder {
     private func resolvedFont(_ style: InlineStyle) -> ChatPlatformFont {
         guard style.isBold || style.isItalic else { return style.font }
         var traits = style.font.fontDescriptor.symbolicTraits
-        if style.isBold { traits.insert(.traitBold) }
-        if style.isItalic { traits.insert(.traitItalic) }
-        guard
+        #if os(macOS)
+            if style.isBold { traits.insert(.bold) }
+            if style.isItalic { traits.insert(.italic) }
             let descriptor = style.font.fontDescriptor
                 .withSymbolicTraits(traits)
-        else { return style.font }
-        return UIFont(descriptor: descriptor, size: style.font.pointSize)
+            return NSFont(
+                descriptor: descriptor,
+                size: style.font.pointSize
+            ) ?? style.font
+        #else
+            if style.isBold { traits.insert(.traitBold) }
+            if style.isItalic { traits.insert(.traitItalic) }
+            guard
+                let descriptor = style.font.fontDescriptor
+                    .withSymbolicTraits(traits)
+            else { return style.font }
+            return UIFont(descriptor: descriptor, size: style.font.pointSize)
+        #endif
     }
 }

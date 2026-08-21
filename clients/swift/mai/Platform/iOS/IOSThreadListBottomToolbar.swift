@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 /// Places the searchable field and create buttons in the bottom toolbar.
@@ -43,3 +44,5 @@ struct IOSThreadListBottomToolbar: ViewModifier {
         }
     }
 }
+
+#endif

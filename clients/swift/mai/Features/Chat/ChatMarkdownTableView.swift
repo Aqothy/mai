@@ -19,13 +19,24 @@ struct ChatMarkdownTableView: View {
                 .contentShape(.rect)
             }
 
-            ScrollView(.horizontal) {
-                ChatMarkdownTableGrid(table: table)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .scrollIndicators(.visible, axes: .horizontal)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // On macOS, a nested SwiftUI horizontal ScrollView traps vertical
+            // wheel gestures; the AppKit container passes them through to the
+            // enclosing chat timeline.
+            #if os(macOS)
+                ChatMacHorizontalScrollView {
+                    ChatMarkdownTableGrid(table: table)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #else
+                ScrollView(.horizontal) {
+                    ChatMarkdownTableGrid(table: table)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollIndicators(.visible, axes: .horizontal)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #endif
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Markdown table")
