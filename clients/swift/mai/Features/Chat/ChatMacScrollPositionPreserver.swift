@@ -14,7 +14,7 @@
 
         private weak var tableView: NSTableView?
         private weak var scrollView: NSScrollView?
-        private var snapshot: Snapshot?
+        private var snapshot: AnchorSnapshot?
         private var preservedAnchor: PreservedAnchor?
         private var isApplyingLayoutAdjustment = false
         private var isAligningInitialBottom = false
@@ -146,10 +146,32 @@
         /// Captures a visible row just before the model mutation that prepends
         /// `leadingRowCount` native table rows.
         func captureBeforePrepend(leadingRowCount: Int) {
+            guard leadingRowCount > 0 else { return }
+            captureVisibleAnchor(
+                rowOffsetAfterMutation: leadingRowCount,
+                minimumRowCountAfterMutation: (tableView?.numberOfRows ?? 0)
+                    + leadingRowCount
+            )
+        }
+
+        /// Captures the first substantive visible row before a disclosure
+        /// changes height. The disclosure is at or below that anchor, so its
+        /// native table index remains stable while the row expands or folds.
+        func captureBeforeContentExpansion() {
+            captureVisibleAnchor(
+                rowOffsetAfterMutation: 0,
+                minimumRowCountAfterMutation: 0
+            )
+        }
+
+        private func captureVisibleAnchor(
+            rowOffsetAfterMutation: Int,
+            minimumRowCountAfterMutation: Int
+        ) {
             snapshot = nil
             preservedAnchor = nil
             shouldRebaseAnchor = false
-            guard leadingRowCount > 0, let tableView,
+            guard let tableView,
                 let scrollView = tableView.enclosingScrollView
             else { return }
 
@@ -165,9 +187,9 @@
             let anchorRect = tableView.rect(ofRow: anchorRow)
             guard !anchorRect.isEmpty else { return }
 
-            snapshot = Snapshot(
-                expectedRowCount: tableView.numberOfRows + leadingRowCount,
-                anchorRowAfterPrepend: anchorRow + leadingRowCount,
+            snapshot = AnchorSnapshot(
+                expectedRowCount: minimumRowCountAfterMutation,
+                anchorRowAfterMutation: anchorRow + rowOffsetAfterMutation,
                 anchorYBeforePrepend: anchorRect.minY,
                 visibleYBeforePrepend: visibleRect.minY
             )
@@ -418,10 +440,10 @@
             else { return }
 
             guard tableView.numberOfRows >= snapshot.expectedRowCount,
-                snapshot.anchorRowAfterPrepend < tableView.numberOfRows
+                snapshot.anchorRowAfterMutation < tableView.numberOfRows
             else { return }
 
-            let anchorRect = tableView.rect(ofRow: snapshot.anchorRowAfterPrepend)
+            let anchorRect = tableView.rect(ofRow: snapshot.anchorRowAfterMutation)
             guard !anchorRect.isEmpty else { return }
 
             let clipView = scrollView.contentView
@@ -430,7 +452,7 @@
                 + anchorRect.minY - snapshot.anchorYBeforePrepend
             let target = clipView.constrainBoundsRect(proposedBounds).origin
             preservedAnchor = PreservedAnchor(
-                row: snapshot.anchorRowAfterPrepend,
+                row: snapshot.anchorRowAfterMutation,
                 lastAnchorY: anchorRect.minY
             )
             self.snapshot = nil
@@ -488,9 +510,9 @@
             scrollView.reflectScrolledClipView(clipView)
         }
 
-        private struct Snapshot {
+        private struct AnchorSnapshot {
             let expectedRowCount: Int
-            let anchorRowAfterPrepend: Int
+            let anchorRowAfterMutation: Int
             let anchorYBeforePrepend: CGFloat
             let visibleYBeforePrepend: CGFloat
         }
