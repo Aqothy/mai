@@ -764,8 +764,8 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	if err := client.Call(ctx, RPCMethodProviderList, nil).Await(ctx, &list); err != nil {
 		t.Fatalf("provider.list: %v", err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("provider.list = %#v, want started ACP and configured Codex app-server instances", list)
+	if len(list) != 3 {
+		t.Fatalf("provider.list = %#v, want started ACP plus configured Codex app-server and Claude Code instances", list)
 	}
 	listed := make(map[provider.InstanceID]provider.InstanceInfo, len(list))
 	for _, instance := range list {
@@ -773,6 +773,9 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	}
 	if listed["codex"].Status != provider.InstanceStatusInitialized || listed["codex-app-server"].Driver != "codex-app-server" || listed["codex-app-server"].Status != provider.InstanceStatusConfigured {
 		t.Fatalf("provider.list = %#v, want initialized ACP and configured Codex app-server instances", list)
+	}
+	if listed["claude-code"].Driver != "claude-code" || listed["claude-code"].Status != provider.InstanceStatusConfigured {
+		t.Fatalf("provider.list = %#v, want a configured Claude Code instance", list)
 	}
 }
 

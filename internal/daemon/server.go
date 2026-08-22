@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/adapters/acp"
+	"github.com/Aqothy/maiD/internal/adapters/claudecode"
 	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
@@ -28,6 +29,8 @@ func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit 
 		return acp.OpenInstance(ctx, spec, emit)
 	case codexapp.DriverKind:
 		return codexapp.OpenInstance(ctx, spec, emit)
+	case claudecode.DriverKind:
+		return claudecode.OpenInstance(ctx, spec, emit)
 	default:
 		return nil, fmt.Errorf("unsupported provider driver %q", spec.Driver)
 	}
@@ -114,6 +117,13 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 		Driver:     codexapp.DriverKind,
 	}); err != nil {
 		logger.Warn("register Codex app-server provider", "error", err)
+	}
+	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
+		InstanceID: "claude-code",
+		Name:       "Claude Code",
+		Driver:     claudecode.DriverKind,
+	}); err != nil {
+		logger.Warn("register Claude Code provider", "error", err)
 	}
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
