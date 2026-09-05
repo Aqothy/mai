@@ -26,8 +26,9 @@ struct IOSWorkspaceRows: View {
     }
 }
 
-/// A concrete row root lets List keep one stable identity path for both
-/// agent-thread and terminal rows.
+/// A single-root container keeps the row unary regardless of which workspace
+/// domain the item belongs to, so List can template row identities from the
+/// ForEach without evaluating every row's body.
 private struct IOSWorkspaceRow: View {
     let store: ThreadStore
     let item: WorkspaceListItem
@@ -37,25 +38,35 @@ private struct IOSWorkspaceRow: View {
     let openTerminalHere: (String) -> Void
 
     var body: some View {
-        switch item {
-        case .agentThread(let thread):
-            IOSThreadRowButton(
-                thread: thread,
-                isUnread: store.isThreadUnread(thread.id),
-                isCompact: isCompact,
-                providerName: store.providerDisplayName(for: thread),
-                select: { selectThread(thread.id) },
-                markRead: { store.markThreadRead(thread.id) },
-                markUnread: { store.markThreadUnread(thread.id) },
-                openTerminalHere: openTerminalHereAction(for: thread)
-            )
-        case .terminal(let summary):
-            IOSTerminalRowButton(
-                summary: summary,
-                isCompact: isCompact,
-                select: { selectTerminal(summary.terminalID) }
-            )
+        VStack(spacing: 0) {
+            switch item {
+            case .agentThread(let thread):
+                IOSThreadRowButton(
+                    thread: thread,
+                    isUnread: store.isThreadUnread(thread.id),
+                    isCompact: isCompact,
+                    providerName: store.providerDisplayName(for: thread),
+                    select: { selectThread(thread.id) },
+                    markRead: { store.markThreadRead(thread.id) },
+                    markUnread: { store.markThreadUnread(thread.id) },
+                    openTerminalHere: openTerminalHereAction(for: thread)
+                )
+            case .terminal(let summary):
+                IOSTerminalRowButton(
+                    summary: summary,
+                    isCompact: isCompact,
+                    select: { selectTerminal(summary.terminalID) }
+                )
+            }
         }
+        // The two-line row's title line box carries more headroom than the
+        // caption line's descender, so an optically even row needs a
+        // slightly shorter top inset.
+        .listRowInsets(
+            isCompact
+                ? EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
+                : EdgeInsets(top: 9, leading: 16, bottom: 11, trailing: 16)
+        )
     }
 
     private func openTerminalHereAction(for thread: ThreadListEntry) -> (() -> Void)? {
@@ -64,8 +75,8 @@ private struct IOSWorkspaceRow: View {
     }
 }
 
-/// One row's chrome, kept unary (a single top-level Button) to preserve the
-/// List fast path and give each row its own invalidation boundary.
+/// One agent-thread row's chrome, its own invalidation boundary with the
+/// context menu attached; the enclosing row supplies the List insets.
 private struct IOSThreadRowButton: View {
     let thread: ThreadListEntry
     let isUnread: Bool
@@ -84,14 +95,6 @@ private struct IOSThreadRowButton: View {
                 ThreadRow(thread: thread, isUnread: isUnread, providerName: providerName)
             }
         }
-        // The two-line row's title line box carries more headroom than the
-        // caption line's descender, so an optically even row needs a
-        // slightly shorter top inset.
-        .listRowInsets(
-            isCompact
-                ? EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
-                : EdgeInsets(top: 9, leading: 16, bottom: 11, trailing: 16)
-        )
         .contextMenu {
             if isUnread {
                 Button("Mark as Read", systemImage: "envelope.open", action: markRead)
@@ -105,7 +108,7 @@ private struct IOSThreadRowButton: View {
     }
 }
 
-/// One terminal row, mirroring the agent-row structure and insets.
+/// One terminal row, mirroring the agent-row structure.
 private struct IOSTerminalRowButton: View {
     let summary: TerminalSummary
     let isCompact: Bool
@@ -119,11 +122,6 @@ private struct IOSTerminalRowButton: View {
                 TerminalThreadRow(summary: summary)
             }
         }
-        .listRowInsets(
-            isCompact
-                ? EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
-                : EdgeInsets(top: 9, leading: 16, bottom: 11, trailing: 16)
-        )
     }
 }
 

@@ -58,7 +58,15 @@ struct ChatView: View {
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
                 if let textLayoutStore = store.selectedThreadTextLayoutStore {
-                    if warmedThreadID == thread.id {
+                    // A thread whose initial page is already parsed (a recent
+                    // back-navigation, or a small thread the store primed)
+                    // mounts immediately instead of flashing a spinner.
+                    if warmedThreadID == thread.id
+                        || Self.isInitialPagePrimed(
+                            thread: thread,
+                            segmentCache: segmentCache
+                        )
+                    {
                         chatTimeline(
                             thread: thread,
                             segmentCache: segmentCache,
@@ -154,21 +162,81 @@ struct ChatView: View {
         }
     }
 
-    /// Projects the timeline incrementally: the store records the lowest
-    /// changed entry index per event, so steady-state streaming reprojects
-    /// only the suffix instead of re-walking the whole transcript.
+    /// Projects the timeline incrementally: the session invalidates the
+    /// projection per event, so steady-state streaming reprojects only the
+    /// changed suffix instead of re-walking the whole transcript.
     private func projectedSections(for thread: Thread)
         -> [ChatTimelineLayout.Section]
     {
         guard let projection = store.selectedThreadTimelineProjection else {
             return ChatTimelineLayout.sections(timeline: thread.timeline)
         }
-        let sections = projection.project(
-            timeline: thread.timeline,
-            firstChangedIndex: store.selectedThreadTimelineFirstChangedIndex
+        return projection.project(thread.timeline)
+    }
+
+    /// The rows of the first mounted page, from a full walk of `thread`.
+    /// Pre-mount work deliberately bypasses the shared projection: it runs
+    /// on a captured thread value that live events may have outdated, and
+    /// consuming the projection's watermark against a stale timeline would
+    /// leave the mounted timeline showing stale sections.
+    private static func initialPageRows(
+        of thread: Thread
+    ) -> [ChatTimelineRowModel] {
+        ChatTimelineLayout.rows(
+            sections: ChatTimeline.initialSections(
+                in: ChatTimelineLayout.sections(timeline: thread.timeline)
+            ),
+            streamingTurnID: streamingTurnID(of: thread),
+            latestTurn: thread.latestTurn,
+            expandedSectionIDs: []
         )
-        store.consumeSelectedThreadTimelineChanges()
-        return sections
+    }
+
+    /// Whether every Markdown parse the initial page's first body would
+    /// perform is already cached, so the timeline can mount without a warm
+    /// pass. Only cache lookups run here; nothing parses.
+    private static func isInitialPagePrimed(
+        thread: Thread,
+        segmentCache: ChatMarkdownSegmentCache
+    ) -> Bool {
+        let pageRows = initialPageRows(of: thread)
+        let streamingTurnID = streamingTurnID(of: thread)
+        let segmentRequests = ChatMarkdownSegmentCache.primeRequests(
+            rows: pageRows,
+            streamingTurnID: streamingTurnID
+        )
+        guard segmentRequests.allSatisfy({
+            segmentCache.contains(messageID: $0.messageID, source: $0.source)
+        }) else { return false }
+
+        // Segmentation is cached, so planning and row rendering below only
+        // read the cache.
+        let wholeDocumentRequests = ChatTimeline.wholeDocumentMarkdownRenderRequests(
+            in: pageRows,
+            streamingTurnID: streamingTurnID,
+            segmentCache: segmentCache
+        )
+        guard wholeDocumentRequests.allSatisfy({
+            ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: $0.messageID,
+                source: $0.source
+            ) != nil
+        }) else { return false }
+
+        let renderRequests = ChatTimeline.markdownRenderRequests(
+            in: ChatTimeline.renderRows(
+                pageRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
+            ),
+            streamingTurnID: streamingTurnID
+        )
+        return renderRequests.allSatisfy {
+            ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: $0.messageID,
+                source: $0.source
+            ) != nil
+        }
     }
 
     /// Parses the initial page's Markdown off the main actor before the
@@ -178,19 +246,11 @@ struct ChatView: View {
         thread: Thread,
         segmentCache: ChatMarkdownSegmentCache
     ) async {
-        let sections = projectedSections(for: thread)
-        let streamingTurnID = Self.streamingTurnID(of: thread)
-        let pageRows = ChatTimelineLayout.rows(
-            sections: ChatTimeline.initialSections(in: sections),
-            streamingTurnID: streamingTurnID,
-            latestTurn: thread.latestTurn,
-            expandedSectionIDs: []
-        )
         // The rendered rows are only needed by `prepare`'s layout pass; the
         // pre-mount warm stops at Markdown parsing.
         _ = await ChatTimeline.primeMarkdownCaches(
-            timelineRows: pageRows,
-            streamingTurnID: streamingTurnID,
+            timelineRows: Self.initialPageRows(of: thread),
+            streamingTurnID: Self.streamingTurnID(of: thread),
             segmentCache: segmentCache
         )
     }
@@ -214,6 +274,9 @@ struct ChatView: View {
         )
         .id(thread.id)
         .onAppear {
+            // Whether mounted through the warm pass or the primed fast
+            // path, later bodies skip the cache probe.
+            warmedThreadID = thread.id
             textLayoutStore.activateTextViewReuse()
         }
         .onDisappear {
@@ -252,6 +315,8 @@ private struct ChatTimelinePreparationKey: Equatable {
     let timelineEntryCount: Int
     let streamingTurnID: String?
     let rowWidth: CGFloat
+    /// Highlighted code is prepared per appearance.
+    let codeTheme: ChatCodeHighlightTheme
     let expandedSectionIDs: Set<String>
     /// Loading earlier history changes which rows exist without changing the
     /// counts above; preparation must re-run over the widened window or a
@@ -607,6 +672,8 @@ struct ChatTimeline: View {
     /// re-evaluates and swaps the lingering message to its settled rows.
     @State private var settledPreparationGeneration = 0
 
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Retained by the thread session across short navigation round trips.
     let textLayoutStore: ChatTextLayoutStore
 
@@ -741,6 +808,7 @@ struct ChatTimeline: View {
                     timelineEntryCount: timelineEntryCount,
                     streamingTurnID: streamingTurnID,
                     rowWidth: rowWidth,
+                    codeTheme: codeTheme,
                     expandedSectionIDs: foldModel.expandedSectionIDs,
                     oldestLoadedSectionID: loadedSections.first?.id
                 )
@@ -769,7 +837,8 @@ struct ChatTimeline: View {
                     streamingTurnID: streamingTurnID,
                     segmentCache: segmentCache,
                     textLayoutStore: textLayoutStore,
-                    rowWidth: rowWidth
+                    rowWidth: rowWidth,
+                    codeTheme: codeTheme
                 )
                 if signalsBenchmarkWarm, !Task.isCancelled {
                     ChatBenchmarkAutoRun.noteTranscriptWarm()
@@ -841,6 +910,10 @@ struct ChatTimeline: View {
                 }
             #endif
         }
+    }
+
+    private var codeTheme: ChatCodeHighlightTheme {
+        colorScheme == .dark ? .dark : .light
     }
 
     private static func scrollGeometry(
@@ -1226,7 +1299,8 @@ struct ChatTimeline: View {
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache,
             textLayoutStore: textLayoutStore,
-            rowWidth: rowWidth
+            rowWidth: rowWidth,
+            codeTheme: codeTheme
         )
 
         guard !Task.isCancelled, isTimelineNearTop,
@@ -1246,7 +1320,8 @@ struct ChatTimeline: View {
         streamingTurnID: String?,
         segmentCache: ChatMarkdownSegmentCache,
         textLayoutStore: any ChatNativeTextLayoutStore,
-        rowWidth: CGFloat
+        rowWidth: CGFloat,
+        codeTheme: ChatCodeHighlightTheme
     ) async {
         let renderedRows = await primeMarkdownCaches(
             timelineRows: timelineRows,
@@ -1260,9 +1335,14 @@ struct ChatTimeline: View {
             streamingTurnID: streamingTurnID,
             rowWidth: rowWidth
         )
+        let richBlocks = Self.richBlockLayoutRequests(
+            in: renderedRows,
+            streamingTurnID: streamingTurnID,
+            codeTheme: codeTheme
+        )
         if ChatBenchmarkAutoRun.plan != nil {
             ChatBenchmarkAutoRun.trace(
-                "prepare rows=\(renderedRows.count) requests=\(layoutRequests.count)"
+                "prepare rows=\(renderedRows.count) requests=\(layoutRequests.count) code=\(richBlocks.code.count) tables=\(richBlocks.tables.count)"
             )
         }
         await textLayoutStore.prepare(requests: layoutRequests)
@@ -1272,6 +1352,77 @@ struct ChatTimeline: View {
                 rowWidth: rowWidth
             )
         )
+        // Prose first: it is most of every page. Code highlighting is
+        // JavaScript-backed and tables are rarer, so they follow.
+        await textLayoutStore.prepareTables(requests: richBlocks.tables)
+        await textLayoutStore.prepareCodeBlocks(requests: richBlocks.code)
+    }
+
+    /// Settled code blocks and tables the rows will host natively on macOS,
+    /// keyed exactly as `ChatMarkdownRichContentView` and
+    /// `ChatResolvedMarkdownBlockRow` key them. Streaming messages are
+    /// excluded: their tail changes per chunk.
+    static func richBlockLayoutRequests(
+        in rows: [ChatTimelineRenderRow],
+        streamingTurnID: String?,
+        codeTheme: ChatCodeHighlightTheme
+    ) -> (code: [ChatCodeLayoutRequest], tables: [ChatTableLayoutRequest]) {
+        var code: [ChatCodeLayoutRequest] = []
+        var tables: [ChatTableLayoutRequest] = []
+
+        func appendBlocks(messageID: String, source: String) {
+            guard let plan = ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: messageID,
+                source: source
+            ) else { return }
+            for (index, block) in plan.blocks.enumerated() {
+                let id = "\(messageID)-block-\(index)"
+                switch block {
+                case .code(let codeBlock):
+                    code.append(
+                        ChatCodeLayoutRequest(id: id, block: codeBlock, theme: codeTheme)
+                    )
+                case .table(let table):
+                    tables.append(ChatTableLayoutRequest(id: id, table: table))
+                case .prose:
+                    break
+                }
+            }
+        }
+
+        for row in rows {
+            switch row {
+            case .richMarkdown(let segment):
+                appendBlocks(messageID: segment.rowID, source: segment.source)
+            case .standard(.message(let message)):
+                guard
+                    message.role != MaidMessageRole.assistant.rawValue
+                        || streamingTurnID == nil
+                        || message.turnID != streamingTurnID
+                else { continue }
+                appendBlocks(messageID: message.id, source: message.text)
+            case .resolvedMarkdown(let block):
+                switch block.content {
+                case .code(let codeBlock):
+                    code.append(
+                        ChatCodeLayoutRequest(
+                            id: block.rowID,
+                            block: codeBlock,
+                            theme: codeTheme
+                        )
+                    )
+                case .table(let table):
+                    tables.append(
+                        ChatTableLayoutRequest(id: block.rowID, table: table)
+                    )
+                case .prose, .proseRun:
+                    break
+                }
+            case .standard, .prose:
+                break
+            }
+        }
+        return (code, tables)
     }
 
     /// Parses every Markdown representation the rows will request — source
@@ -1915,7 +2066,7 @@ private struct ChatThoughtText: View {
     var body: some View {
         Group {
             if let streamingText {
-                ChatSampledStreamingThoughtText(
+                ChatLiveThoughtText(
                     streamingText: streamingText,
                     seedText: fallbackText
                 )
@@ -1929,7 +2080,7 @@ private struct ChatThoughtText: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    static func attributed(_ text: String) -> AttributedString {
+    nonisolated static func attributed(_ text: String) -> AttributedString {
         guard
             let parsed = try? AttributedString(
                 markdown: text,
@@ -1942,62 +2093,43 @@ private struct ChatThoughtText: View {
     }
 }
 
-/// Displays one live reasoning buffer with bounded main-thread cost.
+/// Displays one live reasoning buffer, mirroring how the assistant message
+/// text streams: this leaf is the only view observing the buffer, and each
+/// flushed update parses off the main actor.
 ///
-/// Reasoning text can grow to tens of kilobytes across hundreds of streamed
-/// chunks. The previous leaf observed every append and reparsed the whole
-/// accumulated string inline on the main actor per chunk — O(chunks × size),
-/// several milliseconds per chunk at essay scale. This view instead samples
-/// the shared buffer on a fixed cadence:
-///
-/// - The buffer is dereferenced only inside the sampling task, which runs
-///   outside any SwiftUI body evaluation and therefore registers no
-///   observation. Appends stop invalidating anything; the body re-evaluates
-///   at most once per sample.
-/// - The initial display seeds from `seedText` — the settled-payload
-///   snapshot the parent already carries — instead of reading the buffer:
-///   a read in `init` would execute inside the parent's body and register
-///   the parent as an observer, defeating the sampling.
-/// - Polling (rather than observing revisions) is deliberate: any body-level
-///   read of `revision` — including a `.task(id:)` — would re-register
-///   observation and reintroduce per-chunk invalidation. An idle poll wake
-///   is nanoseconds, and only thoughts with a live buffer mount this view;
-///   `.task` cancels sampling when the row disappears or the item settles.
-/// - The 100 ms interval is a presentation-cadence tuning constant, same
-///   category as `ChatTimelineMetrics.nearBottomDistance`: updates below
-///   ~100 ms are imperceptible for growing dimmed secondary text, while the
-///   cap bounds worst-case parse work no matter how fast chunks arrive.
-/// - Terminal state is exact: when the item settles the store clears the
-///   buffer and the parent swaps to the settled payload text, so the final
-///   render never depends on the last sample.
-private struct ChatSampledStreamingThoughtText: View {
+/// The daemon coalesces reasoning chunks on a 50 ms ticker, so the leaf
+/// re-evaluates at most 20 times per second; the body itself only swaps in a
+/// finished attributed string. A newer revision cancels an in-flight parse,
+/// so superseded text is never rendered. The initial display seeds from
+/// `seedText`, the settled-payload snapshot the parent already carries, so
+/// the row shows text on its first frame. When the item settles the store
+/// clears the buffer and the parent swaps to the settled payload text.
+private struct ChatLiveThoughtText: View {
     let streamingText: ThreadStreamingText
 
-    @State private var sampledText: String
-    @State private var sampledRevision = -1
-
-    /// Maximum display lag behind the stream. 100 ms keeps refreshes
-    /// imperceptible while bounding parsing to at most ten passes per
-    /// second regardless of chunk rate.
-    private static let sampleInterval: Duration = .milliseconds(100)
+    @State private var rendered: AttributedString
 
     init(streamingText: ThreadStreamingText, seedText: String) {
         self.streamingText = streamingText
-        // Plain-value seed: no observable property is touched here.
-        _sampledText = State(initialValue: seedText)
+        _rendered = State(initialValue: ChatThoughtText.attributed(seedText))
     }
 
     var body: some View {
-        Text(ChatThoughtText.attributed(sampledText))
-            .task {
-                while !Task.isCancelled {
-                    if streamingText.revision != sampledRevision {
-                        sampledRevision = streamingText.revision
-                        sampledText = streamingText.text
-                    }
-                    try? await Task.sleep(for: Self.sampleInterval)
-                }
+        Text(rendered)
+            .task(id: streamingText.revision) {
+                let parsed = await Self.parse(streamingText.text)
+                guard !Task.isCancelled else { return }
+                rendered = parsed
             }
+    }
+
+    /// Streamed reasoning carries leading/trailing newlines that the settled
+    /// row trims; trim the live text the same way before parsing.
+    @concurrent
+    private static func parse(_ text: String) async -> AttributedString {
+        ChatThoughtText.attributed(
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 
@@ -2775,12 +2907,8 @@ private struct QueuedPromptRow: View {
             Image(systemName: "arrow.turn.down.right")
                 .foregroundStyle(.secondary)
 
-            Text(
-                text.isEmpty
-                    ? "\(attachmentCount) attachment(s)"
-                    : text
-            )
-            .lineLimit(1)
+            promptLabel
+                .lineLimit(1)
 
             Spacer()
 
@@ -2800,6 +2928,13 @@ private struct QueuedPromptRow: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var promptLabel: Text {
+        if text.isEmpty {
+            return Text("^[\(attachmentCount) attachment](inflect: true)")
+        }
+        return Text(text)
     }
 }
 

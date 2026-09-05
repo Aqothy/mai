@@ -223,6 +223,13 @@ final class ChatBenchmarkModel {
                 lastTimestamp = timestamp
                 phaseStartTimestamp = phaseStartTimestamp ?? timestamp
 
+                if elapsed > 0.1 {
+                    // An occluded window pauses the display link; that gap is
+                    // not a main-thread stall and must be read as such.
+                    Self.note(
+                        "stall \(Int(elapsed * 1_000)) ms at offset \(Int(offsetY)) visible=\(Self.isWindowVisible(window))"
+                    )
+                }
                 let (minY, maxY) = Self.scrollableRange(of: scrollView)
                 offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
                 offsetY = min(max(offsetY, minY), maxY)
@@ -321,6 +328,14 @@ final class ChatBenchmarkModel {
         )
         print("CHAT_BENCHMARK_RESULT \(report.machineReadable)")
         return report
+    }
+
+    private static func isWindowVisible(_ window: ChatBenchmarkWindow) -> Bool {
+        #if os(macOS)
+            window.occlusionState.contains(.visible)
+        #else
+            !window.isHidden
+        #endif
     }
 
     /// A headless launch may start measuring before any window becomes key.
@@ -433,7 +448,7 @@ final class ChatBenchmarkModel {
 }
 
 /// Headless benchmarking: launching with `-ChatPerformanceLab
-/// -ChatAutoBenchmark <scroll|stream|all>` opens the lab directly and runs
+/// -ChatAutoBenchmark <scroll|stream|streamScroll|all>` opens the lab directly and runs
 /// the selected passes, printing one `CHAT_BENCHMARK_RESULT` JSON line per
 /// pass and `CHAT_BENCHMARK_COMPLETE` at the end.
 nonisolated enum ChatBenchmarkAutoRun {
@@ -448,16 +463,36 @@ nonisolated enum ChatBenchmarkAutoRun {
     }
 
     /// `-ChatBenchmarkThread <title substring>` benchmarks a real thread from
-    /// the connected daemon instead of the mock lab.
+    /// the connected daemon instead of the mock lab. A synthetic transcript
+    /// (below) is selected the same way, by its fixed title.
     static var threadTitleQuery: String? {
-        guard ChatPerformanceLab.isEnabled,
-            let value = UserDefaults.standard.string(
-                forKey: "ChatBenchmarkThread"
-            )?.trimmingCharacters(in: .whitespaces),
+        if let value = UserDefaults.standard.string(
+            forKey: "ChatBenchmarkThread"
+        )?.trimmingCharacters(in: .whitespaces), ChatPerformanceLab.isEnabled,
             !value.isEmpty
-        else { return nil }
-        return value
+        {
+            return value
+        }
+        #if DEBUG
+            if syntheticThreadTurnCount != nil {
+                return ChatSyntheticBenchmarkThread.title
+            }
+        #endif
+        return nil
     }
+
+    #if DEBUG
+        /// `-ChatBenchmarkSyntheticTurns <n>` seeds the store with a generated
+        /// `n`-turn transcript and benchmarks the production timeline without
+        /// a daemon. Zero or a missing value leaves the real store in place.
+        static var syntheticThreadTurnCount: Int? {
+            guard ChatPerformanceLab.isEnabled else { return nil }
+            let turns = UserDefaults.standard.integer(
+                forKey: "ChatBenchmarkSyntheticTurns"
+            )
+            return turns > 0 ? turns : nil
+        }
+    #endif
 
     /// Whether the lab has finished priming caches and layouts for the whole
     /// loaded transcript. The scroll benchmark waits for this so it measures
@@ -489,10 +524,19 @@ nonisolated enum ChatBenchmarkAutoRun {
         }
     }
 
-    /// Headless runs also append results to a file: stdout is lost under
-    /// `open`, and ad-hoc launched builds may not reach the unified log.
+    /// A harness tails stdout to time profilers against benchmark phases;
+    /// block buffering would delay those lines by kilobytes of output.
+    private static let lineBufferedStandardOutput: Void = {
+        setvbuf(stdout, nil, _IOLBF, 0)
+    }()
+
+    /// Headless runs append results to a file and echo them to stdout: a
+    /// sandboxed build cannot write outside its container, stdout is lost
+    /// under `open`, and ad-hoc launched builds may not reach the unified log.
     static func trace(_ message: String) {
         guard plan != nil else { return }
+        _ = lineBufferedStandardOutput
+        print("CHAT_BENCHMARK_TRACE \(message)")
         let url = URL(fileURLWithPath: "/tmp/mai-chat-benchmark.log")
         let line = Data((message + "\n").utf8)
         if let handle = try? FileHandle(forWritingTo: url) {

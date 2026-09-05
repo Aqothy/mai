@@ -15,9 +15,7 @@ struct DraftPromptView: View {
 
             VStack {
                 if model.hasWorkingDirectory {
-                    (Text("What should we build in ")
-                        + Text(model.directoryLabel).underline()
-                        + Text("?"))
+                    Text("What should we build in \(Text(model.directoryLabel).underline())?")
                         .font(.largeTitle)
                         .multilineTextAlignment(.center)
                         .accessibilityHeading(.h1)

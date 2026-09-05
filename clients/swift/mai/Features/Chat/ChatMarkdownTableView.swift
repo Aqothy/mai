@@ -4,6 +4,9 @@ import SwiftUI
 /// selectable; the explicit copy action copies the complete table.
 struct ChatMarkdownTableView: View {
     let table: ChatMarkdownTable
+    /// Identifies the table's prepared native layout on macOS.
+    let layoutID: String
+    let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,14 +22,15 @@ struct ChatMarkdownTableView: View {
                 .contentShape(.rect)
             }
 
-            // On macOS, a nested SwiftUI horizontal ScrollView traps vertical
-            // wheel gestures; the AppKit container passes them through to the
-            // enclosing chat timeline.
+            // On macOS the table is measured off the main actor and drawn
+            // natively; the AppKit container also passes vertical wheel
+            // gestures through to the enclosing chat timeline.
             #if os(macOS)
-                ChatMacHorizontalScrollView {
-                    ChatMarkdownTableGrid(table: table)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                ChatMacTableBlock(
+                    layoutID: layoutID,
+                    table: table,
+                    layoutStore: textLayoutStore
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
             #else
                 ScrollView(.horizontal) {
@@ -44,6 +48,7 @@ struct ChatMarkdownTableView: View {
     }
 }
 
+#if os(iOS)
 private struct ChatMarkdownTableGrid: View {
     let table: ChatMarkdownTable
 
@@ -140,3 +145,4 @@ private struct ChatMarkdownTableCell: View {
         }
     }
 }
+#endif

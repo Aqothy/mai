@@ -113,11 +113,17 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
         case .code(let codeBlock):
             ChatMarkdownCodeBlockView(
                 block: codeBlock,
-                isStreaming: isStreaming
+                isStreaming: isStreaming,
+                layoutID: layoutID,
+                textLayoutStore: textLayoutStore
             )
 
         case .table(let table):
-            ChatMarkdownTableView(table: table)
+            ChatMarkdownTableView(
+                table: table,
+                layoutID: layoutID,
+                textLayoutStore: textLayoutStore
+            )
         }
     }
 }
@@ -228,9 +234,18 @@ struct ChatResolvedMarkdownBlockRow: View {
                     ChatMarkdownResolvedProseView(prose: prose)
                 #endif
             case .code(let code):
-                ChatMarkdownCodeBlockView(block: code, isStreaming: false)
+                ChatMarkdownCodeBlockView(
+                    block: code,
+                    isStreaming: false,
+                    layoutID: model.rowID,
+                    textLayoutStore: textLayoutStore
+                )
             case .table(let table):
-                ChatMarkdownTableView(table: table)
+                ChatMarkdownTableView(
+                    table: table,
+                    layoutID: model.rowID,
+                    textLayoutStore: textLayoutStore
+                )
             }
 
             if let attachments = model.attachments, !attachments.isEmpty {

@@ -429,6 +429,24 @@ struct MockChatView: View {
             try? await Task.sleep(for: .seconds(1))
             _ = await runStreamingBenchmark()
         }
+        if plan == "streamScroll" {
+            // A reply streams into the loaded transcript while the user
+            // scrolls through history: growth below the viewport must not
+            // cost the rows above it anything.
+            streamProfile = .rapidBurst
+            enqueueStream(
+                source: MockChatMessage.essay(wordCount: 4_000)
+                    + "\n\n"
+                    + MockChatMarkdownFixtures.componentCatalog,
+                label: "Stream during scroll"
+            )
+            try? await Task.sleep(for: .seconds(1))
+            _ = await benchmark.runScrollBenchmark(
+                pointsPerSecond: 3_000,
+                maximumSweepSeconds: 10,
+                label: "streamScroll-10k-3000pps"
+            )
+        }
         ChatBenchmarkAutoRun.logger.notice("CHAT_BENCHMARK_COMPLETE")
         ChatBenchmarkAutoRun.trace("CHAT_BENCHMARK_COMPLETE")
         print("CHAT_BENCHMARK_COMPLETE")

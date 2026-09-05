@@ -104,27 +104,6 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.timelineProjection
     }
 
-    /// Lowest timeline index that may have changed since the chat last
-    /// projected the selected thread, capped to the timeline count. Reading
-    /// participates in selected-session observation.
-    var selectedThreadTimelineFirstChangedIndex: Int {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID,
-            let session = sessionsByID[selectedThreadID],
-            let count = session.thread?.timeline.count
-        else { return 0 }
-        return min(session.timelineMutationLowerBound, count)
-    }
-
-    /// Marks the selected thread's timeline as fully projected.
-    func consumeSelectedThreadTimelineChanges() {
-        guard let selectedThreadID,
-            var session = sessionsByID[selectedThreadID]
-        else { return }
-        session.timelineMutationLowerBound = .max
-        sessionsByID[selectedThreadID] = session
-    }
-
     func resetSelectedThreadTextLayoutStore() {
         guard let selectedThreadID,
             var session = sessionsByID[selectedThreadID]
@@ -1286,7 +1265,7 @@ final class ThreadStore {
         session.lastSequence = snapshot.snapshotSequence
         session.historyRestorePending = snapshot.historyRestorePending == true
         // The whole timeline was replaced, not appended to.
-        session.timelineMutationLowerBound = 0
+        session.timelineProjection.invalidateAll()
     }
 
     private func applyThreadEvent(_ event: Event) {

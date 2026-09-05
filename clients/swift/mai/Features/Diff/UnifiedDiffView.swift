@@ -366,8 +366,7 @@ struct UnifiedDiffLauncherView: View {
 
     var body: some View {
         Button(
-            "View \(changes.count.formatted()) file "
-                + (changes.count == 1 ? "change" : "changes"),
+            "View ^[\(changes.count) file change](inflect: true)",
             systemImage: "doc.text.magnifyingglass"
         ) {
             isPresented = true

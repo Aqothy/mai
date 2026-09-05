@@ -90,6 +90,13 @@ actor ChatCodeHighlighter {
         return value
     }
 
+    /// Loads the JavaScript highlighter ahead of the first code block, so a
+    /// chat's first fenced block is not the request that pays the
+    /// context-creation cost. Safe to call more than once.
+    func warmUp() {
+        _ = configuredHighlighter(for: .light)
+    }
+
     private func insert(
         _ value: AttributedString,
         code: String,

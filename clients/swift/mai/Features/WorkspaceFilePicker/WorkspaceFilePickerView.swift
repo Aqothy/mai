@@ -19,8 +19,6 @@ struct WorkspaceFilePickerView: View {
                 WorkspaceFilePickerResultsView(
                     matches: model.matches,
                     selectedMatchID: model.selectedMatchID,
-                    showsOverflow: model.matches.count
-                        > WorkspaceFilePickerLayout.maximumVisibleRowCount,
                     select: select
                 )
             } else {

@@ -18,18 +18,45 @@ nonisolated struct ChatResolvedProseLayoutRequest: Sendable {
     let width: CGFloat
 }
 
+/// A settled fenced code block whose highlighted, measured text can be
+/// prepared before its row is realized.
+nonisolated struct ChatCodeLayoutRequest: Sendable {
+    let id: String
+    let block: ChatMarkdownCodeBlock
+    let theme: ChatCodeHighlightTheme
+}
+
+/// A settled table whose cell measurement can be prepared before its row is
+/// realized.
+nonisolated struct ChatTableLayoutRequest: Sendable {
+    let id: String
+    let table: ChatMarkdownTable
+}
+
 /// The small surface used by the timeline to prepare and cache native text.
+/// macOS additionally prepares rich blocks natively; the iOS store keeps
+/// SwiftUI rendering for those and ignores the requests.
 @MainActor protocol ChatNativeTextLayoutStore: AnyObject, Sendable {
     func prepare(requests: [ChatTextLayoutRequest]) async
     func prepareResolvedProse(
         requests: [ChatResolvedProseLayoutRequest]
     ) async
+    func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async
+    func prepareTables(requests: [ChatTableLayoutRequest]) async
 }
 
 extension ChatNativeTextLayoutStore {
     func prepareResolvedProse(
         requests: [ChatResolvedProseLayoutRequest]
     ) async {
+        _ = requests
+    }
+
+    func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async {
+        _ = requests
+    }
+
+    func prepareTables(requests: [ChatTableLayoutRequest]) async {
         _ = requests
     }
 }

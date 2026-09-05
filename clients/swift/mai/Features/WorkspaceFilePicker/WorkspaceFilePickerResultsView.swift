@@ -3,7 +3,6 @@ import SwiftUI
 struct WorkspaceFilePickerResultsView: View {
     let matches: [WorkspaceFileMatch]
     let selectedMatchID: WorkspaceFileMatch.ID?
-    let showsOverflow: Bool
     let select: (WorkspaceFileMatch) -> Void
 
     var body: some View {

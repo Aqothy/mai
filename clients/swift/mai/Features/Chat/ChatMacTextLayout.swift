@@ -10,6 +10,9 @@
     nonisolated final class ChatTextLayout: @unchecked Sendable {
         let width: CGFloat
         let height: CGFloat
+        /// Width the laid-out lines actually occupy. Equals `width` for
+        /// wrapped prose; meaningful for unwrapped code laid out unbounded.
+        let contentWidth: CGFloat
         let attributedString: NSAttributedString
         let quoteBarRects: [NSRect]
         let thematicBreakRects: [NSRect]
@@ -37,6 +40,15 @@
             self.init(
                 attributedString: Self.attributedString(from: prose),
                 width: width
+            )
+        }
+
+        /// Unwrapped code: lines run to their natural width and the host
+        /// scrolls horizontally.
+        convenience init(code: NSAttributedString) {
+            self.init(
+                attributedString: code,
+                width: .greatestFiniteMagnitude
             )
         }
 
@@ -131,8 +143,10 @@
                 )
             }
 
+            let usedRect = manager.usedRect(for: container)
             self.width = safeWidth
-            self.height = ceil(max(1, manager.usedRect(for: container).height))
+            self.height = ceil(max(1, usedRect.height))
+            self.contentWidth = ceil(usedRect.width)
             self.attributedString = attributedString
             self.quoteBarRects = quoteBarRects
             self.thematicBreakRects = thematicBreakRects
@@ -194,8 +208,8 @@
             quoteBarOffset: CGFloat?,
             to output: NSMutableAttributedString
         ) {
-            let string = String(value.characters)
-            guard !string.isEmpty else { return }
+            let inline = inlineAttributedString(from: value)
+            guard inline.length > 0 else { return }
             let start = output.length
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = ChatMarkdownProseStyle.lineSpacing
@@ -205,16 +219,41 @@
                     + ChatMarkdownProseStyle.quoteIndent
                 paragraph.headIndent = paragraph.firstLineHeadIndent
             }
-            output.append(
-                NSAttributedString(
-                    string: string,
-                    attributes: [
-                        .font: NSFont.preferredFont(forTextStyle: .body),
-                        .foregroundColor: NSColor.labelColor,
-                        .paragraphStyle: paragraph,
-                    ]
-                )
+            inline.addAttribute(
+                .paragraphStyle,
+                value: paragraph,
+                range: NSRange(location: 0, length: inline.length)
             )
+            output.append(inline)
+
+            output.append(NSAttributedString(string: "\n"))
+            if let quoteBarOffset {
+                output.addAttribute(
+                    .chatQuoteBarOffsets,
+                    value: [quoteBarOffset],
+                    range: NSRange(
+                        location: start,
+                        length: output.length - start
+                    )
+                )
+            }
+        }
+
+        /// Converts inline Markdown intents (code, emphasis, headings,
+        /// strikethrough, links) from the parser's `AttributedString` into
+        /// AppKit attributes. Shared by resolved prose runs and table cells.
+        static func inlineAttributedString(
+            from value: AttributedString
+        ) -> NSMutableAttributedString {
+            let string = String(value.characters)
+            let output = NSMutableAttributedString(
+                string: string,
+                attributes: [
+                    .font: NSFont.preferredFont(forTextStyle: .body),
+                    .foregroundColor: NSColor.labelColor,
+                ]
+            )
+            guard !string.isEmpty else { return output }
 
             for run in value.runs {
                 let prefix = String(
@@ -222,7 +261,7 @@
                 )
                 let runText = String(value[run.range].characters)
                 let range = NSRange(
-                    location: start + prefix.utf16.count,
+                    location: prefix.utf16.count,
                     length: runText.utf16.count
                 )
                 guard range.length > 0 else { continue }
@@ -275,18 +314,7 @@
                     )
                 }
             }
-
-            output.append(NSAttributedString(string: "\n"))
-            if let quoteBarOffset {
-                output.addAttribute(
-                    .chatQuoteBarOffsets,
-                    value: [quoteBarOffset],
-                    range: NSRange(
-                        location: start,
-                        length: output.length - start
-                    )
-                )
-            }
+            return output
         }
 
         private static func appendBlockSpacer(
@@ -343,10 +371,28 @@
             let layout: ChatTextLayout
         }
 
+        private struct CodeEntry {
+            let block: ChatMarkdownCodeBlock
+            let theme: ChatCodeHighlightTheme
+            let layout: ChatTextLayout
+            /// A synchronous miss stores plain text; preparation replaces it
+            /// with the highlighted form at the same metrics.
+            let isHighlighted: Bool
+        }
+
+        private struct TableEntry {
+            let table: ChatMarkdownTable
+            let layout: ChatTableLayout
+        }
+
         private var entries: [Key: Entry] = [:]
         private var inFlightKeys: Set<Key> = []
         private var resolvedEntries: [Key: ResolvedEntry] = [:]
         private var resolvedInFlightKeys: Set<Key> = []
+        private var codeEntries: [String: CodeEntry] = [:]
+        private var codeInFlightIDs: Set<String> = []
+        private var tableEntries: [String: TableEntry] = [:]
+        private var tableInFlightIDs: Set<String> = []
 
         /// UIKit's pooled-text-view lifecycle does not exist on macOS; the
         /// timeline calls these symmetrically on both platforms.
@@ -470,6 +516,156 @@
                 remaining = remaining.filter { request in
                     let key = Key(id: request.id, width: request.width)
                     return resolvedEntries[key]?.prose != request.prose
+                }
+                if remaining.isEmpty || Task.isCancelled { break }
+                if pending.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+            }
+        }
+
+        // MARK: Rich blocks
+
+        /// The code block's prepared layout, or a synchronous plain-text
+        /// layout on a miss so the row never flashes a placeholder.
+        func codeLayout(
+            id: String,
+            block: ChatMarkdownCodeBlock,
+            theme: ChatCodeHighlightTheme
+        ) -> (layout: ChatTextLayout, isHighlighted: Bool) {
+            if let entry = codeEntries[id], entry.block == block,
+                entry.theme == theme
+            {
+                return (entry.layout, entry.isHighlighted)
+            }
+            ChatBenchmarkAutoRun.trace(
+                "code layout miss id=\(id) bytes=\(block.code.utf8.count)"
+            )
+            let layout = ChatTextLayout(
+                code: ChatMacCodeStyle.attributedString(code: block.code)
+            )
+            codeEntries[id] = CodeEntry(
+                block: block,
+                theme: theme,
+                layout: layout,
+                isHighlighted: false
+            )
+            return (layout, false)
+        }
+
+        /// Highlights and measures code blocks off the main actor. Runs
+        /// after prose preparation: syntax highlighting is JavaScript-backed
+        /// and must not delay the text the page is mostly made of.
+        func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async {
+            var remaining = requests
+            while !remaining.isEmpty, !Task.isCancelled {
+                var pending: [ChatCodeLayoutRequest] = []
+                var seen: Set<String> = []
+                for request in remaining {
+                    guard seen.insert(request.id).inserted,
+                        !isCodePrepared(request),
+                        !codeInFlightIDs.contains(request.id)
+                    else { continue }
+                    codeInFlightIDs.insert(request.id)
+                    pending.append(request)
+                }
+                if !pending.isEmpty {
+                    let claimed = pending
+                    let worker = Task.detached(priority: .userInitiated) {
+                        var layouts: [ChatTextLayout] = []
+                        layouts.reserveCapacity(claimed.count)
+                        for request in claimed {
+                            guard !Task.isCancelled else { break }
+                            let text = await ChatMacCodeStyle.highlightedAttributedString(
+                                block: request.block,
+                                theme: request.theme
+                            )
+                            layouts.append(ChatTextLayout(code: text))
+                        }
+                        return layouts
+                    }
+                    let layouts = await withTaskCancellationHandler {
+                        await worker.value
+                    } onCancel: {
+                        worker.cancel()
+                    }
+                    for (request, layout) in zip(claimed, layouts) {
+                        codeEntries[request.id] = CodeEntry(
+                            block: request.block,
+                            theme: request.theme,
+                            layout: layout,
+                            isHighlighted: true
+                        )
+                    }
+                    for request in claimed {
+                        codeInFlightIDs.remove(request.id)
+                    }
+                }
+                remaining = remaining.filter { !isCodePrepared($0) }
+                if remaining.isEmpty || Task.isCancelled { break }
+                if pending.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+            }
+        }
+
+        private func isCodePrepared(_ request: ChatCodeLayoutRequest) -> Bool {
+            guard let entry = codeEntries[request.id] else { return false }
+            return entry.block == request.block && entry.theme == request.theme
+                && entry.isHighlighted
+        }
+
+        /// The table's prepared layout, measured synchronously on a miss.
+        func tableLayout(
+            id: String,
+            table: ChatMarkdownTable
+        ) -> ChatTableLayout {
+            if let entry = tableEntries[id], entry.table == table {
+                return entry.layout
+            }
+            ChatBenchmarkAutoRun.trace(
+                "table layout miss id=\(id) rows=\(table.rows.count)"
+            )
+            let layout = ChatTableLayout(table: table)
+            tableEntries[id] = TableEntry(table: table, layout: layout)
+            return layout
+        }
+
+        func prepareTables(requests: [ChatTableLayoutRequest]) async {
+            var remaining = requests
+            while !remaining.isEmpty, !Task.isCancelled {
+                var pending: [ChatTableLayoutRequest] = []
+                var seen: Set<String> = []
+                for request in remaining {
+                    guard seen.insert(request.id).inserted,
+                        tableEntries[request.id]?.table != request.table,
+                        !tableInFlightIDs.contains(request.id)
+                    else { continue }
+                    tableInFlightIDs.insert(request.id)
+                    pending.append(request)
+                }
+                if !pending.isEmpty {
+                    let claimed = pending
+                    let worker = Task.detached(priority: .userInitiated) {
+                        claimed.map { ChatTableLayout(table: $0.table) }
+                    }
+                    let layouts = await withTaskCancellationHandler {
+                        await worker.value
+                    } onCancel: {
+                        worker.cancel()
+                    }
+                    for (request, layout) in zip(claimed, layouts) {
+                        tableInFlightIDs.remove(request.id)
+                        if tableEntries[request.id]?.table != request.table {
+                            tableEntries[request.id] = TableEntry(
+                                table: request.table,
+                                layout: layout
+                            )
+                        }
+                    }
+                }
+                remaining = remaining.filter {
+                    tableEntries[$0.id]?.table != $0.table
                 }
                 if remaining.isEmpty || Task.isCancelled { break }
                 if pending.isEmpty {
