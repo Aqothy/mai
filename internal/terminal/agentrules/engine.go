@@ -13,6 +13,7 @@ import (
 	"embed"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -275,16 +276,8 @@ func Labels() []string {
 		seen[m.label] = struct{}{}
 		labels = append(labels, m.label)
 	}
-	sortStrings(labels)
+	slices.Sort(labels)
 	return labels
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }
 
 // Detect evaluates the labeled agent's rules over the input. The highest

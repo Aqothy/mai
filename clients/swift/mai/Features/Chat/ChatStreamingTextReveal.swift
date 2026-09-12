@@ -110,23 +110,20 @@ nonisolated struct ChatStreamingTextRevealState: Equatable, Sendable {
         sourceIsAppendOnly: Bool,
         at date: Date
     ) {
-        guard let previousTarget, let previousUpdateID else {
-            setBaseline(target: target, updateID: updateID)
-            return
+        defer {
+            self.previousTarget = target
+            self.previousUpdateID = updateID
         }
+        guard let previousTarget, let previousUpdateID else { return }
 
         guard sourceIsAppendOnly,
             updateID > previousUpdateID
         else {
             batches.removeAll(keepingCapacity: true)
-            setBaseline(target: target, updateID: updateID)
             return
         }
 
         batches.removeAll { $0.deadline <= date }
-        defer {
-            setBaseline(target: target, updateID: updateID)
-        }
 
         guard target.identity != nil else {
             batches.removeAll(keepingCapacity: true)
@@ -157,14 +154,6 @@ nonisolated struct ChatStreamingTextRevealState: Equatable, Sendable {
             )
         )
         trimToBounds()
-    }
-
-    private mutating func setBaseline(
-        target: ChatStreamingTextRevealTarget,
-        updateID: Int
-    ) {
-        previousTarget = target
-        previousUpdateID = updateID
     }
 
     private mutating func trimToBounds() {
@@ -241,9 +230,7 @@ private nonisolated enum ChatStreamingTextRevealTimeline {
             dates.append(next)
             next = next.addingTimeInterval(frameInterval)
         }
-        if dates.last != deadline {
-            dates.append(deadline)
-        }
+        dates.append(deadline)
         return dates
     }
 }

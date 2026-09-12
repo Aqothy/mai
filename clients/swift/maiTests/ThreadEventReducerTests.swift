@@ -542,13 +542,16 @@ private func makeItem(
 ) -> Item {
     Item(
         createdAt: createdAt,
+        detailAvailable: nil,
         id: id,
         kind: kind,
         payload: payload,
+        sequence: nil,
         status: status,
         textDelta: textDelta,
         title: title,
         toolCall: toolCall,
+        toolCallSummary: nil,
         turnID: turnID,
         updatedAt: Date(timeIntervalSince1970: 0)
     )

@@ -20,24 +20,4 @@ nonisolated struct TerminalStreamMessage: Decodable, Sendable {
         case sequence, status
         case terminalID = "terminalId"
     }
-
-    init(
-        data: Data?,
-        exitCode: Int?,
-        kind: String,
-        message: String?,
-        runID: String?,
-        sequence: Int?,
-        status: String?,
-        terminalID: String
-    ) {
-        self.data = data
-        self.exitCode = exitCode
-        self.kind = kind
-        self.message = message
-        self.runID = runID
-        self.sequence = sequence
-        self.status = status
-        self.terminalID = terminalID
-    }
 }
