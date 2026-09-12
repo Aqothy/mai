@@ -543,11 +543,7 @@ func NewID() string {
 
 func newRunID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail on supported platforms; keep IDs unique
-		// enough for one process if it ever does.
-		return fmt.Sprintf("run-%d", time.Now().UnixNano())
-	}
+	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
 

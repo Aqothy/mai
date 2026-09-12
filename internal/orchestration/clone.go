@@ -8,9 +8,6 @@ import (
 )
 
 func cloneRawMessage(value json.RawMessage) json.RawMessage {
-	if len(value) == 0 {
-		return nil
-	}
 	return append(json.RawMessage(nil), value...)
 }
 

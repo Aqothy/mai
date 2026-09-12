@@ -11,7 +11,6 @@ nonisolated enum ChatMarkdownProseStyle {
     static let blockSpacing: CGFloat = 16
     static let lineSpacing: CGFloat = 2
     static let listIndent: CGFloat = 20
-    static let listMarkerSpacing: CGFloat = 10
     static let listItemSpacing: CGFloat = 8
     static let quoteIndent: CGFloat = 14
     static let quoteBarWidth: CGFloat = 3

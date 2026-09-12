@@ -11,10 +11,8 @@ import Synchronization
 /// - raw terminal bytes must never pass through SwiftUI observation, so this
 ///   type keeps the hot path outside any `@Observable` state.
 ///
-/// Attach snapshots need no special handling here: the daemon synthesizes
-/// them from its terminal model at this client's grid, so they are current
-/// state, not replayed history, and renderer reactions to them belong in the
-/// live PTY.
+/// Native attach snapshots are restored through `TerminalSessionController`;
+/// this pipeline carries live output.
 nonisolated final class TerminalOutputPipeline: Sendable {
     struct Grid: Hashable, Sendable {
         var columns: UInt16
@@ -63,7 +61,11 @@ nonisolated final class TerminalOutputPipeline: Sendable {
     /// keeps live output ordered relative to the buffered flush.
     func deliver(_ data: Data) {
         state.withLock { state in
-            Self.deliverLocked(data, to: &state)
+            guard state.isSurfaceReady, let sink = state.sink else {
+                state.pendingOutput.append(data)
+                return
+            }
+            sink(data)
         }
     }
 
@@ -107,15 +109,4 @@ nonisolated final class TerminalOutputPipeline: Sendable {
         state.withLock { $0.isInputEnabled = enabled }
     }
 
-    var currentGrid: Grid? {
-        state.withLock { $0.lastGrid }
-    }
-
-    private static func deliverLocked(_ data: Data, to state: inout State) {
-        guard state.isSurfaceReady, let sink = state.sink else {
-            state.pendingOutput.append(data)
-            return
-        }
-        sink(data)
-    }
 }

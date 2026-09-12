@@ -27,43 +27,6 @@ protocol TerminalRPCClient: RPCTransportClient {
     func detachTerminal(_ params: TerminalDetachParams)
 }
 
-// Default implementations let test doubles override only what they exercise.
-extension TerminalRPCClient {
-    func subscribeTerminalList() async throws -> TerminalListStreamItem {
-        throw RPCError(code: nil, message: "Terminal list is unavailable", data: nil)
-    }
-
-    func renameTerminal(_ params: TerminalRenameParams) async throws -> TerminalSummary {
-        throw RPCError(code: nil, message: "Terminal rename is unavailable", data: nil)
-    }
-
-    func deleteTerminal(terminalID: String) async throws {
-        throw RPCError(code: nil, message: "Terminal deletion is unavailable", data: nil)
-    }
-
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal creation is unavailable", data: nil)
-    }
-
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal attach is unavailable", data: nil)
-    }
-
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal relaunch is unavailable", data: nil)
-    }
-
-    func terminateTerminal(terminalID: String) async throws {
-        throw RPCError(code: nil, message: "Terminal termination is unavailable", data: nil)
-    }
-
-    func writeTerminal(_ params: TerminalWriteParams) {}
-
-    func resizeTerminal(_ params: TerminalResizeParams) {}
-
-    func detachTerminal(_ params: TerminalDetachParams) {}
-}
-
 extension RPCClient: TerminalRPCClient {
     func subscribeTerminalList() async throws -> TerminalListStreamItem {
         try await call(MaidRPCMethod.terminalSubscribeList, params: EmptyParams())

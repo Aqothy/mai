@@ -347,10 +347,13 @@ struct ThreadStoreTests {
 
     @Test
     func restoredThreadPreparationIsLimitedAndRetryable() async {
-        let rpc = MockThreadRPCClient(threads: [
-            makeThread("restored"),
-            makeThread("active", isRunning: true),
-        ])
+        let rpc = MockThreadRPCClient(
+            threads: [
+                makeThread("restored"),
+                makeThread("active", isRunning: true),
+            ],
+            historyRestorePendingThreadIDs: ["restored"]
+        )
         rpc.prepareFailuresRemaining = 1
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -390,13 +393,16 @@ struct ThreadStoreTests {
         let store = ThreadDraftStore(defaults: defaults)
         store.setActiveDraftThreadID("thread-a")
         store.setText("First prompt", for: "thread-a")
-        store.preferences.rememberProvider("codex")
-        store.preferences.rememberWorkingDirectory("/tmp/project")
+        store.preferences.rememberSelection(
+            providerID: "codex",
+            workingDirectory: "/tmp/project"
+        )
         store.preferences.rememberConfigValue(
             JSONAny("high"),
             providerID: "codex",
             optionID: "reasoning"
         )
+        store.flushPendingSave()
 
         let restored = ThreadDraftStore(defaults: defaults)
         #expect(restored.activeDraftThreadID == "thread-a")
@@ -411,6 +417,7 @@ struct ThreadStoreTests {
         )
 
         restored.setText("  \n", for: "thread-a")
+        restored.flushPendingSave()
         #expect(ThreadDraftStore(defaults: defaults).text(for: "thread-a") == "  \n")
     }
 
@@ -594,7 +601,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     init(
         threads: [mai.Thread],
         detailThreads: [mai.Thread]? = nil,
-        detailSnapshotSequence: Int? = nil
+        detailSnapshotSequence: Int? = nil,
+        historyRestorePendingThreadIDs: Set<String> = []
     ) {
         let entries = threads.map(makeThreadListEntry)
         threadListItem = ThreadListStreamItem(
@@ -616,6 +624,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                         event: nil,
                         kind: "snapshot",
                         snapshot: ThreadDetailSnapshot(
+                            historyRestorePending:
+                                historyRestorePendingThreadIDs.contains(
+                                    thread.id
+                                ),
                             snapshotSequence: detailSnapshotSequence ?? index + 1,
                             thread: thread
                         )
@@ -735,15 +747,19 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             snapshotsByID[threadID] = ThreadStreamItem(
                 event: nil,
                 kind: "snapshot",
-                snapshot: ThreadDetailSnapshot(snapshotSequence: 1, thread: thread)
+                snapshot: ThreadDetailSnapshot(
+                    historyRestorePending: nil,
+                    snapshotSequence: 1,
+                    thread: thread
+                )
             )
         } else if command.type == "thread.create", let threadID = command.threadID {
             let session = SessionBinding(
                 activeTurnID: nil,
                 configOptions: nil,
                 cwd: command.cwd,
+                driver: nil,
                 lastError: nil,
-                provider: nil,
                 providerInstanceID: command.providerInstanceID ?? "codex",
                 providerName: nil,
                 slashCommands: nil,
@@ -763,6 +779,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 event: nil,
                 kind: "snapshot",
                 snapshot: ThreadDetailSnapshot(
+                    historyRestorePending: nil,
                     snapshotSequence: 1,
                     thread: thread
                 )
@@ -823,7 +840,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 mcp: nil,
                 modelSwitch: nil,
                 promptContent: nil,
-                resume: nil
+                resume: nil,
+                sessionList: nil
             ),
             driver: "mock",
             initializedAt: .now,
@@ -913,7 +931,11 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         snapshotsByID[thread.id] = ThreadStreamItem(
             event: nil,
             kind: "snapshot",
-            snapshot: ThreadDetailSnapshot(snapshotSequence: sequence, thread: thread)
+            snapshot: ThreadDetailSnapshot(
+                historyRestorePending: nil,
+                snapshotSequence: sequence,
+                thread: thread
+            )
         )
         let item = ThreadListStreamItem(
             kind: "thread-upserted",

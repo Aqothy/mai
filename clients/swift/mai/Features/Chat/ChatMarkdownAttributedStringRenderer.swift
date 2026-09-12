@@ -9,7 +9,7 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
     static func attributedString(from source: String) -> AttributedString {
         guard !source.isEmpty else { return AttributedString() }
 
-        var builder = ChatMarkdownAttributedStringBuilder()
+        let builder = ChatMarkdownAttributedStringBuilder()
         let result = builder.render(
             document: Markdown.Document(parsing: source)
         )
@@ -21,7 +21,7 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
 
     /// Renders an already-parsed root block without parsing its source again.
     static func attributedString(from block: Markup) -> AttributedString {
-        var builder = ChatMarkdownAttributedStringBuilder()
+        let builder = ChatMarkdownAttributedStringBuilder()
         let result = builder.render(block: block)
         return result.characters.isEmpty
             ? AttributedString(block.format())
@@ -33,7 +33,7 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
     static func attributedString(
         fromQuoteContents quote: BlockQuote
     ) -> AttributedString {
-        var builder = ChatMarkdownAttributedStringBuilder()
+        let builder = ChatMarkdownAttributedStringBuilder()
         return builder.renderQuoteContents(quote, listDepth: 0)
     }
 
@@ -41,7 +41,7 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
     static func attributedString(
         fromInlineChildren children: MarkupChildren
     ) -> AttributedString {
-        var builder = ChatMarkdownAttributedStringBuilder()
+        let builder = ChatMarkdownAttributedStringBuilder()
         return builder.renderInlineChildren(children)
     }
 }
@@ -50,29 +50,27 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
     private struct InlineEnvironment {
         var presentationIntent: InlinePresentationIntent = []
         var font: Font?
-        var foregroundColor: Color?
         var link: URL?
-        var isUnderlined = false
     }
 
-    mutating func render(document: Markdown.Document) -> AttributedString {
+    func render(document: Markdown.Document) -> AttributedString {
         joined(
             document.children.map { render(block: $0, listDepth: 0) },
             separator: "\n\n"
         )
     }
 
-    mutating func render(block: Markup) -> AttributedString {
+    func render(block: Markup) -> AttributedString {
         render(block: block, listDepth: 0)
     }
 
-    mutating func renderInlineChildren(
+    func renderInlineChildren(
         _ children: MarkupChildren
     ) -> AttributedString {
         renderInline(children)
     }
 
-    private mutating func render(
+    private func render(
         block: Markup,
         listDepth: Int
     ) -> AttributedString {
@@ -137,7 +135,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         }
     }
 
-    mutating func renderQuoteContents(
+    func renderQuoteContents(
         _ quote: BlockQuote,
         listDepth: Int
     ) -> AttributedString {
@@ -149,7 +147,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         )
     }
 
-    private mutating func render(
+    private func render(
         items: some Sequence<ListItem>,
         startingAt firstOrdinal: Int?,
         listDepth: Int
@@ -174,7 +172,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         return joined(renderedItems, separator: "\n")
     }
 
-    private mutating func render(
+    private func render(
         item: ListItem,
         marker: String,
         listDepth: Int
@@ -190,28 +188,17 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
             childIndex = 1
         }
 
-        while childIndex < item.childCount {
-            guard let child = item.child(at: childIndex) else {
-                childIndex += 1
-                continue
-            }
+        for child in item.children.dropFirst(childIndex) {
             result.append(AttributedString("\n"))
-            if child is OrderedList || child is UnorderedList {
-                result.append(
-                    render(block: child, listDepth: listDepth + 1)
-                )
-            } else {
+            if !(child is OrderedList || child is UnorderedList) {
                 result.append(AttributedString(indentation + "    "))
-                result.append(
-                    render(block: child, listDepth: listDepth + 1)
-                )
             }
-            childIndex += 1
+            result.append(render(block: child, listDepth: listDepth + 1))
         }
         return result
     }
 
-    private mutating func render(
+    private func render(
         table: Markdown.Table
     ) -> AttributedString {
         var rows: [AttributedString] = []
@@ -227,7 +214,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         return joined(rows, separator: "\n")
     }
 
-    private mutating func render(cells: MarkupChildren) -> AttributedString {
+    private func render(cells: MarkupChildren) -> AttributedString {
         var renderedCells: [AttributedString] = []
         for child in cells {
             guard let cell = child as? Markdown.Table.Cell else { continue }
@@ -239,7 +226,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         return joined(renderedCells, separator: separator)
     }
 
-    private mutating func renderInline(
+    private func renderInline(
         _ nodes: MarkupChildren,
         environment: InlineEnvironment = InlineEnvironment()
     ) -> AttributedString {
@@ -281,7 +268,6 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
                 nested.link = ChatMarkdownLinkPolicy.url(
                     for: link.destination
                 )
-                nested.isUnderlined = nested.link != nil
                 result.append(renderInline(link.children, environment: nested))
 
             case let image as Markdown.Image:
@@ -325,9 +311,8 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
             result.inlinePresentationIntent = environment.presentationIntent
         }
         result.font = environment.font
-        result.foregroundColor = environment.foregroundColor
         result.link = environment.link
-        if environment.isUnderlined {
+        if environment.link != nil {
             result.underlineStyle = .single
         }
         return result
