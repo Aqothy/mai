@@ -99,10 +99,6 @@ final class ChatPromptModel {
         }
     }
 
-    func send(annotations: ChatAnnotationModel? = nil) async {
-        await submit(annotations: annotations)
-    }
-
     func removeQueuedPrompt(_ promptID: String) {
         store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
     }
@@ -117,17 +113,14 @@ final class ChatPromptModel {
         }
     }
 
-    private func submit(annotations annotationModel: ChatAnnotationModel?) async {
+    func send(annotations annotationModel: ChatAnnotationModel? = nil) async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
         let submittedAnnotations = annotationModel?.annotations ?? []
         let submittedAnnotationIDs = Set(submittedAnnotations.map(\.id))
-        guard canSend(annotations: submittedAnnotations),
-            !submittedText.isEmpty || !submittedAttachments.isEmpty
-                || !submittedAnnotations.isEmpty
-        else { return }
+        guard canSend(annotations: submittedAnnotations) else { return }
 
         isSending = true
         defer { isSending = false }

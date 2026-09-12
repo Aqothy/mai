@@ -70,7 +70,7 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	}
 	options := configOptionsFromModels(h.models, selectedModel, "", "")
 	handle := fmt.Sprintf("codex-options-%d", time.Now().UnixNano())
-	h.options[handle] = &optionsState{selectedModel: selectedModel, options: options, callbacks: callbacks}
+	h.options[handle] = &optionsState{selectedModel: selectedModel, callbacks: callbacks}
 	return provider.OptionsSession{
 		Handle:        handle,
 		ConfigOptions: append([]provider.ConfigOption(nil), options...),
@@ -113,8 +113,7 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 	state.selectedModel, _ = currentConfigString(options, "model")
 	state.selectedEffort, _ = currentConfigString(options, "reasoning_effort")
 	state.selectedTier, _ = currentConfigString(options, "service_tier")
-	state.options = options
-	optionsSnapshot := append([]provider.ConfigOption(nil), state.options...)
+	optionsSnapshot := append([]provider.ConfigOption(nil), options...)
 	callback := state.callbacks.Updated
 	h.mu.Unlock()
 	if callback != nil {
@@ -125,11 +124,6 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 
 func (h *Instance) CloseOptionsSession(_ context.Context, handle string) error {
 	h.mu.Lock()
-	state := h.options[handle]
-	if state == nil {
-		h.mu.Unlock()
-		return nil
-	}
 	delete(h.options, handle)
 	h.mu.Unlock()
 	return nil

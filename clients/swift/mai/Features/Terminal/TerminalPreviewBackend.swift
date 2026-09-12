@@ -3,7 +3,7 @@ import Foundation
 import Synchronization
 
 /// Fake host backend for previews and tests. It echoes typed input back to
-/// the renderer, records everything it receives, and prints a canned ANSI
+/// the renderer and prints a canned ANSI
 /// banner once the surface reports its first grid — no daemon involved.
 nonisolated final class TerminalPreviewBackend: TerminalHostBackend {
     @MainActor
@@ -15,8 +15,6 @@ nonisolated final class TerminalPreviewBackend: TerminalHostBackend {
     private struct State {
         var output: (@Sendable (Data) -> Void)?
         var sentBanner = false
-        var inputs: [Data] = []
-        var grids: [TerminalOutputPipeline.Grid] = []
     }
 
     private let state = Mutex(State())
@@ -37,19 +35,8 @@ nonisolated final class TerminalPreviewBackend: TerminalHostBackend {
         state.withLock { $0.output = output }
     }
 
-    var capturedInputs: [Data] {
-        state.withLock { $0.inputs }
-    }
-
-    var capturedGrids: [TerminalOutputPipeline.Grid] {
-        state.withLock { $0.grids }
-    }
-
     func sendInput(_ data: Data) {
-        let output = state.withLock { state in
-            state.inputs.append(data)
-            return state.output
-        }
+        let output = state.withLock { $0.output }
         // Local echo so typing is visible without a shell: CR becomes CRLF.
         var echoed = Data(capacity: data.count + 1)
         for byte in data {
@@ -64,7 +51,6 @@ nonisolated final class TerminalPreviewBackend: TerminalHostBackend {
 
     func sendResize(columns: UInt16, rows: UInt16) {
         let (output, firstReport) = state.withLock { state in
-            state.grids.append(.init(columns: columns, rows: rows))
             let first = !state.sentBanner
             state.sentBanner = true
             return (state.output, first)

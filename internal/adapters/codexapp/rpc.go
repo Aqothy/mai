@@ -46,7 +46,6 @@ type rpcClient struct {
 
 	onNotification func(string, json.RawMessage)
 	onRequest      func(json.RawMessage, string, json.RawMessage)
-	done           chan struct{}
 	closeOnce      sync.Once
 }
 
@@ -54,7 +53,6 @@ func newRPCClient(input io.Reader, output io.Writer) *rpcClient {
 	return &rpcClient{
 		input: input, output: output,
 		pending: make(map[string]chan rpcResponse),
-		done:    make(chan struct{}),
 	}
 }
 
@@ -216,15 +214,7 @@ func (c *rpcClient) fail(err error) {
 		for _, response := range pending {
 			response <- rpcResponse{err: err}
 		}
-		close(c.done)
 	})
-}
-
-func (c *rpcClient) wait() error {
-	<-c.done
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.closeErr
 }
 
 func isRPCMethodNotFound(err error) bool {

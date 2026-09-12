@@ -121,7 +121,7 @@ final class TerminalStore {
             guard let terminalID = item.terminalID else { return }
             terminals.removeAll { $0.terminalID == terminalID }
             if let active = activeAttachment, active.terminalID == terminalID {
-                closeActiveAttachment()
+                closeActiveTerminal()
             }
         case nil:
             // Unknown future kinds must not crash the client.
@@ -160,7 +160,7 @@ final class TerminalStore {
                 mode = .attach(terminalID: terminalID)
             }
         }
-        closeActiveAttachment()
+        closeActiveTerminal()
         let attachment = TerminalAttachment(
             store: self,
             origin: request,
@@ -175,7 +175,8 @@ final class TerminalStore {
     /// state: containers call this when the visible content is no longer a
     /// terminal.
     func closeActiveTerminal() {
-        closeActiveAttachment()
+        activeAttachment?.close()
+        activeAttachment = nil
     }
 
     /// Replaces the active attachment with a fresh run of the same terminal.
@@ -186,7 +187,7 @@ final class TerminalStore {
         guard let active = activeAttachment, let terminalID = active.terminalID else {
             return nil
         }
-        closeActiveAttachment()
+        closeActiveTerminal()
         let attachment = TerminalAttachment(
             store: self,
             origin: active.origin,
@@ -227,7 +228,7 @@ final class TerminalStore {
     func deleteTerminal(terminalID: String) async throws {
         try await rpc.deleteTerminal(terminalID: terminalID)
         if let active = activeAttachment, active.terminalID == terminalID {
-            closeActiveAttachment()
+            closeActiveTerminal()
         }
     }
 
@@ -247,10 +248,5 @@ final class TerminalStore {
         isAwaitingListSnapshot = false
         bufferedListItems.removeAll(keepingCapacity: true)
         activeAttachment?.connectionLost()
-    }
-
-    private func closeActiveAttachment() {
-        activeAttachment?.close()
-        activeAttachment = nil
     }
 }

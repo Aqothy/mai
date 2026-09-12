@@ -378,6 +378,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = mai/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Allow mai to take photos you choose to attach to a message.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to maiD running on your local network.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -431,6 +432,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = mai/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Allow mai to take photos you choose to attach to a message.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to maiD running on your local network.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;

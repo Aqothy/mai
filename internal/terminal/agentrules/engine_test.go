@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// The OSC fixtures in this file document exactly which states Increment 8
-// (title/progress evidence, no screen) recognizes; the screen fixtures
-// document the Increment 9 states that need the detector VT. Patterns come
-// from the recorded Herdr manifests embedded in manifests/.
+// OSC fixtures cover title/progress evidence; screen fixtures cover detector VT
+// evidence. Patterns come from the Herdr manifests embedded in manifests/.
 
 func TestManifestsCompileAndCoverExpectedAgents(t *testing.T) {
 	labels := Labels()
@@ -91,7 +89,7 @@ func TestClaudeOSCStates(t *testing.T) {
 	}
 	// Claude leaves progress stuck at 4;3 while waiting for permission, and
 	// keeps the ✳ idle title. Without screen evidence this reads as idle —
-	// the documented gap that requires the Increment 9 screen source.
+	// detecting the permission prompt requires screen evidence.
 	if d := Detect("claude", Input{OSCTitle: "✳ Task", OSCProgress: "4;3;"}); d.State != StateIdle {
 		t.Fatalf("stuck 4;3 progress with idle title: %+v", d)
 	}

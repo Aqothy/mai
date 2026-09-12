@@ -1131,14 +1131,6 @@ func planEntriesFromApp(steps []appPlanStep) []provider.PlanEntry {
 	return entries
 }
 
-func tokenUsageFromApp(usage appThreadTokenUsage) provider.TokenUsage {
-	result := provider.TokenUsage{UsedTokens: usage.Total.TotalTokens}
-	if usage.ModelContextWindow != nil {
-		result.MaxTokens = *usage.ModelContextWindow
-	}
-	return result
-}
-
 func boundedAppOutput(value string) string {
 	if len(value) <= appToolOutputLimit {
 		return value

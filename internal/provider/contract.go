@@ -388,6 +388,9 @@ type StopSessionInput struct {
 	ThreadID string `json:"threadId"`
 }
 
+// ForkSessionInput forks the whole native session. Codex app-server also
+// accepts a last-turn boundary; it is deliberately not exposed until a client
+// surface exists to choose one.
 type ForkSessionInput struct {
 	ProviderSessionID string `json:"-"`
 }
@@ -611,15 +614,18 @@ type RuntimeEventPayload struct {
 	ItemStatus  ItemStatus               `json:"status,omitempty"`
 	RequestType RuntimeRequestType       `json:"requestType,omitempty"`
 	Decision    ApprovalDecision         `json:"decision,omitempty"`
-	Detail      string                   `json:"detail,omitempty"`
-	Message     string                   `json:"message,omitempty"`
-	Title       string                   `json:"title,omitempty"`
-	Options     []ApprovalOption         `json:"options,omitempty"`
-	Cancelled   bool                     `json:"cancelled,omitempty"`
-	Args        json.RawMessage          `json:"args,omitempty"`
-	Resolution  json.RawMessage          `json:"resolution,omitempty"`
-	Data        json.RawMessage          `json:"data,omitempty"`
-	ToolCall    *ToolCall                `json:"toolCall,omitempty"`
+	// Detail is free-form context for the event. On an ItemCompleted event for
+	// a reasoning item it carries the provider's full reasoning text, which
+	// ingestion treats as authoritative over the streamed deltas.
+	Detail     string           `json:"detail,omitempty"`
+	Message    string           `json:"message,omitempty"`
+	Title      string           `json:"title,omitempty"`
+	Options    []ApprovalOption `json:"options,omitempty"`
+	Cancelled  bool             `json:"cancelled,omitempty"`
+	Args       json.RawMessage  `json:"args,omitempty"`
+	Resolution json.RawMessage  `json:"resolution,omitempty"`
+	Data       json.RawMessage  `json:"data,omitempty"`
+	ToolCall   *ToolCall        `json:"toolCall,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`

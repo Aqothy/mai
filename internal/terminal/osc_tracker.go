@@ -11,9 +11,8 @@ import (
 // byte scanner, not a terminal screen; screen-accurate evidence is the
 // detector VT's job.
 type oscTracker struct {
-	state       oscScanState
-	payload     []byte
-	overflowing bool
+	state   oscScanState
+	payload []byte
 }
 
 type oscScanState uint8
@@ -46,7 +45,6 @@ func (t *oscTracker) scan(data []byte, onTitle func(title string), onProgress fu
 			case ']':
 				t.state = oscScanBody
 				t.payload = t.payload[:0]
-				t.overflowing = false
 			case 0x1b:
 				// stay: ESC ESC ] still starts an OSC
 			default:
@@ -77,14 +75,9 @@ func (t *oscTracker) scan(data []byte, onTitle func(title string), onProgress fu
 }
 
 func (t *oscTracker) collect(b byte) {
-	if t.overflowing {
-		return
+	if len(t.payload) < oscPayloadCap {
+		t.payload = append(t.payload, b)
 	}
-	if len(t.payload) >= oscPayloadCap {
-		t.overflowing = true
-		return
-	}
-	t.payload = append(t.payload, b)
 }
 
 // emit parses one complete OSC payload of the form "Ps;data".

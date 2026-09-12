@@ -1,3 +1,11 @@
+// Package acp adapts ACP agents to maiD's provider contract.
+//
+// Reasoning replay assumption: session/load replays agent thoughts as one
+// agent_thought_chunk per thought with no separators, while live streams
+// carry their own paragraph breaks. Replay therefore appends a paragraph
+// break after every thought chunk (separateReplayReasoningBlocks). An agent
+// that replays a single thought as several sub-newline chunks would gain
+// spurious breaks; no supported agent (gemini-cli, claude-code-acp) does.
 package acp
 
 import (
@@ -181,15 +189,13 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 	return nil
 }
 
-func (h *Instance) agent() *acp.AgentPeer { return h.agentPeer }
-
 func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
 	title := "Mai Daemon"
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
 		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
-	initResp, err := h.agent().Initialize(ctx, initReq)
+	initResp, err := h.agentPeer.Initialize(ctx, initReq)
 	if err != nil {
 		return schema.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", acpRequestError(err))
 	}
@@ -222,7 +228,7 @@ func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	_, err = h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
+	_, err = h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
@@ -237,7 +243,7 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	if !h.Info().Capabilities.Logout {
 		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
 	}
-	_, err := h.agent().Logout(ctx, schema.LogoutRequest{})
+	_, err := h.agentPeer.Logout(ctx, schema.LogoutRequest{})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}

@@ -109,12 +109,6 @@ final class ThreadStore {
         noteSelectedSessionChanged(selectedThreadID)
     }
 
-    var selectedThreadSequence: Int {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return 0 }
-        return sessionsByID[selectedThreadID]?.lastSequence ?? 0
-    }
-
     var isSelectedThreadRestoringHistory: Bool {
         _ = selectedSessionGeneration
         guard let selectedThreadID else { return false }

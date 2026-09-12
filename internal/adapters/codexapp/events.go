@@ -40,9 +40,14 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			h.emitItem(method, notification.ThreadID, notification.TurnID, notification.Item, notification.StartedAtMs, notification.CompletedAtMs)
 		}
 	case "item/agentMessage/delta":
-		h.emitTextDelta(raw, provider.RuntimeContentAssistantText)
-	case "item/reasoning/textDelta", "item/reasoning/summaryTextDelta":
-		h.emitTextDelta(raw, provider.RuntimeContentReasoningText)
+		h.emitTextDelta(raw, provider.RuntimeContentAssistantText, "")
+	case "item/reasoning/summaryTextDelta":
+		h.emitTextDelta(raw, provider.RuntimeContentReasoningText, "summary")
+	case "item/reasoning/textDelta":
+		h.emitTextDelta(raw, provider.RuntimeContentReasoningText, "content")
+	case "item/reasoning/summaryPartAdded":
+		// Part boundaries are derived from the index every reasoning delta
+		// carries, so this notification adds nothing.
 	case "item/commandExecution/outputDelta":
 		h.emitCommandOutput(raw)
 	case "item/fileChange/patchUpdated":
@@ -178,7 +183,7 @@ func (h *Instance) emitTurnCompleted(nativeThread string, turn appTurn) {
 	if session := h.sessionsByLocal[localThread]; session != nil {
 		if session.activeNativeTurn == turn.ID {
 			session.activeNativeTurn = ""
-			session.streamedText = make(map[string]string)
+			session.streamed = make(map[string]streamedItem)
 		}
 	}
 	h.mu.Unlock()
@@ -212,8 +217,8 @@ func (h *Instance) emitItem(method, nativeThread, nativeTurn string, item appIte
 			h.mu.Lock()
 			streamed := ""
 			if session := h.sessionsByLocal[localThread]; session != nil {
-				streamed = session.streamedText[item.ID]
-				delete(session.streamedText, item.ID)
+				streamed = session.streamed[item.ID].text
+				delete(session.streamed, item.ID)
 			}
 			h.mu.Unlock()
 			if strings.HasPrefix(snapshot, streamed) && len(snapshot) > len(streamed) {
@@ -245,12 +250,20 @@ func (h *Instance) emitItem(method, nativeThread, nativeTurn string, item appIte
 	h.emitEvent(event)
 }
 
-func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeContentStreamKind) {
+// emitTextDelta forwards a live text delta. partKind is "summary" or
+// "content" for reasoning deltas (naming which index on the notification
+// identifies the part) and "" for assistant text. The completed reasoning
+// item joins its parts as paragraphs (reasoningText), so a part change
+// inserts the same break live; that keeps what the user watched, the tail
+// emitted on completion, and the replayed thread identical.
+func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeContentStreamKind, partKind string) {
 	var notification struct {
-		ThreadID string `json:"threadId"`
-		TurnID   string `json:"turnId"`
-		ItemID   string `json:"itemId"`
-		Delta    string `json:"delta"`
+		ThreadID     string `json:"threadId"`
+		TurnID       string `json:"turnId"`
+		ItemID       string `json:"itemId"`
+		Delta        string `json:"delta"`
+		SummaryIndex int    `json:"summaryIndex"`
+		ContentIndex int    `json:"contentIndex"`
 	}
 	if json.Unmarshal(raw, &notification) != nil || notification.Delta == "" {
 		return
@@ -259,12 +272,36 @@ func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeConte
 	if !ok {
 		return
 	}
+	part := ""
+	switch partKind {
+	case "summary":
+		part = fmt.Sprintf("summary:%d", notification.SummaryIndex)
+	case "content":
+		part = fmt.Sprintf("content:%d", notification.ContentIndex)
+	}
+	delta := notification.Delta
 	h.mu.Lock()
 	if session := h.sessionsByLocal[local]; session != nil {
-		session.streamedText[notification.ItemID] += notification.Delta
+		item := session.streamed[notification.ItemID]
+		if part != "" && item.part != "" && item.part != part {
+			delta = paragraphBreak(item.text) + delta
+		}
+		session.streamed[notification.ItemID] = streamedItem{text: item.text + delta, part: part}
 	}
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, ThreadID: local, TurnID: turn, ItemID: notification.ItemID, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: notification.Delta}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, ThreadID: local, TurnID: turn, ItemID: notification.ItemID, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: delta}})
+}
+
+// paragraphBreak returns the newlines that make text end in a blank line.
+func paragraphBreak(text string) string {
+	switch {
+	case text == "" || strings.HasSuffix(text, "\n\n"):
+		return ""
+	case strings.HasSuffix(text, "\n"):
+		return "\n"
+	default:
+		return "\n\n"
+	}
 }
 
 func (h *Instance) emitCommandOutput(raw json.RawMessage) {
@@ -282,7 +319,14 @@ func (h *Instance) emitCommandOutput(raw json.RawMessage) {
 		h.mu.Unlock()
 		return
 	}
-	tool := session.items[notification.ItemID]
+	// Output belongs to the snapshot recorded at item/started. Without one
+	// there is nothing to merge into, and emitting a blank tool call would show
+	// an empty row until the next full snapshot.
+	tool, known := session.items[notification.ItemID]
+	if !known {
+		h.mu.Unlock()
+		return
+	}
 	tool.Output += notification.Delta
 	session.items[notification.ItemID] = tool
 	h.mu.Unlock()

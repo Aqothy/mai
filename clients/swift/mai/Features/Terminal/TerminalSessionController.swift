@@ -19,7 +19,6 @@ final class TerminalSessionController {
     @ObservationIgnored let session: InMemoryTerminalSession
 
     @ObservationIgnored private let pipeline: TerminalOutputPipeline
-    @ObservationIgnored private let backend: any TerminalHostBackend
     /// Last grid the surface reported. Updated only when rows/columns change.
     private(set) var grid: TerminalOutputPipeline.Grid?
 
@@ -33,7 +32,6 @@ final class TerminalSessionController {
         backend: any TerminalHostBackend,
         fontSize: Float = TerminalSettings.defaultFontSize
     ) {
-        self.backend = backend
         viewState = TerminalViewState(
             theme: MaidTerminalAppearance.theme,
             terminalConfiguration: MaidTerminalAppearance.terminalConfiguration

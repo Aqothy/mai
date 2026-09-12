@@ -1,14 +1,6 @@
 nonisolated struct ChatMarkdownPresentation: Equatable, Sendable {
     var isStreaming: Bool
-    var showsDiagnostics: Bool
-
-    init(
-        isStreaming: Bool,
-        showsDiagnostics: Bool = false
-    ) {
-        self.isStreaming = isStreaming
-        self.showsDiagnostics = showsDiagnostics
-    }
+    var showsDiagnostics = false
 
     static func timelineMessage(
         role: String,

@@ -40,7 +40,17 @@ type sessionState struct {
 	startedTurns      map[string]bool
 	activeNativeTurn  string
 	items             map[string]provider.ToolCall
-	streamedText      map[string]string
+	streamed          map[string]streamedItem
+}
+
+// streamedItem accumulates the live text deltas of one app-server item so
+// item/completed can emit only the tail the stream has not delivered yet.
+// part identifies the reasoning part (summary or content index) the last
+// delta belonged to; app-server streams parts back to back, so a part change
+// is the only signal for the paragraph boundary the completed item will carry.
+type streamedItem struct {
+	text string
+	part string
 }
 
 type pendingApproval struct {
@@ -56,14 +66,12 @@ type optionsState struct {
 	selectedModel  string
 	selectedEffort string
 	selectedTier   string
-	options        []provider.ConfigOption
 	callbacks      provider.OptionsSessionCallbacks
 }
 
 type Instance struct {
 	mu     sync.Mutex
 	info   provider.InstanceInfo
-	config Config
 	emit   provider.RuntimeEventListener
 	logger *slog.Logger
 
@@ -136,7 +144,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	}
 
 	h := &Instance{
-		config: config, emit: emit,
+		emit:   emit,
 		logger: slog.Default().With("component", "codex-app-server", "providerInstance", spec.InstanceID),
 		cmd:    command, stdin: stdin, stdout: stdout,
 		sessionsByLocal:  make(map[string]*sessionState),
@@ -219,7 +227,10 @@ func (h *Instance) waitProcess() {
 	if !killed {
 		killProcessTree(h.cmd)
 	}
-	h.rpc.fail(firstError(err, io.EOF))
+	if err == nil {
+		err = io.EOF
+	}
+	h.rpc.fail(err)
 	h.cancel()
 	h.cancelPendingApprovals()
 	close(h.processDone)
@@ -252,18 +263,11 @@ func (h *Instance) Close() error {
 	return h.closeErr
 }
 
-func firstError(err error, fallback error) error {
-	if err != nil {
-		return err
-	}
-	return fallback
-}
-
 func newSessionState(localID, nativeID, cwd string) *sessionState {
 	return &sessionState{
 		localThreadID: localID, nativeThreadID: nativeID, cwd: cwd,
 		nativeToLocalTurn: make(map[string]string), localToNativeTurn: make(map[string]string),
-		startedTurns: make(map[string]bool), items: make(map[string]provider.ToolCall), streamedText: make(map[string]string),
+		startedTurns: make(map[string]bool), items: make(map[string]provider.ToolCall), streamed: make(map[string]streamedItem),
 	}
 }
 
@@ -273,16 +277,6 @@ func (h *Instance) bindSessionLocked(session *sessionState) {
 	}
 	h.sessionsByLocal[session.localThreadID] = session
 	h.localByNative[session.nativeThreadID] = session.localThreadID
-}
-
-func (h *Instance) sessionForLocal(localID string) (*sessionState, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	session := h.sessionsByLocal[localID]
-	if session == nil {
-		return nil, fmt.Errorf("Codex thread %q is not bound", localID)
-	}
-	return session, nil
 }
 
 func (h *Instance) emitEvent(event provider.RuntimeEvent) {

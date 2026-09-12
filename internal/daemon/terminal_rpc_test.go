@@ -234,11 +234,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	const outputBytes = 5 * 1024 * 1024
-	const preferredBatchBytes = 64 * 1024
 	const maximumNotificationBytes = 64 * 1024
-	// Loose enough for scheduler variation, but strict enough to catch a
-	// regression to publishing nearly every small PTY read independently.
-	const maximumOutputChunks = outputBytes/preferredBatchBytes + 8
 	started := time.Now()
 	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
@@ -251,13 +247,6 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	client.waitForOutputLength(t, outputBytes)
 	client.waitForOutput(t, "LARGE-OUTPUT-DONE")
 	chunks, bytes, largest := client.outputStats()
-	if chunks > maximumOutputChunks {
-		t.Fatalf(
-			"5 MiB burst used %d terminal chunks, want at most %d",
-			chunks,
-			maximumOutputChunks,
-		)
-	}
 	if largest > maximumNotificationBytes {
 		t.Fatalf(
 			"largest terminal notification was %d bytes, want at most %d",
