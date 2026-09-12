@@ -36,75 +36,6 @@ func (value *initializeResponse) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type threadStartParams struct {
-	Model                 string         `json:"model,omitempty"`
-	ModelProvider         string         `json:"modelProvider,omitempty"`
-	ServiceTier           string         `json:"serviceTier,omitempty"`
-	Cwd                   string         `json:"cwd,omitempty"`
-	ApprovalPolicy        string         `json:"approvalPolicy,omitempty"`
-	Sandbox               string         `json:"sandbox,omitempty"`
-	Config                map[string]any `json:"config,omitempty"`
-	BaseInstructions      string         `json:"baseInstructions,omitempty"`
-	DeveloperInstructions string         `json:"developerInstructions,omitempty"`
-	Personality           string         `json:"personality,omitempty"`
-	Ephemeral             *bool          `json:"ephemeral,omitempty"`
-}
-
-type threadResumeParams struct {
-	ThreadID              string         `json:"threadId"`
-	Model                 string         `json:"model,omitempty"`
-	ModelProvider         string         `json:"modelProvider,omitempty"`
-	ServiceTier           string         `json:"serviceTier,omitempty"`
-	Cwd                   string         `json:"cwd,omitempty"`
-	ApprovalPolicy        string         `json:"approvalPolicy,omitempty"`
-	Sandbox               string         `json:"sandbox,omitempty"`
-	Config                map[string]any `json:"config,omitempty"`
-	BaseInstructions      string         `json:"baseInstructions,omitempty"`
-	DeveloperInstructions string         `json:"developerInstructions,omitempty"`
-	Personality           string         `json:"personality,omitempty"`
-}
-
-type threadForkParams struct {
-	ThreadID              string         `json:"threadId"`
-	LastTurnID            string         `json:"lastTurnId,omitempty"`
-	Model                 string         `json:"model,omitempty"`
-	ModelProvider         string         `json:"modelProvider,omitempty"`
-	ServiceTier           string         `json:"serviceTier,omitempty"`
-	Cwd                   string         `json:"cwd,omitempty"`
-	ApprovalPolicy        string         `json:"approvalPolicy,omitempty"`
-	Sandbox               string         `json:"sandbox,omitempty"`
-	Config                map[string]any `json:"config,omitempty"`
-	BaseInstructions      string         `json:"baseInstructions,omitempty"`
-	DeveloperInstructions string         `json:"developerInstructions,omitempty"`
-	Ephemeral             *bool          `json:"ephemeral,omitempty"`
-}
-
-type threadListParams struct {
-	Cursor         string   `json:"cursor,omitempty"`
-	Limit          int      `json:"limit,omitempty"`
-	SortKey        string   `json:"sortKey,omitempty"`
-	SortDirection  string   `json:"sortDirection,omitempty"`
-	ModelProviders []string `json:"modelProviders,omitempty"`
-	SourceKinds    []string `json:"sourceKinds,omitempty"`
-	Archived       *bool    `json:"archived,omitempty"`
-	Cwd            any      `json:"cwd,omitempty"`
-	UseStateDBOnly bool     `json:"useStateDbOnly,omitempty"`
-	SearchTerm     string   `json:"searchTerm,omitempty"`
-}
-
-type threadReadParams struct {
-	ThreadID     string `json:"threadId"`
-	IncludeTurns bool   `json:"includeTurns,omitempty"`
-}
-
-type threadDeleteParams struct {
-	ThreadID string `json:"threadId"`
-}
-
-type threadUnsubscribeParams struct {
-	ThreadID string `json:"threadId"`
-}
-
 type threadStartResponse struct {
 	Thread          appThread       `json:"thread"`
 	Model           string          `json:"model,omitempty"`
@@ -117,23 +48,6 @@ type threadStartResponse struct {
 
 func (value *threadStartResponse) UnmarshalJSON(data []byte) error {
 	type plain threadStartResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type threadResumeResponse = threadStartResponse
-type threadForkResponse = threadStartResponse
-
-type threadReadResponse struct {
-	Thread appThread       `json:"thread"`
-	Raw    json.RawMessage `json:"-"`
-}
-
-func (value *threadReadResponse) UnmarshalJSON(data []byte) error {
-	type plain threadReadResponse
 	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
 		return err
 	}
@@ -227,34 +141,6 @@ type appTurnError struct {
 	Message           string          `json:"message,omitempty"`
 	AdditionalDetails *string         `json:"additionalDetails,omitempty"`
 	CodexErrorInfo    json.RawMessage `json:"codexErrorInfo,omitempty"`
-}
-
-type turnStartParams struct {
-	ThreadID            string         `json:"threadId"`
-	ClientUserMessageID string         `json:"clientUserMessageId,omitempty"`
-	Input               []appUserInput `json:"input"`
-	Cwd                 string         `json:"cwd,omitempty"`
-	ApprovalPolicy      string         `json:"approvalPolicy,omitempty"`
-	Model               string         `json:"model,omitempty"`
-	ServiceTier         string         `json:"serviceTier,omitempty"`
-	Effort              string         `json:"effort,omitempty"`
-	Summary             string         `json:"summary,omitempty"`
-	Personality         string         `json:"personality,omitempty"`
-	OutputSchema        any            `json:"outputSchema,omitempty"`
-}
-
-type turnStartResponse struct {
-	Turn appTurn         `json:"turn"`
-	Raw  json.RawMessage `json:"-"`
-}
-
-func (value *turnStartResponse) UnmarshalJSON(data []byte) error {
-	type plain turnStartResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
 }
 
 type turnInterruptParams struct {
@@ -490,12 +376,6 @@ type appWebAction struct {
 	Pattern *string  `json:"pattern,omitempty"`
 }
 
-type modelListParams struct {
-	Cursor        string `json:"cursor,omitempty"`
-	Limit         int    `json:"limit,omitempty"`
-	IncludeHidden *bool  `json:"includeHidden,omitempty"`
-}
-
 type modelListResponse struct {
 	Data       []appModel      `json:"data"`
 	NextCursor *string         `json:"nextCursor"`
@@ -622,179 +502,9 @@ func (value *appSkillError) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type accountReadParams struct {
-	RefreshToken bool `json:"refreshToken,omitempty"`
-}
-
-type accountReadResponse struct {
-	Account            *appAccount     `json:"account"`
-	RequiresOpenAIAuth bool            `json:"requiresOpenaiAuth"`
-	Raw                json.RawMessage `json:"-"`
-}
-
-func (value *accountReadResponse) UnmarshalJSON(data []byte) error {
-	type plain accountReadResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type appAccount struct {
-	Type                        string          `json:"type"`
-	Email                       *string         `json:"email,omitempty"`
-	PlanType                    string          `json:"planType,omitempty"`
-	UsesCodexManagedCredentials bool            `json:"usesCodexManagedCredentials,omitempty"`
-	Raw                         json.RawMessage `json:"-"`
-}
-
-func (value *appAccount) UnmarshalJSON(data []byte) error {
-	type plain appAccount
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type accountLoginParams struct {
-	Type                      string  `json:"type"`
-	APIKey                    string  `json:"apiKey,omitempty"`
-	CodexStreamlinedLogin     bool    `json:"codexStreamlinedLogin,omitempty"`
-	UseHostedLoginSuccessPage bool    `json:"useHostedLoginSuccessPage,omitempty"`
-	AccessToken               string  `json:"accessToken,omitempty"`
-	ChatGPTAccountID          string  `json:"chatgptAccountId,omitempty"`
-	ChatGPTPlanType           *string `json:"chatgptPlanType,omitempty"`
-	Region                    string  `json:"region,omitempty"`
-}
-
-type accountLoginResponse struct {
-	Type            string          `json:"type"`
-	LoginID         string          `json:"loginId,omitempty"`
-	AuthURL         string          `json:"authUrl,omitempty"`
-	VerificationURL string          `json:"verificationUrl,omitempty"`
-	UserCode        string          `json:"userCode,omitempty"`
-	Raw             json.RawMessage `json:"-"`
-}
-
-func (value *accountLoginResponse) UnmarshalJSON(data []byte) error {
-	type plain accountLoginResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type accountLoginCompletedNotification struct {
-	LoginID *string `json:"loginId,omitempty"`
-	Success bool    `json:"success"`
-	Error   *string `json:"error,omitempty"`
-}
-
-type accountLogoutResponse struct{}
-
-type threadStartedNotification struct {
-	Thread appThread `json:"thread"`
-}
-
-type turnStartedNotification struct {
-	ThreadID string  `json:"threadId"`
-	Turn     appTurn `json:"turn"`
-}
-
-type turnCompletedNotification = turnStartedNotification
-
-type itemStartedNotification struct {
-	ThreadID    string  `json:"threadId"`
-	TurnID      string  `json:"turnId"`
-	Item        appItem `json:"item"`
-	StartedAtMS float64 `json:"startedAtMs,omitempty"`
-}
-
-type itemCompletedNotification struct {
-	ThreadID      string  `json:"threadId"`
-	TurnID        string  `json:"turnId"`
-	Item          appItem `json:"item"`
-	CompletedAtMS float64 `json:"completedAtMs,omitempty"`
-}
-
-type contentDeltaNotification struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
-	ItemID   string `json:"itemId"`
-	Delta    string `json:"delta"`
-}
-
-type reasoningDeltaNotification struct {
-	contentDeltaNotification
-	ContentIndex int `json:"contentIndex,omitempty"`
-	SummaryIndex int `json:"summaryIndex,omitempty"`
-}
-
-func (value *reasoningDeltaNotification) UnmarshalJSON(data []byte) error {
-	type wire struct {
-		ThreadID     string `json:"threadId"`
-		TurnID       string `json:"turnId"`
-		ItemID       string `json:"itemId"`
-		Delta        string `json:"delta"`
-		ContentIndex int    `json:"contentIndex,omitempty"`
-		SummaryIndex int    `json:"summaryIndex,omitempty"`
-	}
-	var decoded wire
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	value.contentDeltaNotification = contentDeltaNotification{ThreadID: decoded.ThreadID, TurnID: decoded.TurnID, ItemID: decoded.ItemID, Delta: decoded.Delta}
-	value.ContentIndex = decoded.ContentIndex
-	value.SummaryIndex = decoded.SummaryIndex
-	return nil
-}
-
-type turnPlanUpdatedNotification struct {
-	ThreadID    string        `json:"threadId"`
-	TurnID      string        `json:"turnId"`
-	Explanation *string       `json:"explanation,omitempty"`
-	Plan        []appPlanStep `json:"plan"`
-}
-
 type appPlanStep struct {
 	Step   string `json:"step"`
 	Status string `json:"status"`
-}
-
-type threadTokenUsageUpdatedNotification struct {
-	ThreadID   string              `json:"threadId"`
-	TurnID     string              `json:"turnId"`
-	TokenUsage appThreadTokenUsage `json:"tokenUsage"`
-}
-
-type appThreadTokenUsage struct {
-	Total              appTokenUsageBreakdown `json:"total"`
-	Last               appTokenUsageBreakdown `json:"last"`
-	ModelContextWindow *int                   `json:"modelContextWindow,omitempty"`
-}
-
-type appTokenUsageBreakdown struct {
-	TotalTokens           int `json:"totalTokens,omitempty"`
-	InputTokens           int `json:"inputTokens,omitempty"`
-	CachedInputTokens     int `json:"cachedInputTokens,omitempty"`
-	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
-	OutputTokens          int `json:"outputTokens,omitempty"`
-	ReasoningOutputTokens int `json:"reasoningOutputTokens,omitempty"`
-}
-
-type appErrorNotification struct {
-	Error     appTurnError `json:"error"`
-	WillRetry bool         `json:"willRetry"`
-	ThreadID  string       `json:"threadId"`
-	TurnID    string       `json:"turnId"`
-}
-
-type threadNameUpdatedNotification struct {
-	ThreadID   string  `json:"threadId"`
-	ThreadName *string `json:"threadName,omitempty"`
 }
 
 func cloneRawJSON(data []byte) json.RawMessage {

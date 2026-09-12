@@ -354,13 +354,25 @@ type reasoningPayload struct {
 }
 
 func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time) {
+	i.settleReasoningWith(event, status, createdAt, "")
+}
+
+// settleReasoningWith closes the active reasoning segment. A non-empty
+// snapshot is the provider's authoritative text for the completed item and
+// replaces the accumulated deltas: a provider may join its parts differently
+// from its live stream, and the settled item must match what it will replay.
+func (i *ProviderRuntimeIngestion) settleReasoningWith(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time, snapshot string) {
 	i.mu.Lock()
 	ts := i.turns[turnKeyOf(event)]
 	var checkpoint reasoningPayload
 	active := ts != nil && ts.reasoningActive
 	var itemID string
 	if active {
-		checkpoint = reasoningPayload{Text: string(ts.reasoning), Attachments: ts.reasoningAttachments}
+		text := string(ts.reasoning)
+		if snapshot != "" {
+			text = snapshot
+		}
+		checkpoint = reasoningPayload{Text: text, Attachments: ts.reasoningAttachments}
 		itemID = reasoningItemID(event, ts.reasoningSegment)
 		ts.reasoning = nil
 		ts.reasoningPending = nil
@@ -394,7 +406,7 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	}
 	if event.Payload.ItemType == provider.ItemKindReasoning {
 		if status != "" && status != provider.ItemStatusInProgress {
-			i.settleReasoning(event, status, createdAt)
+			i.settleReasoningWith(event, status, createdAt, event.Payload.Detail)
 		}
 		return
 	}

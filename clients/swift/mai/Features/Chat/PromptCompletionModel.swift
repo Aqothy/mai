@@ -257,13 +257,6 @@ final class PromptCompletionModel {
 
     func search() async {
         guard let requestedKey = searchKey else { return }
-        guard requestedKey.scope.isAvailable,
-            store.connectionState == .connected
-        else {
-            clearMatches(phase: .loading)
-            return
-        }
-
         clearMatches(phase: .loading)
 
         do {

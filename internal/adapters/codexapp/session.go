@@ -445,12 +445,3 @@ func (h *Instance) refreshActiveSkills() {
 		}
 	}
 }
-
-func containsSkillToken(text, name string) bool {
-	for _, field := range strings.Fields(text) {
-		if strings.Trim(field, ".,:;!?()[]{}") == "$"+name {
-			return true
-		}
-	}
-	return false
-}

@@ -1,3 +1,11 @@
+// Package acp adapts ACP agents to maiD's provider contract.
+//
+// Reasoning replay assumption: session/load replays agent thoughts as one
+// agent_thought_chunk per thought with no separators, while live streams
+// carry their own paragraph breaks. Replay therefore appends a paragraph
+// break after every thought chunk (separateReplayReasoningBlocks). An agent
+// that replays a single thought as several sub-newline chunks would gain
+// spurious breaks; no supported agent (gemini-cli, claude-code-acp) does.
 package acp
 
 import (

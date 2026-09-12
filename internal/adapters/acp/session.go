@@ -416,7 +416,7 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 	// binding on a close failure so a later stop can retry instead of silently
 	// leaking a provider-side session.
 	if h.sessionCapabilities().Close != nil {
-		if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+		if _, err := h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
 			return acpRequestError(err)
 		}
 	}

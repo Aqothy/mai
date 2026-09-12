@@ -56,11 +56,6 @@ struct PromptCompletionInsertionContext: Equatable {
             return nil
         }
 
-        let queryStart = text.index(after: triggerIndex)
-        guard !text[queryStart..<cursorIndex].contains(where: \.isWhitespace) else {
-            return nil
-        }
-
         return PromptCompletionInsertionContext(
             kind: kind,
             prefix: String(text[..<triggerIndex]),
@@ -75,9 +70,7 @@ struct PromptCompletionInsertionContext: Equatable {
         else { return nil }
 
         let cursorIndex = text.index(text.startIndex, offsetBy: cursorOffset)
-        let query = text[bounds.queryStart..<cursorIndex]
-        guard !query.contains(where: \.isWhitespace) else { return nil }
-        return String(query)
+        return String(text[bounds.queryStart..<cursorIndex])
     }
 
     func edit(

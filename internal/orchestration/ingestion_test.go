@@ -1711,3 +1711,41 @@ func TestIngestionReasoningPreservesNonTextContent(t *testing.T) {
 		t.Fatalf("reasoning events = %d, want attachment payload and settle checkpoint only", reasoningEvents)
 	}
 }
+
+// A completed reasoning item that carries the provider's full text settles
+// with that text, not with the streamed accumulation, so the settled item
+// matches what the provider will replay.
+func TestIngestionCompletedReasoningSnapshotIsAuthoritative(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-reasoning-snapshot")
+	newThreadWithSession(t, engine, threadID)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-snapshot", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
+	thread, _ := engine.Thread(threadID)
+	turnID := string(thread.LatestTurn.ID)
+
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-snapshot-delta", Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "reason-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "firstsecond"}})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-snapshot-completed", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "reason-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindReasoning, ItemStatus: provider.ItemStatusCompleted, Detail: "first\n\nsecond"}})
+
+	thread, _ = engine.Thread(threadID)
+	reasoningID := "reasoning:" + string(threadID) + ":" + turnID
+	for _, item := range thread.Timeline.Items() {
+		if item.ID != reasoningID {
+			continue
+		}
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal reasoning payload: %v", err)
+		}
+		if item.Status != provider.ItemStatusCompleted || payload.Text != "first\n\nsecond" {
+			t.Fatalf("settled reasoning = status %s text %q, want completed with the snapshot text", item.Status, payload.Text)
+		}
+		return
+	}
+	t.Fatalf("reasoning item %s missing from %#v", reasoningID, thread.Timeline.Items())
+}
