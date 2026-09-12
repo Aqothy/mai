@@ -93,7 +93,7 @@ func (h *Instance) ensureSessionStream(sessionID string) (*sessionStream, bool) 
 	}
 	stream := &sessionStream{
 		sessionID: sessionID,
-		session:   h.agent().AttachSession(schema.SessionId(sessionID)),
+		session:   h.agentPeer.AttachSession(schema.SessionId(sessionID)),
 		barriers:  make(map[string]*sessionBarrier),
 	}
 	session.stream = stream

@@ -141,7 +141,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		// once the agent settles the previous one. The maiD turn stays open —
 		// the queued steering prompt keeps the collector from completing, so
 		// the cancelled prompt's resolution cannot emit turn.completed.
-		if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
+		if err := h.agentPeer.Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 			h.emitTurnLifecycle(sessionID, input.ThreadID, turnID, provider.RuntimeEventRuntimeWarning, provider.RuntimeEventPayload{Message: fmt.Sprintf("cancel before steering prompt failed: %v", acpRequestError(err))})
 		} else {
 			for _, cancel := range permissionCancels {
@@ -345,7 +345,7 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 		// cancel whichever newer prompt is running now.
 		return nil
 	}
-	if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
+	if err := h.agentPeer.Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 		return acpRequestError(err)
 	}
 	cancels, dropped, stream := h.markPromptCancelled(sessionID, input.TurnID)

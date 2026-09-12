@@ -612,13 +612,10 @@ func jsonValuesEqual(a json.RawMessage, b json.RawMessage) bool {
 	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
 		return bytes.Equal(a, b)
 	}
-	return objectsEqual(av, bv)
-}
-
-func objectsEqual(a any, b any) bool {
-	aJSON, aErr := json.Marshal(a)
-	bJSON, bErr := json.Marshal(b)
-	return aErr == nil && bErr == nil && bytes.Equal(aJSON, bJSON)
+	// Values decoded from JSON can always be encoded again.
+	aJSON, _ := json.Marshal(av)
+	bJSON, _ := json.Marshal(bv)
+	return bytes.Equal(aJSON, bJSON)
 }
 
 func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {

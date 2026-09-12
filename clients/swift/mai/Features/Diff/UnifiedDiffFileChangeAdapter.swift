@@ -279,9 +279,7 @@ nonisolated enum UnifiedDiffFileChangeAdapter {
             return (nil, path)
         case .delete:
             return (path, nil)
-        case .move:
-            return (path, nonEmpty(change.movePath) ?? path)
-        case .update, nil:
+        case .move, .update, nil:
             return (path, nonEmpty(change.movePath) ?? path)
         }
     }
