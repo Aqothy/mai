@@ -46,7 +46,7 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 	h := newWireTestHandle(t, &fakeWireAgent{})
 	stream := &sessionStream{
 		sessionID: "old",
-		session:   h.agent().AttachSession("old"),
+		session:   h.agentPeer.AttachSession("old"),
 		barriers:  make(map[string]*sessionBarrier),
 	}
 	h.bindSession("thread-old", "old")

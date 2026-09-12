@@ -404,10 +404,6 @@ nonisolated struct ChatActivityGroup: Identifiable {
         items.contains { $0.itemStatus == .failed }
     }
 
-    var isInProgress: Bool {
-        items.contains { $0.itemStatus == .inProgress }
-    }
-
     /// A Codex-style phrase such as "Read 2 files, ran a command".
     var summary: String {
         var counts: [(verb: ChatActivityVerb, count: Int)] = []
