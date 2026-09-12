@@ -56,14 +56,12 @@ type optionsState struct {
 	selectedModel  string
 	selectedEffort string
 	selectedTier   string
-	options        []provider.ConfigOption
 	callbacks      provider.OptionsSessionCallbacks
 }
 
 type Instance struct {
 	mu     sync.Mutex
 	info   provider.InstanceInfo
-	config Config
 	emit   provider.RuntimeEventListener
 	logger *slog.Logger
 
@@ -136,7 +134,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	}
 
 	h := &Instance{
-		config: config, emit: emit,
+		emit:   emit,
 		logger: slog.Default().With("component", "codex-app-server", "providerInstance", spec.InstanceID),
 		cmd:    command, stdin: stdin, stdout: stdout,
 		sessionsByLocal:  make(map[string]*sessionState),
@@ -219,7 +217,10 @@ func (h *Instance) waitProcess() {
 	if !killed {
 		killProcessTree(h.cmd)
 	}
-	h.rpc.fail(firstError(err, io.EOF))
+	if err == nil {
+		err = io.EOF
+	}
+	h.rpc.fail(err)
 	h.cancel()
 	h.cancelPendingApprovals()
 	close(h.processDone)
@@ -250,13 +251,6 @@ func (h *Instance) Close() error {
 		h.mu.Unlock()
 	})
 	return h.closeErr
-}
-
-func firstError(err error, fallback error) error {
-	if err != nil {
-		return err
-	}
-	return fallback
 }
 
 func newSessionState(localID, nativeID, cwd string) *sessionState {

@@ -60,17 +60,6 @@ struct IOSAppContainer: View {
                     )
                 }
             }
-            .toolbar {
-                if ChatPerformanceLab.isEnabled {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            MockChatView()
-                        } label: {
-                            Label("Mock Chat", systemImage: "ladybug")
-                        }
-                    }
-                }
-            }
         }
         .onChange(of: path, initial: true) { _, path in
             // Detach is navigation-driven: when the visible top of the stack

@@ -186,7 +186,7 @@ func (h *Instance) markPermissionToolSettled(sessionID string, threadID string, 
 // requests for that id must be dropped. h.mu must be held.
 func (h *Instance) clearSettledPermissionKeyLocked(sessionID string, threadID string, toolCallID string) {
 	collector := h.updateCollectorLocked(sessionID)
-	if collector == nil || collector.settledPermissionKeys == nil {
+	if collector == nil {
 		return
 	}
 	delete(collector.settledPermissionKeys, permissionRequestID(threadID, toolCallID))

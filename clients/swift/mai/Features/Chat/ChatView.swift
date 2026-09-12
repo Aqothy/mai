@@ -485,18 +485,6 @@ nonisolated enum ChatTimelineMetrics {
         )
     }
 
-    static func textWidth(
-        for style: ChatTextLayoutStyle,
-        in rowWidth: CGFloat
-    ) -> CGFloat {
-        switch style {
-        case .markdownProse:
-            rowWidth
-        case .plain:
-            max(0, rowWidth - 2 * userBubbleHorizontalPadding)
-        }
-    }
-
     static func proseTextWidth(role: String, in rowWidth: CGFloat) -> CGFloat {
         guard role == MaidMessageRole.user.rawValue else { return rowWidth }
         return max(0, rowWidth - 2 * userBubbleHorizontalPadding)

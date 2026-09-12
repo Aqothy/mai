@@ -94,10 +94,6 @@ final class ChatPromptModel {
         }
     }
 
-    func send() async {
-        await submit()
-    }
-
     func removeQueuedPrompt(_ promptID: String) {
         store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
     }
@@ -112,13 +108,12 @@ final class ChatPromptModel {
         }
     }
 
-    private func submit() async {
+    func send() async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
-        guard canSend,
-              !submittedText.isEmpty || !submittedAttachments.isEmpty else { return }
+        guard canSend else { return }
 
         isSending = true
         defer { isSending = false }

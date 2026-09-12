@@ -63,16 +63,6 @@ struct ChatTextSelection: Equatable, Sendable {
             )
         }
 
-        static func rowAppeared(
-            id: String,
-            role: String,
-            path: String,
-            byteCount: Int
-        ) {
-            logger.info(
-                "row appeared id=\(id, privacy: .public) role=\(role, privacy: .public) path=\(path, privacy: .public) bytes=\(byteCount)"
-            )
-        }
     }
 #endif
 

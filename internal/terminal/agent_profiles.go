@@ -6,9 +6,7 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal/agentrules"
 )
 
-// agentEvidence is everything Increment 8 classification may inspect. Screen
-// text joins in Increment 9 through the detector VT and stays empty until
-// then.
+// agentEvidence combines process identity, OSC metadata, and detector screen text.
 type agentEvidence struct {
 	kind AgentKind
 	// rawTitle is the last observed OSC 0/2 title capped at 256 scalars,

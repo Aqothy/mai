@@ -54,19 +54,6 @@ final class ChatScrollState {
         }
     }
 
-    /// Keyboard and accessibility scrolling do not always enter a user-driven
-    /// `ScrollPhase`. Geometry can still prove that the viewport moved toward
-    /// older content, so record the same user intent without leaving the state
-    /// stuck in an active-scroll phase.
-    func noteScrollAwayFromEnd() {
-        if isNearBottom {
-            isNearBottom = false
-        }
-        if shouldFollowBottom {
-            shouldFollowBottom = false
-        }
-    }
-
     func noteUserScrollActivity(isActive: Bool) {
         if isUserScrolling != isActive {
             isUserScrolling = isActive
