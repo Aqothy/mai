@@ -1,0 +1,272 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.0035355 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.011534916 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=680.0 totalHeight=973324.0 elapsed=4.047352458 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=480.0 totalHeight=1031824.0 elapsed=4.33679775 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=380.0 totalHeight=1067374.0 elapsed=4.439546917 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.280761208 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-1","loadedChats":1,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":28870.631333000001,"selectedLayoutCount":14700,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 1
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.055431416 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.01142625 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=680.0 totalHeight=973324.0 elapsed=4.083191083 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-2-turn-298-assistant#segment-50 width=480.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-2-turn-298-assistant#segment-48 width=480.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-2-turn-298-assistant#segment-46 width=480.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=480.0 totalHeight=1031824.0 elapsed=4.283765875 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=380.0 totalHeight=1067374.0 elapsed=4.040078625 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.164877417 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-2","loadedChats":2,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":27812.165832999999,"selectedLayoutCount":14700,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.190018208 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.011742791 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-3-turn-298-assistant#segment-46 width=680.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=680.0 totalHeight=973324.0 elapsed=4.127502708 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=480.0 totalHeight=1031824.0 elapsed=4.199306791 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=380.0 totalHeight=1067374.0 elapsed=4.139536708 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.077410542 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-3","loadedChats":3,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":28400.091042,"selectedLayoutCount":14700,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 3
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.317521625 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.012274125 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=680.0 totalHeight=973324.0 elapsed=4.222335 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=480.0 totalHeight=1031824.0 elapsed=4.0121735 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=380.0 totalHeight=1067374.0 elapsed=4.084650875 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.19826875 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-4","loadedChats":4,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":28113.386167000001,"selectedLayoutCount":14700,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 4
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.02226575 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-50 width=680.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-48 width=680.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-46 width=680.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=680.0 totalHeight=973324.0 elapsed=4.029824667 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-50 width=480.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-48 width=480.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-46 width=480.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=480.0 totalHeight=1031824.0 elapsed=4.06247875 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-50 width=380.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-benchmark-5-turn-298-assistant#segment-48 width=380.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=380.0 totalHeight=1067374.0 elapsed=4.091275083 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.044993584 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-5","loadedChats":5,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":27687.182375,"selectedLayoutCount":14700,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 5
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

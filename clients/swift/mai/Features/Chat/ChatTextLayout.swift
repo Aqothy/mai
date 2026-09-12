@@ -343,7 +343,7 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
     ) -> [(request: ChatTextLayoutRequest, key: Key)] {
         var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
         var seen: Set<Key> = []
-        for request in requests.reversed() where request.width > 0 {
+        for request in requests.reversed() {
             let key = Key(id: request.id, width: request.width)
             guard seen.insert(key).inserted,
                 entries[key]?.source != request.source

@@ -1,0 +1,30 @@
+{
+  "mai/Features/Chat/ChatView.swift": {
+    "before": "234c525881cacb3f857f6b57ad6c05cd754c05c0e217cfa3b30368aa92e6b3d0",
+    "after": "4c33e14a4ee95e2e836566f6614a834c4e85dfdc4c6efb6ae1d03d7b7624d06e"
+  },
+  "mai/Features/Chat/ChatNativePreparedRow.swift": {
+    "before": "b2fe57511828ddd3580a377d6f8a35fb9aed3d2811c11079da22afb49a14f1fd",
+    "after": "356cc4998ac8feda9d37a7423d5e83d1b77379bf163c473bbd7dacebfaaef612"
+  },
+  "mai/Features/Chat/ChatNativeTranscript.swift": {
+    "before": "bab493accd7642f296b4487b8ee8df53ebf6445091edd22c09633792d549ead0",
+    "after": "5a04b572fdc6070a0eeafdc3e90dcfcbd6eafff2a722a38db1c85b960bd2077e"
+  },
+  "mai/Features/Chat/ChatMeasuredTranscriptRow.swift": {
+    "before": "957c5d6a914f2b6e1440dbcfb02c0a9c7be77652998d04c0c4e5ad2c13e8764e",
+    "after": "4a223537d2cfde01b7307396d0ca716b201d63324d09b1116d3f38b86c105e5c"
+  },
+  "maiTests/ChatNativeTranscriptTests.swift": {
+    "before": "e51783e88693e95bde5e732d344688efac61e3e0ab190051990b2c4cbd847139",
+    "after": "df1dfb3613c3a20b40c17ce44e9582ffa3002adc95c39b008968dcaab12d4c18"
+  },
+  "maiTests/ChatNativePreparedHeightTests.swift": {
+    "before": null,
+    "after": "f672a9d3a49bf1aace01f37b5a712ef1b0abc5e6a5bbbadec6adb8a0ad1c0733"
+  },
+  "maiTests/ChatMeasuredTranscriptRowTests.swift": {
+    "before": null,
+    "after": "ecfdc0bcf93e0e7c0368c19c68606d4084b7f90b39d59f70d1b26c67b55e8af8"
+  }
+}

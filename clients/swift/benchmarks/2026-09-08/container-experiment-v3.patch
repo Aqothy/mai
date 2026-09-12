@@ -1,0 +1,435 @@
+--- a/clients/swift/mai/Features/Chat/ChatView.swift
++++ b/clients/swift/mai/Features/Chat/ChatView.swift
+@@ -704,12 +704,32 @@
+         let hasEarlierSections = loadedSections.first?.id != sections.first?.id
+ 
+         ScrollViewReader { proxy in
+-            List {
+-                timelineContent(
+-                    rows: rows,
+-                    effectiveStreamingTurnID: effectiveStreamingTurnID,
+-                    hasEarlierSections: hasEarlierSections
+-                )
++            Group {
++                #if os(macOS) && DEBUG
++                if UserDefaults.standard.bool(forKey: "ChatNativeTableExperiment"),
++                    ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil {
++                    ChatNativeTableExperiment(ids: rows.map(\.id), width: rowWidth) { index in
++                        ChatTimelineRenderRowView(
++                            row: rows[index], streamingTurnID: effectiveStreamingTurnID,
++                            threadID: threadID, store: store, foldModel: foldModel,
++                            scrollState: scrollState, textLayoutStore: textLayoutStore
++                        )
++                        .id(rows[index].id)
++                        .frame(width: rowWidth)
++                        .frame(maxWidth: .infinity)
++                    }
++                } else {
++                    List {
++                        timelineContent(rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
++                                        hasEarlierSections: hasEarlierSections)
++                    }
++                }
++                #else
++                List {
++                    timelineContent(rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
++                                    hasEarlierSections: hasEarlierSections)
++                }
++                #endif
+             }
+             .listStyle(.plain)
+             .scrollContentBackground(.hidden)
+@@ -719,7 +739,7 @@
+             )
+             .dismissesKeyboardInteractively()
+             #if os(macOS)
+-                .opacity(isAwaitingInitialBottom ? 0 : 1)
++                .opacity(UserDefaults.standard.bool(forKey: "ChatNativeTableExperiment") ? 1 : (isAwaitingInitialBottom ? 0 : 1))
+                 .background {
+                     MacListTableViewIntrospector { tableView in
+                         macScrollPositionPreserver.configure(
+@@ -2942,3 +2962,236 @@
+         )
+     }
+ #endif
++
++
++#if os(macOS) && DEBUG
++import AppKit
++import SwiftUI
++
++/// Diagnostic ceiling experiment, not a production timeline: measures the
++/// existing settled row views before scrolling and retains geometry only.
++/// Cold preparation cost is logged separately; it must not be claimed as free.
++struct ChatNativeTableExperiment<Content: View>: NSViewRepresentable {
++    let ids: [String]
++    let width: CGFloat
++    @ViewBuilder let content: (Int) -> Content
++
++    func makeCoordinator() -> Coordinator { Coordinator() }
++
++    func makeNSView(context: Context) -> NSScrollView {
++        let scroll = NSScrollView()
++        scroll.hasVerticalScroller = true
++        scroll.drawsBackground = false
++        let table = context.coordinator.table
++        table.headerView = nil
++        table.style = .plain
++        table.rowSizeStyle = .custom
++        table.backgroundColor = .clear
++        table.intercellSpacing = .zero
++        table.usesAutomaticRowHeights = false
++        table.selectionHighlightStyle = .none
++        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
++        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("content"))
++        table.addTableColumn(column)
++        table.delegate = context.coordinator
++        table.dataSource = context.coordinator
++        if UserDefaults.standard.bool(forKey: "ChatCustomVirtualizationExperiment") {
++            let document = context.coordinator.virtualDocument
++            scroll.documentView = document
++            scroll.contentView.postsBoundsChangedNotifications = true
++            NotificationCenter.default.addObserver(document, selector: #selector(document.viewportChanged),
++                name: NSView.boundsDidChangeNotification, object: scroll.contentView)
++        } else {
++            scroll.documentView = table
++        }
++        return scroll
++    }
++
++    func updateNSView(_ scroll: NSScrollView, context: Context) {
++        context.coordinator.update(ids: ids, width: width, content: content)
++    }
++
++    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
++        coordinator.task?.cancel()
++        NotificationCenter.default.removeObserver(coordinator.virtualDocument)
++        coordinator.virtualDocument.preparationTask?.cancel()
++        coordinator.table.delegate = nil
++        coordinator.table.dataSource = nil
++    }
++
++    final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource {
++        let table = NSTableView()
++        let virtualDocument = VirtualDocument()
++        var task: Task<Void, Never>?
++        var ids: [String] = []
++        var width: CGFloat = 0
++        var heights: [CGFloat] = []
++        var content: ((Int) -> Content)?
++
++        func update(ids: [String], width: CGFloat, content: @escaping (Int) -> Content) {
++            guard width > 0, !ids.isEmpty else { return }
++            guard self.ids != ids || self.width != width else { return }
++            self.ids = ids
++            self.width = width
++            task?.cancel()
++            ChatBenchmarkAutoRun.isNativeGeometryWarm = false
++            task = Task { @MainActor [weak self] in
++                guard let self else { return }
++                // Match the baseline's text preparation before measuring rows.
++                while !ChatBenchmarkAutoRun.isTranscriptWarm {
++                    if Task.isCancelled { return }
++                    try? await Task.sleep(for: .milliseconds(50))
++                }
++                let started = ContinuousClock.now
++                let measure = NSHostingController(rootView: content(0))
++                var result: [CGFloat] = []
++                result.reserveCapacity(ids.count)
++                for index in ids.indices {
++                    if Task.isCancelled { return }
++                    measure.rootView = content(index)
++                    let size = measure.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
++                    result.append(max(1, ceil(size.height)))
++                    await Task.yield()
++                }
++                guard !Task.isCancelled else { return }
++                self.content = content
++                self.heights = result
++                self.table.tableColumns.first?.width = width
++                if UserDefaults.standard.bool(forKey: "ChatCustomVirtualizationExperiment") {
++                    self.virtualDocument.install(heights: result, width: width, content: content)
++                } else {
++                    self.table.reloadData()
++                    self.table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: result.indices))
++                    self.table.layoutSubtreeIfNeeded()
++                    ChatBenchmarkAutoRun.trace("native table automatic=\(self.table.usesAutomaticRowHeights) bounds=\(self.table.bounds) row4800=\(self.table.rect(ofRow: min(4800, result.count - 1)))")
++                }
++                ChatBenchmarkAutoRun.trace("native geometry rows=\(result.count) width=\(width) totalHeight=\(result.reduce(0,+)) elapsed=\(started.duration(to: .now))")
++                ChatBenchmarkAutoRun.isNativeGeometryWarm = true
++            }
++        }
++
++        func numberOfRows(in tableView: NSTableView) -> Int { heights.count }
++        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { heights[row] }
++        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
++        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
++            guard let content else { return nil }
++            let identifier = NSUserInterfaceItemIdentifier("content")
++            let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? Cell
++                ?? Cell(content: content(row))
++            cell.identifier = identifier
++            cell.host.rootView = content(row)
++            return cell
++        }
++    }
++    final class Cell: NSView {
++        let host: NSHostingView<Content>
++        override var isFlipped: Bool { true }
++        init(content: Content) {
++            host = NSHostingView(rootView: content)
++            host.sizingOptions = []
++            super.init(frame: .zero)
++            addSubview(host)
++        }
++        @available(*, unavailable)
++        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
++        override func layout() {
++            super.layout()
++            host.frame = bounds
++        }
++    }
++
++    final class VirtualDocument: NSView, ChatBenchmarkAnchoredDocument {
++        func scrollToBenchmarkRow(_ index: Int) {
++            guard index >= 0, index < offsets.count - 1 else { return }
++            enclosingScrollView?.contentView.scroll(to: NSPoint(x: 0, y: offsets[index]))
++        }
++        override var isFlipped: Bool { true }
++        var offsets: [CGFloat] = [0]
++        var content: ((Int) -> Content)?
++        var hosts: [Int: NSHostingView<Content>] = [:]
++        var reusable: [NSHostingView<Content>] = []
++        var preparationTask: Task<Void, Never>?
++        var preparedRange: ClosedRange<Int>?
++
++        func install(heights: [CGFloat], width: CGFloat, content: @escaping (Int) -> Content) {
++            preparationTask?.cancel()
++            preparedRange = nil
++            self.content = content
++            offsets = [0]
++            for height in heights { offsets.append((offsets.last ?? 0) + height) }
++            for host in hosts.values { host.removeFromSuperview() }
++            hosts.removeAll()
++            reusable.removeAll()
++            setFrameSize(NSSize(width: enclosingScrollView?.contentSize.width ?? width, height: offsets.last ?? 0))
++            viewportChanged()
++        }
++
++        func row(at y: CGFloat) -> Int {
++            var lower = 0
++            var upper = offsets.count - 1
++            while lower < upper {
++                let middle = (lower + upper + 1) / 2
++                if offsets[middle] <= y { lower = middle } else { upper = middle - 1 }
++            }
++            return min(lower, offsets.count - 2)
++        }
++
++        @objc func viewportChanged() {
++            guard let content, offsets.count > 1, let scroll = enclosingScrollView else { return }
++            let visible = scroll.contentView.documentVisibleRect
++            // One viewport of preparation on either side bounds resident views
++            // while allowing ordinary wheel input to reuse already mounted rows.
++            let first = max(0, row(at: max(0, visible.minY - visible.height)))
++            let last = row(at: min(frame.height, visible.maxY + visible.height))
++            guard first <= last else { return }
++            for index in Array(hosts.keys) where !(first...last).contains(index) {
++                if let host = hosts.removeValue(forKey: index) {
++                    host.removeFromSuperview()
++                    reusable.append(host)
++                }
++            }
++            if UserDefaults.standard.bool(forKey: "ChatScheduledPrewarmExperiment") {
++                let visibleFirst = max(first, row(at: visible.minY))
++                let visibleLast = min(last, row(at: visible.maxY))
++                for index in visibleFirst...visibleLast { mount(index, width: visible.width, content: content) }
++                let range = first...last
++                guard range != preparedRange else { return }
++                preparedRange = range
++                preparationTask?.cancel()
++                preparationTask = Task(priority: .utility) { @MainActor [weak self] in
++                    let nearby = range.sorted {
++                        min(abs($0 - visibleFirst), abs($0 - visibleLast))
++                        < min(abs($1 - visibleFirst), abs($1 - visibleLast))
++                    }
++                    for index in nearby {
++                        guard !Task.isCancelled, let self else { return }
++                        if self.hosts[index] == nil { self.mount(index, width: visible.width, content: content) }
++                        await Task.yield()
++                    }
++                }
++            } else {
++                for index in first...last { mount(index, width: visible.width, content: content) }
++            }
++        }
++
++        private func mount(_ index: Int, width: CGFloat, content: (Int) -> Content) {
++            let host: NSHostingView<Content>
++            if let existing = hosts[index] { host = existing }
++            else {
++                host = reusable.popLast() ?? NSHostingView(rootView: content(index))
++                host.sizingOptions = []
++                host.rootView = content(index)
++                let next = hosts.keys.filter { $0 > index }.min().flatMap { hosts[$0] }
++                hosts[index] = host
++                addSubview(host, positioned: next == nil ? .above : .below, relativeTo: next)
++            }
++            host.frame = NSRect(x: 0, y: offsets[index], width: width,
++                                height: offsets[index + 1] - offsets[index])
++            // Offscreen preparation must perform display layout now; mounting
++            // an unlaid-out hosting view only postpones the work until exposure.
++            host.layoutSubtreeIfNeeded()
++        }
++    }
++
++}
++#endif
+--- a/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift
++++ b/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift
+@@ -208,8 +208,26 @@
+             isRunning = false
+         }
+ 
++        #if os(macOS)
++        let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
++        if anchorRow > 0 {
++            if let table = scrollView.documentView as? NSTableView, anchorRow < table.numberOfRows {
++                Self.note("anchor table auto=\(table.usesAutomaticRowHeights) spacing=\(table.intercellSpacing) delegate=\(String(describing: table.delegate))")
++                table.scrollRowToVisible(anchorRow)
++                table.layoutSubtreeIfNeeded()
++                scrollView.contentView.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: anchorRow).minY))
++            } else if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
++                document.scrollToBenchmarkRow(anchorRow)
++            }
++            scrollView.reflectScrolledClipView(scrollView.contentView)
++            try? await Task.sleep(for: .milliseconds(250))
++            Self.note("anchor row=\(anchorRow) offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))")
++        }
++        #endif
+         let monitor = ChatFramePacingMonitor()
+         var scrollsUpward = true
++        let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
++        var scrubStarted: CFTimeInterval?
+         var offsetY = Self.contentOffsetY(of: scrollView)
+         var lastTimestamp: CFTimeInterval?
+         var phaseStartTimestamp: CFTimeInterval?
+@@ -231,13 +249,20 @@
+                     )
+                 }
+                 let (minY, maxY) = Self.scrollableRange(of: scrollView)
+-                offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
+-                offsetY = min(max(offsetY, minY), maxY)
++                if scrubPeriod > 0 {
++                    scrubStarted = scrubStarted ?? timestamp
++                    let phase = ((timestamp - (scrubStarted ?? timestamp)) / scrubPeriod).truncatingRemainder(dividingBy: 2)
++                    let fraction = phase <= 1 ? 1 - phase : phase - 1
++                    offsetY = minY + (maxY - minY) * fraction
++                } else {
++                    offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
++                    offsetY = min(max(offsetY, minY), maxY)
++                }
+                 Self.setContentOffsetY(offsetY, on: scrollView)
+ 
+                 let phaseElapsed = timestamp - (phaseStartTimestamp ?? timestamp)
+                 let reachedEnd = scrollsUpward ? offsetY <= minY : offsetY >= maxY
+-                if reachedEnd || phaseElapsed >= maximumSweepSeconds {
++                if (scrubPeriod <= 0 && reachedEnd) || phaseElapsed >= maximumSweepSeconds {
+                     if scrollsUpward {
+                         scrollsUpward = false
+                         phaseStartTimestamp = timestamp
+@@ -499,6 +524,7 @@
+     /// the production steady state — production always prepares a page off
+     /// the main actor before inserting it into the timeline.
+     @MainActor static var isTranscriptWarm = false
++    @MainActor static var isNativeGeometryWarm = false
+ 
+     /// A window resize while priming restarts the warm at the new width;
+     /// the benchmark must keep waiting for the latest pass.
+@@ -516,7 +542,7 @@
+         timeoutSeconds: TimeInterval
+     ) async {
+         let deadline = ContinuousClock.now + .seconds(timeoutSeconds)
+-        while !isTranscriptWarm, ContinuousClock.now < deadline {
++        while (!isTranscriptWarm || (UserDefaults.standard.bool(forKey: "ChatNativeTableExperiment") && !isNativeGeometryWarm)), ContinuousClock.now < deadline {
+             try? await Task.sleep(for: .milliseconds(250))
+         }
+         if !isTranscriptWarm {
+@@ -548,3 +574,9 @@
+         }
+     }
+ }
++
++#if os(macOS)
++@MainActor protocol ChatBenchmarkAnchoredDocument {
++    func scrollToBenchmarkRow(_ index: Int)
++}
++#endif
+--- a/clients/swift/maiTests/ChatTimelineLayoutTests.swift
++++ b/clients/swift/maiTests/ChatTimelineLayoutTests.swift
+@@ -870,3 +870,65 @@
+         updatedAt: updatedAt
+     )
+ }
++
++#if os(macOS)
++import SwiftUI
++
++struct ChatContainerExperimentTests {
++    @Test @MainActor func customRowLookupUsesHalfOpenIntervals() {
++        let document = ChatNativeTableExperiment<Text>.VirtualDocument()
++        document.install(heights: [10, 20, 30], width: 300) { Text("Row \($0)") }
++        for (position, expected) in [(0.0, 0), (9.0, 0), (10.0, 1), (29.0, 1), (30.0, 2), (60.0, 2)] {
++            #expect(document.row(at: position) == expected)
++        }
++        #expect(document.frame.height == 60)
++    }
++
++    @Test @MainActor func customViewportKeepsViewsBoundedAndReusesVisibleRows() {
++        let document = ChatNativeTableExperiment<Text>.VirtualDocument()
++        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
++        scroll.documentView = document
++        document.install(heights: Array(repeating: 100, count: 5850), width: 300) { Text("Row \($0)") }
++        scroll.contentView.scroll(to: NSPoint(x: 0, y: 1000))
++        document.viewportChanged()
++        let visibleHost = document.hosts[10]
++        #expect(visibleHost != nil)
++        #expect(document.hosts.count <= 8)
++        scroll.contentView.scroll(to: NSPoint(x: 0, y: 1050))
++        document.viewportChanged()
++        #expect(document.hosts[10] === visibleHost)
++        scroll.contentView.scroll(to: NSPoint(x: 0, y: 480000))
++        document.viewportChanged()
++        #expect(document.hosts[4800] != nil)
++        #expect(document.hosts[10] == nil)
++        #expect(document.hosts.count <= 8)
++        #expect(document.hosts.values.allSatisfy { $0.superview === document })
++    }
++
++    @Test @MainActor func tableGeometryMatchesPreparedHeightsAfterRecycling() {
++        let coordinator = ChatNativeTableExperiment<Text>.Coordinator()
++        let table = coordinator.table
++        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
++        table.style = .plain
++        table.rowSizeStyle = .custom
++        table.headerView = nil
++        table.intercellSpacing = .zero
++        table.usesAutomaticRowHeights = false
++        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("content")))
++        table.tableColumns[0].width = 300
++        table.delegate = coordinator
++        table.dataSource = coordinator
++        coordinator.heights = (0..<5850).map { CGFloat(20 + $0 % 7 * 13) }
++        coordinator.content = { Text("Row \($0)") }
++        scroll.documentView = table
++        table.reloadData()
++        for index in [0, 4800, 10, 5849, 30] {
++            table.scrollRowToVisible(index)
++            table.layoutSubtreeIfNeeded()
++            let expectedY = coordinator.heights.prefix(index).reduce(0, +)
++            #expect(abs(table.rect(ofRow: index).minY - expectedY) < 0.5)
++            #expect(abs(table.rect(ofRow: index).height - coordinator.heights[index]) < 0.5)
++        }
++    }
++}
++#endif

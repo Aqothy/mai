@@ -1,0 +1,26 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.451934 seconds
+CHAT_BENCHMARK_TRACE benchmark start: real-cruise-1200pps
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.00972075 seconds
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=154 hostingMounts=20 resident=23 pooled=4
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":119.89960508063476,"displayMaximumFPS":120,"durationSeconds":20.00006587500684,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2399,"hitchCount":2,"hitchTimeMillisecondsPerSecond":0.8556680158749913,"label":"real-cruise-1200pps","maxFrameMilliseconds":17.065458348952234,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":8.333333360496908}
+CHAT_BENCHMARK_RESULT {"averageFPS":119.89960508063476,"displayMaximumFPS":120,"durationSeconds":20.00006587500684,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2399,"hitchCount":2,"hitchTimeMillisecondsPerSecond":0.8556680158749913,"label":"real-cruise-1200pps","maxFrameMilliseconds":17.065458348952234,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":8.333333360496908}
+CHAT_BENCHMARK_TRACE benchmark start: real-scroll-3000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=538 hostingMounts=62 resident=23 pooled=4
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":119.58300904750934,"displayMaximumFPS":120,"durationSeconds":24.000065083324444,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2871,"hitchCount":10,"hitchTimeMillisecondsPerSecond":3.639004019381477,"label":"real-scroll-3000pps","maxFrameMilliseconds":17.62112500728108,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":8.333333360496908}
+CHAT_BENCHMARK_RESULT {"averageFPS":119.58300904750934,"displayMaximumFPS":120,"durationSeconds":24.000065083324444,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2871,"hitchCount":10,"hitchTimeMillisecondsPerSecond":3.639004019381477,"label":"real-scroll-3000pps","maxFrameMilliseconds":17.62112500728108,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":8.333333360496908}
+CHAT_BENCHMARK_TRACE benchmark start: real-fling-8000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=1241 hostingMounts=140 resident=23 pooled=4
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":118.31225937015118,"displayMaximumFPS":120,"durationSeconds":16.00003254166222,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1894,"hitchCount":24,"hitchTimeMillisecondsPerSecond":14.046679766550879,"label":"real-fling-8000pps","maxFrameMilliseconds":22.00050000101328,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":16.687041672412306}
+CHAT_BENCHMARK_RESULT {"averageFPS":118.31225937015118,"displayMaximumFPS":120,"durationSeconds":16.00003254166222,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1894,"hitchCount":24,"hitchTimeMillisecondsPerSecond":14.046679766550879,"label":"real-fling-8000pps","maxFrameMilliseconds":22.00050000101328,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":16.687041672412306}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

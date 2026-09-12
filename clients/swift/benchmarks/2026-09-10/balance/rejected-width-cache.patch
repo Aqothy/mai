@@ -1,0 +1,41 @@
+--- a/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift
++++ b/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift
+@@ -385,14 +385,36 @@
+             let layout: ChatTableLayout
+         }
+ 
+-        private var entries: [Key: Entry] = [:]
++        /// Keep the latest width for each row. A resize must replace its old
++        /// measurement rather than retain another complete attributed layout.
++        private struct WidthCache<Value> {
++            private var values: [String: (width: CGFloat, value: Value)] = [:]
++            var count: Int { values.count }
++
++            subscript(key: Key) -> Value? {
++                get {
++                    guard let entry = values[key.id], entry.width == key.width else { return nil }
++                    return entry.value
++                }
++                set {
++                    if let newValue { values[key.id] = (key.width, newValue) }
++                    else if values[key.id]?.width == key.width { values[key.id] = nil }
++                }
++            }
++        }
++
++        private var entries = WidthCache<Entry>()
+         private var inFlightKeys: Set<Key> = []
+-        private var resolvedEntries: [Key: ResolvedEntry] = [:]
++        private var resolvedEntries = WidthCache<ResolvedEntry>()
+         private var resolvedInFlightKeys: Set<Key> = []
+         private var codeEntries: [String: CodeEntry] = [:]
+         private var codeInFlightIDs: Set<String> = []
+         private var tableEntries: [String: TableEntry] = [:]
+         private var tableInFlightIDs: Set<String> = []
++
++        var cachedLayoutCount: Int {
++            entries.count + resolvedEntries.count + codeEntries.count + tableEntries.count
++        }
+ 
+         /// UIKit's pooled-text-view lifecycle does not exist on macOS; the
+         /// timeline calls these symmetrically on both platforms.

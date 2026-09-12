@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/balanced-candidate/mai.app",
+  "codeImageSHA256": "2d8d126ae47208320e6bc78cfe5340d96fdaad2ed589294e8d4062441e630723",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "sessions",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": true,
+  "floatingBenchmarkWindow": false
+}

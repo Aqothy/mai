@@ -1,0 +1,12 @@
+{
+  "rawLocalSample": "/tmp/maid-chat-perf/list-renewed-profile/main.sample",
+  "durationSeconds": 8,
+  "sampleIntervalMilliseconds": 1,
+  "mainThreadSamples": 5631,
+  "inclusiveSamplesBySymbol": {
+    "-[NSTableView prepareContentInRect:]": 1598,
+    "-[NSTableRowData _doAutomaticRowHeightForRowView:row:]": 941,
+    "NSHostingView._willUpdateConstraintsForSubtree()": 827
+  },
+  "qualification": "Inclusive call-path counts overlap; do not sum them into a total. Profiling perturbs pacing; this run is diagnostic only."
+}

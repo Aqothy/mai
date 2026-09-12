@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/balanced-final/mai.app",
+  "codeImageSHA256": "6284914688d242eeebe44ddde4f0486725d6c1db91fc3959539e19dc99bb61be",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "open",
+  "reuseNativeBodies": true,
+  "directNativeRows": true,
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "prepared aligned viewport",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

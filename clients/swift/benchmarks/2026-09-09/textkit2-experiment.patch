@@ -1,0 +1,26 @@
+--- a/mai/Features/Chat/ChatSelectableTextViewConfiguration.swift
++++ b/mai/Features/Chat/ChatSelectableTextViewConfiguration.swift
+@@ -5,7 +5,12 @@
+         static func makeTextView() -> NSTextView {
+             // NSTextView owns its selection/link cursor tracking. Adding an
+             // I-beam cursor rect here duplicates that work on every scroll.
+-            let view = NSTextView(usingTextLayoutManager: false)
++            #if DEBUG
++            let usesTextKit2 = UserDefaults.standard.bool(forKey: "ChatTextKit2Experiment")
++            #else
++            let usesTextKit2 = false
++            #endif
++            let view = NSTextView(usingTextLayoutManager: usesTextKit2)
+             view.isEditable = false
+             view.isSelectable = true
+             view.isRichText = true
+@@ -20,7 +25,8 @@
+             // Row height comes from a complete prepared layout. A contiguous
+             // display graph prevents recycled rows from showing an empty tail
+             // after AppKit jumps directly into their lower half.
+-            view.layoutManager?.allowsNonContiguousLayout = false
++            // Accessing layoutManager switches a TextKit 2 view to TextKit 1.
++            if !usesTextKit2 { view.layoutManager?.allowsNonContiguousLayout = false }
+             view.linkTextAttributes = [
+                 .foregroundColor: NSColor.labelColor,
+                 .underlineStyle: NSUnderlineStyle.single.rawValue,

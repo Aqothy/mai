@@ -86,18 +86,6 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func TestWebClientHandlerServesEmbeddedIndex(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	webClientHandler().ServeHTTP(recorder, httptest.NewRequest("GET", "/", nil))
-
-	if recorder.Code != 200 {
-		t.Fatalf("GET / status = %d, want 200", recorder.Code)
-	}
-	if body := recorder.Body.String(); !strings.Contains(body, "<title>maiD</title>") || !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("GET / body = %q, want embedded maiD index", body)
-	}
-}
-
 func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()

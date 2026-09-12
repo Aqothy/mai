@@ -1,0 +1,29 @@
+{
+  "variant": "final-stream",
+  "reports": [
+    {
+      "averageFPS": 118.91089786549638,
+      "displayMaximumFPS": 120,
+      "durationSeconds": 23.748874583339784,
+      "expectedFrameMilliseconds": 8.333333333333334,
+      "frameCount": 2825,
+      "hitchCount": 25,
+      "hitchTimeMillisecondsPerSecond": 9.5201441037752,
+      "label": "stream-essay+catalog-rapidBurst",
+      "maxFrameMilliseconds": 22.445291659096256,
+      "measurementKind": "displayLinkCallbacks",
+      "p50FrameMilliseconds": 8.333333331393078,
+      "p95FrameMilliseconds": 8.333333360496908,
+      "p99FrameMilliseconds": 8.333333360496908
+    }
+  ],
+  "metadata": {
+    "app": "/private/tmp/maid-chat-perf/final/mai.app",
+    "codeImageSHA256": "9a042fbe5b4aede56ab35716cb60b02f552e5398630e9f0da3ab4dcf75d1a783",
+    "macOS": "26.5.2",
+    "machine": "Mac14,9",
+    "plan": "stream",
+    "syntheticTurns": null,
+    "measurement": "display-link callback pacing, not presented FPS"
+  }
+}

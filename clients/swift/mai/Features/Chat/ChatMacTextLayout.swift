@@ -394,6 +394,12 @@
         private var tableEntries: [String: TableEntry] = [:]
         private var tableInFlightIDs: Set<String> = []
 
+        #if DEBUG
+        var cachedLayoutCount: Int {
+            entries.count + resolvedEntries.count + codeEntries.count + tableEntries.count
+        }
+        #endif
+
         /// UIKit's pooled-text-view lifecycle does not exist on macOS; the
         /// timeline calls these symmetrically on both platforms.
         func activateTextViewReuse() {}
@@ -723,7 +729,7 @@
         ) -> [(request: ChatTextLayoutRequest, key: Key)] {
             var pending: [(request: ChatTextLayoutRequest, key: Key)] = []
             var seen: Set<Key> = []
-            for request in requests.reversed() where request.width > 0 {
+            for request in requests.reversed() {
                 let key = Key(id: request.id, width: request.width)
                 guard seen.insert(key).inserted,
                     entries[key]?.source != request.source

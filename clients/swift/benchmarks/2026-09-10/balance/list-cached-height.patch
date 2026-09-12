@@ -1,0 +1,84 @@
+--- a/ChatView.swift
++++ b/ChatView.swift
+@@ -1197,7 +1197,7 @@
+                 store: store,
+                 foldModel: foldModel,
+                 scrollState: scrollState,
+-                textLayoutStore: textLayoutStore
++                textLayoutStore: textLayoutStore, measurementWidth: rowWidth
+             )
+         }
+ 
+@@ -1806,7 +1806,29 @@
+     let scrollState: ChatScrollState
+     let textLayoutStore: ChatTextLayoutStore
+ 
++    var measurementWidth: CGFloat = 0
++    @Environment(\.colorScheme) private var measuredColorScheme
++    @Environment(\.dynamicTypeSize) private var measuredDynamicTypeSize
++
+     var body: some View {
++        #if os(macOS)
++        originalContent.frame(height: measuredHeight)
++        #else
++        originalContent
++        #endif
++    }
++
++    #if os(macOS)
++    private var measuredHeight: CGFloat? {
++        guard measurementWidth > 0, let key = row.nativeMeasurementKey else { return nil }
++        return textLayoutStore.experimentalListHeights.height(
++            id: row.id, key: key, width: measurementWidth,
++            colorScheme: measuredColorScheme, dynamicType: measuredDynamicTypeSize,
++            content: originalContent)
++    }
++    #endif
++
++    private var originalContent: some View {
+         VStack(alignment: .leading, spacing: 0) {
+             switch row {
+             case .standard(let model):
+--- a/ChatListRowHeightCache.swift
++++ b/ChatListRowHeightCache.swift
+@@ -0,0 +1,30 @@
++#if os(macOS)
++import AppKit
++import SwiftUI
++
++/// Experiment: only settled rows use exact cached SwiftUI measurements.
++@MainActor final class ChatListRowHeightCache {
++    private struct Entry {
++        let key: ChatNativeRowMeasurementKey
++        let width: CGFloat
++        let colorScheme: ColorScheme
++        let dynamicType: DynamicTypeSize
++        let height: CGFloat
++    }
++    private var entries: [String: Entry] = [:]
++    func height<Content: View>(id: String, key: ChatNativeRowMeasurementKey, width: CGFloat,
++                              colorScheme: ColorScheme, dynamicType: DynamicTypeSize,
++                              content: Content) -> CGFloat {
++        if let previous = entries[id], previous.key == key, previous.width == width,
++           previous.colorScheme == colorScheme, previous.dynamicType == dynamicType {
++            return previous.height
++        }
++        let host = NSHostingController(rootView: content.environment(\.colorScheme, colorScheme)
++            .environment(\.dynamicTypeSize, dynamicType).frame(width: width))
++        let height = ceil(host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height)
++        entries[id] = Entry(key: key, width: width, colorScheme: colorScheme,
++                            dynamicType: dynamicType, height: height)
++        return height
++    }
++}
++#endif
+--- a/ChatMacTextLayout.swift
++++ b/ChatMacTextLayout.swift
+@@ -355,6 +355,7 @@
+     /// NSTextView for its lifetime, so there is one reuse lifecycle to
+     /// reason about.
+     @MainActor final class ChatTextLayoutStore {
++        let experimentalListHeights = ChatListRowHeightCache()
+         private struct Key: Hashable, Sendable {
+             let id: String
+             let width: CGFloat

@@ -1259,6 +1259,26 @@ final class ThreadStore {
         session.timelineProjection.invalidateAll()
     }
 
+    #if DEBUG
+        func insertSyntheticBenchmarkThread(_ thread: Thread) {
+            guard ChatPerformanceLab.isEnabled, thread.id.hasPrefix("synthetic-benchmark-") else { return }
+            var session = ThreadSession(thread: thread)
+            session.subscriptionState = .inactive
+            session.inactiveSince = now()
+            sessionsByID[thread.id] = session
+            threads.append(ChatSyntheticBenchmarkThread.listEntry(for: thread))
+            noteThreadsChanged()
+        }
+
+        func applySyntheticBenchmarkEvent(_ event: Event) {
+            guard ChatPerformanceLab.isEnabled,
+                selectedThreadID == ChatSyntheticBenchmarkThread.threadID,
+                event.payload.threadID == ChatSyntheticBenchmarkThread.threadID
+            else { return }
+            applyThreadEvent(event)
+        }
+    #endif
+
     private func applyThreadEvent(_ event: Event) {
         guard let threadID = event.payload.threadID else { return }
         let hadActiveTurn = hasActiveTurn(sessionsByID[threadID])

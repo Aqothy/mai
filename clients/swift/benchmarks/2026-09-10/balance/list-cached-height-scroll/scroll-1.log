@@ -1,0 +1,34 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE benchmark start: real-cruise-1200pps
+CHAT_BENCHMARK_TRACE anchor table auto=true spacing=(17.0, 0.0) delegate=Optional(<_TtGC7SwiftUI22OutlineListCoordinatorGOS_19SelectionManagerBoxOs5Never__: 0x8e9ba1b00>)
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=262244.32535797206 range=(minY: 0.0, maxY: 347757.0)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":111.55,"displayMaximumFPS":120,"durationSeconds":20,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2232,"hitchCount":124,"hitchTimeMillisecondsPerSecond":66.36461040140911,"label":"real-cruise-1200pps","maxFrameMilliseconds":35.31429165741429,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":13.509708340279758,"p99FrameMilliseconds":21.980708290357143}
+CHAT_BENCHMARK_RESULT {"averageFPS":111.55,"displayMaximumFPS":120,"durationSeconds":20,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2232,"hitchCount":124,"hitchTimeMillisecondsPerSecond":66.36461040140911,"label":"real-cruise-1200pps","maxFrameMilliseconds":35.31429165741429,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":13.509708340279758,"p99FrameMilliseconds":21.980708290357143}
+CHAT_BENCHMARK_TRACE benchmark start: real-scroll-3000pps
+CHAT_BENCHMARK_TRACE anchor table auto=true spacing=(17.0, 0.0) delegate=Optional(<_TtGC7SwiftUI22OutlineListCoordinatorGOS_19SelectionManagerBoxOs5Never__: 0x8e9ba1b00>)
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=262244.32535797206 range=(minY: 0.0, maxY: 347757.0)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":103.27836634947018,"displayMaximumFPS":120,"durationSeconds":24.0030907500186,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2480,"hitchCount":328,"hitchTimeMillisecondsPerSecond":131.55344899967866,"label":"real-scroll-3000pps","maxFrameMilliseconds":25.486666650976986,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":19.80524999089539,"p99FrameMilliseconds":21.88650000607595}
+CHAT_BENCHMARK_RESULT {"averageFPS":103.27836634947018,"displayMaximumFPS":120,"durationSeconds":24.0030907500186,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2480,"hitchCount":328,"hitchTimeMillisecondsPerSecond":131.55344899967866,"label":"real-scroll-3000pps","maxFrameMilliseconds":25.486666650976986,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":19.80524999089539,"p99FrameMilliseconds":21.88650000607595}
+CHAT_BENCHMARK_TRACE benchmark start: real-fling-8000pps
+CHAT_BENCHMARK_TRACE anchor table auto=true spacing=(17.0, 0.0) delegate=Optional(<_TtGC7SwiftUI22OutlineListCoordinatorGOS_19SelectionManagerBoxOs5Never__: 0x8e9ba1b00>)
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=262244.32535797206 range=(minY: 0.0, maxY: 347757.0)
+CHAT_BENCHMARK_TRACE stall 137 ms at offset 212710 visible=true
+CHAT_BENCHMARK_TRACE stall 143 ms at offset 211613 visible=true
+CHAT_BENCHMARK_TRACE stall 264 ms at offset 208944 visible=true
+CHAT_BENCHMARK_TRACE stall 180 ms at offset 206832 visible=true
+CHAT_BENCHMARK_TRACE stall 286 ms at offset 204766 visible=true
+CHAT_BENCHMARK_TRACE stall 958 ms at offset 202473 visible=true
+CHAT_BENCHMARK_TRACE stall 1235 ms at offset 194807 visible=true
+CHAT_BENCHMARK_TRACE stall 136 ms at offset 205630 visible=true
+CHAT_BENCHMARK_TRACE stall 106 ms at offset 241200 visible=true
+CHAT_BENCHMARK_TRACE stall 102 ms at offset 257038 visible=true
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":62.190669371138014,"displayMaximumFPS":120,"durationSeconds":16.433333333348855,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1023,"hitchCount":362,"hitchTimeMillisecondsPerSecond":469.2523199932953,"label":"real-fling-8000pps","maxFrameMilliseconds":1235.2991666994058,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":23.79654167452827,"p99FrameMilliseconds":82.66345836455002}
+CHAT_BENCHMARK_RESULT {"averageFPS":62.190669371138014,"displayMaximumFPS":120,"durationSeconds":16.433333333348855,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1023,"hitchCount":362,"hitchTimeMillisecondsPerSecond":469.2523199932953,"label":"real-fling-8000pps","maxFrameMilliseconds":1235.2991666994058,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333360496908,"p95FrameMilliseconds":23.79654167452827,"p99FrameMilliseconds":82.66345836455002}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

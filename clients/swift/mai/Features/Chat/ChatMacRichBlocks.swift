@@ -153,7 +153,6 @@
                 height: CGFloat.greatestFiniteMagnitude
             )
             textView.textContainer?.widthTracksTextView = false
-            textView.setAccessibilityElement(false)
             documentView = textView
         }
 

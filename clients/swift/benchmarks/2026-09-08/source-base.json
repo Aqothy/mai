@@ -1,0 +1,8 @@
+{
+  "baseFilesSHA256": {
+    "mai/Features/Chat/ChatView.swift": "8d55743124b520d36ddba1ae8a0ad1e184a110602975ddefd195e6655f2b0f07",
+    "mai/Features/Chat/ChatFramePacingBenchmark.swift": "27ebc36719fad8d439f8c25387cb5d3ebae3b5443a664284095a8c1231887207",
+    "maiTests/ChatTimelineLayoutTests.swift": "852c9d68fa93023c57056ff624a88c731fef8ca9ebbf34bfc10ce68c0f317d44"
+  },
+  "patchStatus": "Current patch: v3 behavior restored after rejecting v4 distant-jump prewarm suppression; corrected scrub labels, ordering assertion, and prototype moved into its own file. Xcode build successful. Diagnostic only."
+}

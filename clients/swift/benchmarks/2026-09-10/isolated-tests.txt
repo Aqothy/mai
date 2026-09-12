@@ -1,0 +1,551 @@
+================================================================================
+TEST RESULTS SUMMARY
+================================================================================
+Generated: 2026-09-09T16:42:19Z
+Total Results: 45
+================================================================================
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 1/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/preservesAnchorAcrossPrependAndHeightCorrection()
+TEST_DISPLAY_NAME: preservesAnchorAcrossPrependAndHeightCorrection()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 8
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 2/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/emptyRemovalAndBoundaryLookup()
+TEST_DISPLAY_NAME: emptyRemovalAndBoundaryLookup()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 19
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 3/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/streamingTailGrowthLeavesHistoryPositionsUnchanged()
+TEST_DISPLAY_NAME: streamingTailGrowthLeavesHistoryPositionsUnchanged()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 34
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 4/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/reflowKeepsRowAnchorAndClampsShrinkingRowOffset()
+TEST_DISPLAY_NAME: reflowKeepsRowAnchorAndClampsShrinkingRowOffset()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 47
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 5/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/coordinatorOnlyMeasuresNewOrChangedCompletedRows()
+TEST_DISPLAY_NAME: coordinatorOnlyMeasuresNewOrChangedCompletedRows()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 56
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 6/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/nativeControllerPreservesAnchorThroughHeightChangeAndPrepend()
+TEST_DISPLAY_NAME: nativeControllerPreservesAnchorThroughHeightChangeAndPrepend()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 90
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 7/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatVirtualTranscriptGeometryTests/userScrollCancelsInitialAlignmentWithoutHidingTimeline()
+TEST_DISPLAY_NAME: userScrollCancelsInitialAlignmentWithoutHidingTimeline()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatVirtualTranscriptGeometryTests.swift
+TEST_LINE_NUMBER: 127
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 8/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatNativePreparedRowTests/reuseChangesContentAndClearsSelectionAcrossRowKinds()
+TEST_DISPLAY_NAME: reuseChangesContentAndClearsSelectionAcrossRowKinds()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatNativePreparedRowTests.swift
+TEST_LINE_NUMBER: 6
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 9/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/macBottomOriginIncludesComposerInset()
+TEST_DISPLAY_NAME: macBottomOriginIncludesComposerInset()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 15
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 10/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/macBottomOriginKeepsShortContentAtTopInset()
+TEST_DISPLAY_NAME: macBottomOriginKeepsShortContentAtTopInset()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 28
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 11/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/upwardNativeScrollCannotResumeFromTransientBottomGeometry()
+TEST_DISPLAY_NAME: upwardNativeScrollCannotResumeFromTransientBottomGeometry()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 41
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 12/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/nativeScrollEndingAtBottomRestoresFollowing()
+TEST_DISPLAY_NAME: nativeScrollEndingAtBottomRestoresFollowing()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 53
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 13/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/macResolvedProseRunKeepsSelectionContentAndSemantics()
+TEST_DISPLAY_NAME: macResolvedProseRunKeepsSelectionContentAndSemantics()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 65
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 14/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/jumpToBottomRestoresStreamingFollowIntent()
+TEST_DISPLAY_NAME: jumpToBottomRestoresStreamingFollowIntent()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 137
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 15/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds()
+TEST_DISPLAY_NAME: userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 150
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 16/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/endingAUserScrollAtTheBottomResumesFollowing()
+TEST_DISPLAY_NAME: endingAUserScrollAtTheBottomResumesFollowing()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 163
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 17/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/transientEndVisibilityDoesNotUndoAUserScrollAway()
+TEST_DISPLAY_NAME: transientEndVisibilityDoesNotUndoAUserScrollAway()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 177
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 18/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/keyboardScrollTowardEndResumesOnlyAfterReachingIt()
+TEST_DISPLAY_NAME: keyboardScrollTowardEndResumesOnlyAfterReachingIt()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 189
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 19/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing()
+TEST_DISPLAY_NAME: transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 203
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 20/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain()
+TEST_DISPLAY_NAME: contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 213
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 21/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent()
+TEST_DISPLAY_NAME: layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 229
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 22/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/paginatesByCompleteUserTurns()
+TEST_DISPLAY_NAME: paginatesByCompleteUserTurns()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 243
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 23/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/groupsConsecutiveActivityItemsIntoOneRow()
+TEST_DISPLAY_NAME: groupsConsecutiveActivityItemsIntoOneRow()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 274
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 24/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/reasoningRendersAsThoughtRowOutsideGroups()
+TEST_DISPLAY_NAME: reasoningRendersAsThoughtRowOutsideGroups()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 295
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 25/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/assistantMessageSplitsActivityGroups()
+TEST_DISPLAY_NAME: assistantMessageSplitsActivityGroups()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 325
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 26/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/finishedTurnFoldsActivityBehindHeader()
+TEST_DISPLAY_NAME: finishedTurnFoldsActivityBehindHeader()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 345
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 27/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/foldedTurnKeepsOnlyFinalAssistantMessage()
+TEST_DISPLAY_NAME: foldedTurnKeepsOnlyFinalAssistantMessage()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 373
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 28/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/runningTurnShowsLiveHeaderAndUnfoldedActivity()
+TEST_DISPLAY_NAME: runningTurnShowsLiveHeaderAndUnfoldedActivity()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 405
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 29/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/runningTurnShowsHeaderBeforeFirstActivity()
+TEST_DISPLAY_NAME: runningTurnShowsHeaderBeforeFirstActivity()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 422
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 30/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/emptyMessagesProduceNoRows()
+TEST_DISPLAY_NAME: emptyMessagesProduceNoRows()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 447
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 31/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/previousTurnFoldsWhileNextTurnRuns()
+TEST_DISPLAY_NAME: previousTurnFoldsWhileNextTurnRuns()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 463
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 32/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/steeringMessageStaysInsideItsTurn()
+TEST_DISPLAY_NAME: steeringMessageStaysInsideItsTurn()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 488
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 33/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/historyWithoutTurnIDsSplitsOnUserMessages()
+TEST_DISPLAY_NAME: historyWithoutTurnIDsSplitsOnUserMessages()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 509
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 34/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/warningsAndErrorsNeverFold()
+TEST_DISPLAY_NAME: warningsAndErrorsNeverFold()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 531
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 35/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/pendingApprovalStaysVisibleAndResolvedApprovalFolds()
+TEST_DISPLAY_NAME: pendingApprovalStaysVisibleAndResolvedApprovalFolds()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 547
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 36/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/headerUsesLatestTurnTimestampsWhenAvailable()
+TEST_DISPLAY_NAME: headerUsesLatestTurnTimestampsWhenAvailable()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 572
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 37/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/headerDerivesDurationFromItemTimestampsForOlderTurns()
+TEST_DISPLAY_NAME: headerDerivesDurationFromItemTimestampsForOlderTurns()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 597
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 38/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/headerFallsBackToPlainTitleWhenDurationIsUnknown()
+TEST_DISPLAY_NAME: headerFallsBackToPlainTitleWhenDurationIsUnknown()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 618
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 39/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/interruptedTurnReadsStoppedInsteadOfWorked()
+TEST_DISPLAY_NAME: interruptedTurnReadsStoppedInsteadOfWorked()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 633
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 40/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/interruptedStepInOlderTurnAlsoReadsStopped()
+TEST_DISPLAY_NAME: interruptedStepInOlderTurnAlsoReadsStopped()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 657
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 41/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/headerFlagsFailedSteps()
+TEST_DISPLAY_NAME: headerFlagsFailedSteps()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 671
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 42/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/summarizesGroupedActivityByVerb()
+TEST_DISPLAY_NAME: summarizesGroupedActivityByVerb()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 687
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 43/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/summarizesEditsAndSearches()
+TEST_DISPLAY_NAME: summarizesEditsAndSearches()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 698
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 44/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/summarizesSingleNamedTool()
+TEST_DISPLAY_NAME: summarizesSingleNamedTool()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 709
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 45/45
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatTimelineLayoutTests/durationFormatting()
+TEST_DISPLAY_NAME: durationFormatting()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatTimelineLayoutTests.swift
+TEST_LINE_NUMBER: 718
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+
+================================================================================
+END OF TEST RESULTS SUMMARY
+================================================================================

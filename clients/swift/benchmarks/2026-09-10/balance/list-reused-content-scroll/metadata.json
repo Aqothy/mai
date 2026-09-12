@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/list-reused-content/mai.app",
+  "codeImageSHA256": "55a9d7f99e44c8630654a7770950b9c3cc674a4ca6b627f789d6127254e45b59",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

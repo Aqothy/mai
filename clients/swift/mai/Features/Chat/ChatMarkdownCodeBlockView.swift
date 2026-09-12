@@ -26,9 +26,9 @@ struct ChatMarkdownCodeBlockView: View {
                     text: block.code
                 )
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.horizontal, ChatRichBlockStyle.codeHeaderHorizontalInset)
+            .padding(.top, ChatRichBlockStyle.codeHeaderTopInset)
+            .padding(.bottom, ChatRichBlockStyle.codeHeaderBottomInset)
 
             #if os(macOS)
                 // A native, prepared text view: the row's height is known
@@ -56,12 +56,13 @@ struct ChatMarkdownCodeBlockView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color.primary.opacity(colorScheme == .dark ? 0.11 : 0.055),
-            in: .rect(cornerRadius: 18)
+            Color.primary.opacity(
+                ChatRichBlockStyle.codeBackgroundOpacity(isDark: colorScheme == .dark)),
+            in: .rect(cornerRadius: ChatRichBlockStyle.codeCornerRadius)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(Color.primary.opacity(0.08))
+            RoundedRectangle(cornerRadius: ChatRichBlockStyle.codeCornerRadius)
+                .strokeBorder(Color.primary.opacity(ChatRichBlockStyle.codeBorderOpacity))
         }
         #if os(iOS)
             .task(id: highlightingRequest) {

@@ -16,13 +16,14 @@
         nonisolated static let title = "Synthetic benchmark transcript"
         nonisolated static let threadID = "synthetic-benchmark-thread"
 
-        static func thread(turnCount: Int) -> Thread {
+        static func thread(turnCount: Int, identity: String = threadID) -> Thread {
+            let prefix = identity == threadID ? "synthetic" : identity
             let base = Date(timeIntervalSince1970: 1_800_000_000)
             var timeline: [TimelineEntry] = []
             timeline.reserveCapacity(turnCount * 6)
 
             for turn in 0..<turnCount {
-                let turnID = "synthetic-turn-\(turn)"
+                let turnID = "\(prefix)-turn-\(turn)"
                 let startedAt = base.addingTimeInterval(Double(turn) * 120)
                 let finishedAt = startedAt.addingTimeInterval(42)
 
@@ -59,7 +60,7 @@
                 )
             }
 
-            let lastTurnID = "synthetic-turn-\(max(0, turnCount - 1))"
+            let lastTurnID = "\(prefix)-turn-\(max(0, turnCount - 1))"
             let latestTurn = Turn(
                 completedAt: base.addingTimeInterval(Double(turnCount) * 120),
                 error: nil,
@@ -73,7 +74,7 @@
             return Thread(
                 createdAt: base,
                 cwd: "/Users/example/Project",
-                id: threadID,
+                id: identity,
                 latestTurn: latestTurn,
                 modelSelection: nil,
                 plan: nil,
@@ -89,7 +90,7 @@
                     slashCommands: nil,
                     status: MaidSessionStatus.ready.rawValue,
                     stopRequested: false,
-                    threadID: threadID,
+                    threadID: identity,
                     tokenUsage: nil,
                     updatedAt: base
                 ),
@@ -221,7 +222,7 @@
                 approval: nil,
                 item: Item(
                     createdAt: date,
-                    detailAvailable: true,
+                    detailAvailable: false,
                     id: "\(turnID)-tool-\(step)",
                     kind: MaidItemKind.commandExecution.rawValue,
                     payload: nil,

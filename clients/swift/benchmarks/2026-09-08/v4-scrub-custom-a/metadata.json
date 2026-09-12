@@ -1,0 +1,12 @@
+{
+  "app": "/private/tmp/maid-chat-perf/containers-v4/mai.app",
+  "codeImageSHA256": "f6ebe4a829344603b069d81b939a1c54d779d1ca7562b54965f15fbfd0136ac0",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 2.0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS"
+}

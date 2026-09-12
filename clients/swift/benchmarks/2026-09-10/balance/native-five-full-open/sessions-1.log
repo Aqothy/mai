@@ -1,0 +1,49 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.866937624999999 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.012245875 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-1","loadedChats":1,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":9891.1001250000008,"selectedLayoutCount":5550,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 1
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.650758916999999 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.011369458 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-2","loadedChats":2,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":8661.1527499999993,"selectedLayoutCount":5550,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.64729825 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.011919083 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-3","loadedChats":3,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":8633.234708,"selectedLayoutCount":5550,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 3
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.631134625 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.013050958 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-4","loadedChats":4,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":8855.097667,"selectedLayoutCount":5550,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 4
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.644186542 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.012943958 seconds
+CHAT_BENCHMARK_RESULT {"aligned":true,"label":"sessions-5","loadedChats":5,"measurementKind":"sessionMemoryCheckpoint","preparedAndSettledMilliseconds":8838.9857919999995,"selectedLayoutCount":5550,"visible":true,"windowWidth":1280}
+CHAT_BENCHMARK_TRACE session checkpoint 5
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

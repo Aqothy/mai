@@ -555,6 +555,7 @@ nonisolated enum ChatTimelineMetrics {
     /// Hysteresis for follow state and the jump-to-bottom control. Native
     /// bottom alignment itself still pins to the exact content end.
     static let nearBottomDistance: CGFloat = 24
+    static let rowVerticalInset: CGFloat = 10
     static let rowHorizontalInset: CGFloat = 16
     static let userBubbleHorizontalPadding: CGFloat = 14
     static let userBubbleVerticalPadding: CGFloat = 10
@@ -659,6 +660,9 @@ struct ChatTimeline: View {
     @State private var isViewportNearBottom = true
     @State private var pendingPrependAnchorID: String?
     @State private var rowWidth: CGFloat = 0
+    #if os(macOS)
+        @State private var nativePreparedKey: ChatTimelinePreparationKey?
+    #endif
 
     #if os(macOS)
         @State private var macScrollPositionPreserver =
@@ -702,14 +706,77 @@ struct ChatTimeline: View {
             segmentCache: segmentCache
         )
         let hasEarlierSections = loadedSections.first?.id != sections.first?.id
+        let preparationKey = ChatTimelinePreparationKey(
+            timelineEntryCount: timelineEntryCount,
+            streamingTurnID: streamingTurnID,
+            rowWidth: rowWidth,
+            codeTheme: codeTheme,
+            expandedSectionIDs: foldModel.expandedSectionIDs,
+            oldestLoadedSectionID: loadedSections.first?.id
+        )
 
+        #if os(macOS)
+            let nativeItems = ChatNativeTimelineItem.items(
+                rows: rows, plan: plan,
+                hasEarlierSections: hasEarlierSections, isStreaming: streamingTurnID != nil)
+        #endif
         ScrollViewReader { proxy in
-            List {
-                timelineContent(
-                    rows: rows,
-                    effectiveStreamingTurnID: effectiveStreamingTurnID,
-                    hasEarlierSections: hasEarlierSections
-                )
+            Group {
+                #if os(macOS)
+                    if ChatTranscriptConfiguration.usesNativeMacTranscript {
+                        ChatNativeTranscript(
+                            ids: nativeItems.map(\.id), width: rowWidth,
+                            isPrepared: nativePreparedKey == preparationKey,
+                            measurementKeys: nativeItems.map(\.measurementKey),
+                            presentationTheme: codeTheme,
+                            historyLoadDistance: Self.historyLoadDistance,
+                            onGeometryChange: { old, new in
+                                handleMacScrollGeometryChange(
+                                    from: old, to: new, hasEarlierSections: hasEarlierSections)
+                            }, onAttach: configureMacScrollDocument,
+                            nativeRowHeight: { index, width in
+                                guard case .row(let row) = nativeItems[index],
+                                    let descriptor = ChatNativePreparedRow.descriptor(for: row)
+                                else { return nil }
+                                return ChatNativePreparedRow.preparedHeight(
+                                    for: descriptor, width: width, store: textLayoutStore)
+                            },
+                            nativeRowFactory: { index, reused in
+                                guard case .row(let row) = nativeItems[index],
+                                    let descriptor = ChatNativePreparedRow.descriptor(for: row)
+                                else { return nil }
+                                let native =
+                                    reused as? ChatNativePreparedRow
+                                    ?? ChatNativePreparedRow(frame: .zero)
+                                native.update(
+                                    descriptor, width: rowWidth, store: textLayoutStore,
+                                    theme: codeTheme)
+                                return native
+                            }
+                        ) { index in
+                            ChatNativeTimelineItemView(
+                                item: nativeItems[index], streamingTurnID: effectiveStreamingTurnID,
+                                threadID: threadID, store: store, foldModel: foldModel,
+                                scrollState: scrollState, textLayoutStore: textLayoutStore
+                            )
+                            .id(nativeItems[index].id)
+                            .frame(width: rowWidth)
+                            .frame(maxWidth: .infinity)
+                        }
+                    } else {
+                        List {
+                            timelineContent(
+                                rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
+                                hasEarlierSections: hasEarlierSections)
+                        }
+                    }
+                #else
+                    List {
+                        timelineContent(
+                            rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
+                            hasEarlierSections: hasEarlierSections)
+                    }
+                #endif
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -722,27 +789,7 @@ struct ChatTimeline: View {
                 .opacity(isAwaitingInitialBottom ? 0 : 1)
                 .background {
                     MacListTableViewIntrospector { tableView in
-                        macScrollPositionPreserver.configure(
-                            isBottomFollowingEnabled: {
-                                scrollState.shouldFollowBottom
-                            },
-                            noteUserScrollActivity: { isActive in
-                                scrollState.noteUserScrollActivity(
-                                    isActive: isActive
-                                )
-                            },
-                            noteUserReachedEnd: {
-                                scrollState.noteScrollReturnedToEnd()
-                            },
-                            noteKeyboardScrollIntent: { towardEnd in
-                                if towardEnd {
-                                    scrollState.noteScrollTowardEnd()
-                                } else {
-                                    scrollState.noteScrollAwayFromEnd()
-                                }
-                            }
-                        )
-                        macScrollPositionPreserver.attach(to: tableView)
+                        configureMacScrollDocument(tableView)
                     }
                     .allowsHitTesting(false)
                 }
@@ -802,14 +849,7 @@ struct ChatTimeline: View {
                 #endif
             }
             .task(
-                id: ChatTimelinePreparationKey(
-                    timelineEntryCount: timelineEntryCount,
-                    streamingTurnID: streamingTurnID,
-                    rowWidth: rowWidth,
-                    codeTheme: codeTheme,
-                    expandedSectionIDs: foldModel.expandedSectionIDs,
-                    oldestLoadedSectionID: loadedSections.first?.id
-                )
+                id: preparationKey
             ) {
                 guard rowWidth > 0 else { return }
                 // A real-thread benchmark waits for this preparation pass so
@@ -841,6 +881,11 @@ struct ChatTimeline: View {
                 if signalsBenchmarkWarm, !Task.isCancelled {
                     ChatBenchmarkAutoRun.noteTranscriptWarm()
                 }
+                #if os(macOS)
+                    if !Task.isCancelled, ChatTranscriptConfiguration.usesNativeMacTranscript {
+                        nativePreparedKey = preparationKey
+                    }
+                #endif
                 guard !Task.isCancelled, let settlingTurnID else { return }
                 streamingContinuity.noteSettledPreparation(
                     turnID: settlingTurnID
@@ -864,6 +909,7 @@ struct ChatTimeline: View {
                     // from re-anchoring the viewport mid-measurement.
                     oldestLoadedSectionID =
                         ChatBenchmarkAutoRun.threadTitleQuery != nil
+                            && !UserDefaults.standard.bool(forKey: "ChatBenchmarkPaginatedHistory")
                         ? sections.first?.id
                         : loadedSections.first?.id
                 }
@@ -874,6 +920,9 @@ struct ChatTimeline: View {
                         transaction.disablesAnimations = true
                         withTransaction(transaction) {
                             isAwaitingInitialBottom = false
+                            #if DEBUG
+                                ChatBenchmarkAutoRun.isInitialAlignmentComplete = true
+                            #endif
                         }
                     }
                 #else
@@ -909,6 +958,32 @@ struct ChatTimeline: View {
             #endif
         }
     }
+
+    #if os(macOS)
+        private func configureMacScrollDocument(_ document: any ChatMacScrollDocument) {
+            macScrollPositionPreserver.configure(
+                isBottomFollowingEnabled: {
+                    scrollState.shouldFollowBottom
+                },
+                noteUserScrollActivity: { isActive in
+                    scrollState.noteUserScrollActivity(
+                        isActive: isActive
+                    )
+                },
+                noteUserReachedEnd: {
+                    scrollState.noteScrollReturnedToEnd()
+                },
+                noteKeyboardScrollIntent: { towardEnd in
+                    if towardEnd {
+                        scrollState.noteScrollTowardEnd()
+                    } else {
+                        scrollState.noteScrollAwayFromEnd()
+                    }
+                }
+            )
+            macScrollPositionPreserver.attach(to: document)
+        }
+    #endif
 
     private var codeTheme: ChatCodeHighlightTheme {
         colorScheme == .dark ? .dark : .light
@@ -1104,7 +1179,7 @@ struct ChatTimeline: View {
 
         if !hasEarlierSections, let plan, !plan.entries.isEmpty {
             ChatPlanRow(plan: plan)
-                .padding(.vertical, 10)
+                .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
                 .frame(
                     maxWidth: ChatContentMetrics.maximumWidth,
                     alignment: .leading
@@ -1135,7 +1210,7 @@ struct ChatTimeline: View {
 
         if streamingTurnID != nil {
             ChatWorkingIndicator(activityKey: rows.last?.id)
-                .padding(.vertical, 10)
+                .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
                 .frame(
                     maxWidth: ChatContentMetrics.maximumWidth,
                     alignment: .leading
@@ -1158,8 +1233,8 @@ struct ChatTimeline: View {
             .listRowSeparator(.hidden)
     }
 
-    private static let bottomID = "chat-bottom"
-    private static let historyMarkerID = "chat-history-marker"
+    private static let bottomID = ChatTimelineBoundaryID.bottom
+    private static let historyMarkerID = ChatTimelineBoundaryID.history
     private static let initialTurnCount = 5
     private static let earlierTurnCount = 10
 
@@ -1762,10 +1837,12 @@ struct ChatTimelineRenderRowView: View {
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
                 )
-                .padding(.top, segment.isFirst ? 10 : 0)
+                .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
                 .padding(
                     .bottom,
-                    segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
+                    segment.isLast
+                        ? ChatTimelineMetrics.rowVerticalInset
+                        : ChatTimelineMetrics.interSegmentSpacing
                 )
 
             case .prose(let segment):
@@ -1777,10 +1854,12 @@ struct ChatTimelineRenderRowView: View {
                         layoutStore: textLayoutStore
                     )
                 }
-                .padding(.top, segment.isFirst ? 10 : 0)
+                .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
                 .padding(
                     .bottom,
-                    segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
+                    segment.isLast
+                        ? ChatTimelineMetrics.rowVerticalInset
+                        : ChatTimelineMetrics.interSegmentSpacing
                 )
 
             case .resolvedMarkdown(let block):
@@ -1790,9 +1869,10 @@ struct ChatTimelineRenderRowView: View {
                 )
                     .padding(
                         .top,
-                        block.isFirst ? 10 : ChatMarkdownProseStyle.blockSpacing
+                    block.isFirst
+                        ? ChatTimelineMetrics.rowVerticalInset : ChatMarkdownProseStyle.blockSpacing
                     )
-                    .padding(.bottom, block.isLast ? 10 : 0)
+                .padding(.bottom, block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0)
             }
         }
         .frame(
@@ -1873,16 +1953,7 @@ private struct ChatScrollGeometry: Equatable {
     let contentOffsetY: CGFloat
 }
 
-#if os(macOS)
-    private struct ChatMacScrollGeometry: Equatable {
-        let isNearTop: Bool
-        let isNearBottom: Bool
-        let containerWidth: CGFloat
-        let containerHeight: CGFloat
-        let bottomInset: CGFloat
-        let contentHeight: CGFloat
-    }
-#endif
+
 
 /// Handles explicit jump-to-bottom requests without storing a scroll proxy in
 /// shared state. Automatic following is driven by post-layout geometry below.
@@ -2741,7 +2812,7 @@ private struct ChatApprovalRow: View {
     }
 }
 
-private struct ChatPlanRow: View {
+struct ChatPlanRow: View {
     let plan: Plan
 
     var body: some View {

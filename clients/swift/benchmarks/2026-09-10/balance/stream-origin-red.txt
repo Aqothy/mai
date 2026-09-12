@@ -1,0 +1,28 @@
+================================================================================
+TEST RESULTS SUMMARY
+================================================================================
+Generated: 2026-09-10T15:47:41Z
+Total Results: 1
+================================================================================
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 1/1
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatMeasuredTranscriptRowTests/growingContentDoesNotMoveAboveItsHostWhileHeightUpdateIsPending()
+TEST_DISPLAY_NAME: growingContentDoesNotMoveAboveItsHostWhileHeightUpdateIsPending()
+TEST_STATE: Failed
+TEST_FILE_PATH: mai/maiTests/ChatMeasuredTranscriptRowTests.swift
+TEST_LINE_NUMBER: 7
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 1
+
+TEST_ISSUES:
+    mai/maiTests/ChatMeasuredTranscriptRowTests.swift:36 ChatMeasuredTranscriptRowTests/growingContentDoesNotMoveAboveItsHostWhileHeightUpdateIsPending(): Expectation failed: rect.minY == initialRect.minY
+rect.minY → -88.0
+initialRect.minY → 32.0
+
+
+================================================================================
+END OF TEST RESULTS SUMMARY
+================================================================================

@@ -18,7 +18,10 @@ struct ChatMarkdownTableView: View {
                     text: table.tabSeparatedText
                 )
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(
+                    width: ChatRichBlockStyle.tableToolbarHeight,
+                    height: ChatRichBlockStyle.tableToolbarHeight
+                )
                 .contentShape(.rect)
             }
 

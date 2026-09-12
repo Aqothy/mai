@@ -1,0 +1,25 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.458497459 seconds
+CHAT_BENCHMARK_TRACE benchmark start: real-cruise-1200pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=5330 hostingMounts=584 resident=2 pooled=21
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":36.2024420585835,"displayMaximumFPS":120,"durationSeconds":20.026273333351128,"expectedFrameMilliseconds":8.333333333333334,"frameCount":726,"hitchCount":725,"hitchTimeMillisecondsPerSecond":698.3129828451391,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":60.73729167110287,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":27.305541647365317,"p95FrameMilliseconds":36.77524998784065,"p99FrameMilliseconds":43.316583323758096}
+CHAT_BENCHMARK_RESULT {"averageFPS":36.2024420585835,"displayMaximumFPS":120,"durationSeconds":20.026273333351128,"expectedFrameMilliseconds":8.333333333333334,"frameCount":726,"hitchCount":725,"hitchTimeMillisecondsPerSecond":698.3129828451391,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":60.73729167110287,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":27.305541647365317,"p95FrameMilliseconds":36.77524998784065,"p99FrameMilliseconds":43.316583323758096}
+CHAT_BENCHMARK_TRACE benchmark start: real-scroll-3000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=11332 hostingMounts=1228 resident=5 pooled=18
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":34.11568563123814,"displayMaximumFPS":120,"durationSeconds":24.035864583333023,"expectedFrameMilliseconds":8.333333333333334,"frameCount":821,"hitchCount":819,"hitchTimeMillisecondsPerSecond":715.7631109415825,"label":"full-history-scrub-2.0s-24.0s","maxFrameMilliseconds":69.67912500840612,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":28.94104167353362,"p95FrameMilliseconds":40.150166663806885,"p99FrameMilliseconds":46.871083322912455}
+CHAT_BENCHMARK_RESULT {"averageFPS":34.11568563123814,"displayMaximumFPS":120,"durationSeconds":24.035864583333023,"expectedFrameMilliseconds":8.333333333333334,"frameCount":821,"hitchCount":819,"hitchTimeMillisecondsPerSecond":715.7631109415825,"label":"full-history-scrub-2.0s-24.0s","maxFrameMilliseconds":69.67912500840612,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":28.94104167353362,"p95FrameMilliseconds":40.150166663806885,"p99FrameMilliseconds":46.871083322912455}
+CHAT_BENCHMARK_TRACE benchmark start: real-fling-8000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=15094 hostingMounts=1663 resident=5 pooled=18
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":33.431750126869325,"displayMaximumFPS":120,"durationSeconds":16.03266349999467,"expectedFrameMilliseconds":8.333333333333334,"frameCount":537,"hitchCount":536,"hitchTimeMillisecondsPerSecond":721.4020822760882,"label":"full-history-scrub-2.0s-16.0s","maxFrameMilliseconds":60.734583326848224,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":29.316250002011657,"p95FrameMilliseconds":42.461125005502254,"p99FrameMilliseconds":47.512583318166435}
+CHAT_BENCHMARK_RESULT {"averageFPS":33.431750126869325,"displayMaximumFPS":120,"durationSeconds":16.03266349999467,"expectedFrameMilliseconds":8.333333333333334,"frameCount":537,"hitchCount":536,"hitchTimeMillisecondsPerSecond":721.4020822760882,"label":"full-history-scrub-2.0s-16.0s","maxFrameMilliseconds":60.734583326848224,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":29.316250002011657,"p95FrameMilliseconds":42.461125005502254,"p99FrameMilliseconds":47.512583318166435}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/list-grouped-message/mai.app",
+  "codeImageSHA256": "16153571d4b7e7c0c8cb1cddf882345e427a5253d5ef179201e5b493e0de3dd3",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

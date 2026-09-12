@@ -1,0 +1,47 @@
+[
+  {
+    "aligned": true,
+    "label": "sessions-1",
+    "loadedChats": 1,
+    "measurementKind": "sessionMemoryCheckpoint",
+    "preparedAndSettledMilliseconds": 2726.001167,
+    "selectedLayoutCount": 285,
+    "visible": true
+  },
+  {
+    "aligned": true,
+    "label": "sessions-2",
+    "loadedChats": 2,
+    "measurementKind": "sessionMemoryCheckpoint",
+    "preparedAndSettledMilliseconds": 2470.164292,
+    "selectedLayoutCount": 285,
+    "visible": true
+  },
+  {
+    "aligned": true,
+    "label": "sessions-3",
+    "loadedChats": 3,
+    "measurementKind": "sessionMemoryCheckpoint",
+    "preparedAndSettledMilliseconds": 2450.641792,
+    "selectedLayoutCount": 285,
+    "visible": true
+  },
+  {
+    "aligned": true,
+    "label": "sessions-4",
+    "loadedChats": 4,
+    "measurementKind": "sessionMemoryCheckpoint",
+    "preparedAndSettledMilliseconds": 2452.761583,
+    "selectedLayoutCount": 285,
+    "visible": true
+  },
+  {
+    "aligned": true,
+    "label": "sessions-5",
+    "loadedChats": 5,
+    "measurementKind": "sessionMemoryCheckpoint",
+    "preparedAndSettledMilliseconds": 2470.020541,
+    "selectedLayoutCount": 285,
+    "visible": true
+  }
+]

@@ -1,0 +1,59 @@
+{
+  "variant": "cleanup-run-c",
+  "reports": [
+    {
+      "averageFPS": 111.99981753359938,
+      "displayMaximumFPS": 120,
+      "durationSeconds": 20.000032583338907,
+      "expectedFrameMilliseconds": 8.333333333333334,
+      "frameCount": 2241,
+      "hitchCount": 117,
+      "hitchTimeMillisecondsPerSecond": 61.73466818122483,
+      "label": "real-cruise-1200pps",
+      "maxFrameMilliseconds": 46.45625001285225,
+      "measurementKind": "displayLinkCallbacks",
+      "p50FrameMilliseconds": 8.333333331393078,
+      "p95FrameMilliseconds": 12.65987497754395,
+      "p99FrameMilliseconds": 21.39966667164117
+    },
+    {
+      "averageFPS": 98.2345504999441,
+      "displayMaximumFPS": 120,
+      "durationSeconds": 24.07503254164476,
+      "expectedFrameMilliseconds": 8.333333333333334,
+      "frameCount": 2366,
+      "hitchCount": 404,
+      "hitchTimeMillisecondsPerSecond": 176.0897204511595,
+      "label": "real-scroll-3000pps",
+      "maxFrameMilliseconds": 472.0308333344292,
+      "measurementKind": "displayLinkCallbacks",
+      "p50FrameMilliseconds": 8.333333331393078,
+      "p95FrameMilliseconds": 20.19354165531695,
+      "p99FrameMilliseconds": 21.73370833043009
+    },
+    {
+      "averageFPS": 60.197200338072165,
+      "displayMaximumFPS": 120,
+      "durationSeconds": 16.695128583320184,
+      "expectedFrameMilliseconds": 8.333333333333334,
+      "frameCount": 1006,
+      "hitchCount": 363,
+      "hitchTimeMillisecondsPerSecond": 486.34327429996944,
+      "label": "real-fling-8000pps",
+      "maxFrameMilliseconds": 931.322624994209,
+      "measurementKind": "displayLinkCallbacks",
+      "p50FrameMilliseconds": 8.333333331393078,
+      "p95FrameMilliseconds": 23.87491666013375,
+      "p99FrameMilliseconds": 78.3626250049565
+    }
+  ],
+  "metadata": {
+    "app": "/private/tmp/maid-chat-perf/cleanup/mai.app",
+    "codeImageSHA256": "c033aae461eeefd25f8c0ade422c3a4d1a7e23795f07cd723984b414579229aa",
+    "macOS": "26.5.2",
+    "machine": "Mac14,9",
+    "plan": "scroll",
+    "syntheticTurns": 300,
+    "measurement": "display-link callback pacing, not presented FPS"
+  }
+}

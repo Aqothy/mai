@@ -1,0 +1,15 @@
+{
+  "app": "/private/tmp/maid-chat-perf/containers-resize-anchor-fix/mai.app",
+  "codeImageSHA256": "9fba56246f736d55426f70dc63dfd985346ca54dbd8dfa13dd7bd4e01e915871",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "lifecycle",
+  "directNativeRows": true,
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": true,
+  "floatingBenchmarkWindow": false
+}

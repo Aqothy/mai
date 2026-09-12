@@ -1,0 +1,159 @@
+--- a/ChatView.swift
++++ b/ChatView.swift
+@@ -1189,7 +1189,9 @@
+                 .listRowSeparator(.hidden)
+         }
+ 
+-        ForEach(rows) { row in
++        ForEach(ChatListRowGroup.group(rows)) { group in
++            VStack(alignment: .leading, spacing: 0) {
++            ForEach(group.rows) { row in
+             ChatTimelineRenderRowView(
+                 row: row,
+                 streamingTurnID: effectiveStreamingTurnID,
+@@ -1199,6 +1201,11 @@
+                 scrollState: scrollState,
+                 textLayoutStore: textLayoutStore
+             )
++        }
++            }
++            .listRowInsets(.init(top: 0, leading: ChatTimelineMetrics.rowHorizontalInset,
++                                bottom: 0, trailing: ChatTimelineMetrics.rowHorizontalInset))
++            .listRowSeparator(.hidden)
+         }
+ 
+         if streamingTurnID != nil {
+@@ -1808,6 +1815,25 @@
+ 
+     var body: some View {
+         VStack(alignment: .leading, spacing: 0) {
++            #if os(macOS)
++            if let descriptor = ChatNativePreparedRow.descriptor(for: row) {
++                ChatListPreparedRow(descriptor: descriptor, store: textLayoutStore)
++            } else {
++                originalContent
++            }
++            #else
++            originalContent
++            #endif
++        }
++        .frame(maxWidth: ChatContentMetrics.maximumWidth, alignment: .leading)
++        .frame(maxWidth: .infinity)
++        .listRowInsets(.init(top: 0, leading: ChatTimelineMetrics.rowHorizontalInset,
++                            bottom: 0, trailing: ChatTimelineMetrics.rowHorizontalInset))
++        .listRowSeparator(.hidden)
++    }
++
++    private var originalContent: some View {
++        VStack(alignment: .leading, spacing: 0) {
+             switch row {
+             case .standard(let model):
+                 ChatTimelineRow(
+--- a/ChatListRowGroup.swift
++++ b/ChatListRowGroup.swift
+@@ -0,0 +1,29 @@
++import SwiftUI
++
++@MainActor struct ChatListRowGroup: Identifiable {
++    let id: String
++    var rows: [ChatTimelineRenderRow]
++    static var benchmarkAnchorRow: Int?
++
++    static func group(_ rows: [ChatTimelineRenderRow]) -> [Self] {
++        var groups: [Self] = []
++        let originalAnchor = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
++        for (index, row) in rows.enumerated() {
++            let id: String
++            switch row {
++            case .standard: id = row.id
++            case .prose(let segment), .richMarkdown(let segment): id = segment.messageID
++            case .resolvedMarkdown(let block): id = block.messageID
++            }
++            if groups.last?.id == id {
++                groups[groups.count - 1].rows.append(row)
++            } else {
++                groups.append(Self(id: id, rows: [row]))
++            }
++            if index == originalAnchor {
++                benchmarkAnchorRow = groups.count - 1
++            }
++        }
++        return groups
++    }
++}
+--- a/ChatFramePacingBenchmark.swift
++++ b/ChatFramePacingBenchmark.swift
+@@ -251,7 +251,7 @@
+         }
+ 
+         #if os(macOS)
+-            let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
++            let anchorRow = ChatListRowGroup.benchmarkAnchorRow ?? UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
+             if anchorRow > 0 {
+                 if let table = scrollView.documentView as? NSTableView,
+                     anchorRow < table.numberOfRows
+--- a/ChatMacTextLayout.swift
++++ b/ChatMacTextLayout.swift
+@@ -355,6 +355,8 @@
+     /// NSTextView for its lifetime, so there is one reuse lifecycle to
+     /// reason about.
+     @MainActor final class ChatTextLayoutStore {
++        var experimentalListRows: [ChatNativePreparedRow] = []
++        var experimentalActiveListRows = 0
+         private struct Key: Hashable, Sendable {
+             let id: String
+             let width: CGFloat
+--- a/ChatListPreparedRow.swift
++++ b/ChatListPreparedRow.swift
+@@ -0,0 +1,51 @@
++#if os(macOS)
++import AppKit
++import SwiftUI
++
++/// Experiment: retain List while collapsing settled rich rows to one representable.
++struct ChatListPreparedRow: NSViewRepresentable {
++    let descriptor: ChatNativePreparedRow.Descriptor
++    let store: ChatTextLayoutStore
++    @Environment(\.colorScheme) private var colorScheme
++    private var theme: ChatCodeHighlightTheme { colorScheme == .dark ? .dark : .light }
++
++    func makeNSView(context: Context) -> ChatNativePreparedRow {
++        store.experimentalActiveListRows += 1
++        return store.experimentalListRows.popLast() ?? ChatNativePreparedRow(frame: .zero)
++    }
++    func makeCoordinator() -> ChatTextLayoutStore { store }
++    static func dismantleNSView(_ view: ChatNativePreparedRow, coordinator: ChatTextLayoutStore) {
++        coordinator.experimentalActiveListRows -= 1
++        let capacity = coordinator.experimentalActiveListRows
++        if coordinator.experimentalListRows.count < capacity {
++            coordinator.experimentalListRows.append(view)
++        } else if coordinator.experimentalListRows.count > capacity {
++            coordinator.experimentalListRows.removeLast(coordinator.experimentalListRows.count - capacity)
++        }
++    }
++    func updateNSView(_ view: ChatNativePreparedRow, context: Context) {
++        view.update(descriptor, width: view.bounds.width, store: store, theme: theme)
++    }
++    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ChatNativePreparedRow,
++                     context: Context) -> CGSize? {
++        guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
++        let height: CGFloat
++        switch descriptor.content {
++        case .prose(let source):
++            height = store.layout(id: descriptor.id, source: source, style: .markdownProse, width: width).height
++        case .resolvedProse(let prose):
++            height = store.resolvedLayout(id: descriptor.id, prose: prose, width: width).height
++        case .code(let block):
++            let font = NSFont.preferredFont(forTextStyle: .callout)
++            height = store.codeLayout(id: descriptor.id, block: block, theme: theme).layout.height
++                + ChatMacCodeStyle.bottomInset + ceil(font.ascender - font.descender + font.leading)
++                + ChatRichBlockStyle.codeHeaderTopInset + ChatRichBlockStyle.codeHeaderBottomInset
++        case .table(let table):
++            height = store.tableLayout(id: descriptor.id, table: table).size.height
++                + ChatRichBlockStyle.tableToolbarHeight
++        }
++        nsView.update(descriptor, width: width, store: store, theme: theme)
++        return CGSize(width: width, height: height + descriptor.top + descriptor.bottom)
++    }
++}
++#endif

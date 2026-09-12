@@ -1,16 +1,11 @@
 #if os(macOS)
     import AppKit
 
-    private final class ChatSelectableNSTextView: NSTextView {
-        override func resetCursorRects() {
-            super.resetCursorRects()
-            addCursorRect(bounds, cursor: .iBeam)
-        }
-    }
-
     enum ChatSelectableTextViewConfiguration {
         static func makeTextView() -> NSTextView {
-            let view = ChatSelectableNSTextView(usingTextLayoutManager: false)
+            // NSTextView owns its selection/link cursor tracking. Adding an
+            // I-beam cursor rect here duplicates that work on every scroll.
+            let view = NSTextView(usingTextLayoutManager: false)
             view.isEditable = false
             view.isSelectable = true
             view.isRichText = true
@@ -39,11 +34,6 @@
     enum ChatSelectableTextViewConfiguration {
         static func makeTextView() -> UITextView {
             let view = UITextView(usingTextLayoutManager: false)
-            apply(to: view)
-            return view
-        }
-
-        static func apply(to view: UITextView) {
             view.isScrollEnabled = false
             view.isEditable = false
             view.isSelectable = true
@@ -57,6 +47,7 @@
                 .underlineStyle: NSUnderlineStyle.single.rawValue,
             ]
             view.accessibilityTraits.insert(.staticText)
+            return view
         }
     }
 #endif

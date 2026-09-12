@@ -57,17 +57,33 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
 /// rate so main-thread delivery is sampled against the 120 Hz budget.
 final class ChatFramePacingMonitor: NSObject {
     private var displayLink: CADisplayLink?
+    private var watchdog: Task<Void, Never>?
+    private weak var monitoredWindow: ChatBenchmarkWindow?
+    private var onFailure: ((String) -> Void)?
     private var timestamps: [CFTimeInterval] = []
     private var onFrame: ((CADisplayLink) -> Void)?
     private(set) var displayMaximumFPS = 60
 
     func start(
         in window: ChatBenchmarkWindow?,
+        maximumWallSeconds: TimeInterval,
+        onFailure: @escaping (String) -> Void,
         onFrame: @escaping (CADisplayLink) -> Void
     ) {
         cancel()
+        self.onFailure = onFailure
+        monitoredWindow = window
         #if os(macOS)
-            displayMaximumFPS = window?.screen?.maximumFramesPerSecond ?? 60
+            guard let window, window.occlusionState.contains(.visible) else {
+                onFailure("visible=false before measurement")
+                return
+            }
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(occlusionChanged),
+                name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        #endif
+        #if os(macOS)
+            displayMaximumFPS = window.screen?.maximumFramesPerSecond ?? 60
         #else
             displayMaximumFPS =
                 window?.windowScene?.screen.maximumFramesPerSecond ?? 60
@@ -77,10 +93,12 @@ final class ChatFramePacingMonitor: NSObject {
         timestamps.reserveCapacity(displayMaximumFPS * 60)
 
         #if os(macOS)
-            guard let link = window?.screen?.displayLink(
+            guard
+                let link = window.screen?.displayLink(
                 target: self,
                 selector: #selector(tick(_:))
-            ) else { return }
+                )
+            else { onFailure("no display link available"); return }
         #else
             let link = CADisplayLink(
                 target: self,
@@ -95,7 +113,19 @@ final class ChatFramePacingMonitor: NSObject {
         )
         link.add(to: .main, forMode: .common)
         displayLink = link
+        watchdog = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(maximumWallSeconds)) } catch { return }
+            self?.onFailure?("display-link wall-clock timeout")
+        }
     }
+
+    #if os(macOS)
+        @objc private func occlusionChanged() {
+            if monitoredWindow?.occlusionState.contains(.visible) != true {
+                onFailure?("visible=false during measurement")
+            }
+        }
+    #endif
 
     /// Stops recording and reduces the samples. Returns nil for runs too
     /// short to summarize meaningfully.
@@ -150,6 +180,14 @@ final class ChatFramePacingMonitor: NSObject {
     }
 
     func cancel() {
+        watchdog?.cancel()
+        watchdog = nil
+        #if os(macOS)
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didChangeOcclusionStateNotification, object: monitoredWindow)
+        #endif
+        monitoredWindow = nil
+        onFailure = nil
         displayLink?.invalidate()
         displayLink = nil
         onFrame = nil
@@ -200,6 +238,10 @@ final class ChatBenchmarkModel {
             Self.note("benchmark skipped: no transcript scroll view")
             return nil
         }
+        #if os(macOS)
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate()
+        #endif
         Self.note("benchmark start: \(label)")
         isRunning = true
         Self.beginSyntheticUserScroll(on: scrollView)
@@ -208,16 +250,51 @@ final class ChatBenchmarkModel {
             isRunning = false
         }
 
+        #if os(macOS)
+            let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
+            if anchorRow > 0 {
+                if let table = scrollView.documentView as? NSTableView,
+                    anchorRow < table.numberOfRows
+                {
+                    Self.note(
+                        "anchor table auto=\(table.usesAutomaticRowHeights) spacing=\(table.intercellSpacing) delegate=\(String(describing: table.delegate))"
+                    )
+                    table.scrollRowToVisible(anchorRow)
+                    table.layoutSubtreeIfNeeded()
+                    scrollView.contentView.scroll(
+                        to: NSPoint(x: 0, y: table.rect(ofRow: anchorRow).minY))
+                } else if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
+                    document.scrollToBenchmarkRow(anchorRow)
+                }
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                try? await Task.sleep(for: .milliseconds(250))
+                Self.note(
+                    "anchor row=\(anchorRow) offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
+                )
+            }
+        #endif
         let monitor = ChatFramePacingMonitor()
         var scrollsUpward = true
+        let scrubPeriod = UserDefaults.standard.double(forKey: "ChatBenchmarkScrubPeriod")
+        var scrubStarted: CFTimeInterval?
         var offsetY = Self.contentOffsetY(of: scrollView)
         var lastTimestamp: CFTimeInterval?
         var phaseStartTimestamp: CFTimeInterval?
         var finished = false
+        var encounteredOcclusion = false
 
         await withCheckedContinuation { continuation in
-            monitor.start(in: window) { link in
+            monitor.start(
+                in: window, maximumWallSeconds: maximumSweepSeconds * 2 + 15,
+                onFailure: { reason in
                 guard !finished else { return }
+                    finished = true
+                    Self.note("invalid measurement: \(reason)")
+                    continuation.resume()
+                }
+            ) { link in
+                guard !finished else { return }
+                if !Self.isWindowVisible(window) { encounteredOcclusion = true }
                 let timestamp = link.timestamp
                 let elapsed = timestamp - (lastTimestamp ?? timestamp)
                 lastTimestamp = timestamp
@@ -231,13 +308,21 @@ final class ChatBenchmarkModel {
                     )
                 }
                 let (minY, maxY) = Self.scrollableRange(of: scrollView)
-                offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
-                offsetY = min(max(offsetY, minY), maxY)
+                if scrubPeriod > 0 {
+                    scrubStarted = scrubStarted ?? timestamp
+                    let phase = ((timestamp - (scrubStarted ?? timestamp)) / scrubPeriod)
+                        .truncatingRemainder(dividingBy: 2)
+                    let fraction = phase <= 1 ? 1 - phase : phase - 1
+                    offsetY = minY + (maxY - minY) * fraction
+                } else {
+                    offsetY += (scrollsUpward ? -1 : 1) * pointsPerSecond * elapsed
+                    offsetY = min(max(offsetY, minY), maxY)
+                }
                 Self.setContentOffsetY(offsetY, on: scrollView)
 
                 let phaseElapsed = timestamp - (phaseStartTimestamp ?? timestamp)
                 let reachedEnd = scrollsUpward ? offsetY <= minY : offsetY >= maxY
-                if reachedEnd || phaseElapsed >= maximumSweepSeconds {
+                if (scrubPeriod <= 0 && reachedEnd) || phaseElapsed >= maximumSweepSeconds {
                     if scrollsUpward {
                         scrollsUpward = false
                         phaseStartTimestamp = timestamp
@@ -248,14 +333,23 @@ final class ChatBenchmarkModel {
                 }
             }
         }
-        return finish(monitor, label: label)
+        if encounteredOcclusion { Self.note("invalid measurement: visible=false during sweep") }
+        #if os(macOS)
+            if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
+                Self.note(document.benchmarkStatistics)
+            }
+        #endif
+        let measuredLabel =
+            scrubPeriod > 0
+            ? "full-history-scrub-\(scrubPeriod)s-\(maximumSweepSeconds * 2)s" : label
+        return finish(monitor, label: measuredLabel)
     }
 
     /// The benchmark writes native offsets directly, so bracket the sweep in
     /// the same AppKit live-scroll lifecycle as a real trackpad gesture. This
     /// keeps production intent detection enabled without making layout-only
     /// bounds changes look like user input.
-    private static func beginSyntheticUserScroll(
+    static func beginSyntheticUserScroll(
         on scrollView: ChatBenchmarkScrollView
     ) {
         #if os(macOS)
@@ -266,7 +360,7 @@ final class ChatBenchmarkModel {
         #endif
     }
 
-    private static func endSyntheticUserScroll(
+    static func endSyntheticUserScroll(
         on scrollView: ChatBenchmarkScrollView
     ) {
         #if os(macOS)
@@ -276,6 +370,30 @@ final class ChatBenchmarkModel {
             )
         #endif
     }
+
+    #if os(macOS)
+        func reportOpenBenchmark(started: ContinuousClock.Instant) {
+            let elapsed = started.duration(to: .now).components
+            let window = Self.appWindow()
+            let scroll = window.flatMap { Self.transcriptScrollView(in: $0) }
+            let rows = (scroll?.documentView as? any ChatMacScrollDocument)?.numberOfRows ?? 0
+            let report: [String: Any] = [
+                "label": "prepared-aligned-transcript",
+                "measurementKind": "preparedAlignedViewport",
+                "readyMilliseconds": Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds)
+                    / 1e15,
+                "loadedRows": rows,
+                "aligned": ChatBenchmarkAutoRun.isInitialAlignmentComplete,
+                "visible": window.map(Self.isWindowVisible) ?? false,
+            ]
+            if let data = try? JSONSerialization.data(
+                withJSONObject: report, options: [.sortedKeys]),
+                let json = String(data: data, encoding: .utf8)
+            {
+                print("CHAT_BENCHMARK_RESULT \(json)")
+            }
+        }
+    #endif
 
     /// Records frame pacing while something else (a streaming reply) drives
     /// the content, until `isDone` reports completion or the cap elapses.
@@ -290,6 +408,10 @@ final class ChatBenchmarkModel {
             )
             return nil
         }
+        #if os(macOS)
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate()
+        #endif
         Self.note("benchmark start: \(label)")
         isRunning = true
         defer { isRunning = false }
@@ -297,10 +419,20 @@ final class ChatBenchmarkModel {
         let monitor = ChatFramePacingMonitor()
         var startTimestamp: CFTimeInterval?
         var finished = false
+        var encounteredOcclusion = false
 
         await withCheckedContinuation { continuation in
-            monitor.start(in: window) { link in
+            monitor.start(
+                in: window, maximumWallSeconds: maximumSeconds + 15,
+                onFailure: { reason in
                 guard !finished else { return }
+                    finished = true
+                    Self.note("invalid measurement: \(reason)")
+                    continuation.resume()
+                }
+            ) { link in
+                guard !finished else { return }
+                if !Self.isWindowVisible(window) { encounteredOcclusion = true }
                 startTimestamp = startTimestamp ?? link.timestamp
                 let elapsed = link.timestamp - (startTimestamp ?? link.timestamp)
                 if isDone() || elapsed >= maximumSeconds {
@@ -309,6 +441,7 @@ final class ChatBenchmarkModel {
                 }
             }
         }
+        if encounteredOcclusion { Self.note("invalid measurement: visible=false during stream") }
         return finish(monitor, label: label)
     }
 
@@ -339,7 +472,7 @@ final class ChatBenchmarkModel {
     }
 
     /// A headless launch may start measuring before any window becomes key.
-    private static func appWindow() -> ChatBenchmarkWindow? {
+    static func appWindow() -> ChatBenchmarkWindow? {
         #if os(macOS)
             NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first
         #else
@@ -352,7 +485,7 @@ final class ChatBenchmarkModel {
 
     /// The transcript's vertical scroller is the deepest scroll view with the
     /// tallest content; text views and horizontal code scrollers never win.
-    private static func transcriptScrollView(
+    static func transcriptScrollView(
         in window: ChatBenchmarkWindow
     ) -> ChatBenchmarkScrollView? {
         #if os(macOS)
@@ -428,7 +561,7 @@ final class ChatBenchmarkModel {
         #endif
     }
 
-    private static func setContentOffsetY(
+    static func setContentOffsetY(
         _ offsetY: CGFloat,
         on scrollView: ChatBenchmarkScrollView
     ) {
@@ -499,6 +632,8 @@ nonisolated enum ChatBenchmarkAutoRun {
     /// the production steady state — production always prepares a page off
     /// the main actor before inserting it into the timeline.
     @MainActor static var isTranscriptWarm = false
+    @MainActor static var isNativeGeometryWarm = false
+    @MainActor static var isInitialAlignmentComplete = false
 
     /// A window resize while priming restarts the warm at the new width;
     /// the benchmark must keep waiting for the latest pass.
@@ -516,10 +651,17 @@ nonisolated enum ChatBenchmarkAutoRun {
         timeoutSeconds: TimeInterval
     ) async {
         let deadline = ContinuousClock.now + .seconds(timeoutSeconds)
-        while !isTranscriptWarm, ContinuousClock.now < deadline {
+        while (!isTranscriptWarm
+            || (threadTitleQuery != nil && ChatTranscriptConfiguration.usesNativeMacTranscript
+                && !isNativeGeometryWarm)),
+            ContinuousClock.now < deadline
+        {
             try? await Task.sleep(for: .milliseconds(250))
         }
-        if !isTranscriptWarm {
+        if !isTranscriptWarm
+            || (threadTitleQuery != nil && ChatTranscriptConfiguration.usesNativeMacTranscript
+                && !isNativeGeometryWarm)
+        {
             trace("transcript warm timed out")
         }
     }
@@ -548,3 +690,14 @@ nonisolated enum ChatBenchmarkAutoRun {
         }
     }
 }
+
+#if os(macOS)
+    @MainActor protocol ChatBenchmarkAnchoredDocument {
+        func scrollToBenchmarkRow(_ index: Int)
+        var benchmarkStatistics: String { get }
+    }
+
+    extension ChatBenchmarkAnchoredDocument {
+        var benchmarkStatistics: String { "No native statistics" }
+    }
+#endif

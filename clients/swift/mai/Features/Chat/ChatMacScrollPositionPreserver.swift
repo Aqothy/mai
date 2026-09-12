@@ -1,7 +1,7 @@
 #if os(macOS)
     import AppKit
 
-    /// Preserves the visible table row while SwiftUI prepends chat history.
+    /// Preserves the visible native row while chat history is prepended or reflowed.
     ///
     /// `List` initially estimates offscreen automatic row heights. Keep a
     /// visible anchor stable as those estimates are replaced, while allowing
@@ -12,7 +12,7 @@
         /// movement on Retina displays.
         nonisolated private static let minimumLayoutCorrection: CGFloat = 0.5
 
-        private weak var tableView: NSTableView?
+        private weak var document: (any ChatMacScrollDocument)?
         private weak var scrollView: NSScrollView?
         private var snapshot: AnchorSnapshot?
         private var preservedAnchor: PreservedAnchor?
@@ -21,6 +21,7 @@
         private var initialBottomAlignmentCompletion: (() -> Void)?
         private var isUpdateScheduled = false
         private var shouldRebaseAnchor = false
+        private var lastClipBounds: NSRect?
         // AppKit owns this opaque token. All mutation is main-actor confined;
         // deinit only needs to unregister it from AppKit.
         nonisolated(unsafe) private var inputEventMonitor: Any?
@@ -44,8 +45,8 @@
             self.noteKeyboardScrollIntent = noteKeyboardScrollIntent
         }
 
-        func attach(to tableView: NSTableView) {
-            guard self.tableView !== tableView else { return }
+        func attach(to document: any ChatMacScrollDocument) {
+            guard self.document !== document else { return }
 
             NotificationCenter.default.removeObserver(self)
             removeInputEventMonitor()
@@ -54,17 +55,18 @@
             shouldRebaseAnchor = false
             userScrollStartY = nil
             isMonitoringScrollWheel = false
-            self.tableView = tableView
-            scrollView = tableView.enclosingScrollView
-            tableView.postsFrameChangedNotifications = true
+            self.document = document
+            scrollView = document.enclosingScrollView
+            document.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(
                 self,
-                selector: #selector(tableFrameDidChange(_:)),
+                selector: #selector(documentFrameDidChange(_:)),
                 name: NSView.frameDidChangeNotification,
-                object: tableView
+                object: document
             )
             if let scrollView {
                 let clipView = scrollView.contentView
+                lastClipBounds = clipView.bounds
                 clipView.postsBoundsChangedNotifications = true
                 NotificationCenter.default.addObserver(
                     self,
@@ -105,12 +107,12 @@
         /// retained only as a fallback during the short attach window.
         @discardableResult
         func pinToBottom() -> Bool {
-            guard let scrollView, let tableView else { return false }
+            guard let scrollView, let document else { return false }
             let clipView = scrollView.contentView
             var proposedBounds = clipView.bounds
             proposedBounds.origin.y = Self.bottomOrigin(
-                documentMinY: tableView.bounds.minY,
-                documentMaxY: tableView.bounds.maxY,
+                documentMinY: document.bounds.minY,
+                documentMaxY: document.bounds.maxY,
                 viewportHeight: proposedBounds.height,
                 topInset: clipView.contentInsets.top,
                 bottomInset: clipView.contentInsets.bottom
@@ -149,7 +151,7 @@
             guard leadingRowCount > 0 else { return }
             captureVisibleAnchor(
                 rowOffsetAfterMutation: leadingRowCount,
-                minimumRowCountAfterMutation: (tableView?.numberOfRows ?? 0)
+                minimumRowCountAfterMutation: (document?.numberOfRows ?? 0)
                     + leadingRowCount
             )
         }
@@ -171,33 +173,34 @@
             snapshot = nil
             preservedAnchor = nil
             shouldRebaseAnchor = false
-            guard let tableView,
-                let scrollView = tableView.enclosingScrollView
+            guard let document,
+                let scrollView = document.enclosingScrollView
             else { return }
 
             let visibleRect = scrollView.contentView.documentVisibleRect
-            let visibleRows = tableView.rows(in: visibleRect)
+            let visibleRows = document.rows(in: visibleRect)
             guard visibleRows.location != NSNotFound, visibleRows.length > 0,
                 let anchorRow = anchorRow(
                     in: visibleRows,
-                    tableView: tableView
+                    document: document
                 )
             else { return }
 
-            let anchorRect = tableView.rect(ofRow: anchorRow)
+            let anchorRect = document.rect(ofRow: anchorRow)
             guard !anchorRect.isEmpty else { return }
 
             snapshot = AnchorSnapshot(
                 expectedRowCount: minimumRowCountAfterMutation,
                 anchorRowAfterMutation: anchorRow + rowOffsetAfterMutation,
+                stableID: document.stableIdentity(forRow: anchorRow),
                 anchorYBeforePrepend: anchorRect.minY,
                 visibleYBeforePrepend: visibleRect.minY
             )
         }
 
         @objc
-        private func tableFrameDidChange(_ notification: Notification) {
-            guard notification.object as? NSTableView === tableView else {
+        private func documentFrameDidChange(_ notification: Notification) {
+            guard notification.object as? any ChatMacScrollDocument === document else {
                 return
             }
             guard snapshot != nil || preservedAnchor != nil
@@ -211,6 +214,8 @@
             guard let clipView = notification.object as? NSClipView,
                 clipView === scrollView?.contentView
             else { return }
+            let previousBounds = lastClipBounds
+            lastClipBounds = clipView.bounds
             guard snapshot == nil, !isApplyingLayoutAdjustment else { return }
             if isBottomFollowingEnabled() {
                 preservedAnchor = nil
@@ -226,6 +231,19 @@
                 return
             }
 
+            // AppKit may move the clip origin when its viewport is resized.
+            // That movement is layout, not reader intent. Keep the previous
+            // top position; the document-height observer then applies reflow
+            // deltas relative to the same message anchor.
+            if let previousBounds, previousBounds.size != clipView.bounds.size,
+                let scrollView
+            {
+                var proposed = clipView.bounds
+                proposed.origin.y = previousBounds.minY
+                applyScrollPosition(clipView.constrainBoundsRect(proposed).origin, in: scrollView)
+                lastClipBounds = clipView.bounds
+            }
+
             // Track the row currently under the reader whenever native input
             // moves the viewport. A later width change can then compensate
             // for rewrapping above that row instead of changing what is being
@@ -239,7 +257,7 @@
             guard notification.object as? NSScrollView === scrollView else {
                 return
             }
-            isAligningInitialBottom = false
+            completeInitialBottomAlignment()
             beginUserScroll()
         }
 
@@ -277,10 +295,10 @@
         }
 
         private func handleKeyDown(_ event: NSEvent) {
-            guard let scrollView, let tableView,
+            guard let scrollView, let document,
                 event.window === scrollView.window,
                 let responder = event.window?.firstResponder as? NSView,
-                responder === tableView || responder.isDescendant(of: tableView)
+                responder === document || responder.isDescendant(of: document)
             else { return }
             if let textView = responder as? NSTextView, textView.isEditable {
                 return
@@ -375,15 +393,15 @@
         private func isNearBottom(
             distance: CGFloat = ChatTimelineMetrics.nearBottomDistance
         ) -> Bool {
-            guard let scrollView, let tableView else { return false }
+            guard let scrollView, let document else { return false }
             let clipView = scrollView.contentView
-            return tableView.bounds.maxY + clipView.contentInsets.bottom
+            return document.bounds.maxY + clipView.contentInsets.bottom
                 - clipView.documentVisibleRect.maxY <= distance
         }
 
-        /// NSTableView posts frame notifications from inside its delegate and
-        /// layout work. Deferring all rect reads and offset writes avoids a
-        /// reentrant table operation and coalesces a burst to one run-loop turn.
+        /// Native documents post frame notifications during layout. Deferring
+        /// rect reads and offset writes avoids reentrant layout and coalesces
+        /// a burst of changes into one run-loop turn.
         private func scheduleUpdate() {
             guard !isUpdateScheduled else { return }
             isUpdateScheduled = true
@@ -408,42 +426,55 @@
                 rebasePreservedAnchor(in: visibleRect)
             }
             if isAligningInitialBottom, pinToBottom() {
-                isAligningInitialBottom = false
-                let completion = initialBottomAlignmentCompletion
-                initialBottomAlignmentCompletion = nil
-                completion?()
+                completeInitialBottomAlignment()
             } else if isBottomFollowingEnabled() {
                 _ = pinToBottom()
             }
         }
 
+        private func completeInitialBottomAlignment() {
+            isAligningInitialBottom = false
+            let completion = initialBottomAlignmentCompletion
+            initialBottomAlignmentCompletion = nil
+            completion?()
+        }
+
         private func anchorRow(
             in visibleRows: NSRange,
-            tableView: NSTableView
+            document: any ChatMacScrollDocument
         ) -> Int? {
             let rowRange = visibleRows.location..<NSMaxRange(visibleRows)
-            let validRows = rowRange.filter { $0 < tableView.numberOfRows }
+            let validRows = rowRange.filter { $0 < document.numberOfRows }
             guard let firstRow = validRows.first else { return nil }
 
             // The pagination marker is a one-point transparent List row. A
             // substantive row is a more reliable anchor, but retain a fallback
             // for unusually small content.
             return validRows.first(where: {
-                tableView.rect(ofRow: $0).height
+                document.rect(ofRow: $0).height
                     > ChatTimelineMetrics.historyMarkerHeight
             }) ?? firstRow
         }
 
+        private func resolveAnchorRow(
+            id: String?, fallback: Int, in document: any ChatMacScrollDocument
+        ) -> Int? {
+            if let id { return document.row(forStableIdentity: id) }
+            return fallback >= 0 && fallback < document.numberOfRows ? fallback : nil
+        }
+
         private func restoreCapturedPositionIfPossible() {
-            guard let snapshot, let tableView,
-                let scrollView = tableView.enclosingScrollView
+            guard let snapshot, let document,
+                let scrollView = document.enclosingScrollView
             else { return }
 
-            guard tableView.numberOfRows >= snapshot.expectedRowCount,
-                snapshot.anchorRowAfterMutation < tableView.numberOfRows
+            guard document.numberOfRows >= snapshot.expectedRowCount,
+                let row = resolveAnchorRow(
+                    id: snapshot.stableID, fallback: snapshot.anchorRowAfterMutation, in: document),
+                row < document.numberOfRows
             else { return }
 
-            let anchorRect = tableView.rect(ofRow: snapshot.anchorRowAfterMutation)
+            let anchorRect = document.rect(ofRow: row)
             guard !anchorRect.isEmpty else { return }
 
             let clipView = scrollView.contentView
@@ -452,7 +483,8 @@
                 + anchorRect.minY - snapshot.anchorYBeforePrepend
             let target = clipView.constrainBoundsRect(proposedBounds).origin
             preservedAnchor = PreservedAnchor(
-                row: snapshot.anchorRowAfterMutation,
+                row: row,
+                stableID: snapshot.stableID,
                 lastAnchorY: anchorRect.minY
             )
             self.snapshot = nil
@@ -463,13 +495,21 @@
         /// current position already includes any intervening trackpad motion,
         /// so adding the delta preserves both the visible content and momentum.
         private func compensateForAnchorMovementIfNeeded() {
-            guard var preservedAnchor, let tableView,
-                let scrollView = tableView.enclosingScrollView,
-                preservedAnchor.row < tableView.numberOfRows,
+            guard var preservedAnchor, let document,
+                let scrollView = document.enclosingScrollView,
                 !isApplyingLayoutAdjustment
             else { return }
 
-            let anchorY = tableView.rect(ofRow: preservedAnchor.row).minY
+            guard
+                let row = resolveAnchorRow(
+                    id: preservedAnchor.stableID, fallback: preservedAnchor.row, in: document),
+                row < document.numberOfRows
+            else {
+                self.preservedAnchor = nil
+                rebasePreservedAnchor(in: scrollView.contentView.documentVisibleRect)
+                return
+            }
+            let anchorY = document.rect(ofRow: row).minY
             let delta = anchorY - preservedAnchor.lastAnchorY
             guard abs(delta) >= Self.minimumLayoutCorrection else { return }
             preservedAnchor.lastAnchorY = anchorY
@@ -486,15 +526,16 @@
         /// cannot move the viewport merely because the original anchor is now
         /// offscreen.
         private func rebasePreservedAnchor(in visibleRect: NSRect) {
-            guard let tableView else { return }
-            let visibleRows = tableView.rows(in: visibleRect)
+            guard let document else { return }
+            let visibleRows = document.rows(in: visibleRect)
             guard visibleRows.location != NSNotFound, visibleRows.length > 0,
-                let row = anchorRow(in: visibleRows, tableView: tableView)
+                let row = anchorRow(in: visibleRows, document: document)
             else { return }
-            let rect = tableView.rect(ofRow: row)
+            let rect = document.rect(ofRow: row)
             guard !rect.isEmpty else { return }
             preservedAnchor = PreservedAnchor(
                 row: row,
+                stableID: document.stableIdentity(forRow: row),
                 lastAnchorY: rect.minY
             )
         }
@@ -513,12 +554,14 @@
         private struct AnchorSnapshot {
             let expectedRowCount: Int
             let anchorRowAfterMutation: Int
+            let stableID: String?
             let anchorYBeforePrepend: CGFloat
             let visibleYBeforePrepend: CGFloat
         }
 
         private struct PreservedAnchor {
             let row: Int
+            let stableID: String?
             var lastAnchorY: CGFloat
         }
 

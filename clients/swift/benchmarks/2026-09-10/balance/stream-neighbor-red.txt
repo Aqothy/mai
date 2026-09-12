@@ -1,0 +1,67 @@
+================================================================================
+TEST RESULTS SUMMARY
+================================================================================
+Generated: 2026-09-10T15:51:15Z
+Total Results: 4
+================================================================================
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 1/4
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatNativeTranscriptTests/heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible()
+TEST_DISPLAY_NAME: heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible()
+TEST_STATE: Failed
+TEST_FILE_PATH: mai/maiTests/ChatNativeTranscriptTests.swift
+TEST_LINE_NUMBER: 17
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 2
+
+TEST_ISSUES:
+    mai/maiTests/ChatNativeTranscriptTests.swift:31 ChatNativeTranscriptTests/heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible(): Expectation failed: neighbor?.frame.minY == 350
+neighbor?.frame.minY → 300.0
+350 → 350.0: // Already-mounted neighbors must move before the next frame can paint.
+    mai/maiTests/ChatNativeTranscriptTests.swift:32 ChatNativeTranscriptTests/heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible(): Expectation failed: document.rect(ofRow: 3).minY == 350
+document.rect(ofRow: 3).minY → 300.0
+350 → 350.0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 2/4
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatNativeTranscriptTests/expandedContentUpdatesItsHostAndScrollableExtent()
+TEST_DISPLAY_NAME: expandedContentUpdatesItsHostAndScrollableExtent()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatNativeTranscriptTests.swift
+TEST_LINE_NUMBER: 36
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 3/4
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatNativeTranscriptTests/customRowLookupUsesHalfOpenIntervals()
+TEST_DISPLAY_NAME: customRowLookupUsesHalfOpenIntervals()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatNativeTranscriptTests.swift
+TEST_LINE_NUMBER: 67
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 4/4
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatNativeTranscriptTests/customViewportKeepsViewsBoundedAndReusesVisibleRows()
+TEST_DISPLAY_NAME: customViewportKeepsViewsBoundedAndReusesVisibleRows()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatNativeTranscriptTests.swift
+TEST_LINE_NUMBER: 78
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+
+================================================================================
+END OF TEST RESULTS SUMMARY
+================================================================================

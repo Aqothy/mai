@@ -1,0 +1,743 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=5.408860916 seconds
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5853 requests=3051 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5855 measured=4 width=760.0 totalHeight=967517.0 elapsed=0.0242035 seconds
+CHAT_BENCHMARK_TRACE benchmark start: production-stream-20000chars
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-0 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-0 width=760.0 cached=true bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=10
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=58
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=74
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=90
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=106
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=122
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=138
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=154
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=170
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=186
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=202
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=218
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=234
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=250
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=266
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=282
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=298
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=314
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=330
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=346
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=362
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=378
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=394
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=410
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=426
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=442
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=458
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=474
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-1 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=10
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=58
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=74
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=90
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=106
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=122
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=138
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=154
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=170
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=186
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=202
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=218
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=234
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=250
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=266
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=282
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=298
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=314
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=330
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=346
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=361
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=378
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-3 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=11
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=43
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=59
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=75
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=91
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=107
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=123
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=139
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=155
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=171
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=187
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=203
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=219
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=235
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=251
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=267
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=283
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=299
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=315
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=331
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=347
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=363
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=379
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=395
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=411
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=427
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-5 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=9
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=41
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=57
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=73
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=89
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=105
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=121
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=137
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=153
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=169
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=185
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=201
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=217
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=233
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=249
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=265
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=281
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=297
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=313
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=329
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=345
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=361
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=377
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=393
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-7 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=47
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=63
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=79
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=95
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=111
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=127
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=143
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=159
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=175
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=207
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=223
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=238
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=255
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=271
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=286
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=303
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=319
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=335
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=351
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=367
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=383
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-9 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=9
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=41
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=57
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=73
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=89
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=105
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=121
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=137
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=153
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=168
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=185
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=201
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=217
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=233
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=249
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=265
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=281
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=297
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=313
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=329
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=345
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=361
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=377
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=393
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=409
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=425
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-11 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=13
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=45
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=61
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=93
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=108
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=125
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=141
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=157
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=172
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-13 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=46
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=62
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=78
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=94
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=110
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=126
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=142
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=158
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=174
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=190
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-15 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=16
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=48
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=64
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=80
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=96
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=128
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=144
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=160
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=176
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-17 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=31
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=47
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=63
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=79
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=95
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=111
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=127
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=143
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=159
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=175
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=207
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=223
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=239
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=255
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=271
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-19 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=1
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=49
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=65
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=81
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=97
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=113
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=129
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=145
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=161
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=177
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=193
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=209
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=225
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=241
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=257
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-21 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=12
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=28
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=44
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=60
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=76
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=92
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=108
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=124
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=140
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=156
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=172
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=188
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-23 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=2
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=18
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=34
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=50
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=66
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=82
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=98
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=114
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=130
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=146
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=162
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=178
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=194
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=210
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-25 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=5
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=21
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=37
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=53
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=69
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=85
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=101
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=117
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=133
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=149
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=165
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=181
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=197
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=213
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=229
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=245
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=261
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=277
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=293
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=309
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=325
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=341
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-27 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=false bytes=19
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=144
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=170
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=334
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=357
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=637
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-28 width=760.0 cached=true bytes=904
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=48
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=64
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=80
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=96
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-29 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-30 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-30 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-30 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-30 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=9
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=41
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=57
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=73
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=89
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=105
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-31 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-32 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-32 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-32 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-32 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=2
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=18
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=34
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=50
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=66
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=82
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=98
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=114
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-33 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-34 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-34 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-34 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-34 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=11
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=43
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=59
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=75
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=91
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=107
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-35 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-36 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-36 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-36 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-36 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=4
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=20
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=36
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=52
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=84
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=100
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-37 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-38 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-38 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-38 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-38 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=13
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=45
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=61
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=93
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=109
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-39 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-40 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-40 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-40 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-40 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=6
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=22
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=38
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=54
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=70
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=86
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=102
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-41 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-42 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-42 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-42 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-42 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=31
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=47
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=63
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=79
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=95
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=111
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-43 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-44 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-44 width=760.0 cached=true bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-44 width=760.0 cached=true bytes=413
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-44 width=760.0 cached=true bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=8
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=40
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=56
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=71
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=88
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=104
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-45 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-46 width=760.0 cached=false bytes=110
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-46 width=760.0 cached=true bytes=134
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-46 width=760.0 cached=true bytes=415
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-46 width=760.0 cached=true bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=31
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=47
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=63
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=79
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=95
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=111
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-47 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=false bytes=111
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=140
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=164
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=337
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=504
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=524
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=545
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=569
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=593
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=618
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=644
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=662
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=829
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=931
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=941
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1205
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1352
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1367
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1552
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1568
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1647
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1848
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-48 width=760.0 cached=true bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=46
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=62
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=78
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=93
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=110
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=126
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=142
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=158
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=174
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-49 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-50 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-51 bytes=13
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-51 bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-51 bytes=45
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-51 bytes=61
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-51 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-52 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=9
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=41
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=57
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=73
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=89
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=105
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=121
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=137
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=153
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=169
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-53 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-54 width=760.0 cached=false bytes=20
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-54 width=760.0 cached=true bytes=51
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-54 width=760.0 cached=true bytes=76
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-54 width=760.0 cached=true bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=0
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=0
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=0
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=0
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=1
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=1
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=1
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=1
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=1
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=2
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-stream-assistant-block-55 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=false bytes=28
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=120
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=203
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=324
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=348
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=371
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=521
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-56 width=760.0 cached=true bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=46
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=62
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=78
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=94
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=110
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=126
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=142
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=158
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=174
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=190
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=206
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=222
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=238
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=254
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=270
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=286
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=302
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=318
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=334
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=350
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=366
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=382
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=398
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=414
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=430
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=446
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=462
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=477
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-57 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-58 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=46
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=62
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=78
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=94
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=110
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=126
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=142
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=158
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=174
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=190
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=206
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=222
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=238
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=254
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=270
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=286
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=302
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=318
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=334
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=350
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=366
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=382
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-59 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-60 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=31
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=47
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=63
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=79
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=95
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=111
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=127
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=143
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=158
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=175
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=207
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=223
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=239
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=255
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=271
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=287
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=302
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=319
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=335
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=351
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=367
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=383
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=399
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=415
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=431
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-61 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-62 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=13
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=45
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=61
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=93
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=109
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=125
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=141
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=157
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=173
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=205
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=221
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=237
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=253
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=269
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=285
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=301
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=317
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=333
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=349
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=365
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=381
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=397
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-63 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-64 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=3
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=19
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=35
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=51
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=67
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=83
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=99
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=115
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=131
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=147
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=163
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=179
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=195
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=211
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=227
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=243
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=259
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=275
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=291
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=307
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=323
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=339
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=355
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=371
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-65 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-66 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=0
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=13
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=45
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=61
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=92
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=109
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=125
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=141
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=157
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=173
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=205
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=221
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=237
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=253
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=269
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=285
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=301
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=317
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=333
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=349
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=365
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=381
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=397
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=413
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=429
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-67 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-68 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=1
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=49
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=65
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=81
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=97
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=113
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=128
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=145
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=161
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=177
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-69 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-assistant-block-70 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-71 bytes=2
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-71 bytes=18
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-71 bytes=34
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-71 bytes=50
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-stream-assistant-block-71 bytes=66
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5923 requests=3087 code=2385 tables=151
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5924 measured=71 width=760.0 totalHeight=980604.0 elapsed=0.096168708 seconds
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":114.79586527978657,"displayMaximumFPS":120,"durationSeconds":22.675032708328217,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2604,"hitchCount":106,"hitchTimeMillisecondsPerSecond":43.467225063458,"label":"production-stream-20000chars","maxFrameMilliseconds":40.8621666720137,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":18.502125021768734}
+CHAT_BENCHMARK_RESULT {"averageFPS":114.79586527978657,"displayMaximumFPS":120,"durationSeconds":22.675032708328217,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2604,"hitchCount":106,"hitchTimeMillisecondsPerSecond":43.467225063458,"label":"production-stream-20000chars","maxFrameMilliseconds":40.8621666720137,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":18.502125021768734}
+CHAT_BENCHMARK_TRACE stream sourceMatches=true completed=true
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

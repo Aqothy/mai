@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/list-cached-height/mai.app",
+  "codeImageSHA256": "1f7c8f8aec09f111f4cb7f4455ff8cf2a0d6baeba61352cfa31556d08324868c",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

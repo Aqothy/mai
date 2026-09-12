@@ -1,0 +1,22 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5850 width=760.0 totalHeight=967350.0 elapsed=5.2673981670000005 seconds
+CHAT_BENCHMARK_TRACE benchmark start: real-cruise-1200pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966576.0)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":115.54962398231665,"displayMaximumFPS":120,"durationSeconds":20.000065083324444,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2312,"hitchCount":86,"hitchTimeMillisecondsPerSecond":37.35084095038182,"label":"real-cruise-1200pps","maxFrameMilliseconds":21.65787501144223,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":18.84095833520405}
+CHAT_BENCHMARK_RESULT {"averageFPS":115.54962398231665,"displayMaximumFPS":120,"durationSeconds":20.000065083324444,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2312,"hitchCount":86,"hitchTimeMillisecondsPerSecond":37.35084095038182,"label":"real-cruise-1200pps","maxFrameMilliseconds":21.65787501144223,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":8.333333360496908,"p99FrameMilliseconds":18.84095833520405}
+CHAT_BENCHMARK_TRACE benchmark start: real-scroll-3000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966576.0)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":112.50227993097108,"displayMaximumFPS":120,"durationSeconds":24.008402333332924,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2702,"hitchCount":178,"hitchTimeMillisecondsPerSecond":64.86054597724458,"label":"real-scroll-3000pps","maxFrameMilliseconds":21.356083336286247,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":16.666666662786156,"p99FrameMilliseconds":18.464916647644714}
+CHAT_BENCHMARK_RESULT {"averageFPS":112.50227993097108,"displayMaximumFPS":120,"durationSeconds":24.008402333332924,"expectedFrameMilliseconds":8.333333333333334,"frameCount":2702,"hitchCount":178,"hitchTimeMillisecondsPerSecond":64.86054597724458,"label":"real-scroll-3000pps","maxFrameMilliseconds":21.356083336286247,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":16.666666662786156,"p99FrameMilliseconds":18.464916647644714}
+CHAT_BENCHMARK_TRACE benchmark start: real-fling-8000pps
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966576.0)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":100.93728918825182,"displayMaximumFPS":120,"durationSeconds":16.000033416668884,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1616,"hitchCount":301,"hitchTimeMillisecondsPerSecond":163.57084068087192,"label":"real-fling-8000pps","maxFrameMilliseconds":30.5660416779574,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":17.183958349050954,"p99FrameMilliseconds":18.64750002278015}
+CHAT_BENCHMARK_RESULT {"averageFPS":100.93728918825182,"displayMaximumFPS":120,"durationSeconds":16.000033416668884,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1616,"hitchCount":301,"hitchTimeMillisecondsPerSecond":163.57084068087192,"label":"real-fling-8000pps","maxFrameMilliseconds":30.5660416779574,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":17.183958349050954,"p99FrameMilliseconds":18.64750002278015}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

@@ -1,0 +1,9 @@
+{
+  "app": "/private/tmp/maid-chat-perf/containers/mai.app",
+  "codeImageSHA256": "123c61ffe203ec865875e58266445834234a5c335d3af4384af85d43f1232e28",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS"
+}

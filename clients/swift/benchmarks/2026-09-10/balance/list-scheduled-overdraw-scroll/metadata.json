@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/list-scheduled-overdraw/mai.app",
+  "codeImageSHA256": "08bfe2b2d92ae98c7158f7a14f7dedeec1cd84ccd91e8a0997259f00c9c44a21",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

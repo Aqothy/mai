@@ -1,0 +1,15 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.914330916 seconds
+CHAT_BENCHMARK_TRACE benchmark start: full-history-scrub
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966600.0)
+CHAT_BENCHMARK_TRACE nativeMounts=7512 hostingMounts=824 resident=5 pooled=18
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":49.40865956860925,"displayMaximumFPS":120,"durationSeconds":20.016734083357733,"expectedFrameMilliseconds":8.333333333333334,"frameCount":990,"hitchCount":779,"hitchTimeMillisecondsPerSecond":567.1797154658334,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":59.48016667389311,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":21.79912501014769,"p95FrameMilliseconds":29.825583333149552,"p99FrameMilliseconds":34.55549999489449}
+CHAT_BENCHMARK_RESULT {"averageFPS":49.40865956860925,"displayMaximumFPS":120,"durationSeconds":20.016734083357733,"expectedFrameMilliseconds":8.333333333333334,"frameCount":990,"hitchCount":779,"hitchTimeMillisecondsPerSecond":567.1797154658334,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":59.48016667389311,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":21.79912501014769,"p95FrameMilliseconds":29.825583333149552,"p99FrameMilliseconds":34.55549999489449}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

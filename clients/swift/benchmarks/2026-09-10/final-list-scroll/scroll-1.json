@@ -1,0 +1,47 @@
+[
+  {
+    "averageFPS": 113.00563135148722,
+    "displayMaximumFPS": 120,
+    "durationSeconds": 20.016701583343092,
+    "expectedFrameMilliseconds": 8.333333333333334,
+    "frameCount": 2263,
+    "hitchCount": 125,
+    "hitchTimeMillisecondsPerSecond": 56.78151210397062,
+    "label": "real-cruise-1200pps",
+    "maxFrameMilliseconds": 29.297458328073844,
+    "measurementKind": "displayLinkCallbacks",
+    "p50FrameMilliseconds": 8.333333331393078,
+    "p95FrameMilliseconds": 12.756583309965208,
+    "p99FrameMilliseconds": 20.583124976838008
+  },
+  {
+    "averageFPS": 108.36795514223917,
+    "displayMaximumFPS": 120,
+    "durationSeconds": 24.001560208329465,
+    "expectedFrameMilliseconds": 8.333333333333334,
+    "frameCount": 2602,
+    "hitchCount": 264,
+    "hitchTimeMillisecondsPerSecond": 96.90613082738808,
+    "label": "real-scroll-3000pps",
+    "maxFrameMilliseconds": 27.59683335898444,
+    "measurementKind": "displayLinkCallbacks",
+    "p50FrameMilliseconds": 8.333333331393078,
+    "p95FrameMilliseconds": 16.666666691889986,
+    "p99FrameMilliseconds": 20.62808332266286
+  },
+  {
+    "averageFPS": 71.15029728832953,
+    "displayMaximumFPS": 120,
+    "durationSeconds": 16.008365999994567,
+    "expectedFrameMilliseconds": 8.333333333333334,
+    "frameCount": 1140,
+    "hitchCount": 415,
+    "hitchTimeMillisecondsPerSecond": 403.7122526963495,
+    "label": "real-fling-8000pps",
+    "maxFrameMilliseconds": 940.2543749893084,
+    "measurementKind": "displayLinkCallbacks",
+    "p50FrameMilliseconds": 8.333333331393078,
+    "p95FrameMilliseconds": 21.05295832734555,
+    "p99FrameMilliseconds": 27.814375003799796
+  }
+]

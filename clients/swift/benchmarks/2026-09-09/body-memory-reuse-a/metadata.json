@@ -1,0 +1,17 @@
+{
+  "app": "/private/tmp/maid-chat-perf/containers-normal-preparation/mai.app",
+  "codeImageSHA256": "5d0819a5f8fc89e40132db1b7c574450bfd7bd3029fd1a49efe10c5d4f8c67a3",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scrub",
+  "reuseNativeBodies": true,
+  "directNativeRows": true,
+  "textKit2": false,
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 2.0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

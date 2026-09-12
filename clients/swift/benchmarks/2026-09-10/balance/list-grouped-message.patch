@@ -1,0 +1,68 @@
+--- a/ChatView.swift
++++ b/ChatView.swift
+@@ -1189,7 +1189,9 @@
+                 .listRowSeparator(.hidden)
+         }
+ 
+-        ForEach(rows) { row in
++        ForEach(ChatListRowGroup.group(rows)) { group in
++            VStack(alignment: .leading, spacing: 0) {
++            ForEach(group.rows) { row in
+             ChatTimelineRenderRowView(
+                 row: row,
+                 streamingTurnID: effectiveStreamingTurnID,
+@@ -1199,6 +1201,11 @@
+                 scrollState: scrollState,
+                 textLayoutStore: textLayoutStore
+             )
++        }
++            }
++            .listRowInsets(.init(top: 0, leading: ChatTimelineMetrics.rowHorizontalInset,
++                                bottom: 0, trailing: ChatTimelineMetrics.rowHorizontalInset))
++            .listRowSeparator(.hidden)
+         }
+ 
+         if streamingTurnID != nil {
+--- a/ChatListRowGroup.swift
++++ b/ChatListRowGroup.swift
+@@ -0,0 +1,29 @@
++import SwiftUI
++
++@MainActor struct ChatListRowGroup: Identifiable {
++    let id: String
++    var rows: [ChatTimelineRenderRow]
++    static var benchmarkAnchorRow: Int?
++
++    static func group(_ rows: [ChatTimelineRenderRow]) -> [Self] {
++        var groups: [Self] = []
++        let originalAnchor = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
++        for (index, row) in rows.enumerated() {
++            let id: String
++            switch row {
++            case .standard: id = row.id
++            case .prose(let segment), .richMarkdown(let segment): id = segment.messageID
++            case .resolvedMarkdown(let block): id = block.messageID
++            }
++            if groups.last?.id == id {
++                groups[groups.count - 1].rows.append(row)
++            } else {
++                groups.append(Self(id: id, rows: [row]))
++            }
++            if index == originalAnchor {
++                benchmarkAnchorRow = groups.count - 1
++            }
++        }
++        return groups
++    }
++}
+--- a/ChatFramePacingBenchmark.swift
++++ b/ChatFramePacingBenchmark.swift
+@@ -251,7 +251,7 @@
+         }
+ 
+         #if os(macOS)
+-            let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
++            let anchorRow = ChatListRowGroup.benchmarkAnchorRow ?? UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
+             if anchorRow > 0 {
+                 if let table = scrollView.documentView as? NSTableView,
+                     anchorRow < table.numberOfRows

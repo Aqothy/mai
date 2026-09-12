@@ -1,0 +1,247 @@
+[
+  {
+    "elapsedSeconds": 0.04621479197521694,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 32
+    }
+  },
+  {
+    "elapsedSeconds": 0.6201785839803051,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 32
+    }
+  },
+  {
+    "elapsedSeconds": 1.1719111249840353,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 240
+    }
+  },
+  {
+    "elapsedSeconds": 1.7222902499779593,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 126992
+    }
+  },
+  {
+    "elapsedSeconds": 2.270768833986949,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 216224
+    }
+  },
+  {
+    "elapsedSeconds": 2.84961145897978,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 221760
+    }
+  },
+  {
+    "elapsedSeconds": 3.4233988339838106,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 230416
+    }
+  },
+  {
+    "elapsedSeconds": 4.09062679199269,
+    "completedChats": 0,
+    "residentKiB": {
+      "76627": 231088
+    }
+  },
+  {
+    "elapsedSeconds": 4.6692438749887515,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 231392
+    }
+  },
+  {
+    "elapsedSeconds": 5.239224333985476,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 231392
+    }
+  },
+  {
+    "elapsedSeconds": 5.793750791985076,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 238448
+    }
+  },
+  {
+    "elapsedSeconds": 6.3660327089892235,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 238208
+    }
+  },
+  {
+    "elapsedSeconds": 6.947802458977094,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 238976
+    }
+  },
+  {
+    "elapsedSeconds": 7.528559500002302,
+    "completedChats": 1,
+    "residentKiB": {
+      "76627": 239584
+    }
+  },
+  {
+    "elapsedSeconds": 8.110750958992867,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 239584
+    }
+  },
+  {
+    "elapsedSeconds": 8.687643916986417,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 239584
+    }
+  },
+  {
+    "elapsedSeconds": 9.238870708999457,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 244384
+    }
+  },
+  {
+    "elapsedSeconds": 9.815278750000289,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 243952
+    }
+  },
+  {
+    "elapsedSeconds": 10.390164374985034,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 244736
+    }
+  },
+  {
+    "elapsedSeconds": 10.965967833995819,
+    "completedChats": 2,
+    "residentKiB": {
+      "76627": 238720
+    }
+  },
+  {
+    "elapsedSeconds": 11.544177499978105,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 238720
+    }
+  },
+  {
+    "elapsedSeconds": 12.12345270899823,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 238720
+    }
+  },
+  {
+    "elapsedSeconds": 12.677391791978152,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 243280
+    }
+  },
+  {
+    "elapsedSeconds": 13.247814749978716,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 243264
+    }
+  },
+  {
+    "elapsedSeconds": 13.817134624987375,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 244032
+    }
+  },
+  {
+    "elapsedSeconds": 14.391521583980648,
+    "completedChats": 3,
+    "residentKiB": {
+      "76627": 244656
+    }
+  },
+  {
+    "elapsedSeconds": 14.968402917002095,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 244656
+    }
+  },
+  {
+    "elapsedSeconds": 15.543768999981694,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 244656
+    }
+  },
+  {
+    "elapsedSeconds": 16.095452041976387,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 249280
+    }
+  },
+  {
+    "elapsedSeconds": 16.667926541995257,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 248848
+    }
+  },
+  {
+    "elapsedSeconds": 17.24907158399583,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 250016
+    }
+  },
+  {
+    "elapsedSeconds": 17.824761958996532,
+    "completedChats": 4,
+    "residentKiB": {
+      "76627": 250288
+    }
+  },
+  {
+    "elapsedSeconds": 18.40658420897671,
+    "completedChats": 5,
+    "residentKiB": {
+      "76627": 250288
+    }
+  },
+  {
+    "elapsedSeconds": 18.988188124989392,
+    "completedChats": 5,
+    "residentKiB": {
+      "76627": 250288
+    }
+  },
+  {
+    "elapsedSeconds": 19.568724458978977,
+    "completedChats": 5,
+    "residentKiB": {
+      "76627": 250288
+    }
+  }
+]

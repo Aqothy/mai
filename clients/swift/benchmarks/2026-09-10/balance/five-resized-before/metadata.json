@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/width-cache-before/mai.app",
+  "codeImageSHA256": "652c5d0a1daa540fa8517012e11de3bf4ded504a8cd3f5e7de7ed27605b15192",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "sessionsResize",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "container": "list",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": true,
+  "floatingBenchmarkWindow": false
+}

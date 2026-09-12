@@ -1,0 +1,16 @@
+{
+  "app": "/private/tmp/maid-chat-perf/native-stream-layout-fixed/mai.app",
+  "codeImageSHA256": "0d2cd99f8941bd8b6a394baf2fb94455c4f8660c41d2e3c1d46c1b3f4091baca",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "sessionsResize",
+  "reuseNativeBodies": true,
+  "directNativeRows": true,
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}

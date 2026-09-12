@@ -1,0 +1,17 @@
+{
+  "app": "/private/tmp/maid-chat-perf/containers-alignment-watchdog/mai.app",
+  "codeImageSHA256": "cc67d206797b25f37914d6f8195239a9e6a3f7e36926dca48aafdcde91dd2aa3",
+  "macOS": "26.5.2",
+  "machine": "Mac14,9",
+  "plan": "scroll",
+  "reuseNativeBodies": false,
+  "directNativeRows": false,
+  "textKit2": false,
+  "container": "custom",
+  "scheduledPrewarm": false,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": false,
+  "floatingBenchmarkWindow": false
+}
