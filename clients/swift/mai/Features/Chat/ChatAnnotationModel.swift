@@ -29,10 +29,6 @@ nonisolated struct ChatAnnotationDraft: Identifiable, Equatable, Sendable {
 }
 
 nonisolated enum ChatAnnotationFormatting {
-    static func normalizedQuote(_ quote: String) -> String {
-        quote.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     static func normalizedNote(_ note: String) -> String? {
         let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         return note.isEmpty ? nil : note
@@ -44,13 +40,7 @@ nonisolated enum ChatAnnotationFormatting {
             .joined(separator: " ")
         let maximumLength = 72
         guard quote.count > maximumLength else { return quote }
-        let end =
-            quote.index(
-                quote.startIndex,
-                offsetBy: maximumLength,
-                limitedBy: quote.endIndex
-            ) ?? quote.endIndex
-        return String(quote[..<end]) + "…"
+        return String(quote.prefix(maximumLength)) + "…"
     }
 }
 
@@ -64,7 +54,7 @@ final class ChatAnnotationModel {
         messageID: String?,
         role: String?
     ) {
-        let quote = ChatAnnotationFormatting.normalizedQuote(quote)
+        let quote = quote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !quote.isEmpty else { return }
         editorDraft = ChatAnnotationDraft(
             id: UUID().uuidString,

@@ -146,18 +146,6 @@ final class TerminalAttachment {
         prepareForNewRunRequest()
     }
 
-    /// Starts a fresh shell for this terminal after exit/stop/failure.
-    func relaunch() {
-        guard !isClosed, let terminalID else { return }
-        switch phase {
-        case .exited, .stopped, .failed:
-            mode = .relaunch(terminalID: terminalID)
-            prepareForNewRunRequest()
-        case .attaching, .running, .disconnected:
-            return
-        }
-    }
-
     /// Best-effort detach; the shell keeps running on the daemon.
     func close() {
         guard !isClosed else { return }
@@ -429,13 +417,6 @@ final class TerminalAttachment {
     // MARK: - Resize
 
     private func scheduleResize() {
-        guard !isClosed, phase == .running, runID != nil,
-            pendingGrid != lastSentGrid
-        else { return }
-        sendPendingResize()
-    }
-
-    private func sendPendingResize() {
         guard !isClosed, phase == .running,
             let terminalID, let runID,
             let grid = pendingGrid, grid != lastSentGrid

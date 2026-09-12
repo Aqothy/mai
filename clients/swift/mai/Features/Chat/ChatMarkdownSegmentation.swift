@@ -101,16 +101,6 @@ nonisolated enum ChatMarkdownSegmenter {
         return parsedSegments(of: source)
     }
 
-    /// Full-parser equivalent retained as a benchmark seam. Keeping the
-    /// semantic result directly comparable prevents the prefilter from
-    /// becoming an unverified collection of syntax assumptions.
-    static func segmentsUsingFullParser(
-        of source: String
-    ) -> [ChatMarkdownSegment]? {
-        guard canSegment(source) else { return nil }
-        return parsedSegments(of: source)
-    }
-
     private static func canSegment(_ source: String) -> Bool {
         !containsReferenceDefinition(source)
             && source.contains(where: { !$0.isWhitespace })

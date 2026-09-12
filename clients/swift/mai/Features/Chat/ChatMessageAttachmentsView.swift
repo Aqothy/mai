@@ -8,9 +8,6 @@ import SwiftUI
 /// back to the main actor.
 nonisolated struct ChatTranscriptImage: @unchecked Sendable {
     let cgImage: CGImage
-
-    var pixelWidth: Int { cgImage.width }
-    var pixelHeight: Int { cgImage.height }
 }
 
 nonisolated enum ChatTranscriptImageLoadingError: Error, Equatable {
@@ -53,18 +50,12 @@ nonisolated enum ChatTranscriptImageDecoder {
         }
     }
 
-    nonisolated static func validateEncodedCharacterCount(
-        _ characterCount: Int
-    ) throws {
-        guard characterCount <= maximumEncodedCharacterCount else {
-            throw ChatTranscriptImageLoadingError.encodedPayloadTooLarge
-        }
-    }
-
     nonisolated private static func decodeBase64Synchronously(
         _ payload: String
     ) throws -> ChatTranscriptImage {
-        try validateEncodedCharacterCount(payload.utf8.count)
+        guard payload.utf8.count <= maximumEncodedCharacterCount else {
+            throw ChatTranscriptImageLoadingError.encodedPayloadTooLarge
+        }
 
         guard
             let data = Data(
@@ -101,7 +92,6 @@ nonisolated enum ChatTranscriptImageDecoder {
         guard
             width <= maximumSourceDimension,
             height <= maximumSourceDimension,
-            height <= maximumPixelCount,
             width <= maximumPixelCount / height
         else {
             throw ChatTranscriptImageLoadingError.imageDimensionsTooLarge
@@ -128,10 +118,6 @@ nonisolated enum ChatMessageAttachmentPresentation {
     static func isImage(_ attachment: Attachment) -> Bool {
         attachment.kind.lowercased() == "image"
             || attachment.mimeType?.lowercased().hasPrefix("image/") == true
-    }
-
-    static func isInlineImage(_ attachment: Attachment) -> Bool {
-        isImage(attachment) && inlineImagePayload(from: attachment) != nil
     }
 
     static func displayName(_ attachment: Attachment) -> String {
@@ -181,10 +167,12 @@ struct ChatMessageAttachmentsView: View {
 
     var body: some View {
         let categorized = attachments.reduce(
-            into: (images: [Attachment](), others: [Attachment]())
+            into: (images: [(attachment: Attachment, payload: String)](), others: [Attachment]())
         ) { result, attachment in
-            if ChatMessageAttachmentPresentation.isInlineImage(attachment) {
-                result.images.append(attachment)
+            if ChatMessageAttachmentPresentation.isImage(attachment),
+                let payload = ChatMessageAttachmentPresentation.inlineImagePayload(from: attachment)
+            {
+                result.images.append((attachment, payload))
             } else {
                 result.others.append(attachment)
             }
@@ -194,11 +182,13 @@ struct ChatMessageAttachmentsView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             if !imageAttachments.isEmpty {
-                if imageAttachments.count == 1,
-                    let attachment = imageAttachments.first
-                {
-                    ChatMessageImageAttachmentView(attachment: attachment)
-                        .frame(maxWidth: 480)
+                if imageAttachments.count == 1 {
+                    let image = imageAttachments[0]
+                    ChatMessageImageAttachmentView(
+                        attachment: image.attachment,
+                        payload: image.payload
+                    )
+                    .frame(maxWidth: 480)
                 } else {
                     LazyVGrid(
                         columns: [
@@ -213,7 +203,8 @@ struct ChatMessageAttachmentsView: View {
                     ) {
                         ForEach(imageAttachments.indices, id: \.self) { index in
                             ChatMessageImageAttachmentView(
-                                attachment: imageAttachments[index]
+                                attachment: imageAttachments[index].attachment,
+                                payload: imageAttachments[index].payload
                             )
                         }
                     }
@@ -300,33 +291,28 @@ private struct ChatMessageImageAttachmentView: View {
     }
 
     let attachment: Attachment
+    let payload: String
     @State private var phase = Phase.loading
 
     var body: some View {
         let name = ChatMessageAttachmentPresentation.displayName(attachment)
 
         VStack(alignment: .leading, spacing: 4) {
-            if let payload = ChatMessageAttachmentPresentation.inlineImagePayload(
-                from: attachment
-            ) {
-                imageContent(name: name)
-                    .task(id: SourceIdentity(payload: payload, attachment: attachment)) {
-                        phase = .loading
-                        do {
-                            let image = try await ChatTranscriptImageDecoder.decodeBase64(
-                                payload
-                            )
-                            try Task.checkCancellation()
-                            phase = .loaded(image)
-                        } catch is CancellationError {
-                            return
-                        } catch {
-                            phase = .failed
-                        }
+            imageContent(name: name)
+                .task(id: SourceIdentity(payload: payload, attachment: attachment)) {
+                    phase = .loading
+                    do {
+                        let image = try await ChatTranscriptImageDecoder.decodeBase64(
+                            payload
+                        )
+                        try Task.checkCancellation()
+                        phase = .loaded(image)
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        phase = .failed
                     }
-            } else {
-                ChatTranscriptImageFallback(name: name)
-            }
+                }
 
             Text(name)
                 .font(.caption)
