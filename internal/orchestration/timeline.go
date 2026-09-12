@@ -86,6 +86,7 @@ func (t Timeline) Clone() Timeline {
 		if entry.Message != nil {
 			message := *entry.Message
 			message.Attachments = cloneAttachments(entry.Message.Attachments)
+			message.Annotations = append([]provider.PromptAnnotation(nil), entry.Message.Annotations...)
 			clone[i].Message = &message
 		}
 		if entry.Item != nil {

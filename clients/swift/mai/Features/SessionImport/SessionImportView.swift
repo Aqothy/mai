@@ -24,13 +24,22 @@ struct SessionImportView: View {
             ForEach(model.entries) { entry in
                 SessionImportRow(
                     entry: entry,
+                    capabilities: model.capabilities,
                     isImporting: model.importingSessionIDs.contains(entry.id),
+                    maintenanceAction: model.maintenanceBySessionID[entry.id],
+                    isClosed: model.closedSessionIDs.contains(entry.id),
                     importSession: {
                         Task {
                             if let threadID = await model.importSession(entry) {
                                 openThread(threadID)
                             }
                         }
+                    },
+                    closeSession: {
+                        Task { await model.closeSession(entry) }
+                    },
+                    deleteSession: {
+                        Task { await model.deleteSession(entry) }
                     }
                 )
             }
@@ -151,12 +160,14 @@ struct SessionImportStatusView: View {
                     store: store,
                     previewSessions: [
                         SessionSummary(
+                            additionalDirectories: nil,
                             cwd: "/Users/me/Code/maiD",
                             sessionID: "sess-1",
                             title: "Fix reconnect loop",
                             updatedAt: "2026-08-01T10:15:30Z"
                         ),
                         SessionSummary(
+                            additionalDirectories: nil,
                             cwd: "/Users/me/Code/side-project",
                             sessionID: "sess-2",
                             title: nil,

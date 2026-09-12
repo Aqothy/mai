@@ -12,7 +12,57 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 }
 
 func cloneAttachments(values []provider.Attachment) []provider.Attachment {
-	return append([]provider.Attachment(nil), values...)
+	if values == nil {
+		return nil
+	}
+	cloned := make([]provider.Attachment, len(values))
+	for index, value := range values {
+		cloned[index] = value
+		cloned[index].Annotations = cloneContentAnnotations(value.Annotations)
+		cloned[index].Metadata = cloneMetadata(value.Metadata)
+		cloned[index].ResourceMetadata = cloneMetadata(value.ResourceMetadata)
+	}
+	return cloned
+}
+
+func cloneContentAnnotations(value *provider.ContentAnnotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Audience = append([]string(nil), value.Audience...)
+	cloned.Metadata = cloneMetadata(value.Metadata)
+	return &cloned
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = cloneMetadataValue(entry)
+	}
+	return cloned
+}
+
+func cloneMetadataValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMetadata(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, entry := range typed {
+			cloned[index] = cloneMetadataValue(entry)
+		}
+		return cloned
+	case json.RawMessage:
+		return cloneRawMessage(typed)
+	case []byte:
+		return append([]byte(nil), typed...)
+	default:
+		return value
+	}
 }
 
 // cloneToolCall isolates a public thread snapshot from projection-owned state.
@@ -69,6 +119,7 @@ func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
 
 func cloneThread(thread Thread) Thread {
 	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
+	thread.AdditionalDirectories = append([]string(nil), thread.AdditionalDirectories...)
 	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
 	thread.Session = cloneSessionPtr(thread.Session)
 	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
@@ -109,13 +160,22 @@ func cloneSlashCommands(commands []provider.SlashCommand) []provider.SlashComman
 	return append([]provider.SlashCommand{}, commands...)
 }
 
+func cloneSkills(skills []provider.Skill) []provider.Skill {
+	if skills == nil {
+		return nil
+	}
+	return append([]provider.Skill{}, skills...)
+}
+
 func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	if value == nil {
 		return nil
 	}
 	clone := *value
+	clone.AdditionalDirectories = append([]string(nil), value.AdditionalDirectories...)
 	clone.ConfigOptions = cloneConfigOptions(value.ConfigOptions)
 	clone.SlashCommands = cloneSlashCommands(value.SlashCommands)
+	clone.Skills = cloneSkills(value.Skills)
 	if value.TokenUsage != nil {
 		usage := *value.TokenUsage
 		clone.TokenUsage = &usage

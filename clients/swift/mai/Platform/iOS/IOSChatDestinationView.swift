@@ -6,6 +6,7 @@ struct IOSChatDestinationView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
     let projectFolders: ProjectFolderStore
+    let openThread: (String) -> Void
 
     var body: some View {
         Group {
@@ -15,14 +16,16 @@ struct IOSChatDestinationView: View {
                     store: store,
                     draftStore: draftStore,
                     projectFolders: projectFolders,
-                    initialWorkingDirectory: workingDirectory
+                    initialWorkingDirectory: workingDirectory,
+                    openThread: openThread
                 )
             case .thread(let threadID):
                 if store.selectedThreadID == threadID {
                     ChatView(
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        projectFolders: projectFolders,
+                        openThread: openThread
                     )
                 } else {
                     ProgressView("Opening Chat…")

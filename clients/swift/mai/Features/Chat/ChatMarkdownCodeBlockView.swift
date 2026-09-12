@@ -6,6 +6,15 @@ struct ChatMarkdownCodeBlockView: View {
     /// Identifies the block's prepared native layout on macOS.
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
+    let revealBatches: [ChatStreamingTextRevealBatch]
+
+    init(block: ChatMarkdownCodeBlock, isStreaming: Bool, layoutID: String, textLayoutStore: ChatTextLayoutStore, revealBatches: [ChatStreamingTextRevealBatch] = []) {
+        self.block = block
+        self.isStreaming = isStreaming
+        self.layoutID = layoutID
+        self.textLayoutStore = textLayoutStore
+        self.revealBatches = revealBatches
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     #if os(iOS)
@@ -43,7 +52,7 @@ struct ChatMarkdownCodeBlockView: View {
                 )
             #else
                 ScrollView(.horizontal) {
-                    Text(displayedCode)
+                    ChatStreamingTextRevealView(text: displayedCode, batches: revealBatches)
                         .font(.callout.monospaced())
                         .lineSpacing(4)
                         .fixedSize(horizontal: true, vertical: false)

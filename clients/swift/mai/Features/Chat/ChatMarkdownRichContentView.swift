@@ -6,7 +6,22 @@ struct ChatMarkdownRichContentView: View {
     let layoutIDPrefix: String
     let plan: ChatMarkdownRenderPlan
     let streamingStableBlockCount: Int?
+    let streamingRevealBatches: [ChatStreamingTextRevealBatch]
     let textLayoutStore: ChatTextLayoutStore
+
+    init(
+        layoutIDPrefix: String,
+        plan: ChatMarkdownRenderPlan,
+        streamingStableBlockCount: Int?,
+        streamingRevealBatches: [ChatStreamingTextRevealBatch] = [],
+        textLayoutStore: ChatTextLayoutStore
+    ) {
+        self.layoutIDPrefix = layoutIDPrefix
+        self.plan = plan
+        self.streamingStableBlockCount = streamingStableBlockCount
+        self.streamingRevealBatches = streamingRevealBatches
+        self.textLayoutStore = textLayoutStore
+    }
 
     var body: some View {
         VStack(
@@ -15,12 +30,18 @@ struct ChatMarkdownRichContentView: View {
         ) {
             ForEach(plan.blocks.indices, id: \.self) { index in
                 let block = plan.blocks[index]
-                let isStreamingBlock = streamingStableBlockCount.map {
-                    index >= $0
-                } ?? false
+                let isStreamingBlock =
+                    streamingStableBlockCount.map {
+                        index >= $0
+                    } ?? false
+                let revealBatches =
+                    isStreamingBlock
+                        && index == plan.blocks.indices.last
+                    ? streamingRevealBatches : []
                 ChatMarkdownRenderBlockView(
                     block: block,
                     isStreaming: isStreamingBlock,
+                    revealBatches: revealBatches,
                     layoutID: "\(layoutIDPrefix)-block-\(index)",
                     textLayoutStore: textLayoutStore
                 )
@@ -80,6 +101,7 @@ struct ChatMarkdownRichContentView: View {
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
     let isStreaming: Bool
+    let revealBatches: [ChatStreamingTextRevealBatch]
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
 
@@ -89,6 +111,7 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     ) -> Bool {
         lhs.block == rhs.block
             && lhs.isStreaming == rhs.isStreaming
+            && lhs.revealBatches == rhs.revealBatches
             && lhs.layoutID == rhs.layoutID
             && lhs.textLayoutStore === rhs.textLayoutStore
     }
@@ -104,7 +127,10 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
                 )
                 .equatable()
             } else {
-                ChatMarkdownResolvedProseView(prose: prose)
+                ChatMarkdownResolvedProseView(
+                    prose: prose,
+                    revealBatches: revealBatches
+                )
             }
 
         case .code(let codeBlock):
@@ -112,7 +138,8 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
                 block: codeBlock,
                 isStreaming: isStreaming,
                 layoutID: layoutID,
-                textLayoutStore: textLayoutStore
+                textLayoutStore: textLayoutStore,
+                revealBatches: revealBatches
             )
 
         case .table(let table):
@@ -153,12 +180,15 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
 
 private struct ChatMarkdownResolvedProseView: Equatable, View {
     let prose: ChatMarkdownProseRun
+    let revealBatches: [ChatStreamingTextRevealBatch]
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatMarkdownProseStyle.blockSpacing) {
             ForEach(prose.pieces.indices, id: \.self) { index in
                 ChatMarkdownResolvedProsePieceView(
-                    piece: prose.pieces[index]
+                    piece: prose.pieces[index],
+                    revealBatches: index == prose.pieces.indices.last
+                        ? revealBatches : []
                 )
                 .equatable()
             }
@@ -261,30 +291,45 @@ struct ChatResolvedMarkdownBlockRow: View {
 
 struct ChatMarkdownResolvedProsePieceView: Equatable, View {
     let piece: ChatMarkdownProseRun.Piece
+    let revealBatches: [ChatStreamingTextRevealBatch]
+
+    init(
+        piece: ChatMarkdownProseRun.Piece,
+        revealBatches: [ChatStreamingTextRevealBatch] = []
+    ) {
+        self.piece = piece
+        self.revealBatches = revealBatches
+    }
 
     var body: some View {
         switch piece {
         case .text(let text):
-            Text(text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ChatStreamingTextRevealView(
+                text: text,
+                batches: revealBatches
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
                 .chatTextPointerStyle()
 
         case .quote(let quote):
-            Text(quote)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(
-                    .leading,
-                    ChatMarkdownProseStyle.quoteBarWidth
-                        + ChatMarkdownProseStyle.quoteIndent
+            ChatStreamingTextRevealView(
+                text: quote,
+                batches: revealBatches
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(
+                .leading,
+                ChatMarkdownProseStyle.quoteBarWidth
+                    + ChatMarkdownProseStyle.quoteIndent
+            )
+            .overlay(alignment: .leading) {
+                RoundedRectangle(
+                    cornerRadius: ChatMarkdownProseStyle.quoteBarWidth / 2
                 )
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(
-                        cornerRadius: ChatMarkdownProseStyle.quoteBarWidth / 2
-                    )
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: ChatMarkdownProseStyle.quoteBarWidth)
-                    .accessibilityHidden(true)
-                }
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: ChatMarkdownProseStyle.quoteBarWidth)
+                .accessibilityHidden(true)
+            }
                 .chatTextPointerStyle()
 
         case .thematicBreak:

@@ -165,6 +165,18 @@ func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveRoute visible: %v", err)
 	}
+	// A config change on the same provider has the same write ordering: the
+	// route is authoritative when its model selection is present.
+	if err := metadata.UpsertThread(store.ThreadMeta{ThreadID: "same-provider", ProviderInstanceID: spec.InstanceID, ModelSelection: &provider.ModelSelection{Model: "stale-model"}, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("UpsertThread same-provider: %v", err)
+	}
+	if err := metadata.SaveRoute("same-provider", store.RouteRecord{
+		InstanceID:        spec.InstanceID,
+		ProviderSessionID: "session-same-provider",
+		StartInput:        provider.StartSessionInput{ModelSelection: &provider.ModelSelection{Model: "latest-model"}},
+	}); err != nil {
+		t.Fatalf("SaveRoute same-provider: %v", err)
+	}
 
 	s := newServer(newLoggerFromEnv(), metadata)
 	defer s.Close()
@@ -178,7 +190,11 @@ func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
 	if route, ok := routes["visible"]; !ok || route.ProviderSessionID != "session-visible" {
 		t.Fatalf("visible thread route was pruned: %+v", routes)
 	}
-	entry, ok := s.orchestration.ThreadListEntry("visible")
+	entry, ok := s.orchestration.ThreadListEntry("same-provider")
+	if !ok || entry.ModelSelection == nil || entry.ModelSelection.Model != "latest-model" {
+		t.Fatalf("same-provider route model was not restored: %#v", entry)
+	}
+	entry, ok = s.orchestration.ThreadListEntry("visible")
 	if !ok || entry.ProviderInstanceID != spec.InstanceID {
 		t.Fatalf("restored provider instance = %q, want newer route instance %q", entry.ProviderInstanceID, spec.InstanceID)
 	}

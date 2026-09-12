@@ -43,18 +43,22 @@ type contract struct {
 	TimelineEntry                    wire.TimelineEntry                    `json:"timelineEntry"`
 	Plan                             wire.Plan                             `json:"plan"`
 	InstanceInfo                     wire.InstanceInfo                     `json:"instanceInfo"`
+	AuthenticationResult             wire.AuthenticationResult             `json:"authenticationResult"`
 	SessionSummary                   wire.SessionSummary                   `json:"sessionSummary"`
 	Attachment                       wire.Attachment                       `json:"attachment"`
+	PromptAnnotation                 wire.PromptAnnotation                 `json:"promptAnnotation"`
 	ModelSelection                   wire.ModelSelection                   `json:"modelSelection"`
 	ConfigOption                     wire.ConfigOption                     `json:"configOption"`
 	ConfigChoice                     wire.ConfigChoice                     `json:"configChoice"`
 	ConfigOptionSelection            wire.ConfigOptionSelection            `json:"configOptionSelection"`
 	SlashCommand                     wire.SlashCommand                     `json:"slashCommand"`
+	Skill                            wire.Skill                            `json:"skill"`
 	TokenUsage                       wire.TokenUsage                       `json:"tokenUsage"`
 	ApprovalOption                   wire.ApprovalOption                   `json:"approvalOption"`
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`
+	ProviderForkThreadParams         wire.ProviderForkThreadParams         `json:"providerForkThreadParams"`
 	ProviderInstanceParams           wire.ProviderInstanceParams           `json:"providerInstanceParams"`
 	ProviderListSessionsParams       wire.ProviderListSessionsParams       `json:"providerListSessionsParams"`
 	ProviderSessionParams            wire.ProviderSessionParams            `json:"providerSessionParams"`

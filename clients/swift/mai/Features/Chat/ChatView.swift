@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let openThread: ((String) -> Void)?
 
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
@@ -12,6 +13,7 @@ struct ChatView: View {
     /// The timeline mounts only after this, so a cold open never parses
     /// synchronously inside view construction.
     @State private var warmedThreadID: String?
+    @State private var annotationModel = ChatAnnotationModel()
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -19,10 +21,12 @@ struct ChatView: View {
         store: ThreadStore,
         draftStore: ThreadDraftStore,
         projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
-        initialWorkingDirectory: String? = nil
+        initialWorkingDirectory: String? = nil,
+        openThread: ((String) -> Void)? = nil
     ) {
         self.store = store
         self.draftStore = draftStore
+        self.openThread = openThread
         _draftModel = State(
             initialValue: DraftPromptModel(
                 store: store,
@@ -44,7 +48,7 @@ struct ChatView: View {
 
     var body: some View {
         let promptText = currentPromptText
-        let workspaceFilePicker = currentWorkspaceFilePicker
+        let promptCompletion = currentPromptCompletion
 
         Group {
             if let errorMessage = store.selectedThreadLoadErrorMessage {
@@ -104,9 +108,9 @@ struct ChatView: View {
             // This overlay belongs to the full chat surface. Rendering it
             // outside the safe-area bar's bounds would make its visible rows
             // miss taps and scrolling gestures.
-            ChatWorkspaceFilePickerOverlay(
+            ChatPromptCompletionOverlay(
                 text: promptText,
-                model: workspaceFilePicker
+                model: promptCompletion
             )
             .safeAreaPadding(.bottom)
         }
@@ -116,18 +120,40 @@ struct ChatView: View {
                     store: store,
                     draftModel: draftModel,
                     chatModel: chatModel,
+                    annotationModel: annotationModel,
                     promptText: promptText,
-                    workspaceFilePicker: workspaceFilePicker
+                    promptCompletion: promptCompletion
                 )
             )
         )
         .navigationTitle(selectedThreadTitle)
         .inlineNavigationBarTitle()
+        .toolbar {
+            if let chatModel, openThread != nil,
+                store.threadSupportsFork(chatModel.threadID)
+            {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Fork Chat", systemImage: "arrow.triangle.branch") {
+                        Task {
+                            guard let threadID = await chatModel.forkThread() else { return }
+                            openThread?(threadID)
+                        }
+                    }
+                    .disabled(!chatModel.canForkThread)
+                    .accessibilityHint(
+                        store.threadIsRunning(chatModel.threadID)
+                            ? "Available after the current response finishes"
+                            : "Creates a new chat from this conversation"
+                    )
+                }
+            }
+        }
         .onChange(of: store.selectedThreadID, initial: true) {
             previousThreadID,
             threadID in
             if previousThreadID != threadID {
-                currentWorkspaceFilePicker.dismiss()
+                currentPromptCompletion.dismiss()
+                annotationModel.reset()
             }
             if previousThreadID != threadID, previousThreadID != nil {
                 scrollState.reset()
@@ -148,6 +174,18 @@ struct ChatView: View {
             // Fonts are baked into each layout. Drop layouts built at
             // the previous Dynamic Type size.
             store.resetSelectedThreadTextLayoutStore()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { annotationModel.editorDraft != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        annotationModel.cancelEditor()
+                    }
+                }
+            )
+        ) {
+            ChatAnnotationEditor(model: annotationModel)
         }
         .alert(
             "Something Went Wrong",
@@ -270,6 +308,7 @@ struct ChatView: View {
             segmentCache: segmentCache,
             store: store,
             scrollState: scrollState,
+            annotationModel: annotationModel,
             textLayoutStore: textLayoutStore
         )
         .id(thread.id)
@@ -306,8 +345,8 @@ struct ChatView: View {
         return $draftModel.prompt
     }
 
-    private var currentWorkspaceFilePicker: WorkspaceFilePickerModel {
-        chatModel?.workspaceFilePicker ?? draftModel.workspaceFilePicker
+    private var currentPromptCompletion: PromptCompletionModel {
+        chatModel?.promptCompletion ?? draftModel.promptCompletion
     }
 }
 
@@ -329,13 +368,18 @@ private struct ChatComposerStack: View {
     let store: ThreadStore
     let draftModel: DraftPromptModel
     let chatModel: ChatPromptModel?
+    let annotationModel: ChatAnnotationModel
     let promptText: Binding<String>
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var body: some View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
 
         VStack(alignment: .leading) {
+            if let chatModel, chatModel.showsFailedTurnRetry {
+                ChatFailedTurnRetryView(model: chatModel)
+            }
+
             if chatModel == nil {
                 HStack(spacing: 16) {
                     DraftSessionControlsView(model: draftModel)
@@ -361,16 +405,23 @@ private struct ChatComposerStack: View {
                 focusID: chatModel == nil ? draftModel.promptFocusID : nil,
                 canSend: chatModel == nil
                     ? draftModel.canSend
-                    : state.exists && chatModel?.canSend == true,
+                    : state.exists
+                        && chatModel?.canSend(
+                            annotations: annotationModel.annotations
+                        ) == true,
                 isSending: isSendingNow,
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
-                workspaceFilePicker: workspaceFilePicker,
+                annotations: chatModel == nil
+                    ? [] : annotationModel.annotations,
+                promptCompletion: promptCompletion,
+                commands: state.slashCommands,
+                skills: state.skills,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
             ) {
                 if let chatModel {
-                    Task { await chatModel.send() }
+                    Task { await chatModel.send(annotations: annotationModel) }
                 } else {
                     Task { await draftModel.send() }
                 }
@@ -384,6 +435,8 @@ private struct ChatComposerStack: View {
                 } else {
                     draftModel.removeAttachment(id: id)
                 }
+            } removeAnnotation: { id in
+                annotationModel.remove(id: id)
             } leadingControls: {
                 ComposerAddMenu(
                     isImageAttachmentAvailable: supportsImageAttachments,
@@ -395,9 +448,9 @@ private struct ChatComposerStack: View {
                         ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
                     ),
                     commands: state.slashCommands,
-                    addWorkspaceFile: workspaceFilePicker.isAvailable && !isSendingNow
+                    addWorkspaceFile: promptCompletion.isFileCompletionAvailable && !isSendingNow
                         ? {
-                            presentWorkspaceFilePickerAtPromptEnd()
+                            presentWorkspaceFileCompletionAtPromptEnd()
                         }
                         : nil,
                     addImages: chatModel?.addImages ?? draftModel.addImages,
@@ -436,15 +489,41 @@ private struct ChatComposerStack: View {
         return draftModel.supportsImageAttachments
     }
 
-    private func presentWorkspaceFilePickerAtPromptEnd() {
-        // Appending `@` reuses the same trigger path as typing it, keeping one
-        // insertion behavior for keyboard and menu-driven use.
-        var prompt = promptText.wrappedValue
-        if !prompt.isEmpty, prompt.last?.isWhitespace != true {
-            prompt += " "
+    private func presentWorkspaceFileCompletionAtPromptEnd() {
+        promptText.wrappedValue = promptCompletion.textByPresentingFileCompletion(
+            in: promptText.wrappedValue
+        )
+    }
+}
+
+private struct ChatFailedTurnRetryView: View {
+    let model: ChatPromptModel
+
+    var body: some View {
+        HStack {
+            Label(
+                model.failedTurnError ?? "The response failed.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+
+            Spacer()
+
+            Button(
+                model.isRetryingFailedTurn ? "Retrying…" : "Retry",
+                systemImage: "arrow.clockwise"
+            ) {
+                Task { await model.retryFailedTurn() }
+            }
+            .disabled(!model.canRetryFailedTurn)
         }
-        prompt += "@"
-        promptText.wrappedValue = prompt
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -458,6 +537,7 @@ private struct ChatComposerThreadState {
     let isRunning: Bool
     let session: SessionBinding?
     let slashCommands: [SlashCommand]
+    let skills: [Skill]
 
     init(thread: Thread?) {
         exists = thread != nil
@@ -465,19 +545,20 @@ private struct ChatComposerThreadState {
         isRunning = thread?.latestTurn?.turnState == .running
         session = thread?.session
         slashCommands = thread?.session?.slashCommands ?? []
+        skills = thread?.session?.skills ?? []
     }
 }
 
-private struct ChatWorkspaceFilePickerOverlay: View {
+private struct ChatPromptCompletionOverlay: View {
     private static let composerSpacing: CGFloat = 8
 
     @Binding var text: String
-    let model: WorkspaceFilePickerModel
+    let model: PromptCompletionModel
 
     var body: some View {
-        if model.isPresented, model.isAvailable {
-            WorkspaceFilePickerView(model: model) { match in
-                insertWorkspaceFile(match.relativePath)
+        if model.isPresented {
+            PromptCompletionView(model: model) { match in
+                insertCompletion(match)
             }
             .frame(maxWidth: ChatContentMetrics.maximumWidth)
             .frame(maxWidth: .infinity)
@@ -486,14 +567,9 @@ private struct ChatWorkspaceFilePickerOverlay: View {
         }
     }
 
-    private func insertWorkspaceFile(_ relativePath: String) {
-        guard
-            let updatedText = model.textBySelecting(
-                relativePath: relativePath,
-                in: text
-            )
-        else { return }
-        text = updatedText
+    private func insertCompletion(_ match: PromptCompletionMatch) {
+        guard let edit = model.edit(selecting: match, in: text) else { return }
+        text = edit.text
     }
 }
 
@@ -649,6 +725,7 @@ struct ChatTimeline: View {
     let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
 
     @State private var foldModel = ChatTimelineFoldModel()
     @State private var isAwaitingInitialBottom = true
@@ -1204,6 +1281,7 @@ struct ChatTimeline: View {
                 store: store,
                 foldModel: foldModel,
                 scrollState: scrollState,
+                annotationModel: annotationModel,
                 textLayoutStore: textLayoutStore
             )
         }
@@ -1543,8 +1621,8 @@ struct ChatTimeline: View {
 
     /// Expands oversized user messages and every settled assistant message.
     /// Streaming keeps one stable live row. Documents that cannot be
-    /// source-segmented are parsed once as a whole, then their resolved blocks
-    /// become lazy timeline rows without changing reference-link semantics.
+    /// source-segmented keep the whole-document renderer so reference links
+    /// and transcript selection actions remain correct.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -1612,6 +1690,9 @@ struct ChatTimeline: View {
                         index: index,
                         source: segment.source,
                         role: message.role,
+                        annotations: index == segments.count - 1
+                            ? message.annotations
+                            : nil,
                         attachments: index == segments.count - 1
                             ? message.attachments
                             : nil,
@@ -1674,7 +1755,7 @@ struct ChatTimeline: View {
                     source: segment.source
                 )
 
-            case .standard, .prose, .resolvedMarkdown:
+            case .standard, .prose:
                 return nil
             }
         }
@@ -1752,7 +1833,7 @@ struct ChatTimeline: View {
                     source: message.text,
                     role: message.role
                 )
-            case .standard, .resolvedMarkdown:
+            case .standard:
                 break
             }
         }
@@ -1790,14 +1871,12 @@ enum ChatTimelineRenderRow: Identifiable {
     case standard(ChatTimelineRowModel)
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
-    case resolvedMarkdown(ChatResolvedMarkdownBlockRowModel)
 
     var id: String {
         switch self {
         case .standard(let row): row.id
         case .richMarkdown(let segment): "\(segment.rowID)-rich"
         case .prose(let segment): "\(segment.rowID)-prose"
-        case .resolvedMarkdown(let block): block.rowID
         }
     }
 }
@@ -1811,6 +1890,7 @@ struct ChatTimelineRenderRowView: View {
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
@@ -1824,6 +1904,7 @@ struct ChatTimelineRenderRowView: View {
                     store: store,
                     foldModel: foldModel,
                     scrollState: scrollState,
+                    annotationModel: annotationModel,
                     textLayoutStore: textLayoutStore
                 )
 
@@ -1832,10 +1913,19 @@ struct ChatTimelineRenderRowView: View {
                     messageID: segment.rowID,
                     text: segment.source,
                     role: segment.role,
+                    annotations: segment.annotations,
                     attachments: segment.attachments,
                     streamingText: nil,
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
+                )
+                .environment(
+                    \.chatAnnotationContext,
+                    ChatAnnotationContext(
+                        messageID: segment.messageID,
+                        role: segment.role,
+                        model: annotationModel
+                    )
                 )
                 .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
                 .padding(
@@ -1854,6 +1944,14 @@ struct ChatTimelineRenderRowView: View {
                         layoutStore: textLayoutStore
                     )
                 }
+                .environment(
+                    \.chatAnnotationContext,
+                    ChatAnnotationContext(
+                        messageID: segment.messageID,
+                        role: segment.role,
+                        model: annotationModel
+                    )
+                )
                 .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
                 .padding(
                     .bottom,
@@ -1897,6 +1995,7 @@ struct ChatMessageSegmentRowModel {
     let index: Int
     let source: String
     let role: String
+    let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
     let isFirst: Bool
     let isLast: Bool
@@ -1912,13 +2011,12 @@ private struct ChatNativeTextMessageRow<NativeText: View>: View {
         VStack(alignment: .leading) {
             nativeText()
 
+            if let annotations = segment.annotations, !annotations.isEmpty {
+                ChatMessageAnnotationsView(annotations: annotations)
+            }
+
             if let attachments = segment.attachments, !attachments.isEmpty {
-                Text(
-                    attachments.map { $0.name ?? $0.kind }
-                        .joined(separator: " · ")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .padding(
@@ -1998,6 +2096,7 @@ private struct ChatTimelineRow: View {
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
@@ -2008,6 +2107,7 @@ private struct ChatTimelineRow: View {
                     messageID: message.id,
                     text: message.text,
                     role: message.role,
+                    annotations: message.annotations,
                     attachments: message.attachments,
                     streamingText: store.streamingMessageText(
                         threadID: threadID,
@@ -2019,6 +2119,14 @@ private struct ChatTimelineRow: View {
                         streamingTurnID: streamingTurnID
                     ),
                     textLayoutStore: textLayoutStore
+                )
+                .environment(
+                    \.chatAnnotationContext,
+                    ChatAnnotationContext(
+                        messageID: message.id,
+                        role: message.role,
+                        model: annotationModel
+                    )
                 )
                 .padding(.vertical, 10)
             case .thought(let item):
@@ -2396,7 +2504,7 @@ private struct ChatActivityItemRow: View {
         VStack(alignment: .leading, spacing: 8) {
             if isFileChangeStep || hasExpandableContent {
                 Button {
-                    if isFileChangeStep {
+                    if opensDiffDirectly {
                         Task { await openDiff() }
                     } else {
                         scrollState.noteContentExpansion()
@@ -2481,15 +2589,53 @@ private struct ChatActivityItemRow: View {
                 .foregroundStyle(.secondary)
             }
         } else {
-            // Summary previews render instantly; the fetched detail replaces
-            // them in place, so expansion never flashes a loading state.
-            ChatStepOutputBox(
-                command: toolCall?.command ?? summary?.commandPreview,
-                query: toolCall?.query ?? summary?.queryPreview,
-                output: toolCall?.output ?? summary?.outputPreview,
-                error: toolCall?.error ?? summary?.errorPreview,
-                metadata: metadata
-            )
+            if hasOutputContent {
+                // Summary previews render instantly; fetched detail replaces
+                // them in place without hiding already available output.
+                ChatStepOutputBox(
+                    command: toolCall?.command ?? summary?.commandPreview,
+                    query: toolCall?.query ?? summary?.queryPreview,
+                    output: toolCall?.output ?? summary?.outputPreview,
+                    error: toolCall?.error ?? summary?.errorPreview,
+                    metadata: metadata
+                )
+            }
+
+            if let attachments = toolCall?.attachments, !attachments.isEmpty {
+                ChatMessageAttachmentsView(attachments: attachments)
+            } else if hasAttachmentSummary, detail == nil,
+                item.detailAvailable == true
+            {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading attachments…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            } else if hasAttachmentSummary {
+                Label(
+                    "Attachments unavailable",
+                    systemImage: "photo.badge.exclamationmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if isFileChangeStep,
+                let changes = toolCall?.changes,
+                !changes.isEmpty
+            {
+                Button(
+                    "View Changes",
+                    systemImage: "doc.text.magnifyingglass"
+                ) {
+                    presentedChanges = changes
+                }
+                .font(.caption)
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -2500,6 +2646,27 @@ private struct ChatActivityItemRow: View {
         ChatActivityVerb(item: item) == .edited
     }
 
+    private var opensDiffDirectly: Bool {
+        isFileChangeStep && !hasAttachmentSummary
+    }
+
+    private var hasAttachmentSummary: Bool {
+        (summary?.attachmentCount ?? 0) > 0
+            || summary?.attachments?.isEmpty == false
+    }
+
+    private var hasOutputContent: Bool {
+        toolCall?.command != nil
+            || summary?.commandPreview != nil
+            || toolCall?.query != nil
+            || summary?.queryPreview != nil
+            || toolCall?.output != nil
+            || summary?.outputPreview != nil
+            || toolCall?.error != nil
+            || summary?.errorPreview != nil
+            || metadata != nil
+    }
+
     /// Expandable only when there is genuinely more to show; a bare read
     /// with no output would otherwise expand into an empty box.
     private var hasExpandableContent: Bool {
@@ -2507,6 +2674,7 @@ private struct ChatActivityItemRow: View {
             || summary?.queryPreview != nil
             || summary?.outputPreview != nil
             || summary?.errorPreview != nil
+            || hasAttachmentSummary
     }
 
     private func openDiff() async {
@@ -2666,6 +2834,7 @@ private struct ChatMessageRow: View {
     let messageID: String
     let text: String
     let role: String
+    let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
     let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
@@ -2696,10 +2865,12 @@ private struct ChatMessageRow: View {
                 }
             }
 
+            if let annotations, !annotations.isEmpty {
+                ChatMessageAnnotationsView(annotations: annotations)
+            }
+
             if let attachments, !attachments.isEmpty {
-                Text(attachments.map { $0.name ?? $0.kind }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .padding(
@@ -2921,7 +3092,8 @@ private struct ChatPromptQueueView: View {
                     model: model,
                     promptID: prompt.id,
                     text: prompt.text,
-                    attachmentCount: prompt.attachments.count
+                    attachmentCount: prompt.attachments.count,
+                    annotationCount: prompt.annotations.count
                 )
             }
         }
@@ -2942,14 +3114,21 @@ private struct QueuedPromptRow: View {
     let promptID: String
     let text: String
     let attachmentCount: Int
+    let annotationCount: Int
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.turn.down.right")
                 .foregroundStyle(.secondary)
 
-            promptLabel
-                .lineLimit(1)
+            Text(
+                Self.summary(
+                    text: text,
+                    attachmentCount: attachmentCount,
+                    annotationCount: annotationCount
+                )
+            )
+            .lineLimit(1)
 
             Spacer()
 
@@ -2971,11 +3150,19 @@ private struct QueuedPromptRow: View {
         .padding(.vertical, 10)
     }
 
-    private var promptLabel: Text {
-        if text.isEmpty {
-            return Text("^[\(attachmentCount) attachment](inflect: true)")
+    private static func summary(
+        text: String,
+        attachmentCount: Int,
+        annotationCount: Int
+    ) -> String {
+        if !text.isEmpty { return text }
+        if annotationCount > 0, attachmentCount > 0 {
+            return "\(annotationCount) annotation(s) · \(attachmentCount) attachment(s)"
         }
-        return Text(text)
+        if annotationCount > 0 {
+            return "\(annotationCount) annotation(s)"
+        }
+        return "\(attachmentCount) attachment(s)"
     }
 }
 

@@ -7,7 +7,7 @@ import SwiftUI
 final class ChatPromptModel {
     let store: ThreadStore
     let threadID: String
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
 
     var text: String {
         didSet {
@@ -16,8 +16,12 @@ final class ChatPromptModel {
     }
     private(set) var isSending = false
     private(set) var isInterrupting = false
+    private(set) var isForking = false
+    private(set) var isRetryingFailedTurn = false
     private(set) var settingConfigOptionIDs: Set<String> = []
     private(set) var errorMessage: String?
+
+    private var retryRequestedTurnID: String?
 
     private let draftStore: ThreadDraftStore
     private let attachmentsModel = ComposerAttachmentsModel()
@@ -26,7 +30,7 @@ final class ChatPromptModel {
         self.store = store
         self.draftStore = draftStore
         self.threadID = threadID
-        workspaceFilePicker = WorkspaceFilePickerModel(
+        promptCompletion = PromptCompletionModel(
             store: store,
             scope: .thread(id: threadID)
         )
@@ -45,15 +49,45 @@ final class ChatPromptModel {
     }
 
     var canSend: Bool {
+        canSend(annotations: [])
+    }
+
+    func canSend(annotations: [ChatPendingAnnotation]) -> Bool {
         store.connectionState == .connected
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !attachments.isEmpty)
+                || !attachments.isEmpty
+                || !annotations.isEmpty)
             && attachments.allSatisfy { !$0.isProcessing }
             && !isSending
     }
 
     var isPromptEnabled: Bool {
         store.connectionState == .connected && !isSending
+    }
+
+    var showsFailedTurnRetry: Bool {
+        store.failedTurnID(for: threadID) != nil
+    }
+
+    var canRetryFailedTurn: Bool {
+        guard let failedTurnID = store.failedTurnID(for: threadID) else { return false }
+        return store.connectionState == .connected
+            && retryRequestedTurnID != failedTurnID
+            && !isSending
+            && !isRetryingFailedTurn
+    }
+
+    var failedTurnError: String? {
+        store.failedTurnError(for: threadID)
+    }
+
+    var canForkThread: Bool {
+        store.connectionState == .connected
+            && store.threadSupportsFork(threadID)
+            && !store.threadIsRunning(threadID)
+            && !isSending
+            && !isForking
+            && !isRetryingFailedTurn
     }
 
     var isErrorPresented: Bool {
@@ -79,12 +113,14 @@ final class ChatPromptModel {
         }
     }
 
-    func send() async {
+    func send(annotations annotationModel: ChatAnnotationModel? = nil) async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
-        guard canSend else { return }
+        let submittedAnnotations = annotationModel?.annotations ?? []
+        let submittedAnnotationIDs = Set(submittedAnnotations.map(\.id))
+        guard canSend(annotations: submittedAnnotations) else { return }
 
         isSending = true
         defer { isSending = false }
@@ -93,13 +129,15 @@ final class ChatPromptModel {
             try await store.submitTurn(
                 threadID: threadID,
                 text: submittedText,
-                attachments: submittedAttachments.compactMap(\.attachment)
+                attachments: submittedAttachments.compactMap(\.attachment),
+                annotations: submittedAnnotations.map(\.promptAnnotation)
             )
             if text == submittedDraft,
                draftStore.text(for: threadID) == submittedDraft {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
+            annotationModel?.removeSent(ids: submittedAnnotationIDs)
         } catch is CancellationError {
             return
         } catch {
@@ -138,6 +176,41 @@ final class ChatPromptModel {
         } catch is CancellationError {
             return
         } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func forkThread() async -> String? {
+        guard canForkThread else { return nil }
+
+        isForking = true
+        defer { isForking = false }
+
+        do {
+            return try await store.forkThread(threadID)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func retryFailedTurn() async {
+        guard canRetryFailedTurn,
+            let failedTurnID = store.failedTurnID(for: threadID)
+        else { return }
+
+        retryRequestedTurnID = failedTurnID
+        isRetryingFailedTurn = true
+        defer { isRetryingFailedTurn = false }
+
+        do {
+            try await store.retryFailedTurn(threadID: threadID)
+        } catch is CancellationError {
+            retryRequestedTurnID = nil
+        } catch {
+            retryRequestedTurnID = nil
             errorMessage = error.localizedDescription
         }
     }

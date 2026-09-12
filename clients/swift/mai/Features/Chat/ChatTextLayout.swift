@@ -425,6 +425,8 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
 /// The optional callback is the narrow extension point for selection-based
 /// actions and annotations; normal rows pay no delegate-callback cost.
 struct ChatSelectableText: UIViewRepresentable {
+    @Environment(\.chatAnnotationContext) private var annotationContext
+
     let layoutID: String
     let source: String
     let style: ChatTextLayoutStyle
@@ -442,8 +444,9 @@ struct ChatSelectableText: UIViewRepresentable {
     func updateUIView(_ uiView: ChatSelectableTextHostView, context: Context) {
         context.coordinator.layoutID = layoutID
         context.coordinator.onSelectionChange = onSelectionChange
+        context.coordinator.annotationContext = annotationContext
         uiView.selectionDelegate =
-            onSelectionChange == nil
+            onSelectionChange == nil && annotationContext == nil
             ? nil
             : context.coordinator
         uiView.update(
@@ -464,6 +467,7 @@ struct ChatSelectableText: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var layoutID = ""
         var onSelectionChange: ((ChatTextSelection?) -> Void)?
+        var annotationContext: ChatAnnotationContext?
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard let onSelectionChange else { return }
@@ -482,6 +486,47 @@ struct ChatSelectableText: UIViewRepresentable {
                         from: range
                     ).string
                 )
+            )
+        }
+
+        func textView(
+            _ textView: UITextView,
+            editMenuForTextInRanges ranges: [NSValue],
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            guard let annotationContext,
+                let range = ranges.first?.rangeValue,
+                let selection = selection(in: textView, range: range)
+            else {
+                return UIMenu(children: suggestedActions)
+            }
+
+            let comment = UIAction(
+                title: "Comment…",
+                image: UIImage(systemName: "text.bubble")
+            ) { _ in
+                annotationContext.model.beginComment(
+                    quote: selection.text,
+                    messageID: annotationContext.messageID,
+                    role: annotationContext.role
+                )
+            }
+            return UIMenu(children: suggestedActions + [comment])
+        }
+
+        private func selection(
+            in textView: UITextView,
+            range: NSRange
+        ) -> ChatTextSelection? {
+            guard range.length > 0,
+                NSMaxRange(range) <= textView.attributedText.length
+            else { return nil }
+            return ChatTextSelection(
+                layoutID: layoutID,
+                range: range,
+                text: textView.attributedText.attributedSubstring(
+                    from: range
+                ).string
             )
         }
     }

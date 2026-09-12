@@ -316,7 +316,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 	}
 	ts.reasoning = append(ts.reasoning, event.Payload.Delta...)
 	ts.reasoningPending = append(ts.reasoningPending, event.Payload.Delta...)
-	ts.reasoningAttachments = append(ts.reasoningAttachments, event.Payload.Attachments...)
+	ts.reasoningAttachments = append(ts.reasoningAttachments, cloneAttachments(event.Payload.Attachments)...)
 	ts.reasoningActive = true
 	itemID := reasoningItemID(event, ts.reasoningSegment)
 	var full *reasoningPayload
@@ -324,7 +324,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 		// Non-text content (ACP thought chunks are full ContentBlocks) flushes
 		// immediately as the COMPLETE replacement payload, so an attachment is
 		// never hidden until the settle checkpoint.
-		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: append([]provider.Attachment(nil), ts.reasoningAttachments...)}
+		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: cloneAttachments(ts.reasoningAttachments)}
 		ts.reasoningPending = ts.reasoningPending[:0]
 	}
 	i.mu.Unlock()
@@ -390,6 +390,12 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	}
 	if event.Payload.ItemType == provider.ItemKindAssistantMessage {
 		i.ingestAssistantMessageStatus(event, createdAt, status)
+		return
+	}
+	if event.Payload.ItemType == provider.ItemKindReasoning {
+		if status != "" && status != provider.ItemStatusInProgress {
+			i.settleReasoning(event, status, createdAt)
+		}
 		return
 	}
 	kind := event.Payload.ItemType
@@ -527,6 +533,9 @@ func (i *ProviderRuntimeIngestion) ingestConfigOptions(event provider.RuntimeEve
 func (i *ProviderRuntimeIngestion) ingestThreadMetadata(event provider.RuntimeEvent, createdAt time.Time) {
 	if event.Payload.SlashCommands != nil {
 		i.record(EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{SlashCommands: event.Payload.SlashCommands}})
+	}
+	if event.Payload.Skills != nil {
+		i.record(EventInput{Type: EventThreadSkillsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Skills: event.Payload.Skills}})
 	}
 	if event.Payload.Title != "" {
 		i.record(EventInput{Type: EventThreadMetaUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Title: event.Payload.Title}})

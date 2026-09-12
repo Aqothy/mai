@@ -31,6 +31,7 @@ const (
 	MethodProviderImportSession      = "provider.importSession"
 	MethodProviderDeleteSession      = "provider.deleteSession"
 	MethodProviderCloseSession       = "provider.closeSession"
+	MethodProviderForkThread         = "provider.forkThread"
 	MethodProviderOptionsGet         = "provider.options.get"
 	MethodProviderOptionsSet         = "provider.options.set"
 	MethodProviderOptionsUpdated     = "provider.options.updated"
@@ -71,13 +72,16 @@ type Plan = orchestration.Plan
 
 // Client-visible provider types.
 type InstanceInfo = provider.InstanceInfo
+type AuthenticationResult = provider.AuthenticationResult
 type SessionSummary = provider.SessionSummary
 type Attachment = provider.Attachment
+type PromptAnnotation = provider.PromptAnnotation
 type ModelSelection = provider.ModelSelection
 type ConfigOption = provider.ConfigOption
 type ConfigChoice = provider.ConfigChoice
 type ConfigOptionSelection = provider.ConfigOptionSelection
 type SlashCommand = provider.SlashCommand
+type Skill = provider.Skill
 type TokenUsage = provider.TokenUsage
 type ApprovalOption = provider.ApprovalOption
 
@@ -109,6 +113,11 @@ type ACPCustomAgentAddParams struct {
 type ProviderAuthenticateParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	MethodID   string              `json:"methodId"`
+	Secret     string              `json:"secret,omitempty"`
+}
+
+type ProviderForkThreadParams struct {
+	SourceThreadID orchestration.ThreadID `json:"sourceThreadId"`
 }
 
 type ProviderInstanceParams struct {
@@ -149,6 +158,7 @@ type ProviderOptionsSetParams struct {
 type ProviderOptionsResult struct {
 	OptionsSessionID string                  `json:"optionsSessionId"`
 	ConfigOptions    []provider.ConfigOption `json:"configOptions"`
+	Skills           []provider.Skill        `json:"skills,omitempty"`
 }
 
 type ProviderOptionsInvalidated struct {

@@ -260,6 +260,12 @@
         "name": {
           "type": "string"
         },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
         "mimeType": {
           "type": "string"
         },
@@ -268,6 +274,18 @@
         },
         "uri": {
           "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "annotations": {
+          "$ref": "#/$defs/ContentAnnotations"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "resourceMeta": {
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -293,6 +311,28 @@
       "type": "object",
       "title": "Auth"
     },
+    "AuthChallenge": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "loginId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "userCode": {
+          "type": "string"
+        },
+        "verificationUrl": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "AuthChallenge"
+    },
     "AuthMethod": {
       "properties": {
         "id": {
@@ -303,6 +343,12 @@
         },
         "description": {
           "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "requiresSecret": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -312,15 +358,46 @@
       ],
       "title": "AuthMethod"
     },
+    "AuthenticationResult": {
+      "properties": {
+        "instance": {
+          "$ref": "#/$defs/InstanceInfo"
+        },
+        "challenge": {
+          "$ref": "#/$defs/AuthChallenge"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ],
+      "title": "AuthenticationResult"
+    },
     "Capabilities": {
       "properties": {
         "sessionList": {
+          "type": "boolean"
+        },
+        "sessionDelete": {
+          "type": "boolean"
+        },
+        "sessionClose": {
           "type": "boolean"
         },
         "loadReplay": {
           "type": "boolean"
         },
         "resume": {
+          "type": "boolean"
+        },
+        "additionalDirectories": {
+          "type": "boolean"
+        },
+        "fork": {
+          "type": "boolean"
+        },
+        "skills": {
           "type": "boolean"
         },
         "auth": {
@@ -369,6 +446,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
         },
@@ -416,6 +499,12 @@
             "$ref": "#/$defs/Attachment"
           },
           "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -431,6 +520,15 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "groupLabel": {
           "type": "string"
         }
       },
@@ -491,6 +589,28 @@
         "value"
       ],
       "title": "ConfigOptionSelection"
+    },
+    "ContentAnnotations": {
+      "properties": {
+        "audience": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "lastModified": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ContentAnnotations"
     },
     "DispatchResult": {
       "properties": {
@@ -577,6 +697,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "session": {
           "$ref": "#/$defs/SessionBinding"
         },
@@ -595,6 +721,12 @@
         "attachments": {
           "items": {
             "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
           },
           "type": "array"
         },
@@ -640,6 +772,12 @@
         "slashCommands": {
           "items": {
             "$ref": "#/$defs/SlashCommand"
+          },
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
           },
           "type": "array"
         },
@@ -844,6 +982,12 @@
           },
           "type": "array"
         },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
+        },
         "turnId": {
           "type": "string"
         },
@@ -918,6 +1062,32 @@
       ],
       "title": "PlanEntry"
     },
+    "PromptAnnotation": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "quote"
+      ],
+      "title": "PromptAnnotation"
+    },
     "PromptContentCapabilities": {
       "properties": {
         "image": {
@@ -941,6 +1111,9 @@
         },
         "methodId": {
           "type": "string"
+        },
+        "secret": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -950,6 +1123,19 @@
         "methodId"
       ],
       "title": "ProviderAuthenticateParams"
+    },
+    "ProviderForkThreadParams": {
+      "properties": {
+        "sourceThreadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sourceThreadId"
+      ],
+      "title": "ProviderForkThreadParams"
     },
     "ProviderImportSessionParams": {
       "properties": {
@@ -1054,6 +1240,12 @@
             "$ref": "#/$defs/ConfigOption"
           },
           "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -1137,6 +1329,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "status": {
           "type": "string"
         },
@@ -1155,6 +1353,12 @@
         "slashCommands": {
           "items": {
             "$ref": "#/$defs/SlashCommand"
+          },
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
           },
           "type": "array"
         },
@@ -1190,6 +1394,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "updatedAt": {
           "type": "string"
         }
@@ -1201,6 +1411,35 @@
       ],
       "title": "SessionSummary"
     },
+    "Skill": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "shortDescription": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "title": "Skill"
+    },
     "SlashCommand": {
       "properties": {
         "name": {
@@ -1211,6 +1450,9 @@
         },
         "hasInput": {
           "type": "boolean"
+        },
+        "inputHint": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1539,6 +1781,12 @@
         "cwd": {
           "type": "string"
         },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "session": {
           "$ref": "#/$defs/SessionBinding"
         },
@@ -1607,6 +1855,12 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "latestTurn": {
           "$ref": "#/$defs/Turn"
@@ -2156,11 +2410,17 @@
         "instanceInfo": {
           "$ref": "#/$defs/InstanceInfo"
         },
+        "authenticationResult": {
+          "$ref": "#/$defs/AuthenticationResult"
+        },
         "sessionSummary": {
           "$ref": "#/$defs/SessionSummary"
         },
         "attachment": {
           "$ref": "#/$defs/Attachment"
+        },
+        "promptAnnotation": {
+          "$ref": "#/$defs/PromptAnnotation"
         },
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
@@ -2177,6 +2437,9 @@
         "slashCommand": {
           "$ref": "#/$defs/SlashCommand"
         },
+        "skill": {
+          "$ref": "#/$defs/Skill"
+        },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
         },
@@ -2191,6 +2454,9 @@
         },
         "providerAuthenticateParams": {
           "$ref": "#/$defs/ProviderAuthenticateParams"
+        },
+        "providerForkThreadParams": {
+          "$ref": "#/$defs/ProviderForkThreadParams"
         },
         "providerInstanceParams": {
           "$ref": "#/$defs/ProviderInstanceParams"
@@ -2313,18 +2579,22 @@
         "timelineEntry",
         "plan",
         "instanceInfo",
+        "authenticationResult",
         "sessionSummary",
         "attachment",
+        "promptAnnotation",
         "modelSelection",
         "configOption",
         "configChoice",
         "configOptionSelection",
         "slashCommand",
+        "skill",
         "tokenUsage",
         "approvalOption",
         "providerStartParams",
         "acpRegistryStartParams",
         "providerAuthenticateParams",
+        "providerForkThreadParams",
         "providerInstanceParams",
         "providerListSessionsParams",
         "providerSessionParams",
