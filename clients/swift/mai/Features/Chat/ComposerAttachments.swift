@@ -100,11 +100,7 @@ final class ComposerAttachmentsModel {
     }
 
     func addCameraImage(_ thumbnail: ChatComposerThumbnail) {
-        guard ensureImagesAllowed() else { return }
-        guard attachments.count < ChatAttachmentLoader.maximumAttachmentCount else {
-            reportError(Self.limitMessage)
-            return
-        }
+        guard availableCountForAddingImages() != nil else { return }
 
         let id = UUID()
         let name = "camera-\(UUID().uuidString).jpg"
@@ -124,16 +120,11 @@ final class ComposerAttachmentsModel {
         attachments.removeAll { ids.contains($0.id) }
     }
 
-    private func ensureImagesAllowed() -> Bool {
+    private func availableCountForAddingImages() -> Int? {
         guard canAttachImages() else {
             reportError(Self.unsupportedMessage)
-            return false
+            return nil
         }
-        return true
-    }
-
-    private func availableCountForAddingImages() -> Int? {
-        guard ensureImagesAllowed() else { return nil }
         let availableCount = max(
             0,
             ChatAttachmentLoader.maximumAttachmentCount - attachments.count

@@ -354,7 +354,7 @@
     /// recycling stays with each host view on macOS: every host owns one
     /// NSTextView for its lifetime, so there is one reuse lifecycle to
     /// reason about.
-    final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
+    @MainActor final class ChatTextLayoutStore {
         private struct Key: Hashable, Sendable {
             let id: String
             let width: CGFloat
@@ -424,7 +424,7 @@
                 style: style,
                 width: width
             )
-            insert(layout, source: source, style: style, for: key)
+            entries[key] = Entry(source: source, style: style, layout: layout)
             return layout
         }
 
@@ -698,12 +698,16 @@
                 worker.cancel()
             }
             for (item, layout) in zip(pending, layouts) {
-                finishPreparation(
-                    layout,
-                    source: item.request.source,
-                    style: item.request.style,
-                    key: item.key
-                )
+                inFlightKeys.remove(item.key)
+                if entries[item.key]?.source != item.request.source
+                    || entries[item.key]?.style != item.request.style
+                {
+                    entries[item.key] = Entry(
+                        source: item.request.source,
+                        style: item.request.style,
+                        layout: layout
+                    )
+                }
             }
             // Unbuilt claims must not block future preparation for these rows.
             for item in pending.dropFirst(layouts.count) {
@@ -732,30 +736,6 @@
             return pending
         }
 
-        private func finishPreparation(
-            _ layout: ChatTextLayout,
-            source: String,
-            style: ChatTextLayoutStyle,
-            key: Key
-        ) {
-            inFlightKeys.remove(key)
-            guard entries[key]?.source != source || entries[key]?.style != style
-            else { return }
-            insert(layout, source: source, style: style, for: key)
-        }
-
-        private func insert(
-            _ layout: ChatTextLayout,
-            source: String,
-            style: ChatTextLayoutStyle,
-            for key: Key
-        ) {
-            entries[key] = Entry(
-                source: source,
-                style: style,
-                layout: layout
-            )
-        }
     }
 
     /// Native macOS range selection for settled prose. The optional callback

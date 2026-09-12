@@ -181,8 +181,6 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 	return nil
 }
 
-func (h *Instance) agent() *acp.AgentPeer { return h.agentPeer }
-
 func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
 	title := "Mai Daemon"
 	initReq := schema.InitializeRequest{
@@ -196,7 +194,7 @@ func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeR
 		},
 		ClientInfo: &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
-	initResp, err := h.agent().Initialize(ctx, initReq)
+	initResp, err := h.agentPeer.Initialize(ctx, initReq)
 	if err != nil {
 		return schema.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", acpRequestError(err))
 	}
@@ -229,7 +227,7 @@ func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	_, err = h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
+	_, err = h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
@@ -244,7 +242,7 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	if !h.Info().Capabilities.Logout {
 		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
 	}
-	_, err := h.agent().Logout(ctx, schema.LogoutRequest{})
+	_, err := h.agentPeer.Logout(ctx, schema.LogoutRequest{})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}

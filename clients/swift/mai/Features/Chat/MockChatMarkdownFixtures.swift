@@ -773,17 +773,6 @@ enum MockChatStreamProfile: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var renderThrottle: Duration {
-        switch self {
-        case .rapidBurst, .readableTokens:
-            .milliseconds(50)
-        case .daemonCadence:
-            .milliseconds(100)
-        case .slowInspection:
-            .milliseconds(250)
-        }
-    }
-
     /// Repeating character counts. Every pattern starts with one character
     /// so a source beginning with `##`, `**`, or ``` enters an incomplete
     /// delimiter state before its next chunk arrives.
@@ -813,7 +802,7 @@ enum MockChatMarkdownStream {
         let pattern = profile.chunkPattern
         let averageChunkSize = pattern.reduce(0, +) / pattern.count
         var result = [String]()
-        result.reserveCapacity(source.count / max(1, averageChunkSize) + 1)
+        result.reserveCapacity(source.count / averageChunkSize + 1)
 
         var lowerBound = source.startIndex
         var patternIndex = 0
@@ -832,13 +821,4 @@ enum MockChatMarkdownStream {
         return result
     }
 
-    static func reconstructedSource(from chunks: some Sequence<String>) -> String {
-        chunks.reduce(into: "") { source, chunk in
-            source.append(contentsOf: chunk)
-        }
-    }
-
-    static func append(_ chunk: String, to source: inout String) {
-        source.append(contentsOf: chunk)
-    }
 }

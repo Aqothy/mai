@@ -497,7 +497,7 @@ private struct ChatWorkspaceFilePickerOverlay: View {
     }
 }
 
-private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
+struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
     let composer: Composer
 
     @ViewBuilder
@@ -708,9 +708,7 @@ struct ChatTimeline: View {
                 timelineContent(
                     rows: rows,
                     effectiveStreamingTurnID: effectiveStreamingTurnID,
-                    hasEarlierSections: hasEarlierSections,
-                    showsHistoryMarker: true,
-                    showsPlan: !hasEarlierSections
+                    hasEarlierSections: hasEarlierSections
                 )
             }
             .listStyle(.plain)
@@ -1094,11 +1092,9 @@ struct ChatTimeline: View {
     private func timelineContent(
         rows: [ChatTimelineRenderRow],
         effectiveStreamingTurnID: String?,
-        hasEarlierSections: Bool,
-        showsHistoryMarker: Bool,
-        showsPlan: Bool
+        hasEarlierSections: Bool
     ) -> some View {
-        if showsHistoryMarker, hasEarlierSections {
+        if hasEarlierSections {
             Color.clear
                 .frame(height: ChatTimelineMetrics.historyMarkerHeight)
                 .id(Self.historyMarkerID)
@@ -1106,7 +1102,7 @@ struct ChatTimeline: View {
                 .listRowSeparator(.hidden)
         }
 
-        if showsPlan, let plan, !plan.entries.isEmpty {
+        if !hasEarlierSections, let plan, !plan.entries.isEmpty {
             ChatPlanRow(plan: plan)
                 .padding(.vertical, 10)
                 .frame(
@@ -1319,7 +1315,7 @@ struct ChatTimeline: View {
         timelineRows: [ChatTimelineRowModel],
         streamingTurnID: String?,
         segmentCache: ChatMarkdownSegmentCache,
-        textLayoutStore: any ChatNativeTextLayoutStore,
+        textLayoutStore: ChatTextLayoutStore,
         rowWidth: CGFloat,
         codeTheme: ChatCodeHighlightTheme
     ) async {
@@ -2216,7 +2212,7 @@ private struct ChatActivityGroupRow: View {
                                 : AnyShapeStyle(.secondary)
                         )
 
-                    summaryText
+                    Text(group.summary)
                         .lineLimit(1)
 
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -2245,14 +2241,11 @@ private struct ChatActivityGroupRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var summaryText: Text {
-        Text(group.summary)
-    }
-
     /// A single-step group shows its specific work instead of an aggregate.
-    static func singleItemText(_ item: Item, fallback: String) -> Text {
+    static func itemLineText(_ item: Item) -> Text {
         let summary = item.toolCallSummary
-        switch ChatActivityVerb(item: item) {
+        let verb = ChatActivityVerb(item: item)
+        switch verb {
         case .ranCommand:
             if let command = summary?.commandPreview, !command.isEmpty {
                 return Text("Ran ") + monospaced(command)
@@ -2283,17 +2276,8 @@ private struct ChatActivityGroupRow: View {
         if let title = item.title, !title.isEmpty {
             return Text(title)
         }
-        return Text(fallback)
-    }
-
-    /// The one-line label for a step, shared by the group summary and the
-    /// expanded per-step rows so both read identically.
-    static func itemLineText(_ item: Item) -> Text {
-        singleItemText(
-            item,
-            fallback: ChatActivityVerb(item: item)
-                .phrase(count: 1, toolName: item.toolCallSummary?.name)
-                .capitalizedFirst
+        return Text(
+            verb.phrase(count: 1, toolName: summary?.name).capitalizedFirst
         )
     }
 
@@ -2370,7 +2354,7 @@ private struct ChatActivityItemRow: View {
                 set: { if !$0 { presentedChanges = nil } }
             )
         ) {
-            ChatStepDiffSheet(changes: presentedChanges ?? [])
+            UnifiedDiffView(changes: presentedChanges ?? [])
                 .presentationDragIndicator(.visible)
         }
         .onChange(of: item.sequence) { _, _ in
@@ -2574,15 +2558,6 @@ private struct ChatStepOutputBox: View {
             return (text, false)
         }
         return (String(text[..<end]), end != text.endIndex)
-    }
-}
-
-/// Presents a tool step's captured file changes in the shared diff viewer.
-private struct ChatStepDiffSheet: View {
-    let changes: [FileChange]
-
-    var body: some View {
-        UnifiedDiffView(changes: changes)
     }
 }
 
@@ -2803,11 +2778,6 @@ private enum ChatTimelineText {
         value.replacing("_", with: " ").replacing("-", with: " ").capitalized
     }
 
-    static func encoded<T: Encodable>(_ value: T) -> String? {
-        guard let data = try? newJSONEncoder().encode(value) else { return nil }
-        return String(decoding: data, as: UTF8.self)
-    }
-
     static func encoded(_ value: Any) -> String {
         if let string = value as? String { return string }
         guard JSONSerialization.isValidJSONObject(value),
@@ -2822,7 +2792,7 @@ private enum ChatTimelineText {
     }
 }
 
-private struct ChatEndMarker: View {
+struct ChatEndMarker: View {
     var body: some View {
         Color.clear
             .frame(height: 24)
@@ -2830,7 +2800,7 @@ private struct ChatEndMarker: View {
     }
 }
 
-private struct ChatScrollToBottomButton: View {
+struct ChatScrollToBottomButton: View {
     let scrollState: ChatScrollState
     let scrollToBottom: () -> Void
 

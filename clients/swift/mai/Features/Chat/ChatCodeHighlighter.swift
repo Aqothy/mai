@@ -86,7 +86,7 @@ actor ChatCodeHighlighter {
         mutable.removeAttribute(.backgroundColor, range: range)
         mutable.removeAttribute(.paragraphStyle, range: range)
         let value = AttributedString(mutable)
-        insert(value, code: code, for: key)
+        insert(value, for: key)
         return value
     }
 
@@ -99,15 +99,13 @@ actor ChatCodeHighlighter {
 
     private func insert(
         _ value: AttributedString,
-        code: String,
         for key: Key
     ) {
         let entry = Entry(
             value: value,
-            retainedBytes: Self.estimatedRetainedBytes(
-                code: code,
-                value: value
-            )
+            retainedBytes: key.code.utf8.count * 2
+                + value.characters.count * 2
+                + value.runs.count * 96
         )
         guard entry.retainedBytes <= Self.maximumRetainedBytes else { return }
 
@@ -124,15 +122,6 @@ actor ChatCodeHighlighter {
             }
             retainedBytes -= removed.retainedBytes
         }
-    }
-
-    private static func estimatedRetainedBytes(
-        code: String,
-        value: AttributedString
-    ) -> Int {
-        code.utf8.count * 2
-            + value.characters.count * 2
-            + value.runs.count * 96
     }
 
     private func configuredHighlighter(

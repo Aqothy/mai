@@ -162,8 +162,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                 in: NSRange(location: output.length - 1, length: 1)
             )
         }
-        return output.copy() as? NSAttributedString
-            ?? NSAttributedString(attributedString: output)
+        return NSAttributedString(attributedString: output)
     }
 
     private mutating func append(
@@ -177,17 +176,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
             + ChatMarkdownProseStyle.quoteIndent
 
         for child in quote.children {
-            if let paragraph = child as? Paragraph {
-                appendParagraph(
-                    inlineText(paragraph.children, style: inlineStyle(quoted)),
-                    firstLineIndent: quoted.indent,
-                    remainingLineIndent: quoted.indent,
-                    quoteBarOffsets: quoted.quoteBarOffsets,
-                    spacingBefore: quoted.blockSpacing
-                )
-            } else {
-                append(block: child, environment: quoted)
-            }
+            append(block: child, environment: quoted)
         }
     }
 

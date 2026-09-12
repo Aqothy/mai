@@ -1,13 +1,11 @@
 import SwiftUI
 
 struct SessionImportView: View {
-    let store: ThreadStore
     let openThread: (String) -> Void
 
     @State private var model: SessionImportModel
 
     init(store: ThreadStore, openThread: @escaping (String) -> Void) {
-        self.store = store
         self.openThread = openThread
         _model = State(initialValue: SessionImportModel(store: store))
     }
@@ -15,7 +13,6 @@ struct SessionImportView: View {
     #if DEBUG
         init(store: ThreadStore, model: SessionImportModel, openThread: @escaping (String) -> Void)
         {
-            self.store = store
             self.openThread = openThread
             _model = State(initialValue: model)
         }

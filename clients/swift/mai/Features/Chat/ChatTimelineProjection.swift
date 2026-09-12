@@ -7,8 +7,7 @@ import Foundation
 /// refresh snapshots replace entries wholesale. The session reports the
 /// lowest index each event changed, so steady-state streaming reprojects only
 /// the changed suffix instead of re-walking every historical entry on the
-/// main thread for each structural event (about 5 ms per event at 2,500
-/// entries and 20 ms at 10,000 in a debug build).
+/// main thread for each structural event.
 ///
 /// Reuse is exact, not heuristic: `invalidate(from:)` lowers the watermark
 /// and `invalidateAll()` forces a full rebuild. The projection owns the

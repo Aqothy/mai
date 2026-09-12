@@ -49,27 +49,15 @@ private struct ACPRegistryIcon: View {
     var body: some View {
         Group {
             if let iconURL {
-                ACPRegistryIconContent(iconURL: iconURL)
+                ACPRegistrySVGIcon(iconURL: iconURL)
             } else {
-                fallbackGlyph
+                Image(systemName: "puzzlepiece.extension")
+                    .imageScale(.large)
             }
         }
         .frame(width: 28, height: 28)
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
-    }
-}
-
-private var fallbackGlyph: some View {
-    Image(systemName: "puzzlepiece.extension")
-        .imageScale(.large)
-}
-
-private struct ACPRegistryIconContent: View {
-    let iconURL: URL
-
-    var body: some View {
-        ACPRegistrySVGIcon(iconURL: iconURL)
     }
 }
 

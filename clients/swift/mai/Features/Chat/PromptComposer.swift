@@ -73,8 +73,6 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 text: $text,
                 isEnabled: isEnabled,
                 focusID: focusID,
-                canSend: canSend,
-                send: send,
                 textChanged: updateWorkspaceFilePicker,
                 moveWorkspaceFileSelection: moveWorkspaceFileSelection,
                 selectWorkspaceFile: selectWorkspaceFile,
@@ -183,8 +181,6 @@ private struct DraftPromptEditor: View {
 
     let isEnabled: Bool
     let focusID: String?
-    let canSend: Bool
-    let send: () -> Void
     let textChanged: (String, String) -> Void
     let moveWorkspaceFileSelection: (Int) -> Bool
     let selectWorkspaceFile: () -> Bool

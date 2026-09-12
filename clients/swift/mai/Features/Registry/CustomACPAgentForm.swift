@@ -237,15 +237,9 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
 
 @Observable
 private final class CustomACPEnvironmentVariable: Identifiable {
-    let id: UUID
-    var key: String
-    var value: String
-
-    init(id: UUID = UUID(), key: String = "", value: String = "") {
-        self.id = id
-        self.key = key
-        self.value = value
-    }
+    let id = UUID()
+    var key = ""
+    var value = ""
 }
 
 private struct CustomACPEnvironmentVariableRow: View {

@@ -151,14 +151,7 @@ final class RPCClient {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(value)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw RPCError(
-                code: nil,
-                message: "Could not encode the JSON-RPC request",
-                data: nil
-            )
-        }
-        return text
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func sendRequestAndWaitForResponse<Params: Encodable>(
@@ -219,14 +212,7 @@ final class RPCClient {
 
                 switch message {
                 case .string(let text):
-                    guard let textData = text.data(using: .utf8) else {
-                        throw RPCError(
-                            code: nil,
-                            message: "maiD sent invalid UTF-8",
-                            data: nil
-                        )
-                    }
-                    data = textData
+                    data = Data(text.utf8)
                 case .data:
                     throw RPCError(
                         code: nil,
@@ -301,14 +287,7 @@ final class RPCClient {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(value)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw RPCError(
-                code: nil,
-                message: "Could not encode the JSON-RPC notification",
-                data: nil
-            )
-        }
-        return text
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func finishConnection(_ socket: URLSessionWebSocketTask, error: Error?) {

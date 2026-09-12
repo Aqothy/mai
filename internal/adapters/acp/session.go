@@ -53,7 +53,7 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	if cwd == "" {
 		return provider.OptionsSession{}, fmt.Errorf("provider options session requires cwd")
 	}
-	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agentPeer.NewSession(ctx, schema.NewSessionRequest{CWD: cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		return provider.OptionsSession{}, acpRequestError(err)
 	}
@@ -65,7 +65,7 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 		// The fresh session was never exposed; close it best-effort rather than
 		// leaking it in the agent process.
 		if h.sessionCapabilities().Close != nil {
-			_, _ = h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)})
+			_, _ = h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)})
 		}
 		return provider.OptionsSession{}, err
 	}
@@ -104,7 +104,7 @@ func (h *Instance) CloseOptionsSession(ctx context.Context, handle string) error
 	}
 	var closeErr error
 	if h.sessionCapabilities().Close != nil {
-		if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(handle)}); err != nil {
+		if _, err := h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(handle)}); err != nil {
 			closeErr = acpRequestError(err)
 		}
 	}
@@ -196,7 +196,7 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		// do not silently lose provider context.
 	}
 
-	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agentPeer.NewSession(ctx, schema.NewSessionRequest{CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		return provider.StartSessionResult{}, acpRequestError(err)
 	}
@@ -227,7 +227,7 @@ func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionI
 	}
 	stream, _ := h.ensureSessionStream(sessionID)
 	h.beginSessionLoad(sessionID)
-	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agentPeer.LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		h.unbindSessionID(sessionID)
 		return provider.StartSessionResult{}, acpRequestError(err)
@@ -376,14 +376,14 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 	h.mu.Unlock()
 	if idle {
 		if h.sessionCapabilities().Close != nil {
-			if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+			if _, err := h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
 				return acpRequestError(err)
 			}
 		}
 		h.unbindSessionID(sessionID)
 		return nil
 	}
-	if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
+	if err := h.agentPeer.Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 		// Keep both the binding and live turn state so callers can retry
 		// cancellation without the adapter reporting a cancellation that the
 		// agent never received.
@@ -413,7 +413,7 @@ func (h *Instance) ListSessions(ctx context.Context, cwd string) ([]provider.Ses
 	var sessions []provider.SessionSummary
 	seenCursors := make(map[string]struct{})
 	for {
-		resp, err := h.agent().ListSessions(ctx, req)
+		resp, err := h.agentPeer.ListSessions(ctx, req)
 		if err != nil {
 			return nil, acpRequestError(err)
 		}
@@ -437,7 +437,7 @@ func (h *Instance) DeleteSession(ctx context.Context, sessionID string) error {
 	if threadID := h.threadIDForSession(sessionID); threadID != "" {
 		return fmt.Errorf("cannot delete ACP session %q while it is bound to thread %q", sessionID, threadID)
 	}
-	if _, err := h.agent().DeleteSession(ctx, schema.DeleteSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+	if _, err := h.agentPeer.DeleteSession(ctx, schema.DeleteSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
 		return acpRequestError(err)
 	}
 	h.unbindSessionID(sessionID)
@@ -451,7 +451,7 @@ func (h *Instance) CloseSession(ctx context.Context, sessionID string) error {
 	if threadID := h.threadIDForSession(sessionID); threadID != "" {
 		return fmt.Errorf("cannot close ACP session %q while it is bound to thread %q", sessionID, threadID)
 	}
-	if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
+	if _, err := h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
 		return acpRequestError(err)
 	}
 	h.unbindSessionID(sessionID)
@@ -469,7 +469,7 @@ func (h *Instance) resumeSession(ctx context.Context, input provider.StartSessio
 		return provider.Session{}, err
 	}
 	stream, _ := h.ensureSessionStream(sessionID)
-	resp, err := h.agent().ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
+	resp, err := h.agentPeer.ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		h.unbindSessionID(sessionID)
 		return provider.Session{}, acpRequestError(err)
@@ -663,7 +663,7 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 	default:
 		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
 	}
-	resp, err := h.agent().SetSessionConfigOption(ctx, request)
+	resp, err := h.agentPeer.SetSessionConfigOption(ctx, request)
 	if err != nil {
 		return acpRequestError(err)
 	}
@@ -672,7 +672,7 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 }
 
 func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, modeID schema.SessionModeId) error {
-	if _, err := h.agent().SetSessionMode(ctx, schema.SetSessionModeRequest{SessionID: schema.SessionId(sessionID), ModeID: modeID}); err != nil {
+	if _, err := h.agentPeer.SetSessionMode(ctx, schema.SetSessionModeRequest{SessionID: schema.SessionId(sessionID), ModeID: modeID}); err != nil {
 		return acpRequestError(err)
 	}
 	h.mu.Lock()

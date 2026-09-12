@@ -9,7 +9,6 @@ final class ChatScrollState {
 
     var isNearBottom = true
     private(set) var shouldFollowBottom = true
-    private var isEndZoneVisible = true
     private var resumesWhenEndBecomesVisible = true
     private(set) var isUserScrolling = false
     private(set) var bottomScrollRequest = BottomScrollRequest()
@@ -24,10 +23,6 @@ final class ChatScrollState {
     }
 
     func noteEndVisibility(_ isVisible: Bool) {
-        if isEndZoneVisible != isVisible {
-            isEndZoneVisible = isVisible
-        }
-
         if isVisible {
             if !isNearBottom {
                 isNearBottom = true
@@ -89,7 +84,6 @@ final class ChatScrollState {
     /// reaches the end without participating in a live-scroll phase.
     func noteScrollReturnedToEnd() {
         resumesWhenEndBecomesVisible = true
-        isEndZoneVisible = true
         if !isNearBottom {
             isNearBottom = true
         }
@@ -105,9 +99,6 @@ final class ChatScrollState {
         }
         if !shouldFollowBottom {
             shouldFollowBottom = true
-        }
-        if !isEndZoneVisible {
-            isEndZoneVisible = true
         }
         if isUserScrolling {
             isUserScrolling = false

@@ -81,17 +81,19 @@ struct MockChatView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            MockChatScrollToBottomButton(scrollState: scrollState) {
+            ChatScrollToBottomButton(scrollState: scrollState) {
                 scrollState.requestScrollToBottom(animated: true)
             }
             .safeAreaPadding(.bottom)
         }
         .modifier(
-            MockChatComposerSafeAreaBar(
-                prompt: $prompt,
-                isRunning: isRunning,
-                send: send,
-                stop: stopReply
+            ChatComposerSafeAreaBar(
+                composer: MockChatComposerBar(
+                    prompt: $prompt,
+                    isRunning: isRunning,
+                    send: send,
+                    stop: stopReply
+                )
             )
         )
         .navigationTitle("Mock Chat")
@@ -515,16 +517,12 @@ struct MockChatView: View {
     private func enqueueStream(source: String, label: String) {
         stopReply()
 
-        let liveMessage = MockChatStreamingMessage(
-            label: label,
-            renderThrottle: streamProfile.renderThrottle
-        )
+        let liveMessage = MockChatStreamingMessage(label: label)
         let reply = MockChatMessage(
             role: .agent,
             text: "",
             isStreaming: true,
             label: label,
-            renderThrottle: streamProfile.renderThrottle,
             liveMessage: liveMessage
         )
         messages.append(reply)
@@ -708,11 +706,9 @@ private final class MockChatStreamingMessage {
     private(set) var isStreaming = true
     private(set) var updateCount = 0
     private(set) var label: String?
-    let renderThrottle: Duration
 
-    init(label: String?, renderThrottle: Duration) {
+    init(label: String?) {
         self.label = label
-        self.renderThrottle = renderThrottle
     }
 
     func append(_ chunk: String) {
@@ -771,7 +767,7 @@ private struct MockChatTimeline: View {
                     )
                 }
 
-                MockChatEndMarker()
+                ChatEndMarker()
                     .id(Self.bottomID)
                     .listRowInsets(.init())
                     .listRowSeparator(.hidden)
@@ -1262,61 +1258,6 @@ private struct MockChatMessageDiagnostics: View {
     }
 }
 
-private struct MockChatEndMarker: View {
-    var body: some View {
-        Color.clear
-            .frame(height: 24)
-            .allowsHitTesting(false)
-    }
-}
-
-private struct MockChatComposerSafeAreaBar: ViewModifier {
-    @Binding var prompt: String
-    let isRunning: Bool
-    let send: () -> Void
-    let stop: () -> Void
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        #if os(macOS)
-            if #available(macOS 26.0, *) {
-                safeAreaBar(content)
-            } else {
-                safeAreaInset(content)
-            }
-        #else
-            if #available(iOS 26.0, *) {
-                safeAreaBar(content)
-            } else {
-                safeAreaInset(content)
-            }
-        #endif
-    }
-
-    @available(iOS 26.0, macOS 26.0, *)
-    private func safeAreaBar(_ content: Content) -> some View {
-        content.safeAreaBar(edge: .bottom, spacing: 0) {
-            MockChatComposerBar(
-                prompt: $prompt,
-                isRunning: isRunning,
-                send: send,
-                stop: stop
-            )
-        }
-    }
-
-    private func safeAreaInset(_ content: Content) -> some View {
-            content.safeAreaInset(edge: .bottom, spacing: 0) {
-                MockChatComposerBar(
-                    prompt: $prompt,
-                    isRunning: isRunning,
-                    send: send,
-                    stop: stop
-                )
-            }
-    }
-}
-
 private struct MockChatComposerBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -1360,56 +1301,6 @@ private struct MockChatComposerBar: View {
     }
 }
 
-private struct MockChatScrollToBottomButton: View {
-    let scrollState: ChatScrollState
-    let scrollToBottom: () -> Void
-
-    var body: some View {
-        ZStack {
-            if !scrollState.isNearBottom {
-                Button {
-                    scrollToBottom()
-                } label: {
-                    Label("Scroll to bottom", systemImage: "arrow.down")
-                        .labelStyle(.iconOnly)
-                        .font(.body.bold())
-                        .frame(width: 24, height: 24)
-                        .contentShape(.circle)
-                }
-                .buttonBorderShape(.circle)
-                .modifier(MockChatScrollButtonStyle())
-                .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .animation(.snappy, value: scrollState.isNearBottom)
-    }
-}
-
-private struct MockChatScrollButtonStyle: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        #if os(macOS)
-            if #available(macOS 26.0, *) {
-                content.buttonStyle(.glass)
-            } else {
-                fallback(content)
-            }
-        #else
-            if #available(iOS 26.0, *) {
-                content.buttonStyle(.glass)
-            } else {
-                fallback(content)
-            }
-        #endif
-    }
-
-    private func fallback(_ content: Content) -> some View {
-        content
-            .background(.regularMaterial, in: .circle)
-            .buttonStyle(.plain)
-    }
-}
-
 private struct MockChatBubble: View {
     let message: MockChatMessage
     let showsRawMarkdown: Bool
@@ -1428,13 +1319,14 @@ private struct MockChatBubble: View {
                     .font(.callout.monospaced())
                     .textSelection(.enabled)
             } else {
-                if textPlan == .existingRenderer {
+                switch textPlan {
+                case .existingRenderer:
                     MockChatExistingText(
                         message: message,
                         showsDiagnostics: showsDiagnostics,
                         textLayoutStore: textLayoutStore
                     )
-                } else if case .segmented(let segments) = textPlan {
+                case .segmented(let segments):
                     MockChatOptimizedText(
                         message: message,
                         segments: segments,
@@ -1552,7 +1444,6 @@ struct MockChatMessage: Identifiable, Equatable {
     var updateCount: Int
     var label: String?
     let fileChangesFixture: FileChangesFixture?
-    let renderThrottle: Duration
     fileprivate let liveMessage: MockChatStreamingMessage?
 
     fileprivate init(
@@ -1563,7 +1454,6 @@ struct MockChatMessage: Identifiable, Equatable {
         updateCount: Int = 0,
         label: String? = nil,
         fileChangesFixture: FileChangesFixture? = nil,
-        renderThrottle: Duration = .milliseconds(50),
         liveMessage: MockChatStreamingMessage? = nil
     ) {
         self.id = id
@@ -1573,7 +1463,6 @@ struct MockChatMessage: Identifiable, Equatable {
         self.updateCount = updateCount
         self.label = label
         self.fileChangesFixture = fileChangesFixture
-        self.renderThrottle = renderThrottle
         self.liveMessage = liveMessage
     }
 
@@ -1593,10 +1482,6 @@ struct MockChatMessage: Identifiable, Equatable {
         liveMessage?.label ?? label
     }
 
-    var displayedRenderThrottle: Duration {
-        liveMessage?.renderThrottle ?? renderThrottle
-    }
-
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id
             && lhs.role == rhs.role
@@ -1605,7 +1490,6 @@ struct MockChatMessage: Identifiable, Equatable {
             && lhs.updateCount == rhs.updateCount
             && lhs.label == rhs.label
             && lhs.fileChangesFixture == rhs.fileChangesFixture
-            && lhs.renderThrottle == rhs.renderThrottle
             && lhs.liveMessage === rhs.liveMessage
     }
 

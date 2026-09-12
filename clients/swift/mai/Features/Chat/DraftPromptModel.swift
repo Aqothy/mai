@@ -138,7 +138,7 @@ final class DraftPromptModel {
 
     var canSend: Bool {
         connectionState == .connected
-            && effectiveProviderID != nil
+            && selectedProviderID != nil
             && !workingDirectory.isEmpty
             && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !attachments.isEmpty)
@@ -160,7 +160,7 @@ final class DraftPromptModel {
     }
 
     var supportsImageAttachments: Bool {
-        store.promptContentCapabilities(for: effectiveProviderID)?.image == true
+        store.promptContentCapabilities(for: selectedProviderID)?.image == true
     }
 
     var connectionState: ThreadStore.ConnectionState {
@@ -181,7 +181,7 @@ final class DraftPromptModel {
     }
 
     var optionsSelectionKey: String {
-        "\(connectionState)|\(effectiveProviderID ?? "")|\(workingDirectory)|\(optionsLoadAttempt)"
+        "\(connectionState)|\(selectedProviderID ?? "")|\(workingDirectory)|\(optionsLoadAttempt)"
     }
 
     func ensureLocalDraft() {
@@ -237,7 +237,7 @@ final class DraftPromptModel {
         optionsSessionID = nil
         configOptions = []
         guard connectionState == .connected,
-              let requestedProviderID = effectiveProviderID,
+              let requestedProviderID = selectedProviderID,
               !workingDirectory.isEmpty else {
             optionsPhase = .unavailable
             return
@@ -282,7 +282,7 @@ final class DraftPromptModel {
     }
 
     func updateConfig(_ optionID: String, value: JSONAny) {
-        guard let providerID = effectiveProviderID else { return }
+        guard let providerID = selectedProviderID else { return }
         updateLocalOption(optionID, value: value)
         draftStore.preferences.rememberConfigValue(
             value,
@@ -327,7 +327,7 @@ final class DraftPromptModel {
         if reconcileAcceptedDraft() { return }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend,
-              let requestedProviderID = effectiveProviderID,
+              let requestedProviderID = selectedProviderID,
               let threadID = draftStore.activeDraftThreadID else { return }
 
         let requestedCwd = workingDirectory
@@ -364,12 +364,8 @@ final class DraftPromptModel {
         }
     }
 
-    private var effectiveProviderID: String? {
-        selectedProviderID
-    }
-
     private func selectionMatches(providerID: String, cwd: String) -> Bool {
-        effectiveProviderID == providerID && workingDirectory == cwd
+        selectedProviderID == providerID && workingDirectory == cwd
     }
 
     private func providerIsAvailable(_ providerID: String) -> Bool {
@@ -391,7 +387,7 @@ final class DraftPromptModel {
         optionsSessionID = nil
         configOptions = []
         configUpdates.removeAll()
-        optionsPhase = effectiveProviderID == nil || workingDirectory.isEmpty
+        optionsPhase = selectedProviderID == nil || workingDirectory.isEmpty
             ? .unavailable
             : .loading
         if !isConfiguringInitialSelection {
@@ -503,7 +499,7 @@ final class DraftPromptModel {
 
     private func persistSelection() {
         draftStore.preferences.rememberSelection(
-            providerID: effectiveProviderID,
+            providerID: selectedProviderID,
             workingDirectory: workingDirectory
         )
     }
@@ -514,8 +510,7 @@ final class DraftPromptModel {
             configOptions.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        return values.keys.sorted().compactMap { optionID in
-            guard let value = values[optionID] else { return nil }
+        return values.sorted { $0.key < $1.key }.compactMap { optionID, value in
             // With live options, drop remembered values the agent no longer
             // offers so every Send does not re-emit the same runtime warning.
             if optionsPhase == .live {

@@ -79,7 +79,7 @@ nonisolated enum ChatTimelineLayout {
             entry.message?.role == MaidMessageRole.user.rawValue
 
         var startsNewSection = sections.isEmpty
-        if let current = sections.last, !startsNewSection {
+        if let current = sections.last {
             if isUserMessage {
                 // A user message starts the next turn unless it was
                 // steering the turn this section already covers.
@@ -413,10 +413,6 @@ nonisolated struct ChatActivityGroup: Identifiable {
 
     var hasFailure: Bool {
         items.contains { $0.itemStatus == .failed }
-    }
-
-    var isInProgress: Bool {
-        items.contains { $0.itemStatus == .inProgress }
     }
 
     /// A Codex-style phrase such as "Read 2 files, ran a command".

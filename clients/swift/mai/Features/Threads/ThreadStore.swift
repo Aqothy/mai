@@ -114,12 +114,6 @@ final class ThreadStore {
         noteSelectedSessionChanged(selectedThreadID)
     }
 
-    var selectedThreadSequence: Int {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return 0 }
-        return sessionsByID[selectedThreadID]?.lastSequence ?? 0
-    }
-
     var isSelectedThreadRestoringHistory: Bool {
         _ = selectedSessionGeneration
         guard let selectedThreadID else { return false }
@@ -277,10 +271,6 @@ final class ThreadStore {
         Task { [weak self] in
             await self?.restoreSubscriptions()
         }
-    }
-
-    func ensureProviderAvailable(_ requestedID: String) async throws -> String {
-        try await resolveProvider(requestedID)
     }
 
     func providerSupportsConfigOptions(_ providerID: String) -> Bool {
@@ -764,7 +754,7 @@ final class ThreadStore {
             ?? threads.first { $0.id == selectedThreadID }?.title
     }
 
-    private func resolveProvider(_ preferredID: String) async throws -> String {
+    func ensureProviderAvailable(_ preferredID: String) async throws -> String {
         if let provider = providers.first(where: { $0.instanceID == preferredID }),
             provider.instanceStatus == .initialized
         {
@@ -1075,9 +1065,10 @@ final class ThreadStore {
 
     private func markInactive(_ id: String, at timestamp: Date) {
         guard var session = sessionsByID[id] else { return }
-        session.inactiveSince = session.isProtected ? nil : timestamp
+        let isProtected = session.isProtected
+        session.inactiveSince = isProtected ? nil : timestamp
         if session.subscriptionState.isSubscribed {
-            session.subscriptionState = session.isProtected ? .protected : .inactive
+            session.subscriptionState = isProtected ? .protected : .inactive
         }
         sessionsByID[id] = session
     }

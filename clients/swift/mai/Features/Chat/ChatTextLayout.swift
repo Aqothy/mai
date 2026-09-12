@@ -33,34 +33,6 @@ nonisolated struct ChatTableLayoutRequest: Sendable {
     let table: ChatMarkdownTable
 }
 
-/// The small surface used by the timeline to prepare and cache native text.
-/// macOS additionally prepares rich blocks natively; the iOS store keeps
-/// SwiftUI rendering for those and ignores the requests.
-@MainActor protocol ChatNativeTextLayoutStore: AnyObject, Sendable {
-    func prepare(requests: [ChatTextLayoutRequest]) async
-    func prepareResolvedProse(
-        requests: [ChatResolvedProseLayoutRequest]
-    ) async
-    func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async
-    func prepareTables(requests: [ChatTableLayoutRequest]) async
-}
-
-extension ChatNativeTextLayoutStore {
-    func prepareResolvedProse(
-        requests: [ChatResolvedProseLayoutRequest]
-    ) async {
-        _ = requests
-    }
-
-    func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async {
-        _ = requests
-    }
-
-    func prepareTables(requests: [ChatTableLayoutRequest]) async {
-        _ = requests
-    }
-}
-
 struct ChatTextSelection: Equatable, Sendable {
     let layoutID: String
     let range: NSRange
@@ -205,7 +177,7 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
 
 /// Thread-owned cache for completed and in-flight layouts, plus a
 /// reuse pool of native views List has already displayed.
-final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
+@MainActor final class ChatTextLayoutStore {
     private struct Key: Hashable, Sendable {
         let id: String
         let width: CGFloat
@@ -218,7 +190,6 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
     }
 
     private struct IdleTextView {
-        let key: Key
         let layout: ChatTextLayout
         let view: UITextView
     }
@@ -288,7 +259,7 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
                 durationMilliseconds: (CACurrentMediaTime() - layoutStart) * 1_000
             )
         #endif
-        insert(layout, source: source, style: style, for: key)
+        entries[key] = Entry(source: source, style: style, layout: layout)
         return layout
     }
 
@@ -346,12 +317,16 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
             worker.cancel()
         }
         for (item, layout) in zip(pending, layouts) {
-            finishPreparation(
-                layout,
-                source: item.request.source,
-                style: item.request.style,
-                key: item.key
-            )
+            inFlightKeys.remove(item.key)
+            if entries[item.key]?.source != item.request.source
+                || entries[item.key]?.style != item.request.style
+            {
+                entries[item.key] = Entry(
+                    source: item.request.source,
+                    style: item.request.style,
+                    layout: layout
+                )
+            }
         }
         // Unbuilt claims must not block future preparation for these rows.
         for item in pending.dropFirst(layouts.count) {
@@ -381,30 +356,10 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
         return pending
     }
 
-    private func finishPreparation(
-        _ layout: ChatTextLayout,
-        source: String,
-        style: ChatTextLayoutStyle,
-        key: Key
-    ) {
-        inFlightKeys.remove(key)
-        guard entries[key]?.source != source || entries[key]?.style != style
-        else { return }
-        insert(layout, source: source, style: style, for: key)
-    }
-
-    private func insert(
-        _ layout: ChatTextLayout,
-        source: String,
-        style: ChatTextLayoutStyle,
-        for key: Key
-    ) {
-        entries[key] = Entry(
-            source: source,
-            style: style,
-            layout: layout
-        )
-    }
+    // iOS renders these blocks in SwiftUI and does not prepare native layouts.
+    func prepareResolvedProse(requests: [ChatResolvedProseLayoutRequest]) async {}
+    func prepareCodeBlocks(requests: [ChatCodeLayoutRequest]) async {}
+    func prepareTables(requests: [ChatTableLayoutRequest]) async {}
 
     /// Prefers the native view that already contains this exact layout.
     /// Otherwise recycles another idle view so fast traversal does not
@@ -440,7 +395,7 @@ final class ChatTextLayoutStore: ChatNativeTextLayoutStore {
         {
             return
         }
-        let idle = IdleTextView(key: key, layout: layout, view: textView)
+        let idle = IdleTextView(layout: layout, view: textView)
         if let replaced = idleTextViews.updateValue(idle, forKey: key) {
             stashSpare(replaced.view)
         } else {
@@ -557,10 +512,6 @@ final class ChatSelectableTextHostView: UIView {
             guard let layoutManager, let textContainer,
                 let context = UIGraphicsGetCurrentContext()
             else { return }
-            let origin = CGPoint(
-                x: 0,
-                y: 0
-            )
             var rangesByOffset: [CGFloat: [NSRange]] = [:]
             var index = 0
             while index < attributedText.length {
@@ -593,16 +544,14 @@ final class ChatSelectableTextHostView: UIView {
                         forCharacterRange: range,
                         actualCharacterRange: nil
                     )
-                    var bounds = layoutManager.boundingRect(
+                    let bounds = layoutManager.boundingRect(
                         forGlyphRange: glyphRange,
                         in: textContainer
                     )
-                    bounds.origin.x += origin.x
-                    bounds.origin.y += origin.y
                     guard bounds.intersects(rect) else { continue }
 
                     let bar = CGRect(
-                        x: origin.x + offset,
+                        x: offset,
                         y: bounds.minY,
                         width: ChatMarkdownProseStyle.quoteBarWidth,
                         height: bounds.height

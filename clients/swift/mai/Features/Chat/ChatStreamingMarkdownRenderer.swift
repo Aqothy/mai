@@ -385,8 +385,8 @@ nonisolated enum ChatStreamingMarkdownRepairer {
                     ? source[source.index(before: range.lowerBound)] : nil
                 let next = range.upperBound < source.endIndex
                     ? source[range.upperBound] : nil
-                if String(previous.map(String.init) ?? "") == delimiter
-                    || String(next.map(String.init) ?? "") == delimiter
+                if previous.map(String.init) == delimiter
+                    || next.map(String.init) == delimiter
                 {
                     continue
                 }
@@ -526,8 +526,6 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
             appendSettledBlocks(parsed.dropLast().map(\.block))
             stableUTF8Count += active.utf8Offset
             activeBlocks = [active.block]
-        } else if parsed.isEmpty {
-            activeBlocks = []
         } else {
             activeBlocks = parsed.map(\.block)
         }

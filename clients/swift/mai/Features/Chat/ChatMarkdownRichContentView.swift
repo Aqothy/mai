@@ -20,7 +20,6 @@ struct ChatMarkdownRichContentView: View {
                 } ?? false
                 ChatMarkdownRenderBlockView(
                     block: block,
-                    usesSelectableProse: !isStreamingBlock,
                     isStreaming: isStreamingBlock,
                     layoutID: "\(layoutIDPrefix)-block-\(index)",
                     textLayoutStore: textLayoutStore
@@ -80,7 +79,6 @@ struct ChatMarkdownRichContentView: View {
 
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
-    let usesSelectableProse: Bool
     let isStreaming: Bool
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
@@ -90,7 +88,6 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
         rhs: ChatMarkdownRenderBlockView
     ) -> Bool {
         lhs.block == rhs.block
-            && lhs.usesSelectableProse == rhs.usesSelectableProse
             && lhs.isStreaming == rhs.isStreaming
             && lhs.layoutID == rhs.layoutID
             && lhs.textLayoutStore === rhs.textLayoutStore
@@ -99,7 +96,7 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     var body: some View {
         switch block {
         case .prose(let prose):
-            if usesSelectableProse {
+            if !isStreaming {
                 ChatSelectableMarkdownProseRun(
                     layoutID: layoutID,
                     prose: prose,
