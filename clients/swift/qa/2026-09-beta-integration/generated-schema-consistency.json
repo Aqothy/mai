@@ -1,0 +1,11 @@
+{
+  "client-api.schema.json": {
+    "identical": true
+  },
+  "vocabulary.json": {
+    "identical": true
+  },
+  "rpc-methods.json": {
+    "identical": true
+  }
+}

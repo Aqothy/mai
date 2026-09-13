@@ -1,5 +1,7 @@
 # Chat QA checklist
 
+The integrated release also requires [RELEASE_QA.md](RELEASE_QA.md), which covers beta providers, attachments, annotations, completions, terminals and distribution.
+
 Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMANCE_BALANCE.md for completed automated evidence and CHAT_BENCHMARK_GUIDE.md for launches. Record app binary/commit, renderer, OS, window size, refresh rate, content fixture and adapter/runtime versions with failures. Use the same content/window for List/native comparisons. Keep visual inspection separate from timed benchmarks.
 
 ## Essential macOS behavior

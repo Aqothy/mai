@@ -1,0 +1,9 @@
+ok  	github.com/Aqothy/maiD/internal/adapters/acp	2.520s
+ok  	github.com/Aqothy/maiD/internal/adapters/claudecode	2.500s
+ok  	github.com/Aqothy/maiD/internal/adapters/codexapp	3.347s
+ok  	github.com/Aqothy/maiD/internal/orchestration	2.838s
+ok  	github.com/Aqothy/maiD/internal/providerservice	3.088s
+ok  	github.com/Aqothy/maiD/internal/daemon	9.238s
+ok  	github.com/Aqothy/maiD/internal/terminal	3.669s
+ok  	github.com/Aqothy/maiD/internal/terminal/agentrules	1.949s
+ok  	github.com/Aqothy/maiD/internal/terminal/vtscreen	2.931s

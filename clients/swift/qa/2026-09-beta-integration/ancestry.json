@@ -1,0 +1,77 @@
+[
+  {
+    "ref": "refs/remotes/origin/aq/beta-01-acp-provider-foundation",
+    "commit": "043bcfbcdba4cfa5b5f6dd9af098393ff5b1d662",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-02-codex-app-server",
+    "commit": "5e8851a54f2362f3029b709752d2b54c72e24a53",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-03-streaming-reveal",
+    "commit": "7465a8092ada0f86bf8f4bae0d7599a45f8e6fac",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-04-rich-attachments",
+    "commit": "9cc8257e3fe732010383e23a6d3d419605da2716",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-05-completions-skills",
+    "commit": "ee53bd57104dc4f019e522edf019439b54994986",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-06-chat-annotations",
+    "commit": "0cedc32b246ea38a3719b6bda57bf36f5cf71f98",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-07-stability-followups",
+    "commit": "65b0a4339804e92fcb1d416e8364a56d2be476ea",
+    "included": true
+  },
+  {
+    "ref": "refs/remotes/origin/aq/beta-08-claude-provider",
+    "commit": "e7b661d00dd96d4ba1f9ec7042f166e2ac8aaefe",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-01",
+    "commit": "3bb2a51b77a079af743c8297a7b4164ad75231f4",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-02",
+    "commit": "588362cbf78c12ed70afb240b12f06eed527c0d7",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-03",
+    "commit": "2a96f9be5e22cd2eb1424d96ba619bb2ac96e259",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-04",
+    "commit": "3a112207ab17d50a0dec8df43d389387f9cf25a1",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-05",
+    "commit": "c30bd283cabd4c4ce6fd609e6a237430641c2952",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-06",
+    "commit": "14e8b42ff99d2a794f6ff8833f62cf585fc7978c",
+    "included": true
+  },
+  {
+    "ref": "refs/integration/20260912/beta-07",
+    "commit": "24db269ed7d4c62d3c69dc80e30ffb9c01496641",
+    "included": true
+  }
+]

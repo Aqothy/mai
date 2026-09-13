@@ -1,0 +1,8 @@
+=== RUN   TestLiveSmoke
+    live_test.go:32: auth status: authenticated
+    live_test.go:48: session id: 1884a795-3e21-44cc-8635-d7786fa4ce78, options: 2, skills: 1
+    live_test.go:70: turn state = "failed" (Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again)
+--- FAIL: TestLiveSmoke (9.41s)
+FAIL
+FAIL	github.com/Aqothy/maiD/internal/adapters/claudecode	9.786s
+FAIL

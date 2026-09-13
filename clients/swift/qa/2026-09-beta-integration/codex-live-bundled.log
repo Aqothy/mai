@@ -1,0 +1,12 @@
+=== RUN   TestLiveSmoke
+    live_test.go:41: authentication: authenticated
+    live_test.go:48: available model: gpt-6-astra (default=true)
+    live_test.go:48: available model: gpt-5.6-sol (default=false)
+    live_test.go:48: available model: gpt-5.6-terra (default=false)
+    live_test.go:48: available model: gpt-5.6-luna (default=false)
+    live_test.go:48: available model: gpt-5.5 (default=false)
+{"timestamp":"2026-09-13T04:19:44.799485Z","level":"WARN","fields":{"message":"stored OAuth refresh credentials could not be bound to their issuer for MCP server `RevenueCat`; using the stored access token without refresh"},"target":"codex_rmcp_client::rmcp_client"}
+    live_test.go:123: completed text, listing, stop/resume (5 replay events), and fork passed
+--- PASS: TestLiveSmoke (5.43s)
+PASS
+ok  	github.com/Aqothy/maiD/internal/adapters/codexapp	5.684s
