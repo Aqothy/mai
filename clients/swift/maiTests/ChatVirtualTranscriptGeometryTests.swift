@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Foundation
 import SwiftUI
@@ -5,7 +6,6 @@ import Testing
 
 @testable import mai
 
-#if os(macOS)
     struct ChatVirtualTranscriptGeometryTests {
         @Test func preservesAnchorAcrossPrependAndHeightCorrection() throws {
             var geometry = ChatVirtualTranscriptGeometry()

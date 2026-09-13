@@ -161,7 +161,7 @@ struct ChatAnnotationEditor: View {
             }
             .padding()
             .navigationTitle("Comment on Selection")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) {

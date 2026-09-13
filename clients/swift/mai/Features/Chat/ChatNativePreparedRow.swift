@@ -21,7 +21,7 @@
         static func descriptor(for row: ChatTimelineRenderRow) -> Descriptor? {
             switch row {
             case .prose(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false else {
+                guard segment.role == "assistant", segment.attachments?.isEmpty != false, segment.annotations?.isEmpty != false else {
                     return nil
                 }
                 return Descriptor(
@@ -46,7 +46,7 @@
                         : ChatMarkdownProseStyle.blockSpacing,
                     bottom: block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0)
             case .richMarkdown(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false,
+                guard segment.role == "assistant", segment.attachments?.isEmpty != false, segment.annotations?.isEmpty != false,
                     let plan = ChatMarkdownRenderCache.shared.cachedPlan(
                         messageID: segment.rowID, source: segment.source),
                     plan.blocks.count == 1, let block = plan.blocks.first
@@ -123,8 +123,13 @@
 
         func update(
             _ descriptor: Descriptor, width: CGFloat, store: ChatTextLayoutStore,
-            theme: ChatCodeHighlightTheme
+            theme: ChatCodeHighlightTheme,
+            annotationContext: ChatAnnotationContext? = nil
         ) {
+            (bodyView as? ChatSelectableTextHostView)?.annotationContext = annotationContext
+            if let code = bodyView as? ChatMacCodeBlockHostView {
+                (code.documentView as? ChatAnnotationTextView)?.annotationContext = annotationContext
+            }
             contentWidth = width
             if self.descriptor == descriptor, self.theme == theme {
                 needsLayout = true
@@ -144,16 +149,19 @@
             case .prose(let source):
                 let prose = proseView
                 setBody(prose)
+                prose.annotationContext = annotationContext
                 prose.update(
                     layoutID: descriptor.id, source: source, style: .markdownProse,
                     layoutStore: store)
             case .resolvedProse(let text):
                 let prose = proseView
                 setBody(prose)
+                prose.annotationContext = annotationContext
                 prose.update(layoutID: descriptor.id, resolvedProse: text, layoutStore: store)
             case .code(let code):
                 let codeView = self.codeView
                 setBody(codeView)
+                (codeView.documentView as? ChatAnnotationTextView)?.annotationContext = annotationContext
                 codeView.contentView.scroll(to: .zero)
                 codeView.update(
                     layoutID: descriptor.id, block: code, theme: theme, isStreaming: false,

@@ -133,7 +133,7 @@ struct ProviderAccountDetailView: View {
             }
         }
         .navigationTitle(model.provider?.name ?? "Provider Account")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Refresh", systemImage: "arrow.clockwise") {

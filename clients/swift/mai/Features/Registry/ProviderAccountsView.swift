@@ -39,7 +39,7 @@ struct ProviderAccountsView: View {
             }
         }
         .navigationTitle("Provider Accounts")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Done") { dismiss() }

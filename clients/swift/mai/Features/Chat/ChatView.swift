@@ -815,14 +815,15 @@ struct ChatTimeline: View {
                                     ?? ChatNativePreparedRow(frame: .zero)
                                 native.update(
                                     descriptor, width: rowWidth, store: textLayoutStore,
-                                    theme: codeTheme)
+                                    theme: codeTheme,
+                                    annotationContext: row.annotationContext(model: annotationModel))
                                 return native
                             }
                         ) { index in
                             ChatNativeTimelineItemView(
                                 item: nativeItems[index], streamingTurnID: effectiveStreamingTurnID,
                                 threadID: threadID, store: store, foldModel: foldModel,
-                                scrollState: scrollState, textLayoutStore: textLayoutStore
+                                scrollState: scrollState, annotationModel: annotationModel, textLayoutStore: textLayoutStore
                             )
                             .id(nativeItems[index].id)
                             .frame(width: rowWidth)
@@ -1609,8 +1610,8 @@ struct ChatTimeline: View {
 
     /// Expands oversized user messages and every settled assistant message.
     /// Streaming keeps one stable live row. Documents that cannot be
-    /// source-segmented keep the whole-document renderer so reference links
-    /// and transcript selection actions remain correct.
+    /// source-segmented are parsed as whole documents before splitting into
+    /// resolved rows, retaining reference links and message annotation context.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -1640,35 +1641,42 @@ struct ChatTimeline: View {
             )
             switch plan {
             case .existingRenderer:
-                // A restored message can carry no turn ID; `nil != nil` must
-                // not classify it as the streaming message when nothing is
-                // streaming.
-                guard message.role == MaidMessageRole.assistant.rawValue,
-                    streamingTurnID == nil || message.turnID != streamingTurnID
-                else { return [.standard(row)] }
+                #if os(macOS)
+                    // A restored message can carry no turn ID; `nil != nil` must
+                    // not classify it as the streaming message when nothing is
+                    // streaming.
+                    guard message.annotations?.isEmpty != false,
+                        message.role == MaidMessageRole.assistant.rawValue,
+                        streamingTurnID == nil || message.turnID != streamingTurnID
+                    else { return [.standard(row)] }
 
-                let renderPlan = ChatMarkdownRenderCache.shared.plan(
-                    messageID: message.id,
-                    source: message.text
-                )
-                let contents = ChatResolvedMarkdownRowPlanner.contents(
-                    in: renderPlan
-                )
-                guard !contents.isEmpty else { return [.standard(row)] }
-                return contents.indices.map { index in
-                    .resolvedMarkdown(
-                        ChatResolvedMarkdownBlockRowModel(
-                            messageID: message.id,
-                            index: index,
-                            content: contents[index],
-                            attachments: index == contents.count - 1
-                                ? message.attachments
-                                : nil,
-                            isFirst: index == 0,
-                            isLast: index == contents.count - 1
-                        )
+                    let renderPlan = ChatMarkdownRenderCache.shared.plan(
+                        messageID: message.id,
+                        source: message.text
                     )
-                }
+                    let contents = ChatResolvedMarkdownRowPlanner.contents(
+                        in: renderPlan
+                    )
+                    guard !contents.isEmpty else { return [.standard(row)] }
+                    return contents.indices.map { index in
+                        .resolvedMarkdown(
+                            ChatResolvedMarkdownBlockRowModel(
+                                messageID: message.id,
+                                index: index,
+                                content: contents[index],
+                                attachments: index == contents.count - 1
+                                    ? message.attachments
+                                    : nil,
+                                isFirst: index == 0,
+                                isLast: index == contents.count - 1
+                            )
+                        )
+                    }
+                #else
+                    // Keep the selection action on the complete attributed
+                    // document, including references resolved outside a block.
+                    return [.standard(row)]
+                #endif
 
             case .segmented(let segments):
                 return segments.indices.map { index in
@@ -1743,7 +1751,7 @@ struct ChatTimeline: View {
                     source: segment.source
                 )
 
-            case .standard, .prose:
+            case .standard, .prose, .resolvedMarkdown:
                 return nil
             }
         }
@@ -1821,7 +1829,7 @@ struct ChatTimeline: View {
                     source: message.text,
                     role: message.role
                 )
-            case .standard:
+            case .standard, .resolvedMarkdown:
                 break
             }
         }
@@ -1859,12 +1867,25 @@ enum ChatTimelineRenderRow: Identifiable {
     case standard(ChatTimelineRowModel)
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
+    case resolvedMarkdown(ChatResolvedMarkdownBlockRowModel)
+
+    func annotationContext(model: ChatAnnotationModel) -> ChatAnnotationContext? {
+        switch self {
+        case .prose(let segment), .richMarkdown(let segment):
+            ChatAnnotationContext(messageID: segment.messageID, role: segment.role, model: model)
+        case .resolvedMarkdown(let block):
+            ChatAnnotationContext(messageID: block.messageID, role: MaidMessageRole.assistant.rawValue, model: model)
+        case .standard:
+            nil
+        }
+    }
 
     var id: String {
         switch self {
         case .standard(let row): row.id
         case .richMarkdown(let segment): "\(segment.rowID)-rich"
         case .prose(let segment): "\(segment.rowID)-prose"
+        case .resolvedMarkdown(let block): block.rowID
         }
     }
 }
@@ -1952,6 +1973,14 @@ struct ChatTimelineRenderRowView: View {
                 ChatResolvedMarkdownBlockRow(
                     model: block,
                     textLayoutStore: textLayoutStore
+                )
+                .environment(
+                    \.chatAnnotationContext,
+                    ChatAnnotationContext(
+                        messageID: block.messageID,
+                        role: MaidMessageRole.assistant.rawValue,
+                        model: annotationModel
+                    )
                 )
                     .padding(
                         .top,

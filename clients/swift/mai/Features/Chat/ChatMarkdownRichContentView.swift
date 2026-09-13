@@ -180,7 +180,7 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
 
 private struct ChatMarkdownResolvedProseView: Equatable, View {
     let prose: ChatMarkdownProseRun
-    let revealBatches: [ChatStreamingTextRevealBatch]
+    var revealBatches: [ChatStreamingTextRevealBatch] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatMarkdownProseStyle.blockSpacing) {
@@ -276,12 +276,7 @@ struct ChatResolvedMarkdownBlockRow: View {
             }
 
             if let attachments = model.attachments, !attachments.isEmpty {
-                Text(
-                    attachments.map { $0.name ?? $0.kind }
-                        .joined(separator: " · ")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

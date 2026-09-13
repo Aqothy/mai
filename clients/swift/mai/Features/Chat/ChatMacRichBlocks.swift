@@ -80,6 +80,7 @@
     /// A fenced code block as one selectable, horizontally scrolling
     /// `NSTextView` whose text and size were prepared off the main actor.
     struct ChatMacCodeBlockText: NSViewRepresentable {
+        @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
         let block: ChatMarkdownCodeBlock
         let theme: ChatCodeHighlightTheme
@@ -96,6 +97,7 @@
             _ nsView: ChatMacCodeBlockHostView,
             context: Context
         ) {
+            (nsView.documentView as? ChatAnnotationTextView)?.annotationContext = annotationContext
             nsView.update(
                 layoutID: layoutID,
                 block: block,
@@ -183,6 +185,7 @@
         }
 
         func dismantle() {
+            (textView as? ChatAnnotationTextView)?.annotationContext = nil
             highlightTask?.cancel()
             highlightTask = nil
             presentedLayout = nil

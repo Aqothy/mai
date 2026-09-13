@@ -5,7 +5,7 @@
         static func makeTextView() -> NSTextView {
             // NSTextView owns its selection/link cursor tracking. Adding an
             // I-beam cursor rect here duplicates that work on every scroll.
-            let view = NSTextView(usingTextLayoutManager: false)
+            let view = ChatAnnotationTextView(usingTextLayoutManager: false)
             view.isEditable = false
             view.isSelectable = true
             view.isRichText = true

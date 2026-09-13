@@ -8,6 +8,7 @@
         let store: ThreadStore
         let foldModel: ChatTimelineFoldModel
         let scrollState: ChatScrollState
+        let annotationModel: ChatAnnotationModel
         let textLayoutStore: ChatTextLayoutStore
 
         var body: some View {
@@ -20,7 +21,7 @@
                 ChatTimelineRenderRowView(
                     row: row, streamingTurnID: streamingTurnID,
                     threadID: threadID, store: store, foldModel: foldModel,
-                    scrollState: scrollState, textLayoutStore: textLayoutStore)
+                    scrollState: scrollState, annotationModel: annotationModel, textLayoutStore: textLayoutStore)
             case .working(let key):
                 ChatWorkingIndicator(activityKey: key).padding(
                     .vertical, ChatTimelineMetrics.rowVerticalInset)

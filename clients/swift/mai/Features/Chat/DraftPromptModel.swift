@@ -166,8 +166,8 @@ final class DraftPromptModel {
     }
 
     var supportsAdditionalDirectories: Bool {
-        guard let effectiveProviderID else { return false }
-        return store.providerSupportsAdditionalDirectories(effectiveProviderID)
+        guard let selectedProviderID else { return false }
+        return store.providerSupportsAdditionalDirectories(selectedProviderID)
     }
 
     var connectionState: ThreadStore.ConnectionState {

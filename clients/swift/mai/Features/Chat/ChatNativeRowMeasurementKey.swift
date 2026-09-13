@@ -12,7 +12,7 @@
         var nativeMeasurementKey: ChatNativeRowMeasurementKey? {
             switch self {
             case .prose(let segment), .richMarkdown(let segment):
-                guard segment.attachments?.isEmpty != false else { return nil }
+                guard segment.attachments?.isEmpty != false, segment.annotations?.isEmpty != false else { return nil }
                 return .source(
                     segment.source, role: segment.role, first: segment.isFirst, last: segment.isLast
                 )

@@ -41,19 +41,19 @@
                             .richMarkdown(
                                 .init(
                                     messageID: "rich-table", index: 0, source: tableSource,
-                                    role: "assistant", attachments: nil, isFirst: first,
+                                    role: "assistant", annotations: nil, attachments: nil, isFirst: first,
                                     isLast: last)),
                             .prose(
                                 .init(
                                     messageID: "short", index: 0, source: "A short paragraph",
-                                    role: "assistant", attachments: nil, isFirst: first,
+                                    role: "assistant", annotations: nil, attachments: nil, isFirst: first,
                                     isLast: last)),
                             .prose(
                                 .init(
                                     messageID: "long", index: 0,
                                     source: String(
                                         repeating: "A **formatted** paragraph with wrapping. ",
-                                        count: 40), role: "assistant", attachments: nil,
+                                        count: 40), role: "assistant", annotations: nil, attachments: nil,
                                     isFirst: first, isLast: last)),
                             .resolvedMarkdown(
                                 .init(
@@ -74,7 +74,7 @@
                                 rootView: ChatTimelineRenderRowView(
                                     row: row, streamingTurnID: nil, threadID: "height-test",
                                     store: store,
-                                    foldModel: fold, scrollState: scroll, textLayoutStore: layouts
+                                    foldModel: fold, scrollState: scroll, annotationModel: ChatAnnotationModel(), textLayoutStore: layouts
                                 ).frame(width: width))
                             let measured = ceil(
                                 host.sizeThatFits(

@@ -747,6 +747,7 @@
     /// Native macOS range selection for settled prose. The optional callback
     /// is the extension point for selection-driven annotations and menus.
     struct ChatSelectableText: NSViewRepresentable {
+        @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
         let source: String
         let style: ChatTextLayoutStyle
@@ -771,6 +772,7 @@
                 onSelectionChange == nil
                 ? nil
                 : context.coordinator
+            nsView.annotationContext = annotationContext
             nsView.update(
                 layoutID: layoutID,
                 source: source,
@@ -829,6 +831,7 @@
     }
 
     struct ChatSelectableResolvedProse: NSViewRepresentable {
+        @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
         let prose: ChatMarkdownProseRun
         let layoutStore: ChatTextLayoutStore
@@ -841,6 +844,7 @@
             _ nsView: ChatSelectableTextHostView,
             context: Context
         ) {
+            nsView.annotationContext = annotationContext
             nsView.update(
                 layoutID: layoutID,
                 resolvedProse: prose,
@@ -903,6 +907,10 @@
 
         weak var selectionDelegate: NSTextViewDelegate? {
             didSet { textView.delegate = selectionDelegate }
+        }
+
+        var annotationContext: ChatAnnotationContext? {
+            didSet { (textView as? ChatAnnotationTextView)?.annotationContext = annotationContext }
         }
 
         private var decorationView: MarkdownDecorationView?
@@ -998,6 +1006,7 @@
         }
 
         func dismantle() {
+            annotationContext = nil
             textView.delegate = nil
             decorationView?.removeFromSuperview()
             decorationView = nil

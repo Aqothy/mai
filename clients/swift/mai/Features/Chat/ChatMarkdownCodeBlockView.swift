@@ -40,16 +40,31 @@ struct ChatMarkdownCodeBlockView: View {
             .padding(.bottom, ChatRichBlockStyle.codeHeaderBottomInset)
 
             #if os(macOS)
-                // A native, prepared text view: the row's height is known
-                // before the row exists and vertical wheel gestures pass
-                // through to the transcript.
-                ChatMacCodeBlockText(
-                    layoutID: layoutID,
-                    block: block,
-                    theme: colorScheme == .dark ? .dark : .light,
-                    isStreaming: isStreaming,
-                    layoutStore: textLayoutStore
-                )
+                if isStreaming {
+                    ScrollView(.horizontal) {
+                        ChatStreamingTextRevealView(
+                            text: AttributedString(block.code), batches: revealBatches
+                        )
+                        .font(.callout.monospaced())
+                        .lineSpacing(ChatMacCodeStyle.lineSpacing)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, ChatMacCodeStyle.horizontalInset)
+                        .padding(.bottom, ChatMacCodeStyle.bottomInset)
+                    }
+                    .scrollIndicators(.visible, axes: .horizontal)
+                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                } else {
+                    // A native, prepared text view: the row's height is known
+                    // before the row exists and vertical wheel gestures pass
+                    // through to the transcript.
+                    ChatMacCodeBlockText(
+                        layoutID: layoutID,
+                        block: block,
+                        theme: colorScheme == .dark ? .dark : .light,
+                        isStreaming: isStreaming,
+                        layoutStore: textLayoutStore
+                    )
+                }
             #else
                 ScrollView(.horizontal) {
                     ChatStreamingTextRevealView(text: displayedCode, batches: revealBatches)
