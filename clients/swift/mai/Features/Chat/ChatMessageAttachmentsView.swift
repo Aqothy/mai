@@ -274,22 +274,6 @@ private struct ChatMessageImageAttachmentView: View {
         case failed
     }
 
-    private struct SourceIdentity: Hashable {
-        let characterCount: Int
-        let prefix: String
-        let suffix: String
-        let mimeType: String?
-        let name: String?
-
-        init(payload: String, attachment: Attachment) {
-            characterCount = payload.utf8.count
-            prefix = String(payload.prefix(48))
-            suffix = String(payload.suffix(48))
-            mimeType = attachment.mimeType
-            name = attachment.name
-        }
-    }
-
     let attachment: Attachment
     let payload: String
     @State private var phase = Phase.loading
@@ -299,7 +283,9 @@ private struct ChatMessageImageAttachmentView: View {
 
         VStack(alignment: .leading, spacing: 4) {
             imageContent(name: name)
-                .task(id: SourceIdentity(payload: payload, attachment: attachment)) {
+                // Images can share byte count, headers and trailers while
+                // their pixels differ. Reuse must compare the whole payload.
+                .task(id: payload) {
                     phase = .loading
                     do {
                         let image = try await ChatTranscriptImageDecoder.decodeBase64(

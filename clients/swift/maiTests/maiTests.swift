@@ -550,6 +550,70 @@ struct ThreadStoreTests {
         #expect(draftStore.text(for: "accepted-thread").isEmpty)
     }
 
+    @Test
+    func annotationSendRetainsFailedDraftAndEditsMadeDuringSuccessfulSend() async throws {
+        let suite = "AnnotationSendQA-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let model = ChatPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults), threadID: "a")
+        let annotations = ChatAnnotationModel()
+        annotations.beginComment(quote: "Original quote", messageID: "message-a", role: "assistant")
+        annotations.addEditorDraft()
+        let originalID = try #require(annotations.annotations.first?.id)
+        #expect(model.canSend(annotations: annotations.annotations))
+        rpc.turnFailuresRemaining = 1
+        await model.send(annotations: annotations)
+        #expect(annotations.annotations.first?.id == originalID)
+        #expect(model.errorMessage != nil)
+        #expect(!model.isSending)
+
+        rpc.shouldBlockTurnDispatch = true
+        let sending = Task { await model.send(annotations: annotations) }
+        await waitUntil { rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 2 }
+        #expect(model.isSending)
+        annotations.beginComment(quote: "New quote", messageID: "message-b", role: "assistant")
+        annotations.addEditorDraft()
+        model.text = "Next prompt"
+        rpc.resumeTurnDispatches()
+        await sending.value
+
+        let sent = try #require(rpc.dispatchedCommands.last?.message)
+        #expect(sent.text.isEmpty)
+        #expect(sent.annotations?.map(\.id) == [originalID])
+        #expect(annotations.annotations.map(\.quote) == ["New quote"])
+        #expect(model.text == "Next prompt")
+        #expect(!model.isSending)
+    }
+
+    @Test
+    func queuedAnnotationSteersToItsOwnThreadAndSurvivesDispatchFailure() async throws {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true), makeThread("b")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        let annotation = PromptAnnotation(id: "comment", messageID: "message-a", note: "Clarify", quote: "Quoted", role: "assistant")
+        try await store.submitTurn(threadID: "a", text: "", annotations: [annotation])
+        let queued = try #require(store.queuedPrompts(for: "a").first)
+        store.selectThread("b")
+        rpc.turnFailuresRemaining = 1
+        do {
+            try await store.steerQueuedPrompt(threadID: "a", promptID: queued.id)
+            Issue.record("Expected the simulated dispatch failure")
+        } catch {}
+        #expect(store.queuedPrompts(for: "a").first?.id == queued.id)
+        try await store.steerQueuedPrompt(threadID: "a", promptID: queued.id)
+        let sent = try #require(rpc.dispatchedCommands.last)
+        #expect(sent.threadID == "a")
+        #expect(sent.message?.annotations?.first?.messageID == "message-a")
+        #expect(sent.message?.annotations?.first?.note == "Clarify")
+        #expect(store.queuedPrompts(for: "a").isEmpty)
+        #expect(store.selectedThreadID == "b")
+    }
+
     private func waitUntil(
         _ condition: () -> Bool,
         attempts: Int = 100
@@ -574,6 +638,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     var shouldBlockUnsubscribe = false
     var shouldBlockProviderStart = false
     var shouldBlockProviderOptionSet = false
+    var shouldBlockTurnDispatch = false
+    var turnFailuresRemaining = 0
     var threadListFailuresRemaining = 0
     var threadSubscriptionFailuresRemaining = 0
     var prepareFailuresRemaining = 0
@@ -595,6 +661,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private var unsubscribeContinuations: [CheckedContinuation<Void, Never>] = []
     private var providerStartContinuations: [CheckedContinuation<Void, Never>] = []
     private var providerOptionSetContinuations: [CheckedContinuation<Void, Never>] = []
+    private var turnDispatchContinuations: [CheckedContinuation<Void, Never>] = []
     private let threadListItem: ThreadListStreamItem
     private var snapshotsByID: [String: ThreadStreamItem]
 
@@ -734,6 +801,15 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
         dispatchedCommands.append(command)
+        if command.type == "thread.turn.start" {
+            if turnFailuresRemaining > 0 {
+                turnFailuresRemaining -= 1
+                throw MockError.disconnected
+            }
+            if shouldBlockTurnDispatch {
+                await withCheckedContinuation { turnDispatchContinuations.append($0) }
+            }
+        }
         if command.type == "thread.session.prepare", prepareFailuresRemaining > 0 {
             prepareFailuresRemaining -= 1
             throw MockError.prepareFailed
@@ -966,6 +1042,13 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
         let data = try newJSONEncoder().encode(MockNotification(params: item))
         onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+    }
+
+    func resumeTurnDispatches() {
+        shouldBlockTurnDispatch = false
+        let continuations = turnDispatchContinuations
+        turnDispatchContinuations.removeAll()
+        for continuation in continuations { continuation.resume() }
     }
 
     private enum MockError: Error {
