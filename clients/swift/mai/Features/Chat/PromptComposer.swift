@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 
 struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @Binding var text: String
     @State private var textSelection: TextSelection?
@@ -82,8 +83,11 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         )
         let cursorRequest = promptCompletion?.cursorRequest
         let completionModelID = promptCompletion.map(ObjectIdentifier.init)
+        let contentLayout = verticalSizeClass == .compact
+            ? AnyLayout(HStackLayout(alignment: .center))
+            : AnyLayout(VStackLayout(alignment: .leading))
 
-        VStack(alignment: .leading) {
+        contentLayout {
             if !attachments.isEmpty {
                 ChatComposerAttachmentStrip(
                     attachments: attachments,
@@ -155,6 +159,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 .disabled(showsStop ? isStopping : !canSend)
             }
             .frame(height: 36)
+            .fixedSize(horizontal: verticalSizeClass == .compact, vertical: false)
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
         }
@@ -276,6 +281,8 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
 }
 
 private struct DraftPromptEditor: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
     @Binding var text: String
     @Binding var selection: TextSelection?
 
@@ -288,8 +295,14 @@ private struct DraftPromptEditor: View {
 
     @FocusState private var isFocused: Bool
 
+    private var maximumLineCount: Int {
+        // Keep the controls inside the keyboard safe area on landscape
+        // phones. The vertical text field scrolls through the full draft.
+        verticalSizeClass == .compact ? 1 : 6
+    }
+
     private var minimumLineCount: Int {
-        min(text.lazy.filter(\.isNewline).count + 1, 6)
+        min(text.lazy.filter(\.isNewline).count + 1, maximumLineCount)
     }
 
     var body: some View {
@@ -302,7 +315,7 @@ private struct DraftPromptEditor: View {
             axis: .vertical
         )
         .textFieldStyle(.plain)
-        .lineLimit(minimumLineCount...6)
+        .lineLimit(minimumLineCount...maximumLineCount)
         .focused($isFocused)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.horizontal, 14)

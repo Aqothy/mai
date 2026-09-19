@@ -98,10 +98,18 @@ struct ChatView: View {
         }
         .overlay(alignment: .bottom) {
             if store.selectedThread != nil {
-                ChatScrollToBottomButton(scrollState: scrollState) {
-                    scrollState.requestScrollToBottom(animated: true)
+                ViewThatFits(in: .vertical) {
+                    ChatScrollToBottomButton(scrollState: scrollState) {
+                        scrollState.requestScrollToBottom(animated: true)
+                    }
+                    .safeAreaPadding(.vertical)
+
+                    // A landscape keyboard can leave no transcript space
+                    // between the navigation bar and composer.
+                    Color.clear
+                        .frame(height: 0)
+                        .allowsHitTesting(false)
                 }
-                .safeAreaPadding(.bottom)
             }
         }
         .overlay(alignment: .bottom) {

@@ -175,7 +175,7 @@ struct ChatAnnotationEditor: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
         .onAppear {
             isNoteFocused = true
         }
