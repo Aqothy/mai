@@ -9,16 +9,13 @@ import SwiftUI
     import UIKit
 #endif
 
-/// Keeps the profiling fixture reachable in optimized iOS builds without
-/// exposing it during ordinary Release launches.
+/// Profiling fixtures are available in Debug builds only.
 nonisolated enum ChatPerformanceLab {
-    static let launchArgument = "-ChatPerformanceLab"
-
     static let isEnabled: Bool = {
         #if DEBUG
             true
         #else
-            ProcessInfo.processInfo.arguments.contains(launchArgument)
+            false
         #endif
     }()
 }
