@@ -1,0 +1,1343 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-0-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-0-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-0-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-0-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-0-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-0-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-0-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-0-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-0-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-1-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-1-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-2-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-2-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-2-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-2-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-2-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-3-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-3-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-4-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-4-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-4-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-5-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-5-assistant#segment-0 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-6-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-6-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-6-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-6-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-6-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-6-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-6-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-6-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-6-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-7-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-7-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-user-block-0 width=732.0 cached=false bytes=103
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-8-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-8-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-8-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-8-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-8-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-9-user-block-0 width=732.0 cached=false bytes=104
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-9-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-10-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-10-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-10-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-11-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-11-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-12-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-12-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-12-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-12-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-12-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-12-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-12-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-12-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-12-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-13-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-13-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-14-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-14-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-14-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-14-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-14-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-15-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-15-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-16-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-16-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-16-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-17-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-17-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-18-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-18-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-18-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-18-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-18-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-18-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-18-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-18-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-18-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-19-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-19-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-20-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-20-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-20-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-20-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-20-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-21-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-21-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-22-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-22-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-22-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-23-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-23-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-24-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-24-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-24-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-24-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-24-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-24-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-24-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-24-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-24-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-25-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-25-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-26-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-26-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-26-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-26-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-26-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-27-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-27-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-28-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-28-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-28-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-29-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-29-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-30-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-30-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-30-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-30-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-30-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-30-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-30-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-30-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-30-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-31-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-31-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-32-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-32-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-32-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-32-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-32-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-33-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-33-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-34-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-34-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-34-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-35-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-35-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-36-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-36-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-36-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-36-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-36-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-36-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-36-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-36-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-36-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-37-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-37-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-38-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-38-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-38-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-38-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-38-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-39-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-39-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-40-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-40-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-40-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-41-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-41-assistant#segment-0 width=760.0 cached=false bytes=143
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-42-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-42-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-42-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-42-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-42-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-42-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-42-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-42-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-42-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-43-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-43-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-294-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-294-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-294-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-294-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-294-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-3-block-0 bytes=388
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-295-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-296-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-296-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-296-assistant#segment-5-block-0 bytes=172
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-296-assistant#segment-7-block-0 rows=3
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-5-block-0 bytes=112
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-7-block-0 bytes=112
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-17-block-0 bytes=112
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-19-block-0 bytes=113
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-23-block-0 bytes=73
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-298-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-298-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-289-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-289-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-290-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-290-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-290-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-290-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-290-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-291-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-291-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-292-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-50 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-292-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-292-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-293-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-293-assistant#segment-0 width=760.0 cached=false bytes=144
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-294-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-294-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-294-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-294-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-268-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-268-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-268-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-268-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-268-assistant#segment-45-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-268-assistant#segment-46 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-268-assistant#segment-47-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-268-assistant#segment-48 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-268-assistant#segment-49-block-0 bytes=266
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-256-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-256-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-256-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-256-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-256-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-256-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-256-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-256-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-256-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-232-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-232-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-14 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-232-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-232-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-232-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-232-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-217-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-217-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-217-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-217-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-217-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-217-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-218-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-202-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-202-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-202-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-202-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-202-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-203-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-203-assistant#segment-0 width=760.0 cached=false bytes=144
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-204-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-204-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-204-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-204-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-15-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-16 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-17-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-18 width=760.0 cached=false bytes=682
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-190-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-190-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-190-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-175-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-175-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-175-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-175-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-assistant#segment-0 width=760.0 cached=false bytes=1724
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-176-assistant#segment-1-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-176-assistant#segment-3-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-176-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-176-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-176-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-162-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-162-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-162-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-162-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-162-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-162-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-162-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-163-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-163-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-163-assistant#segment-1-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-163-assistant#segment-2 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-163-assistant#segment-3-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-163-assistant#segment-4 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-163-assistant#segment-5-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-163-assistant#segment-6 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-39-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-40 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-41-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-42 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-148-assistant#segment-43-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-148-assistant#segment-44 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-135-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-11-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-136-assistant#segment-12 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-136-assistant#segment-13-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-121-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-121-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-106-assistant#segment-51-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-106-assistant#segment-52 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-106-assistant#segment-53-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-106-assistant#segment-54 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-106-assistant#segment-55-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-106-assistant#segment-56 width=760.0 cached=false bytes=310
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-107-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-107-assistant#segment-0 width=760.0 cached=false bytes=144
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-108-user-block-0 width=732.0 cached=false bytes=107
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-108-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-108-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-108-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-108-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-108-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-108-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-108-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-108-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-19-block-0 bytes=113
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-20 width=760.0 cached=false bytes=1864
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-21-block-0 bytes=186
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-22 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-23-block-0 bytes=73
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-24 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-25-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-26 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-94-assistant#segment-27-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-28 width=760.0 cached=false bytes=537
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-29-block-0 bytes=479
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-30 width=760.0 cached=false bytes=29
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-31-block-0 bytes=388
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-32 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-33-block-0 bytes=429
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-34 width=760.0 cached=false bytes=23
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-35-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-36 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-94-assistant#segment-37-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-94-assistant#segment-38 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-80-assistant#segment-4 width=760.0 cached=false bytes=77
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-80-assistant#segment-5-block-0 bytes=172
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-80-assistant#segment-6 width=760.0 cached=false bytes=91
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-80-assistant#segment-7-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-80-assistant#segment-8 width=760.0 cached=false bytes=322
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-81-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-81-assistant#segment-0 width=760.0 cached=false bytes=5483
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-0 width=760.0 cached=false bytes=760
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-82-assistant#segment-1-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-2 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-82-assistant#segment-3-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-4 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-82-assistant#segment-5-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-6 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-82-assistant#segment-7-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-8 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-82-assistant#segment-9-block-0 bytes=112
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-82-assistant#segment-10 width=760.0 cached=false bytes=680
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-7-block-0 bytes=401
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-8 width=760.0 cached=false bytes=25
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-9-block-0 bytes=386
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-10 width=760.0 cached=false bytes=24
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-11-block-0 bytes=435
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-12 width=760.0 cached=false bytes=27
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-13-block-0 bytes=193
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-14 width=760.0 cached=false bytes=32
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-15-block-0 bytes=194
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-16 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-17-block-0 bytes=202
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-18 width=760.0 cached=false bytes=26
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-19-block-0 bytes=287
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-20 width=760.0 cached=false bytes=17
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-21-block-0 bytes=266
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-22 width=760.0 cached=false bytes=33
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-23-block-0 bytes=191
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-24 width=760.0 cached=false bytes=14
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-25-block-0 bytes=213
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-26 width=760.0 cached=false bytes=42
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-67-assistant#segment-27-block-0 bytes=350
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-67-assistant#segment-28 width=760.0 cached=false bytes=142
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-54-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-54-assistant#segment-0 width=760.0 cached=false bytes=30
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-54-assistant#segment-1-block-0 bytes=68
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-54-assistant#segment-2 width=760.0 cached=false bytes=68
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-54-assistant#segment-3-block-0 bytes=133
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-54-assistant#segment-4 width=760.0 cached=false bytes=10
+CHAT_BENCHMARK_TRACE table layout miss id=synthetic-turn-54-assistant#segment-5-block-0 rows=3
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-54-assistant#segment-6 width=760.0 cached=false bytes=15
+CHAT_BENCHMARK_TRACE code layout miss id=synthetic-turn-54-assistant#segment-7-block-0 bytes=66
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-55-user-block-0 width=732.0 cached=false bytes=105
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-turn-55-assistant#segment-0 width=760.0 cached=false bytes=189
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE layout miss id=synthetic-stream-user-block-0 width=732.0 cached=false bytes=48
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5853 requests=3051 code=2350 tables=150
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE benchmark start: production-stream-scroll-3000pps
+CHAT_BENCHMARK_TRACE anchor table auto=true spacing=(17.0, 0.0) delegate=Optional(<_TtGC7SwiftUI22OutlineListCoordinatorGOS_19SelectionManagerBoxOs5Never__: 0x778dee8380>)
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=259009.0204954013 range=(minY: 0.0, maxY: 344766.5)
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":96.01414351808509,"displayMaximumFPS":120,"durationSeconds":20.007469000003766,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1922,"hitchCount":412,"hitchTimeMillisecondsPerSecond":195.55619453597268,"label":"production-stream-scroll-3000pps","maxFrameMilliseconds":94.47579165862408,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":20.40570833196398,"p99FrameMilliseconds":24.10312500433065}
+CHAT_BENCHMARK_RESULT {"averageFPS":96.01414351808509,"displayMaximumFPS":120,"durationSeconds":20.007469000003766,"expectedFrameMilliseconds":8.333333333333334,"frameCount":1922,"hitchCount":412,"hitchTimeMillisecondsPerSecond":195.55619453597268,"label":"production-stream-scroll-3000pps","maxFrameMilliseconds":94.47579165862408,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":8.333333331393078,"p95FrameMilliseconds":20.40570833196398,"p99FrameMilliseconds":24.10312500433065}
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5923 requests=3087 code=2385 tables=151
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE stream sourceMatches=true completed=true
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

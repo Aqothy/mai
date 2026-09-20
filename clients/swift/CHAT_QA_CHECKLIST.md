@@ -18,6 +18,8 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 
 - [ ] Stream prose with wrapping, partial Markdown delimiters, code fences, tables and long lines; no temporary overlap or upward recentering.
 - [ ] Working timer/whimsical text stays below content throughout growth and transitions between block types.
+- [ ] Inspect captured streaming frames for mixed old/new content, tile seams and single-frame displacement; callback pacing alone cannot pass this check.
+- [x] Remove streamed-text fades and working-indicator pulse/phrase transitions as requested on September 19. Plain text is the current baseline; there is no reveal timeline or custom text renderer.
 - [ ] While following the bottom, new text remains visible without repeated jumping or jump-button flicker.
 - [ ] Scroll away during streaming; incoming text does not pull the reader back. Return to bottom and verify following resumes.
 - [ ] Expand thoughts/tools while streaming; preserve the reader's position and intentional follow state.
@@ -52,5 +54,5 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 - [ ] Record the actual adapter, backend executable and versions; test bundled runtime and explicit custom executable independently.
 - [ ] Load/import/resume ordinary and paginated Codex threads on supported older/current combinations, including multi-page history and completed/live tool content.
 - [ ] Unsupported history operations yield a narrow compatible fallback where available; auth/network/corruption errors are not hidden by retry loops.
-- [ ] Verify Claude independently with its own thread/provider binding and exact error; identical generic error screens do not establish a shared cause.
+- Excluded by the user: live Claude testing, because no Claude Pro account is available. Use Codex for this run; historical Claude authentication errors are not renderer failures.
 - [ ] Adapter updates preserve active work, apply on safe restart and respect pinned/custom installations. Verify history compatibility before testing downgrade against valuable data.

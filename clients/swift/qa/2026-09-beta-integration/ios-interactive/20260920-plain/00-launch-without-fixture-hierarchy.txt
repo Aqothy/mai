@@ -1,0 +1,53 @@
+Device orientation: Unknown
+------------------------
+Application bundle identifier: com.anthonyqiu.mai
+Application UI orientation: Portrait
+Application, pid: 70290, label: 'mai'
+ Window, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+  Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+   Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+    Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+     Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+      Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+       NavigationBar, {{0.0, 62.0}, {402.0, 54.0}}, identifier: 'Threads', hitPoint: {201.0, 89.0}
+        Button, {{20.0, 66.0}, {36.0, 36.0}}, label: 'Settings', hitPoint: {38.0, 84.0}
+        StaticText, {{168.0, 73.7}, {65.7, 20.7}}, label: 'Threads', hitPoint: {200.8, 84.0}
+        Button, {{346.0, 66.0}, {36.0, 36.0}}, label: 'Filter Threads', hitPoint: {364.0, 84.0}
+       Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+        Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+         Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+          Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+           CollectionView, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+            Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+             Other, {{0.0, 0.0}, {402.0, 156.0}}, hitPoint: {201.0, 78.0}
+             Other, {{0.0, 748.0}, {402.0, 126.0}}, hitPoint: {201.0, 811.0}
+            Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+            Other, {{369.0, 116.0}, {30.0, 632.3}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {384.0, 432.2}
+             Other, {{396.0, 738.3}, {3.0, 7.0}}, hitPoint: {397.5, 741.8}
+            Other, {{369.0, 116.0}, {30.0, 632.3}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {384.0, 432.2}
+             Other, {{396.0, 738.3}, {3.0, 7.0}}, hitPoint: {397.5, 741.8}
+           StaticText, {{146.7, 359.3}, {108.7, 92.0}}, label: 'No Threads', hitPoint: {201.0, 405.3}
+           Image, {{173.0, 359.3}, {56.3, 44.7}}, identifier: 'bubble.left.and.bubble.right', label: 'Conversation', hitPoint: {201.2, 381.7}
+           StaticText, {{44.0, 454.3}, {314.0, 24.0}}, label: 'Your conversations will appear here.', hitPoint: {201.0, 466.3}
+           ActivityIndicator, {{128.0, 765.0}, {14.0, 14.3}}, value: 1, hitPoint: {135.0, 772.2}
+            ActivityIndicator, {{128.0, 765.0}, {14.0, 14.3}}, value: 1, hitPoint: {135.0, 772.2}
+           StaticText, {{150.0, 764.3}, {80.3, 15.7}}, label: 'Connecting…', hitPoint: {190.2, 772.2}
+       Toolbar, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'Toolbar', label: 'Toolbar', hitPoint: {201.0, 437.0}
+        Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+         Other, {{0.0, 62.0}, {402.0, 812.0}}, hitPoint: {201.0, 468.0}
+          Other, {{0.0, 62.0}, {402.0, 812.0}}, hitPoint: {201.0, 468.0}
+            Other, {{28.0, 798.0}, {226.0, 48.0}}, hitPoint: {141.0, 822.0}
+             Other, {{28.0, 798.0}, {226.0, 48.0}}, hitPoint: {141.0, 822.0}
+              Other, {{28.0, 808.0}, {226.0, 28.0}}, hitPoint: {141.0, 822.0}
+               SearchField, {{28.0, 808.0}, {226.0, 28.0}}, label: 'Search Threads', placeholderValue: 'Search Threads', hitPoint: {141.0, 822.0}
+                Image, {{40.0, 812.0}, {20.7, 19.3}}, identifier: 'magnifyingglass', label: 'Search', hitPoint: {50.3, 821.7}
+            Other, {{266.0, 798.0}, {48.0, 48.0}}, hitPoint: {290.0, 822.0}
+             Other, {{266.0, 798.0}, {48.0, 48.0}}, hitPoint: {290.0, 822.0}
+              Other, {{271.0, 803.0}, {38.0, 38.0}}, hitPoint: {290.0, 822.0}
+               Other, {{271.0, 803.0}, {38.0, 38.0}}, hitPoint: {290.0, 822.0}
+                Button, {{271.0, 803.0}, {38.0, 38.0}}, label: 'New Terminal', hitPoint: {290.0, 822.0}
+            Other, {{326.0, 798.0}, {48.0, 48.0}}, hitPoint: {350.0, 822.0}
+             Other, {{326.0, 798.0}, {48.0, 48.0}}, hitPoint: {350.0, 822.0}
+              Other, {{331.0, 803.0}, {38.0, 38.0}}, hitPoint: {350.0, 822.0}
+               Other, {{331.0, 803.0}, {38.0, 38.0}}, hitPoint: {350.0, 822.0}
+                Button, {{331.0, 803.0}, {38.0, 38.0}}, label: 'New Chat', hitPoint: {350.0, 822.0}

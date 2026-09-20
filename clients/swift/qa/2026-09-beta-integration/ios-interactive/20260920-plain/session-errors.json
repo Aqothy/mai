@@ -1,0 +1,14 @@
+[
+  {
+    "interactSessionKey": "Plain Chat Final Simulator QA",
+    "interactionCommand": "",
+    "isError": true,
+    "message": "Session not found. It may have already been closed, or the identifier is wrong"
+  },
+  {
+    "interactSessionKey": "Plain Chat Fixture QA",
+    "interactionCommand": "",
+    "isError": true,
+    "message": "Session not found. It may have already been closed, or the identifier is wrong"
+  }
+]

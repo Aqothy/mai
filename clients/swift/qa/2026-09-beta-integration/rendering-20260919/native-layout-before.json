@@ -1,0 +1,34 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 1,
+    "notRun": 0,
+    "passed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-19T15-14-40-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/467A716E-BE7A-4E1E-8084-16A82831D781.txt",
+  "message": "Some error messages were truncated to 5. Full logs available at /var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/467A716E-BE7A-4E1E-8084-16A82831D781.txt.",
+  "results": [
+    {
+      "displayName": "growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit()",
+      "errorMessages": [
+        "mai/maiTests/ChatNativeTranscriptTests.swift:40 ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit(): Expectation failed: document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY == workingY\ndocument.rect(ofRow: 1).minY - scroll.contentView.bounds.minY → 209.0\nworkingY → 179.0: // No yield: an eventual correction still permits a visibly displaced frame.",
+        "mai/maiTests/ChatNativeTranscriptTests.swift:41 ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit(): Expectation failed: scroll.contentView.bounds.maxY == document.bounds.maxY\nscroll.contentView.bounds.maxY → 621.0\ndocument.bounds.maxY → 651.0",
+        "mai/maiTests/ChatNativeTranscriptTests.swift:40 ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit(): Expectation failed: document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY == workingY\ndocument.rect(ofRow: 1).minY - scroll.contentView.bounds.minY → 529.0\nworkingY → 179.0: // No yield: an eventual correction still permits a visibly displaced frame.",
+        "mai/maiTests/ChatNativeTranscriptTests.swift:41 ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit(): Expectation failed: scroll.contentView.bounds.maxY == document.bounds.maxY\nscroll.contentView.bounds.maxY → 621.0\ndocument.bounds.maxY → 971.0",
+        "mai/maiTests/ChatNativeTranscriptTests.swift:40 ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit(): Expectation failed: document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY == workingY\ndocument.rect(ofRow: 1).minY - scroll.contentView.bounds.minY → 359.0\nworkingY → 179.0: // No yield: an eventual correction still permits a visibly displaced frame."
+      ],
+      "identifier": "ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "1 tests: 0 passed, 1 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 1,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.19_15-14-40--0400.xcresult"
+}

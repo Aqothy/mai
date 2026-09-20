@@ -1,0 +1,118 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 0,
+    "notRun": 0,
+    "passed": 14,
+    "skipped": 0,
+    "total": 14
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-19T15-15-59-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/E2094EF3-FB5E-4B06-AC01-D8C0C1DF82A4.txt",
+  "results": [
+    {
+      "displayName": "growingContentDoesNotMoveAboveItsHostWhileHeightUpdateIsPending()",
+      "errorMessages": [],
+      "identifier": "ChatMeasuredTranscriptRowTests/growingContentDoesNotMoveAboveItsHostWhileHeightUpdateIsPending()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit()",
+      "errorMessages": [],
+      "identifier": "ChatNativeTranscriptTests/growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible()",
+      "errorMessages": [],
+      "identifier": "ChatNativeTranscriptTests/heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "expandedContentUpdatesItsHostAndScrollableExtent()",
+      "errorMessages": [],
+      "identifier": "ChatNativeTranscriptTests/expandedContentUpdatesItsHostAndScrollableExtent()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "customRowLookupUsesHalfOpenIntervals()",
+      "errorMessages": [],
+      "identifier": "ChatNativeTranscriptTests/customRowLookupUsesHalfOpenIntervals()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "customViewportKeepsViewsBoundedAndReusesVisibleRows()",
+      "errorMessages": [],
+      "identifier": "ChatNativeTranscriptTests/customViewportKeepsViewsBoundedAndReusesVisibleRows()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "preservesAnchorAcrossPrependAndHeightCorrection()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/preservesAnchorAcrossPrependAndHeightCorrection()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "emptyRemovalAndBoundaryLookup()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/emptyRemovalAndBoundaryLookup()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "streamingTailGrowthLeavesHistoryPositionsUnchanged()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/streamingTailGrowthLeavesHistoryPositionsUnchanged()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "reflowKeepsRowAnchorAndClampsShrinkingRowOffset()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/reflowKeepsRowAnchorAndClampsShrinkingRowOffset()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "coordinatorOnlyMeasuresNewOrChangedCompletedRows()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/coordinatorOnlyMeasuresNewOrChangedCompletedRows()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "refreshingAnActiveRowKeepsItsHeightReporterValid()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/refreshingAnActiveRowKeepsItsHeightReporterValid()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "nativeControllerPreservesAnchorThroughHeightChangeAndPrepend()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/nativeControllerPreservesAnchorThroughHeightChangeAndPrepend()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "userScrollCancelsInitialAlignmentWithoutHidingTimeline()",
+      "errorMessages": [],
+      "identifier": "ChatVirtualTranscriptGeometryTests/userScrollCancelsInitialAlignmentWithoutHidingTimeline()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "14 tests: 14 passed, 0 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 14,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.19_15-15-59--0400.xcresult"
+}

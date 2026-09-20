@@ -1,0 +1,148 @@
+CHAT_BENCHMARK_TRACE real-thread benchmark start: Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE real-thread benchmark thread: synthetic-benchmark-thread Synthetic benchmark transcript
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=107 requests=56 code=44 tables=2
+CHAT_BENCHMARK_TRACE transcript warm started
+CHAT_BENCHMARK_TRACE prepare rows=5850 requests=3050 code=2350 tables=150
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-property
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-tag
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-punctuation
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-params
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-function
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-dark: hljs-operator
+CHAT_BENCHMARK_TRACE transcript warm
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=5851 width=760.0 totalHeight=967374.0 elapsed=4.441480708 seconds
+CHAT_BENCHMARK_TRACE native geometry rows=5851 measured=0 width=760.0 totalHeight=967374.0 elapsed=0.020577917 seconds
+CHAT_BENCHMARK_TRACE benchmark start: full-history-scrub
+CHAT_BENCHMARK_TRACE anchor row=4800 offset=793392.0 range=(minY: 0.0, maxY: 966628.0)
+CHAT_BENCHMARK_TRACE nativeMounts=6483 hostingMounts=675 resident=5 pooled=18
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_RESULT {"averageFPS":46.345384764076826,"displayMaximumFPS":120,"durationSeconds":20.023568791672005,"expectedFrameMilliseconds":8.333333333333334,"frameCount":929,"hitchCount":882,"hitchTimeMillisecondsPerSecond":611.2555555924108,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":55.882250002468936,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":21.498875008546747,"p95FrameMilliseconds":31.738874997245148,"p99FrameMilliseconds":37.65716665657237}
+CHAT_BENCHMARK_RESULT {"averageFPS":46.345384764076826,"displayMaximumFPS":120,"durationSeconds":20.023568791672005,"expectedFrameMilliseconds":8.333333333333334,"frameCount":929,"hitchCount":882,"hitchTimeMillisecondsPerSecond":611.2555555924108,"label":"full-history-scrub-2.0s-20.0s","maxFrameMilliseconds":55.882250002468936,"measurementKind":"displayLinkCallbacks","p50FrameMilliseconds":21.498875008546747,"p95FrameMilliseconds":31.738874997245148,"p99FrameMilliseconds":37.65716665657237}
+CHAT_BENCHMARK_TRACE CHAT_BENCHMARK_COMPLETE
+CHAT_BENCHMARK_COMPLETE

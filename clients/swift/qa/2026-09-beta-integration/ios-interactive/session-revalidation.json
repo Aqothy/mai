@@ -1,0 +1,12 @@
+{
+  "session": "Beta Release Simulator QA",
+  "operation": "DeviceInteractionSynthesize",
+  "interactionCommand": "",
+  "result": {
+    "type": "error",
+    "data": "Session not found. It may have already been closed, or the identifier is wrong"
+  },
+  "recreated": false,
+  "testedCommit": "412959a",
+  "sourceHeadAtRevalidation": "571c565"
+}

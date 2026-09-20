@@ -1,0 +1,1 @@
+This attempt produced no performance results. All three native sweeps were rejected before measurement because macOS reported the window occluded. Horizontal alignment validation passed. Kept as an invalid attempt; excluded from comparisons. A separately launched preparation window was raised through accessibility and visually verified before retrying.

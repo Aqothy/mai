@@ -1,0 +1,165 @@
+Device orientation: Landscape Left
+------------------------
+Application bundle identifier: com.anthonyqiu.mai
+Application UI orientation: Landscape Right
+Application, pid: 41701, label: 'mai'
+ Window, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+  Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+   Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+    Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+     Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+      Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+       NavigationBar, {{0.0, 24.0}, {874.0, 54.0}}, identifier: 'Synthetic benchmark transcript', hitPoint: {437.0, 51.0}
+        Button, {{38.0, 24.0}, {44.0, 44.0}}, identifier: 'BackButton', label: 'Threads', hitPoint: {60.0, 46.0}
+        StaticText, {{311.0, 35.7}, {252.0, 20.7}}, label: 'Synthetic benchmark transcript', hitPoint: {437.0, 46.0}
+       Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+        Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+         Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+          Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+           CollectionView, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+            Other, {{0.0, -7571.0}, {874.0, 8892.0}}, hitPoint: {437.0, 201.0}
+            Cell, {{0.0, -2.3}, {874.0, 110.7}}, hitPoint: {437.0, 54.2}
+             Other, {{0.0, -2.3}, {874.0, 110.7}}, hitPoint: {437.0, 54.2}
+              Other, {{0.0, -2.3}, {874.0, 110.7}}, hitPoint: {437.0, 54.2}
+             Other, {{62.0, -2.3}, {750.0, 110.7}}, hitPoint: {437.0, 54.2}
+              Other, {{62.0, -2.3}, {750.0, 110.7}}, hitPoint: {437.0, 54.2}
+               Other, {{62.0, -2.3}, {750.0, 110.7}}, hitPoint: {437.0, 54.2}
+                Other, {{78.0, -2.3}, {718.0, 102.7}}, label: 'Text code block', hitPoint: {437.0, 50.2}
+                 StaticText, {{94.0, 12.2}, {30.7, 19.3}}, label: 'Text', hitPoint: {109.3, 21.8}
+                 Button, {{760.3, 13.0}, {17.7, 17.7}}, identifier: 'square.on.square', label: 'Copy code', hitPoint: {769.2, 21.8}
+                 ScrollView, {{78.0, 42.0}, {718.0, 58.3}}, hitPoint: {437.0, 71.2}
+                  Other, {{78.0, 42.0}, {2455.3, 58.3}}, hitPoint: {476.0, 71.2}
+                   StaticText, {{94.0, 42.0}, {2423.3, 42.3}}, label: 'debug event=message.delta thread=mock-thread message=fixture-assistant-001 sequence=0000042 payload=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 path=/an/intentionally/long/path/that/should/not/wrap/aggressively/in/a/code/block
+literal delimiters inside code: **strong?** _emphasis?_ ~~strike?~~ [link?](https://example.com) <html?>', hitPoint: {484.0, 63.2}
+                  Other, {{78.0, 68.2}, {718.0, 29.2}}, label: 'Horizontal scroll bar, 4 pages', value: 0%, hitPoint: {437.0, 82.8}
+                   Other, {{438.0, 94.3}, {7.0, 3.0}}, hitPoint: {441.5, 95.8}
+                  Other, {{78.0, 68.2}, {718.0, 29.2}}, label: 'Horizontal scroll bar, 4 pages', value: 0%, hitPoint: {437.0, 82.8}
+                   Other, {{438.0, 94.3}, {7.0, 3.0}}, hitPoint: {441.5, 95.8}
+            Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+             Other, {{0.0, 0.0}, {874.0, 118.0}}, hitPoint: {437.0, 59.0}
+             Other, {{0.0, 82.0}, {874.0, 136.0}}, hitPoint: {437.0, 150.0}
+            Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+             Other, {{0.0, 0.0}, {874.0, 118.0}}, hitPoint: {437.0, 59.0}
+             Other, {{0.0, 82.0}, {874.0, 136.0}}, hitPoint: {437.0, 150.0}
+            Cell, {{0.0, 108.3}, {874.0, 199.0}}, hitPoint: {437.0, 207.8}
+             Other, {{0.0, 108.3}, {874.0, 199.0}}, hitPoint: {437.0, 207.8}
+              Other, {{0.0, 108.3}, {874.0, 199.0}}, hitPoint: {437.0, 207.8}
+             Other, {{62.0, 108.3}, {750.0, 199.0}}, hitPoint: {437.0, 207.8}
+              Other, {{62.0, 108.3}, {750.0, 199.0}}, hitPoint: {437.0, 207.8}
+               Other, {{62.0, 108.3}, {750.0, 199.0}}, hitPoint: {437.0, 207.8}
+                Other, {{78.0, 108.3}, {718.0, 189.0}}, hitPoint: {437.0, 202.8}
+                 TextView, {{78.0, 108.3}, {718.0, 189.0}}, value: After the code
+
+Pr..., hitPoint: {437.0, 202.8}
+                  TextView, {{78.0, 108.3}, {130.7, 25.9}}, label: 'After the code', hitPoint: {143.3, 121.3}
+                  TextView, {{78.0, 150.2}, {718.0, 44.6}}, label: 'Prose after the final fence confirms that the renderer closes code-block presentation and returns to the normal text style.', hitPoint: {437.0, 172.5}
+                  TextView, {{78.0, 210.8}, {102.5, 25.9}}, label: 'Conclusion', hitPoint: {129.2, 223.7}
+                  TextView, {{78.0, 252.6}, {718.0, 44.3}}, label: 'The end marker makes it easy to confirm that a large message remains selectable, accessible, and correctly positioned after every section has rendered.', hitPoint: {437.0, 274.8}
+                  Other, {{763.0, 108.3}, {30.0, 189.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {778.0, 202.8}
+                   Other, {{790.0, 111.3}, {3.0, 250.0}}, hitPoint: {791.5, 236.3}
+                  Other, {{78.0, 264.3}, {718.0, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {437.0, 279.3}
+                   Other, {{81.0, 291.3}, {364.0, 3.0}}, hitPoint: {263.0, 292.8}
+            Cell, {{0.0, 307.3}, {874.0, 85.0}}, hitPoint: {437.0, 349.8}
+             Other, {{0.0, 307.3}, {874.0, 85.0}}, hitPoint: {437.0, 349.8}
+              Other, {{0.0, 307.3}, {874.0, 85.0}}, hitPoint: {437.0, 349.8}
+             Other, {{62.0, 307.3}, {750.0, 85.0}}, hitPoint: {437.0, 349.8}
+              Other, {{62.0, 307.3}, {750.0, 85.0}}, hitPoint: {437.0, 349.8}
+               Other, {{62.0, 307.3}, {750.0, 85.0}}, hitPoint: {437.0, 349.8}
+                Other, {{92.0, 327.3}, {690.0, 45.0}}, hitPoint: {437.0, 349.8}
+                 TextView, {{92.0, 327.3}, {690.0, 45.0}}, value: Turn 300: explain ..., hitPoint: {437.0, 349.8}
+                  TextView, {{92.0, 327.3}, {690.0, 44.3}}, label: 'Turn 300: explain the change, show the table of options, and include the code we discussed for module299.', hitPoint: {437.0, 349.5}
+                  Other, {{749.0, 327.3}, {30.0, 45.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {764.0, 349.8}
+                   Other, {{776.0, 330.3}, {3.0, 61.0}}, hitPoint: {777.5, 360.8}
+                  Other, {{92.0, 346.8}, {690.0, 22.5}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {437.0, 358.1}
+                   Other, {{95.0, 366.3}, {336.0, 3.0}}, hitPoint: {263.0, 367.8}
+            Cell, {{0.0, 392.3}, {874.0, 35.7}}, hitPoint: {437.0, 397.2}
+             Other, {{0.0, 392.3}, {874.0, 35.7}}, hitPoint: {437.0, 397.2}
+              Other, {{0.0, 392.3}, {874.0, 35.7}}, hitPoint: {437.0, 397.2}
+             Other, {{62.0, 392.3}, {750.0, 35.7}}, hitPoint: {437.0, 397.2}
+              Other, {{62.0, 392.3}, {750.0, 35.7}}, hitPoint: {437.0, 397.2}
+               Other, {{62.0, 392.3}, {750.0, 35.7}}, hitPoint: {437.0, 397.2}
+                Button, {{0.0, 392.3}, {874.0, 35.7}}, label: 'Show agent activity, Worked for 2m', hitPoint: {437.0, 397.2}
+                 StaticText, {{78.0, 398.3}, {107.3, 19.3}}, label: 'Worked for 2m', hitPoint: {131.7, 400.2}
+            Other, {{779.0, 78.0}, {30.0, 44.0}}, label: 'Vertical scroll bar, 166 pages', value: 95%, hitPoint: {794.0, 100.0}
+             Other, {{806.0, 90.3}, {3.0, 36.0}}, hitPoint: {807.5, 108.3}
+            Other, {{779.0, 78.0}, {30.0, 44.0}}, label: 'Vertical scroll bar, 166 pages', value: 95%, hitPoint: {794.0, 100.0}
+             Other, {{806.0, 90.3}, {3.0, 36.0}}, hitPoint: {807.5, 108.3}
+           Other, {{62.0, 78.0}, {750.0, 44.0}}, hitPoint: {437.0, 100.0}
+           Button, {{62.0, 103.0}, {38.0, 38.0}}, identifier: 'arrow.down', label: 'Scroll to bottom', hitPoint: {81.0, 122.0}
+           Button, {{78.0, 123.0}, {614.0, 42.0}}, label: 'Prompt', hitPoint: {385.0, 144.0}
+           Button, {{708.0, 122.0}, {36.0, 36.0}}, label: 'Add', hitPoint: {726.0, 140.0}
+            Button, {{708.0, 122.0}, {36.0, 36.0}}, hitPoint: {726.0, 140.0}
+             Image, {{708.0, 122.0}, {36.0, 36.0}}, identifier: 'plus', label: 'Add', hitPoint: {726.0, 140.0}
+           Button, {{752.0, 122.0}, {36.0, 36.0}}, identifier: 'arrow.up', label: 'Send', hitPoint: {770.0, 140.0}
+           TextField, {{92.0, 137.0}, {586.0, 20.0}}, label: 'Prompt', value: Offline QA draft
+S..., Keyboard Focused, hitPoint: {385.0, 147.0}
+              Other, {{84.8, 99.5}, {16.5, 16.5}}, hitPoint: {93.0, 107.8}
+              Other, {{84.8, 99.5}, {16.5, 16.5}}, hitPoint: {93.0, 107.8}
+            Other, {{92.0, 144.0}, {586.0, 10.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {385.0, 149.0}
+             Other, {{95.0, 151.0}, {577.0, 3.0}}, hitPoint: {383.5, 152.5}
+       Toolbar, {{0.0, 0.0}, {874.0, 402.0}}, identifier: 'Toolbar', label: 'Toolbar', hitPoint: {437.0, 201.0}
+        Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+ Window, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+  Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+   Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+   Other, {{0.0, 178.0}, {874.0, 224.0}}, hitPoint: {437.0, 290.0}
+    Other, {{0.0, 178.0}, {874.0, 224.0}}, identifier: 'inputView', hitPoint: {437.0, 290.0}
+ Window, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+  Other, {{0.0, 0.0}, {874.0, 402.0}}, hitPoint: {437.0, 201.0}
+   Other, {{0.0, 178.0}, {874.0, 224.0}}, hitPoint: {437.0, 290.0}
+    Other, {{0.0, 178.0}, {874.0, 225.0}}, hitPoint: {437.0, 290.0}
+     Other, {{0.0, 178.0}, {874.0, 225.0}}, hitPoint: {437.0, 290.0}
+      Other, {{0.0, 178.0}, {874.0, 225.0}}, hitPoint: {437.0, 290.0}
+    Other, {{75.0, 178.0}, {724.0, 44.0}}, identifier: 'SystemInputAssistantView', hitPoint: {437.0, 200.0}
+     Other, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+      Other, {{75.0, 178.0}, {724.0, 44.0}}, identifier: 'CenterPageView', hitPoint: {437.0, 200.0}
+       Other, {{75.0, -422.0}, {724.0, 1244.0}}, hitPoint: {437.0, 201.0}
+        ScrollView, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+       Other, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+        Other, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+         Other, {{75.0, 178.0}, {724.0, 44.0}}, label: 'Typing Predictions', hitPoint: {437.0, 200.0}
+          Other, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+           Other, {{75.0, 178.0}, {724.0, 44.0}}, hitPoint: {437.0, 200.0}
+            Button, {{75.0, 178.0}, {241.3, 44.0}}, hitPoint: {195.7, 200.0}
+            Button, {{316.3, 178.0}, {241.3, 44.0}}, hitPoint: {437.0, 200.0}
+            Button, {{557.7, 178.0}, {241.3, 44.0}}, hitPoint: {678.3, 200.0}
+    Other, {{0.0, 222.0}, {874.0, 180.0}}, hitPoint: {437.0, 312.0}
+     Button, {{8.5, 336.7}, {68.1, 68.7}}, label: 'Next keyboard', value: 简体拼音, hitPoint: {42.5, 369.3}
+     Button, {{797.4, 336.4}, {68.1, 68.7}}, identifier: 'dictation', label: 'Dictate', hitPoint: {831.5, 369.2}
+     Button, {{797.4, 336.4}, {68.1, 68.7}}, identifier: 'dictation', label: 'Dictate', hitPoint: {831.5, 369.2}
+    Other, {{75.0, 222.0}, {724.0, 177.0}}, hitPoint: {437.0, 310.5}
+     Keyboard, {{75.0, 222.0}, {724.0, 177.0}}, hitPoint: {437.0, 310.5}
+      Other, {{75.0, 222.0}, {724.0, 177.0}}, hitPoint: {437.0, 310.5}
+       Other, {{75.0, 222.0}, {724.0, 177.0}}, identifier: 'UIKeyboardLayoutStar Preview', hitPoint: {437.0, 310.5}
+        Key, {{77.0, 227.0}, {72.3, 40.0}}, label: 'q', hitPoint: {113.2, 247.0}
+        Key, {{149.3, 227.0}, {72.0, 40.0}}, label: 'w', hitPoint: {185.3, 247.0}
+        Key, {{221.3, 227.0}, {72.3, 40.0}}, label: 'e', hitPoint: {257.5, 247.0}
+        Key, {{293.7, 227.0}, {72.0, 40.0}}, label: 'r', hitPoint: {329.7, 247.0}
+        Key, {{365.7, 227.0}, {72.3, 40.0}}, label: 't', hitPoint: {401.8, 247.0}
+        Key, {{438.0, 227.0}, {72.3, 40.0}}, label: 'y', hitPoint: {474.2, 247.0}
+        Key, {{510.3, 227.0}, {72.0, 40.0}}, label: 'u', hitPoint: {546.3, 247.0}
+        Key, {{582.3, 227.0}, {72.3, 40.0}}, label: 'i', hitPoint: {618.5, 247.0}
+        Key, {{654.7, 227.0}, {72.0, 40.0}}, label: 'o', hitPoint: {690.7, 247.0}
+        Key, {{726.7, 227.0}, {72.3, 40.0}}, label: 'p', hitPoint: {762.8, 247.0}
+        Key, {{113.0, 267.0}, {72.3, 40.0}}, label: 'a', hitPoint: {149.2, 287.0}
+        Key, {{185.3, 267.0}, {72.3, 40.0}}, label: 's', hitPoint: {221.5, 287.0}
+        Key, {{257.7, 267.0}, {72.0, 40.0}}, label: 'd', hitPoint: {293.7, 287.0}
+        Key, {{329.7, 267.0}, {72.3, 40.0}}, label: 'f', hitPoint: {365.8, 287.0}
+        Key, {{402.0, 267.0}, {72.0, 40.0}}, label: 'g', hitPoint: {438.0, 287.0}
+        Key, {{474.0, 267.0}, {72.3, 40.0}}, label: 'h', hitPoint: {510.2, 287.0}
+        Key, {{546.3, 267.0}, {72.3, 40.0}}, label: 'j', hitPoint: {582.5, 287.0}
+        Key, {{618.7, 267.0}, {72.0, 40.0}}, label: 'k', hitPoint: {654.7, 287.0}
+        Key, {{690.7, 267.0}, {72.3, 40.0}}, label: 'l', hitPoint: {726.8, 287.0}
+        Button, {{77.0, 307.0}, {94.0, 40.0}}, identifier: 'shift', label: 'shift', hitPoint: {124.0, 327.0}
+        Key, {{185.3, 307.0}, {72.3, 40.0}}, label: 'z', hitPoint: {221.5, 327.0}
+        Key, {{257.7, 307.0}, {72.0, 40.0}}, label: 'x', hitPoint: {293.7, 327.0}
+        Key, {{329.7, 307.0}, {72.3, 40.0}}, label: 'c', hitPoint: {365.8, 327.0}
+        Key, {{402.0, 307.0}, {72.0, 40.0}}, label: 'v', hitPoint: {438.0, 327.0}
+        Key, {{474.0, 307.0}, {72.3, 40.0}}, label: 'b', hitPoint: {510.2, 327.0}
+        Key, {{546.3, 307.0}, {72.3, 40.0}}, label: 'n', hitPoint: {582.5, 327.0}
+        Key, {{618.7, 307.0}, {72.0, 40.0}}, label: 'm', hitPoint: {654.7, 327.0}
+        Key, {{705.0, 307.0}, {94.0, 40.0}}, identifier: 'delete', label: 'delete', hitPoint: {752.0, 327.0}
+        Key, {{77.0, 347.0}, {72.3, 40.0}}, identifier: 'more', label: 'numbers', hitPoint: {113.2, 367.0}
+        Button, {{149.3, 347.0}, {72.0, 40.0}}, identifier: 'emoji', label: 'Emoji', hitPoint: {185.3, 367.0}
+        Key, {{221.3, 347.0}, {433.3, 40.0}}, identifier: 'space', label: 'space', hitPoint: {438.0, 367.0}
+        Button, {{654.7, 347.0}, {144.3, 40.0}}, identifier: 'Return', label: 'return', hitPoint: {726.8, 367.0}

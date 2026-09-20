@@ -1,0 +1,53 @@
+Device orientation: Unknown
+------------------------
+Application bundle identifier: com.anthonyqiu.mai
+Application UI orientation: Portrait
+Application, pid: 52354, label: 'mai'
+ Window, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+  Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+   Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+    Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+     Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+      Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+       Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+       CollectionView, {{118.3, 266.7}, {250.0, 874.0}}, hitPoint: {243.3, 570.3}
+        Cell, {{126.3, 266.7}, {234.0, 77.0}}, hitPoint: {243.3, 305.2}
+         Button, {{126.3, 266.7}, {234.0, 77.0}}, label: 'Copy', hitPoint: {243.3, 305.2}
+          Image, {{233.0, 283.0}, {21.0, 23.7}}, identifier: 'document.on.document', label: 'Document overlapping another document', hitPoint: {243.5, 294.8}
+        Other, {{142.3, 343.7}, {202.0, 1.0}}, hitPoint: {243.3, 344.2}
+        Cell, {{118.3, 354.7}, {250.0, 42.0}}, hitPoint: {243.3, 375.7}
+         Button, {{118.3, 354.7}, {250.0, 42.0}}, label: 'Look Up', hitPoint: {243.3, 375.7}
+          Image, {{148.7, 366.0}, {19.7, 19.7}}, identifier: 'info.circle', label: 'info', hitPoint: {158.5, 375.8}
+        Cell, {{118.3, 396.7}, {250.0, 42.0}}, hitPoint: {243.3, 417.7}
+         Button, {{118.3, 396.7}, {250.0, 42.0}}, label: 'Translate', hitPoint: {243.3, 417.7}
+          Image, {{143.3, 407.0}, {30.3, 21.7}}, identifier: 'translate', label: 'Translate', hitPoint: {158.5, 417.8}
+        Cell, {{118.3, 438.7}, {250.0, 42.0}}, hitPoint: {243.3, 459.7}
+         Button, {{118.3, 438.7}, {250.0, 42.0}}, identifier: 'dd-search-web', label: 'Search Web', hitPoint: {243.3, 459.7}
+          Image, {{148.3, 450.3}, {20.3, 19.3}}, identifier: 'magnifyingglass', label: 'Search', hitPoint: {158.5, 460.0}
+        Other, {{142.3, 490.7}, {202.0, 1.0}}, hitPoint: {243.3, 491.2}
+        Cell, {{118.3, 501.7}, {250.0, 42.0}}, hitPoint: {243.3, 522.7}
+         Button, {{118.3, 501.7}, {250.0, 42.0}}, label: 'Share…', hitPoint: {243.3, 522.7}
+          Image, {{149.0, 510.3}, {19.0, 22.7}}, identifier: 'square.and.arrow.up', label: 'Share', hitPoint: {158.5, 521.7}
+        Other, {{142.3, 553.7}, {202.0, 1.0}}, hitPoint: {243.3, 554.2}
+        Cell, {{118.3, 564.7}, {250.0, 42.0}}, hitPoint: {243.3, 585.7}
+         Button, {{118.3, 564.7}, {250.0, 42.0}}, label: 'Comment…', hitPoint: {243.3, 585.7}
+          Image, {{147.3, 576.3}, {22.3, 20.0}}, identifier: 'text.bubble', label: 'comment lines', hitPoint: {158.5, 586.3}
+        Other, {{335.3, 296.7}, {30.0, 290.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {350.3, 441.7}
+         Other, {{362.3, 299.7}, {3.0, 284.0}}, hitPoint: {363.8, 441.7}
+        Other, {{118.3, 553.7}, {221.7, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {229.2, 568.7}
+         Other, {{121.3, 580.7}, {215.7, 3.0}}, hitPoint: {229.2, 582.2}
+        Other, {{335.3, 296.7}, {30.0, 290.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {350.3, 441.7}
+         Other, {{362.3, 299.7}, {3.0, 284.0}}, hitPoint: {363.8, 441.7}
+        Other, {{118.3, 553.7}, {221.7, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {229.2, 568.7}
+         Other, {{121.3, 580.7}, {215.7, 3.0}}, hitPoint: {229.2, 582.2}
+      Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+       Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+        Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+         Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+          Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+           Other, {{118.3, 266.7}, {250.0, 44.0}}, hitPoint: {243.3, 288.7}
+         Other, {{118.3, 266.7}, {250.0, 350.0}}, hitPoint: {243.3, 441.7}
+          Other, {{118.3, 266.7}, {250.0, 44.0}}, hitPoint: {243.3, 288.7}
+ Window, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+  Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+   Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}

@@ -1,0 +1,82 @@
+[
+  {
+    "configuration": "custom-scroll",
+    "label": "real-cruise-1200pps",
+    "runs": 3,
+    "meanCallbackHz": 118.86653810013433,
+    "maximumRunP99Milliseconds": 8.333333360496908,
+    "maximumIntervalMilliseconds": 164.57670833915472
+  },
+  {
+    "configuration": "custom-scroll",
+    "label": "real-scroll-3000pps",
+    "runs": 3,
+    "meanCallbackHz": 118.47206158564677,
+    "maximumRunP99Milliseconds": 12.874166655819863,
+    "maximumIntervalMilliseconds": 227.04216666170396
+  },
+  {
+    "configuration": "custom-scroll",
+    "label": "real-fling-8000pps",
+    "runs": 3,
+    "meanCallbackHz": 116.52083333333333,
+    "maximumRunP99Milliseconds": 17.389083339367062,
+    "maximumIntervalMilliseconds": 23.563249997096136
+  },
+  {
+    "configuration": "list-scroll",
+    "label": "real-cruise-1200pps",
+    "runs": 3,
+    "meanCallbackHz": 109.05773718343808,
+    "maximumRunP99Milliseconds": 22.35804166411981,
+    "maximumIntervalMilliseconds": 95.95912499935366
+  },
+  {
+    "configuration": "list-scroll",
+    "label": "real-scroll-3000pps",
+    "runs": 3,
+    "meanCallbackHz": 96.71017786769391,
+    "maximumRunP99Milliseconds": 22.35429166466929,
+    "maximumIntervalMilliseconds": 28.214583348017186
+  },
+  {
+    "configuration": "list-scroll",
+    "label": "real-fling-8000pps",
+    "runs": 3,
+    "meanCallbackHz": 59.06461218436726,
+    "maximumRunP99Milliseconds": 75.24962499155663,
+    "maximumIntervalMilliseconds": 1216.2190833478235
+  },
+  {
+    "configuration": "custom-stream",
+    "label": "production-stream-20000chars",
+    "runs": 3,
+    "meanCallbackHz": 108.13403610629838,
+    "maximumRunP99Milliseconds": 25.87737498106435,
+    "maximumIntervalMilliseconds": 58.333333319751546
+  },
+  {
+    "configuration": "list-stream",
+    "label": "production-stream-20000chars",
+    "runs": 3,
+    "meanCallbackHz": 93.11629518257052,
+    "maximumRunP99Milliseconds": 33.33333332557231,
+    "maximumIntervalMilliseconds": 296.4079166704323
+  },
+  {
+    "configuration": "custom-streamScroll",
+    "label": "production-stream-scroll-3000pps",
+    "runs": 3,
+    "meanCallbackHz": 117.90858044300829,
+    "maximumRunP99Milliseconds": 16.666666662786156,
+    "maximumIntervalMilliseconds": 24.999999994179234
+  },
+  {
+    "configuration": "list-streamScroll",
+    "label": "production-stream-scroll-3000pps",
+    "runs": 3,
+    "meanCallbackHz": 102.31648877633835,
+    "maximumRunP99Milliseconds": 18.8987500150688,
+    "maximumIntervalMilliseconds": 88.14845833694562
+  }
+]

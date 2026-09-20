@@ -1,0 +1,136 @@
+Device orientation: Unknown
+------------------------
+Application bundle identifier: com.anthonyqiu.mai
+Application UI orientation: Portrait
+Application, pid: 52354, label: 'mai'
+ Window, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+  Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+   Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+    Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+     Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+      Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+       NavigationBar, {{0.0, 62.0}, {402.0, 54.0}}, identifier: 'Synthetic benchmark transcript', hitPoint: {201.0, 89.0}
+        Button, {{16.0, 62.0}, {44.0, 44.0}}, identifier: 'BackButton', label: 'Threads', hitPoint: {38.0, 84.0}
+        StaticText, {{75.0, 73.7}, {252.0, 20.7}}, label: 'Synthetic benchmark transcript', hitPoint: {201.0, 84.0}
+       Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+        Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+         Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+          Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+           Other, {{0.0, 116.0}, {402.0, 616.0}}, hitPoint: {201.0, 424.0}
+           CollectionView, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+            Other, {{0.0, -8563.0}, {402.0, 11043.0}}, hitPoint: {201.0, 437.0}
+            Cell, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+             Other, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+              Other, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+             Other, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+              Other, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+               Other, {{0.0, -69.3}, {402.0, 110.7}}, hitPoint: {201.0, 20.7}
+                Other, {{16.0, -69.3}, {370.0, 102.7}}, label: 'Text code block', hitPoint: {201.0, 16.7}
+                 ScrollView, {{16.0, -25.0}, {370.0, 58.3}}, hitPoint: {201.0, 16.7}
+                  Other, {{16.0, -25.0}, {2455.3, 58.3}}, hitPoint: {209.0, 16.7}
+                   StaticText, {{32.0, -25.0}, {2423.3, 42.3}}, label: 'debug event=message.delta thread=mock-thread message=fixture-assistant-001 sequence=0000042 payload=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 path=/an/intentionally/long/path/that/should/not/wrap/aggressively/in/a/code/block
+literal delimiters inside code: **strong?** _emphasis?_ ~~strike?~~ [link?](https://example.com) <html?>', hitPoint: {217.0, 8.7}
+                  Other, {{16.0, 1.2}, {370.0, 29.2}}, label: 'Horizontal scroll bar, 7 pages', value: 0%, hitPoint: {201.0, 15.7}
+                   Other, {{376.0, 27.3}, {7.0, 3.0}}, hitPoint: {379.5, 28.8}
+                  Other, {{16.0, 1.2}, {370.0, 29.2}}, label: 'Horizontal scroll bar, 7 pages', value: 0%, hitPoint: {201.0, 15.7}
+                   Other, {{376.0, 27.3}, {7.0, 3.0}}, hitPoint: {379.5, 28.8}
+            Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+             Other, {{0.0, 0.0}, {402.0, 156.0}}, hitPoint: {201.0, 78.0}
+             Other, {{0.0, 692.0}, {402.0, 182.0}}, hitPoint: {201.0, 783.0}
+            Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
+             Other, {{0.0, 0.0}, {402.0, 156.0}}, hitPoint: {201.0, 78.0}
+            Cell, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+             Other, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+              Other, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+             Other, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+              Other, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+               Other, {{0.0, 41.3}, {402.0, 266.0}}, hitPoint: {201.0, 174.3}
+                Other, {{16.0, 41.3}, {370.0, 256.0}}, hitPoint: {201.0, 169.3}
+                 TextView, {{16.0, 41.3}, {370.0, 256.0}}, value: After the code
+
+Pr..., hitPoint: {201.0, 169.3}
+                  TextView, {{16.0, 41.3}, {130.7, 25.9}}, label: 'After the code', hitPoint: {81.3, 54.3}
+                  TextView, {{16.0, 83.2}, {370.0, 66.9}}, label: 'Prose after the final fence confirms that the renderer closes code-block presentation and returns to the normal text style.', hitPoint: {201.0, 116.6}
+                  TextView, {{16.0, 166.1}, {102.5, 25.9}}, label: 'Conclusion', hitPoint: {67.2, 179.0}
+                  TextView, {{16.0, 207.9}, {370.0, 88.9}}, label: 'The end marker makes it easy to confirm that a large message remains selectable, accessible, and correctly positioned after every section has rendered.', hitPoint: {201.0, 252.4}
+                  Other, {{353.0, 41.3}, {30.0, 256.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {368.0, 169.3}
+                   Other, {{380.0, 44.3}, {3.0, 250.0}}, hitPoint: {381.5, 169.3}
+                  Other, {{16.0, 264.3}, {370.0, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {201.0, 279.3}
+                   Other, {{19.0, 291.3}, {364.0, 3.0}}, hitPoint: {201.0, 292.8}
+            Cell, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+             Other, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+              Other, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+             Other, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+              Other, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+               Other, {{0.0, 307.3}, {402.0, 107.0}}, hitPoint: {201.0, 360.8}
+                Other, {{30.0, 327.3}, {342.0, 67.0}}, hitPoint: {201.0, 360.8}
+                 TextView, {{30.0, 327.3}, {342.0, 67.0}}, value: Turn 300: explain ..., hitPoint: {201.0, 360.8}
+                  TextView, {{30.0, 327.3}, {342.0, 66.6}}, label: 'Turn 300: explain the change, show the table of options, and include the code we discussed for module299.', hitPoint: {201.0, 360.6}
+                  Other, {{339.0, 327.3}, {30.0, 67.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {354.0, 360.8}
+                   Other, {{366.0, 330.3}, {3.0, 61.0}}, hitPoint: {367.5, 360.8}
+                  Other, {{30.0, 361.3}, {342.0, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {201.0, 376.3}
+                   Other, {{33.0, 388.3}, {336.0, 3.0}}, hitPoint: {201.0, 389.8}
+            Cell, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+             Other, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+              Other, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+             Other, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+              Other, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+               Other, {{0.0, 414.3}, {402.0, 35.7}}, hitPoint: {201.0, 432.2}
+                Button, {{0.0, 414.3}, {402.0, 35.7}}, label: 'Hide agent activity, Worked for 2m', hitPoint: {201.0, 432.2}
+                 StaticText, {{16.0, 420.3}, {107.3, 19.3}}, label: 'Worked for 2m', hitPoint: {69.7, 430.0}
+                 Image, {{130.7, 427.3}, {9.7, 5.7}}, identifier: 'chevron.down', label: 'Go Down', hitPoint: {135.5, 430.2}
+            Cell, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+             Other, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+              Other, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+             Other, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+              Other, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+               Other, {{0.0, 450.0}, {402.0, 121.7}}, hitPoint: {201.0, 510.8}
+                Button, {{16.0, 456.0}, {152.0, 19.3}}, label: 'Hide thought', hitPoint: {92.0, 465.7}
+                 Image, {{16.3, 459.0}, {15.7, 13.0}}, identifier: 'brain', label: 'Human Brain', hitPoint: {24.2, 465.5}
+                 StaticText, {{40.0, 456.0}, {107.7, 19.3}}, label: 'Thought for 3s', hitPoint: {93.8, 465.7}
+                 Image, {{157.0, 463.0}, {9.7, 5.7}}, identifier: 'chevron.down', label: 'Go Down', hitPoint: {161.8, 465.8}
+                StaticText, {{16.0, 483.3}, {364.7, 82.3}}, label: 'Considering the request for turn 300. The table needs every option, and the code sample should compile against module299 without touching the rest.', hitPoint: {198.3, 524.5}
+            Cell, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+             Other, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+              Other, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+             Other, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+              Other, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+               Other, {{0.0, 571.7}, {402.0, 27.3}}, hitPoint: {201.0, 585.3}
+                Button, {{0.0, 571.7}, {402.0, 27.3}}, label: 'Ran 3 commands', hitPoint: {201.0, 585.3}
+                 Image, {{17.0, 580.0}, {14.0, 11.0}}, identifier: 'terminal', label: 'Terminal Command Prompt', hitPoint: {24.0, 585.5}
+                 StaticText, {{40.0, 575.7}, {126.0, 19.3}}, label: 'Ran 3 commands', hitPoint: {103.0, 585.3}
+                 Image, {{176.0, 580.7}, {5.7, 9.7}}, identifier: 'chevron.right', label: 'Forward', hitPoint: {178.8, 585.5}
+            Cell, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+             Other, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+              Other, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+             Other, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+              Other, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+               Other, {{0.0, 599.0}, {402.0, 109.0}}, hitPoint: {201.0, 653.5}
+                Other, {{16.0, 609.0}, {370.0, 89.0}}, hitPoint: {201.0, 653.5}
+                 TextView, {{16.0, 609.0}, {370.0, 89.0}}, value: Short answer for t..., hitPoint: {201.0, 653.5}
+                  TextView, {{16.0, 609.0}, {370.0, 88.9}}, label: 'Short answer for turn 300: the fix lands in ThreadStore.applyThreadEvent and keeps the timeline buffer uniquely referenced while text streams.', hitPoint: {201.0, 653.4}
+                  Other, {{353.0, 609.0}, {30.0, 54.0}}, label: 'Vertical scroll bar, 1 page', value: 0%, hitPoint: {368.0, 636.0}
+                   Other, {{380.0, 612.0}, {3.0, 83.0}}, hitPoint: {381.5, 653.5}
+                  Other, {{51.0, 665.0}, {300.0, 30.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {201.0, 680.0}
+                   Other, {{19.0, 692.0}, {364.0, 3.0}}, hitPoint: {201.0, 693.5}
+            Cell, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+             Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+              Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+             Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+              Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+               Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+                Other, {{0.0, 708.0}, {402.0, 24.0}}, hitPoint: {201.0, 720.0}
+            Other, {{369.0, 116.0}, {30.0, 616.0}}, label: 'Vertical scroll bar, 13 pages', value: 100%, hitPoint: {384.0, 424.0}
+             Other, {{396.0, 660.7}, {3.0, 68.3}}, hitPoint: {397.5, 694.8}
+            Other, {{369.0, 116.0}, {30.0, 616.0}}, label: 'Vertical scroll bar, 13 pages', value: 100%, hitPoint: {384.0, 424.0}
+             Other, {{396.0, 660.7}, {3.0, 68.3}}, hitPoint: {397.5, 694.8}
+           Button, {{16.0, 732.0}, {370.0, 44.0}}, label: 'Prompt', hitPoint: {201.0, 754.0}
+           TextField, {{30.0, 746.0}, {342.0, 22.0}}, label: 'Prompt', placeholderValue: 'Ask anything', hitPoint: {201.0, 757.0}
+            Other, {{30.0, 754.0}, {342.0, 11.0}}, label: 'Horizontal scroll bar, 1 page', value: 0%, hitPoint: {201.0, 759.5}
+             Other, {{33.0, 762.0}, {336.0, 3.0}}, hitPoint: {201.0, 763.5}
+           Button, {{24.0, 784.0}, {36.0, 36.0}}, label: 'Add', hitPoint: {42.0, 802.0}
+            Button, {{24.0, 784.0}, {36.0, 36.0}}, hitPoint: {42.0, 802.0}
+             Image, {{24.0, 784.0}, {36.0, 36.0}}, identifier: 'plus', label: 'Add', hitPoint: {42.0, 802.0}
+           Button, {{342.0, 784.0}, {36.0, 36.0}}, identifier: 'arrow.up', label: 'Send', Disabled, hitPoint: {360.0, 802.0}
+       Toolbar, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'Toolbar', label: 'Toolbar', hitPoint: {201.0, 437.0}
+        Other, {{0.0, 0.0}, {402.0, 874.0}}, hitPoint: {201.0, 437.0}
