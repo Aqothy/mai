@@ -50,6 +50,7 @@
 
             NotificationCenter.default.removeObserver(self)
             removeInputEventMonitor()
+            self.document?.setGeometryCommitHandler(nil)
             snapshot = nil
             preservedAnchor = nil
             shouldRebaseAnchor = false
@@ -57,13 +58,20 @@
             isMonitoringScrollWheel = false
             self.document = document
             scrollView = document.enclosingScrollView
-            document.postsFrameChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(documentFrameDidChange(_:)),
-                name: NSView.frameDidChangeNotification,
-                object: document
-            )
+            let commitsGeometry = document.setGeometryCommitHandler { [weak self] in
+                // Virtual geometry is final at this boundary. Correct the clip
+                // origin in the same transaction as row frames, without yielding.
+                self?.processPendingUpdate(completesInitialAlignment: false)
+            }
+            if !commitsGeometry {
+                document.postsFrameChangedNotifications = true
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(documentFrameDidChange(_:)),
+                    name: NSView.frameDidChangeNotification,
+                    object: document
+                )
+            }
             if let scrollView {
                 let clipView = scrollView.contentView
                 lastClipBounds = clipView.bounds
@@ -413,7 +421,7 @@
             }
         }
 
-        private func processPendingUpdate() {
+        private func processPendingUpdate(completesInitialAlignment: Bool = true) {
             if snapshot == nil {
                 compensateForAnchorMovementIfNeeded()
             }
@@ -426,7 +434,7 @@
                 rebasePreservedAnchor(in: visibleRect)
             }
             if isAligningInitialBottom, pinToBottom() {
-                completeInitialBottomAlignment()
+                if completesInitialAlignment { completeInitialBottomAlignment() }
             } else if isBottomFollowingEnabled() {
                 _ = pinToBottom()
             }

@@ -253,6 +253,7 @@ final class ChatBenchmarkModel {
         #if os(macOS)
             let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
             if anchorRow > 0 {
+                let horizontalOrigin = scrollView.contentView.bounds.minX
                 if let table = scrollView.documentView as? NSTableView,
                     anchorRow < table.numberOfRows
                 {
@@ -261,15 +262,20 @@ final class ChatBenchmarkModel {
                     )
                     table.scrollRowToVisible(anchorRow)
                     table.layoutSubtreeIfNeeded()
-                    scrollView.contentView.scroll(
-                        to: NSPoint(x: 0, y: table.rect(ofRow: anchorRow).minY))
+                    // SwiftUI's List may use a nonzero horizontal clip origin
+                    // for sidebar/content margins. This is a vertical jump.
+                    Self.setContentOffsetY(table.rect(ofRow: anchorRow).minY, on: scrollView)
                 } else if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
                     document.scrollToBenchmarkRow(anchorRow)
                 }
                 scrollView.reflectScrolledClipView(scrollView.contentView)
                 try? await Task.sleep(for: .milliseconds(250))
+                guard abs(scrollView.contentView.bounds.minX - horizontalOrigin) < 0.5 else {
+                    Self.note("invalid measurement: benchmark anchor changed horizontal alignment")
+                    return nil
+                }
                 Self.note(
-                    "anchor row=\(anchorRow) offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
+                    "anchor row=\(anchorRow) x=\(horizontalOrigin) preservedX=true offset=\(Self.contentOffsetY(of: scrollView)) range=\(Self.scrollableRange(of: scrollView))"
                 )
             }
         #endif

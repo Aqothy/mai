@@ -1,5 +1,6 @@
 #if os(macOS)
     import AppKit
+    import QuartzCore
     import SwiftUI
 
     /// Native transcript viewport with stable row geometry and bounded view reuse.
@@ -53,6 +54,7 @@
             coordinator.virtualDocument.preparationTask?.cancel()
             coordinator.virtualDocument.heightUpdateTask?.cancel()
             coordinator.virtualDocument.geometryNotificationTask?.cancel()
+            coordinator.virtualDocument.setGeometryCommitHandler(nil)
         }
 
         final class Coordinator {
@@ -165,7 +167,8 @@
 
             func scrollToBenchmarkRow(_ index: Int) {
                 guard index >= 0, index < offsets.count - 1 else { return }
-                enclosingScrollView?.contentView.scroll(to: NSPoint(x: 0, y: offsets[index]))
+                guard let scroll = enclosingScrollView else { return }
+                ChatBenchmarkModel.setContentOffsetY(offsets[index], on: scroll)
             }
             override var isFlipped: Bool { true }
             var geometry = ChatVirtualTranscriptGeometry()
@@ -180,6 +183,13 @@
             private var nextRowRevision = 0
             var heightUpdateTask: Task<Void, Never>?
             var isApplyingHeights = false
+            private var geometryCommitHandler: (() -> Void)?
+
+            @discardableResult
+            func setGeometryCommitHandler(_ handler: (() -> Void)?) -> Bool {
+                geometryCommitHandler = handler
+                return true
+            }
             var content: ((Int) -> Content)?
             var hosts: [Int: NSView] = [:]
             var nativeRowFactory: ((Int, NSView?) -> NSView?)?
@@ -197,6 +207,16 @@
                 changedIDs: Set<String>? = nil, heightInvalidatedIDs: Set<String>? = nil,
                 content: @escaping (Int) -> Content
             ) {
+                // Content, row frames, document extent and scroll compensation
+                // belong to one render transaction. Never yield between them.
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                isApplyingHeights = true
+                defer {
+                    isApplyingHeights = false
+                    viewportChanged()
+                    CATransaction.commit()
+                }
                 preparationTask?.cancel()
                 preparedRange = nil
                 self.content = content
@@ -236,7 +256,7 @@
                     NSSize(
                         width: enclosingScrollView?.contentSize.width ?? width,
                         height: geometry.totalHeight))
-                viewportChanged()
+                geometryCommitHandler?()
             }
 
             func row(at y: CGFloat) -> Int { geometry.index(at: y) ?? -1 }
@@ -248,11 +268,15 @@
                 // Commit geometry before this layout can paint. Deferring these
                 // frames leaves the working row over newly expanded content.
                 let wasApplyingHeights = isApplyingHeights
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
                 isApplyingHeights = true
                 geometry.updateHeights([id: height])
                 repositionMountedRows()
                 setFrameSize(NSSize(width: frame.width, height: geometry.totalHeight))
+                geometryCommitHandler?()
                 isApplyingHeights = wasApplyingHeights
+                CATransaction.commit()
                 // Mounting newly exposed rows may re-enter SwiftUI layout, so
                 // keep that work coalesced outside the height-report callback.
                 guard heightUpdateTask == nil else { return }

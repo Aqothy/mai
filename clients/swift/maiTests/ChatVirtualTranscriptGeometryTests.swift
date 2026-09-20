@@ -134,6 +134,7 @@ import Testing
             for _ in 0..<20 { await Task.yield() }
             let anchor = try #require(document.geometry.anchor(at: scroll.contentView.bounds.minY))
             document.noteHeight(200, id: "row-0", revision: document.rowRevisions["row-0"] ?? 0)
+            #expect(scroll.contentView.bounds.minY == 450)
             await document.heightUpdateTask?.value
             for _ in 0..<20 { await Task.yield() }
             #expect(scroll.contentView.bounds.minY == 450)
@@ -143,6 +144,7 @@ import Testing
                 heights: [20, 50] + document.geometry.heights, width: 300,
                 ids: ["older-a", "older-b"] + ids, changedIDs: ["older-a", "older-b"]
             ) { Text("Row \($0)") }
+            #expect(scroll.contentView.bounds.minY == 520)
             for _ in 0..<20 { await Task.yield() }
             #expect(scroll.contentView.bounds.minY == 520)
             #expect(document.geometry.anchor(at: scroll.contentView.bounds.minY) == anchor)

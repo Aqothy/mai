@@ -20,6 +20,50 @@
     }
 
     struct ChatNativeTranscriptTests {
+        @Test @MainActor func reflowPreservesReadingPositionEvenWhenTotalHeightIsUnchanged() async {
+            let document = ChatNativeTranscript<Text>.VirtualDocument()
+            document.nativeRowFactory = { _, reused in reused ?? NSView() }
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            scroll.documentView = document
+            let ids = (0..<10).map { "row-\($0)" }
+            document.install(heights: Array(repeating: 100, count: 10), width: 300,
+                             ids: ids) { Text("Row \($0)") }
+            let preserver = ChatMacScrollPositionPreserver()
+            preserver.attach(to: document)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 250))
+            for _ in 0..<20 { await Task.yield() }
+            document.install(heights: [200, 50, 50] + Array(repeating: 100, count: 7),
+                             width: 300, ids: ids) { Text("Row \($0)") }
+            // Extent remains 1,000; a frame-change observer never sees this reflow.
+            #expect(document.bounds.height == 1000)
+            #expect(scroll.contentView.bounds.minY == 300)
+            document.preparationTask?.cancel()
+        }
+
+        @Test @MainActor func growingReplyKeepsWorkingRowPinnedInTheSameLayoutCommit() throws {
+            let document = ChatNativeTranscript<Text>.VirtualDocument()
+            document.nativeRowFactory = { _, reused in reused ?? NSView() }
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            scroll.documentView = document
+            document.install(heights: [600, 20, 1], width: 300,
+                             ids: ["reply", "working", "end"]) { Text("Row \($0)") }
+            let preserver = ChatMacScrollPositionPreserver()
+            preserver.configure(isBottomFollowingEnabled: { true },
+                               noteUserScrollActivity: { _ in }, noteUserReachedEnd: {},
+                               noteKeyboardScrollIntent: { _ in })
+            preserver.attach(to: document)
+            #expect(preserver.pinToBottom())
+            let workingY = document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY
+            for height in [CGFloat(630), 950, 780, 1100] {
+                document.noteHeight(height, id: "reply", revision: document.rowRevisions["reply"] ?? 0)
+                // No yield: an eventual correction still permits a visibly displaced frame.
+                #expect(document.rect(ofRow: 1).minY - scroll.contentView.bounds.minY == workingY)
+                #expect(scroll.contentView.bounds.maxY == document.bounds.maxY)
+            }
+            document.preparationTask?.cancel()
+            document.heightUpdateTask?.cancel()
+        }
+
         @Test @MainActor func heightChangesMovePreparedNeighborsBeforeTheyBecomeVisible() async {
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))

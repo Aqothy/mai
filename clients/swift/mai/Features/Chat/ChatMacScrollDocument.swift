@@ -10,11 +10,17 @@
         func rows(in rect: NSRect) -> NSRange
         func stableIdentity(forRow row: Int) -> String?
         func row(forStableIdentity id: String) -> Int?
+        /// Custom documents can publish complete geometry before the current
+        /// render transaction commits. Return false for AppKit-managed layout.
+        @discardableResult
+        func setGeometryCommitHandler(_ handler: (() -> Void)?) -> Bool
     }
 
     extension ChatMacScrollDocument {
         func stableIdentity(forRow row: Int) -> String? { nil }
         func row(forStableIdentity id: String) -> Int? { nil }
+        @discardableResult
+        func setGeometryCommitHandler(_ handler: (() -> Void)?) -> Bool { false }
     }
     extension NSTableView: ChatMacScrollDocument {}
 #endif
