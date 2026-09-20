@@ -20,6 +20,38 @@
     }
 
     struct ChatNativeTranscriptTests {
+        @Test @MainActor func replacingTranscriptDuringPreparationCannotInstallStaleRows() async throws {
+            let coordinator = ChatNativeTranscript<Text>.Coordinator()
+            let oldIDs = (0..<100).map { "old-\($0)" }
+            var startedOldPreparation = false
+            var installedOldTranscript = false
+            coordinator.update(
+                ids: oldIDs, width: 300, nativeRowHeight: { _, _ in
+                    startedOldPreparation = true
+                    return 100
+                }, nativeRowFactory: { _, reused in reused ?? NSView() },
+                onAttach: { _ in installedOldTranscript = true }
+            ) { Text("Old \($0)") }
+            let oldTask = coordinator.task
+            // Let the first preparation enter its yielding measurement loop.
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !startedOldPreparation, ContinuousClock.now < deadline { await Task.yield() }
+            try #require(startedOldPreparation)
+            #expect(!installedOldTranscript)
+            coordinator.update(
+                ids: ["new-reply"], width: 300, nativeRowHeight: { _, _ in 40 },
+                nativeRowFactory: { _, reused in reused ?? NSView() }, onAttach: nil
+            ) { _ in Text("New reply") }
+            await coordinator.task?.value
+            await oldTask?.value
+            #expect(!installedOldTranscript)
+            #expect(coordinator.virtualDocument.geometry.ids == ["new-reply"])
+            #expect(coordinator.virtualDocument.geometry.heights == [40])
+            #expect(Set(coordinator.measurements.keys) == ["new-reply"])
+            #expect(coordinator.virtualDocument.hosts.keys.allSatisfy { $0 == 0 })
+            coordinator.virtualDocument.preparationTask?.cancel()
+        }
+
         @Test @MainActor func reflowPreservesReadingPositionEvenWhenTotalHeightIsUnchanged() async {
             let document = ChatNativeTranscript<Text>.VirtualDocument()
             document.nativeRowFactory = { _, reused in reused ?? NSView() }

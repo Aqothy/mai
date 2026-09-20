@@ -72,6 +72,48 @@ struct ThreadStoreTests {
     }
 
     @Test
+    func recentChatRetainsPresentationButEvictionReleasesIt() async throws {
+        let threadIDs = (0...6).map { "thread-\($0)" }
+        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("thread-0")
+        await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
+
+        weak var originalSegments = store.selectedThreadMarkdownSegmentCache
+        weak var originalLayouts = store.selectedThreadTextLayoutStore
+        weak var preparedLayout = store.selectedThreadTextLayoutStore?.layout(
+            id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
+        _ = store.selectedThreadMarkdownSegmentCache?.segments(
+            messageID: "reply", source: "A retained **rich** reply.")
+        #expect(originalSegments?.entryCount == 1)
+        #expect(preparedLayout != nil)
+
+        store.selectThread("thread-1")
+        await waitUntil { store.subscribedThreadIDs.contains("thread-1") }
+        store.selectThread("thread-0")
+        #expect(store.selectedThreadMarkdownSegmentCache === originalSegments)
+        #expect(store.selectedThreadTextLayoutStore === originalLayouts)
+        #expect(preparedLayout != nil)
+
+        for threadID in threadIDs.dropFirst() {
+            store.selectThread(threadID)
+            await waitUntil { store.subscribedThreadIDs.contains(threadID) }
+        }
+        await waitUntil { rpc.unsubscribedThreadIDs.contains("thread-0") }
+        #expect(store.cachedThread(for: "thread-0") != nil)
+        #expect(originalSegments == nil)
+        #expect(originalLayouts == nil)
+        #expect(preparedLayout == nil)
+
+        store.selectThread("thread-0")
+        let freshSegments = try #require(store.selectedThreadMarkdownSegmentCache)
+        #expect(freshSegments.entryCount == 0)
+        await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
+        #expect(store.selectedThread?.id == "thread-0")
+    }
+
+    @Test
     func hiddenRunningThreadIsProtectedOutsideIdleBudget() async {
         let running = makeThread("running", isRunning: true)
         let idleThreads = (0...5).map { makeThread("idle-\($0)") }
