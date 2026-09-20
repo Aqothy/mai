@@ -6,20 +6,17 @@ struct ChatMarkdownRichContentView: View {
     let layoutIDPrefix: String
     let plan: ChatMarkdownRenderPlan
     let streamingStableBlockCount: Int?
-    let streamingRevealBatches: [ChatStreamingTextRevealBatch]
     let textLayoutStore: ChatTextLayoutStore
 
     init(
         layoutIDPrefix: String,
         plan: ChatMarkdownRenderPlan,
         streamingStableBlockCount: Int?,
-        streamingRevealBatches: [ChatStreamingTextRevealBatch] = [],
         textLayoutStore: ChatTextLayoutStore
     ) {
         self.layoutIDPrefix = layoutIDPrefix
         self.plan = plan
         self.streamingStableBlockCount = streamingStableBlockCount
-        self.streamingRevealBatches = streamingRevealBatches
         self.textLayoutStore = textLayoutStore
     }
 
@@ -34,14 +31,9 @@ struct ChatMarkdownRichContentView: View {
                     streamingStableBlockCount.map {
                         index >= $0
                     } ?? false
-                let revealBatches =
-                    isStreamingBlock
-                        && index == plan.blocks.indices.last
-                    ? streamingRevealBatches : []
                 ChatMarkdownRenderBlockView(
                     block: block,
                     isStreaming: isStreamingBlock,
-                    revealBatches: revealBatches,
                     layoutID: "\(layoutIDPrefix)-block-\(index)",
                     textLayoutStore: textLayoutStore
                 )
@@ -101,7 +93,6 @@ struct ChatMarkdownRichContentView: View {
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
     let isStreaming: Bool
-    let revealBatches: [ChatStreamingTextRevealBatch]
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
 
@@ -111,7 +102,6 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     ) -> Bool {
         lhs.block == rhs.block
             && lhs.isStreaming == rhs.isStreaming
-            && lhs.revealBatches == rhs.revealBatches
             && lhs.layoutID == rhs.layoutID
             && lhs.textLayoutStore === rhs.textLayoutStore
     }
@@ -127,10 +117,7 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
                 )
                 .equatable()
             } else {
-                ChatMarkdownResolvedProseView(
-                    prose: prose,
-                    revealBatches: revealBatches
-                )
+                ChatMarkdownResolvedProseView(prose: prose)
             }
 
         case .code(let codeBlock):
@@ -138,8 +125,7 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
                 block: codeBlock,
                 isStreaming: isStreaming,
                 layoutID: layoutID,
-                textLayoutStore: textLayoutStore,
-                revealBatches: revealBatches
+                textLayoutStore: textLayoutStore
             )
 
         case .table(let table):
@@ -180,15 +166,12 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
 
 private struct ChatMarkdownResolvedProseView: Equatable, View {
     let prose: ChatMarkdownProseRun
-    var revealBatches: [ChatStreamingTextRevealBatch] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatMarkdownProseStyle.blockSpacing) {
             ForEach(prose.pieces.indices, id: \.self) { index in
                 ChatMarkdownResolvedProsePieceView(
-                    piece: prose.pieces[index],
-                    revealBatches: index == prose.pieces.indices.last
-                        ? revealBatches : []
+                    piece: prose.pieces[index]
                 )
                 .equatable()
             }
@@ -286,31 +269,16 @@ struct ChatResolvedMarkdownBlockRow: View {
 
 struct ChatMarkdownResolvedProsePieceView: Equatable, View {
     let piece: ChatMarkdownProseRun.Piece
-    let revealBatches: [ChatStreamingTextRevealBatch]
-
-    init(
-        piece: ChatMarkdownProseRun.Piece,
-        revealBatches: [ChatStreamingTextRevealBatch] = []
-    ) {
-        self.piece = piece
-        self.revealBatches = revealBatches
-    }
 
     var body: some View {
         switch piece {
         case .text(let text):
-            ChatStreamingTextRevealView(
-                text: text,
-                batches: revealBatches
-            )
+            Text(text)
             .frame(maxWidth: .infinity, alignment: .leading)
                 .chatTextPointerStyle()
 
         case .quote(let quote):
-            ChatStreamingTextRevealView(
-                text: quote,
-                batches: revealBatches
-            )
+            Text(quote)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(
                 .leading,

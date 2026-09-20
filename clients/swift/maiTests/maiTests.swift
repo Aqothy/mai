@@ -6,6 +6,48 @@ import Testing
 
 struct ThreadStoreTests {
     @Test
+    func streamingDeltasInvalidateTheLiveTextWithoutInvalidatingTimelineOrSidebar() async throws {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: "Start", sequence: 100)
+        let liveText = try #require(store.streamingMessageText(threadID: "a", messageID: "reply"))
+        let timelineInvalidated = Mutex(false)
+        let sidebarInvalidated = Mutex(false)
+        let textInvalidated = Mutex(false)
+        withObservationTracking {
+            _ = store.selectedThread
+        } onChange: {
+            timelineInvalidated.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = store.threads
+            _ = store.selectedThreadTitle
+        } onChange: {
+            sidebarInvalidated.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = liveText.text
+            _ = liveText.revision
+        } onChange: {
+            textInvalidated.withLock { $0 = true }
+        }
+        for index in 1...20 {
+            try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: " 👋🏽", sequence: 100 + index)
+        }
+        #expect(textInvalidated.withLock { $0 })
+        #expect(!timelineInvalidated.withLock { $0 })
+        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(liveText.text == "Start" + String(repeating: " 👋🏽", count: 20))
+        #expect(store.selectedThread?.timeline.last?.message?.text == liveText.text)
+        // A new message is structural and must publish the enclosing timeline.
+        try rpc.sendAssistantDelta(threadID: "a", messageID: "next", text: "Next", sequence: 121)
+        #expect(timelineInvalidated.withLock { $0 })
+    }
+
+    @Test
     func keepsFiveInactiveSubscriptionsAndCachesEvictedModel() async {
         let threadIDs = (0...6).map { "thread-\($0)" }
         let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
@@ -944,6 +986,18 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             sequence: sequence,
             type: "thread.meta-updated"
         )
+        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
+        let data = try newJSONEncoder().encode(MockNotification(params: item))
+        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+    }
+
+    func sendAssistantDelta(threadID: String, messageID: String, text: String, sequence: Int) throws {
+        let event = Event(
+            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil,
+            occurredAt: .now,
+            payload: makeEventPayload(threadID: threadID, messageID: messageID,
+                                      role: "assistant", text: text, turnID: "turn-\(threadID)"),
+            sequence: sequence, type: "thread.message-sent")
         let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
         let data = try newJSONEncoder().encode(MockNotification(params: item))
         onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)

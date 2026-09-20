@@ -74,24 +74,4 @@ struct ChatBetaIntegrationTests {
         #expect(PromptCompletionInsertionContext.detect(in: "mail@example.com", cursorOffset: 16) == nil)
     }
 
-    @Test @MainActor
-    func revealDoesNotRestartOlderBatchesAndResetsOnReplacement() {
-        let time = Date(timeIntervalSince1970: 100)
-        let identity = ChatStreamingTextRevealTarget.Identity(
-            stableBlockCount: 0, blockIndex: 0, content: .proseText(pieceIndex: 0))
-        var state = ChatStreamingTextRevealState()
-        for index in 0..<4 {
-            state.observe(
-                target: .init(identity: identity, characterCount: index * 10), updateID: index,
-                sourceIsAppendOnly: true, at: time.addingTimeInterval(Double(index) * 0.05))
-        }
-        #expect(state.batches.map(\.characterCount) == [10, 10, 10])
-        #expect(state.batches.first?.startedAt == time.addingTimeInterval(0.05))
-        state.observe(target: .init(identity: identity, characterCount: 5), updateID: 4,
-                      sourceIsAppendOnly: false, at: time.addingTimeInterval(0.16))
-        #expect(state.batches.isEmpty)
-        state.observe(target: .init(identity: identity, characterCount: 10_000), updateID: 5,
-                      sourceIsAppendOnly: true, at: time.addingTimeInterval(0.17))
-        #expect(state.batches.reduce(0) { $0 + $1.characterCount } <= 512)
-    }
 }

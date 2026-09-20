@@ -94,22 +94,17 @@ private struct ChatStreamingMarkdownContentView: View {
                 )
         )
     }
-    @State private var revealState = ChatStreamingTextRevealState()
-    @State private var renderedUpdateID: Int?
 
     var body: some View {
         ChatMarkdownRichContentView(
             layoutIDPrefix: messageID,
             plan: snapshot.plan,
             streamingStableBlockCount: snapshot.stableBlockCount,
-            streamingRevealBatches: renderedUpdateID == updateID
-                ? revealState.batches : [],
             textLayoutStore: textLayoutStore
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(ChatMarkdownContentStyle())
         .task(id: updateID) {
-            let revealStartedAt = Date.now
             guard
                 let newSnapshot = await worker.render(
                     source: source,
@@ -125,16 +120,7 @@ private struct ChatStreamingMarkdownContentView: View {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                revealState.observe(
-                    target: ChatStreamingTextRevealTarget(
-                        snapshot: newSnapshot
-                    ),
-                    updateID: updateID,
-                    sourceIsAppendOnly: sourceIsAppendOnly,
-                    at: revealStartedAt
-                )
                 snapshot = newSnapshot
-                renderedUpdateID = updateID
             }
         }
         #if DEBUG
