@@ -1,6 +1,9 @@
 import Foundation
 
 final class RPCClient {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private static let notificationQueueLimit = 1_024
 
     var onNotification: ((String, Data) -> Void)?

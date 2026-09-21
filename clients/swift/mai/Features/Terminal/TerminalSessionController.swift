@@ -10,6 +10,9 @@ import GhosttyTerminal
 /// touches observation or SwiftUI `body`.
 @Observable
 final class TerminalSessionController {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// Package integration object. It is an `ObservableObject` by package
     /// design; that is acceptable only inside this wrapper.
     @ObservationIgnored let viewState: TerminalViewState

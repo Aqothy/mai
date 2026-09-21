@@ -674,6 +674,9 @@ struct MockChatView: View {
 /// advancing a chunk must not invalidate `MockChatView` and rebuild its
 /// 5,000-element timeline input.
 private final class MockChatActiveStream {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     let id = UUID()
     let messageID: UUID
     let liveMessage: MockChatStreamingMessage
@@ -699,6 +702,9 @@ private final class MockChatActiveStream {
 /// stays byte-for-byte stable throughout the stream.
 @Observable
 private final class MockChatStreamingMessage {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var text = ""
     private(set) var isStreaming = true
     private(set) var updateCount = 0

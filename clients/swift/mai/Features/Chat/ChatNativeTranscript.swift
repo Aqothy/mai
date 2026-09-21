@@ -58,6 +58,9 @@
         }
 
         final class Coordinator {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             let virtualDocument = VirtualDocument()
             var task: Task<Void, Never>?
             struct Measurement {
@@ -145,6 +148,9 @@
         }
 
         final class VirtualDocument: NSView, ChatBenchmarkAnchoredDocument, ChatMacScrollDocument {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var numberOfRows: Int { offsets.count - 1 }
             func stableIdentity(forRow row: Int) -> String? {
                 geometry.ids.indices.contains(row) ? geometry.ids[row] : nil

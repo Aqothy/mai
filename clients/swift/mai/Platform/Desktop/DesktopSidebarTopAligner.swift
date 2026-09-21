@@ -6,6 +6,9 @@
     /// turns pass without another table or viewport change.
     @MainActor
     final class DesktopSidebarTopAligner: NSObject {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private weak var tableView: NSTableView?
         private weak var scrollView: NSScrollView?
         private var isAlignmentRequested = false

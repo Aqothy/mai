@@ -3,6 +3,61 @@ import XCTest
 
 @testable import mai
 
+private nonisolated enum ChatLifetimeTestContext {
+    @TaskLocal static var marker = false
+}
+
+/// UIKit/SwiftUI can release presentation state synchronously, outside a
+/// Swift task. Async tests miss the isolated-deinit runtime bug on iOS 18.6.
+nonisolated final class ChatPresentationLifetimeTests: XCTestCase {
+    @MainActor
+    private func assertSynchronousRelease<T: AnyObject>(_ make: () -> T) {
+        weak var released: T?
+        ChatLifetimeTestContext.$marker.withValue(true) {
+            let object = make()
+            released = object
+            withExtendedLifetime(object) {}
+        }
+        XCTAssertNil(released)
+    }
+
+    @MainActor func testProjectionRelease() {
+        assertSynchronousRelease { ChatTimelineProjection() }
+    }
+
+    @MainActor func testTextLayoutStoreRelease() {
+        assertSynchronousRelease { ChatTextLayoutStore() }
+    }
+
+    @MainActor func testMarkdownSegmentCacheRelease() {
+        assertSynchronousRelease { ChatMarkdownSegmentCache() }
+    }
+
+    @MainActor func testAnnotationStateRelease() {
+        assertSynchronousRelease { ChatAnnotationModel() }
+    }
+
+    @MainActor func testScrollStateRelease() {
+        assertSynchronousRelease { ChatScrollState() }
+    }
+
+    @MainActor func testFoldStateRelease() {
+        assertSynchronousRelease { ChatTimelineFoldModel() }
+    }
+
+    @MainActor func testStreamingTextRelease() {
+        assertSynchronousRelease { ThreadStreamingText(text: "Hello 👋🏽") }
+    }
+
+    @MainActor func testJSONPayloadRelease() {
+        assertSynchronousRelease { JSONAny(["text": "Hello"]) }
+    }
+
+    @MainActor func testJSONNullRelease() {
+        assertSynchronousRelease { JSONNull() }
+    }
+}
+
 /// Correctness and benchmarks for `ChatTimelineProjection`, the incremental
 /// section projection behind the chat timeline.
 ///

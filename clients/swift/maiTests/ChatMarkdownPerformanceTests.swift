@@ -1041,6 +1041,10 @@ private nonisolated struct FullRecoalescingStreamingPlannerBaseline {
 @MainActor
 @Observable
 private final class ChatMarkdownHostingState {
+    // Synchronous host teardown must avoid the old runtime's isolated
+    // deinit/task-local crash, just like production presentation caches.
+    nonisolated deinit {}
+
     var source = "## Streamed response\n\nA"
     var isStreaming = true
 }
@@ -1066,6 +1070,10 @@ private struct ChatMarkdownHostingHarness: View {
 @MainActor
 @Observable
 private final class NativeStreamingBenchmarkState {
+    // See ChatMarkdownHostingState: UIKit can release this after a commit,
+    // outside any Swift task on older supported OS runtimes.
+    nonisolated deinit {}
+
     var source = ""
     var isStreaming = true
 }

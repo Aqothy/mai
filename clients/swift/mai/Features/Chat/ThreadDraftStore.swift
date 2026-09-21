@@ -5,6 +5,9 @@ import Observation
 /// state. `activeDraftThreadID` identifies the one provisional new chat.
 @Observable
 final class ThreadDraftStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     let preferences: DraftPreferencesStore
 
     private struct StoredDrafts: Codable {

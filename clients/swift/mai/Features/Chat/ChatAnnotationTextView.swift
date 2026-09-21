@@ -4,6 +4,9 @@
     /// Adds the shared annotation editor to native text without changing
     /// NSTextView's cursor tracking or selection behavior.
     final class ChatAnnotationTextView: NSTextView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         var annotationContext: ChatAnnotationContext?
 
         private struct CommentSelection {

@@ -120,6 +120,9 @@ extension ACPRegistrySVGIcon {
 
     @MainActor
     final class Coordinator {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private var currentURL: URL?
         private var loadTask: Task<Void, Never>?
 

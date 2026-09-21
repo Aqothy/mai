@@ -13,6 +13,9 @@ protocol RPCTransportClient: AnyObject {
 /// coordinator provides the shared timeout, retry, and disconnect behavior.
 @Observable
 final class RPCConnectionCoordinator {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     static let maximumReconnectAttempts = 5
     static let connectAttemptTimeout: Duration = .seconds(15)
 

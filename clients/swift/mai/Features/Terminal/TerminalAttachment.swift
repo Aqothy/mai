@@ -13,6 +13,9 @@ import Foundation
 /// straight to the controller and never enter observation.
 @Observable
 final class TerminalAttachment {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// How the attachment obtains its run.
     enum Mode: Equatable {
         /// Create a new terminal in the given working directory.

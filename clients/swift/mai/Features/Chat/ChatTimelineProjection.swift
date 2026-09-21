@@ -14,6 +14,11 @@ import Foundation
 /// watermark, so projecting and consuming it is one atomic step on the
 /// caller's timeline value.
 final class ChatTimelineProjection {
+    // Explicit nonisolated destruction avoids the older Swift runtime's
+    // task-local/isolated-deinit crash (swiftlang/swift#88036). This cache
+    // owns values and has no actor-bound cleanup.
+    nonisolated deinit {}
+
     private var sections: [ChatTimelineLayout.Section] = []
     /// Entry index where the section at the same position begins.
     private var sectionStarts: [Int] = []

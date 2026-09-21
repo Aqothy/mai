@@ -5,6 +5,9 @@
     /// exclusively in the daemon-free synthetic thread.
     @MainActor
     final class ChatSyntheticStreamingBenchmark {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private let store: ThreadStore
         private var sequence = 0
         private let turnID = "synthetic-stream-turn"

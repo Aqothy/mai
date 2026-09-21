@@ -62,6 +62,9 @@ struct PromptCompletionCursorRequest: Equatable {
 
 @Observable
 final class PromptCompletionModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     enum Phase: Equatable {
         case idle
         case loading

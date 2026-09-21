@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class ACPRegistryModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     enum Phase: Equatable {
         case loading
         case loaded

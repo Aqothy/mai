@@ -35,6 +35,9 @@ nonisolated enum UnifiedDiffSource: Hashable, Sendable {
 
 @Observable
 private final class UnifiedDiffLoader {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var document = UnifiedDiffDocument.empty
     private(set) var isLoading = true
 

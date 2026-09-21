@@ -29,6 +29,9 @@
         }
 
         final class FinderView: NSView {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var onResolve: ((NSTableView) -> Void)? {
                 didSet {
                     if let tableView {

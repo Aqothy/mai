@@ -355,6 +355,9 @@
     /// NSTextView for its lifetime, so there is one reuse lifecycle to
     /// reason about.
     @MainActor final class ChatTextLayoutStore {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private struct Key: Hashable, Sendable {
             let id: String
             let width: CGFloat
@@ -804,6 +807,9 @@
         }
 
         final class Coordinator: NSObject, NSTextViewDelegate {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var layoutID = ""
             var onSelectionChange: ((ChatTextSelection?) -> Void)?
 
@@ -875,12 +881,18 @@
     }
 
     final class ChatSelectableTextHostView: NSView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private enum Content: Equatable {
             case source(String, ChatTextLayoutStyle)
             case resolvedProse(ChatMarkdownProseRun)
         }
 
         private final class MarkdownDecorationView: NSView {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var quoteBarRects: [NSRect] = []
             var thematicBreakRects: [NSRect] = []
 

@@ -80,12 +80,18 @@ struct ThreadStoreTests {
         store.selectThread("thread-0")
         await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
 
-        weak var originalSegments = store.selectedThreadMarkdownSegmentCache
-        weak var originalLayouts = store.selectedThreadTextLayoutStore
-        weak var preparedLayout = store.selectedThreadTextLayoutStore?.layout(
-            id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
-        _ = store.selectedThreadMarkdownSegmentCache?.segments(
-            messageID: "reply", source: "A retained **rich** reply.")
+        weak var originalSegments: ChatMarkdownSegmentCache?
+        weak var originalLayouts: ChatTextLayoutStore?
+        weak var preparedLayout: ChatTextLayout?
+        do {
+            let segments = try #require(store.selectedThreadMarkdownSegmentCache)
+            let layouts = try #require(store.selectedThreadTextLayoutStore)
+            originalSegments = segments
+            originalLayouts = layouts
+            preparedLayout = layouts.layout(
+                id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
+            _ = segments.segments(messageID: "reply", source: "A retained **rich** reply.")
+        }
         #expect(originalSegments?.entryCount == 1)
         #expect(preparedLayout != nil)
 

@@ -5,6 +5,9 @@ import SwiftUI
 
 @Observable
 final class ChatPromptModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     let store: ThreadStore
     let threadID: String
     let promptCompletion: PromptCompletionModel

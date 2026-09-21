@@ -239,6 +239,9 @@ nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
 
 /// Avoids reparsing unchanged settled messages when the timeline updates.
 final class ChatMarkdownSegmentCache {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// Retained message entries; a test seam for retention behavior.
     var entryCount: Int { entries.count }
 

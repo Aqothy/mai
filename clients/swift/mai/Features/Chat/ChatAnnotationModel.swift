@@ -46,6 +46,9 @@ nonisolated enum ChatAnnotationFormatting {
 
 @Observable
 final class ChatAnnotationModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var annotations: [ChatPendingAnnotation] = []
     var editorDraft: ChatAnnotationDraft?
 

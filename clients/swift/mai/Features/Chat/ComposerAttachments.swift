@@ -54,6 +54,9 @@ struct ChatPendingAttachment: Identifiable {
 /// pipeline, shared by the draft and thread prompt models.
 @Observable
 final class ComposerAttachmentsModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var attachments: [ChatPendingAttachment] = []
 
     /// Draft composers gate on the selected provider's capabilities; thread
@@ -242,6 +245,9 @@ struct ChatComposerAttachmentStrip: View {
 }
 
 final class ChatComposerThumbnail: @unchecked Sendable {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     nonisolated let image: PlatformImage
 
     nonisolated init(image: PlatformImage) {

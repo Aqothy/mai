@@ -2,6 +2,9 @@ import Observation
 
 @Observable
 final class ChatScrollState {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     struct BottomScrollRequest: Equatable {
         var count = 0
         var animated = false

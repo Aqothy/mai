@@ -99,6 +99,9 @@ struct CustomACPAgentForm: View {
 
 @Observable
 private final class CustomACPAgentFormModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     var name = ""
     var command = ""
     var argumentText = ""
@@ -237,6 +240,9 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
 
 @Observable
 private final class CustomACPEnvironmentVariable: Identifiable {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     let id = UUID()
     var key = ""
     var value = ""

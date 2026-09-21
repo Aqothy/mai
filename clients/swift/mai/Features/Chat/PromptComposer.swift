@@ -521,6 +521,9 @@ struct ComposerAddMenu: View {
         final class Coordinator: NSObject, UIImagePickerControllerDelegate,
             UINavigationControllerDelegate
         {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var parent: ComposerCameraPicker
 
             init(parent: ComposerCameraPicker) {

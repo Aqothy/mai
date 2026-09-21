@@ -18,6 +18,9 @@ struct QueuedChatPrompt: Identifiable {
 /// row observes this reference directly.
 @Observable
 final class ThreadStreamingText {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var text: String
     /// Cheap task identity that avoids hashing the growing text on every chunk.
     private(set) var revision = 0
@@ -35,6 +38,9 @@ final class ThreadStreamingText {
 
 @Observable
 final class ThreadStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     typealias ConnectionState = RPCConnectionCoordinator.State
 
     struct CachePolicy {

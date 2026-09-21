@@ -11,6 +11,9 @@
     /// time.
     @MainActor
     final class ChatListBottomFollower {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private weak var scrollView: UIScrollView?
 
         func attach(to scrollView: UIScrollView) {
@@ -51,6 +54,9 @@
         func updateUIView(_ uiView: FinderView, context: Context) {}
 
         final class FinderView: UIView {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             private let onResolve: (UICollectionView) -> Void
             private var resolvedCollectionView: UICollectionView?
 

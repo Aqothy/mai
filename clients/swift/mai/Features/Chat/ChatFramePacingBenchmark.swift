@@ -56,6 +56,9 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
 /// a callback-pacing report. The link requests the display's maximum refresh
 /// rate so main-thread delivery is sampled against the 120 Hz budget.
 final class ChatFramePacingMonitor: NSObject {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private var displayLink: CADisplayLink?
     private var watchdog: Task<Void, Never>?
     private weak var monitoredWindow: ChatBenchmarkWindow?
@@ -205,6 +208,9 @@ final class ChatFramePacingMonitor: NSObject {
 /// harvesting and kept for in-app display.
 @Observable
 final class ChatBenchmarkModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private static let logger = Logger(
         subsystem: "com.aqothy.mai",
         category: "ChatBenchmark"

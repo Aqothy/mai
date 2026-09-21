@@ -6,6 +6,9 @@ import Foundation
 /// controller and never enter observation.
 @Observable
 final class TerminalStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
 
     /// Terminal summaries ordered by updatedAt descending, then id — the

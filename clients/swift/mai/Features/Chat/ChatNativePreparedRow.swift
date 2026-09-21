@@ -5,6 +5,9 @@
     /// Unsupported rows retain the existing SwiftUI renderer. Prose and table
     /// geometry uses the same prepared layouts as their visible native bodies.
     final class ChatNativePreparedRow: NSView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         enum Content: Equatable {
             case prose(String)
             case resolvedProse(ChatMarkdownProseRun)

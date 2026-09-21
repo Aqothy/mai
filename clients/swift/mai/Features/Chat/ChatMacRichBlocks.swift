@@ -133,6 +133,9 @@
     }
 
     final class ChatMacCodeBlockHostView: ChatMacHorizontalDocumentScrollView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private let textView: NSTextView
         private var layoutID: String?
         private var block: ChatMarkdownCodeBlock?
@@ -424,7 +427,13 @@
     }
 
     final class ChatMacTableHostView: ChatMacHorizontalDocumentScrollView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private final class TableDocumentView: NSView {
+            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+            nonisolated deinit {}
+
             var tableLayout: ChatTableLayout? {
                 didSet { needsDisplay = true }
             }
@@ -494,6 +503,9 @@
     /// lets vertical wheel gestures continue through the enclosing chat
     /// timeline.
     class ChatMacHorizontalDocumentScrollView: NSScrollView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         /// The document's natural size; the document is at least as wide as
         /// the clip view so short content still fills the row.
         var documentSize: NSSize = .zero {

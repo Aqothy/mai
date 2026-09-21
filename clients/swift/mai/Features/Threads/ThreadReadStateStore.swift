@@ -5,6 +5,9 @@ import Observation
 /// conversation snapshots and live subscriptions.
 @Observable
 final class ThreadReadStateStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private static let storageKey = "unread-thread-ids-v1"
 
     private(set) var unreadThreadIDs: Set<String>

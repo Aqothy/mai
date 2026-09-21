@@ -178,6 +178,11 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
 /// Thread-owned cache for completed and in-flight layouts, plus a
 /// reuse pool of native views List has already displayed.
 @MainActor final class ChatTextLayoutStore {
+    // Avoid synthesized isolated destruction on iOS 18.6's Swift runtime
+    // (swiftlang/swift#88036). View reuse is explicitly ended by the
+    // destination; destruction only releases the owned references.
+    nonisolated deinit {}
+
     private struct Key: Hashable, Sendable {
         let id: String
         let width: CGFloat
@@ -465,6 +470,9 @@ struct ChatSelectableText: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         var layoutID = ""
         var onSelectionChange: ((ChatTextSelection?) -> Void)?
         var annotationContext: ChatAnnotationContext?
@@ -548,7 +556,13 @@ struct ChatSelectableText: UIViewRepresentable {
 }
 
 final class ChatSelectableTextHostView: UIView {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private final class MarkdownDecorationView: UIView {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         var attributedText = NSAttributedString()
         weak var layoutManager: NSLayoutManager?
         weak var textContainer: NSTextContainer?

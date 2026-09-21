@@ -604,6 +604,9 @@ struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
 /// fold without closure or binding inputs defeating row-level invalidation.
 @Observable
 final class ChatTimelineFoldModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var expandedSectionIDs: Set<String> = []
     @ObservationIgnored var prepareForToggle: () -> Void = {}
 
@@ -674,6 +677,9 @@ nonisolated enum ChatTimelineMetrics {
 /// Plain non-observable storage: `body` records the live turn here without
 /// triggering another invalidation.
 private final class ChatStreamingContinuity {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private var lastStreamingTurnID: String?
     private var preparedSettledTurnID: String?
 

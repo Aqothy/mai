@@ -5,6 +5,9 @@ import Observation
 /// store after the daemon has returned them from filesystem browsing.
 @Observable
 final class ProjectFolderStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private static let projectStorageKey = "project-folders"
     private static let parentStorageKey = "project-parent-folders"
 

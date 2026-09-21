@@ -594,6 +594,9 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
 /// re-parses the source off the main actor.
 @MainActor
 final class ChatStreamingSnapshotCache {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     static let shared = ChatStreamingSnapshotCache()
 
     /// Only one message streams at a time; a few entries absorb rapid

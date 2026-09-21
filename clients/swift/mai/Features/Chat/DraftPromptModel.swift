@@ -5,6 +5,9 @@ import SwiftUI
 
 @Observable
 final class DraftPromptModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     enum OptionsPhase: Equatable {
         case unavailable
         case loading
