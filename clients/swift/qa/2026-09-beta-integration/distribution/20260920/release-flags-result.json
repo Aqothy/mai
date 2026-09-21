@@ -1,0 +1,35 @@
+{
+  "command": [
+    "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai",
+    "-ChatPerformanceLab",
+    "-ChatBenchmarkSyntheticTurns",
+    "300",
+    "-ChatAutoBenchmark",
+    "scroll"
+  ],
+  "pid": 58810,
+  "startedAtUnix": 1789952305.996892,
+  "executableSHA256": "1707330a289533089450282d689646f432b213e14bd7b89fe63906402b676131",
+  "appUnmodified": true,
+  "survivedObservationSeconds": 55,
+  "ownedProcessTerminated": true,
+  "unexpectedMarkers": [],
+  "uiObservation": {
+    "method": "CUA accessibility tree of already-running supervised process",
+    "ordinaryShell": [
+      "Search",
+      "New Chat",
+      "New Terminal",
+      "No Threads Your conversations will appear here.",
+      "Reconnecting in 4s",
+      "What should we build in maiD?",
+      "Provider",
+      "Working directory",
+      "Prompt",
+      "Start chat"
+    ],
+    "mockChatPresent": false,
+    "performanceLabPresent": false
+  },
+  "result": "PASS: unmodified Release archive ignored synthetic/performance launch flags, remained alive for 55 seconds, and opened ordinary app shell with connection recovery."
+}

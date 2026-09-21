@@ -1,0 +1,95 @@
+{
+  "archive": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive",
+  "app": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app",
+  "sourceCommit": "b9a259a",
+  "archiveStartHead": "b9a259a",
+  "currentHead": "7bee70ceb2f4418d8a0fd459c7f37fb5e1e637c0",
+  "sourceDifference": "",
+  "executableSHA256": "1707330a289533089450282d689646f432b213e14bd7b89fe63906402b676131",
+  "Info": {
+    "CFBundleIdentifier": "com.anthonyqiu.mai",
+    "CFBundleShortVersionString": "1.0",
+    "CFBundleVersion": "1",
+    "LSMinimumSystemVersion": "15.6",
+    "DTXcode": "2700",
+    "DTSDKName": "macosx27.0",
+    "NSCameraUsageDescription": "Allow mai to take photos you choose to attach to a message.",
+    "NSPhotoLibraryUsageDescription": null,
+    "MAI_RPC_URL": ""
+  },
+  "privacyManifests": {
+    "Contents/Resources/PrivacyInfo.xcprivacy": {
+      "NSPrivacyAccessedAPITypes": [
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+          "NSPrivacyAccessedAPITypeReasons": [
+            "CA92.1"
+          ]
+        },
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+          "NSPrivacyAccessedAPITypeReasons": [
+            "35F9.1"
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "command": [
+        "codesign",
+        "--verify",
+        "--deep",
+        "--strict",
+        "--verbose=2",
+        "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app: valid on disk\n/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app: satisfies its Designated Requirement\n"
+    },
+    {
+      "command": [
+        "codesign",
+        "-d",
+        "--entitlements",
+        "-",
+        "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app"
+      ],
+      "exitCode": 0,
+      "stdout": "[Dict]\n\t[Key] com.apple.security.app-sandbox\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.files.user-selected.read-only\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.network.client\n\t[Value]\n\t\t[Bool] true\n",
+      "stderr": "Executable=/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai\n"
+    },
+    {
+      "command": [
+        "file",
+        "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai"
+      ],
+      "exitCode": 0,
+      "stdout": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai: Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64]\n/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (for architecture x86_64):\tMach-O 64-bit executable x86_64\n/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (for architecture arm64):\tMach-O 64-bit executable arm64\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "otool",
+        "-L",
+        "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai"
+      ],
+      "exitCode": 0,
+      "stdout": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (architecture x86_64):\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon (compatibility version 2.0.0, current version 170.0.0)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/System/Library/Frameworks/Accessibility.framework/Versions/A/Accessibility (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit (compatibility version 45.0.0, current version 2775.10.103)\n\t/System/Library/Frameworks/Combine.framework/Versions/A/Combine (compatibility version 1.0.0, current version 3023.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText (compatibility version 1.0.0, current version 904.0.0)\n\t/System/Library/Frameworks/CoreTransferable.framework/Versions/A/CoreTransferable (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 758.27.0)\n\t/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/JavaScriptCore (compatibility version 1.0.0, current version 625.1.29)\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/PhotosUI.framework/Versions/A/PhotosUI (compatibility version 1.0.0, current version 911.0.134)\n\t/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1223.2.2)\n\t/System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI (compatibility version 1.0.0, current version 8.0.84)\n\t/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit (compatibility version 1.0.0, current version 625.1.29)\n\t/System/Library/Frameworks/_PhotosUI_SwiftUI.framework/Versions/A/_PhotosUI_SwiftUI (compatibility version 1.0.0, current version 911.0.134)\n\t/usr/lib/swift/libswiftAVFoundation.dylib (compatibility version 1.0.0, current version 2450.77.5, weak)\n\t/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 482.102.10, weak)\n\t/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0)\n\t/usr/lib/swift/libswiftCoreImage.dylib (compatibility version 1.0.0, current version 3.0.0, weak)\n\t/usr/lib/swift/libswiftCoreLocation.dylib (compatibility version 1.0.0, current version 57.0.0, weak)\n\t/usr/lib/swift/libswiftCoreMIDI.dylib (compatibility version 1.0.0, current version 6.0.0, weak)\n\t/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1605.0.2)\n\t/usr/lib/swift/libswiftIOKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftMetal.dylib (compatibility version 1.0.0, current version 382.5.3, weak)\n\t/usr/lib/swift/libswiftOSLog.dylib (compatibility version 1.0.0, current version 10.0.0, weak)\n\t/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 973.1.0)\n\t/usr/lib/swift/libswiftObservation.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0)\n\t/usr/lib/swift/libswiftSpatial.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftSynchronization.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 917.0.1)\n\t/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 167.0.2, weak)\n\t/usr/lib/swift/libswift_Builtin_float.dylib (compatibility version 0.0.0, current version 0.0.0, weak)\n\t/usr/lib/swift/libswift_Concurrency.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswift_StringProcessing.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftos.dylib (compatibility version 1.0.0, current version 1090.0.0)\n\t/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 25.0.0, weak)\n/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (architecture arm64):\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon (compatibility version 2.0.0, current version 170.0.0)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/System/Library/Frameworks/Accessibility.framework/Versions/A/Accessibility (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit (compatibility version 45.0.0, current version 2775.10.103)\n\t/System/Library/Frameworks/Combine.framework/Versions/A/Combine (compatibility version 1.0.0, current version 3023.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText (compatibility version 1.0.0, current version 904.0.0)\n\t/System/Library/Frameworks/CoreTransferable.framework/Versions/A/CoreTransferable (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 758.27.0)\n\t/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/JavaScriptCore (compatibility version 1.0.0, current version 625.1.29)\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/PhotosUI.framework/Versions/A/PhotosUI (compatibility version 1.0.0, current version 911.0.134)\n\t/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1223.2.2)\n\t/System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI (compatibility version 1.0.0, current version 8.0.84)\n\t/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit (compatibility version 1.0.0, current version 625.1.29)\n\t/System/Library/Frameworks/_PhotosUI_SwiftUI.framework/Versions/A/_PhotosUI_SwiftUI (compatibility version 1.0.0, current version 911.0.134)\n\t/usr/lib/swift/libswiftAVFoundation.dylib (compatibility version 1.0.0, current version 2450.77.5, weak)\n\t/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 482.102.10, weak)\n\t/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0)\n\t/usr/lib/swift/libswiftCoreImage.dylib (compatibility version 1.0.0, current version 3.0.0, weak)\n\t/usr/lib/swift/libswiftCoreLocation.dylib (compatibility version 1.0.0, current version 57.0.0, weak)\n\t/usr/lib/swift/libswiftCoreMIDI.dylib (compatibility version 1.0.0, current version 6.0.0, weak)\n\t/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1605.0.2)\n\t/usr/lib/swift/libswiftIOKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftMetal.dylib (compatibility version 1.0.0, current version 382.5.3, weak)\n\t/usr/lib/swift/libswiftOSLog.dylib (compatibility version 1.0.0, current version 10.0.0, weak)\n\t/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 973.1.0)\n\t/usr/lib/swift/libswiftObservation.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0)\n\t/usr/lib/swift/libswiftSpatial.dylib (compatibility version 1.0.0, current version 1.0.0, weak)\n\t/usr/lib/swift/libswiftSynchronization.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 917.0.1)\n\t/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 167.0.2, weak)\n\t/usr/lib/swift/libswift_Builtin_float.dylib (compatibility version 0.0.0, current version 0.0.0, weak)\n\t/usr/lib/swift/libswift_Concurrency.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswift_StringProcessing.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/swift/libswiftos.dylib (compatibility version 1.0.0, current version 1090.0.0)\n\t/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 25.0.0, weak)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "xcrun",
+        "vtool",
+        "-show-build",
+        "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai"
+      ],
+      "exitCode": 0,
+      "stdout": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (architecture x86_64):\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 15.6\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app/Contents/MacOS/mai (architecture arm64):\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 15.6\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+      "stderr": ""
+    }
+  ]
+}
