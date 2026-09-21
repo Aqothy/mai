@@ -1,8 +1,42 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import mai
 
 struct ChatBetaIntegrationTests {
+    @Test @MainActor
+    func completionCursorRejectsMismatchedPasteAndDeletionRevisions() {
+        let pasted = "Release QA\nStreaming café 👩🏽‍💻 stays intact.\n@file"
+        let selection = TextSelection(insertionPoint: pasted.endIndex)
+        #expect(PromptCompletionCursor.offset(for: selection, in: "") == nil)
+        #expect(PromptCompletionCursor.offset(for: selection, in: "short") == nil)
+        #expect(PromptCompletionCursor.offset(for: selection, in: pasted) == pasted.count)
+        #expect(PromptCompletionCursor.offset(for: selection, in: "") == nil)
+        #expect(PromptCompletionCursor.offset(for: nil, in: "") == 0)
+    }
+
+    @Test @MainActor
+    func completionCursorCountsUnicodeCharactersAtEveryValidBoundary() {
+        let text = "café e\u{301} 👩🏽‍💻\n@文件"
+        for (offset, index) in text.indices.enumerated() {
+            let selection = TextSelection(insertionPoint: index)
+            #expect(PromptCompletionCursor.offset(for: selection, in: text) == offset)
+        }
+        #expect(PromptCompletionCursor.offset(for: nil, in: text) == text.count)
+        let end = TextSelection(insertionPoint: text.endIndex)
+        #expect(PromptCompletionCursor.offset(for: end, in: text) == text.count)
+    }
+
+    @Test @MainActor
+    func completionCursorRejectsNonBoundaryIndicesAndSelectedText() {
+        let old = "abc"
+        let stale = TextSelection(insertionPoint: old.index(after: old.startIndex))
+        #expect(PromptCompletionCursor.offset(for: stale, in: "👩🏽‍💻") == nil)
+        #expect(PromptCompletionCursor.offset(for: stale, in: "e\u{301}") == nil)
+        let selection = TextSelection(range: old.startIndex..<old.endIndex)
+        #expect(PromptCompletionCursor.offset(for: selection, in: old) == nil)
+    }
+
     @Test @MainActor
     func referenceDocumentKeepsAnnotationsAndPlatformSelectionPath() throws {
         let annotation = PromptAnnotation(

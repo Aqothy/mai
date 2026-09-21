@@ -220,7 +220,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
             applyCursorRequest(request)
             cursorOffset = request.cursorOffset
         } else {
-            cursorOffset = Self.cursorOffset(for: selection, in: text)
+            cursorOffset = PromptCompletionCursor.offset(for: selection, in: text)
         }
         promptCompletion.update(text: text, cursorOffset: cursorOffset)
     }
@@ -261,22 +261,6 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         textSelection = TextSelection(insertionPoint: insertionPoint)
         appliedCursorRequestRevision = request.revision
         appliedCursorRequestModelID = ObjectIdentifier(promptCompletion)
-    }
-
-    private static func cursorOffset(
-        for selection: TextSelection?,
-        in text: String
-    ) -> Int? {
-        guard let selection else { return text.count }
-        switch selection.indices {
-        case .selection(let range):
-            guard range.isEmpty else { return nil }
-            return text.distance(from: text.startIndex, to: range.lowerBound)
-        case .multiSelection(_):
-            return nil
-        @unknown default:
-            return nil
-        }
     }
 }
 
