@@ -96,7 +96,15 @@ Disable benchmark arguments to return to normal app startup. Direct Xcode/manual
 
 ## Reading results
 
-Each output directory contains plan/run `.json`, `.log`, `.stderr`, post-run `.memory.json`, and `metadata.json` with the binary hash and configuration. Session plans also have `.memory-samples.json`.
+For an already-built Debug app installed on an isolated, booted iOS simulator, the same production transcript can run without a device-viewer session:
+
+```sh
+python3 clients/swift/scripts/benchmark-simulator.py SIMULATOR_UUID /tmp/ios-chat-stream --plan stream --paginated --runs 3
+```
+
+Use Xcode MCP to build and test, then `simctl install` if installation is needed. This script supports `scroll`, `stream` and `streamScroll`, opens the chat through the existing Debug runner, validates report count and exact streamed source, and terminates the app it launched. It replaces any running mai instance on the selected simulator, so use a dedicated QA device. Logs and binary/device metadata are retained in a fresh output directory. It does not automate keyboard or text-selection interactions. Simulator callback rates cannot establish physical iPhone 60/120 Hz performance.
+
+Each macOS harness output directory contains plan/run `.json`, `.log`, `.stderr`, post-run `.memory.json`, and `metadata.json` with the binary hash and configuration. Session plans also have `.memory-samples.json`.
 
 `averageFPS` is historically named: it measures CADisplayLink callbacks per second, not independently verified presented FPS. At 120 Hz the interval target is 8.33 ms. Read p99 and maximum intervals alongside the average. RSS is whole-process memory, not isolated cache size or a guaranteed peak. Hidden-window, incomplete or source-mismatch runs are invalid; do not include them in comparisons.
 

@@ -1,0 +1,22 @@
+diff --git 1/Users/aqothy/Code/Personal/maiD/clients/swift/mai/Generated/MaidModels.swift 2/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/generated-teardown-review/clients/swift/mai/Generated/MaidModels.swift
+index 6d8964c..6f1be05 100644
+--- 1/Users/aqothy/Code/Personal/maiD/clients/swift/mai/Generated/MaidModels.swift
++++ 2/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/generated-teardown-review/clients/swift/mai/Generated/MaidModels.swift
+@@ -5316,6 +5316,8 @@ func newJSONEncoder() -> JSONEncoder {
+ // MARK: - Encode/decode helpers
+ 
+ public class JSONNull: Codable, Hashable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
+ 
+     public static func == (lhs: JSONNull, rhs: JSONNull) -> Bool {
+         return true
+@@ -5365,6 +5367,8 @@ final class JSONCodingKey: CodingKey {
+ }
+ 
+ public class JSONAny: Codable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
+ 
+     public let value: Any
+ 

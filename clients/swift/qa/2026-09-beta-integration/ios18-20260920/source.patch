@@ -1,0 +1,922 @@
+diff --git a/clients/swift/mai/Features/Chat/ChatAnnotationModel.swift b/clients/swift/mai/Features/Chat/ChatAnnotationModel.swift
+index 427c117..32e7cb3 100644
+--- a/clients/swift/mai/Features/Chat/ChatAnnotationModel.swift
++++ b/clients/swift/mai/Features/Chat/ChatAnnotationModel.swift
+@@ -46,6 +46,9 @@ nonisolated enum ChatAnnotationFormatting {
+ 
+ @Observable
+ final class ChatAnnotationModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var annotations: [ChatPendingAnnotation] = []
+     var editorDraft: ChatAnnotationDraft?
+ 
+diff --git a/clients/swift/mai/Features/Chat/ChatAnnotationTextView.swift b/clients/swift/mai/Features/Chat/ChatAnnotationTextView.swift
+index 22f8836..a144868 100644
+--- a/clients/swift/mai/Features/Chat/ChatAnnotationTextView.swift
++++ b/clients/swift/mai/Features/Chat/ChatAnnotationTextView.swift
+@@ -4,6 +4,9 @@
+     /// Adds the shared annotation editor to native text without changing
+     /// NSTextView's cursor tracking or selection behavior.
+     final class ChatAnnotationTextView: NSTextView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         var annotationContext: ChatAnnotationContext?
+ 
+         private struct CommentSelection {
+diff --git a/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift b/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift
+index aff2580..3053897 100644
+--- a/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift
++++ b/clients/swift/mai/Features/Chat/ChatFramePacingBenchmark.swift
+@@ -56,6 +56,9 @@ nonisolated struct ChatFramePacingReport: Codable, Equatable, Sendable {
+ /// a callback-pacing report. The link requests the display's maximum refresh
+ /// rate so main-thread delivery is sampled against the 120 Hz budget.
+ final class ChatFramePacingMonitor: NSObject {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private var displayLink: CADisplayLink?
+     private var watchdog: Task<Void, Never>?
+     private weak var monitoredWindow: ChatBenchmarkWindow?
+@@ -205,6 +208,9 @@ final class ChatFramePacingMonitor: NSObject {
+ /// harvesting and kept for in-app display.
+ @Observable
+ final class ChatBenchmarkModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private static let logger = Logger(
+         subsystem: "com.aqothy.mai",
+         category: "ChatBenchmark"
+diff --git a/clients/swift/mai/Features/Chat/ChatListBottomFollower.swift b/clients/swift/mai/Features/Chat/ChatListBottomFollower.swift
+index 6c64bb3..35a9e33 100644
+--- a/clients/swift/mai/Features/Chat/ChatListBottomFollower.swift
++++ b/clients/swift/mai/Features/Chat/ChatListBottomFollower.swift
+@@ -11,6 +11,9 @@
+     /// time.
+     @MainActor
+     final class ChatListBottomFollower {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private weak var scrollView: UIScrollView?
+ 
+         func attach(to scrollView: UIScrollView) {
+@@ -51,6 +54,9 @@
+         func updateUIView(_ uiView: FinderView, context: Context) {}
+ 
+         final class FinderView: UIView {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             private let onResolve: (UICollectionView) -> Void
+             private var resolvedCollectionView: UICollectionView?
+ 
+diff --git a/clients/swift/mai/Features/Chat/ChatMacRichBlocks.swift b/clients/swift/mai/Features/Chat/ChatMacRichBlocks.swift
+index 6a59c93..cc0c7ad 100644
+--- a/clients/swift/mai/Features/Chat/ChatMacRichBlocks.swift
++++ b/clients/swift/mai/Features/Chat/ChatMacRichBlocks.swift
+@@ -133,6 +133,9 @@
+     }
+ 
+     final class ChatMacCodeBlockHostView: ChatMacHorizontalDocumentScrollView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private let textView: NSTextView
+         private var layoutID: String?
+         private var block: ChatMarkdownCodeBlock?
+@@ -424,7 +427,13 @@
+     }
+ 
+     final class ChatMacTableHostView: ChatMacHorizontalDocumentScrollView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private final class TableDocumentView: NSView {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var tableLayout: ChatTableLayout? {
+                 didSet { needsDisplay = true }
+             }
+@@ -494,6 +503,9 @@
+     /// lets vertical wheel gestures continue through the enclosing chat
+     /// timeline.
+     class ChatMacHorizontalDocumentScrollView: NSScrollView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         /// The document's natural size; the document is at least as wide as
+         /// the clip view so short content still fills the row.
+         var documentSize: NSSize = .zero {
+diff --git a/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift b/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift
+index 68c5ca4..1d1f520 100644
+--- a/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift
++++ b/clients/swift/mai/Features/Chat/ChatMacTextLayout.swift
+@@ -355,6 +355,9 @@
+     /// NSTextView for its lifetime, so there is one reuse lifecycle to
+     /// reason about.
+     @MainActor final class ChatTextLayoutStore {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private struct Key: Hashable, Sendable {
+             let id: String
+             let width: CGFloat
+@@ -804,6 +807,9 @@
+         }
+ 
+         final class Coordinator: NSObject, NSTextViewDelegate {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var layoutID = ""
+             var onSelectionChange: ((ChatTextSelection?) -> Void)?
+ 
+@@ -875,12 +881,18 @@
+     }
+ 
+     final class ChatSelectableTextHostView: NSView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private enum Content: Equatable {
+             case source(String, ChatTextLayoutStyle)
+             case resolvedProse(ChatMarkdownProseRun)
+         }
+ 
+         private final class MarkdownDecorationView: NSView {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var quoteBarRects: [NSRect] = []
+             var thematicBreakRects: [NSRect] = []
+ 
+diff --git a/clients/swift/mai/Features/Chat/ChatMarkdownSegmentation.swift b/clients/swift/mai/Features/Chat/ChatMarkdownSegmentation.swift
+index b99d3dd..37f5965 100644
+--- a/clients/swift/mai/Features/Chat/ChatMarkdownSegmentation.swift
++++ b/clients/swift/mai/Features/Chat/ChatMarkdownSegmentation.swift
+@@ -239,6 +239,9 @@ nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
+ 
+ /// Avoids reparsing unchanged settled messages when the timeline updates.
+ final class ChatMarkdownSegmentCache {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     /// Retained message entries; a test seam for retention behavior.
+     var entryCount: Int { entries.count }
+ 
+diff --git a/clients/swift/mai/Features/Chat/ChatNativePreparedRow.swift b/clients/swift/mai/Features/Chat/ChatNativePreparedRow.swift
+index 506e873..69390a9 100644
+--- a/clients/swift/mai/Features/Chat/ChatNativePreparedRow.swift
++++ b/clients/swift/mai/Features/Chat/ChatNativePreparedRow.swift
+@@ -5,6 +5,9 @@
+     /// Unsupported rows retain the existing SwiftUI renderer. Prose and table
+     /// geometry uses the same prepared layouts as their visible native bodies.
+     final class ChatNativePreparedRow: NSView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         enum Content: Equatable {
+             case prose(String)
+             case resolvedProse(ChatMarkdownProseRun)
+diff --git a/clients/swift/mai/Features/Chat/ChatNativeTranscript.swift b/clients/swift/mai/Features/Chat/ChatNativeTranscript.swift
+index 7117043..3199eb4 100644
+--- a/clients/swift/mai/Features/Chat/ChatNativeTranscript.swift
++++ b/clients/swift/mai/Features/Chat/ChatNativeTranscript.swift
+@@ -58,6 +58,9 @@
+         }
+ 
+         final class Coordinator {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             let virtualDocument = VirtualDocument()
+             var task: Task<Void, Never>?
+             struct Measurement {
+@@ -145,6 +148,9 @@
+         }
+ 
+         final class VirtualDocument: NSView, ChatBenchmarkAnchoredDocument, ChatMacScrollDocument {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var numberOfRows: Int { offsets.count - 1 }
+             func stableIdentity(forRow row: Int) -> String? {
+                 geometry.ids.indices.contains(row) ? geometry.ids[row] : nil
+diff --git a/clients/swift/mai/Features/Chat/ChatPromptModel.swift b/clients/swift/mai/Features/Chat/ChatPromptModel.swift
+index 145db5f..902faba 100644
+--- a/clients/swift/mai/Features/Chat/ChatPromptModel.swift
++++ b/clients/swift/mai/Features/Chat/ChatPromptModel.swift
+@@ -5,6 +5,9 @@ import SwiftUI
+ 
+ @Observable
+ final class ChatPromptModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     let store: ThreadStore
+     let threadID: String
+     let promptCompletion: PromptCompletionModel
+diff --git a/clients/swift/mai/Features/Chat/ChatScrollState.swift b/clients/swift/mai/Features/Chat/ChatScrollState.swift
+index 0e77f06..5819176 100644
+--- a/clients/swift/mai/Features/Chat/ChatScrollState.swift
++++ b/clients/swift/mai/Features/Chat/ChatScrollState.swift
+@@ -2,6 +2,9 @@ import Observation
+ 
+ @Observable
+ final class ChatScrollState {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     struct BottomScrollRequest: Equatable {
+         var count = 0
+         var animated = false
+diff --git a/clients/swift/mai/Features/Chat/ChatStreamingMarkdownRenderer.swift b/clients/swift/mai/Features/Chat/ChatStreamingMarkdownRenderer.swift
+index 252040a..1822c61 100644
+--- a/clients/swift/mai/Features/Chat/ChatStreamingMarkdownRenderer.swift
++++ b/clients/swift/mai/Features/Chat/ChatStreamingMarkdownRenderer.swift
+@@ -594,6 +594,9 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
+ /// re-parses the source off the main actor.
+ @MainActor
+ final class ChatStreamingSnapshotCache {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     static let shared = ChatStreamingSnapshotCache()
+ 
+     /// Only one message streams at a time; a few entries absorb rapid
+diff --git a/clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift b/clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift
+index ee3a3e2..135f5bc 100644
+--- a/clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift
++++ b/clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift
+@@ -5,6 +5,9 @@
+     /// exclusively in the daemon-free synthetic thread.
+     @MainActor
+     final class ChatSyntheticStreamingBenchmark {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private let store: ThreadStore
+         private var sequence = 0
+         private let turnID = "synthetic-stream-turn"
+diff --git a/clients/swift/mai/Features/Chat/ChatTextLayout.swift b/clients/swift/mai/Features/Chat/ChatTextLayout.swift
+index d3959a9..382ceb2 100644
+--- a/clients/swift/mai/Features/Chat/ChatTextLayout.swift
++++ b/clients/swift/mai/Features/Chat/ChatTextLayout.swift
+@@ -178,6 +178,11 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
+ /// Thread-owned cache for completed and in-flight layouts, plus a
+ /// reuse pool of native views List has already displayed.
+ @MainActor final class ChatTextLayoutStore {
++    // Avoid synthesized isolated destruction on iOS 18.6's Swift runtime
++    // (swiftlang/swift#88036). View reuse is explicitly ended by the
++    // destination; destruction only releases the owned references.
++    nonisolated deinit {}
++
+     private struct Key: Hashable, Sendable {
+         let id: String
+         let width: CGFloat
+@@ -465,6 +470,9 @@ struct ChatSelectableText: UIViewRepresentable {
+     }
+ 
+     final class Coordinator: NSObject, UITextViewDelegate {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         var layoutID = ""
+         var onSelectionChange: ((ChatTextSelection?) -> Void)?
+         var annotationContext: ChatAnnotationContext?
+@@ -548,7 +556,13 @@ struct ChatSelectableText: UIViewRepresentable {
+ }
+ 
+ final class ChatSelectableTextHostView: UIView {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private final class MarkdownDecorationView: UIView {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         var attributedText = NSAttributedString()
+         weak var layoutManager: NSLayoutManager?
+         weak var textContainer: NSTextContainer?
+diff --git a/clients/swift/mai/Features/Chat/ChatTimelineProjection.swift b/clients/swift/mai/Features/Chat/ChatTimelineProjection.swift
+index 8b97bc7..fe0fee5 100644
+--- a/clients/swift/mai/Features/Chat/ChatTimelineProjection.swift
++++ b/clients/swift/mai/Features/Chat/ChatTimelineProjection.swift
+@@ -14,6 +14,11 @@ import Foundation
+ /// watermark, so projecting and consuming it is one atomic step on the
+ /// caller's timeline value.
+ final class ChatTimelineProjection {
++    // Explicit nonisolated destruction avoids the older Swift runtime's
++    // task-local/isolated-deinit crash (swiftlang/swift#88036). This cache
++    // owns values and has no actor-bound cleanup.
++    nonisolated deinit {}
++
+     private var sections: [ChatTimelineLayout.Section] = []
+     /// Entry index where the section at the same position begins.
+     private var sectionStarts: [Int] = []
+diff --git a/clients/swift/mai/Features/Chat/ChatView.swift b/clients/swift/mai/Features/Chat/ChatView.swift
+index 6fd9600..271fe91 100644
+--- a/clients/swift/mai/Features/Chat/ChatView.swift
++++ b/clients/swift/mai/Features/Chat/ChatView.swift
+@@ -604,6 +604,9 @@ struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
+ /// fold without closure or binding inputs defeating row-level invalidation.
+ @Observable
+ final class ChatTimelineFoldModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var expandedSectionIDs: Set<String> = []
+     @ObservationIgnored var prepareForToggle: () -> Void = {}
+ 
+@@ -674,6 +677,9 @@ nonisolated enum ChatTimelineMetrics {
+ /// Plain non-observable storage: `body` records the live turn here without
+ /// triggering another invalidation.
+ private final class ChatStreamingContinuity {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private var lastStreamingTurnID: String?
+     private var preparedSettledTurnID: String?
+ 
+diff --git a/clients/swift/mai/Features/Chat/ComposerAttachments.swift b/clients/swift/mai/Features/Chat/ComposerAttachments.swift
+index 2b18f50..e0ea874 100644
+--- a/clients/swift/mai/Features/Chat/ComposerAttachments.swift
++++ b/clients/swift/mai/Features/Chat/ComposerAttachments.swift
+@@ -54,6 +54,9 @@ struct ChatPendingAttachment: Identifiable {
+ /// pipeline, shared by the draft and thread prompt models.
+ @Observable
+ final class ComposerAttachmentsModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var attachments: [ChatPendingAttachment] = []
+ 
+     /// Draft composers gate on the selected provider's capabilities; thread
+@@ -242,6 +245,9 @@ struct ChatComposerAttachmentStrip: View {
+ }
+ 
+ final class ChatComposerThumbnail: @unchecked Sendable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     nonisolated let image: PlatformImage
+ 
+     nonisolated init(image: PlatformImage) {
+diff --git a/clients/swift/mai/Features/Chat/DraftPreferencesStore.swift b/clients/swift/mai/Features/Chat/DraftPreferencesStore.swift
+index d2bde8a..e569bf4 100644
+--- a/clients/swift/mai/Features/Chat/DraftPreferencesStore.swift
++++ b/clients/swift/mai/Features/Chat/DraftPreferencesStore.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class DraftPreferencesStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private struct StoredPreferences: Codable {
+         var providerID: String?
+         var workingDirectory: String?
+diff --git a/clients/swift/mai/Features/Chat/DraftPromptModel.swift b/clients/swift/mai/Features/Chat/DraftPromptModel.swift
+index 262412b..8f0e10b 100644
+--- a/clients/swift/mai/Features/Chat/DraftPromptModel.swift
++++ b/clients/swift/mai/Features/Chat/DraftPromptModel.swift
+@@ -5,6 +5,9 @@ import SwiftUI
+ 
+ @Observable
+ final class DraftPromptModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     enum OptionsPhase: Equatable {
+         case unavailable
+         case loading
+diff --git a/clients/swift/mai/Features/Chat/MockChatView.swift b/clients/swift/mai/Features/Chat/MockChatView.swift
+index 695a4f8..b8bee14 100644
+--- a/clients/swift/mai/Features/Chat/MockChatView.swift
++++ b/clients/swift/mai/Features/Chat/MockChatView.swift
+@@ -674,6 +674,9 @@ struct MockChatView: View {
+ /// advancing a chunk must not invalidate `MockChatView` and rebuild its
+ /// 5,000-element timeline input.
+ private final class MockChatActiveStream {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     let id = UUID()
+     let messageID: UUID
+     let liveMessage: MockChatStreamingMessage
+@@ -699,6 +702,9 @@ private final class MockChatActiveStream {
+ /// stays byte-for-byte stable throughout the stream.
+ @Observable
+ private final class MockChatStreamingMessage {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var text = ""
+     private(set) var isStreaming = true
+     private(set) var updateCount = 0
+diff --git a/clients/swift/mai/Features/Chat/PromptCompletionModel.swift b/clients/swift/mai/Features/Chat/PromptCompletionModel.swift
+index 35de02e..22f9c78 100644
+--- a/clients/swift/mai/Features/Chat/PromptCompletionModel.swift
++++ b/clients/swift/mai/Features/Chat/PromptCompletionModel.swift
+@@ -62,6 +62,9 @@ struct PromptCompletionCursorRequest: Equatable {
+ 
+ @Observable
+ final class PromptCompletionModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     enum Phase: Equatable {
+         case idle
+         case loading
+diff --git a/clients/swift/mai/Features/Chat/PromptComposer.swift b/clients/swift/mai/Features/Chat/PromptComposer.swift
+index c9d7731..131de13 100644
+--- a/clients/swift/mai/Features/Chat/PromptComposer.swift
++++ b/clients/swift/mai/Features/Chat/PromptComposer.swift
+@@ -521,6 +521,9 @@ struct ComposerAddMenu: View {
+         final class Coordinator: NSObject, UIImagePickerControllerDelegate,
+             UINavigationControllerDelegate
+         {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var parent: ComposerCameraPicker
+ 
+             init(parent: ComposerCameraPicker) {
+diff --git a/clients/swift/mai/Features/Chat/ThreadDraftStore.swift b/clients/swift/mai/Features/Chat/ThreadDraftStore.swift
+index 0532347..13b4a3c 100644
+--- a/clients/swift/mai/Features/Chat/ThreadDraftStore.swift
++++ b/clients/swift/mai/Features/Chat/ThreadDraftStore.swift
+@@ -5,6 +5,9 @@ import Observation
+ /// state. `activeDraftThreadID` identifies the one provisional new chat.
+ @Observable
+ final class ThreadDraftStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     let preferences: DraftPreferencesStore
+ 
+     private struct StoredDrafts: Codable {
+diff --git a/clients/swift/mai/Features/Diff/UnifiedDiffView.swift b/clients/swift/mai/Features/Diff/UnifiedDiffView.swift
+index e77428a..440a495 100644
+--- a/clients/swift/mai/Features/Diff/UnifiedDiffView.swift
++++ b/clients/swift/mai/Features/Diff/UnifiedDiffView.swift
+@@ -35,6 +35,9 @@ nonisolated enum UnifiedDiffSource: Hashable, Sendable {
+ 
+ @Observable
+ private final class UnifiedDiffLoader {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var document = UnifiedDiffDocument.empty
+     private(set) var isLoading = true
+ 
+diff --git a/clients/swift/mai/Features/Projects/FolderPickerModel.swift b/clients/swift/mai/Features/Projects/FolderPickerModel.swift
+index aa71073..5746f14 100644
+--- a/clients/swift/mai/Features/Projects/FolderPickerModel.swift
++++ b/clients/swift/mai/Features/Projects/FolderPickerModel.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class FolderPickerModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private struct DirectorySnapshot {
+         let path: String
+         let parentPath: String?
+diff --git a/clients/swift/mai/Features/Projects/ProjectFolderStore.swift b/clients/swift/mai/Features/Projects/ProjectFolderStore.swift
+index 214dfe5..aaf8c0e 100644
+--- a/clients/swift/mai/Features/Projects/ProjectFolderStore.swift
++++ b/clients/swift/mai/Features/Projects/ProjectFolderStore.swift
+@@ -5,6 +5,9 @@ import Observation
+ /// store after the daemon has returned them from filesystem browsing.
+ @Observable
+ final class ProjectFolderStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private static let projectStorageKey = "project-folders"
+     private static let parentStorageKey = "project-parent-folders"
+ 
+diff --git a/clients/swift/mai/Features/Registry/ACPRegistryModel.swift b/clients/swift/mai/Features/Registry/ACPRegistryModel.swift
+index b30972b..b904287 100644
+--- a/clients/swift/mai/Features/Registry/ACPRegistryModel.swift
++++ b/clients/swift/mai/Features/Registry/ACPRegistryModel.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class ACPRegistryModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     enum Phase: Equatable {
+         case loading
+         case loaded
+diff --git a/clients/swift/mai/Features/Registry/ACPRegistryRow.swift b/clients/swift/mai/Features/Registry/ACPRegistryRow.swift
+index 23a619a..5461b52 100644
+--- a/clients/swift/mai/Features/Registry/ACPRegistryRow.swift
++++ b/clients/swift/mai/Features/Registry/ACPRegistryRow.swift
+@@ -120,6 +120,9 @@ extension ACPRegistrySVGIcon {
+ 
+     @MainActor
+     final class Coordinator {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private var currentURL: URL?
+         private var loadTask: Task<Void, Never>?
+ 
+diff --git a/clients/swift/mai/Features/Registry/CustomACPAgentForm.swift b/clients/swift/mai/Features/Registry/CustomACPAgentForm.swift
+index ad9f327..dc39113 100644
+--- a/clients/swift/mai/Features/Registry/CustomACPAgentForm.swift
++++ b/clients/swift/mai/Features/Registry/CustomACPAgentForm.swift
+@@ -99,6 +99,9 @@ struct CustomACPAgentForm: View {
+ 
+ @Observable
+ private final class CustomACPAgentFormModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     var name = ""
+     var command = ""
+     var argumentText = ""
+@@ -237,6 +240,9 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
+ 
+ @Observable
+ private final class CustomACPEnvironmentVariable: Identifiable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     let id = UUID()
+     var key = ""
+     var value = ""
+diff --git a/clients/swift/mai/Features/Registry/ProviderAccountModel.swift b/clients/swift/mai/Features/Registry/ProviderAccountModel.swift
+index b5c3fe7..c7d0a3d 100644
+--- a/clients/swift/mai/Features/Registry/ProviderAccountModel.swift
++++ b/clients/swift/mai/Features/Registry/ProviderAccountModel.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class ProviderAccountModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     enum Phase: Equatable {
+         case loading
+         case loaded
+diff --git a/clients/swift/mai/Features/Selection/SearchableSelectionModel.swift b/clients/swift/mai/Features/Selection/SearchableSelectionModel.swift
+index 5661260..7832710 100644
+--- a/clients/swift/mai/Features/Selection/SearchableSelectionModel.swift
++++ b/clients/swift/mai/Features/Selection/SearchableSelectionModel.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class SearchableSelectionModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     let choices: [SearchableSelectionChoice]
+     var searchText = ""
+ 
+diff --git a/clients/swift/mai/Features/SessionImport/SessionImportModel.swift b/clients/swift/mai/Features/SessionImport/SessionImportModel.swift
+index 47b165f..beee530 100644
+--- a/clients/swift/mai/Features/SessionImport/SessionImportModel.swift
++++ b/clients/swift/mai/Features/SessionImport/SessionImportModel.swift
+@@ -3,6 +3,9 @@ import Observation
+ 
+ @Observable
+ final class SessionImportModel {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     enum Phase: Equatable {
+         case loading
+         case loaded
+diff --git a/clients/swift/mai/Features/Terminal/TerminalAttachment.swift b/clients/swift/mai/Features/Terminal/TerminalAttachment.swift
+index f49f2ef..6bb3b3a 100644
+--- a/clients/swift/mai/Features/Terminal/TerminalAttachment.swift
++++ b/clients/swift/mai/Features/Terminal/TerminalAttachment.swift
+@@ -13,6 +13,9 @@ import Foundation
+ /// straight to the controller and never enter observation.
+ @Observable
+ final class TerminalAttachment {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     /// How the attachment obtains its run.
+     enum Mode: Equatable {
+         /// Create a new terminal in the given working directory.
+diff --git a/clients/swift/mai/Features/Terminal/TerminalSessionController.swift b/clients/swift/mai/Features/Terminal/TerminalSessionController.swift
+index d96359c..d5d1ef3 100644
+--- a/clients/swift/mai/Features/Terminal/TerminalSessionController.swift
++++ b/clients/swift/mai/Features/Terminal/TerminalSessionController.swift
+@@ -10,6 +10,9 @@ import GhosttyTerminal
+ /// touches observation or SwiftUI `body`.
+ @Observable
+ final class TerminalSessionController {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     /// Package integration object. It is an `ObservableObject` by package
+     /// design; that is acceptable only inside this wrapper.
+     @ObservationIgnored let viewState: TerminalViewState
+diff --git a/clients/swift/mai/Features/Terminal/TerminalSettings.swift b/clients/swift/mai/Features/Terminal/TerminalSettings.swift
+index 65db5b8..adb5619 100644
+--- a/clients/swift/mai/Features/Terminal/TerminalSettings.swift
++++ b/clients/swift/mai/Features/Terminal/TerminalSettings.swift
+@@ -4,6 +4,9 @@ import Foundation
+ /// live here; rendering, shaping, and zoom gestures belong to the package.
+ @Observable
+ final class TerminalSettings {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     static let shared = TerminalSettings()
+ 
+     static let defaultFontSize: Float = 12
+diff --git a/clients/swift/mai/Features/Terminal/TerminalStore.swift b/clients/swift/mai/Features/Terminal/TerminalStore.swift
+index d1dc447..0b3d7d1 100644
+--- a/clients/swift/mai/Features/Terminal/TerminalStore.swift
++++ b/clients/swift/mai/Features/Terminal/TerminalStore.swift
+@@ -6,6 +6,9 @@ import Foundation
+ /// controller and never enter observation.
+ @Observable
+ final class TerminalStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
+ 
+     /// Terminal summaries ordered by updatedAt descending, then id — the
+diff --git a/clients/swift/mai/Features/Threads/ThreadReadStateStore.swift b/clients/swift/mai/Features/Threads/ThreadReadStateStore.swift
+index b9a5e4c..9b2ed4d 100644
+--- a/clients/swift/mai/Features/Threads/ThreadReadStateStore.swift
++++ b/clients/swift/mai/Features/Threads/ThreadReadStateStore.swift
+@@ -5,6 +5,9 @@ import Observation
+ /// conversation snapshots and live subscriptions.
+ @Observable
+ final class ThreadReadStateStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private static let storageKey = "unread-thread-ids-v1"
+ 
+     private(set) var unreadThreadIDs: Set<String>
+diff --git a/clients/swift/mai/Features/Threads/ThreadStore.swift b/clients/swift/mai/Features/Threads/ThreadStore.swift
+index 81dd1a7..ae8da41 100644
+--- a/clients/swift/mai/Features/Threads/ThreadStore.swift
++++ b/clients/swift/mai/Features/Threads/ThreadStore.swift
+@@ -18,6 +18,9 @@ struct QueuedChatPrompt: Identifiable {
+ /// row observes this reference directly.
+ @Observable
+ final class ThreadStreamingText {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private(set) var text: String
+     /// Cheap task identity that avoids hashing the growing text on every chunk.
+     private(set) var revision = 0
+@@ -35,6 +38,9 @@ final class ThreadStreamingText {
+ 
+ @Observable
+ final class ThreadStore {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     typealias ConnectionState = RPCConnectionCoordinator.State
+ 
+     struct CachePolicy {
+diff --git a/clients/swift/mai/Generated/MaidModels.swift b/clients/swift/mai/Generated/MaidModels.swift
+index 6d8964c..6f1be05 100644
+--- a/clients/swift/mai/Generated/MaidModels.swift
++++ b/clients/swift/mai/Generated/MaidModels.swift
+@@ -5316,6 +5316,8 @@ func newJSONEncoder() -> JSONEncoder {
+ // MARK: - Encode/decode helpers
+ 
+ public class JSONNull: Codable, Hashable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
+ 
+     public static func == (lhs: JSONNull, rhs: JSONNull) -> Bool {
+         return true
+@@ -5365,6 +5367,8 @@ final class JSONCodingKey: CodingKey {
+ }
+ 
+ public class JSONAny: Codable {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
+ 
+     public let value: Any
+ 
+diff --git a/clients/swift/mai/Network/RPCClient.swift b/clients/swift/mai/Network/RPCClient.swift
+index 4c6d5be..67d1fc0 100644
+--- a/clients/swift/mai/Network/RPCClient.swift
++++ b/clients/swift/mai/Network/RPCClient.swift
+@@ -1,6 +1,9 @@
+ import Foundation
+ 
+ final class RPCClient {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     private static let notificationQueueLimit = 1_024
+ 
+     var onNotification: ((String, Data) -> Void)?
+diff --git a/clients/swift/mai/Network/RPCConnectionCoordinator.swift b/clients/swift/mai/Network/RPCConnectionCoordinator.swift
+index faf5cb6..661d16d 100644
+--- a/clients/swift/mai/Network/RPCConnectionCoordinator.swift
++++ b/clients/swift/mai/Network/RPCConnectionCoordinator.swift
+@@ -13,6 +13,9 @@ protocol RPCTransportClient: AnyObject {
+ /// coordinator provides the shared timeout, retry, and disconnect behavior.
+ @Observable
+ final class RPCConnectionCoordinator {
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}
++
+     static let maximumReconnectAttempts = 5
+     static let connectAttemptTimeout: Duration = .seconds(15)
+ 
+diff --git a/clients/swift/mai/Platform/Desktop/DesktopSidebarTopAligner.swift b/clients/swift/mai/Platform/Desktop/DesktopSidebarTopAligner.swift
+index 187f70e..3e62db8 100644
+--- a/clients/swift/mai/Platform/Desktop/DesktopSidebarTopAligner.swift
++++ b/clients/swift/mai/Platform/Desktop/DesktopSidebarTopAligner.swift
+@@ -6,6 +6,9 @@
+     /// turns pass without another table or viewport change.
+     @MainActor
+     final class DesktopSidebarTopAligner: NSObject {
++        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++        nonisolated deinit {}
++
+         private weak var tableView: NSTableView?
+         private weak var scrollView: NSScrollView?
+         private var isAlignmentRequested = false
+diff --git a/clients/swift/mai/Platform/Desktop/MacListTableViewIntrospector.swift b/clients/swift/mai/Platform/Desktop/MacListTableViewIntrospector.swift
+index 8195bfa..c713554 100644
+--- a/clients/swift/mai/Platform/Desktop/MacListTableViewIntrospector.swift
++++ b/clients/swift/mai/Platform/Desktop/MacListTableViewIntrospector.swift
+@@ -29,6 +29,9 @@
+         }
+ 
+         final class FinderView: NSView {
++            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++            nonisolated deinit {}
++
+             var onResolve: ((NSTableView) -> Void)? {
+                 didSet {
+                     if let tableView {
+diff --git a/clients/swift/maiTests/ChatMarkdownPerformanceTests.swift b/clients/swift/maiTests/ChatMarkdownPerformanceTests.swift
+index 5869c97..1211ac4 100644
+--- a/clients/swift/maiTests/ChatMarkdownPerformanceTests.swift
++++ b/clients/swift/maiTests/ChatMarkdownPerformanceTests.swift
+@@ -1041,6 +1041,10 @@ private nonisolated struct FullRecoalescingStreamingPlannerBaseline {
+ @MainActor
+ @Observable
+ private final class ChatMarkdownHostingState {
++    // Synchronous host teardown must avoid the old runtime's isolated
++    // deinit/task-local crash, just like production presentation caches.
++    nonisolated deinit {}
++
+     var source = "## Streamed response\n\nA"
+     var isStreaming = true
+ }
+@@ -1066,6 +1070,10 @@ private struct ChatMarkdownHostingHarness: View {
+ @MainActor
+ @Observable
+ private final class NativeStreamingBenchmarkState {
++    // See ChatMarkdownHostingState: UIKit can release this after a commit,
++    // outside any Swift task on older supported OS runtimes.
++    nonisolated deinit {}
++
+     var source = ""
+     var isStreaming = true
+ }
+diff --git a/clients/swift/maiTests/ChatTimelinePerformanceTests.swift b/clients/swift/maiTests/ChatTimelinePerformanceTests.swift
+index e1e7bc9..c21f373 100644
+--- a/clients/swift/maiTests/ChatTimelinePerformanceTests.swift
++++ b/clients/swift/maiTests/ChatTimelinePerformanceTests.swift
+@@ -3,6 +3,61 @@ import XCTest
+ 
+ @testable import mai
+ 
++private nonisolated enum ChatLifetimeTestContext {
++    @TaskLocal static var marker = false
++}
++
++/// UIKit/SwiftUI can release presentation state synchronously, outside a
++/// Swift task. Async tests miss the isolated-deinit runtime bug on iOS 18.6.
++nonisolated final class ChatPresentationLifetimeTests: XCTestCase {
++    @MainActor
++    private func assertSynchronousRelease<T: AnyObject>(_ make: () -> T) {
++        weak var released: T?
++        ChatLifetimeTestContext.$marker.withValue(true) {
++            let object = make()
++            released = object
++            withExtendedLifetime(object) {}
++        }
++        XCTAssertNil(released)
++    }
++
++    @MainActor func testProjectionRelease() {
++        assertSynchronousRelease { ChatTimelineProjection() }
++    }
++
++    @MainActor func testTextLayoutStoreRelease() {
++        assertSynchronousRelease { ChatTextLayoutStore() }
++    }
++
++    @MainActor func testMarkdownSegmentCacheRelease() {
++        assertSynchronousRelease { ChatMarkdownSegmentCache() }
++    }
++
++    @MainActor func testAnnotationStateRelease() {
++        assertSynchronousRelease { ChatAnnotationModel() }
++    }
++
++    @MainActor func testScrollStateRelease() {
++        assertSynchronousRelease { ChatScrollState() }
++    }
++
++    @MainActor func testFoldStateRelease() {
++        assertSynchronousRelease { ChatTimelineFoldModel() }
++    }
++
++    @MainActor func testStreamingTextRelease() {
++        assertSynchronousRelease { ThreadStreamingText(text: "Hello 👋🏽") }
++    }
++
++    @MainActor func testJSONPayloadRelease() {
++        assertSynchronousRelease { JSONAny(["text": "Hello"]) }
++    }
++
++    @MainActor func testJSONNullRelease() {
++        assertSynchronousRelease { JSONNull() }
++    }
++}
++
+ /// Correctness and benchmarks for `ChatTimelineProjection`, the incremental
+ /// section projection behind the chat timeline.
+ ///
+diff --git a/clients/swift/maiTests/maiTests.swift b/clients/swift/maiTests/maiTests.swift
+index 8063784..2a430ff 100644
+--- a/clients/swift/maiTests/maiTests.swift
++++ b/clients/swift/maiTests/maiTests.swift
+@@ -80,12 +80,18 @@ struct ThreadStoreTests {
+         store.selectThread("thread-0")
+         await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
+ 
+-        weak var originalSegments = store.selectedThreadMarkdownSegmentCache
+-        weak var originalLayouts = store.selectedThreadTextLayoutStore
+-        weak var preparedLayout = store.selectedThreadTextLayoutStore?.layout(
+-            id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
+-        _ = store.selectedThreadMarkdownSegmentCache?.segments(
+-            messageID: "reply", source: "A retained **rich** reply.")
++        weak var originalSegments: ChatMarkdownSegmentCache?
++        weak var originalLayouts: ChatTextLayoutStore?
++        weak var preparedLayout: ChatTextLayout?
++        do {
++            let segments = try #require(store.selectedThreadMarkdownSegmentCache)
++            let layouts = try #require(store.selectedThreadTextLayoutStore)
++            originalSegments = segments
++            originalLayouts = layouts
++            preparedLayout = layouts.layout(
++                id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
++            _ = segments.segments(messageID: "reply", source: "A retained **rich** reply.")
++        }
+         #expect(originalSegments?.entryCount == 1)
+         #expect(preparedLayout != nil)
+ 
+diff --git a/tools/client-gen/generate.mjs b/tools/client-gen/generate.mjs
+index 80da03d..57bd4a7 100644
+--- a/tools/client-gen/generate.mjs
++++ b/tools/client-gen/generate.mjs
+@@ -69,6 +69,25 @@ swiftSource = swiftSource.replace(
+   "final class JSONCodingKey: CodingKey {",
+ );
+ 
++// Default MainActor isolation synthesizes an isolated destructor for these
++// helpers. Older supported OS runtimes crash when it runs in a synchronous
++// task-local scope (swiftlang/swift#88036). Generate the compatibility fix
++// here so regeneration cannot reintroduce that path.
++for (const declaration of [
++  "public class JSONNull: Codable, Hashable {",
++  "public class JSONAny: Codable {",
++]) {
++  if (swiftSource.split(declaration).length !== 2) {
++    throw new Error(`Expected exactly one quicktype helper: ${declaration}`);
++  }
++  swiftSource = swiftSource.replace(
++    declaration,
++    `${declaration}
++    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
++    nonisolated deinit {}`,
++  );
++}
++
+ await writeFile(swiftModelsPath, swiftSource);
+ 
+ const registry = JSON.parse(await readFile(methodsPath, "utf8"));

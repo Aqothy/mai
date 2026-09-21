@@ -1,0 +1,727 @@
+[ConsoleFoundation] Initialization successful2026-09-20 14:54:21.918946-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:54:21.918973-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:54:21.918981-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:54:21.918984-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:54:21.918988-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:54:21.918998-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:54:21.919004-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:54:21.944341-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:54:21.944366-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:54:21.944371-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:54:21.944376-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:54:21.944418-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0xa84c0
+2026-09-20 14:54:21.944444-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:54:21.944449-0400 [29642:4098082] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:54:21.999389-0400 [29642:4098082] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+Test Suite 'All tests' started at 2026-09-20 14:54:23.016.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:54:23.017.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:54:23.017.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testCumulativePrefixSourceUpdateAndFullAnalysisPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testCumulativePrefixSourceUpdateAndFullAnalysisPerformance]' measured [Clock Monotonic Time, s] average: 0.093, relative standard deviation: 0.929%, values: [0.094005, 0.092890, 0.091891], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testCumulativePrefixSourceUpdateAndFullAnalysisPerformance]' passed (0.401 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingChunkedPlannerPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingChunkedPlannerPerformance]' measured [Clock Monotonic Time, s] average: 0.078, relative standard deviation: 0.813%, values: [0.077257, 0.078795, 0.077673, 0.077364, 0.076980], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingChunkedPlannerPerformance]' passed (0.531 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingFullRecoalescingBaselinePerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingFullRecoalescingBaselinePerformance]' measured [Clock Monotonic Time, s] average: 0.074, relative standard deviation: 1.716%, values: [0.076241, 0.073510, 0.072389, 0.073732, 0.073588], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testEssayScaleStreamingFullRecoalescingBaselinePerformance]' passed (0.470 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteCachedNativeRowAttachmentPerformance]' started.
+
+2026-09-20 14:54:24.449676-0400 [29642:4098082] [ChatTextPerformance] cache miss id=four-kilobyte-cached-row style=markdownProse bytes=4125 ms=25.421750
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteCachedNativeRowAttachmentPerformance]' measured [Clock Monotonic Time, s] average: 0.000, relative standard deviation: 16.168%, values: [0.000111, 0.000082, 0.000106, 0.000074, 0.000083], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29642,0x102339e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29642,0x102339e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:54:45.516707-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:54:45.516746-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:54:45.516752-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:54:45.516755-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:54:45.516758-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:54:45.516830-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:54:45.516836-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:54:45.517322-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:54:45.517339-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:54:45.517344-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:54:45.517349-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:54:45.517379-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x1d84c0
+2026-09-20 14:54:45.517399-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:54:45.517402-0400 [29690:4099440] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:54:45.560086-0400 [29690:4099440] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+2026-09-20 14:54:45.758892-0400 [29690:4099466] [General] Failed to send CA Event for app launch measurements for ca_event_type: 0 event_name: com.apple.app_launch_measurement.FirstFramePresentationMetric
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:54:45.846.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:54:45.846.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:54:45.846.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteExistingRendererLayoutPerformance]' started.
+
+2026-09-20 14:54:45.874178-0400 [29690:4099440] [ChatTextPerformance] cache miss id=6B753172-47EB-4C9F-98CD-E5BCBDBDAE61-block-0 style=markdownProse bytes=4125 ms=9.282375
+mai(29690,0x1024b9e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29690,0x1024b9e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:55:06.645766-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:55:06.645802-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:55:06.645807-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:55:06.645812-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:55:06.645813-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:55:06.645850-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:55:06.645864-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:55:06.646399-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:55:06.646419-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:55:06.646424-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:55:06.646429-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:55:06.646457-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0xa84c0
+2026-09-20 14:55:06.646476-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:55:06.646482-0400 [29730:4100235] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:55:06.879949-0400 [29730:4100235] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+2026-09-20 14:55:06.881875-0400 [29730:4100300] [General] Failed to send CA Event for app launch measurements for ca_event_type: 0 event_name: com.apple.app_launch_measurement.FirstFramePresentationMetric
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:55:06.968.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:55:06.969.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:55:06.969.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteNativeProseColdLayoutPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteNativeProseColdLayoutPerformance]' measured [Clock Monotonic Time, s] average: 0.004, relative standard deviation: 3.548%, values: [0.004093, 0.003756, 0.003865, 0.003751, 0.003726], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobyteNativeProseColdLayoutPerformance]' passed (0.050 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobytePlainUserColdLayoutPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobytePlainUserColdLayoutPerformance]' measured [Clock Monotonic Time, s] average: 0.002, relative standard deviation: 4.023%, values: [0.002105, 0.001939, 0.002038, 0.001878, 0.001954], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testFourKilobytePlainUserColdLayoutPerformance]' passed (0.028 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testGiantPlainTextSingleRowHostingAndLayoutPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testGiantPlainTextSingleRowHostingAndLayoutPerformance]' measured [Clock Monotonic Time, s] average: 0.506, relative standard deviation: 1.053%, values: [0.502260, 0.499101, 0.514594, 0.508318, 0.504870], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testGiantPlainTextSingleRowHostingAndLayoutPerformance]' passed (3.087 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testGiantProseRecycledNativeRowAttachmentPerformance]' started.
+
+2026-09-20 14:55:10.174086-0400 [29730:4100235] [ChatTextPerformance] cache miss id=giant-recycled-row style=markdownProse bytes=95999 ms=35.599792
+2026-09-20 14:55:10.210984-0400 [29730:4100235] [ChatTextPerformance] slow attach id=giant-recycled-row style=markdownProse bytes=95999 ms=36.321167 reused=false
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testGiantProseRecycledNativeRowAttachmentPerformance]' measured [Clock Monotonic Time, s] average: 0.000, relative standard deviation: 4.910%, values: [0.000420, 0.000425, 0.000440, 0.000428, 0.000380], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29730,0x103101e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29730,0x103101e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:55:30.988599-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:55:30.988635-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:55:30.988641-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:55:30.988646-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:55:30.988648-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:55:30.988687-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:55:30.988692-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:55:30.989151-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:55:30.989157-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:55:30.989161-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:55:30.989166-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:55:30.989195-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x584c0
+2026-09-20 14:55:30.989207-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:55:30.991810-0400 [29762:4100910] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:55:31.189400-0400 [29762:4100910] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:55:31.266.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:55:31.267.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:55:31.267.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testHostedStreamingMessageLifecycle]' started.
+
+2026-09-20 14:55:31.289470-0400 [29762:4100910] [ChatTextPerformance] cache miss id=hosted-streaming-lifecycle-block-0 style=markdownProse bytes=22 ms=3.600250
+2026-09-20 14:55:31.370754-0400 [29762:4100910] [ChatTextPerformance] cache miss id=hosted-streaming-lifecycle-block-0 style=markdownProse bytes=15 ms=0.402625
+2026-09-20 14:55:31.436491-0400 [29762:4100910] [ChatTextPerformance] cache miss id=hosted-streaming-lifecycle-block-0 style=markdownProse bytes=163 ms=3.234208
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testHostedStreamingMessageLifecycle]' passed (0.211 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testLargeCodeListTableParseAndSafetyAnalysisPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testLargeCodeListTableParseAndSafetyAnalysisPerformance]' measured [Clock Monotonic Time, s] average: 0.023, relative standard deviation: 1.172%, values: [0.023819, 0.023301, 0.023062, 0.023522, 0.023145], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testLargeCodeListTableParseAndSafetyAnalysisPerformance]' passed (0.159 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testMixedContentMessageHostingAndLayoutPerformance]' started.
+
+2026-09-20 14:55:31.652261-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-0 style=markdownProse bytes=381 ms=1.271375
+2026-09-20 14:55:31.660762-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-4 style=markdownProse bytes=208 ms=0.617667
+2026-09-20 14:55:31.664844-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-8 style=markdownProse bytes=208 ms=0.519167
+2026-09-20 14:55:31.670155-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-12 style=markdownProse bytes=208 ms=0.659542
+2026-09-20 14:55:31.674876-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-16 style=markdownProse bytes=208 ms=0.647917
+2026-09-20 14:55:31.679418-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-20 style=markdownProse bytes=208 ms=0.597042
+2026-09-20 14:55:31.683486-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-24 style=markdownProse bytes=208 ms=0.547792
+2026-09-20 14:55:31.688231-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-28 style=markdownProse bytes=208 ms=0.662042
+2026-09-20 14:55:31.692651-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-32 style=markdownProse bytes=208 ms=0.578958
+2026-09-20 14:55:31.696598-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-36 style=markdownProse bytes=210 ms=0.684667
+2026-09-20 14:55:31.700637-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-40 style=markdownProse bytes=210 ms=0.595417
+2026-09-20 14:55:31.704360-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-44 style=markdownProse bytes=210 ms=0.462000
+2026-09-20 14:55:31.709026-0400 [29762:4100910] [ChatTextPerformance] cache miss id=layout-performance-message-block-48 style=markdownProse bytes=44 ms=0.285333
+mai(29762,0x1048e9e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29762,0x1048e9e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:55:52.473421-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:55:52.473453-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:55:52.473459-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:55:52.473463-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:55:52.473464-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:55:52.473695-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:55:52.473704-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:55:52.474170-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:55:52.474178-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:55:52.474180-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:55:52.474184-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:55:52.474217-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x584c0
+2026-09-20 14:55:52.474230-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:55:52.474234-0400 [29779:4101408] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:55:52.654110-0400 [29779:4101408] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:55:52.728.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:55:52.728.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:55:52.728.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichBlockColdMountPerformance]' started.
+
+2026-09-20 14:55:52.758229-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-0 style=markdownProse bytes=381 ms=2.102833
+2026-09-20 14:55:52.765166-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-4 style=markdownProse bytes=208 ms=0.597917
+2026-09-20 14:55:52.769099-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-8 style=markdownProse bytes=208 ms=0.467083
+2026-09-20 14:55:52.773479-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-12 style=markdownProse bytes=208 ms=0.667708
+2026-09-20 14:55:52.778647-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-16 style=markdownProse bytes=208 ms=0.618000
+2026-09-20 14:55:52.783221-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-20 style=markdownProse bytes=208 ms=0.578792
+2026-09-20 14:55:52.787765-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-24 style=markdownProse bytes=208 ms=0.543792
+2026-09-20 14:55:52.792431-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-28 style=markdownProse bytes=208 ms=0.656750
+2026-09-20 14:55:52.796818-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-32 style=markdownProse bytes=208 ms=0.626625
+2026-09-20 14:55:52.801199-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-36 style=markdownProse bytes=210 ms=0.580000
+2026-09-20 14:55:52.806020-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-40 style=markdownProse bytes=210 ms=0.459792
+2026-09-20 14:55:52.809894-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-44 style=markdownProse bytes=210 ms=0.488375
+2026-09-20 14:55:52.813709-0400 [29779:4101408] [ChatTextPerformance] cache miss id=790CFFC9-DD8B-460B-BD87-EE182A9B55FE-block-48 style=markdownProse bytes=44 ms=0.192500
+mai(29779,0x105131e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29779,0x105131e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:56:13.628180-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:56:13.628201-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:56:13.628207-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:56:13.628211-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:56:13.628213-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:56:13.628300-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:56:13.628330-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:56:13.628870-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:56:13.628880-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:56:13.628884-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:56:13.628887-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:56:13.628932-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x584c0
+2026-09-20 14:56:13.628946-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:56:13.629231-0400 [29798:4102379] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:56:13.666887-0400 [29798:4102379] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:56:13.918.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:56:13.918.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:56:13.919.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichBlockFreshStoreRemountBaselinePerformance]' started.
+
+2026-09-20 14:56:13.973218-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-0 style=markdownProse bytes=381 ms=2.301542
+2026-09-20 14:56:13.980387-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-4 style=markdownProse bytes=208 ms=0.649000
+2026-09-20 14:56:13.984411-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-8 style=markdownProse bytes=208 ms=0.488167
+2026-09-20 14:56:13.988820-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-12 style=markdownProse bytes=208 ms=0.589542
+2026-09-20 14:56:13.993252-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-16 style=markdownProse bytes=208 ms=0.554167
+2026-09-20 14:56:13.997050-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-20 style=markdownProse bytes=208 ms=0.474583
+2026-09-20 14:56:14.001210-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-24 style=markdownProse bytes=208 ms=0.627500
+2026-09-20 14:56:14.006037-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-28 style=markdownProse bytes=208 ms=0.605000
+2026-09-20 14:56:14.010977-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-32 style=markdownProse bytes=208 ms=0.743583
+2026-09-20 14:56:14.016164-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-36 style=markdownProse bytes=210 ms=0.583458
+2026-09-20 14:56:14.020049-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-40 style=markdownProse bytes=210 ms=0.475417
+2026-09-20 14:56:14.024461-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-44 style=markdownProse bytes=210 ms=0.677542
+2026-09-20 14:56:14.029169-0400 [29798:4102379] [ChatTextPerformance] cache miss id=native-rich-fresh-store-remount-benchmark-block-48 style=markdownProse bytes=44 ms=0.237250
+mai(29798,0x104911e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29798,0x104911e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:56:35.025247-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:56:35.025271-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:56:35.025276-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:56:35.025279-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:56:35.025284-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:56:35.025345-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:56:35.025363-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:56:35.031441-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:56:35.031460-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:56:35.031465-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:56:35.031470-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:56:35.031513-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x1a84c0
+2026-09-20 14:56:35.031529-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:56:35.031534-0400 [29815:4103115] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:56:35.137574-0400 [29815:4103115] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:56:35.507.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:56:35.507.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:56:35.507.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichBlockHotRemountPerformance]' started.
+
+2026-09-20 14:56:35.529998-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-0 style=markdownProse bytes=381 ms=9.008625
+2026-09-20 14:56:35.530862-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-4 style=markdownProse bytes=208 ms=0.526500
+2026-09-20 14:56:35.531310-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-8 style=markdownProse bytes=208 ms=0.399500
+2026-09-20 14:56:35.533458-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-12 style=markdownProse bytes=208 ms=2.110167
+2026-09-20 14:56:35.533874-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-16 style=markdownProse bytes=208 ms=0.376875
+2026-09-20 14:56:35.534271-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-20 style=markdownProse bytes=208 ms=0.367208
+2026-09-20 14:56:35.534662-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-24 style=markdownProse bytes=208 ms=0.361167
+2026-09-20 14:56:35.535063-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-28 style=markdownProse bytes=208 ms=0.370750
+2026-09-20 14:56:35.535443-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-32 style=markdownProse bytes=208 ms=0.353167
+2026-09-20 14:56:35.535825-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-36 style=markdownProse bytes=210 ms=0.353417
+2026-09-20 14:56:35.536207-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-40 style=markdownProse bytes=210 ms=0.354792
+2026-09-20 14:56:35.536592-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-44 style=markdownProse bytes=210 ms=0.351000
+2026-09-20 14:56:35.536753-0400 [29815:4103115] [ChatTextPerformance] cache miss id=native-rich-remount-benchmark-block-48 style=markdownProse bytes=44 ms=0.132292
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichBlockHotRemountPerformance]' measured [Clock Monotonic Time, s] average: 0.046, relative standard deviation: 2.354%, values: [0.045553, 0.046514, 0.045946, 0.046257, 0.043509], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29815,0x102bb1e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29815,0x102bb1e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:56:56.644191-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:56:56.644223-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:56:56.644229-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:56:56.644233-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:56:56.644237-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:56:56.644289-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:56:56.644309-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:56:56.644788-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:56:56.644800-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:56:56.644804-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:56:56.644809-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:56:56.644851-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x1fb84c0
+2026-09-20 14:56:56.644866-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:56:56.644870-0400 [29848:4103791] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:56:56.675240-0400 [29848:4103791] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:56:56.936.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:56:56.936.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:56:56.937.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheHitPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheHitPerformance]' measured [Clock Monotonic Time, s] average: 0.000, relative standard deviation: 3.832%, values: [0.000177, 0.000176, 0.000182, 0.000194, 0.000174], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheHitPerformance]' passed (0.026 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheMemory]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheMemory]' measured [Memory Physical, kB] average: 3375.104, relative standard deviation: 0.000%, values: [3375.104000], performanceMetricID:com.apple.dt.XCTMetric_Memory.physical, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheMemory]' measured [Memory Peak Physical, kB] average: 76303.168, relative standard deviation: 0.000%, values: [76303.168000], performanceMetricID:com.apple.dt.XCTMetric_Memory.physical_peak, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanCacheMemory]' passed (0.463 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanColdPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanColdPerformance]' measured [Clock Monotonic Time, s] average: 0.063, relative standard deviation: 0.954%, values: [0.063475, 0.062056, 0.063565, 0.062458, 0.062509], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeRichRenderPlanColdPerformance]' passed (0.393 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testNativeStreamingLifecyclePerformance]' started.
+
+2026-09-20 14:56:57.849113-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=43 ms=5.600042
+2026-09-20 14:56:57.898050-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=488 ms=33.758333
+2026-09-20 14:56:57.908727-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=739 ms=1.090417
+2026-09-20 14:56:57.917602-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=117 ms=0.439042
+2026-09-20 14:56:57.925708-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=340 ms=0.621292
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+2026-09-20 14:56:57.932508-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=591 ms=0.835333
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+2026-09-20 14:56:57.941577-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=117 ms=0.413542
+2026-09-20 14:56:57.948076-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=340 ms=0.462750
+2026-09-20 14:56:57.953855-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=591 ms=0.944208
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+2026-09-20 14:56:57.960268-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=117 ms=0.360375
+2026-09-20 14:56:57.965770-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=340 ms=0.445542
+2026-09-20 14:56:57.971872-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=591 ms=0.752458
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+2026-09-20 14:56:57.978430-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=102 ms=0.222792
+2026-09-20 14:56:57.989490-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=212 ms=0.428167
+2026-09-20 14:56:58.036356-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=739 ms=1.082917
+2026-09-20 14:56:58.037255-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=591 ms=0.722833
+2026-09-20 14:56:58.038944-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=591 ms=0.700000
+2026-09-20 14:56:58.040498-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=591 ms=0.677250
+2026-09-20 14:56:58.041505-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=102 ms=0.148417
+2026-09-20 14:56:58.058043-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=265 ms=0.545708
+2026-09-20 14:56:58.063767-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=488 ms=0.616792
+2026-09-20 14:56:58.068876-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-0 style=markdownProse bytes=739 ms=1.013000
+2026-09-20 14:56:58.074577-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=117 ms=0.258333
+2026-09-20 14:56:58.079916-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=340 ms=0.454292
+2026-09-20 14:56:58.084728-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-2 style=markdownProse bytes=591 ms=0.731625
+2026-09-20 14:56:58.091115-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=117 ms=0.284250
+2026-09-20 14:56:58.095782-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=340 ms=0.447583
+2026-09-20 14:56:58.101653-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-4 style=markdownProse bytes=591 ms=0.738875
+2026-09-20 14:56:58.107994-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=117 ms=0.347083
+2026-09-20 14:56:58.112400-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=340 ms=0.450250
+2026-09-20 14:56:58.118397-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-6 style=markdownProse bytes=591 ms=0.731417
+2026-09-20 14:56:58.127705-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=117 ms=0.346917
+2026-09-20 14:56:58.133681-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=212 ms=0.435083
+2026-09-20 14:56:58.134862-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=117 ms=0.285417
+2026-09-20 14:56:58.138443-0400 [29848:4103791] [ChatTextPerformance] cache miss id=native-streaming-lifecycle-benchmark-block-8 style=markdownProse bytes=212 ms=0.370083
+mai(29848,0x102dd9e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29848,0x102dd9e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:57:18.965734-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:57:18.965764-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:57:18.965774-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:57:18.965778-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:57:18.965781-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:57:18.965820-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:57:18.965823-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:57:18.966912-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:57:18.966931-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:57:18.966934-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:57:18.966938-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:57:18.966969-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0xa84c0
+2026-09-20 14:57:18.966981-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:57:18.966985-0400 [29877:4104426] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:57:19.010220-0400 [29877:4104426] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:57:19.299.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:57:19.299.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:57:19.299.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testRepresentativeLongResponseParseAndSafetyAnalysisPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testRepresentativeLongResponseParseAndSafetyAnalysisPerformance]' measured [Clock Monotonic Time, s] average: 0.004, relative standard deviation: 2.875%, values: [0.003448, 0.003679, 0.003521, 0.003518, 0.003375], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testRepresentativeLongResponseParseAndSafetyAnalysisPerformance]' passed (0.040 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFastPathPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFastPathPerformance]' measured [Clock Monotonic Time, s] average: 0.154, relative standard deviation: 0.538%, values: [0.153887, 0.153352, 0.153305, 0.153342, 0.155471], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFastPathPerformance]' passed (1.400 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFullParserPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFullParserPerformance]' measured [Clock Monotonic Time, s] average: 0.282, relative standard deviation: 0.857%, values: [0.283366, 0.286654, 0.280380, 0.280587, 0.280706], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledMessageSegmentationFullParserPerformance]' passed (1.741 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledProseColdLayoutPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledProseColdLayoutPerformance]' measured [Clock Monotonic Time, s] average: 0.034, relative standard deviation: 1.311%, values: [0.033221, 0.034332, 0.034113, 0.034335, 0.034441], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledProseColdLayoutPerformance]' passed (0.224 seconds).
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledProseLayoutCacheHitPerformance]' started.
+
+2026-09-20 14:57:22.744555-0400 [29877:4104426] [ChatTextPerformance] cache miss id=cache-performance-message style=markdownProse bytes=95999 ms=34.021625
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testSettledProseLayoutCacheHitPerformance]' measured [Clock Monotonic Time, s] average: 0.002, relative standard deviation: 3.560%, values: [0.001946, 0.001911, 0.002018, 0.001819, 0.001867], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29877,0x100569e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29877,0x100569e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:57:43.488696-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:57:43.488724-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:57:43.488732-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:57:43.488735-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:57:43.488739-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:57:43.488780-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:57:43.488802-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:57:43.489315-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:57:43.489339-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:57:43.489343-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:57:43.489348-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:57:43.489386-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x3a84c0
+2026-09-20 14:57:43.489399-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:57:43.489404-0400 [29900:4105064] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:57:43.529752-0400 [29900:4105064] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:57:43.799.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:57:43.799.
+Test Suite 'ChatMarkdownPerformanceTests' started at 2026-09-20 14:57:43.800.
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [Memory Physical, kB] average: -95.027, relative standard deviation: -208.728%, values: [-491.520000, 0.000000, 16.384000, 0.000000, 0.000000], performanceMetricID:com.apple.dt.XCTMetric_Memory.physical, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [CPU Cycles, kC] average: 66100.070, relative standard deviation: 1.455%, values: [66897.424000, 66626.948000, 64221.673000, 66261.246000, 66493.057000], performanceMetricID:com.apple.dt.XCTMetric_CPU.cycles, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [Clock Monotonic Time, s] average: 0.019, relative standard deviation: 0.632%, values: [0.018875, 0.018723, 0.018504, 0.018713, 0.018716], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [CPU Time, s] average: 0.019, relative standard deviation: 1.526%, values: [0.019749, 0.019531, 0.018900, 0.019437, 0.019656], performanceMetricID:com.apple.dt.XCTMetric_CPU.time, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [CPU Instructions Retired, kI] average: 270375.181, relative standard deviation: 0.493%, values: [270572.970000, 270233.008000, 268298.638000, 270277.691000, 272493.600000], performanceMetricID:com.apple.dt.XCTMetric_CPU.instructions_retired, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+<unknown>:0: Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' measured [Memory Peak Physical, kB] average: 66895.475, relative standard deviation: 0.272%, values: [67259.200000, 66784.064000, 66800.448000, 66816.832000, 66816.832000], performanceMetricID:com.apple.dt.XCTMetric_Memory.physical_peak, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatMarkdownPerformanceTests testStreamingRepairAndRenderPlanPerformance]' passed (0.179 seconds).
+Test Suite 'ChatMarkdownPerformanceTests' passed at 2026-09-20 14:57:43.979.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.179 (0.180) seconds
+Test Suite 'ChatTimelinePerformanceTests' started at 2026-09-20 14:57:43.980.
+Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionAtTenThousandEntriesPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionAtTenThousandEntriesPerformance]' measured [Clock Monotonic Time, s] average: 1.135, relative standard deviation: 0.863%, values: [1.123639, 1.147383, 1.130485, 1.128239, 1.146482], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionAtTenThousandEntriesPerformance]' passed (7.134 seconds).
+Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionBaselinePerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionBaselinePerformance]' measured [Clock Monotonic Time, s] average: 1.174, relative standard deviation: 0.540%, values: [1.173732, 1.186697, 1.171535, 1.170117, 1.169652], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+Test Case '-[maiTests.ChatTimelinePerformanceTests testFullSectionProjectionBaselinePerformance]' passed (7.330 seconds).
+Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalProjectionMatchesFullRebuild]' started.
+mai(29900,0x100921e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29900,0x100921e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:58:19.460202-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:58:19.460248-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:58:19.460254-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:58:19.460258-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:58:19.460263-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:58:19.460643-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:58:19.460661-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:58:19.461165-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:58:19.461174-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:58:19.461183-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:58:19.461188-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:58:19.461236-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x784c0
+2026-09-20 14:58:19.461251-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:58:19.461256-0400 [29923:4105727] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:58:19.489051-0400 [29923:4105727] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:58:19.731.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:58:19.732.
+Test Suite 'ChatTimelinePerformanceTests' started at 2026-09-20 14:58:19.732.
+Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionAtTenThousandEntriesPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionAtTenThousandEntriesPerformance]' measured [Clock Monotonic Time, s] average: 0.223, relative standard deviation: 0.525%, values: [0.225340, 0.222557, 0.222088, 0.224075, 0.222929], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29923,0x1026a9e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29923,0x1026a9e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:58:42.007786-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:58:42.007827-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:58:42.007837-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:58:42.007842-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:58:42.007846-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:58:42.007956-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:58:42.007977-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:58:42.008555-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:58:42.008569-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:58:42.008574-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:58:42.008578-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:58:42.008618-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x684c0
+2026-09-20 14:58:42.008630-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:58:42.008634-0400 [29950:4106484] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:58:42.194454-0400 [29950:4106484] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:58:42.267.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:58:42.268.
+Test Suite 'ChatTimelinePerformanceTests' started at 2026-09-20 14:58:42.268.
+Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionPerformance]' measured [Clock Monotonic Time, s] average: 0.232, relative standard deviation: 0.630%, values: [0.232448, 0.231239, 0.233340, 0.233755, 0.229742], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29950,0x1005e9e40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29950,0x1005e9e40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:59:04.714952-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:59:04.714993-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:59:04.714998-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:59:04.715003-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:59:04.715006-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:59:04.715315-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:59:04.715325-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:59:04.715809-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:59:04.715816-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:59:04.715820-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:59:04.715823-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:59:04.715857-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0xfd84c0
+2026-09-20 14:59:04.715868-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:59:04.715874-0400 [29964:4107147] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:59:04.742563-0400 [29964:4107147] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:59:04.954.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:59:04.954.
+Test Suite 'ChatTimelinePerformanceTests' started at 2026-09-20 14:59:04.954.
+Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionTailOnlyPerformance]' started.
+<unknown>:0: Test Case '-[maiTests.ChatTimelinePerformanceTests testIncrementalSectionProjectionTailOnlyPerformance]' measured [Clock Monotonic Time, s] average: 0.029, relative standard deviation: 2.175%, values: [0.029974, 0.028351, 0.028306, 0.028688, 0.028437], performanceMetricID:com.apple.dt.XCTMetric_Clock.time.monotonic, baselineName: "", baselineAverage: , polarity: prefers smaller, maxPercentRegression: 10.000%, maxPercentRelativeStandardDeviation: 10.000%, maxRegression: 0.000, maxStandardDeviation: 0.000
+mai(29964,0x100a4de40) malloc: *** error for object 0x251f66440: pointer being freed was not allocated
+mai(29964,0x100a4de40) malloc: *** set a breakpoint in malloc_error_break to debug
+[ConsoleFoundation] Initialization successful2026-09-20 14:59:26.352209-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-09-20 14:59:26.352240-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `mai.debug.dylib`
+2026-09-20 14:59:26.352246-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-09-20 14:59:26.352250-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-09-20 14:59:26.352253-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-09-20 14:59:26.352313-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/mai.debug.dylib`
+2026-09-20 14:59:26.352334-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-09-20 14:59:26.352861-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-09-20 14:59:26.352871-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-09-20 14:59:26.352876-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-09-20 14:59:26.352881-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/mai.debug.dylib'
+2026-09-20 14:59:26.352925-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0xe84c0
+2026-09-20 14:59:26.352941-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-09-20 14:59:26.352946-0400 [29974:4107691] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+2026-09-20 14:59:26.394244-0400 [29974:4107691] [library] load_eligibility_plist: Failed to open /Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Data/Application/D0DEB200-58B1-4A2C-AC41-71E175595EDF/private/var/db/eligibilityd/eligibility.plist: No such file or directory(2)
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-09-20 14:59:26.671.
+Test Suite 'maiTests.xctest' started at 2026-09-20 14:59:26.671.
+Test Suite 'ChatTimelinePerformanceTests' started at 2026-09-20 14:59:26.671.
+Test Suite 'ChatTimelinePerformanceTests' passed at 2026-09-20 14:59:26.672.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'maiTests.xctest' passed at 2026-09-20 14:59:26.672.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-20 14:59:26.672.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64-apple-ios17.0-simulator
+◇ Suite ACPRegistryModelTests started.
+◇ Suite ThreadListFilterTests started.
+◇ Suite ThreadStoreTests started.
+◇ Suite ThreadEventReducerTests started.
+◇ Test emptyQueryMatchesEverything() started.
+◇ Test providerFilterMatchesResolvedProviderID() started.
+◇ Test isActiveReflectsQueryAndPresets() started.
+◇ Suite ChatAttachmentTests started.
+◇ Test queryMatchesTitleSubstringCaseInsensitively() started.
+◇ Test configUpdatesAreSentInSelectionOrder() started.
+◇ Test subscribeRecoveryAppliesBufferedDetailAndListUpdates() started.
+◇ Test threadListTimestampRemainsAuthoritativeAcrossDetailUpdates() started.
+◇ Test projectFilterMatchesExactWorkingDirectory() started.
+◇ Test draftStorePersistsTheActiveDraft() started.
+◇ Suite ChatTimelineLayoutTests started.
+◇ Test localDraftLoadsProviderOptionsWithoutCreatingAThread() started.
+◇ Test hiddenRunningThreadIsProtectedOutsideIdleBudget() started.
+◇ Test sendSnapshotsDraftBeforeProviderStartup() started.
+◇ Test reconnectKeepsCachedContentAndRequestsFreshSnapshots() started.
+◇ Test recentChatRetainsPresentationButEvictionReleasesIt() started.
+◇ Test protectedThreadGetsFullInactiveTTLAfterCompletion() started.
+◇ Test retryResubscribesSelectedThreadAfterSnapshotFailure() started.
+◇ Test queuedAnnotationSteersToItsOwnThreadAndSurvivesDispatchFailure() started.
+◇ Test inactiveSubscribedThreadReceivesBackgroundUpdates() started.
+◇ Test reopeningCoalescesBehindPendingUnsubscribe() started.
+◇ Test reopeningUnsubscribedThreadUsesCachedModelThenFreshSnapshot() started.
+◇ Test annotationSendRetainsFailedDraftAndEditsMadeDuringSuccessfulSend() started.
+◇ Test keepsFiveInactiveSubscriptionsAndCachesEvictedModel() started.
+◇ Test inactiveSubscriptionExpiresAfterThirtyMinutes() started.
+◇ Suite ChatBetaIntegrationTests started.
+◇ Test streamingDeltasInvalidateTheLiveTextWithoutInvalidatingTimelineOrSidebar() started.
+◇ Test repeatedReconnectFailurePreservesWarmSubscriptions() started.
+◇ Test authoritativeThreadListReconcilesAcceptedDraftAfterEdits() started.
+◇ Test itemTextDeltaAccumulatesWhileFullPayloadReplaces() started.
+◇ Test sessionStatusSettlesTheRunningTurn() started.
+◇ Test approvalResponseRecordsTheOptimisticDecision() started.
+◇ Test restoredThreadPreparationIsLimitedAndRetryable() started.
+◇ Test nonErrorSessionClearsAnyStaleLastError() started.
+◇ Test ignoresUnrecognizedEventType() started.
+◇ Test itemUpsertAppendsThenMergesPreservingCreatedAtAndPriorFields() started.
+◇ Test sessionMetadataEventsMaterializeAMissingBinding() started.
+◇ Test sessionPrepareResetsTheBindingToStarting() started.
+◇ Test turnStartCreatesRunningTurnAndStampsItsMessage() started.
+◇ Test metaUpdateAppliesTitleAndCwdOnlyWhenPresent() started.
+◇ Test hiddenThreadEventsDoNotInvalidateSelectedThreadObservers() started.
+◇ Test interruptFailureClearsTheRequestWithoutCompletingTheTurn() started.
+◇ Test appendsNewMessageAndCoalescesLaterChunksIntoIt() started.
+◇ Test approvalOpensPendingThenResolves() started.
+◇ Test interruptRequestMarksTurnAndConfirmationCompletesIt() started.
+◇ Test configOptionsCarryingAModelUpdateTheThreadSelection() started.
+◇ Test ignoresMessageEventWithoutIdentity() started.
+◇ Test sessionStatusBackfillsThreadIdentityOnlyWhenMissing() started.
+◇ Test erroredSessionKeepsItsMessageAndAttachesItToTheTurn() started.
+◇ Test turnStartForTheRunningTurnKeepsItsOriginalTimestamps() started.
+◇ Test ignoresEventsAddressedToAnotherThread() started.
+◇ Test stopRequestAndFailureToggleTheStopFlag() started.
+◇ Test switchingProviderReplacesSelectionAndClearsTheStaleSession() started.
+◇ Test statusOnlyToolUpdatePreservesCompactSummaryAndDetailMarker() started.
+◇ Test updatesTargetTheMatchingEntryEvenWhenItIsNotTheNewest() started.
+◇ Test newItemWithoutStatusDefaultsToInProgress() started.
+◇ Test keyboardScrollTowardEndResumesOnlyAfterReachingIt() started.
+◇ Test transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing() started.
+◇ Test transientEndVisibilityDoesNotUndoAUserScrollAway() started.
+◇ Test summarizesGroupedActivityByVerb() started.
+◇ Test headerFallsBackToPlainTitleWhenDurationIsUnknown() started.
+◇ Test emptyMessagesProduceNoRows() started.
+◇ Test steeringMessageStaysInsideItsTurn() started.
+◇ Test runningTurnShowsHeaderBeforeFirstActivity() started.
+◇ Test historyWithoutTurnIDsSplitsOnUserMessages() started.
+◇ Test summarizesEditsAndSearches() started.
+◇ Test userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds() started.
+◇ Test summarizesSingleNamedTool() started.
+◇ Test headerFlagsFailedSteps() started.
+◇ Test jumpToBottomRestoresStreamingFollowIntent() started.
+◇ Test runningTurnShowsLiveHeaderAndUnfoldedActivity() started.
+◇ Test interruptedStepInOlderTurnAlsoReadsStopped() started.
+◇ Test finishedTurnFoldsActivityBehindHeader() started.
+◇ Test interruptedTurnReadsStoppedInsteadOfWorked() started.
+◇ Test pendingApprovalStaysVisibleAndResolvedApprovalFolds() started.
+◇ Test paginatesByCompleteUserTurns() started.
+◇ Test warningsAndErrorsNeverFold() started.
+◇ Test durationFormatting() started.
+◇ Test headerUsesLatestTurnTimestampsWhenAvailable() started.
+◇ Test foldedTurnKeepsOnlyFinalAssistantMessage() started.
+◇ Test reasoningRendersAsThoughtRowOutsideGroups() started.
+◇ Test endingAUserScrollAtTheBottomResumesFollowing() started.
+◇ Test distinctImagePixelsSurviveDecodingDespiteMatchingPayloadEnds() started.
+◇ Test headerDerivesDurationFromItemTimestampsForOlderTurns() started.
+◇ Test contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain() started.
+◇ Test attachmentPresentationAcceptsInlineImagesAndKeepsRemoteLinksAsLinks() started.
+◇ Test malformedAndOversizedImagePayloadsFailWithoutRendering() started.
+◇ Test previousTurnFoldsWhileNextTurnRuns() started.
+◇ Test completionPreservesUnicodeSuffixAndRejectsStaleText() started.
+◇ Test addingCustomAgentUsesNameDerivedIdentityWithoutStartingAProvider() started.
+◇ Test referenceDocumentKeepsAnnotationsAndPlatformSelectionPath() started.
+◇ Test customAgentOccupyingRegistryIDReplacesCatalogEntry() started.
+◇ Test searchMatchesNamesDescriptionsIDsAndCustomAgents() started.
+◇ Test layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent() started.
+◇ Test customConfigurationNormalizesUserFacingFieldsAndValidatesEnvironment() started.
+◇ Test sendingAnnotationsOnlyRemovesSubmittedDrafts() started.
+◇ Test assistantMessageSplitsActivityGroups() started.
+◇ Test groupsConsecutiveActivityItemsIntoOneRow() started.
+✔ Test localDraftLoadsProviderOptionsWithoutCreatingAThread() passed after 0.013 seconds.
+✔ Test authoritativeThreadListReconcilesAcceptedDraftAfterEdits() passed after 0.023 seconds.
+✔ Test emptyQueryMatchesEverything() passed after 0.030 seconds.
+✔ Test completionPreservesUnicodeSuffixAndRejectsStaleText() passed after 0.026 seconds.
+✔ Test addingCustomAgentUsesNameDerivedIdentityWithoutStartingAProvider() passed after 0.026 seconds.
+✔ Test referenceDocumentKeepsAnnotationsAndPlatformSelectionPath() passed after 0.026 seconds.
+✔ Test searchMatchesNamesDescriptionsIDsAndCustomAgents() passed after 0.029 seconds.
+✔ Test sendingAnnotationsOnlyRemovesSubmittedDrafts() passed after 0.029 seconds.
+✔ Suite ChatBetaIntegrationTests passed after 0.034 seconds.
+✔ Test customAgentOccupyingRegistryIDReplacesCatalogEntry() passed after 0.029 seconds.
+✔ Test providerFilterMatchesResolvedProviderID() passed after 0.040 seconds.
+✔ Test isActiveReflectsQueryAndPresets() passed after 0.040 seconds.
+✔ Test threadListTimestampRemainsAuthoritativeAcrossDetailUpdates() passed after 0.045 seconds.
+
+2026-09-20 14:59:26.736820-0400 [29974:4107691] [ChatTextPerformance] cache miss id=reply style=markdownProse bytes=26 ms=9.941500
+✔ Test queuedAnnotationSteersToItsOwnThreadAndSurvivesDispatchFailure() passed after 0.057 seconds.
+✔ Test inactiveSubscribedThreadReceivesBackgroundUpdates() passed after 0.057 seconds.
+✔ Test streamingDeltasInvalidateTheLiveTextWithoutInvalidatingTimelineOrSidebar() passed after 0.058 seconds.
+✔ Test queryMatchesTitleSubstringCaseInsensitively() passed after 0.060 seconds.
+✔ Test projectFilterMatchesExactWorkingDirectory() passed after 0.060 seconds.
+✔ Suite ThreadListFilterTests passed after 0.060 seconds.
+✔ Test draftStorePersistsTheActiveDraft() passed after 0.065 seconds.
+✔ Test approvalResponseRecordsTheOptimisticDecision() passed after 0.064 seconds.
+✔ Test sessionMetadataEventsMaterializeAMissingBinding() passed after 0.064 seconds.
+✔ Test subscribeRecoveryAppliesBufferedDetailAndListUpdates() passed after 0.066 seconds.
+✔ Test configUpdatesAreSentInSelectionOrder() passed after 0.066 seconds.
+✔ Test metaUpdateAppliesTitleAndCwdOnlyWhenPresent() passed after 0.065 seconds.
+✔ Test ignoresUnrecognizedEventType() passed after 0.065 seconds.
+✔ Test itemTextDeltaAccumulatesWhileFullPayloadReplaces() passed after 0.066 seconds.
+✔ Test itemUpsertAppendsThenMergesPreservingCreatedAtAndPriorFields() passed after 0.065 seconds.
+✔ Test turnStartCreatesRunningTurnAndStampsItsMessage() passed after 0.065 seconds.
+✔ Test sessionStatusSettlesTheRunningTurn() passed after 0.066 seconds.
+✔ Test interruptFailureClearsTheRequestWithoutCompletingTheTurn() passed after 0.066 seconds.
+✔ Test ignoresEventsAddressedToAnotherThread() passed after 0.065 seconds.
+✔ Test approvalOpensPendingThenResolves() passed after 0.066 seconds.
+✔ Test ignoresMessageEventWithoutIdentity() passed after 0.065 seconds.
+✔ Test nonErrorSessionClearsAnyStaleLastError() passed after 0.066 seconds.
+✔ Test sessionPrepareResetsTheBindingToStarting() passed after 0.066 seconds.
+✔ Test keyboardScrollTowardEndResumesOnlyAfterReachingIt() passed after 0.064 seconds.
+✔ Test stopRequestAndFailureToggleTheStopFlag() passed after 0.065 seconds.
+✔ Test newItemWithoutStatusDefaultsToInProgress() passed after 0.065 seconds.
+✔ Test updatesTargetTheMatchingEntryEvenWhenItIsNotTheNewest() passed after 0.065 seconds.
+✔ Test emptyMessagesProduceNoRows() passed after 0.064 seconds.
+✔ Test configOptionsCarryingAModelUpdateTheThreadSelection() passed after 0.065 seconds.
+✔ Test interruptRequestMarksTurnAndConfirmationCompletesIt() passed after 0.066 seconds.
+✔ Test summarizesSingleNamedTool() passed after 0.064 seconds.
+✔ Test erroredSessionKeepsItsMessageAndAttachesItToTheTurn() passed after 0.065 seconds.
+✔ Test appendsNewMessageAndCoalescesLaterChunksIntoIt() passed after 0.066 seconds.
+✔ Test jumpToBottomRestoresStreamingFollowIntent() passed after 0.064 seconds.
+✔ Test statusOnlyToolUpdatePreservesCompactSummaryAndDetailMarker() passed after 0.065 seconds.
+✔ Test summarizesEditsAndSearches() passed after 0.064 seconds.
+✔ Test runningTurnShowsLiveHeaderAndUnfoldedActivity() passed after 0.064 seconds.
+✔ Test runningTurnShowsHeaderBeforeFirstActivity() passed after 0.065 seconds.
+✔ Test sessionStatusBackfillsThreadIdentityOnlyWhenMissing() passed after 0.065 seconds.
+✔ Test paginatesByCompleteUserTurns() passed after 0.064 seconds.
+✔ Test turnStartForTheRunningTurnKeepsItsOriginalTimestamps() passed after 0.066 seconds.
+✔ Test headerFallsBackToPlainTitleWhenDurationIsUnknown() passed after 0.065 seconds.
+✔ Test reasoningRendersAsThoughtRowOutsideGroups() passed after 0.064 seconds.
+✔ Test pendingApprovalStaysVisibleAndResolvedApprovalFolds() passed after 0.064 seconds.
+✔ Test interruptedTurnReadsStoppedInsteadOfWorked() passed after 0.064 seconds.
+✔ Test contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain() passed after 0.063 seconds.
+✔ Test interruptedStepInOlderTurnAlsoReadsStopped() passed after 0.064 seconds.
+✔ Test steeringMessageStaysInsideItsTurn() passed after 0.065 seconds.
+✔ Test previousTurnFoldsWhileNextTurnRuns() passed after 0.065 seconds.
+✔ Test attachmentPresentationAcceptsInlineImagesAndKeepsRemoteLinksAsLinks() passed after 0.064 seconds.
+✔ Test headerDerivesDurationFromItemTimestampsForOlderTurns() passed after 0.063 seconds.
+✔ Test foldedTurnKeepsOnlyFinalAssistantMessage() passed after 0.064 seconds.
+✔ Test layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent() passed after 0.063 seconds.
+✔ Test headerFlagsFailedSteps() passed after 0.065 seconds.
+✔ Test endingAUserScrollAtTheBottomResumesFollowing() passed after 0.064 seconds.
+✔ Test switchingProviderReplacesSelectionAndClearsTheStaleSession() passed after 0.066 seconds.
+✔ Test historyWithoutTurnIDsSplitsOnUserMessages() passed after 0.065 seconds.
+✔ Test userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds() passed after 0.065 seconds.
+✔ Test headerUsesLatestTurnTimestampsWhenAvailable() passed after 0.065 seconds.
+✔ Test warningsAndErrorsNeverFold() passed after 0.065 seconds.
+✔ Test durationFormatting() passed after 0.064 seconds.
+✔ Test groupsConsecutiveActivityItemsIntoOneRow() passed after 0.065 seconds.
+✔ Test finishedTurnFoldsActivityBehindHeader() passed after 0.065 seconds.
+✔ Test customConfigurationNormalizesUserFacingFieldsAndValidatesEnvironment() passed after 0.063 seconds.
+✔ Test transientEndVisibilityDoesNotUndoAUserScrollAway() passed after 0.066 seconds.
+✔ Test summarizesGroupedActivityByVerb() passed after 0.066 seconds.
+✔ Test assistantMessageSplitsActivityGroups() passed after 0.065 seconds.
+✔ Test transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing() passed after 0.066 seconds.
+✔ Test distinctImagePixelsSurviveDecodingDespiteMatchingPayloadEnds() passed after 0.064 seconds.
+✔ Suite ACPRegistryModelTests passed after 0.070 seconds.
+✔ Suite ThreadEventReducerTests passed after 0.069 seconds.
+✔ Test protectedThreadGetsFullInactiveTTLAfterCompletion() passed after 0.069 seconds.
+✔ Test annotationSendRetainsFailedDraftAndEditsMadeDuringSuccessfulSend() passed after 0.069 seconds.
+✔ Suite ChatTimelineLayoutTests passed after 0.069 seconds.
+✔ Test sendSnapshotsDraftBeforeProviderStartup() passed after 0.070 seconds.
+✔ Test retryResubscribesSelectedThreadAfterSnapshotFailure() passed after 0.227 seconds.
+✔ Test hiddenThreadEventsDoNotInvalidateSelectedThreadObservers() passed after 0.227 seconds.
+✔ Test reconnectKeepsCachedContentAndRequestsFreshSnapshots() passed after 0.227 seconds.
+✔ Test inactiveSubscriptionExpiresAfterThirtyMinutes() passed after 0.228 seconds.
+✔ Test malformedAndOversizedImagePayloadsFailWithoutRendering() passed after 0.223 seconds.
+✔ Suite ChatAttachmentTests passed after 0.229 seconds.
+✔ Test restoredThreadPreparationIsLimitedAndRetryable() passed after 0.236 seconds.
+✔ Test repeatedReconnectFailurePreservesWarmSubscriptions() passed after 0.249 seconds.
+✔ Test hiddenRunningThreadIsProtectedOutsideIdleBudget() passed after 0.270 seconds.
+✔ Test keepsFiveInactiveSubscriptionsAndCachesEvictedModel() passed after 0.270 seconds.
+✔ Test reopeningUnsubscribedThreadUsesCachedModelThenFreshSnapshot() passed after 0.281 seconds.
+✔ Test recentChatRetainsPresentationButEvictionReleasesIt() passed after 0.281 seconds.
+✔ Test reopeningCoalescesBehindPendingUnsubscribe() passed after 0.281 seconds.
+✔ Suite ThreadStoreTests passed after 0.282 seconds.
+✔ Test run with 95 tests in 7 suites passed after 0.283 seconds.

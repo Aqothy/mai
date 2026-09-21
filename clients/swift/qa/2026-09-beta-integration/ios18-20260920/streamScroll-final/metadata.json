@@ -1,0 +1,14 @@
+{
+  "app": "/Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Bundle/Application/FE4B8786-0188-4214-88FF-759619E90C88/mai.app",
+  "bundleID": "com.anthonyqiu.mai",
+  "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+  "deviceName": "mai QA iOS 18.6",
+  "deviceUUID": "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+  "codeImageSHA256": "207c138d46c48574febf71277198ca08880e13c77b841d1784317c08f74b5ad0",
+  "plan": "streamScroll",
+  "runs": 3,
+  "syntheticTurns": 300,
+  "paginated": true,
+  "container": "iOS SwiftUI List",
+  "measurement": "simulator display-link callbacks, not physical-device or presented FPS"
+}

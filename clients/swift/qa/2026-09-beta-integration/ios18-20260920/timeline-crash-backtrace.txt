@@ -1,0 +1,205 @@
+(lldb) target create "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug-iphonesimulator/mai.app/mai"
+Current executable set to '/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug-iphonesimulator/mai.app/mai' (arm64).
+(lldb) breakpoint set -n malloc_error_break
+Breakpoint 1: where = libsystem_malloc.dylib`malloc_error_break, address = 0x00000001806b3f9c
+(lldb) process attach --name mai --waitfor
+Process 30304 stopped
+* thread #1, stop reason = signal SIGSTOP
+       frame #0: 0x00000001042b4bf0 dyld`_dyld_start
+dyld`_dyld_start:
+->  0x1042b4bf0 <+0>:  mov    x0, sp
+    0x1042b4bf4 <+4>:  and    sp, x0, #0xfffffffffffffff0
+    0x1042b4bf8 <+8>:  mov    x29, #0x0                 ; =0 
+    0x1042b4bfc <+12>: mov    x30, #0x0                 ; =0 
+Target 0: (mai) stopped.
+warning: Executable binary changed from "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug-iphonesimulator/mai.app/mai" to "/Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Bundle/Application/2B4B47B2-58F1-4DAC-BE6C-BBF3185B08AF/mai.app/mai".
+(lldb) continue
+1 location added to breakpoint 1
+Process 30304 resuming
+Process 30304 stopped and restarted: thread 1 received signal: SIGCONT
+Process 30304 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.2
+       frame #0: 0x00000001801e6f78 libsystem_malloc.dylib`malloc_error_break
+libsystem_malloc.dylib`malloc_error_break:
+->  0x1801e6f78 <+0>:  stp    x29, x30, [sp, #-0x10]!
+    0x1801e6f7c <+4>:  mov    x29, sp
+    0x1801e6f80 <+8>:  nop    
+    0x1801e6f84 <+12>: ldp    x29, x30, [sp], #0x10
+Target 0: (mai) stopped.
+(lldb) thread backtrace all
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.2
+   * frame #0: 0x00000001801e6f78 libsystem_malloc.dylib`malloc_error_break
+     frame #1: 0x00000001801f4384 libsystem_malloc.dylib`malloc_vreport + 748
+     frame #2: 0x00000001801f45d8 libsystem_malloc.dylib`malloc_report + 60
+     frame #3: 0x00000001801c3708 libsystem_malloc.dylib`___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED + 28
+     frame #4: 0x0000000249b38a34 libswift_Concurrency.dylib`swift::TaskLocal::StopLookupScope::~StopLookupScope() + 112
+     frame #5: 0x0000000249b2d848 libswift_Concurrency.dylib`swift_task_deinitOnExecutorImpl(void*, void (void*) swiftcall*, swift::SerialExecutorRef, unsigned long) + 100
+     frame #6: 0x0000000106d0bce4 mai.debug.dylib`ChatTimelineProjection.__deallocating_deinit() at ChatTimelineProjection.swift:0
+     frame #7: 0x000000019594c04c libswiftCore.dylib`_swift_release_dealloc + 28
+     frame #8: 0x000000019594ca24 libswiftCore.dylib`bool swift::RefCounts<swift::RefCountBitsT<(swift::RefCountInlinedness)1>>::doDecrementSlow<(swift::PerformDeinit)1>(swift::RefCountBitsT<(swift::RefCountInlinedness)1>, unsigned int) + 148
+  ﹍ frame #9: 0x00000001063e39a8 maiTests`ChatTimelinePerformanceTests.testIncrementalProjectionMatchesFullRebuild() at ChatTimelinePerformanceTests.swift:268:5
+  ﹉ frame #11: 0x00000001804cffe0 CoreFoundation`__invoking___ + 144
+     frame #12: 0x00000001804cd178 CoreFoundation`-[NSInvocation invoke] + 276
+     frame #13: 0x000000010526bd84 XCTestCore`+[XCTFailableInvocation invokeStandardConventionInvocation:completion:] + 56
+     frame #14: 0x000000010526bd44 XCTestCore`__90+[XCTFailableInvocation invokeInvocation:withTestMethodConvention:lastObservedErrorIssue:]_block_invoke_3 + 24
+     frame #15: 0x000000010526b610 XCTestCore`__81+[XCTFailableInvocation invokeWithAsynchronousWait:lastObservedErrorIssue:block:]_block_invoke + 292
+     frame #16: 0x000000010525cfa8 XCTestCore`__49+[XCTSwiftErrorObservation observeErrorsInBlock:]_block_invoke + 28
+     frame #17: 0x00000001052ce43c XCTestCore`specialized static XCTSwiftErrorObservation._observeErrors(in:) + 172
+     frame #18: 0x00000001052ce490 XCTestCore`@objc static XCTSwiftErrorObservation._observeErrors(in:) + 28
+     frame #19: 0x000000010525cecc XCTestCore`+[XCTSwiftErrorObservation observeErrorsInBlock:] + 156
+     frame #20: 0x000000010526b414 XCTestCore`+[XCTFailableInvocation invokeWithAsynchronousWait:lastObservedErrorIssue:block:] + 176
+     frame #21: 0x000000010526bab8 XCTestCore`+[XCTFailableInvocation invokeInvocation:withTestMethodConvention:lastObservedErrorIssue:] + 392
+     frame #22: 0x000000010526be04 XCTestCore`+[XCTFailableInvocation invokeInvocation:lastObservedErrorIssue:] + 64
+     frame #23: 0x000000010527e4fc XCTestCore`-[XCTestCase invokeTestMethod:] + 56
+     frame #24: 0x000000010527ead8 XCTestCore`__24-[XCTestCase invokeTest]_block_invoke.98 + 60
+     frame #25: 0x0000000105283d80 XCTestCore`-[XCTestCase(XCTIssueHandling) _caughtUnhandledDeveloperExceptionPermittingControlFlowInterruptions:caughtInterruptionException:whileExecutingBlock:] + 144
+     frame #26: 0x000000010527e708 XCTestCore`-[XCTestCase invokeTest] + 476
+     frame #27: 0x000000010527fe74 XCTestCore`__45-[XCTestCase _invokeTestIfSupportedOSVersion]_block_invoke + 32
+     frame #28: 0x0000000105283d80 XCTestCore`-[XCTestCase(XCTIssueHandling) _caughtUnhandledDeveloperExceptionPermittingControlFlowInterruptions:caughtInterruptionException:whileExecutingBlock:] + 144
+     frame #29: 0x000000010527fd4c XCTestCore`-[XCTestCase _invokeTestIfSupportedOSVersion] + 156
+     frame #30: 0x000000010527f844 XCTestCore`__26-[XCTestCase performTest:]_block_invoke.125 + 324
+     frame #31: 0x000000010525a434 XCTestCore`+[XCTContext _runInChildOfContext:forTestCase:markAsReportingBase:block:] + 152
+     frame #32: 0x000000010525a358 XCTestCore`+[XCTContext runInContextForTestCase:markAsReportingBase:block:] + 88
+     frame #33: 0x000000010527f444 XCTestCore`-[XCTestCase performTest:] + 236
+     frame #34: 0x000000010527bb5c XCTestCore`-[XCTest runTest] + 44
+     frame #35: 0x0000000105289ae4 XCTestCore`-[XCTestSuite runTestBasedOnRepetitionPolicy:testRun:] + 60
+     frame #36: 0x000000010528991c XCTestCore`__27-[XCTestSuite performTest:]_block_invoke + 172
+     frame #37: 0x0000000105289024 XCTestCore`__59-[XCTestSuite _performProtectedSectionForTest:testSection:]_block_invoke + 40
+     frame #38: 0x000000010525a434 XCTestCore`+[XCTContext _runInChildOfContext:forTestCase:markAsReportingBase:block:] + 152
+     frame #39: 0x000000010525a358 XCTestCore`+[XCTContext runInContextForTestCase:markAsReportingBase:block:] + 88
+     frame #40: 0x0000000105288fa4 XCTestCore`-[XCTestSuite _performProtectedSectionForTest:testSection:] + 140
+     frame #41: 0x000000010528945c XCTestCore`-[XCTestSuite performTest:] + 208
+     frame #42: 0x000000010527bb5c XCTestCore`-[XCTest runTest] + 44
+     frame #43: 0x0000000105289ae4 XCTestCore`-[XCTestSuite runTestBasedOnRepetitionPolicy:testRun:] + 60
+     frame #44: 0x000000010528991c XCTestCore`__27-[XCTestSuite performTest:]_block_invoke + 172
+     frame #45: 0x0000000105289024 XCTestCore`__59-[XCTestSuite _performProtectedSectionForTest:testSection:]_block_invoke + 40
+     frame #46: 0x000000010525a434 XCTestCore`+[XCTContext _runInChildOfContext:forTestCase:markAsReportingBase:block:] + 152
+     frame #47: 0x000000010525a358 XCTestCore`+[XCTContext runInContextForTestCase:markAsReportingBase:block:] + 88
+     frame #48: 0x0000000105288fa4 XCTestCore`-[XCTestSuite _performProtectedSectionForTest:testSection:] + 140
+     frame #49: 0x000000010528945c XCTestCore`-[XCTestSuite performTest:] + 208
+     frame #50: 0x000000010527bb5c XCTestCore`-[XCTest runTest] + 44
+     frame #51: 0x0000000105289ae4 XCTestCore`-[XCTestSuite runTestBasedOnRepetitionPolicy:testRun:] + 60
+     frame #52: 0x000000010528991c XCTestCore`__27-[XCTestSuite performTest:]_block_invoke + 172
+     frame #53: 0x0000000105289024 XCTestCore`__59-[XCTestSuite _performProtectedSectionForTest:testSection:]_block_invoke + 40
+     frame #54: 0x000000010525a434 XCTestCore`+[XCTContext _runInChildOfContext:forTestCase:markAsReportingBase:block:] + 152
+     frame #55: 0x000000010525a358 XCTestCore`+[XCTContext runInContextForTestCase:markAsReportingBase:block:] + 88
+     frame #56: 0x0000000105288fa4 XCTestCore`-[XCTestSuite _performProtectedSectionForTest:testSection:] + 140
+     frame #57: 0x000000010528945c XCTestCore`-[XCTestSuite performTest:] + 208
+     frame #58: 0x000000010527bb5c XCTestCore`-[XCTest runTest] + 44
+     frame #59: 0x00000001052a35fc XCTestCore`__89-[XCTTestRunSession executeTestsWithIdentifiers:skippingTestsWithIdentifiers:completion:]_block_invoke + 100
+     frame #60: 0x000000010525a434 XCTestCore`+[XCTContext _runInChildOfContext:forTestCase:markAsReportingBase:block:] + 152
+     frame #61: 0x000000010525a358 XCTestCore`+[XCTContext runInContextForTestCase:markAsReportingBase:block:] + 88
+     frame #62: 0x00000001052a34bc XCTestCore`-[XCTTestRunSession executeTestsWithIdentifiers:skippingTestsWithIdentifiers:completion:] + 288
+     frame #63: 0x000000010529a288 XCTestCore`__72-[XCTExecutionWorker enqueueTestIdentifiersToRun:testIdentifiersToSkip:]_block_invoke_2 + 116
+     frame #64: 0x000000010529b098 XCTestCore`__XCTAsyncEnumerateWithWaiter_block_invoke + 212
+     frame #65: 0x000000010529b204 XCTestCore`__XCTAsyncEnumerate_block_invoke.99 + 52
+     frame #66: 0x000000010529a120 XCTestCore`XCTAsyncEnumerateWithWaiter + 464
+     frame #67: 0x0000000105299f04 XCTestCore`__72-[XCTExecutionWorker enqueueTestIdentifiersToRun:testIdentifiersToSkip:]_block_invoke + 108
+     frame #68: 0x000000010529a398 XCTestCore`-[XCTExecutionWorker runWithError:] + 68
+     frame #69: 0x00000001052983ec XCTestCore`__25-[XCTestDriver _runTests]_block_invoke.324 + 52
+     frame #70: 0x00000001052a80d0 XCTestCore`-[XCTestObservationCenter _observeTestExecutionForTestBundle:inBlock:] + 92
+     frame #71: 0x0000000105297f28 XCTestCore`-[XCTestDriver _runTests] + 932
+     frame #72: 0x0000000105299c1c XCTestCore`_XCTestMain + 84
+     frame #73: 0x0000000104295274 libXCTestBundleInject.dylib`RunTestsFromRunLoop + 108
+     frame #74: 0x00000001803ed7c0 CoreFoundation`__CFMachPortPerform + 164
+     frame #75: 0x0000000180429918 CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE1_PERFORM_FUNCTION__ + 56
+     frame #76: 0x0000000180428f30 CoreFoundation`__CFRunLoopDoSource1 + 480
+     frame #77: 0x0000000180423828 CoreFoundation`__CFRunLoopRun + 2132
+     frame #78: 0x0000000180422b98 CoreFoundation`CFRunLoopRunSpecific + 536
+     frame #79: 0x000000019101fd00 GraphicsServices`GSEventRunModal + 164
+     frame #80: 0x0000000185c5ebb8 UIKitCore`-[UIApplication _run] + 796
+     frame #81: 0x0000000185c62f84 UIKitCore`UIApplicationMain + 124
+     frame #82: 0x00000001d3b1b66c SwiftUI`closure #1 in KitRendererCommon(_:) + 164
+     frame #83: 0x00000001d3b1b3a0 SwiftUI`runApp(_:) + 180
+  ﹍ frame #84: 0x00000001d38a6dc4 SwiftUI`static App.main() + 148
+  ﹉ frame #86: 0x00000001072ebb08 mai.debug.dylib`main at ContentView.swift:0
+     frame #87: 0x00000001045593d4 dyld_sim`start_sim + 20
+     frame #88: 0x00000001042e1e80 dyld`start + 6688
+  thread #2
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #3
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #4
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #5, name = 'com.apple.uikit.eventfetch-thread'
+       frame #0: 0x000000010441cb5c libsystem_kernel.dylib`mach_msg2_trap + 8
+       frame #1: 0x000000010442e0e4 libsystem_kernel.dylib`mach_msg2_internal + 72
+       frame #2: 0x0000000104424c58 libsystem_kernel.dylib`mach_msg_overwrite + 484
+       frame #3: 0x000000010441cedc libsystem_kernel.dylib`mach_msg + 20
+       frame #4: 0x0000000180428a70 CoreFoundation`__CFRunLoopServiceMachPort + 156
+       frame #5: 0x0000000180423450 CoreFoundation`__CFRunLoopRun + 1148
+       frame #6: 0x0000000180422b98 CoreFoundation`CFRunLoopRunSpecific + 536
+       frame #7: 0x0000000180f0e38c Foundation`-[NSRunLoop(NSRunLoop) runMode:beforeDate:] + 208
+       frame #8: 0x0000000180f0e5ac Foundation`-[NSRunLoop(NSRunLoop) runUntilDate:] + 60
+       frame #9: 0x0000000185d0c774 UIKitCore`-[UIEventFetcher threadMain] + 408
+       frame #10: 0x0000000180f35148 Foundation`__NSThread__start__ + 716
+       frame #11: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #6
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #7
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #8
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #9
+       frame #0: 0x000000010441e68c libsystem_kernel.dylib`__workq_kernreturn + 8
+  thread #11, name = 'JavaScriptCore libpas scavenger'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x000000019971a550 JavaScriptCore`scavenger_thread_main + 1176
+       frame #3: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #12, name = 'JIT Worklist Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #13, name = 'JIT Worklist Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #14, name = 'JIT Worklist Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #15, name = 'Heap Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #16, name = 'Heap Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+  thread #17, name = 'Heap Helper Thread'
+       frame #0: 0x0000000104420024 libsystem_kernel.dylib`__psynch_cvwait + 8
+       frame #1: 0x00000001044fab44 libsystem_pthread.dylib`_pthread_cond_wait + 972
+       frame #2: 0x00000001981196ac JavaScriptCore`WTF::ThreadCondition::timedWait(WTF::Mutex&, WTF::WallTime) + 236
+       frame #3: 0x00000001980d59ec JavaScriptCore`WTF::ParkingLot::parkConditionallyImpl(void const*, WTF::ScopedLambda<bool ()> const&, WTF::ScopedLambda<void ()> const&, WTF::TimeWithDynamicClockType const&) + 1992
+       frame #4: 0x000000019808afac JavaScriptCore`WTF::Detail::CallableWrapper<WTF::AutomaticThread::start(WTF::AbstractLocker const&)::$_0, void>::call() + 496
+       frame #5: 0x00000001981168f0 JavaScriptCore`WTF::Thread::entryPoint(WTF::Thread::NewThreadContext*) + 324
+       frame #6: 0x0000000198118cd8 JavaScriptCore`WTF::wtfThreadEntryPoint(void*) + 12
+       frame #7: 0x00000001044fa680 libsystem_pthread.dylib`_pthread_start + 104
+(lldb) process detach
+Process 30304 detached

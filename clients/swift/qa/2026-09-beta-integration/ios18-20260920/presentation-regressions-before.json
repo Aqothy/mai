@@ -1,0 +1,88 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+        "deviceName" : "mai QA iOS 18.6",
+        "modelName" : "iPhone 16",
+        "osBuildNumber" : "22G86",
+        "osVersion" : "18.6",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 5,
+      "passedTests" : 2,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "mai · Built with macOS 27.0",
+  "expectedFailures" : 0,
+  "failedTests" : 5,
+  "finishTime" : 1789950919.761,
+  "passedTests" : 2,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1789950811.738,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "ChatPresentationLifetimeTests/testAnnotationStateRelease()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatPresentationLifetimeTests/testAnnotationStateRelease",
+      "testName" : "testAnnotationStateRelease()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 2,
+      "testIdentifierString" : "ChatPresentationLifetimeTests/testFoldStateRelease()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatPresentationLifetimeTests/testFoldStateRelease",
+      "testName" : "testFoldStateRelease()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 3,
+      "testIdentifierString" : "ChatPresentationLifetimeTests/testMarkdownSegmentCacheRelease()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatPresentationLifetimeTests/testMarkdownSegmentCacheRelease",
+      "testName" : "testMarkdownSegmentCacheRelease()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 5,
+      "testIdentifierString" : "ChatPresentationLifetimeTests/testScrollStateRelease()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatPresentationLifetimeTests/testScrollStateRelease",
+      "testName" : "testScrollStateRelease()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 6,
+      "testIdentifierString" : "ChatPresentationLifetimeTests/testStreamingTextRelease()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatPresentationLifetimeTests/testStreamingTextRelease",
+      "testName" : "testStreamingTextRelease()"
+    }
+  ],
+  "title" : "Test - mai",
+  "topInsights" : [
+    {
+      "category" : "Common Failures",
+      "impact" : "100% of failures",
+      "text" : "5 runs of 5 tests failed with Test crashed with signal abrt."
+    }
+  ],
+  "totalTestCount" : 7
+}

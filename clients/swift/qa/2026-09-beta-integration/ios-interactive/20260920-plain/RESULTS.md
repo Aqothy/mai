@@ -19,3 +19,7 @@ The failure is an environment/tool interruption, not evidence of an app crash or
 - An actual older-history pagination boundary from the initial chunk of the 300-turn fixture, with before/after anchor and duplicate-row observation.
 
 Earlier evidence in [the parent results](../RESULTS.md) remains limited to its explicitly identified builds and scenarios. This run adds no iOS 18.6, physical-device 60/120 Hz, timing, streaming, accessibility-service, or real-provider validation.
+
+## Direct scripted launch after user workflow correction
+
+The user requested scripts and direct computer control in preference to Xcode interaction sessions, then requested non-UI QA whenever it provides equivalent evidence. `simctl launch --terminate-running-process` with the same synthetic arguments successfully started process 70772; a simulator screenshot verified the expected synthetic thread in the ordinary app shell. The transient launch screenshot is no longer present in the local evidence directory. This confirms fixture launch, not entry into the chat or the remaining keyboard/selection cases. Device Hub direct accessibility timed out repeatedly, including after its QA-owned viewer process was reopened. No physical phone was used. Subsequent non-UI checks should use scripted launch and Xcode MCP tests/builds; do not treat viewer failure as app failure or mark unobserved interactions passed.

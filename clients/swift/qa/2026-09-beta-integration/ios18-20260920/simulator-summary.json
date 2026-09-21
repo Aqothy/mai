@@ -1,0 +1,80 @@
+{
+  "source": "b9a259a",
+  "codeImageSHA256": "207c138d46c48574febf71277198ca08880e13c77b841d1784317c08f74b5ad0",
+  "scenarios": {
+    "real-cruise-1200pps": {
+      "runs": 3,
+      "meanCallbackHz": 59.20965971461443,
+      "worstP99Milliseconds": 33.33333332557231,
+      "maximumIntervalMilliseconds": 48.07512499974109
+    },
+    "real-scroll-3000pps": {
+      "runs": 3,
+      "meanCallbackHz": 57.3868380882672,
+      "worstP99Milliseconds": 35.53212498081848,
+      "maximumIntervalMilliseconds": 76.04104166966863
+    },
+    "real-fling-8000pps": {
+      "runs": 3,
+      "meanCallbackHz": 58.217518485975596,
+      "worstP99Milliseconds": 33.33333335467614,
+      "maximumIntervalMilliseconds": 72.64549998217262
+    },
+    "production-stream-20000chars": {
+      "runs": 3,
+      "meanCallbackHz": 50.276508119377844,
+      "worstP99Milliseconds": 37.59366666781716,
+      "maximumIntervalMilliseconds": 128.1694166827947
+    },
+    "production-stream-scroll-3000pps": {
+      "runs": 3,
+      "meanCallbackHz": 56.57064471877456,
+      "worstP99Milliseconds": 35.16287499223836,
+      "maximumIntervalMilliseconds": 119.54729168792255
+    }
+  },
+  "metadata": {
+    "scroll": {
+      "app": "/Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Bundle/Application/FE4B8786-0188-4214-88FF-759619E90C88/mai.app",
+      "bundleID": "com.anthonyqiu.mai",
+      "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+      "deviceName": "mai QA iOS 18.6",
+      "deviceUUID": "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+      "codeImageSHA256": "207c138d46c48574febf71277198ca08880e13c77b841d1784317c08f74b5ad0",
+      "plan": "scroll",
+      "runs": 3,
+      "syntheticTurns": 300,
+      "paginated": true,
+      "container": "iOS SwiftUI List",
+      "measurement": "simulator display-link callbacks, not physical-device or presented FPS"
+    },
+    "stream": {
+      "app": "/Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Bundle/Application/FE4B8786-0188-4214-88FF-759619E90C88/mai.app",
+      "bundleID": "com.anthonyqiu.mai",
+      "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+      "deviceName": "mai QA iOS 18.6",
+      "deviceUUID": "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+      "codeImageSHA256": "207c138d46c48574febf71277198ca08880e13c77b841d1784317c08f74b5ad0",
+      "plan": "stream",
+      "runs": 3,
+      "syntheticTurns": 300,
+      "paginated": true,
+      "container": "iOS SwiftUI List",
+      "measurement": "simulator display-link callbacks, not physical-device or presented FPS"
+    },
+    "streamScroll": {
+      "app": "/Users/aqothy/Library/Developer/CoreSimulator/Devices/9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48/data/Containers/Bundle/Application/FE4B8786-0188-4214-88FF-759619E90C88/mai.app",
+      "bundleID": "com.anthonyqiu.mai",
+      "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+      "deviceName": "mai QA iOS 18.6",
+      "deviceUUID": "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+      "codeImageSHA256": "207c138d46c48574febf71277198ca08880e13c77b841d1784317c08f74b5ad0",
+      "plan": "streamScroll",
+      "runs": 3,
+      "syntheticTurns": 300,
+      "paginated": true,
+      "container": "iOS SwiftUI List",
+      "measurement": "simulator display-link callbacks, not physical-device or presented FPS"
+    }
+  }
+}

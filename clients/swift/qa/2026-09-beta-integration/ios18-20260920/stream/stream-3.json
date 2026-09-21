@@ -1,0 +1,17 @@
+[
+  {
+    "averageFPS": 51.12033195019512,
+    "displayMaximumFPS": 60,
+    "durationSeconds": 24.10000000000582,
+    "expectedFrameMilliseconds": 16.666666666666668,
+    "frameCount": 1233,
+    "hitchCount": 204,
+    "hitchTimeMillisecondsPerSecond": 149.26454530763476,
+    "label": "production-stream-20000chars",
+    "maxFrameMilliseconds": 127.7433333452791,
+    "measurementKind": "displayLinkCallbacks",
+    "p50FrameMilliseconds": 16.666666662786156,
+    "p95FrameMilliseconds": 33.33333335467614,
+    "p99FrameMilliseconds": 38.61137499916367
+  }
+]

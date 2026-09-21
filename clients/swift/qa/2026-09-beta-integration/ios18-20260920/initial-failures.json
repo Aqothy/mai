@@ -1,0 +1,160 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+        "deviceName" : "mai QA iOS 18.6",
+        "modelName" : "iPhone 16",
+        "osBuildNumber" : "22G86",
+        "osVersion" : "18.6",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 13,
+      "passedTests" : 113,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "mai · Built with macOS 27.0",
+  "expectedFailures" : 0,
+  "failedTests" : 13,
+  "finishTime" : 1789930767.061,
+  "passedTests" : 113,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1789930418.882,
+  "statistics" : [
+    {
+      "subtitle" : "24 test runs",
+      "title" : "24 tests collected performance metrics"
+    }
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 4,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testFourKilobyteCachedNativeRowAttachmentPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testFourKilobyteCachedNativeRowAttachmentPerformance",
+      "testName" : "testFourKilobyteCachedNativeRowAttachmentPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 5,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testFourKilobyteExistingRendererLayoutPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testFourKilobyteExistingRendererLayoutPerformance",
+      "testName" : "testFourKilobyteExistingRendererLayoutPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 9,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testGiantProseRecycledNativeRowAttachmentPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testGiantProseRecycledNativeRowAttachmentPerformance",
+      "testName" : "testGiantProseRecycledNativeRowAttachmentPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 28,
+      "testIdentifierString" : "ChatTimelinePerformanceTests/testIncrementalProjectionMatchesFullRebuild()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatTimelinePerformanceTests/testIncrementalProjectionMatchesFullRebuild",
+      "testName" : "testIncrementalProjectionMatchesFullRebuild()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 29,
+      "testIdentifierString" : "ChatTimelinePerformanceTests/testIncrementalSectionProjectionAtTenThousandEntriesPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatTimelinePerformanceTests/testIncrementalSectionProjectionAtTenThousandEntriesPerformance",
+      "testName" : "testIncrementalSectionProjectionAtTenThousandEntriesPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 30,
+      "testIdentifierString" : "ChatTimelinePerformanceTests/testIncrementalSectionProjectionPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatTimelinePerformanceTests/testIncrementalSectionProjectionPerformance",
+      "testName" : "testIncrementalSectionProjectionPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 31,
+      "testIdentifierString" : "ChatTimelinePerformanceTests/testIncrementalSectionProjectionTailOnlyPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatTimelinePerformanceTests/testIncrementalSectionProjectionTailOnlyPerformance",
+      "testName" : "testIncrementalSectionProjectionTailOnlyPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 12,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testMixedContentMessageHostingAndLayoutPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testMixedContentMessageHostingAndLayoutPerformance",
+      "testName" : "testMixedContentMessageHostingAndLayoutPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 13,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testNativeRichBlockColdMountPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testNativeRichBlockColdMountPerformance",
+      "testName" : "testNativeRichBlockColdMountPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 14,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testNativeRichBlockFreshStoreRemountBaselinePerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testNativeRichBlockFreshStoreRemountBaselinePerformance",
+      "testName" : "testNativeRichBlockFreshStoreRemountBaselinePerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 15,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testNativeRichBlockHotRemountPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testNativeRichBlockHotRemountPerformance",
+      "testName" : "testNativeRichBlockHotRemountPerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 19,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testNativeStreamingLifecyclePerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testNativeStreamingLifecyclePerformance",
+      "testName" : "testNativeStreamingLifecyclePerformance()"
+    },
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 24,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testSettledProseLayoutCacheHitPerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testSettledProseLayoutCacheHitPerformance",
+      "testName" : "testSettledProseLayoutCacheHitPerformance()"
+    }
+  ],
+  "title" : "Test - mai",
+  "topInsights" : [
+    {
+      "category" : "Common Failures",
+      "impact" : "100% of failures",
+      "text" : "13 runs of 13 tests failed with Test crashed with signal abrt."
+    },
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "45% of duration",
+      "text" : "2 longest test runs with outlier durations exceeding 3.10s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 126
+}

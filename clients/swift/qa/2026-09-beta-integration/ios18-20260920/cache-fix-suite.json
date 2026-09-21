@@ -1,0 +1,59 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+        "deviceName" : "mai QA iOS 18.6",
+        "modelName" : "iPhone 16",
+        "osBuildNumber" : "22G86",
+        "osVersion" : "18.6",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 1,
+      "passedTests" : 125,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "mai · Built with macOS 27.0",
+  "expectedFailures" : 0,
+  "failedTests" : 1,
+  "finishTime" : 1789931373.776,
+  "passedTests" : 125,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1789931319.793,
+  "statistics" : [
+    {
+      "subtitle" : "28 test runs",
+      "title" : "28 tests collected performance metrics"
+    }
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Test crashed with signal abrt.",
+      "targetName" : "maiTests",
+      "testIdentifier" : 19,
+      "testIdentifierString" : "ChatMarkdownPerformanceTests/testNativeStreamingLifecyclePerformance()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatMarkdownPerformanceTests/testNativeStreamingLifecyclePerformance",
+      "testName" : "testNativeStreamingLifecyclePerformance()"
+    }
+  ],
+  "title" : "Test - mai",
+  "topInsights" : [
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "38% of duration",
+      "text" : "2 longest test runs with outlier durations exceeding 3.18s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 126
+}
