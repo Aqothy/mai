@@ -1,0 +1,15 @@
+{
+  "head": "ace9f99853f50c66ef126e39dd6c037ff2ad1613",
+  "appSourceCommit": "b9a259a",
+  "app": "/Users/aqothy/Library/Developer/Xcode/Archives/2026-09-20/mai 2026-09-20, 8.55\u202fPM.xcarchive/Products/Applications/mai.app",
+  "appSHA256": "1707330a289533089450282d689646f432b213e14bd7b89fe63906402b676131",
+  "appUnmodified": true,
+  "daemon": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/maiD",
+  "daemonSHA256": "e051e45952a65ee63e545c5f638ac438966ffaa36dbd440ecf01f4f28b46b0ac",
+  "dataDirectory": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/data",
+  "workingDirectory": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/workspace",
+  "endpoint": "ws://127.0.0.1:8765/rpc",
+  "codexExecutable": "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "codexVersion": "codex-cli 0.155.0-alpha.9.2",
+  "liveProvider": "Codex only"
+}

@@ -1,0 +1,6 @@
+{
+  "expected": "let answer = 42",
+  "actual": "let answer = 42",
+  "uiFeedback": "Copied",
+  "pass": true
+}

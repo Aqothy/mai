@@ -1,0 +1,11 @@
+# Codex reasoning selection
+
+Fix: `5ea7385`. The actual Release workflow requested low reasoning but the session returned xhigh, the global Codex default. The adapter parsed the selected value but omitted it from both `thread/start` and `thread/resume`, then adopted the returned default for `turn/start`.
+
+Both thread requests now send `config.model_reasoning_effort` when the caller explicitly selects an effort. An absent selection leaves the runtime default intact; the response remains authoritative. The installed CLI's generated schema confirms that thread requests accept `config`, while `turn/start` uses `effort`. This agrees with the official [app-server protocol](https://learn.chatgpt.com/docs/app-server) and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+The new fake-process regression failed before the five-line fix for both new and resumed sessions. Its four cases now verify explicit low selection and inherited default, including the following turn request. The adapter test run has 41 passing cases/subcases and one expected opt-in live-test skip. The separately enabled live test passed on bundled Codex CLI 0.155.0-alpha.9.2, gpt-5.6-luna: low at startup and resume, exact OK response, listing, history replay and independent fork. An unrelated RevenueCat MCP authorization warning is retained in the log; no MCP tool was used.
+
+The full Go suite and `go vet ./...` pass. Race tests pass for the changed adapter and provider service. The rebuilt daemon also completed a real WebSocket `thread.start` using low reasoning and returned low in its session options. `daemon-result.json` records the exact command, completed turn and binary hash. The first harness sampled the assistant response before explicitly checking the completed state; a subsequent read of that same thread confirmed completion, and the retained script now waits on `latestTurn.state`.
+
+Commands use the Ghostty pkg-config path from the Makefile. The live run used `CODEX_LIVE_TEST=1`, `CODEX_LIVE_BINARY=/Applications/ChatGPT.app/Contents/Resources/codex`, `CODEX_LIVE_MODEL=gpt-5.6-luna` and `CODEX_LIVE_EFFORT=low`. No user Codex configuration was changed. This backend-only correction does not change the archived Swift app.

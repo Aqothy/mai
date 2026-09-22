@@ -1,0 +1,202 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "optionsSessionId": "client-3-options-session-1",
+    "configOptions": [
+      {
+        "id": "model",
+        "type": "select",
+        "category": "model",
+        "label": "Model",
+        "description": "Model used for this thread",
+        "choices": [
+          {
+            "value": "gpt-6-astra",
+            "label": "GPT-6-Astra",
+            "description": "Our most capable model for complex, demanding work."
+          },
+          {
+            "value": "gpt-5.6-sol",
+            "label": "GPT-5.6-Sol",
+            "description": "Reliable agentic workhorse for everyday tasks."
+          },
+          {
+            "value": "gpt-5.6-terra",
+            "label": "GPT-5.6-Terra",
+            "description": "Balanced agentic coding model for everyday work."
+          },
+          {
+            "value": "gpt-5.6-luna",
+            "label": "GPT-5.6-Luna",
+            "description": "Fast and affordable agentic coding model."
+          },
+          {
+            "value": "gpt-5.5",
+            "label": "GPT-5.5",
+            "description": "Proven previous-generation model for coding and general work."
+          }
+        ],
+        "currentValue": "gpt-6-astra"
+      },
+      {
+        "id": "service_tier",
+        "type": "select",
+        "category": "model_config",
+        "label": "Service tier",
+        "description": "Service tier used for this thread",
+        "choices": [
+          {
+            "value": "default",
+            "label": "Standard",
+            "description": "Standard speed and usage"
+          },
+          {
+            "value": "priority",
+            "label": "Fast",
+            "description": "2x speed, increased usage"
+          }
+        ],
+        "currentValue": "default"
+      },
+      {
+        "id": "reasoning_effort",
+        "type": "select",
+        "category": "thought_level",
+        "label": "Reasoning",
+        "description": "Reasoning effort used for this thread",
+        "choices": [
+          {
+            "value": "low",
+            "label": "Low",
+            "description": "Fast responses with lighter reasoning"
+          },
+          {
+            "value": "medium",
+            "label": "Medium",
+            "description": "Balances speed and reasoning depth for everyday tasks"
+          },
+          {
+            "value": "high",
+            "label": "High",
+            "description": "Greater reasoning depth for complex problems"
+          },
+          {
+            "value": "xhigh",
+            "label": "XHIGH",
+            "description": "Extra high reasoning depth for complex problems"
+          },
+          {
+            "value": "max",
+            "label": "Max",
+            "description": "Maximum reasoning depth for the hardest problems"
+          },
+          {
+            "value": "ultra",
+            "label": "Ultra",
+            "description": "Maximum reasoning with automatic task delegation"
+          }
+        ],
+        "currentValue": "low"
+      }
+    ],
+    "skills": [
+      {
+        "name": "pdf:pdf",
+        "enabled": true
+      },
+      {
+        "name": "plugin-management:plugin-management",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:create-revenuecat-project",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:experiment-analysis",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:integrate-revenuecat",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-charts",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-customer-center",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-entitlements-gate",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-identify-user",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-migrate",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-paywall",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-purchase-flow",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-sdk-compatibility",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-status",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-store-state",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-testing-setup",
+        "enabled": true
+      },
+      {
+        "name": "revenuecat:revenuecat-troubleshoot",
+        "enabled": true
+      },
+      {
+        "name": "imagegen",
+        "enabled": true
+      },
+      {
+        "name": "openai-docs",
+        "enabled": true
+      },
+      {
+        "name": "plugin-creator",
+        "enabled": true
+      },
+      {
+        "name": "review-agent",
+        "enabled": true
+      },
+      {
+        "name": "skill-creator",
+        "enabled": true
+      },
+      {
+        "name": "skill-installer",
+        "enabled": true
+      }
+    ]
+  }
+}

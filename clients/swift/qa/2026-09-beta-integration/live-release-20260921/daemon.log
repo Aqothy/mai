@@ -1,0 +1,145 @@
+time=2026-09-21T10:52:25.169-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/data/maid.db
+time=2026-09-21T10:52:25.169-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-21T10:52:25.170-04:00 level=INFO msg="server listening" http=http://127.0.0.1:8765 websocket=ws://127.0.0.1:8765/rpc
+time=2026-09-21T10:52:50.336-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-21T10:52:50.680-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=339ms
+time=2026-09-21T10:52:50.680-04:00 level=DEBUG msg="RPC completed" method=provider.start duration=339ms client=client-1
+time=2026-09-21T10:52:50.682-04:00 level=INFO msg="client disconnected" client=client-1
+time=2026-09-21T10:52:52.001-04:00 level=INFO msg="client connected" client=client-2
+time=2026-09-21T10:52:52.270-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThreadList duration=0s client=client-2
+time=2026-09-21T10:52:52.282-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-2
+time=2026-09-21T10:52:52.282-04:00 level=DEBUG msg="RPC completed" method=acp.registry.installed duration=0s client=client-2
+time=2026-09-21T10:52:52.298-04:00 level=DEBUG msg="RPC completed" method=terminal.subscribeList duration=0s client=client-2
+time=2026-09-21T10:52:52.336-04:00 level=DEBUG msg="RPC completed" method=provider.options.get duration=28ms client=client-2
+time=2026-09-21T10:53:18.175-04:00 level=INFO msg="client connected" client=client-3
+time=2026-09-21T10:53:18.179-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-3
+time=2026-09-21T10:53:18.180-04:00 level=INFO msg="client disconnected" client=client-3
+time=2026-09-21T10:55:58.208-04:00 level=DEBUG msg="RPC completed" method=provider.options.set duration=1ms client=client-2
+time=2026-09-21T10:56:03.037-04:00 level=DEBUG msg="RPC completed" method=provider.options.set duration=1ms client=client-2
+{"timestamp":"2026-09-21T16:47:01.944613Z","level":"ERROR","fields":{"message":"failed to refresh available models: Connection failed: error sending request"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-21T18:17:34.049968Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-21T18:22:09.059738Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-21T18:40:22.843654Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-21T18:54:01.212879Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-21T18:58:36.222980Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+time=2026-09-21T15:47:33.728-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/data/maid.db
+time=2026-09-21T15:47:33.729-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-21T15:47:33.731-04:00 level=INFO msg="server listening" http=http://127.0.0.1:8765 websocket=ws://127.0.0.1:8765/rpc
+time=2026-09-21T15:47:35.078-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-21T15:47:35.678-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=589ms
+time=2026-09-21T15:47:35.678-04:00 level=DEBUG msg="RPC completed" method=provider.start duration=589ms client=client-1
+time=2026-09-21T15:47:35.680-04:00 level=INFO msg="client disconnected" client=client-1
+time=2026-09-21T15:47:52.108-04:00 level=INFO msg="client connected" client=client-2
+time=2026-09-21T15:47:52.121-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThreadList duration=0s client=client-2
+time=2026-09-21T15:47:52.125-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-2
+time=2026-09-21T15:47:52.129-04:00 level=DEBUG msg="RPC completed" method=acp.registry.installed duration=0s client=client-2
+time=2026-09-21T15:47:52.130-04:00 level=DEBUG msg="RPC completed" method=terminal.subscribeList duration=0s client=client-2
+time=2026-09-21T15:47:52.166-04:00 level=DEBUG msg="RPC completed" method=provider.options.get duration=26ms client=client-2
+time=2026-09-21T15:47:52.168-04:00 level=DEBUG msg="RPC completed" method=provider.options.set duration=0s client=client-2
+time=2026-09-21T15:47:52.169-04:00 level=DEBUG msg="RPC completed" method=provider.options.set duration=0s client=client-2
+time=2026-09-21T15:48:23.192-04:00 level=INFO msg="client connected" client=client-3
+time=2026-09-21T15:48:23.197-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThreadList duration=0s client=client-3
+time=2026-09-21T15:48:28.313-04:00 level=DEBUG msg="orchestration event" sequence=1 event=thread.created actor=client thread=E66C84F9-6695-46F9-9328-C989A3605576 command=EE921B98-2A04-47A5-9B85-8EBFB0A7C0F7
+time=2026-09-21T15:48:28.313-04:00 level=DEBUG msg="orchestration event" sequence=3 event=thread.turn-start-requested actor=client thread=E66C84F9-6695-46F9-9328-C989A3605576 command=EE921B98-2A04-47A5-9B85-8EBFB0A7C0F7 turn=turn_0f69b7db-991e-433b-93a1-7b66cb1eab7e
+time=2026-09-21T15:48:28.313-04:00 level=DEBUG msg="orchestration event" sequence=4 event=thread.session-status-set actor=server thread=E66C84F9-6695-46F9-9328-C989A3605576 provider=codex-app-server status=starting turn=turn_0f69b7db-991e-433b-93a1-7b66cb1eab7e generation=0
+time=2026-09-21T15:48:28.314-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=2ms client=client-2
+time=2026-09-21T15:48:28.314-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-3
+time=2026-09-21T15:48:28.335-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-2
+time=2026-09-21T15:48:28.537-04:00 level=DEBUG msg="orchestration event" sequence=5 event=thread.session-status-set actor=server thread=E66C84F9-6695-46F9-9328-C989A3605576 provider=codex-app-server status=running turn=turn_0f69b7db-991e-433b-93a1-7b66cb1eab7e generation=1
+time=2026-09-21T15:48:28.537-04:00 level=DEBUG msg="orchestration event" sequence=6 event=thread.config-options-updated actor=provider thread=E66C84F9-6695-46F9-9328-C989A3605576 options=3
+{"timestamp":"2026-09-21T19:48:29.350392Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-21T15:48:33.256-04:00 level=DEBUG msg="orchestration event" sequence=12 event=thread.token-usage-updated actor=provider thread=E66C84F9-6695-46F9-9328-C989A3605576 usedTokens=15525
+time=2026-09-21T15:48:38.616-04:00 level=DEBUG msg="orchestration event" sequence=13 event=thread.session-status-set actor=server thread=E66C84F9-6695-46F9-9328-C989A3605576 provider=codex-app-server status=ready turn="" generation=1
+time=2026-09-21T15:49:03.742-04:00 level=INFO msg="client connected" client=client-4
+time=2026-09-21T15:49:03.745-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-4
+time=2026-09-21T15:49:03.747-04:00 level=INFO msg="client disconnected" client=client-4
+time=2026-09-21T15:49:18.188-04:00 level=INFO msg="client disconnected" client=client-3
+time=2026-09-21T15:51:03.862-04:00 level=INFO msg="client connected" client=client-5
+time=2026-09-21T15:51:03.868-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=1ms client=client-5
+time=2026-09-21T15:51:04.922-04:00 level=DEBUG msg="RPC completed" method=provider.listSessions duration=1.053s client=client-5
+time=2026-09-21T15:51:04.924-04:00 level=DEBUG msg="orchestration event" sequence=14 event=thread.meta-updated actor=client thread=E66C84F9-6695-46F9-9328-C989A3605576 command=53bedb98-6592-44fa-b4f2-e8f931d4ff42
+time=2026-09-21T15:51:04.924-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-5
+time=2026-09-21T15:51:04.924-04:00 level=DEBUG msg="orchestration event" sequence=15 event=thread.session-stop-requested actor=client thread=E66C84F9-6695-46F9-9328-C989A3605576 command=c947db8e-1ce7-41bf-91ae-be094824a220
+time=2026-09-21T15:51:04.924-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-5
+time=2026-09-21T15:51:04.925-04:00 level=DEBUG msg="orchestration event" sequence=16 event=thread.session-prepare-requested actor=client thread=E66C84F9-6695-46F9-9328-C989A3605576 command=ce7d9515-7874-4226-9899-1882b82b358c
+time=2026-09-21T15:51:04.925-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-5
+time=2026-09-21T15:51:04.925-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-5
+time=2026-09-21T15:51:04.926-04:00 level=DEBUG msg="orchestration event" sequence=17 event=thread.session-status-set actor=server thread=E66C84F9-6695-46F9-9328-C989A3605576 provider=codex-app-server status=stopped turn="" generation=1
+time=2026-09-21T15:51:05.024-04:00 level=DEBUG msg="orchestration event" sequence=18 event=thread.session-status-set actor=server thread=E66C84F9-6695-46F9-9328-C989A3605576 provider=codex-app-server status=ready turn="" generation=1
+time=2026-09-21T15:51:05.024-04:00 level=DEBUG msg="orchestration event" sequence=19 event=thread.config-options-updated actor=provider thread=E66C84F9-6695-46F9-9328-C989A3605576 options=3
+time=2026-09-21T15:51:05.177-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-5
+time=2026-09-21T15:51:05.244-04:00 level=WARN msg="RPC failed" method=provider.forkThread duration=66ms client=client-5 error="codex app-server error -32600: no rollout found for thread id 01a0c585-a3e4-75b1-a6ed-45b1a526d1f1"
+time=2026-09-21T15:51:05.245-04:00 level=INFO msg="client disconnected" client=client-5
+{"timestamp":"2026-09-21T19:51:05.342560Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+{"timestamp":"2026-09-21T19:52:04.929711Z","level":"WARN","fields":{"message":"failed to initialize MCP client during shutdown: MCP startup failed: OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-21T15:54:04.488-04:00 level=INFO msg="client connected" client=client-6
+time=2026-09-21T15:54:04.499-04:00 level=DEBUG msg="orchestration event" sequence=20 event=thread.imported actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b
+time=2026-09-21T15:54:04.499-04:00 level=DEBUG msg="RPC completed" method=provider.importSession duration=4ms client=client-6
+time=2026-09-21T15:54:04.502-04:00 level=DEBUG msg="RPC completed" method=provider.importSession duration=1ms client=client-6
+time=2026-09-21T15:54:04.504-04:00 level=DEBUG msg="orchestration event" sequence=21 event=thread.session-prepare-requested actor=client thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b command=98b1d67d-772e-4e33-b836-2971976fd9d0
+time=2026-09-21T15:54:04.505-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=1ms client=client-6
+time=2026-09-21T15:54:04.506-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:04.623-04:00 level=DEBUG msg="orchestration event" sequence=22 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=running turn=01a0c583-40fd-7af3-aba1-f0a6d2b1cade generation=0
+time=2026-09-21T15:54:04.624-04:00 level=DEBUG msg="orchestration event" sequence=25 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=ready turn="" generation=0
+time=2026-09-21T15:54:04.624-04:00 level=DEBUG msg="orchestration event" sequence=26 event=thread.token-usage-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b usedTokens=15525
+time=2026-09-21T15:54:04.624-04:00 level=DEBUG msg="orchestration event" sequence=27 event=thread.history-replay-completed actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b
+time=2026-09-21T15:54:04.624-04:00 level=DEBUG msg="orchestration event" sequence=28 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=ready turn="" generation=1
+time=2026-09-21T15:54:04.624-04:00 level=DEBUG msg="orchestration event" sequence=29 event=thread.config-options-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b options=3
+time=2026-09-21T15:54:04.758-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:04.759-04:00 level=DEBUG msg="orchestration event" sequence=30 event=thread.meta-updated actor=client thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b command=54e6627e-066b-451f-bdb0-059ccc1cdf97
+time=2026-09-21T15:54:04.760-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=1ms client=client-6
+time=2026-09-21T15:54:05.001-04:00 level=DEBUG msg="orchestration event" sequence=31 event=thread.imported actor=server thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f
+time=2026-09-21T15:54:05.001-04:00 level=DEBUG msg="RPC completed" method=provider.forkThread duration=240ms client=client-6
+time=2026-09-21T15:54:05.002-04:00 level=DEBUG msg="orchestration event" sequence=32 event=thread.session-prepare-requested actor=client thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f command=c2e11abe-da5e-4428-a21f-99bc6202d6bb
+time=2026-09-21T15:54:05.002-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-6
+time=2026-09-21T15:54:05.002-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:05.036-04:00 level=DEBUG msg="orchestration event" sequence=33 event=thread.session-status-set actor=server thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f provider=codex-app-server status=running turn=01a0c583-40fd-7af3-aba1-f0a6d2b1cade generation=0
+time=2026-09-21T15:54:05.036-04:00 level=DEBUG msg="orchestration event" sequence=36 event=thread.session-status-set actor=server thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f provider=codex-app-server status=ready turn="" generation=0
+time=2026-09-21T15:54:05.036-04:00 level=DEBUG msg="orchestration event" sequence=37 event=thread.token-usage-updated actor=provider thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f usedTokens=15525
+time=2026-09-21T15:54:05.036-04:00 level=DEBUG msg="orchestration event" sequence=38 event=thread.history-replay-completed actor=provider thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f
+time=2026-09-21T15:54:05.036-04:00 level=DEBUG msg="orchestration event" sequence=39 event=thread.session-status-set actor=server thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f provider=codex-app-server status=ready turn="" generation=1
+time=2026-09-21T15:54:05.037-04:00 level=DEBUG msg="orchestration event" sequence=40 event=thread.config-options-updated actor=provider thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f options=3
+time=2026-09-21T15:54:05.254-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:05.255-04:00 level=DEBUG msg="orchestration event" sequence=41 event=thread.meta-updated actor=client thread=thread_5be8d20e-48a5-499b-850e-743807e1e01f command=10284d8e-47af-4c0c-ba96-b70fb033d130
+time=2026-09-21T15:54:05.255-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-6
+time=2026-09-21T15:54:05.812-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=true duration=557ms
+time=2026-09-21T15:54:05.813-04:00 level=DEBUG msg="RPC completed" method=provider.start duration=557ms client=client-6
+time=2026-09-21T15:54:05.814-04:00 level=DEBUG msg="orchestration event" sequence=42 event=thread.session-prepare-requested actor=client thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b command=48128a1a-6104-43a2-9a5c-af1f68021bce
+time=2026-09-21T15:54:05.814-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-6
+time=2026-09-21T15:54:05.816-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:05.907-04:00 level=DEBUG msg="orchestration event" sequence=43 event=thread.token-usage-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b usedTokens=15525
+time=2026-09-21T15:54:05.914-04:00 level=DEBUG msg="orchestration event" sequence=44 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=ready turn="" generation=2
+time=2026-09-21T15:54:05.915-04:00 level=DEBUG msg="orchestration event" sequence=45 event=thread.config-options-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b options=3
+time=2026-09-21T15:54:06.067-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-6
+time=2026-09-21T15:54:06.068-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-6
+time=2026-09-21T15:54:06.072-04:00 level=INFO msg="client disconnected" client=client-6
+{"timestamp":"2026-09-21T19:54:07.048656Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-21T15:55:05.143-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-2
+time=2026-09-21T15:55:40.038-04:00 level=INFO msg="client disconnected" client=client-2
+time=2026-09-21T15:55:40.038-04:00 level=DEBUG msg="close disposable options session" client=client-2 provider=codex-app-server error="provider instance \"codex-app-server\" is not initialized"
+time=2026-09-21T15:55:40.149-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-20/live-release/data/maid.db
+time=2026-09-21T15:55:40.150-04:00 level=INFO msg="restored persisted threads" count=3
+time=2026-09-21T15:55:40.150-04:00 level=INFO msg="server listening" http=http://127.0.0.1:8765 websocket=ws://127.0.0.1:8765/rpc
+time=2026-09-21T15:55:41.216-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-21T15:55:41.221-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThreadList duration=0s client=client-1
+time=2026-09-21T15:55:41.228-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-1
+time=2026-09-21T15:55:41.236-04:00 level=DEBUG msg="RPC completed" method=acp.registry.installed duration=0s client=client-1
+time=2026-09-21T15:55:41.252-04:00 level=DEBUG msg="RPC completed" method=terminal.subscribeList duration=1ms client=client-1
+time=2026-09-21T15:55:41.257-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-1
+time=2026-09-21T15:55:41.259-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-1
+time=2026-09-21T15:55:41.313-04:00 level=DEBUG msg="orchestration event" sequence=1 event=thread.session-prepare-requested actor=client thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b command=82F7586E-9A75-47F9-AC1B-5FD38A9DD815
+time=2026-09-21T15:55:41.313-04:00 level=DEBUG msg="RPC completed" method=orchestration.dispatchCommand duration=0s client=client-1
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=2 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=running turn=01a0c583-40fd-7af3-aba1-f0a6d2b1cade generation=0
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=5 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=ready turn="" generation=0
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=6 event=thread.token-usage-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b usedTokens=15525
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=7 event=thread.history-replay-completed actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=8 event=thread.session-status-set actor=server thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b provider=codex-app-server status=ready turn="" generation=2
+time=2026-09-21T15:55:41.950-04:00 level=DEBUG msg="orchestration event" sequence=9 event=thread.config-options-updated actor=provider thread=thread_519fa327-8703-4235-a2a7-cf534dc71d1b options=3
+time=2026-09-21T15:55:42.027-04:00 level=DEBUG msg="RPC completed" method=provider.list duration=0s client=client-1
+{"timestamp":"2026-09-21T19:55:43.321213Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-21T15:56:05.938-04:00 level=INFO msg="client connected" client=client-2
+time=2026-09-21T15:56:05.943-04:00 level=DEBUG msg="RPC completed" method=orchestration.subscribeThread duration=0s client=client-2
+time=2026-09-21T15:56:05.945-04:00 level=INFO msg="client disconnected" client=client-2
+time=2026-09-21T16:25:05.825-04:00 level=DEBUG msg="RPC completed" method=orchestration.unsubscribeThread duration=0s client=client-1
+{"timestamp":"2026-09-21T22:25:28.068296Z","level":"ERROR","fields":{"message":"failed to refresh available models: timeout waiting for child process to exit"},"target":"codex_models_manager::manager"}
+{"timestamp":"2026-09-22T01:14:42.968045Z","level":"WARN","fields":{"message":"failed to initialize MCP client during shutdown: MCP startup failed: OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}

@@ -1,0 +1,45 @@
+{
+  "sourceCommit": "5ea738595fa5938919acd5e284e01c207c059aca",
+  "codexVersion": "codex-cli 0.155.0-alpha.9.2",
+  "verification": {
+    "goTestAll": true,
+    "goVetAll": true,
+    "racePackages": [
+      "internal/adapters/codexapp",
+      "internal/providerservice"
+    ]
+  },
+  "schemaProperties": {
+    "ThreadStartParams": {
+      "config": {
+        "additionalProperties": true,
+        "type": [
+          "object",
+          "null"
+        ]
+      }
+    },
+    "ThreadResumeParams": {
+      "config": {
+        "additionalProperties": true,
+        "type": [
+          "object",
+          "null"
+        ]
+      }
+    },
+    "TurnStartParams": {
+      "effort": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/ReasoningEffort"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Override the reasoning effort for this turn and subsequent turns."
+      }
+    }
+  }
+}

@@ -32,12 +32,14 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 
 - [ ] ACP: create, list/page/import/resume, rename, stop/interrupt, close/delete, unsupported capability handling, additional directories and config options.
 - [ ] Codex app-server: login state, model/config selection, new prompt, steering/queue, approvals, fork, retry, history paging and reconnect/replay.
+- [x] Codex core Release workflow: authenticated startup, saved model, real Unicode/Markdown prompt, exact completion, copy, idempotent import, independent fork and restart/replay. The selected reasoning setting defect is fixed in `5ea7385` and passes explicit/default new/resumed-session checks plus real Codex and daemon turns. Steering/queue, approvals, retry and multi-page history remain open above.
 - [ ] Codex reasoning with multiple summary/content parts agrees while streaming, after completion, and after reload; completed snapshots are authoritative.
 - Claude native live checks: **excluded from this QA run by the user on September 14**, because no Claude Pro account is available. Use Codex for live-provider testing. Existing fake-runtime adapter tests remain evidence only for their covered protocol logic.
 - [ ] Lifecycle: late responses cannot switch providers/threads; malformed/closed RPC and transport loss clear activity or recover explicitly; no duplicate history or lost accepted prompt.
 - [ ] Test current bundled and custom/pinned runtimes independently; capture versions and supported older/current Codex history combinations, including narrow unsupported-operation fallback.
 - [ ] Registry install/update/delete, pinned/custom executable handling and safe restart preserve active work.
-- [ ] Persist/restart/reconnect existing ordinary chats and verify no data loss; use disposable data for destructive operations and migration/downgrade testing.
+- [x] Persist/restart/reconnect an ordinary Codex chat without data loss: exact messages, renamed title and original native session survive both provider and daemon restart. A long outage reaches the bounded Retry state; pressing Retry restores the same chat. See the September 21 live Release report.
+- [ ] Migration/downgrade testing uses disposable data and verifies recovery without altering valuable history.
 
 ## Attachments, annotations and composition
 
@@ -51,8 +53,9 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 
 ## Terminal and surrounding app
 
-- [ ] Terminal create/attach, live byte ordering, 5 MiB output, resize, reconnect/snapshot, input gating, relaunch/exit/terminate/delete and switching to/from chat.
-- [ ] Terminal agent-state detection, OSC overlength/split sequences and run identity guards.
+- [x] Terminal create/attach, live byte ordering, 5 MiB output, resize, reconnect/snapshot, input gating, relaunch/exit/terminate/delete and switching to/from chat. The actual daemon passed the scripted PTY checks; the Release app passed creation, Unicode input/output and chat switching. See the September 21 terminal report for exact scope and capture-tool failures.
+- [x] Terminal agent-state detection, OSC overlength/split sequences and run identity guards pass the full backend suite. Actual live-provider activity inside the terminal and VoiceOver remain separate open checks.
+- [ ] Verify live-provider terminal activity, terminal text selection/copy and VoiceOver; repeat relevant terminal rendering checks on iOS.
 - [ ] Project folder search/selection, sidebar filters, thread search/import/fork navigation and split-window/fullscreen behavior.
 - [ ] Light/dark, Dynamic Type, keyboard-only navigation, VoiceOver labels/actions, copy feedback and no stale accessibility content after row reuse.
 - [ ] iOS List opening/pagination/plain streaming/scroll intent, rotation, keyboard safe areas, attachments and annotations; verify physical 60/120 Hz devices and memory pressure separately from simulator.
@@ -96,5 +99,11 @@ In progress; this branch is **not yet cleared for production**. Durable results 
 - September 20 scripted iOS 18.6 app QA: nine fresh final-build launches completed three repetitions each of scroll, stream and stream-while-scroll, with 15 reports, exact-source/completion checks and no fatal-error markers. Scroll callback means were 59.21/57.39/58.22 Hz across the three speeds; streaming 50.28 Hz and streaming while scrolling 56.57 Hz on the simulator’s 60 Hz display. These are simulator callback measurements, not physical-device or presented FPS. Raw evidence and limits are in the older-runtime report.
 
 - September 20 final-source Release archives succeeded without reported warnings. Both signatures pass deep/strict verification and minimum OS load commands match macOS 15.6 / iOS 18.6. The unmodified macOS archive ignores all synthetic/benchmark launch flags. The iOS artifact is development-signed, not a distribution export, and was not run on a physical device. See [Release artifact report](qa/2026-09-beta-integration/distribution/20260920/REPORT.md).
+
+- September 21 actual Release workflow found a composer paste crash before its first live prompt. The debugger traced it to a new selection paired with the old empty draft. `267d18b` resolves only valid character boundaries from the current draft. All six related tests pass on macOS and iOS 18.6; the original paste and deletion/retyping work in the Debug app. Both new Release archives pass local signing/minimum-OS checks, and the actual macOS archive now submits the same prompt successfully. See the [composer regression report](qa/2026-09-beta-integration/composer-20260921/REPORT.md) and [current archive report](qa/2026-09-beta-integration/distribution/20260921/REPORT.md).
+
+- The actual macOS Release app with bundled Codex 0.155.0-alpha.9.2 passes exact Unicode/Markdown streaming completion, actual code clipboard, idempotent import, independent fork, provider restart and daemon restart. Both content and native session identity are verified. An initial harness used reset-session semantics incorrectly; its failure is retained and excluded from reconnect evidence. See [live Release report](qa/2026-09-beta-integration/live-release-20260921/REPORT.md).
+- `5ea7385` fixes ignored Codex reasoning selection at thread startup/resume. New fake-process regressions failed before the fix and pass afterward; real low-effort Codex and daemon turns also pass. Full Go tests, vet and adapter/provider-service race tests pass. See [reasoning regression report](qa/2026-09-beta-integration/reasoning-20260921/REPORT.md).
+- The rebuilt daemon passes exact 5 MiB terminal output, ordered bounded chunks, reconnect snapshot, actual PTY resize, detached/stale input rejection and full process lifecycle. The Release app creates a terminal, renders Unicode command output and switches to/from chat. An independent window capture resolves the CUA tool's blank images; terminal VoiceOver remains unverified. See [terminal report](qa/2026-09-beta-integration/terminal-20260921/REPORT.md). The owned app/daemon were stopped and the original draft preference restored after QA.
 
 Next: complete remaining scripted and interactive macOS/iOS/device checks and distribution validation, including remaining full-build performance/resource scenarios and presented-frame consistency. Historical performance reports are not used as proof for this build.

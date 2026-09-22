@@ -25,7 +25,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 - [ ] Expand thoughts/tools while streaming; preserve the reader's position and intentional follow state.
 - [ ] Resize or switch chats during streaming; return to complete, correct content with no updates leaking into another chat.
 - [ ] Complete, stop, fail and retry a turn; final rendering matches exact source and the working indicator clears correctly.
-- [ ] Exercise real daemon reconnect/replay; no duplicate chunks, stale indicator or silently missing history. Synthetic streaming cannot cover this.
+- [x] Exercise real daemon reconnect/replay; no duplicate chunks, stale indicator or silently missing history. The September 21 actual Release/Codex run verifies exact messages, cleared working state and preserved native session identity after provider and daemon restart. See `qa/2026-09-beta-integration/live-release-20260921/REPORT.md`.
 
 ## Rich content and accessibility
 

@@ -1,0 +1,18 @@
+{
+  "appSource": "267d18b",
+  "backendSource": "5ea7385",
+  "appPID": 75895,
+  "windowID": 20174,
+  "createdUsingAppButton": true,
+  "actualPasteAndReturnReachedShell": true,
+  "terminalToChatAndBack": true,
+  "renderedOutput": "TERMINAL-QA café 👩🏽‍💻",
+  "capture": "release-terminal.png",
+  "captureMethod": "screencapture -x -l 20174",
+  "limitations": [
+    "CUA paste reported a clipboard-read timeout although text reached the terminal.",
+    "CUA screenshots became blank; the independent window capture proves the actual window still renders.",
+    "Terminal content is not exposed in the accessibility tree; VoiceOver remains unverified."
+  ],
+  "fixtureDeleted": true
+}

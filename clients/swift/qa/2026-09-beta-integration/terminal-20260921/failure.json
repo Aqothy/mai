@@ -1,0 +1,29 @@
+{
+  "source": "5ea7385",
+  "checks": [
+    "create and live input",
+    "exact ordered 5 MiB payload and monotonic bounded notifications",
+    "disconnect/reconnect retains process and atomic history; actual PTY grid matches resize",
+    "detached input rejected; relaunch replaces run and rejects stale input"
+  ],
+  "startedAt": "2026-09-22T02:04:33.886Z",
+  "terminalId": "terminal-7f4b3e31038ba7ce5d7c229cd1b89539",
+  "originalRunId": "602a20618d359e5ecca03232fc0891c7",
+  "snapshotFormat": "ghostty-gsn-v1-7a9c369cf5da72d41946f683c48b0466a210cb7e",
+  "burst": {
+    "bytes": 5242880,
+    "sha256": "559490f3312b59e2db9fc78530a8bd3faba60266e36e064b33d2735becb33875",
+    "chunks": 85,
+    "maximumChunk": 65536,
+    "elapsedMs": 192.8163340000001
+  },
+  "reconnect": {
+    "runId": "602a20618d359e5ecca03232fc0891c7",
+    "snapshotSequence": 86,
+    "snapshotBytes": 164290,
+    "columns": 96,
+    "rows": 31
+  },
+  "newRunId": "a9804a992c12c66af76d5f22e8374b18",
+  "error": "Error: exit notification timed out"
+}

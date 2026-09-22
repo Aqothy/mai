@@ -1,0 +1,14 @@
+{
+  "classification": "QA harness used reset semantics; not a normal reconnect defect",
+  "command": "thread.session.stop",
+  "contract": "drops stored native route so the next turn starts fresh",
+  "evidence": [
+    "internal/providerservice/service.go StopSession",
+    "internal/providerservice/service_test.go TestStopSessionDropsStoredResumeCursorSoNextTurnStartsFresh"
+  ],
+  "originalNativeSession": "01a0c583-402a-7653-9b6b-cfe34da193e3",
+  "freshNativeSessionAfterReset": "01a0c585-a3e4-75b1-a6ed-45b1a526d1f1",
+  "subsequentForkError": "codex app-server error -32600: no rollout found for thread id 01a0c585-a3e4-75b1-a6ed-45b1a526d1f1",
+  "resumedThreadFileIsReplayProof": false,
+  "replacementCheck": "check-recovery.mjs"
+}

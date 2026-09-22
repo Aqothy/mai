@@ -1,0 +1,12 @@
+{
+  "source": "267d18b",
+  "assistantExactSource": true,
+  "capturedAssistantChunks": 5,
+  "capturedEventSequencesUniqueAndOrdered": true,
+  "completed": true,
+  "model": "gpt-5.6-luna",
+  "workingIndicatorCleared": true,
+  "composerCleared": true,
+  "actualCodeClipboardVerified": true,
+  "presentedFrameCoherence": "not established by these observations"
+}
