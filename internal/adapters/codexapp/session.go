@@ -30,6 +30,11 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	if model != "" {
 		params["model"] = model
 	}
+	if effort != "" {
+		// Thread requests accept reasoning through config; only turn/start has
+		// a top-level effort field. Apply it before adopting the effective config.
+		params["config"] = map[string]any{"model_reasoning_effort": effort}
+	}
 	if serviceTier != "" {
 		params["serviceTier"] = serviceTier
 	}

@@ -52,10 +52,25 @@ func TestLiveSmoke(t *testing.T) {
 	if model := os.Getenv("CODEX_LIVE_MODEL"); model != "" {
 		selection = &provider.ModelSelection{Model: model}
 	}
-	started, err := instance.StartSession(ctx, provider.StartSessionInput{ThreadID: "live-thread", Cwd: cwd, ModelSelection: selection})
+	var config []provider.ConfigOptionSelection
+	selectedEffort := os.Getenv("CODEX_LIVE_EFFORT")
+	if selectedEffort != "" {
+		config = []provider.ConfigOptionSelection{{OptionID: "reasoning_effort", Value: selectedEffort}}
+	}
+	checkEffort := func(session provider.Session) {
+		t.Helper()
+		if selectedEffort != "" {
+			if got, ok := currentConfigString(session.ConfigOptions, "reasoning_effort"); !ok || got != selectedEffort {
+				t.Fatalf("session reasoning effort = %q, %v; want %q", got, ok, selectedEffort)
+			}
+			t.Logf("effective reasoning effort: %s", selectedEffort)
+		}
+	}
+	started, err := instance.StartSession(ctx, provider.StartSessionInput{ThreadID: "live-thread", Cwd: cwd, ModelSelection: selection, ConfigSelections: config})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	checkEffort(started.Session)
 	if err := instance.SendTurn(ctx, provider.SendTurnInput{
 		ThreadID: "live-thread", TurnID: "live-turn",
 		Input: "Reply with exactly OK. Do not use tools or modify files.",
@@ -105,7 +120,7 @@ completed:
 	}
 	resumed, err := instance.StartSession(ctx, provider.StartSessionInput{
 		ThreadID: "resumed-thread", ProviderSessionID: started.Session.ProviderSessionID,
-		Cwd: cwd, ReplayHistory: true,
+		Cwd: cwd, ReplayHistory: true, ModelSelection: selection, ConfigSelections: config,
 	})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
@@ -113,6 +128,7 @@ completed:
 	if resumed.HistoryUnavailable || len(resumed.Replay) == 0 {
 		t.Fatal("completed session replay is unavailable or empty")
 	}
+	checkEffort(resumed.Session)
 	forked, err := instance.ForkSession(ctx, provider.ForkSessionInput{ProviderSessionID: started.Session.ProviderSessionID})
 	if err != nil {
 		t.Fatalf("fork: %v", err)

@@ -192,6 +192,32 @@ func TestServiceTierFlowsThroughSessionAndTurnRequests(t *testing.T) {
 	}
 }
 
+func TestReasoningEffortFlowsThroughNewAndResumedSessions(t *testing.T) {
+	for _, nativeID := range []string{"", "native-thread"} {
+		for _, selected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("native=%s/selected=%t", nativeID, selected), func(t *testing.T) {
+				scenario, want := "reasoning-default", "medium"
+				input := provider.StartSessionInput{ThreadID: "local-thread", ProviderSessionID: nativeID, Cwd: "/tmp"}
+				if selected {
+					scenario, want = "reasoning-low", "low"
+					input.ConfigSelections = []provider.ConfigOptionSelection{{OptionID: "reasoning_effort", Value: want}}
+				}
+				instance := openFakeInstance(t, scenario, nil)
+				result, err := instance.StartSession(testContext(t), input)
+				if err != nil {
+					t.Fatalf("start session: %v", err)
+				}
+				if got, ok := currentConfigString(result.Session.ConfigOptions, "reasoning_effort"); !ok || got != want {
+					t.Fatalf("session effort = %q, %v; want %q", got, ok, want)
+				}
+				if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello"}); err != nil {
+					t.Fatalf("start turn: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestAuthoritativeNullServiceTierRemainsStandard(t *testing.T) {
 	instance := openFakeInstance(t, "catalog-priority-default", nil)
 	result, err := instance.StartSession(testContext(t), provider.StartSessionInput{
@@ -465,6 +491,29 @@ func runFakeAppServer(scenario string) error {
 			return err
 		}
 		method := fakeMethod(message)
+		effort := "medium"
+		if strings.HasPrefix(scenario, "reasoning-") {
+			if scenario == "reasoning-low" {
+				effort = "low"
+			}
+			var params struct {
+				Config map[string]any `json:"config"`
+				Effort string         `json:"effort"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil {
+				return err
+			}
+			switch method {
+			case "thread/start", "thread/resume":
+				if scenario == "reasoning-low" && params.Config["model_reasoning_effort"] != effort || scenario == "reasoning-default" && len(params.Config) != 0 {
+					return fmt.Errorf("invalid reasoning override: %s", fakeMessageJSON(message))
+				}
+			case "turn/start":
+				if params.Effort != effort {
+					return fmt.Errorf("turn lost reasoning selection: %s", fakeMessageJSON(message))
+				}
+			}
+		}
 		switch method {
 		case "account/read":
 			var params struct {
@@ -489,7 +538,7 @@ func runFakeAppServer(scenario string) error {
 				"data": []any{map[string]any{
 					"id": "gpt-test", "model": "gpt-test", "displayName": "GPT Test", "isDefault": true,
 					"defaultReasoningEffort":    "medium",
-					"supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}},
+					"supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low"}, map[string]any{"reasoningEffort": "medium"}},
 					"serviceTiers": []any{
 						map[string]any{"id": "priority", "name": "Fast", "description": "Fast queue"},
 					},
@@ -568,6 +617,7 @@ func runFakeAppServer(scenario string) error {
 				return fmt.Errorf("invalid thread/start params: %s", fakeMessageJSON(message))
 			}
 			response := fakeThreadResponse("native-thread")
+			response["reasoningEffort"] = effort
 			if scenario == "service-tier" {
 				response["serviceTier"] = "priority"
 			}
@@ -590,7 +640,9 @@ func runFakeAppServer(scenario string) error {
 			if scenario == "resume-wrong-identity" {
 				responseID = "different-thread"
 			}
-			if err := writeFakeResult(encoder, message["id"], fakeThreadResponse(responseID)); err != nil {
+			response := fakeThreadResponse(responseID)
+			response["reasoningEffort"] = effort
+			if err := writeFakeResult(encoder, message["id"], response); err != nil {
 				return err
 			}
 		case "turn/start":
