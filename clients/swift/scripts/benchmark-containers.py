@@ -44,6 +44,11 @@ def main():
         parser.error("Runs and timeout must be positive; turns must be nonnegative.")
     if args.float_window and not shutil.which("aerospace"):
         parser.error("--float-window requires the AeroSpace CLI.")
+    if args.float_window:
+        probe = subprocess.run(["aerospace", "list-workspaces", "--all"],
+                               capture_output=True, text=True, timeout=5)
+        if probe.returncode:
+            parser.error("--float-window requires a running AeroSpace server.")
     app = args.app.resolve()
     executable = app / "Contents/MacOS/mai"
     if not executable.is_file():
@@ -66,7 +71,10 @@ def main():
         "directNativeRows": args.container == "custom",
         "container": args.container, "scheduledPrewarm": args.container == "custom", "scrubPeriodSeconds": args.scrub_period,
         "syntheticTurns": args.turns,
-        "measurement": "prepared aligned viewport" if args.plan == "open" else "display-link callback pacing, not presented FPS",
+        "measurement": ("prepared aligned viewport" if args.plan == "open" else
+                        "session checkpoints, sampled RSS and final/peak physical footprint"
+                        if args.plan in ("sessions", "sessionsResize") else
+                        "display-link callback pacing, not presented FPS"),
         "paginated": args.paginated, "floatingBenchmarkWindow": args.float_window,
     }
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -98,6 +106,10 @@ def main():
                             subprocess.run(["aerospace", "layout", "--window-id", str(window["window-id"]), "floating"], check=True)
                             floated.add(window["window-id"])
                 text = log.read_text(errors="replace") if log.exists() else ""
+                for marker in ("invalid measurement:", "sourceMatches=false",
+                               "visible=false", "transcript warm timed out"):
+                    if marker in text:
+                        raise RuntimeError(f"Invalid benchmark ({marker}): {log}")
                 if args.plan in ("sessions", "sessionsResize"):
                     resident = {}
                     for pid in app_pids(executable):
@@ -105,27 +117,19 @@ def main():
                         if sample.returncode == 0 and sample.stdout.strip():
                             resident[str(pid)] = int(sample.stdout.strip())
                     memory_samples.append({"elapsedSeconds": time.monotonic() - started,
-                                           "completedChats": text.count("CHAT_BENCHMARK_RESULT "),
+                                           "completedCheckpoints": text.count("CHAT_BENCHMARK_RESULT "),
                                            "residentKiB": resident})
                 if "\nCHAT_BENCHMARK_COMPLETE" in text:
                     reports = [json.loads(line.removeprefix("CHAT_BENCHMARK_RESULT "))
                                for line in text.splitlines()
                                if line.startswith("CHAT_BENCHMARK_RESULT ")]
-                    expected = 5 if args.plan in ("sessions", "sessionsResize") else 3 if args.plan == "scroll" else 1
+                    expected = 11 if args.plan == "sessionsResize" else 5 if args.plan == "sessions" else 3 if args.plan == "scroll" else 1
                     if len(reports) != expected:
                         raise RuntimeError(f"Expected {expected} reports, got {len(reports)}: {log}")
                     if args.plan in ("open", "sessions", "sessionsResize") and any(not r.get("aligned") or not r.get("visible") for r in reports):
                         raise RuntimeError(f"Unaligned or hidden opening invalidates run: {log}")
                     if args.plan == "lifecycle" and any(not r.get("passed") for r in reports):
                         raise RuntimeError(f"Lifecycle correctness failure: {log}")
-                    if "invalid measurement:" in text:
-                        raise RuntimeError(f"Invalid measurement: {log}")
-                    if "sourceMatches=false" in text:
-                        raise RuntimeError(f"Stream content mismatch: {log}")
-                    if "visible=false" in text:
-                        raise RuntimeError(f"Occluded window invalidates run: {log}")
-                    if "transcript warm timed out" in text:
-                        raise RuntimeError(f"Unprepared transcript invalidates run: {log}")
                     resident = {}
                     for pid in app_pids(executable):
                         sample = subprocess.run(["ps", "-p", str(pid), "-o", "rss="], text=True, capture_output=True)
@@ -134,6 +138,11 @@ def main():
                     log.with_suffix(".memory.json").write_text(json.dumps({"residentAfterMeasurementKiB": resident, "measurement": "post-run RSS, not peak or allocation count"}, indent=2) + "\n")
                     if memory_samples:
                         log.with_suffix(".memory-samples.json").write_text(json.dumps(memory_samples, indent=2) + "\n")
+                        for pid in app_pids(executable):
+                            footprint = subprocess.run(["vmmap", "-summary", str(pid)],
+                                                       capture_output=True, text=True, timeout=30)
+                            log.with_suffix(f".{pid}.vmmap.txt").write_text(
+                                footprint.stdout + footprint.stderr)
                     log.with_suffix(".json").write_text(json.dumps(reports, indent=2) + "\n")
                     print(f"Completed {log}", flush=True)
                     break
@@ -146,6 +155,11 @@ def main():
             else:
                 raise TimeoutError(f"Benchmark did not finish: {log}")
         finally:
+            # Preserve samples from rejected/timeout runs too. Their logs still
+            # determine validity; saving diagnostics must not make them passes.
+            if memory_samples:
+                log.with_suffix(".memory-samples.json").write_text(
+                    json.dumps(memory_samples, indent=2) + "\n")
             # No instance existed before this launch; only stop this build.
             for pid in app_pids(executable):
                 subprocess.run(["kill", "-TERM", str(pid)], check=False)

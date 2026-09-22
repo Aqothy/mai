@@ -1,0 +1,9 @@
+{
+  "baseCommit": "2be528a68475b744df516f5cc9527e0d293aed4b",
+  "codeImageSHA256": "f3f58822079c80abf066760a121e524605a3db21254063260976b795c5b0d44b",
+  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
+  "xcodeBuildLog": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260922-150044.txt",
+  "buildSucceeded": true,
+  "compilerWarnings": 0,
+  "changes": "Identical product code; setup deadline increased from 3 to 15 seconds, failure diagnostics expanded. See viewport-timeout-source.patch."
+}

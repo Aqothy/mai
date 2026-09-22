@@ -1,0 +1,16 @@
+{
+  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
+  "codeImageSHA256": "bba11d79339a8289fc44ad5eddd10ff31cbc62a4460391b5cf830c6e71cc1e2c",
+  "macOS": "27.0",
+  "machine": "Mac14,9",
+  "plan": "lifecycle",
+  "reuseNativeBodies": true,
+  "directNativeRows": true,
+  "container": "custom",
+  "scheduledPrewarm": true,
+  "scrubPeriodSeconds": 0,
+  "syntheticTurns": 300,
+  "measurement": "display-link callback pacing, not presented FPS",
+  "paginated": true,
+  "floatingBenchmarkWindow": false
+}

@@ -1,0 +1,98 @@
+diff --git i/clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift w/clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift
+index c257a9b..ecf9150 100644
+--- i/clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift
++++ w/clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift
+@@ -42 +42,4 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-        pinWindowForDeterministicRuns()
++        guard await pinWindowForDeterministicRuns() else {
++            finish("invalid measurement: benchmark window did not reach the requested size")
++            return
++        }
+@@ -151 +154,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-            for index in 1...5 {
++            // Initial opening uses a fixed viewport; this plan explicitly
++            // exercises resizing after that setup has been verified.
++            if ChatBenchmarkAutoRun.plan == "sessionsResize" {
++                window.contentMinSize = NSSize(width: 600, height: 400)
++                window.contentMaxSize = NSSize(width: 2000, height: 2000)
++            }
++            let visits = ChatBenchmarkAutoRun.plan == "sessionsResize"
++                ? [1, 2, 3, 4, 5, 1, 5, 2, 4, 3, 1] : [1, 2, 3, 4, 5]
++            for (checkpoint, index) in visits.enumerated() {
+@@ -153,5 +164,8 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-                if index > 1 {
+-                    let thread = ChatSyntheticBenchmarkThread.thread(
+-                        turnCount: turns,
+-                        identity: "synthetic-benchmark-\(index)")
+-                    store.insertSyntheticBenchmarkThread(thread)
++                if checkpoint > 0 {
++                    let identity = index == 1
++                        ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
++                    if checkpoint < 5 {
++                        let thread = ChatSyntheticBenchmarkThread.thread(
++                            turnCount: turns, identity: identity)
++                        store.insertSyntheticBenchmarkThread(thread)
++                    }
+@@ -160 +174 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-                    selectThread(thread.id)
++                    selectThread(identity)
+@@ -174,0 +189,6 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
++                        guard abs(window.contentRect(forFrameRect: window.frame).width - width) <= 1
++                        else {
++                            ChatBenchmarkAutoRun.trace(
++                                "invalid measurement: memory resize did not reach \(width) points")
++                            return
++                        }
+@@ -190,2 +210,3 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-                    "label": "sessions-\(index)", "measurementKind": "sessionMemoryCheckpoint",
+-                    "loadedChats": index,
++                    "label": "sessions-\(checkpoint + 1)", "measurementKind": "sessionMemoryCheckpoint",
++                    "loadedChats": min(checkpoint + 1, 5), "selectedChat": index,
++                    "phase": checkpoint < 5 ? "open" : "revisit",
+@@ -205 +226 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-                    ChatBenchmarkAutoRun.trace("session checkpoint \(index)")
++                    ChatBenchmarkAutoRun.trace("session checkpoint \(checkpoint + 1)")
+@@ -267 +288 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-    private func pinWindowForDeterministicRuns() {
++    private func pinWindowForDeterministicRuns() async -> Bool {
+@@ -270,3 +291,31 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
+-            for window in NSApplication.shared.windows {
+-                window.setContentSize(NSSize(width: 1_280, height: 900))
+-                window.makeKeyAndOrderFront(nil)
++            guard let window = ChatBenchmarkModel.appWindow() else { return false }
++            let target = NSSize(width: 1_280, height: 900)
++            window.contentMinSize = target
++            window.contentMaxSize = target
++            window.setContentSize(target)
++            window.center()
++            window.makeKeyAndOrderFront(nil)
++            // Window restoration can race the first SwiftUI task. Verify the
++            // actual viewport instead of accepting a successful resize request.
++            // A cold full-history List can occupy the main actor during its
++            // first mount. Keep setup separate from measured scrolling and
++            // allow it to settle before applying the same viewport checks.
++            let deadline = ContinuousClock.now + .seconds(15)
++            var stableSince = ContinuousClock.now
++            while ContinuousClock.now < deadline {
++                let actual = window.contentRect(forFrameRect: window.frame).size
++                let onScreen = window.screen?.frame.contains(window.frame) == true
++                if abs(actual.width - target.width) <= 1,
++                    abs(actual.height - target.height) <= 1, onScreen
++                {
++                    if stableSince.duration(to: .now) >= .milliseconds(200) {
++                        ChatBenchmarkAutoRun.trace(
++                            "benchmark viewport verified content=\(actual) frame=\(window.frame)")
++                        return true
++                    }
++                } else {
++                    stableSince = .now
++                    window.setContentSize(target)
++                    window.center()
++                }
++                try? await Task.sleep(for: .milliseconds(25))
+@@ -273,0 +323,3 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
++            ChatBenchmarkAutoRun.trace(
++                "invalid measurement: actual window frame=\(window.frame) content=\(window.contentRect(forFrameRect: window.frame).size) screen=\(String(describing: window.screen?.frame))")
++            return false
+@@ -281,0 +334 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
++            return true

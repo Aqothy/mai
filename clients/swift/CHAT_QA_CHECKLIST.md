@@ -19,6 +19,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 - [ ] Stream prose with wrapping, partial Markdown delimiters, code fences, tables and long lines; no temporary overlap or upward recentering.
 - [ ] Working timer/whimsical text stays below content throughout growth and transitions between block types.
 - [ ] Inspect captured streaming frames for mixed old/new content, tile seams and single-frame displacement; callback pacing alone cannot pass this check.
+- [x] Reproduce and fix the captured List completion displacement. The September 22 image regression fails on the old recording (35-point movement over 19 frames) and passes on fixed List/native captures. Exact source/completion pass; missed display frames and thought/tool-specific transitions remain outside this regression's scope. See `qa/2026-09-beta-integration/rendering-20260922/REPORT.md`.
 - [x] Remove streamed-text fades and working-indicator pulse/phrase transitions as requested on September 19. Plain text is the current baseline; there is no reveal timeline or custom text renderer.
 - [ ] While following the bottom, new text remains visible without repeated jumping or jump-button flicker.
 - [ ] Scroll away during streaming; incoming text does not pull the reader back. Return to bottom and verify following resumes.
@@ -37,12 +38,12 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 
 ## Performance and memory
 
-- [ ] Repeat scroll and streaming plans at least three launches, with no profiler/other workload; compare average, p99 and worst stalls, not averages alone.
-- [ ] Run extreme scrubbing separately; record remaining dropped pacing honestly rather than extrapolating ordinary sweep results.
-- [ ] Compare normal paginated opening with forced full history; distinguish preparation from process startup/network/first presentation.
-- [ ] Open five distinct normal chats, then five full rich chats; switch back and forth, resize and record retained/peak memory using appropriate tools.
-- [ ] Evict/close sessions and verify presentation resources can be released; do not require RSS to immediately fall because allocators retain memory.
-- [ ] Verify cancellation when changing chats during preparation; stale work must not repopulate the wrong transcript.
+- [x] Repeat scroll and streaming plans at least three launches, with no profiler/other workload; compare average, p99 and worst stalls, not averages alone. The `217e488-plain-streaming` report records both renderers and remaining stalls; this is completed measurement, not a claim of hitch-free rendering.
+- [x] Run extreme scrubbing separately; record remaining dropped pacing honestly rather than extrapolating ordinary sweep results. September 22 full-history stress: native 39.88 callback Hz over three valid runs; List 17.80 over two. Worst intervals 79.04/947.03 ms. Neither is a 120 fps stress pass; rejected launches are preserved in `benchmarks/20260922-final/REPORT.md`.
+- [x] Compare normal paginated opening with forced full history; distinguish preparation from process startup/network/first presentation. September 22: three fresh native launches each, 109 versus 5,851 rows, 0.732–0.745 versus 7.714–7.980 seconds to the prepared/aligned checkpoint; no network or first-presentation claim.
+- [x] Open five distinct normal chats, then five full rich chats; switch back and forth, resize and record retained/peak memory using appropriate tools. September 22: each scenario passed 11 visits and 44 resizes. Physical footprint final/peak: 123.9M/169.2M normal, 486.8M/494.5M full rich. This does not cover continuous resizing across arbitrarily many distinct widths or OS memory pressure.
+- [x] Evict/close sessions and verify presentation resources can be released; do not require RSS to immediately fall because allocators retain memory. The September 20 resource tests verify eviction releases the original cache/layout objects while preserving thread data and reopening uses fresh caches; whole-app memory-pressure behavior remains a separate device check.
+- [x] Verify cancellation when changing chats during preparation; stale work must not repopulate the wrong transcript. The September 20 native preparation regression replaces the active preparation and verifies cancelled work cannot install stale rows.
 
 ## iOS regression pass
 

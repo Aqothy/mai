@@ -1,0 +1,66 @@
+{
+  "checks": [
+    {
+      "file": "custom-stream-timing/stream-1.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    },
+    {
+      "file": "custom-stream-timing/stream-2.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    },
+    {
+      "file": "custom-stream-timing/stream-3.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    },
+    {
+      "file": "list-stream-timing/stream-1.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    },
+    {
+      "file": "list-stream-timing/stream-2.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    },
+    {
+      "file": "list-stream-timing/stream-3.log",
+      "reportMatchesRawLog": true,
+      "sourceAndCompletion": true,
+      "viewportVerified": true,
+      "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e"
+    }
+  ],
+  "summary": {
+    "custom": {
+      "runs": 3,
+      "meanCallbackHz": 110.68008078208035,
+      "p99MsRange": [
+        23.858625034336,
+        24.632374988868833
+      ],
+      "worstMs": 55.211416678503156
+    },
+    "list": {
+      "runs": 3,
+      "meanCallbackHz": 96.27627662104953,
+      "p99MsRange": [
+        29.70020828070119,
+        30.998708331026137
+      ],
+      "worstMs": 201.4027499826625
+    }
+  }
+}

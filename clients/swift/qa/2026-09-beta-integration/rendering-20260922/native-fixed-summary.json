@@ -1,0 +1,25 @@
+{
+  "frames": 1957,
+  "durationSeconds": 25.884333,
+  "effectiveCaptureHz": 75.56694622959765,
+  "captureIntervalMs": {
+    "median": 11.167000000000371,
+    "p99": 22.334000000000742,
+    "maximum": 100.5
+  },
+  "workingLabelMatchedFramesAfter4Seconds": 1603,
+  "workingLabelYHistogram": {
+    "714": 1603
+  },
+  "stationaryCapturedLabelCheck": {
+    "passed": true,
+    "matchedFrames": 1709,
+    "yValues": [
+      714
+    ]
+  },
+  "scope": "Candidate generation only. Capture misses some display frames; repeated motifs can confuse motion matching.",
+  "videoPath": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/custom-stream-completion-fixed/stream.mov",
+  "videoSHA256": "4198909305dea16d4543fcd3484b4d5e158203e71dd79c2b410269ed73d9f590",
+  "videoBytes": 27945029
+}

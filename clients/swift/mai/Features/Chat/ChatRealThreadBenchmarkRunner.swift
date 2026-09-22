@@ -39,7 +39,10 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
     private func run(query: String) async {
         let started = ContinuousClock.now
         ChatBenchmarkAutoRun.trace("real-thread benchmark start: \(query)")
-        pinWindowForDeterministicRuns()
+        guard await pinWindowForDeterministicRuns() else {
+            finish("invalid measurement: benchmark window did not reach the requested size")
+            return
+        }
 
         guard let entry = await waitForThread(matching: query) else {
             finish("real-thread benchmark: no thread matching \"\(query)\"")
@@ -148,16 +151,27 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             guard let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount,
                 let window = ChatBenchmarkModel.appWindow()
             else { return }
-            for index in 1...5 {
+            // Initial opening uses a fixed viewport; this plan explicitly
+            // exercises resizing after that setup has been verified.
+            if ChatBenchmarkAutoRun.plan == "sessionsResize" {
+                window.contentMinSize = NSSize(width: 600, height: 400)
+                window.contentMaxSize = NSSize(width: 2000, height: 2000)
+            }
+            let visits = ChatBenchmarkAutoRun.plan == "sessionsResize"
+                ? [1, 2, 3, 4, 5, 1, 5, 2, 4, 3, 1] : [1, 2, 3, 4, 5]
+            for (checkpoint, index) in visits.enumerated() {
                 let started = ContinuousClock.now
-                if index > 1 {
-                    let thread = ChatSyntheticBenchmarkThread.thread(
-                        turnCount: turns,
-                        identity: "synthetic-benchmark-\(index)")
-                    store.insertSyntheticBenchmarkThread(thread)
+                if checkpoint > 0 {
+                    let identity = index == 1
+                        ? ChatSyntheticBenchmarkThread.threadID : "synthetic-benchmark-\(index)"
+                    if checkpoint < 5 {
+                        let thread = ChatSyntheticBenchmarkThread.thread(
+                            turnCount: turns, identity: identity)
+                        store.insertSyntheticBenchmarkThread(thread)
+                    }
                     ChatBenchmarkAutoRun.isTranscriptWarm = false
                     ChatBenchmarkAutoRun.isInitialAlignmentComplete = false
-                    selectThread(thread.id)
+                    selectThread(identity)
                 }
                 await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
                 let deadline = ContinuousClock.now + .seconds(30)
@@ -172,6 +186,12 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                         window.setContentSize(NSSize(width: width, height: 900))
                         try? await Task.sleep(for: .milliseconds(250))
                         await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
+                        guard abs(window.contentRect(forFrameRect: window.frame).width - width) <= 1
+                        else {
+                            ChatBenchmarkAutoRun.trace(
+                                "invalid measurement: memory resize did not reach \(width) points")
+                            return
+                        }
                         guard window.occlusionState.contains(.visible) else {
                             ChatBenchmarkAutoRun.trace(
                                 "invalid measurement: memory resize window hidden")
@@ -187,8 +207,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 }
                 let elapsed = started.duration(to: .now).components
                 let payload: [String: Any] = [
-                    "label": "sessions-\(index)", "measurementKind": "sessionMemoryCheckpoint",
-                    "loadedChats": index,
+                    "label": "sessions-\(checkpoint + 1)", "measurementKind": "sessionMemoryCheckpoint",
+                    "loadedChats": min(checkpoint + 1, 5), "selectedChat": index,
+                    "phase": checkpoint < 5 ? "open" : "revisit",
                     "preparedAndSettledMilliseconds": Double(elapsed.seconds) * 1000 + Double(
                         elapsed.attoseconds) / 1e15,
                     "selectedLayoutCount": store.selectedThreadTextLayoutStore?.cachedLayoutCount
@@ -202,7 +223,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                     let line = String(data: data, encoding: .utf8)
                 {
                     print("CHAT_BENCHMARK_RESULT \(line)")
-                    ChatBenchmarkAutoRun.trace("session checkpoint \(index)")
+                    ChatBenchmarkAutoRun.trace("session checkpoint \(checkpoint + 1)")
                 }
                 // Give the external runner time to sample this process after each chat.
                 try? await Task.sleep(for: .seconds(1))
@@ -264,13 +285,44 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
     }
 
     /// A deterministic window keeps runs comparable across launches.
-    private func pinWindowForDeterministicRuns() {
+    private func pinWindowForDeterministicRuns() async -> Bool {
         #if os(macOS)
             NSApplication.shared.activate()
-            for window in NSApplication.shared.windows {
-                window.setContentSize(NSSize(width: 1_280, height: 900))
-                window.makeKeyAndOrderFront(nil)
+            guard let window = ChatBenchmarkModel.appWindow() else { return false }
+            let target = NSSize(width: 1_280, height: 900)
+            window.contentMinSize = target
+            window.contentMaxSize = target
+            window.setContentSize(target)
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            // Window restoration can race the first SwiftUI task. Verify the
+            // actual viewport instead of accepting a successful resize request.
+            // A cold full-history List can occupy the main actor during its
+            // first mount. Keep setup separate from measured scrolling and
+            // allow it to settle before applying the same viewport checks.
+            let deadline = ContinuousClock.now + .seconds(15)
+            var stableSince = ContinuousClock.now
+            while ContinuousClock.now < deadline {
+                let actual = window.contentRect(forFrameRect: window.frame).size
+                let onScreen = window.screen?.frame.contains(window.frame) == true
+                if abs(actual.width - target.width) <= 1,
+                    abs(actual.height - target.height) <= 1, onScreen
+                {
+                    if stableSince.duration(to: .now) >= .milliseconds(200) {
+                        ChatBenchmarkAutoRun.trace(
+                            "benchmark viewport verified content=\(actual) frame=\(window.frame)")
+                        return true
+                    }
+                } else {
+                    stableSince = .now
+                    window.setContentSize(target)
+                    window.center()
+                }
+                try? await Task.sleep(for: .milliseconds(25))
             }
+            ChatBenchmarkAutoRun.trace(
+                "invalid measurement: actual window frame=\(window.frame) content=\(window.contentRect(forFrameRect: window.frame).size) screen=\(String(describing: window.screen?.frame))")
+            return false
         #else
             for scene in UIApplication.shared.connectedScenes {
                 guard let windowScene = scene as? UIWindowScene,
@@ -279,6 +331,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 restrictions.minimumSize = CGSize(width: 1_280, height: 900)
                 restrictions.maximumSize = CGSize(width: 1_280, height: 900)
             }
+            return true
         #endif
     }
 }

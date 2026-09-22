@@ -797,7 +797,7 @@ struct ChatTimeline: View {
         #if os(macOS)
             let nativeItems = ChatNativeTimelineItem.items(
                 rows: rows, plan: plan,
-                hasEarlierSections: hasEarlierSections, isStreaming: streamingTurnID != nil)
+                hasEarlierSections: hasEarlierSections, isStreaming: effectiveStreamingTurnID != nil)
         #endif
         ScrollViewReader { proxy in
             Group {
@@ -1289,7 +1289,10 @@ struct ChatTimeline: View {
             )
         }
 
-        if streamingTurnID != nil {
+        // Keep the activity header, message and footer in the same presentation
+        // until settled preparation is ready. Removing just the footer early
+        // changes List's bottom offset and briefly displaces the live header.
+        if effectiveStreamingTurnID != nil {
             ChatWorkingIndicator(activityKey: rows.last?.id)
                 .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
                 .frame(

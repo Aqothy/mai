@@ -1,0 +1,66 @@
+{
+  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
+  "codeImageSHA256": "4efa17f3c23b91e080c221597d65d1c19a9d5e71f361441b03e35e74bd76204e",
+  "requestedCaptureHz": 120,
+  "container": "custom",
+  "scope": "captured frame inspection; capture overhead invalidates FPS comparisons",
+  "completed": true,
+  "geometry": {
+    "windowId": 26617,
+    "bounds": {
+      "X": 116,
+      "Height": 900,
+      "Y": 46,
+      "Width": 1280
+    },
+    "scale": 2,
+    "screen": {
+      "origin": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 1512,
+        "height": 982
+      }
+    }
+  },
+  "captureCommand": [
+    "ffmpeg",
+    "-hide_banner",
+    "-nostdin",
+    "-f",
+    "avfoundation",
+    "-framerate",
+    "120",
+    "-capture_cursor",
+    "0",
+    "-pixel_format",
+    "nv12",
+    "-probesize",
+    "32",
+    "-analyzeduration",
+    "0",
+    "-i",
+    "Capture screen 0:none",
+    "-an",
+    "-vf",
+    "crop=2560:1800:232:92,scale=1280:900",
+    "-c:v",
+    "h264_videotoolbox",
+    "-b:v",
+    "40M",
+    "-realtime",
+    "1",
+    "-fps_mode",
+    "passthrough",
+    "-video_track_timescale",
+    "120000",
+    "-t",
+    "60",
+    "/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/custom-stream-completion-fixed/stream.mov"
+  ],
+  "captureStartedAt": 1790103880.473739,
+  "appCompletedAt": 1790103906.821355,
+  "captureExitCode": 255
+}
