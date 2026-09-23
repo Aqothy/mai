@@ -142,28 +142,34 @@ func (h *Instance) resolveTurnLocked(session *sessionState, nativeTurn string) s
 	return local
 }
 
-func (h *Instance) emitTurnStarted(nativeThread, nativeTurn string) {
+func (h *Instance) emitTurnStarted(nativeThread, nativeTurn string) error {
 	h.mu.Lock()
 	localThread := h.localByNative[nativeThread]
 	if localThread == "" {
 		h.mu.Unlock()
-		return
+		return nil
 	}
 	session := h.sessionsByLocal[localThread]
 	if session == nil {
 		h.mu.Unlock()
-		return
+		return nil
+	}
+	// A completion (or disconnect) can be delivered before the turn/start
+	// caller resumes. An already-observed start must never reactivate it.
+	if local := session.nativeToLocalTurn[nativeTurn]; local != "" && session.startedTurns[local] {
+		h.mu.Unlock()
+		return nil
+	}
+	if h.transportClosed {
+		h.mu.Unlock()
+		return fmt.Errorf("Codex app-server connection closed before turn start was acknowledged")
 	}
 	localTurn := h.resolveTurnLocked(session, nativeTurn)
-	alreadyStarted := session.startedTurns[localTurn]
-	if alreadyStarted {
-		h.mu.Unlock()
-		return
-	}
 	session.startedTurns[localTurn] = true
 	session.activeNativeTurn = nativeTurn
 	h.mu.Unlock()
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: localThread, TurnID: localTurn})
+	return nil
 }
 
 func (h *Instance) emitTurnCompleted(nativeThread string, turn appTurn) {

@@ -1,0 +1,18 @@
+ok  	github.com/Aqothy/maiD/api/wire	(cached)
+?   	github.com/Aqothy/maiD/cmd/generate-wire-schema	[no test files]
+?   	github.com/Aqothy/maiD/cmd/maiD	[no test files]
+ok  	github.com/Aqothy/maiD/internal/adapters/acp	0.836s
+ok  	github.com/Aqothy/maiD/internal/adapters/claudecode	(cached)
+ok  	github.com/Aqothy/maiD/internal/adapters/codexapp	0.455s
+ok  	github.com/Aqothy/maiD/internal/daemon	4.194s
+ok  	github.com/Aqothy/maiD/internal/orchestration	(cached)
+ok  	github.com/Aqothy/maiD/internal/provider	(cached)
+ok  	github.com/Aqothy/maiD/internal/providerservice	(cached)
+ok  	github.com/Aqothy/maiD/internal/store	(cached)
+ok  	github.com/Aqothy/maiD/internal/terminal	(cached)
+ok  	github.com/Aqothy/maiD/internal/terminal/agentrules	(cached)
+ok  	github.com/Aqothy/maiD/internal/terminal/vtscreen	(cached)
+ok  	github.com/Aqothy/maiD/internal/workspacesearch	(cached)
+ok  	github.com/Aqothy/maiD/internal/workspacesearch/fff	0.900s
+?   	github.com/Aqothy/maiD/internal/workspacesearch/searchtest	[no test files]
+?   	github.com/Aqothy/maiD/tools/fff-smoke	[no test files]

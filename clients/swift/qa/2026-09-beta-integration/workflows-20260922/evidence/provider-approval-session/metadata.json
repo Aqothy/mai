@@ -1,0 +1,14 @@
+{
+  "source": "951a4bfd640ab0dde7bc50236470fdf38392cf8f",
+  "daemon": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/maiD-provider-recovery",
+  "daemonSHA256": "5fc07b1f15907588e7418094c961f6156697f34cf09cdcb6864c94120eaf4390",
+  "codex": "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "codexVersion": "codex-cli 0.155.0-alpha.9.2",
+  "workspace": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/provider-approval-session/workspace",
+  "data": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/provider-approval-session/data",
+  "endpoint": "ws://127.0.0.1:63166/rpc",
+  "provider": "Codex only",
+  "policy": "on-request + read-only + user reviewer (child-process configuration only)",
+  "backendSourceDiffSHA256": "c28a80a5fa9808c567bed3eb61a8cf245d2ddbaac6e6813250a8513e6d1d40f5",
+  "authenticated": true
+}

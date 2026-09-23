@@ -1,0 +1,5 @@
+[
+  "Two queued prompts waited, drained in order into separate turns, retained IDs, and did not change selected chat",
+  "Queued annotated prompt steered its own active turn, retained quote\/note\/message IDs, and left the other selected chat unchanged",
+  "Wrong-turn interruption rejected; real command interrupted; subsequent turn completed normally"
+]

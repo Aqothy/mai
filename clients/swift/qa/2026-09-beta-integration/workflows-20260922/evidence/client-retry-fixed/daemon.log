@@ -1,0 +1,12 @@
+time=2026-09-22T21:30:17.417-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/client-retry-fixed/data/maid.db
+time=2026-09-22T21:30:17.418-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-22T21:30:17.418-04:00 level=INFO msg="server listening" http=http://127.0.0.1:62906 websocket=ws://127.0.0.1:62906/rpc
+time=2026-09-22T21:30:17.483-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-22T21:30:18.182-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=692ms
+time=2026-09-22T21:30:40.730-04:00 level=INFO msg="client connected" client=client-2
+{"timestamp":"2026-09-23T01:30:41.141836Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+{"timestamp":"2026-09-23T01:30:47.261691Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+{"timestamp":"2026-09-23T01:30:48.526694Z","level":"ERROR","fields":{"message":"Custom tool call output is missing for call id: call_rFGsDKsTqj8SSZLl3SyAOcwK"},"target":"codex_core::util"}
+{"timestamp":"2026-09-23T01:31:04.515796Z","level":"ERROR","fields":{"message":"Custom tool call output is missing for call id: call_rFGsDKsTqj8SSZLl3SyAOcwK"},"target":"codex_core::util"}
+time=2026-09-22T21:31:06.404-04:00 level=INFO msg="client disconnected" client=client-2
+time=2026-09-22T21:32:15.777-04:00 level=INFO msg="client disconnected" client=client-1

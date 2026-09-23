@@ -225,8 +225,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		h.mu.Unlock()
 		return fmt.Errorf("turn/start returned an empty turn id")
 	}
-	h.emitTurnStarted(nativeThread, response.Turn.ID)
-	return nil
+	return h.emitTurnStarted(nativeThread, response.Turn.ID)
 }
 
 func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error {

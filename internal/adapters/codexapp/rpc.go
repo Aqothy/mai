@@ -46,6 +46,8 @@ type rpcClient struct {
 
 	onNotification func(string, json.RawMessage)
 	onRequest      func(json.RawMessage, string, json.RawMessage)
+	onClose        func(error)
+	runDone        chan struct{}
 	closeOnce      sync.Once
 }
 
@@ -53,10 +55,20 @@ func newRPCClient(input io.Reader, output io.Writer) *rpcClient {
 	return &rpcClient{
 		input: input, output: output,
 		pending: make(map[string]chan rpcResponse),
+		runDone: make(chan struct{}),
 	}
 }
 
 func (c *rpcClient) run() {
+	defer func() {
+		c.mu.Lock()
+		err := c.closeErr
+		c.mu.Unlock()
+		if c.onClose != nil {
+			c.onClose(err)
+		}
+		close(c.runDone)
+	}()
 	scanner := bufio.NewScanner(c.input)
 	scanner.Buffer(make([]byte, 64*1024), maxMessageBytes)
 	for scanner.Scan() {

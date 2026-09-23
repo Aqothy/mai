@@ -389,6 +389,89 @@ func TestUnexpectedProcessExitResolvesPendingApproval(t *testing.T) {
 	}
 }
 
+func TestProcessExitSettlesActiveTurn(t *testing.T) {
+	for _, intentional := range []bool{false, true} {
+		t.Run(fmt.Sprintf("intentional=%v", intentional), func(t *testing.T) {
+			events := make(chan provider.RuntimeEvent, 32)
+			instance := openFakeInstance(t, "lifecycle", func(event provider.RuntimeEvent) { events <- event })
+			startFakeTurn(t, instance)
+			if intentional {
+				if err := instance.Close(); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := instance.cmd.Process.Kill(); err != nil {
+				t.Fatal(err)
+			}
+			completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+				return event.Type == provider.RuntimeEventTurnCompleted
+			})
+			want := provider.RuntimeTurnFailed
+			if intentional {
+				want = provider.RuntimeTurnCancelled
+			}
+			if completed.ThreadID != "local-thread" || completed.TurnID != "local-turn" || completed.Payload.TurnState != want {
+				t.Fatalf("exit completion = %#v", completed)
+			}
+			if !intentional && !strings.Contains(completed.Payload.Message, "Codex") {
+				t.Fatalf("missing actionable failure: %#v", completed.Payload)
+			}
+			select {
+			case <-instance.processDone:
+			case <-testContext(t).Done():
+				t.Fatal("provider did not finish cleanup")
+			}
+			for len(events) > 0 {
+				if event := <-events; event.Type == provider.RuntimeEventTurnCompleted {
+					t.Fatalf("duplicate exit completion: %#v", event)
+				}
+			}
+		})
+	}
+}
+
+func TestMalformedTransportSettlesTurnAndStopsProcess(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "lifecycle", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+	if err := instance.rpc.notify("qa/malformed", nil); err != nil {
+		t.Fatal(err)
+	}
+	completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if completed.TurnID != "local-turn" || completed.Payload.TurnState != provider.RuntimeTurnFailed || !strings.Contains(completed.Payload.Message, "decode Codex app-server message") {
+		t.Fatalf("malformed transport outcome = %#v", completed)
+	}
+	select {
+	case <-instance.processDone:
+	case <-testContext(t).Done():
+		t.Fatal("unusable app-server process was left running")
+	}
+	if err := instance.emitTurnStarted("native-thread", "unacknowledged-turn"); err == nil {
+		t.Fatal("late turn/start response reactivated a closed transport")
+	}
+}
+
+func TestCompletedTurnIsNotFailedOnProcessExit(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "complete-and-exit", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+	select {
+	case <-instance.processDone:
+	case <-testContext(t).Done():
+		t.Fatal("provider did not exit")
+	}
+	var completions []provider.RuntimeEvent
+	for len(events) > 0 {
+		if event := <-events; event.Type == provider.RuntimeEventTurnCompleted {
+			completions = append(completions, event)
+		}
+	}
+	if len(completions) != 1 || completions[0].Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("completed turn was lost or failed again on exit: %#v", completions)
+	}
+}
+
 func openFakeInstance(t *testing.T, scenario string, emit provider.RuntimeEventListener) *Instance {
 	t.Helper()
 	config, err := json.Marshal(Config{
@@ -657,7 +740,7 @@ func runFakeAppServer(scenario string) error {
 					return fmt.Errorf("invalid tiered turn/start params: %s", fakeMessageJSON(message))
 				}
 			}
-			if scenario == "fast-completion" {
+			if scenario == "fast-completion" || scenario == "complete-and-exit" {
 				if err := writeFakeNotification(encoder, "turn/started", map[string]any{"threadId": "native-thread", "turn": fakeTurn("native-turn", "inProgress")}); err != nil {
 					return err
 				}
@@ -669,6 +752,9 @@ func runFakeAppServer(scenario string) error {
 			}
 			if err := writeFakeResult(encoder, message["id"], map[string]any{"turn": fakeTurn("native-turn", "inProgress")}); err != nil {
 				return err
+			}
+			if scenario == "complete-and-exit" {
+				return nil
 			}
 			if err := writeFakeNotification(encoder, "thread/name/updated", map[string]any{"threadId": "native-thread", "threadName": "Protocol title"}); err != nil {
 				return err
@@ -688,6 +774,10 @@ func runFakeAppServer(scenario string) error {
 				if scenario == "exit-with-approval" {
 					return nil
 				}
+			}
+		case "qa/malformed":
+			if _, err := fmt.Fprintln(os.Stdout, "{not-json}"); err != nil {
+				return err
 			}
 		case "turn/steer":
 			if err := validateTurnSteer(message); err != nil {

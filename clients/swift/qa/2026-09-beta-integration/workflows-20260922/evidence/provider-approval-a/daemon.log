@@ -1,0 +1,7 @@
+time=2026-09-22T16:26:16.494-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/provider-approval-a/data/maid.db
+time=2026-09-22T16:26:16.494-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-22T16:26:16.494-04:00 level=INFO msg="server listening" http=http://127.0.0.1:58968 websocket=ws://127.0.0.1:58968/rpc
+time=2026-09-22T16:26:16.537-04:00 level=INFO msg="client connected" client=client-1
+Error: approval_policy = "untrusted" is no longer supported; remove this setting
+time=2026-09-22T16:26:16.566-04:00 level=WARN msg="RPC failed" method=provider.start duration=24ms client=client-1 error="initialize Codex app-server: EOF"
+time=2026-09-22T16:26:16.568-04:00 level=INFO msg="client disconnected" client=client-1

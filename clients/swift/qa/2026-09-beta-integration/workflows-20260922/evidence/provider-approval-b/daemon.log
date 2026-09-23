@@ -1,0 +1,9 @@
+time=2026-09-22T16:27:26.427-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/provider-approval-b/data/maid.db
+time=2026-09-22T16:27:26.428-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-22T16:27:26.428-04:00 level=INFO msg="server listening" http=http://127.0.0.1:58991 websocket=ws://127.0.0.1:58991/rpc
+time=2026-09-22T16:27:26.477-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-22T16:27:26.884-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=403ms
+{"timestamp":"2026-09-22T20:27:29.756646Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+{"timestamp":"2026-09-22T20:27:52.479398Z","level":"ERROR","fields":{"error":"exec_command failed: CreateProcess { message: \"Rejected(\\\"rejected by user\\\")\" }"},"target":"codex_core::tools::router"}
+{"timestamp":"2026-09-22T20:28:05.748850Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-22T16:28:12.993-04:00 level=INFO msg="client disconnected" client=client-1

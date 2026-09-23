@@ -1,0 +1,11 @@
+# go.mitchellh.com/libghostty
+# [pkg-config --cflags --static -- libghostty-vt-static]
+Package libghostty-vt-static was not found in the pkg-config search path.
+Perhaps you should add the directory containing `libghostty-vt-static.pc'
+to the PKG_CONFIG_PATH environment variable
+Package 'libghostty-vt-static' not found
+ok  	github.com/Aqothy/maiD/internal/adapters/codexapp	3.408s
+ok  	github.com/Aqothy/maiD/internal/providerservice	(cached)
+ok  	github.com/Aqothy/maiD/internal/orchestration	1.367s
+FAIL	github.com/Aqothy/maiD/internal/daemon [build failed]
+FAIL

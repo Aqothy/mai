@@ -88,9 +88,10 @@ type Instance struct {
 	models           []appModel
 	options          map[string]*optionsState
 
-	processDone chan struct{}
-	processErr  error
-	closing     bool
+	processDone     chan struct{}
+	processErr      error
+	closing         bool
+	transportClosed bool
 	// reaped/killedTree fence process-group cleanup. Once Wait has reaped the
 	// leader its pid must never be signalled later by Close, because the OS may
 	// recycle it for an unrelated process. A wrapper that exits before its real
@@ -157,6 +158,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	h.rpc = newRPCClient(stdout, stdin)
 	h.rpc.onNotification = h.handleNotification
 	h.rpc.onRequest = h.handleServerRequest
+	h.rpc.onClose = h.handleTransportClosed
 	h.info = provider.InstanceInfo{
 		InstanceID: spec.InstanceID, Name: spec.Name, Driver: DriverKind,
 		PID: command.Process.Pid, Status: provider.InstanceStatusConfigured,
@@ -193,6 +195,11 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		return nil, fmt.Errorf("notify Codex app-server initialized: %w", err)
 	}
 	h.mu.Lock()
+	if h.transportClosed {
+		h.mu.Unlock()
+		_ = h.Close()
+		return nil, fmt.Errorf("Codex app-server connection closed during initialization")
+	}
 	h.info.Status = provider.InstanceStatusInitialized
 	h.info.InitializedAt = time.Now()
 	h.mu.Unlock()
@@ -232,8 +239,54 @@ func (h *Instance) waitProcess() {
 	}
 	h.rpc.fail(err)
 	h.cancel()
-	h.cancelPendingApprovals()
+	// Let the reader finish delivering its terminal notifications before
+	// process cleanup is considered complete. Its close callback settles any
+	// turns for which app-server could no longer send a completion.
+	<-h.rpc.runDone
 	close(h.processDone)
+}
+
+func (h *Instance) handleTransportClosed(err error) {
+	h.mu.Lock()
+	h.transportClosed = true
+	h.info.Status = provider.InstanceStatusExited
+	h.info.PID = 0
+	closing := h.closing
+	shouldKill := !h.reaped && !h.killedTree
+	if shouldKill {
+		h.killedTree = true
+	}
+	var activeTurns []provider.RuntimeEvent
+	for _, session := range h.sessionsByLocal {
+		if nativeTurn := session.activeNativeTurn; nativeTurn != "" {
+			state := provider.RuntimeTurnFailed
+			message := "Codex app-server disconnected unexpectedly"
+			if err != nil {
+				message += ": " + err.Error()
+			}
+			if closing {
+				state, message = provider.RuntimeTurnCancelled, ""
+			}
+			activeTurns = append(activeTurns, provider.RuntimeEvent{
+				Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID,
+				TurnID:  h.resolveTurnLocked(session, nativeTurn),
+				Payload: provider.RuntimeEventPayload{TurnState: state, StopReason: "connection_closed", Message: message},
+			})
+		}
+		// A pending turn/start is released by rpc.fail and its caller records
+		// the dispatch error. Only already-started turns need an async outcome.
+		session.activeNativeTurn = ""
+		session.streamed = make(map[string]streamedItem)
+	}
+	h.mu.Unlock()
+	if shouldKill {
+		killProcessTree(h.cmd)
+	}
+	h.cancel()
+	h.cancelPendingApprovals()
+	for _, event := range activeTurns {
+		h.emitEvent(event)
+	}
 }
 
 func (h *Instance) Close() error {
