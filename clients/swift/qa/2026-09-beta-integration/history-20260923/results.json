@@ -1,0 +1,59 @@
+{
+  "sourceBase": "f46c590ac19ce78614ebf3f28bd8cd3a195ee0a5",
+  "changes": "Two new opt-in/history-error test files; no production code changes",
+  "platform": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0\nBuildVersion:\t\t26A428\n",
+  "goVersion": "go version go1.26.5 darwin/arm64",
+  "runtimes": {
+    "bundled": {
+      "command": "/Applications/ChatGPT.app/Contents/Resources/codex",
+      "resolvedPath": "/Applications/ChatGPT.app/Contents/Resources/codex",
+      "version": "codex-cli 0.155.0-alpha.9.2",
+      "entrySHA256": "9280c0754e8f1f6b72f495d30c8c82a006dbc4995bf0492916fa0901f6bfd1f9"
+    },
+    "custom": {
+      "command": "/Users/aqothy/.local/share/pnpm/bin/codex",
+      "resolvedPath": "/Users/aqothy/.local/share/pnpm/bin/codex",
+      "version": "codex-cli 0.147.0",
+      "entrySHA256": "7c5b6d6424840392b423bbae2ed98e3316c5ac6895d153476e01b96ab9171ab5",
+      "nativeExecutable": "/Users/aqothy/.local/share/pnpm/store/v11/links/@openai/codex/0.147.0-darwin-arm64/3d514e6ce48d431ec30b97899eeeec810ed1f6ae55a82d33e388d1e5f01ede5c/node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex",
+      "nativeSHA256": "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+    }
+  },
+  "liveRuns": [
+    {
+      "log": "bundled.log",
+      "exitCode": 0,
+      "sessions": 737,
+      "fixtureSessions": 2,
+      "controlledPages": 2,
+      "replayedTurns": 2
+    },
+    {
+      "log": "custom-0147.log",
+      "exitCode": 0,
+      "sessions": 737,
+      "fixtureSessions": 2,
+      "controlledPages": 2,
+      "replayedTurns": 2
+    },
+    {
+      "log": "bundled-after-custom.log",
+      "exitCode": 0,
+      "sessions": 737,
+      "fixtureSessions": 2,
+      "controlledPages": 2,
+      "replayedTurns": 2
+    }
+  ],
+  "packageRace": {
+    "exitCode": 0,
+    "topLevelPassed": 39,
+    "topLevelSkipped": [
+      "TestLiveHistoryPagination",
+      "TestLiveSmoke"
+    ],
+    "failed": 0
+  },
+  "vetExitCode": 0,
+  "privacy": "Only counts from account-wide listing are logged. Committed message expectations are disposable QA images/prompts. No personal history bodies, account files or credentials were copied."
+}

@@ -53,7 +53,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 
 ## Provider/version compatibility — separate from renderer
 
-- [ ] Record the actual adapter, backend executable and versions; test bundled runtime and explicit custom executable independently.
+- [x] Record the actual adapter, backend executable and versions; test bundled runtime and explicit custom executable independently. Live workflow reports identify the daemon; September 23 history checks exercise Codex 0.155.0-alpha.9.2 and 0.147.0 independently and retain versions/native executable hashes. The older runtime emits cache/plugin compatibility warnings despite passing listing/replay; see `qa/2026-09-beta-integration/history-20260923/REPORT.md`.
 - [ ] Load/import/resume ordinary and paginated Codex threads on supported older/current combinations, including multi-page history and completed/live tool content.
 - [ ] Unsupported history operations yield a narrow compatible fallback where available; auth/network/corruption errors are not hidden by retry loops.
 - Excluded by the user: live Claude testing, because no Claude Pro account is available. Use Codex for this run; historical Claude authentication errors are not renderer failures.

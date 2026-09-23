@@ -1,0 +1,42 @@
+{
+  "REPORT.md": {
+    "bytes": 4727,
+    "sha256": "5526f1af9bfb63640b6fbb73fc0f964da0a12e6184286b76b79b36cb89243c9e"
+  },
+  "bundled-after-custom.log": {
+    "bytes": 497,
+    "sha256": "9723267e729efc6fa79df0c015701188eaa630219b6f025d96324149545d2d15"
+  },
+  "bundled.log": {
+    "bytes": 497,
+    "sha256": "477293dedc8082fee21be9d67967d64f672b7f402a5ac3b84df322a530881cda"
+  },
+  "custom-0147.log": {
+    "bytes": 2583,
+    "sha256": "1493960cdd1541a4c69db15ce20f32a743f30e6c0da2abd04be714ea7f2f3581"
+  },
+  "fixture.json": {
+    "bytes": 1713,
+    "sha256": "f5c5aa33e807be3ed50b682c276432aa7da1d126dfd579e89eaa064a249ee65f"
+  },
+  "package-race.log": {
+    "bytes": 7333,
+    "sha256": "5812fb88389d3b3967472ea6e2893b70edf8c417c8b759b367d0ee16ab731766"
+  },
+  "package-vet.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results.json": {
+    "bytes": 2156,
+    "sha256": "a2f07c551fa684a569b54de646c186a6ad708738c424c7e5a8bd57f5a650baac"
+  },
+  "internal/adapters/codexapp/history_test.go": {
+    "bytes": 2876,
+    "sha256": "99f40d35b7686be2fa77879ff61a870b3076837698dbac2699c1e6ed3974a52d"
+  },
+  "internal/adapters/codexapp/history_live_test.go": {
+    "bytes": 5521,
+    "sha256": "d60b12566942683c3d41930cea8e476d454f66acaea9515ceac49693cc307264"
+  }
+}
