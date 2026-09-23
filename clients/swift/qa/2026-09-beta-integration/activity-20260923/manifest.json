@@ -1,0 +1,31 @@
+{
+  "baseCommit": "dbba066ba1cd1e4bc25037da40272f541a4df245",
+  "source": [
+    {
+      "path": "clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift",
+      "sha256": "9056fd31c0088180510c17f81dfdc262b46dcddc3b35c67d379b756c1a2d7beb"
+    },
+    {
+      "path": "clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift",
+      "sha256": "cfd4e5589e95ea1b1fb88512719cb1d66ec665f200b78c0e96e58a3784cbe6ca"
+    },
+    {
+      "path": "clients/swift/maiTests/maiTests.swift",
+      "sha256": "4e8824ace6a408b77f6b557bf60e14c01c423023f8b0fd15e9af77589c5c5c1e"
+    },
+    {
+      "path": "clients/swift/scripts/record-chat-stream.py",
+      "sha256": "7056cda252619ecc5db2678608da8fa01d34e0de04ba82f90bb010133555adc7"
+    }
+  ],
+  "images": [
+    {
+      "path": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app/Contents/MacOS/mai.debug.dylib",
+      "sha256": "0f98c497aac11bbb3f1d8b0da04fa050eb4c6ffc626f795271d0beb966b954c9"
+    },
+    {
+      "path": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug-iphonesimulator/mai.app/mai.debug.dylib",
+      "sha256": "909053fef383801b2b6320061109b0dfa6f50406049e1843c6e777a78ada033d"
+    }
+  ]
+}

@@ -6,6 +6,55 @@ import Testing
 
 struct ThreadStoreTests {
     @Test
+    func reasoningDeltasInvalidateOnlyLiveTextAndCompletionPublishesAuthoritativeText() async throws {
+        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        try rpc.sendReasoning(threadID: "a", delta: "Start", sequence: 100)
+        let liveText = try #require(store.streamingReasoningText(threadID: "a", itemID: "thought"))
+        let timelineInvalidated = Mutex(false)
+        let sidebarInvalidated = Mutex(false)
+        let textInvalidated = Mutex(false)
+        withObservationTracking {
+            _ = store.selectedThread
+        } onChange: {
+            timelineInvalidated.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = store.threads
+            _ = store.selectedThreadTitle
+        } onChange: {
+            sidebarInvalidated.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = liveText.text
+            _ = liveText.revision
+        } onChange: {
+            textInvalidated.withLock { $0 = true }
+        }
+        for index in 1...20 {
+            try rpc.sendReasoning(threadID: "a", delta: " café 👩🏽‍💻", sequence: 100 + index)
+        }
+        #expect(textInvalidated.withLock { $0 })
+        #expect(!timelineInvalidated.withLock { $0 })
+        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(liveText.text == "Start" + String(repeating: " café 👩🏽‍💻", count: 20))
+
+        // The completed payload can correct streamed text. Publish that change
+        // to the disclosure row and discard its live buffer in the same event.
+        let authoritative = "Completed **thought** with corrected Unicode 👩🏽‍💻."
+        try rpc.sendReasoning(threadID: "a", completedText: authoritative, sequence: 121)
+        #expect(timelineInvalidated.withLock { $0 })
+        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(store.streamingReasoningText(threadID: "a", itemID: "thought") == nil)
+        let settled = try #require(store.selectedThread?.timeline.last?.item)
+        #expect(settled.itemStatus == .completed)
+        #expect((settled.payload?.value as? [String: Any])?["text"] as? String == authoritative)
+    }
+
+    @Test
     func streamingDeltasInvalidateTheLiveTextWithoutInvalidatingTimelineOrSidebar() async throws {
         let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
         let store = ThreadStore(rpc: rpc)
@@ -1051,6 +1100,24 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
     }
 
+    func sendReasoning(
+        threadID: String, delta: String? = nil, completedText: String? = nil, sequence: Int
+    ) throws {
+        let reasoning = Item(
+            createdAt: .now, detailAvailable: false, id: "thought", kind: MaidItemKind.reasoning.rawValue,
+            payload: completedText.map { JSONAny(["text": $0]) }, sequence: nil,
+            status: completedText == nil ? MaidItemStatus.inProgress.rawValue : MaidItemStatus.completed.rawValue,
+            textDelta: delta, title: nil, toolCall: nil, toolCallSummary: nil,
+            turnID: "turn-\(threadID)", updatedAt: .now)
+        let event = Event(
+            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil, occurredAt: .now,
+            payload: makeEventPayload(threadID: threadID, item: reasoning), sequence: sequence,
+            type: MaidEventType.threadItemUpserted.rawValue)
+        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
+        let data = try newJSONEncoder().encode(MockNotification(params: item))
+        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+    }
+
     func sendUserMessage(
         threadID: String,
         text: String,
@@ -1187,7 +1254,8 @@ private func makeEventPayload(
     text: String? = nil,
     title: String? = nil,
     turnID: String? = nil,
-    session: SessionBinding? = nil
+    session: SessionBinding? = nil,
+    item: Item? = nil
 ) -> EventPayload {
     EventPayload(
         approval: nil,
@@ -1196,7 +1264,7 @@ private func makeEventPayload(
         createdAt: nil,
         cwd: nil,
         decision: nil,
-        item: nil,
+        item: item,
         messageID: messageID,
         modelSelection: nil,
         optionID: nil,

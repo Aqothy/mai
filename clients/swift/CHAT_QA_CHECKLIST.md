@@ -18,6 +18,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 
 - [ ] Stream prose with wrapping, partial Markdown delimiters, code fences, tables and long lines; no temporary overlap or upward recentering.
 - [ ] Working timer/whimsical text stays below content throughout growth and transitions between block types.
+- [x] Verify assistant and reasoning deltas update only the live text observation, and thought completion publishes authoritative text and clears the buffer. Two regressions pass on macOS 27 and iOS 18.6; the full two-thought/tool/reply state scenario also preserves exact source and earlier history. This does not pass visual frame coherence. See `qa/2026-09-beta-integration/activity-20260923/REPORT.md`.
 - [ ] Inspect captured streaming frames for mixed old/new content, tile seams and single-frame displacement; callback pacing alone cannot pass this check.
 - [x] Reproduce and fix the captured List completion displacement. The September 22 image regression fails on the old recording (35-point movement over 19 frames) and passes on fixed List/native captures. Exact source/completion pass; missed display frames and thought/tool-specific transitions remain outside this regression's scope. See `qa/2026-09-beta-integration/rendering-20260922/REPORT.md`.
 - [x] Remove streamed-text fades and working-indicator pulse/phrase transitions as requested on September 19. Plain text is the current baseline; there is no reveal timeline or custom text renderer.

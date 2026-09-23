@@ -25,6 +25,7 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 - [x] Exercise five ordinary and five full rich chats with switching/resizing, retained/peak memory, cancellation and release of presentation resources. September 22 whole-app runs passed 11 visits/44 resizes each; September 20 object-lifetime/cancellation regressions cover resource release. Continuous resizing across many distinct widths and physical-device memory pressure remain unverified.
 - [x] Remove beta text-reveal effects and working-indicator animations per the September 19 request; validate plain streaming through partial Markdown, replacement and completion on iOS.
 - [ ] Verify frame consistency during native streaming: content, row heights and bottom position agree within each presented frame; no working-indicator jump or partially updated tiles.
+- [x] Verify reasoning/assistant leaf observation and complete synthetic activity state on macOS 27 and iOS 18.6. Two regression tests per platform and the two-thought/tool/reply scenario pass; activity recordings failed visibility/setup checks and are explicitly excluded from frame-consistency evidence. See [activity report](qa/2026-09-beta-integration/activity-20260923/REPORT.md).
 - [ ] Verify parser-resolved reference-link rows retain correct links, annotations, attachments and native preparation.
 - [ ] Verify selection menus bind comments to the actual message after reuse, scrolling, switching threads and reference-link splitting.
 

@@ -96,7 +96,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             if ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil,
                 let plan = ChatBenchmarkAutoRun.plan, plan == "stream" || plan == "streamScroll"
             {
-                let driver = ChatSyntheticStreamingBenchmark(store: store)
+                let driver = ChatSyntheticStreamingBenchmark(
+                    store: store,
+                    includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"))
                 driver.prepare()
                 try? await Task.sleep(for: .milliseconds(500))
                 await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
@@ -310,7 +312,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 {
                     if stableSince.duration(to: .now) >= .milliseconds(200) {
                         ChatBenchmarkAutoRun.trace(
-                            "benchmark viewport verified content=\(actual) frame=\(window.frame)")
+                            "benchmark viewport verified windowNumber=\(window.windowNumber) content=\(actual) frame=\(window.frame)")
                         return true
                     }
                 } else {

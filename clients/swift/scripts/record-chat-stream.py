@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import signal
 import subprocess
 import time
@@ -21,17 +22,18 @@ def app_pids(executable):
             and (parts[1] == str(executable) or parts[1].startswith(str(executable) + " "))}
 
 
-def window_geometry(pid):
+def window_geometry(pid, window_id=None):
     script = """
 ObjC.import('CoreGraphics'); ObjC.import('AppKit');
 var windows=ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1,0)));
-var owned=windows.filter(function(w){return w.kCGWindowOwnerPID===QA_PID && w.kCGWindowLayer===0;});
-owned.sort(function(a,b){return b.kCGWindowBounds.Width*b.kCGWindowBounds.Height-a.kCGWindowBounds.Width*a.kCGWindowBounds.Height;});
+var owned=windows.filter(function(w){return w.kCGWindowOwnerPID===QA_PID &&
+    (QA_WINDOW!==null ? w.kCGWindowNumber===QA_WINDOW :
+     w.kCGWindowLayer===0 && Math.abs(w.kCGWindowBounds.Width-1280)<=1 && Math.abs(w.kCGWindowBounds.Height-900)<=1);});
 var screens=$.NSScreen.screens;
-if(Number(screens.count)!==1 || owned.length===0) throw Error('Expected one display and a visible owned window');
+if(Number(screens.count)!==1 || owned.length!==1) throw Error('Expected one display and exactly one matching visible owned window');
 JSON.stringify({windowId:owned[0].kCGWindowNumber,bounds:owned[0].kCGWindowBounds,
 scale:Number(screens.objectAtIndex(0).backingScaleFactor),screen:screens.objectAtIndex(0).frame});
-""".replace("QA_PID", str(pid))
+""".replace("QA_PID", str(pid)).replace("QA_WINDOW", json.dumps(window_id))
     return json.loads(subprocess.check_output(["osascript", "-l", "JavaScript", "-e", script], text=True))
 
 
@@ -41,6 +43,8 @@ def main():
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--container", choices=["custom", "list"], default="custom")
     parser.add_argument("--rate", type=int, default=120)
+    parser.add_argument("--activity", action="store_true",
+                        help="Stream two thoughts and tool updates before the final reply")
     args = parser.parse_args()
     app = args.app.resolve()
     executable = app / "Contents/MacOS/mai"
@@ -57,7 +61,7 @@ def main():
     if not image.is_file():
         parser.error("The recording scenario requires a Debug app build.")
     metadata = {"app": str(app), "codeImageSHA256": hashlib.sha256(image.read_bytes()).hexdigest(),
-                "requestedCaptureHz": args.rate, "container": args.container,
+                "requestedCaptureHz": args.rate, "container": args.container, "activity": args.activity,
                 "scope": "captured frame inspection; capture overhead invalidates FPS comparisons"}
     capture = None
     metadata["completed"] = False
@@ -66,6 +70,7 @@ def main():
                         "--stderr", str(out / "app.stderr"), "--args", "-ChatPerformanceLab",
                         "-ChatBenchmarkSyntheticTurns", "20", "-ChatAutoBenchmark", "stream",
                         "-ChatBenchmarkUseList", "YES" if args.container == "list" else "NO",
+                        "-ChatBenchmarkStreamActivity", "YES" if args.activity else "NO",
                         "-ChatBenchmarkPaginatedHistory", "YES"], check=True)
         deadline = time.monotonic() + 90
         with (out / "capture.log").open("w") as capture_log:
@@ -77,7 +82,10 @@ def main():
                     pids = app_pids(executable)
                     if len(pids) != 1:
                         raise RuntimeError("Expected exactly one owned app process")
-                    geometry = window_geometry(next(iter(pids)))
+                    match = re.search(r"benchmark viewport verified windowNumber=(\d+)", text)
+                    pid = next(iter(pids))
+                    geometry = window_geometry(pid, int(match.group(1)) if match else None)
+                    metadata.update({"appPID": pid, "geometry": geometry})
                     bounds, scale = geometry["bounds"], geometry["scale"]
                     if abs(bounds["Width"] - 1280) > 1 or abs(bounds["Height"] - 900) > 1:
                         raise RuntimeError(f"Unexpected capture bounds: {bounds}")
@@ -97,12 +105,21 @@ def main():
                 if "\nCHAT_BENCHMARK_COMPLETE" in text:
                     if capture is None:
                         raise RuntimeError("Stream completed before recording began")
+                    if "stream sourceMatches=true completed=true" not in text:
+                        raise RuntimeError("Stream did not validate its final source and completion")
+                    if args.activity and any(f"activity phase={phase}" not in text for phase in [
+                            "first-thought-start", "first-thought-completed", "tool-start",
+                            "tool-completed", "second-thought-completed", "reply-start", "turn-completed"]):
+                        raise RuntimeError("Activity scenario did not execute every transition")
                     metadata["appCompletedAt"] = time.time()
                     metadata["completed"] = True
                     break
                 time.sleep(0.05)
             else:
                 raise TimeoutError("Synthetic stream did not finish")
+    except Exception as error:
+        metadata["failure"] = str(error)
+        raise
     finally:
         if capture is not None and capture.poll() is None:
             capture.send_signal(signal.SIGINT)
