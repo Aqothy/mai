@@ -1,0 +1,10 @@
+=== RUN   TestACPRegistryNPMUpdatePreservesActiveTurn
+    acp_registry_npm_test.go:43: npm=/Users/aqothy/.local/share/mise/installs/node/lts/bin/npm version=11.9.0
+time=2026-09-23T19:25:46.454-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-23T19:25:46.455-04:00 level=INFO msg="client connected" client=client-1
+    acp_registry_npm_test.go:109: install should register a cold provider
+time=2026-09-23T19:25:46.456-04:00 level=INFO msg="client disconnected" client=client-1
+--- FAIL: TestACPRegistryNPMUpdatePreservesActiveTurn (0.26s)
+FAIL
+FAIL	github.com/Aqothy/maiD/internal/daemon	0.548s
+FAIL

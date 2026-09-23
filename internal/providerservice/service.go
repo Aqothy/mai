@@ -103,12 +103,14 @@ type Service struct {
 	// instanceSpecs includes persisted and manifest-owned specs for instances
 	// that are still cold.
 	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
-	// manifestInstanceIDs identifies specs owned by a backend JSON manifest.
-	// Their executable configuration must never enter the route database.
-	manifestInstanceIDs map[provider.InstanceID]struct{}
-	threadRoutes        map[string]threadRoute
-	startLocks          map[provider.InstanceID]*sync.RWMutex
-	openInstance        InstanceFactory
+	// Manifest configuration never enters the route database. Updates to a
+	// running instance wait for its next launch; cold defaults must not override
+	// an explicit custom executable chosen when the instance first starts.
+	manifestInstanceIDs  map[provider.InstanceID]struct{}
+	pendingManifestSpecs map[provider.InstanceID]provider.InstanceSpec
+	threadRoutes         map[string]threadRoute
+	startLocks           map[provider.InstanceID]*sync.RWMutex
+	openInstance         InstanceFactory
 
 	activeEventGenerations map[provider.InstanceID]uint64
 	nextEventGeneration    uint64
@@ -145,6 +147,7 @@ func New(openInstance InstanceFactory, opts ...Option) *Service {
 		instances:              make(map[provider.InstanceID]ProviderInstance),
 		instanceSpecs:          make(map[provider.InstanceID]provider.InstanceSpec),
 		manifestInstanceIDs:    make(map[provider.InstanceID]struct{}),
+		pendingManifestSpecs:   make(map[provider.InstanceID]provider.InstanceSpec),
 		threadRoutes:           make(map[string]threadRoute),
 		startLocks:             make(map[provider.InstanceID]*sync.RWMutex),
 		openInstance:           openInstance,
@@ -216,6 +219,9 @@ func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider
 	s.mu.Lock()
 	instance := s.instances[instanceID]
 	spec, restorable := s.instanceSpecs[instanceID]
+	if manifest, ok := s.pendingManifestSpecs[instanceID]; ok {
+		spec, restorable = manifest, true
+	}
 	s.mu.Unlock()
 
 	needsStart := instance == nil
@@ -244,12 +250,20 @@ func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
 	}
 	spec = cloneInstanceSpec(spec)
 
+	// Serialize registration with launch so an in-flight factory cannot
+	// overwrite a newer definition before a process has been installed.
+	lock := s.startLock(spec.InstanceID)
+	lock.Lock()
+	defer lock.Unlock()
 	s.mu.Lock()
 	s.manifestInstanceIDs[spec.InstanceID] = struct{}{}
 	// Preserve the spec of a running process until an explicit restart swaps it;
 	// cold definitions can immediately adopt updated manifest configuration.
 	if instance := s.instances[spec.InstanceID]; instance == nil || instance.Info().Status == provider.InstanceStatusExited {
 		s.instanceSpecs[spec.InstanceID] = spec
+		delete(s.pendingManifestSpecs, spec.InstanceID)
+	} else {
+		s.pendingManifestSpecs[spec.InstanceID] = spec
 	}
 	s.mu.Unlock()
 
@@ -390,6 +404,7 @@ func (s *Service) Close() {
 		}
 		s.instances = make(map[provider.InstanceID]ProviderInstance)
 		s.instanceSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
+		s.pendingManifestSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
 		s.threadRoutes = make(map[string]threadRoute)
 		s.activeEventGenerations = make(map[provider.InstanceID]uint64)
 		s.mu.Unlock()
@@ -496,6 +511,9 @@ func (s *Service) StartManifestInstance(ctx context.Context, spec provider.Insta
 	if err := s.RegisterManifestInstance(spec); err != nil {
 		return provider.InstanceInfo{}, err
 	}
+	if !restart {
+		return s.StartConfiguredInstance(ctx, spec.InstanceID)
+	}
 	return s.StartInstance(ctx, spec, restart)
 }
 
@@ -583,6 +601,9 @@ func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec,
 	current := s.instances[spec.InstanceID]
 	s.instances[spec.InstanceID] = instance
 	s.instanceSpecs[spec.InstanceID] = cloneInstanceSpec(spec)
+	if pending, ok := s.pendingManifestSpecs[spec.InstanceID]; ok && instanceSpecsEqual(pending, spec) {
+		delete(s.pendingManifestSpecs, spec.InstanceID)
+	}
 	s.activeEventGenerations[spec.InstanceID] = generation
 	s.mu.Unlock()
 	if current != nil && current != instance {

@@ -1,0 +1,52 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "00006020-000E319A2EC0C01E",
+        "deviceName" : "My Mac",
+        "modelName" : "MacBook Pro",
+        "osBuildNumber" : "26A428",
+        "osVersion" : "27.0",
+        "platform" : "macOS"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 1,
+      "passedTests" : 0,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "mai · Built with macOS 27.0",
+  "expectedFailures" : 0,
+  "failedTests" : 1,
+  "finishTime" : 1790205735.861,
+  "passedTests" : 0,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1790205731.699,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Caught error: DecodingError.keyNotFound: Key 'initializedAt' not found in keyed decoding container. Debug description: No value associated with key CodingKeys(stringValue: \"initializedAt\", intValue: nil) (\"initializedAt\").",
+      "targetName" : "maiTests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "ACPRegistryModelTests/updatingRegistryMetadataDoesNotRestartTheRunningAgent()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ACPRegistryModelTests/updatingRegistryMetadataDoesNotRestartTheRunningAgent()",
+      "testName" : "updatingRegistryMetadataDoesNotRestartTheRunningAgent()"
+    }
+  ],
+  "title" : "Test - mai",
+  "topInsights" : [
+
+  ],
+  "totalTestCount" : 1
+}

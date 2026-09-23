@@ -377,6 +377,8 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 			}
 		case "logout":
 		case "session/close":
+		case "session/resume":
+			cwdBySession[req.Params.SessionID] = req.Params.Cwd
 		case "session/set_config_option":
 			switch req.Params.ConfigID {
 			case "mode":

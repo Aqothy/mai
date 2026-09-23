@@ -431,25 +431,14 @@ final class ThreadStore {
     }
 
     /// Installs (or updates) a registry agent at its current registry version.
-    /// A running process is restarted to adopt an update; a cold agent stays
-    /// cold until it is selected.
+    /// The daemon adopts the update on the next agent launch. A running
+    /// process keeps its current version so updating cannot interrupt a turn.
     func installRegistryAgent(id: String) async throws -> ACPRegistryInstalledAgent {
         let installed = try await rpc.installRegistryAgent(id)
         installedAgents.removeAll { $0.id == installed.id }
         installedAgents.append(installed)
         installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         rebuildProviderCaches()
-        if providers.contains(where: {
-            $0.instanceID == installed.instanceID && $0.instanceStatus == .initialized
-        }) {
-            let started = try await rpc.startRegistryAgent(
-                installed.id,
-                restart: true
-            )
-            providers.removeAll { $0.instanceID == started.instanceID }
-            providers.append(started)
-            rebuildProviderCaches()
-        }
         return installed
     }
 

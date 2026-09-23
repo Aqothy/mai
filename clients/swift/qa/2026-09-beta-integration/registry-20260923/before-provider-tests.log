@@ -1,0 +1,11 @@
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/lazy_session_recovery
+    manifest_update_test.go:77: launch configs = [{"command":["agent@1"]} {"command":["agent@1"]}], want old then updated
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/ordinary_registry_start
+    manifest_update_test.go:48: start with pending update: provider instance "registry-agent" is already initialized with different configuration; use restart to replace it
+--- FAIL: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch (0.00s)
+    --- FAIL: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/lazy_session_recovery (0.00s)
+    --- FAIL: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/ordinary_registry_start (0.00s)
+FAIL
+FAIL	github.com/Aqothy/maiD/internal/providerservice	0.461s
+FAIL

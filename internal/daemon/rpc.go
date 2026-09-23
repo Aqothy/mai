@@ -509,7 +509,18 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if h.server.acpRegistry == nil {
 			return nil, fmt.Errorf("ACP registry is unavailable")
 		}
-		return h.server.acpRegistry.install(ctx, params.RegistryID)
+		installed, err := h.server.acpRegistry.install(ctx, params.RegistryID)
+		if err != nil {
+			return nil, err
+		}
+		spec, err := h.server.acpRegistry.instanceSpec(installed.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.server.providerService.RegisterManifestInstance(spec); err != nil {
+			return nil, err
+		}
+		return installed, nil
 	case RPCMethodACPRegistryAddCustom:
 		var params acpCustomAgentAddParams
 		if err := decodeRPCParams(req, &params); err != nil {

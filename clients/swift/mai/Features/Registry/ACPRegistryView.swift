@@ -22,14 +22,18 @@ struct ACPRegistryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            ForEach(model.entries) { entry in
-                ACPRegistryRow(
-                    entry: entry,
-                    isInstalling: model.installingIDs.contains(entry.id),
-                    install: {
-                        Task { await model.install(entry) }
-                    }
-                )
+            Section {
+                ForEach(model.entries) { entry in
+                    ACPRegistryRow(
+                        entry: entry,
+                        isInstalling: model.installingIDs.contains(entry.id),
+                        install: {
+                            Task { await model.install(entry) }
+                        }
+                    )
+                }
+            } footer: {
+                Text("Updates apply the next time the agent starts. Active chats keep running.")
             }
         }
         .listStyle(.plain)

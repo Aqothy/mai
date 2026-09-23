@@ -40,7 +40,7 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 - Claude native live checks: **excluded from this QA run by the user on September 14**, because no Claude Pro account is available. Use Codex for live-provider testing. Existing fake-runtime adapter tests remain evidence only for their covered protocol logic.
 - [ ] Lifecycle: late responses cannot switch providers/threads; malformed/closed RPC and transport loss clear activity or recover explicitly; no duplicate history or lost accepted prompt.
 - [ ] Test current bundled and custom/pinned runtimes independently; capture versions and supported older/current Codex history combinations, including narrow unsupported-operation fallback.
-- [ ] Registry install/update/delete, pinned/custom executable handling and safe restart preserve active work.
+- [x] Registry install/update, version ceilings and custom-executable recovery preserve active work. Scripted Swift, real local npm/WebSocket/ACP-process lifecycle, persistence and race checks pass after fixing an immediate-restart defect and stale recovery configuration. Registry uninstall is not implemented and is outside this regression scope. Public/account-specific ACP behavior remains separate. See [registry lifecycle report](qa/2026-09-beta-integration/registry-20260923/REPORT.md).
 - [x] Persist/restart/reconnect an ordinary Codex chat without data loss: exact messages, renamed title and original native session survive both provider and daemon restart. A long outage reaches the bounded Retry state; pressing Retry restores the same chat. See the September 21 live Release report.
 - [ ] Migration/downgrade testing uses disposable data and verifies recovery without altering valuable history.
 

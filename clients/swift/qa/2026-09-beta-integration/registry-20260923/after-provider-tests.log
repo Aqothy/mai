@@ -1,0 +1,8 @@
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/lazy_session_recovery
+=== RUN   TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/ordinary_registry_start
+--- PASS: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch (0.00s)
+    --- PASS: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/lazy_session_recovery (0.00s)
+    --- PASS: TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch/ordinary_registry_start (0.00s)
+PASS
+ok  	github.com/Aqothy/maiD/internal/providerservice	0.270s

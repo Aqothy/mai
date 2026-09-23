@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"data\":\"The result bundle could not be opened as it is incomplete. Xcode might have failed to finish writing the result bundle.\",\"type\":\"error\"}"
+    }
+  ],
+  "isError": true
+}
