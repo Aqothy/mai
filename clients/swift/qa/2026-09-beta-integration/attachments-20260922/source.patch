@@ -1,0 +1,50 @@
+diff --git i/clients/swift/mai/Features/Chat/ChatMessageAttachmentsView.swift w/clients/swift/mai/Features/Chat/ChatMessageAttachmentsView.swift
+index 9203cfe..ff08061 100644
+--- i/clients/swift/mai/Features/Chat/ChatMessageAttachmentsView.swift
++++ w/clients/swift/mai/Features/Chat/ChatMessageAttachmentsView.swift
+@@ -353,19 +353,39 @@ private struct ChatTranscriptImageFallback: View {
+     let name: String
+ 
+     var body: some View {
+-        VStack {
+-            Image(systemName: "photo")
+-                .imageScale(.large)
+-            Text("Image unavailable")
+-                .font(.caption)
++        ZStack {
++            Color.secondary.opacity(0.1)
++            VStack {
++                Image(systemName: "photo")
++                    .imageScale(.large)
++                Text("Image unavailable")
++                    .font(.caption)
++                    .multilineTextAlignment(.center)
++                    .fixedSize(horizontal: false, vertical: true)
++            }
++            .padding()
+         }
+         .foregroundStyle(.secondary)
+         .aspectRatio(4 / 3, contentMode: .fit)
+         .frame(maxWidth: .infinity)
+-        .background(.secondary.opacity(0.1))
+         .clipShape(.rect(cornerRadius: 12))
+         .accessibilityElement(children: .ignore)
+         .accessibilityLabel(name)
+         .accessibilityValue("Image unavailable")
+     }
+ }
++
++#if DEBUG
++    #Preview("Unavailable image") {
++        ChatTranscriptImageFallback(name: "Example attachment")
++            .frame(width: 160)
++            .padding()
++    }
++
++    #Preview("Unavailable image — Larger text") {
++        ChatTranscriptImageFallback(name: "Example attachment")
++            .frame(width: 160)
++            .padding()
++            .environment(\.dynamicTypeSize, .accessibility3)
++    }
++#endif

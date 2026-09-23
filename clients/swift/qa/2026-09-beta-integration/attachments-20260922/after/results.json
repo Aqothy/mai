@@ -1,0 +1,102 @@
+[
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "01-red",
+    "redSamples" : 44100,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 44100,
+    "height" : 1120,
+    "name" : "02-blue-same-view",
+    "redSamples" : 0,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "03-invalid-same-view",
+    "redSamples" : 0,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "04-oversized-same-view",
+    "redSamples" : 0,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "05-red-recovered-same-view",
+    "redSamples" : 44100,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "06-missing-remote-other",
+    "redSamples" : 0,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "07-fallback-light",
+    "redSamples" : 0,
+    "width" : 1280
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "08-fallback-narrow",
+    "redSamples" : 0,
+    "width" : 480
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "09-fallback-narrow-large-text",
+    "redSamples" : 0,
+    "width" : 480
+  },
+  {
+    "blueSamples" : 0,
+    "height" : 1120,
+    "name" : "10-fallback-grid-large-text",
+    "redSamples" : 0,
+    "width" : 750
+  },
+  {
+    "limitErrors" : 1,
+    "name" : "composer-limit-removal-pipeline",
+    "passed" : true,
+    "ready" : 7
+  },
+  {
+    "error" : "'invalid.png' could not be read as an image.",
+    "name" : "invalid.png",
+    "passed" : true
+  },
+  {
+    "error" : "'empty.png' could not be read as an image.",
+    "name" : "empty.png",
+    "passed" : true
+  },
+  {
+    "error" : "'unsupported.txt' could not be read as an image.",
+    "name" : "unsupported.txt",
+    "passed" : true
+  },
+  {
+    "error" : "'oversized.png' could not be read as an image.",
+    "name" : "oversized.png",
+    "passed" : true
+  },
+  {
+    "name" : "provider-capability-gate",
+    "passed" : true
+  }
+]

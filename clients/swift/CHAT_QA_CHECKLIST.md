@@ -35,6 +35,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 - [ ] Scroll reused views into unrelated rows; selection, copied feedback, syntax colors and horizontal offset do not leak.
 - [ ] Check light/dark appearance, increased text size, keyboard scrolling/focus, VoiceOver labels and copy-button accessibility.
 - [ ] Check attachments, approvals, error rows and fetched remote tool details with real threads; offline fixtures cannot validate these integrations.
+- [x] Verify real Codex image-only and text+image user messages in actual native/List windows. September 23: exact payloads survive; Codex identifies the blue fixture; both renderers show images and replies correctly in settled window captures. Same-view replacement and invalid-image fallback also pass. Assistant/tool rows, URL actions, remote details and streaming image-height transitions remain open; see `qa/2026-09-beta-integration/attachments-20260922/REPORT.md`.
 
 ## Performance and memory
 

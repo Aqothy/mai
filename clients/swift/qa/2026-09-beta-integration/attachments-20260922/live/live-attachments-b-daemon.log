@@ -1,0 +1,14 @@
+time=2026-09-23T02:27:58.244-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/live-attachments-b/data/maid.db
+time=2026-09-23T02:27:58.244-04:00 level=INFO msg="restored persisted threads" count=0
+time=2026-09-23T02:27:58.244-04:00 level=INFO msg="server listening" http=http://127.0.0.1:50772 websocket=ws://127.0.0.1:50772/rpc
+time=2026-09-23T02:27:58.294-04:00 level=INFO msg="client connected" client=client-1
+time=2026-09-23T02:27:58.685-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=387ms
+time=2026-09-23T02:33:09.708-04:00 level=INFO msg="client connected" client=client-2
+time=2026-09-23T02:33:10.077-04:00 level=INFO msg="client disconnected" client=client-2
+{"timestamp":"2026-09-23T06:33:10.142658Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-23T02:36:35.147-04:00 level=INFO msg="client connected" client=client-3
+{"timestamp":"2026-09-23T06:36:35.467963Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
+time=2026-09-23T02:36:57.198-04:00 level=INFO msg="client disconnected" client=client-3
+time=2026-09-23T02:38:49.676-04:00 level=INFO msg="client connected" client=client-4
+time=2026-09-23T02:39:27.152-04:00 level=INFO msg="client disconnected" client=client-4
+time=2026-09-23T02:39:53.458-04:00 level=INFO msg="client disconnected" client=client-1
