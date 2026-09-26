@@ -61,7 +61,7 @@ struct ChatNativeClipboardTests {
         let menu = NSMenu()
         text.appendComment(to: menu)
         guard let oldMenu = menu.items.last else { throw NSError(domain: "NativeActionQA", code: 5) }
-    
+
         let firstCode = "let first = \"café 👩🏽‍💻\"\n" + String(repeating: "// long line αβ ", count: 30)
         render(.code(.init(code: firstCode, language: "swift", kind: .fenced)), id: "code-first")
         _ = try copyButton("Copy code", expecting: firstCode)
@@ -72,7 +72,7 @@ struct ChatNativeClipboardTests {
         codeText.setSelectedRange(NSRange(location: 0, length: 3))
         text.comment(oldMenu)
         try require(annotations.editorDraft == nil, "Detached prose menu created a comment")
-    
+
         let table = ChatMarkdownTable(alignments: [.leading, .center, .trailing],
                                      header: [AttributedString("Name"), AttributedString("Quote"), AttributedString("Value")],
                                      rows: [[AttributedString("café"), AttributedString(String(repeating: "Wide 👩🏽‍💻 ", count: 20)), AttributedString("保持")]])
@@ -84,7 +84,7 @@ struct ChatNativeClipboardTests {
         try require(host.accessibilityValue() as? String == table.tabSeparatedText, "Table accessibility content differs")
         try await Task.sleep(for: .milliseconds(1700))
         try require(tableCopy.accessibilityLabel() == "Copy table", "Old feedback task overwrote reused button")
-    
+
         let secondCode = ChatMarkdownCodeBlock(code: "let second = 42 // 保持", language: "swift", kind: .fenced)
         for theme in [ChatCodeHighlightTheme.dark, .light] {
             await layouts.prepareCodeBlocks(requests: [.init(id: "code-second", block: secondCode, theme: theme)])

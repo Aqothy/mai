@@ -18,6 +18,6 @@ The first clipboard test failed because it compared the unmodified prepared font
 
 ## Evidence and limits
 
-`manifest.json` records original paths and hashes. `mac-selection-*` contains five passing selection/reference/reuse tests. `mac-initial-console.txt` contains the passing attachment test and the initial clipboard failure. `mac-font-diagnostic-console.txt` identifies the fallback font. `mac-clipboard-*` contains the final passing copy test; `ios-*` contains both passing shared reference tests.
+`manifest.json` records original paths and hashes. Logs are compressed losslessly as `.txt.gz`, preserving tool output whitespace without adding it to source diffs. `mac-selection-*` contains five passing selection/reference/reuse tests. `mac-initial-console.txt` contains the passing attachment test and the initial clipboard failure. `mac-font-diagnostic-console.txt` identifies the fallback font. `mac-clipboard-*` contains the final passing copy test; `ios-*` contains both passing shared reference tests.
 
 Actions use real AppKit controls, text storage and the system clipboard, driven programmatically. This is not a pointer/trackpad gesture test, an app-wide VoiceOver pass, a screenshot comparison, an iOS physical-device measurement, or evidence of every presented frame. Outer-transcript position during horizontal gestures and annotation persistence through native provider reload/fork remain separate release checks.
