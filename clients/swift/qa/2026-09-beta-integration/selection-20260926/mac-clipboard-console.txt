@@ -1,0 +1,97 @@
+Test mai
+  ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+  WARNING MISSING STYLE in atom-one-dark: hljs-operator
+  WARNING MISSING STYLE in atom-one-light: hljs-operator
+  PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected
+  ✔ Test richCopyActionsAndSelectionStayCurrentAfterReuse() passed after 3.519 seconds.
+
+  Launch actions
+    Launch maiTests
+      notice:Platform: macOS
+      notice:Device Identifier: 00006020-000E319A2EC0C01E
+      notice:Operating System Version: 27.0 (26A428)
+      notice:Model: MacBook Pro (Mac14,9)
+      notice:Target Architecture: arm64
+    
+      Installing built products
+        notice:Installing on My Mac
+      
+      Launching maiTests
+        notice:Launching new instance of maiTests
+        notice:Launching suspended and the launcher is responsible for resuming.
+        notice:Launching from file:///Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app
+        notice:Process with pid 98843 launched
+        notice:Console logging policy: Synchronously obtain os_logs via libLogRedirect, and read stdio from File Descriptors
+        notice:Resumed target process.
+      
+  Testing Test Scheme Action
+    Test target maiTests
+      mai (98843)
+        [ConsoleFoundation] Initialization successful2026-09-26 19:56:06.758837-0400 [98843:1425682] [Common] Unable to obtain a task name port right for pid 438: (os/kern) failure (0x5)
+        Test Suite 'Selected tests' started at 2026-09-26 19:56:06.801.
+        Test Suite 'maiTests.xctest' started at 2026-09-26 19:56:06.801.
+        Test Suite 'maiTests.xctest' passed at 2026-09-26 19:56:06.801.
+        	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+        Test Suite 'Selected tests' passed at 2026-09-26 19:56:06.801.
+        	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+        ◇ Test run started.
+        ↳ Testing Library Version: 2084
+        ↳ Target Platform: arm64e-apple-macos14.0
+        ◇ Suite ChatNativeClipboardTests started.
+        ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+        WARNING MISSING STYLE in atom-one-dark: hljs-operator
+        WARNING MISSING STYLE in atom-one-light: hljs-operator
+        PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected
+        ✔ Test richCopyActionsAndSelectionStayCurrentAfterReuse() passed after 3.519 seconds.
+        ✔ Suite ChatNativeClipboardTests passed after 3.519 seconds.
+      
+        Writing diagnostic log for test runner launch.
+          /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Logs/Test/Test-mai-2026.09.26_19-56-04--0400.xcresult/Staging/1_Test/Diagnostics/maiTests-27B0C8AB-85E6-41CB-B756-FB7D8B207D53-Configuration-Test Scheme Action-Iteration-1/maiTests-CF03BD5A-4D3E-4219-8A15-56D6511FED2A/Session-maiTests-2026-09-26_195605-1zCPRi.log:notice:/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Logs/Test/Test-mai-2026.09.26_19-56-04--0400.xcresult/Staging/1_Test/Diagnostics/maiTests-27B0C8AB-85E6-41CB-B756-FB7D8B207D53-Configuration-Test Scheme Action-Iteration-1/maiTests-CF03BD5A-4D3E-4219-8A15-56D6511FED2A/Session-maiTests-2026-09-26_195605-1zCPRi.log
+        
+        Run test suite Selected tests
+          Summary: Test Suite 'Selected tests' passed at 2026-09-26 19:56:06.801.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+          [ConsoleFoundation] Initialization successful2026-09-26 19:56:06.758837-0400 [98843:1425682] [Common] Unable to obtain a task name port right for pid 438: (os/kern) failure (0x5)
+          Test Suite 'Selected tests' started at 2026-09-26 19:56:06.801.
+          Test Suite 'maiTests.xctest' started at 2026-09-26 19:56:06.801.
+          Test Suite 'maiTests.xctest' passed at 2026-09-26 19:56:06.801.
+          	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+          Test Suite 'Selected tests' passed at 2026-09-26 19:56:06.801.
+          	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+        
+          Run test suite maiTests.xctest
+            Summary: Test Suite 'maiTests.xctest' passed at 2026-09-26 19:56:06.801.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+
+            Test Suite 'maiTests.xctest' started at 2026-09-26 19:56:06.801.
+            Test Suite 'maiTests.xctest' passed at 2026-09-26 19:56:06.801.
+            	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+          
+        Run test suite ChatNativeClipboardTests
+          Summary: ✔ Suite ChatNativeClipboardTests passed after 3.519 seconds.
+
+          ◇ Test run started.
+          ↳ Testing Library Version: 2084
+          ↳ Target Platform: arm64e-apple-macos14.0
+          ◇ Suite ChatNativeClipboardTests started.
+          ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+          WARNING MISSING STYLE in atom-one-dark: hljs-operator
+          WARNING MISSING STYLE in atom-one-light: hljs-operator
+          PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected
+          ✔ Test richCopyActionsAndSelectionStayCurrentAfterReuse() passed after 3.519 seconds.
+          ✔ Suite ChatNativeClipboardTests passed after 3.519 seconds.
+        
+          Run test case richCopyActionsAndSelectionStayCurrentAfterReuse()
+            Summary: WARNING MISSING STYLE in atom-one-dark: hljs-operator
+WARNING MISSING STYLE in atom-one-light: hljs-operator
+PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected
+✔ Test richCopyActionsAndSelectionStayCurrentAfterReuse() passed after 3.519 seconds.
+
+            ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+            WARNING MISSING STYLE in atom-one-dark: hljs-operator
+            WARNING MISSING STYLE in atom-one-light: hljs-operator
+            PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected
+            ✔ Test richCopyActionsAndSelectionStayCurrentAfterReuse() passed after 3.519 seconds.
+          
+** TEST FINISHED **

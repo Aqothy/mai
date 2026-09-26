@@ -26,8 +26,8 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 - [x] Remove beta text-reveal effects and working-indicator animations per the September 19 request; validate plain streaming through partial Markdown, replacement and completion on iOS.
 - [ ] Verify frame consistency during native streaming: content, row heights and bottom position agree within each presented frame; no working-indicator jump or partially updated tiles.
 - [x] Verify reasoning/assistant leaf observation and complete synthetic activity state on macOS 27 and iOS 18.6. Two regression tests per platform and the two-thought/tool/reply scenario pass; activity recordings failed visibility/setup checks and are explicitly excluded from frame-consistency evidence. See [activity report](qa/2026-09-beta-integration/activity-20260923/REPORT.md).
-- [ ] Verify parser-resolved reference-link rows retain correct links, annotations, attachments and native preparation.
-- [ ] Verify selection menus bind comments to the actual message after reuse, scrolling, switching threads and reference-link splitting.
+- [x] Verify parser-resolved reference-link rows retain correct links, annotations, attachments and native preparation. September 26 native text-storage and shared Mac/iOS 18.6 regression checks pass; link-opening gestures and attachment pixels remain separate. See [selection report](qa/2026-09-beta-integration/selection-20260926/REPORT.md).
+- [x] Verify selection menus bind comments to the actual message after reuse, scrolling, switching threads and reference-link splitting. Actual native virtualization and menu actions preserve exact quotes/message IDs, reject stale menus and update the annotation model even when the new chat has identical message IDs/content. Programmatic action coverage excludes pointer gestures and VoiceOver.
 
 ## Providers, persistence and connectivity
 

@@ -34,7 +34,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
 
 - [ ] Check headings, nested lists, quotes, rules, Unicode/emoji, links, inline formatting, narrow/wide tables and labelled/unlabelled code against List.
 - [ ] Select/copy prose and code, copy tables, scroll code/tables horizontally; verify actual clipboard text and no unexpected chat scrolling.
-- [ ] Scroll reused views into unrelated rows; selection, copied feedback, syntax colors and horizontal offset do not leak.
+- [x] Scroll reused views into unrelated rows; selection, copied feedback, syntax colors and horizontal offset do not leak. September 26 actual native virtualization and reusable code/table/prose controls pass exact clipboard, selection, feedback, both syntax themes and horizontal-offset checks. See `qa/2026-09-beta-integration/selection-20260926/REPORT.md`; outer-chat position during pointer gestures remains part of the preceding requirement.
 - [ ] Check light/dark appearance, increased text size, keyboard scrolling/focus, VoiceOver labels and copy-button accessibility.
 - [ ] Check attachments, approvals, error rows and fetched remote tool details with real threads; offline fixtures cannot validate these integrations.
 - [x] Verify real Codex image-only and text+image user messages in actual native/List windows. September 23: exact payloads survive; Codex identifies the blue fixture; both renderers show images and replies correctly in settled window captures. Same-view replacement and invalid-image fallback also pass. Assistant/tool rows, URL actions, remote details and streaming image-height transitions remain open; see `qa/2026-09-beta-integration/attachments-20260922/REPORT.md`.

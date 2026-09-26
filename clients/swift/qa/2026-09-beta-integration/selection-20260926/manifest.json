@@ -1,0 +1,71 @@
+{
+  "baseCommit": "73866d155c78b5dd5c6f204fe08510f4e9ac28c0",
+  "files": [
+    {
+      "file": "mac-selection-console.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-26T14-52-08-04-00.txt",
+      "bytes": 10271,
+      "sha256": "633662378dcd822b6622f376a2079213f8bb27f1da6464207c644012f218fe51"
+    },
+    {
+      "file": "mac-selection-summary.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/6DFC09A0-2986-4756-B556-F6B4D5C20E94.txt",
+      "bytes": 2731,
+      "sha256": "b8c4a90e834c1fa2e2fe15680dcf0c1c4db3830f30388babc8c9ca38960251df"
+    },
+    {
+      "file": "mac-initial-console.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-26T14-58-21-04-00.txt",
+      "bytes": 8441,
+      "sha256": "732955bf332936daa452c9541f742bbdb6cf93dee7298a3d24e5f738fa2e3a5b"
+    },
+    {
+      "file": "mac-font-diagnostic-console.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-26T19-52-06-04-00.txt",
+      "bytes": 15296,
+      "sha256": "9e71ceb2d42996db91fc3a6695f42e7ec3e4a44d9ad52aa2702efb4c40375988"
+    },
+    {
+      "file": "mac-clipboard-console.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-26T19-56-04-04-00.txt",
+      "bytes": 6890,
+      "sha256": "4aa1b381e1e9af5961224443f99e9530fdf63b6cc6b156a7dd8f52551acaf5c1"
+    },
+    {
+      "file": "mac-clipboard-summary.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/AF897D80-AD7F-4E68-9165-A2E73AA4EC70.txt",
+      "bytes": 933,
+      "sha256": "3c4fe1b8251fe165b7cbe989cdc5ff5779225308838ee3e7d055a310b9eea07e"
+    },
+    {
+      "file": "ios-console.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-26T19-56-30-04-00.txt",
+      "bytes": 10594,
+      "sha256": "ee6ed3bdd9d0d8e2953ca5ae610bec049fbf9f34c8a98386aa79a318f4e64802"
+    },
+    {
+      "file": "ios-summary.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/59B9583E-E654-43FA-8435-26D34597C21A.txt",
+      "bytes": 1411,
+      "sha256": "94291a66e5245e3b19712d4e3a7f76d0c3faa462e8ac27d94584be0c07d27e37"
+    },
+    {
+      "file": "mac-build.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260926-195558.txt",
+      "bytes": 204764,
+      "sha256": "688420fa75af471e03589b106751a4aae00560a03eb315d2ac4619d63719a6e4"
+    },
+    {
+      "file": "ios-build.txt",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260926-195622.txt",
+      "bytes": 223586,
+      "sha256": "68a30136b1735b9761f8255e528ff8f5b740802dc1f8c6b5cd9bfe63b4cbc234"
+    },
+    {
+      "file": "snippet-timeout-sample.txt",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/native-actions-sample.txt",
+      "bytes": 252938,
+      "sha256": "1088f95bd1ad910565ec327841db26a802a642949d0fe8bc0376dcd531583a9c"
+    }
+  ]
+}

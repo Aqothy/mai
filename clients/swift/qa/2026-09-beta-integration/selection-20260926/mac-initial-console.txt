@@ -1,0 +1,112 @@
+Test mai
+  ◇ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() started.
+  ✔ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() passed after 0.035 seconds.
+  ✔ Suite ChatBetaIntegrationTests passed after 0.035 seconds.
+  ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() failed after 1.779 seconds with 1 issue.
+  ✘ Suite ChatNativeClipboardTests failed after 1.780 seconds with 1 issue.
+
+  Launch actions
+    Launch maiTests
+      notice:Platform: macOS
+      notice:Device Identifier: 00006020-000E319A2EC0C01E
+      notice:Operating System Version: 27.0 (26A428)
+      notice:Model: MacBook Pro (Mac14,9)
+      notice:Target Architecture: arm64
+    
+      Installing built products
+        notice:Installing on My Mac
+      
+      Launching maiTests
+        notice:Launching new instance of maiTests
+        notice:Launching suspended and the launcher is responsible for resuming.
+        notice:Launching from file:///Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app
+        notice:Process with pid 85985 launched
+        notice:Console logging policy: Synchronously obtain os_logs via libLogRedirect, and read stdio from File Descriptors
+        notice:Resumed target process.
+      
+  Testing Test Scheme Action
+    Test target maiTests
+      mai (85985)
+        [ConsoleFoundation] Initialization successful2026-09-26 14:58:25.037763-0400 [85985:1126133] [Common] Unable to obtain a task name port right for pid 438: (os/kern) failure (0x5)
+        Test Suite 'Selected tests' started at 2026-09-26 14:58:25.079.
+        Test Suite 'maiTests.xctest' started at 2026-09-26 14:58:25.079.
+        Test Suite 'maiTests.xctest' passed at 2026-09-26 14:58:25.079.
+        	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+        Test Suite 'Selected tests' passed at 2026-09-26 14:58:25.079.
+        	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+        ◇ Test run started.
+        ↳ Testing Library Version: 2084
+        ↳ Target Platform: arm64e-apple-macos14.0
+        ◇ Suite ChatNativeClipboardTests started.
+        ◇ Suite ChatBetaIntegrationTests started.
+        ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+        ◇ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() started.
+        ✔ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() passed after 0.035 seconds.
+        ✔ Suite ChatBetaIntegrationTests passed after 0.035 seconds.
+        WARNING MISSING STYLE in atom-one-dark: hljs-operator
+        ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() recorded an issue at ChatNativeClipboardTests.swift:7:6: Caught error: Error Domain=NativeActionQA Code=1 "Rendered syntax attributes differ from the prepared theme" UserInfo={NSLocalizedDescription=Rendered syntax attributes differ from the prepared theme}
+        ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() failed after 1.779 seconds with 1 issue.
+        ✘ Suite ChatNativeClipboardTests failed after 1.780 seconds with 1 issue.
+        ✘ Test run with 2 tests in 2 suites failed after 1.780 seconds with 1 issue.
+      
+        Writing diagnostic log for test runner launch.
+          /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Logs/Test/Test-mai-2026.09.26_14-58-21--0400.xcresult/Staging/1_Test/Diagnostics/maiTests-D70F5C58-1283-456C-A43A-42F0C049108C-Configuration-Test Scheme Action-Iteration-1/maiTests-FCC0A1B2-4437-41B4-8195-5BB67E1694C9/Session-maiTests-2026-09-26_145823-Q1IFVs.log:notice:/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Logs/Test/Test-mai-2026.09.26_14-58-21--0400.xcresult/Staging/1_Test/Diagnostics/maiTests-D70F5C58-1283-456C-A43A-42F0C049108C-Configuration-Test Scheme Action-Iteration-1/maiTests-FCC0A1B2-4437-41B4-8195-5BB67E1694C9/Session-maiTests-2026-09-26_145823-Q1IFVs.log
+        
+        Run test suite Selected tests
+          Summary: Test Suite 'Selected tests' passed at 2026-09-26 14:58:25.079.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+          [ConsoleFoundation] Initialization successful2026-09-26 14:58:25.037763-0400 [85985:1126133] [Common] Unable to obtain a task name port right for pid 438: (os/kern) failure (0x5)
+          Test Suite 'Selected tests' started at 2026-09-26 14:58:25.079.
+          Test Suite 'maiTests.xctest' started at 2026-09-26 14:58:25.079.
+          Test Suite 'maiTests.xctest' passed at 2026-09-26 14:58:25.079.
+          	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+          Test Suite 'Selected tests' passed at 2026-09-26 14:58:25.079.
+          	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+        
+          Run test suite maiTests.xctest
+            Summary: Test Suite 'maiTests.xctest' passed at 2026-09-26 14:58:25.079.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+
+            Test Suite 'maiTests.xctest' started at 2026-09-26 14:58:25.079.
+            Test Suite 'maiTests.xctest' passed at 2026-09-26 14:58:25.079.
+            	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+          
+        Run test suite ChatBetaIntegrationTests
+          Summary: WARNING MISSING STYLE in atom-one-dark: hljs-operator
+✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() recorded an issue at ChatNativeClipboardTests.swift:7:6: Caught error: Error Domain=NativeActionQA Code=1 "Rendered syntax attributes differ from the prepared theme" UserInfo={NSLocalizedDescription=Rendered syntax attributes differ from the prepared theme}
+
+          ◇ Test run started.
+          ↳ Testing Library Version: 2084
+          ↳ Target Platform: arm64e-apple-macos14.0
+          ◇ Suite ChatNativeClipboardTests started.
+          ✔ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() passed after 0.035 seconds.
+          ✔ Suite ChatBetaIntegrationTests passed after 0.035 seconds.
+          WARNING MISSING STYLE in atom-one-dark: hljs-operator
+          ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() recorded an issue at ChatNativeClipboardTests.swift:7:6: Caught error: Error Domain=NativeActionQA Code=1 "Rendered syntax attributes differ from the prepared theme" UserInfo={NSLocalizedDescription=Rendered syntax attributes differ from the prepared theme}
+        
+          Run test case resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts()
+            Summary: ✔ Suite ChatBetaIntegrationTests passed after 0.035 seconds.
+
+            ✔ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() passed after 0.035 seconds.
+            ✔ Suite ChatBetaIntegrationTests passed after 0.035 seconds.
+          
+        Run test suite ChatNativeClipboardTests
+          Summary: ✘ Test run with 2 tests in 2 suites failed after 1.780 seconds with 1 issue.
+
+          ◇ Suite ChatBetaIntegrationTests started.
+          ◇ Test richCopyActionsAndSelectionStayCurrentAfterReuse() started.
+          ◇ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() started.
+          ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() failed after 1.779 seconds with 1 issue.
+          ✘ Suite ChatNativeClipboardTests failed after 1.780 seconds with 1 issue.
+          ✘ Test run with 2 tests in 2 suites failed after 1.780 seconds with 1 issue.
+        
+          Run test case richCopyActionsAndSelectionStayCurrentAfterReuse()
+            Summary: ✘ Suite ChatNativeClipboardTests failed after 1.780 seconds with 1 issue.
+
+            ◇ Test resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() started.
+            ✘ Test richCopyActionsAndSelectionStayCurrentAfterReuse() failed after 1.779 seconds with 1 issue.
+            ✘ Suite ChatNativeClipboardTests failed after 1.780 seconds with 1 issue.
+            /Users/aqothy/Code/Personal/maiD/clients/swift/maiTests/ChatNativeClipboardTests.swift:test failure:Caught error: Error Domain=NativeActionQA Code=1 "Rendered syntax attributes differ from the prepared theme" UserInfo={NSLocalizedDescription=Rendered syntax attributes differ from the prepared theme}
+          
+** TEST FINISHED **

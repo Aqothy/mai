@@ -1,0 +1,35 @@
+================================================================================
+TEST RESULTS SUMMARY
+================================================================================
+Generated: 2026-09-26T23:56:52Z
+Total Results: 2
+================================================================================
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 1/2
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatBetaIntegrationTests/resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts()
+TEST_DISPLAY_NAME: resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatBetaIntegrationTests.swift
+TEST_LINE_NUMBER: 74
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+--------------------------------------------------------------------------------
+TEST_RESULT_INDEX: 2/2
+TEST_TARGET: maiTests
+TEST_IDENTIFIER: ChatBetaIntegrationTests/referenceDocumentKeepsAnnotationsAndPlatformSelectionPath()
+TEST_DISPLAY_NAME: referenceDocumentKeepsAnnotationsAndPlatformSelectionPath()
+TEST_STATE: Passed
+TEST_FILE_PATH: mai/maiTests/ChatBetaIntegrationTests.swift
+TEST_LINE_NUMBER: 39
+TEST_TAGS: (none)
+
+TEST_ISSUE_COUNT: 0
+
+
+================================================================================
+END OF TEST RESULTS SUMMARY
+================================================================================

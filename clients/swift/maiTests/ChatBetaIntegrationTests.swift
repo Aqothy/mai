@@ -73,6 +73,48 @@ struct ChatBetaIntegrationTests {
     }
 
     @Test @MainActor
+    func resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() throws {
+        let attachment = Attachment(data: nil, kind: "image", mimeType: "image/png", name: "QA attachment", uri: "https://example.invalid/qa.png")
+        var message = Message(
+            annotations: nil, attachments: [attachment], createdAt: .now,
+            id: "reference-with-attachment", role: "assistant",
+            text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide",
+            turnID: "turn", updatedAt: .now)
+        let cache = ChatMarkdownSegmentCache()
+        let rows = ChatTimeline.renderRows([.message(message)], streamingTurnID: nil, segmentCache: cache)
+        #if os(macOS)
+            #expect(rows.count == 2)
+            let resolved = rows.compactMap { row -> ChatResolvedMarkdownBlockRowModel? in
+                if case .resolvedMarkdown(let block) = row { return block }
+                return nil
+            }
+            #expect(resolved.count == 2)
+            #expect(resolved.first?.attachments == nil)
+            #expect(resolved.last?.attachments?.count == 1)
+            #expect(resolved.last?.attachments?.first?.uri == attachment.uri)
+            #expect(ChatNativePreparedRow.descriptor(for: try #require(rows.first)) != nil)
+            #expect(ChatNativePreparedRow.descriptor(for: try #require(rows.last)) == nil)
+        #else
+            #expect(rows.count == 1)
+            guard case .standard(.message(let retained)) = try #require(rows.first) else {
+                Issue.record("iOS reference document lost its standard selection renderer")
+                return
+            }
+            #expect(retained.attachments?.first?.uri == attachment.uri)
+        #endif
+        message.annotations = [PromptAnnotation(id: "note", messageID: "original", note: "Explain", quote: "Guide", role: "assistant")]
+        let annotated = ChatTimeline.renderRows([.message(message)], streamingTurnID: nil, segmentCache: cache)
+        #expect(annotated.count == 1)
+        guard case .standard(.message(let retained)) = try #require(annotated.first) else {
+            Issue.record("Annotated reference document lost its metadata renderer")
+            return
+        }
+        #expect(retained.attachments?.first?.uri == attachment.uri)
+        #expect(retained.annotations?.first?.messageID == "original")
+        #expect(retained.annotations?.first?.quote == "Guide")
+    }
+
+    @Test @MainActor
     func sendingAnnotationsOnlyRemovesSubmittedDrafts() throws {
         let model = ChatAnnotationModel()
         model.beginComment(quote: "  First 🌍 quote\n", messageID: "first", role: "assistant")
