@@ -265,6 +265,7 @@ func TestReplayEventsPreservesTurnAndItemOrder(t *testing.T) {
 		provider.RuntimeEventItemStarted,
 		provider.RuntimeEventItemCompleted,
 		provider.RuntimeEventContentDelta,
+		provider.RuntimeEventItemCompleted,
 		provider.RuntimeEventTurnCompleted,
 	}
 	if len(events) != len(wantTypes) {

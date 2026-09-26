@@ -1,0 +1,242 @@
+UpdateSessionError
+
+Update session: 1-0 (canceled: false)
+
+==================================
+
+|  CompileDylibError: Failed to build ThreadSession.swift
+|  
+|  Compiling failed: call to main actor-isolated static method 'reasoningText' in a synchronous nonisolated context [#ActorIsolatedCall]
+|  
+|  /Users/aqothy/Code/Personal/maiD/clients/swift/mai/Features/Threads/ThreadSession.swift:147:80: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+|  146 |         thread.timeline.compactMap { entry in
+|  147 |             if let item = entry.item {
+|  148 |                 return Value(kind: item.kind, id: item.id, status: item.status ?? "", text: ChatTimelineLayout.reasoningText(item) ?? "")
+|      |                                                                                `- warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+|  149 |             }
+|  150 |             if let message = entry.message {
+|  
+|  macro expansion #Playground:39:80: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+|  `- /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.swift:189:2: note: expanded code originates here
+|  121 | 
+|  122 | import Playgrounds
+|  123 | #Playground("Agentic Snippet") {
+|      | `- note: in expansion of macro 'Playground' here
+|  124 | // Run in ThreadSession.swift through Xcode MCP on each platform.
+|  125 | // Replace QA_FIXTURE_BASE64 with the base64 encoding of pipeline.json.
+|      :
+|  187 |     print("PASS: \(fixture.events.count) server events, 3 live thought checkpoints, 3 authoritative completions, exact 5-entry timeline and stable identities after reload, duplicate sequences rejected, activity cleared")
+|  188 | }.value
+|  189 | }
+|      +--- macro expansion #Playground -----------------------------------
+|      | 37 |         thread.timeline.compactMap { entry in
+|      | 38 |             if let item = entry.item {
+|      | 39 |                 return Value(kind: item.kind, id: item.id, status: item.status ?? "", text: ChatTimelineLayout.reasoningText(item) ?? "")
+|      |    |                                                                                `- warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+|      | 40 |             }
+|      | 41 |             if let message = entry.message {
+|      +-------------------------------------------------------------------
+|  190 | 
+|  191 | 
+|  
+|  macro expansion #Playground:39:112: error: call to main actor-isolated static method 'reasoningText' in a synchronous nonisolated context [#ActorIsolatedCall]
+|  `- /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.swift:189:2: note: expanded code originates here
+|  121 | 
+|  122 | import Playgrounds
+|  123 | #Playground("Agentic Snippet") {
+|      | `- note: in expansion of macro 'Playground' here
+|  124 | // Run in ThreadSession.swift through Xcode MCP on each platform.
+|  125 | // Replace QA_FIXTURE_BASE64 with the base64 encoding of pipeline.json.
+|      :
+|  187 |     print("PASS: \(fixture.events.count) server events, 3 live thought checkpoints, 3 authoritative completions, exact 5-entry timeline and stable identities after reload, duplicate sequences rejected, activity cleared")
+|  188 | }.value
+|  189 | }
+|      +--- macro expansion #Playground -----------------------------------
+|      | 37 |         thread.timeline.compactMap { entry in
+|      | 38 |             if let item = entry.item {
+|      | 39 |                 return Value(kind: item.kind, id: item.id, status: item.status ?? "", text: ChatTimelineLayout.reasoningText(item) ?? "")
+|      |    |                                                                                                                `- error: call to main actor-isolated static method 'reasoningText' in a synchronous nonisolated context [#ActorIsolatedCall]
+|      | 40 |             }
+|      | 41 |             if let message = entry.message {
+|      +-------------------------------------------------------------------
+|  190 | 
+|  191 | 
+|  
+|  /Users/aqothy/Code/Personal/maiD/clients/swift/mai/Features/Chat/ChatTimelineLayout.swift:342:17: note: calls to static method 'reasoningText' from outside of its actor context are implicitly asynchronous
+|  340 |     /// render as blank space, so the text is trimmed.
+|  341 |     @MainActor
+|  342 |     static func reasoningText(_ item: Item) -> String? {
+|      |                 `- note: calls to static method 'reasoningText' from outside of its actor context are implicitly asynchronous
+|  343 |         guard let text = (item.payload?.value as? [String: Any])?["text"] as? String
+|  344 |         else { return nil }
+|  
+|  [#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+|  
+|  -frontend
+|  -c
+|  -filelist
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/sources-1
+|  -primary-file
+|  /Users/aqothy/Code/Personal/maiD/clients/swift/mai/Features/Threads/ThreadSession.swift
+|  -serialize-diagnostics-path
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.dia
+|  -target
+|  arm64-apple-macos15.6
+|  -disable-cross-import-overlay-search
+|  -swift-module-cross-import
+|  PhotosUI
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay
+|  -swift-module-cross-import
+|  PhotosUI
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay
+|  -swift-module-cross-import
+|  PhotosUI
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay
+|  -swift-module-cross-import
+|  PhotosUI
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay
+|  -swift-module-cross-import
+|  WebKit
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Cryptexes/OS/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay
+|  -swift-module-cross-import
+|  WebKit
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay
+|  -load-resolved-plugin
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#FoundationMacros
+|  -load-resolved-plugin
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#ObservationMacros
+|  -load-resolved-plugin
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#PreviewsMacros
+|  -load-resolved-plugin
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#SwiftMacros
+|  -load-resolved-plugin
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#SwiftUIMacros
+|  -explicit-swift-module-map-file
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/mai-dependencies-1.json
+|  -Xllvm
+|  -aarch64-use-tbi
+|  -enable-objc-interop
+|  -stack-check
+|  -sdk
+|  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk
+|  -I
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug
+|  -F
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/PackageFrameworks
+|  -F
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug
+|  -module-cache-path
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+|  -no-color-diagnostics
+|  -Xcc
+|  -fno-color-diagnostics
+|  -enable-testing
+|  -g
+|  -debug-info-format=dwarf
+|  -dwarf-version=5
+|  -swift-version
+|  6
+|  -Onone
+|  -D
+|  DEBUG
+|  -serialize-debugging-options
+|  -enable-upcoming-feature
+|  MemberImportVisibility
+|  -enable-upcoming-feature
+|  InferIsolatedConformances
+|  -enable-upcoming-feature
+|  NonisolatedNonsendingByDefault
+|  -enable-experimental-feature
+|  DebugDescriptionMacro
+|  -default-isolation=MainActor
+|  -empty-abi-descriptor
+|  -validate-clang-modules-once
+|  -clang-build-session-file
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation
+|  -Xcc
+|  -working-directory
+|  -Xcc
+|  /Users/aqothy/Code/Personal/maiD/clients/swift
+|  -enable-anonymous-context-mangled-names
+|  -file-compilation-dir
+|  /Users/aqothy/Code/Personal/maiD/clients/swift
+|  -Xcc
+|  -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/src/include/module.modulemap
+|  -Xcc
+|  -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/extensions/include/module.modulemap
+|  -Xcc
+|  -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-markdown/Sources/CAtomic/include/module.modulemap
+|  -Xcc
+|  -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
+|  -Xcc
+|  -ivfsstatcache
+|  -Xcc
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache
+|  -Xcc
+|  -fmodules-prune-interval=86400
+|  -Xcc
+|  -fmodules-prune-after=345600
+|  -Xcc
+|  -iquote
+|  -Xcc
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-generated-files.hmap
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-own-target-headers.hmap
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-all-non-framework-target-headers.hmap
+|  -Xcc
+|  -ivfsoverlay
+|  -Xcc
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai-ba4309b37d56413b197b3f4db3843c3a-VFS/all-product-headers.yaml
+|  -Xcc
+|  -iquote
+|  -Xcc
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-project-headers.hmap
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/src/include
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/extensions/include
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-markdown/Sources/CAtomic/include
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/include
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources-normal/arm64
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources/arm64
+|  -Xcc
+|  -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources
+|  -Xcc
+|  -DDEBUG=1
+|  -no-auto-bridging-header-chaining
+|  -module-name
+|  mai
+|  -disable-clang-spi
+|  -clang-target
+|  arm64-apple-macos27.0
+|  -target-sdk-version
+|  27.0
+|  -target-sdk-name
+|  macosx27.0
+|  -in-process-plugin-server-path
+|  /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib
+|  -o
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.o
+|  -debug-module-path
+|  mai.swiftmodule
+|  -vfsoverlay
+|  /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/vfsoverlay-ThreadSession.48.preview-thunk.swift.json
+|  -playground-option
+|  NoScopeEvents
+|  -enable-experimental-feature
+|  PlaygroundExtendedCallbacks
+|  -enable-experimental-feature
+|  OpaqueTypeErasure
+|  -plugin-path
+|  /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins
+|  
+|  ==================================
+|  
+|  |  BuildInvocationError
+|  |  
+|  |  /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c -filelist /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/sources-1 -primary-file /Users/aqothy/Code/Personal/maiD/clients/swift/mai/Features/Threads/ThreadSession.swift -serialize-diagnostics-path /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.dia -target arm64-apple-macos15.6 -disable-cross-import-overlay-search -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -swift-module-cross-import WebKit /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Cryptexes/OS/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import WebKit /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server#SwiftUIMacros -explicit-swift-module-map-file /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/mai-dependencies-1.json -Xllvm -aarch64-use-tbi -enable-objc-interop -stack-check -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -I /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug -F /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/PackageFrameworks -F /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug -module-cache-path /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format=dwarf -dwarf-version=5 -swift-version 6 -Onone -D DEBUG -serialize-debugging-options -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -default-isolation=MainActor -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /Users/aqothy/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/aqothy/Code/Personal/maiD/clients/swift -enable-anonymous-context-mangled-names -file-compilation-dir /Users/aqothy/Code/Personal/maiD/clients/swift -Xcc -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/src/include/module.modulemap -Xcc -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/extensions/include/module.modulemap -Xcc -fmodule-map-file=/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-markdown/Sources/CAtomic/include/module.modulemap -Xcc -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /Users/aqothy/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache -Xcc -fmodules-prune-interval=86400 -Xcc -fmodules-prune-after=345600 -Xcc -iquote -Xcc /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-generated-files.hmap -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-own-target-headers.hmap -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai-ba4309b37d56413b197b3f4db3843c3a-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/mai-project-headers.hmap -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/src/include -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-cmark/extensions/include -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/SourcePackages/checkouts/swift-markdown/Sources/CAtomic/include -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/include -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources-normal/arm64 -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources/arm64 -Xcc -I/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/DerivedSources -Xcc -DDEBUG=1 -no-auto-bridging-header-chaining -module-name mai -disable-clang-spi -clang-target arm64-apple-macos27.0 -target-sdk-version 27.0 -target-sdk-name macosx27.0 -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/ThreadSession.48.preview-thunk.o -debug-module-path mai.swiftmodule -vfsoverlay /Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Intermediates.noindex/mai.build/Debug/mai.build/Objects-normal/arm64/vfsoverlay-ThreadSession.48.preview-thunk.swift.json -playground-option NoScopeEvents -enable-experimental-feature PlaygroundExtendedCallbacks -enable-experimental-feature OpaqueTypeErasure -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins

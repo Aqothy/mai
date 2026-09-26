@@ -260,6 +260,13 @@ func replayEvents(localThreadID string, thread appThread) []provider.RuntimeEven
 				if text := reasoningText(item); text != "" {
 					events = append(events, replayContentEvent(localThreadID, turnID, item.ID, provider.RuntimeContentReasoningText, text, at))
 				}
+				// Preserve the same boundary as item/completed in the live
+				// stream. Otherwise adjacent thoughts concatenate on reload
+				// and every later reasoning segment receives a different ID.
+				if event, ok := runtimeEventFromItem(localThreadID, turnID, item, provider.RuntimeEventItemCompleted, at.Add(time.Nanosecond)); ok {
+					event.EventID = replayEventID(turnID, item.ID, "completed")
+					events = append(events, event)
+				}
 			default:
 				started := item
 				started.Status = "inProgress"

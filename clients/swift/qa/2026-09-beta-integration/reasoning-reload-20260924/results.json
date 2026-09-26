@@ -1,0 +1,44 @@
+{
+  "backend": {
+    "topLevelPassed": 506,
+    "failures": [],
+    "skips": [
+      {
+        "package": "github.com/Aqothy/maiD/internal/adapters/claudecode",
+        "test": "TestLiveSmoke"
+      },
+      {
+        "package": "github.com/Aqothy/maiD/internal/adapters/codexapp",
+        "test": "TestLiveHistoryPagination"
+      },
+      {
+        "package": "github.com/Aqothy/maiD/internal/adapters/codexapp",
+        "test": "TestLiveSmoke"
+      },
+      {
+        "package": "github.com/Aqothy/maiD/internal/daemon",
+        "test": "TestACPRegistryNPMUpdatePreservesActiveTurn"
+      },
+      {
+        "package": "github.com/Aqothy/maiD/internal/daemon",
+        "test": "TestCaptureClientAPIExamples"
+      }
+    ],
+    "packagesPassed": 14
+  },
+  "race": {
+    "topLevelPassed": 175,
+    "failures": [],
+    "skips": [
+      {
+        "package": "github.com/Aqothy/maiD/internal/adapters/codexapp",
+        "test": "TestLiveHistoryPagination"
+      },
+      {
+        "package": "github.com/Aqothy/maiD/internal/adapters/codexapp",
+        "test": "TestLiveSmoke"
+      }
+    ],
+    "packagesPassed": 2
+  }
+}
