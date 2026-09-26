@@ -1,0 +1,86 @@
+{
+  "work": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3",
+  "versions": {
+    "old": "88d7d7e72fb3ea459b32245f8d37e6fd278496a1",
+    "current": "034ab57b38b761c291d2668d91cd0ffd54940331"
+  },
+  "steps": [
+    {
+      "name": "01-old-seed",
+      "version": "88d7d7e72fb3ea459b32245f8d37e6fd278496a1",
+      "operation": "seed",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/original.db",
+      "exitCode": 0
+    },
+    {
+      "name": "02-upgrade",
+      "version": "034ab57b38b761c291d2668d91cd0ffd54940331",
+      "operation": "read",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "03-current-new-fields",
+      "version": "034ab57b38b761c291d2668d91cd0ffd54940331",
+      "operation": "enrich",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "04-current-reopen",
+      "version": "034ab57b38b761c291d2668d91cd0ffd54940331",
+      "operation": "read",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "05-old-open-new-db",
+      "version": "88d7d7e72fb3ea459b32245f8d37e6fd278496a1",
+      "operation": "read",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "06-old-write-new-db",
+      "version": "88d7d7e72fb3ea459b32245f8d37e6fd278496a1",
+      "operation": "rewrite-old",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "07-current-after-old-write",
+      "version": "034ab57b38b761c291d2668d91cd0ffd54940331",
+      "operation": "read",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/upgrade.db",
+      "exitCode": 0
+    },
+    {
+      "name": "08-backup-recovery",
+      "version": "034ab57b38b761c291d2668d91cd0ffd54940331",
+      "operation": "read",
+      "database": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/metadata-qnlfn5f3/recovered.db",
+      "exitCode": 0
+    }
+  ],
+  "limitations": [
+    "The pre-beta version discards unknown additionalDirectories in the JSON launch route when saving it. Do not promise lossless downgrade of new features; restore the backup when returning to the current build."
+  ],
+  "oldBinarySHA256": "795693a67a4e20889d2658919896f64c1db0d0ed746d295a3be5bd6bf2675199",
+  "currentBinarySHA256": "1064b03714e17a7304eb05a9a2e0548def6c7c6ecc64905a7f77701b0cd71e75",
+  "checks": {
+    "upgradePreservesOriginalValues": true,
+    "migrationIdempotent": true,
+    "oldBinaryCanReadAndWriteNewSchema": true,
+    "unknownSQLColumnSurvivesOldUpsert": true,
+    "olderRouteRewriteLosesNewJSONField": true,
+    "backupRecoveryExact": true,
+    "sqliteIntegrityAndForeignKeys": true,
+    "originalAndBackupUntouched": true
+  },
+  "databaseSHA256": {
+    "original.db": "04520fceee27b42a83ac3ade12497e97ac995416aca9f72b4cf129787c0bb1ae",
+    "pre-downgrade.db": "692c3c6088a82da3142584834f13c584a1106013d139ad30d2fc7be95b0e356f",
+    "recovered.db": "692c3c6088a82da3142584834f13c584a1106013d139ad30d2fc7be95b0e356f"
+  },
+  "passed": true
+}

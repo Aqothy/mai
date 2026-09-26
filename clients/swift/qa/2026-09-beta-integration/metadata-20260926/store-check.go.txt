@@ -1,0 +1,74 @@
+// Copied as main.go into a disposable source export; never built into the daemon.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/store"
+)
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func main() {
+	if len(os.Args) != 3 {
+		panic("expected operation and disposable database path")
+	}
+	db, err := store.Open(os.Args[2])
+	must(err)
+	defer func() { must(db.Close()) }()
+	const id = "qa-thread-café-👩🏽‍💻"
+	switch os.Args[1] {
+	case "seed":
+		timestamp := time.Date(2026, 9, 26, 10, 0, 0, 123456789, time.UTC)
+		meta := store.ThreadMeta{ThreadID: id, Title: "Original café 👩🏽‍💻", Cwd: "/disposable/QA workspace", ProviderInstanceID: "qa-provider", ModelSelection: &provider.ModelSelection{Model: "qa-model", Options: json.RawMessage(`{"custom":{"value":"保持"}}`)}, CreatedAt: timestamp, UpdatedAt: timestamp}
+		must(db.SaveInstance(provider.InstanceSpec{InstanceID: "qa-provider", Name: "QA only", Driver: "acp", Config: json.RawMessage(`{"command":["/never/launched"]}`)}))
+		route := store.RouteRecord{InstanceID: "qa-provider", ProviderSessionID: "qa-native-session", ResumeCursor: json.RawMessage(`{"cursor":"opaque-保持"}`), StartInput: provider.StartSessionInput{ThreadID: id, ProviderInstanceID: "qa-provider", Cwd: meta.Cwd, ModelSelection: meta.ModelSelection, ConfigSelections: []provider.ConfigOptionSelection{{OptionID: "mode", Value: "plan"}}}}
+		actual, inserted, err := db.ImportThread(meta, route)
+		must(err)
+		if actual != id || !inserted {
+			panic("first import did not insert the intended thread")
+		}
+		must(db.UpsertTerminal(store.TerminalMeta{TerminalID: "qa-terminal", Title: "Terminal 保持", Cwd: meta.Cwd, CreatedAt: timestamp, UpdatedAt: timestamp}))
+	case "enrich", "rewrite-old":
+		threads, err := db.ListThreads()
+		must(err)
+		if len(threads) != 1 || threads[0].ThreadID != id {
+			panic("unexpected disposable thread")
+		}
+		meta := threads[0]
+		routes, err := db.LoadRoutes()
+		must(err)
+		route := routes[id]
+		if os.Args[1] == "enrich" {
+			// JSON allows the identical harness to compile against both source
+			// versions. Only the current version runs this operation.
+			must(json.Unmarshal([]byte(`{"AdditionalDirectories":["/disposable/extra α","/disposable/extra β"]}`), &meta))
+			must(json.Unmarshal([]byte(`{"additionalDirectories":["/disposable/extra α","/disposable/extra β"]}`), &route.StartInput))
+		} else {
+			meta.Title = "Renamed by older version"
+		}
+		must(db.UpsertThread(meta))
+		must(db.SaveRoute(id, route))
+	case "read":
+	default:
+		panic("unknown operation")
+	}
+	threads, err := db.ListThreads()
+	must(err)
+	routes, err := db.LoadRoutes()
+	must(err)
+	instances, err := db.LoadInstances()
+	must(err)
+	terminals, err := db.ListTerminals()
+	must(err)
+	must(json.NewEncoder(os.Stdout).Encode(map[string]any{"threads": threads, "routes": routes, "instances": instances, "terminals": terminals}))
+	fmt.Fprintln(os.Stderr, "PASS: store operation and complete metadata read")
+}
