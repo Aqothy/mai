@@ -1,0 +1,7 @@
+{
+  "error": {
+    "detailsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunCodeSnippet/RunCodeSnippet-ErrorDetails-20260927-151722.txt",
+    "message": "Failed to build PromptComposer.swift",
+    "summary": "Compiling failed: local type cannot have attached extension macro"
+  }
+}

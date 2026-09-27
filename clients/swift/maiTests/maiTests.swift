@@ -6,6 +6,107 @@ import Testing
 
 struct ThreadStoreTests {
     @Test
+    func fileCompletionKeepsNewestResultsWhenSearchesFinishOutOfOrder() async throws {
+        let rpc = MockThreadRPCClient(threads: [])
+        defer { rpc.cancelFileSearches() }
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let model = PromptCompletionModel(store: store, scope: .workingDirectory("/qa"))
+        model.update(text: "@old", cursorOffset: 4)
+        let old = Task { await model.search() }
+        await waitUntil { rpc.fileSearchInputs.count == 1 }
+        model.update(text: "@new", cursorOffset: 4)
+        let newest = Task { await model.search() }
+        await waitUntil { rpc.fileSearchInputs.count == 2 }
+        #expect(rpc.fileSearchInputs.map(\.query) == ["old", "new"])
+        #expect(rpc.fileSearchInputs.allSatisfy { $0.cwd == "/qa" && $0.threadID == nil && $0.limit == 50 })
+        rpc.completeFileSearch(1, result: .success(WorkspaceSearchFilesResult(entries: [WorkspaceFileEntry(displayName: "New", relativePath: "new.swift")], indexing: false)))
+        await newest.value
+        #expect(model.matches.map(\.insertionValue) == ["new.swift"])
+        rpc.completeFileSearch(0, result: .success(WorkspaceSearchFilesResult(entries: [WorkspaceFileEntry(displayName: "Old", relativePath: "old.swift")], indexing: false)))
+        await old.value
+        #expect(model.phase == .results)
+        #expect(model.matches.map(\.insertionValue) == ["new.swift"])
+        #expect(model.editBySelectingCurrentMatch(in: "@new")?.text == "@new.swift ")
+    }
+
+    @Test
+    func fileCompletionDiscardsRepliesAfterScopeChangeDismissalAndCancellation() async throws {
+        let rpc = MockThreadRPCClient(threads: [])
+        defer { rpc.cancelFileSearches() }
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let model = PromptCompletionModel(store: store, scope: .thread(id: "a"))
+        model.update(text: "@", cursorOffset: 1)
+        let first = Task { await model.search() }
+        await waitUntil { rpc.fileSearchInputs.count == 1 }
+        let firstKey = model.searchKey
+        model.updateScope(.thread(id: "b"))
+        #expect(!model.isPresented)
+        let text = model.textByPresentingFileCompletion(in: "")
+        #expect(text == "@")
+        #expect(model.searchKey != firstKey)
+        let second = Task { await model.search() }
+        await waitUntil { rpc.fileSearchInputs.count == 2 }
+        #expect(rpc.fileSearchInputs.map(\.threadID) == ["a", "b"])
+        rpc.completeFileSearch(0, result: .failure(URLError(.timedOut)))
+        await first.value
+        #expect(model.phase == .loading)
+        #expect(model.dismiss())
+        rpc.completeFileSearch(1, result: .success(WorkspaceSearchFilesResult(entries: [WorkspaceFileEntry(displayName: "Stale", relativePath: "stale")], indexing: false)))
+        await second.value
+        #expect(!model.isPresented)
+        #expect(model.matches.isEmpty)
+        model.update(text: "@", cursorOffset: 1)
+        #expect(!model.isPresented)
+        _ = model.textByPresentingFileCompletion(in: "")
+        let cancelled = Task { await model.search() }
+        await waitUntil { rpc.fileSearchInputs.count == 3 }
+        cancelled.cancel()
+        rpc.completeFileSearch(2, result: .success(WorkspaceSearchFilesResult(entries: [WorkspaceFileEntry(displayName: "Cancelled", relativePath: "cancelled")], indexing: false)))
+        await cancelled.value
+        #expect(model.matches.isEmpty)
+        model.update(text: "@", cursorOffset: nil)
+        #expect(!model.isPresented)
+    }
+
+    @Test
+    func fileCompletionRetriesIndexingAndFailureWithoutSplittingUnicodeQuery() async throws {
+        let rpc = MockThreadRPCClient(threads: [])
+        defer { rpc.cancelFileSearches() }
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let model = PromptCompletionModel(store: store, scope: .workingDirectory("/qa"))
+        let query = String(repeating: "👩🏽‍💻", count: 30)
+        model.update(text: "@" + query, cursorOffset: query.count + 1)
+        #expect(model.query.utf8.count <= 256)
+        #expect((model.query + "👩🏽‍💻").utf8.count > 256)
+        #expect(model.query.allSatisfy { $0 == "👩🏽‍💻" })
+        for index in 0..<3 {
+            let key = model.searchKey
+            let search = Task { await model.search() }
+            await waitUntil { rpc.fileSearchInputs.count == index + 1 }
+            #expect(rpc.fileSearchInputs.last?.query == model.query)
+            switch index {
+            case 0:
+                rpc.completeFileSearch(index, result: .success(WorkspaceSearchFilesResult(entries: [], indexing: true)))
+            case 1:
+                rpc.completeFileSearch(index, result: .failure(URLError(.notConnectedToInternet)))
+            default:
+                rpc.completeFileSearch(index, result: .success(WorkspaceSearchFilesResult(entries: [WorkspaceFileEntry(displayName: "文件.swift", relativePath: "Sources/文件.swift")], indexing: false)))
+            }
+            await search.value
+            #expect(model.phase == [PromptCompletionModel.Phase.indexing, .failed, .results][index])
+            if index < 2 {
+                #expect(model.matches.isEmpty)
+                model.retry()
+                #expect(model.searchKey != key)
+            }
+        }
+        #expect(model.editBySelectingCurrentMatch(in: "@" + query)?.text == "@Sources/文件.swift ")
+    }
+
+    @Test
     func reasoningDeltasInvalidateOnlyLiveTextAndCompletionPublishesAuthoritativeText() async throws {
         let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
         let store = ThreadStore(rpc: rpc)
@@ -773,6 +874,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private(set) var dispatchedCommands: [Command] = []
     private(set) var providerStartInputs: [String] = []
     private(set) var providerOptionSetInputs: [ProviderOptionsSetParams] = []
+    private(set) var fileSearchInputs: [WorkspaceSearchFilesParams] = []
+    private var fileSearchContinuations: [Int: CheckedContinuation<WorkspaceSearchFilesResult, Error>] = [:]
     var shouldBlockSubscribe = false
     var shouldBlockUnsubscribe = false
     var shouldBlockProviderStart = false
@@ -846,6 +949,24 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     func connect() {}
 
     func disconnect() {}
+
+    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
+        let index = fileSearchInputs.count
+        fileSearchInputs.append(input)
+        return try await withCheckedThrowingContinuation { continuation in
+            fileSearchContinuations[index] = continuation
+        }
+    }
+
+    func completeFileSearch(_ index: Int, result: Result<WorkspaceSearchFilesResult, Error>) {
+        fileSearchContinuations.removeValue(forKey: index)?.resume(with: result)
+    }
+
+    func cancelFileSearches() {
+        let pending = fileSearchContinuations.values
+        fileSearchContinuations.removeAll()
+        for continuation in pending { continuation.resume(throwing: CancellationError()) }
+    }
 
     func subscribeThreadList() async throws -> ThreadListStreamItem {
         if threadListFailuresRemaining > 0 {

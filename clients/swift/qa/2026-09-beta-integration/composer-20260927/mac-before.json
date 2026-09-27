@@ -1,0 +1,115 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 1,
+    "notRun": 0,
+    "passed": 12,
+    "skipped": 0,
+    "total": 13
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-27T15-15-15-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/281DAA93-5640-4147-830A-E75C57A466E7.txt",
+  "results": [
+    {
+      "displayName": "completionRejectsAnObsoleteChoiceAfterCatalogRefresh()",
+      "errorMessages": [
+        "mai/maiTests/ChatBetaIntegrationTests.swift:18 ChatBetaIntegrationTests/completionRejectsAnObsoleteChoiceAfterCatalogRefresh(): Expectation failed: model.edit(selecting: oldChoice, in: \"$\") == nil\nmodel.edit(selecting: oldChoice, in: \"$\") → PromptCompletionEdit(text: \"$old \", cursorOffset: 5)",
+        "mai/maiTests/ChatBetaIntegrationTests.swift:19 ChatBetaIntegrationTests/completionRejectsAnObsoleteChoiceAfterCatalogRefresh(): Expectation failed: model.isPresented\nmodel → mai.PromptCompletionModel\nisPresented → false",
+        "mai/maiTests/ChatBetaIntegrationTests.swift:20 ChatBetaIntegrationTests/completionRejectsAnObsoleteChoiceAfterCatalogRefresh(): Expectation failed: model.editBySelectingCurrentMatch(in: \"$\")?.text == \"$new \"\nmodel.editBySelectingCurrentMatch(in: \"$\")?.text → nil"
+      ],
+      "identifier": "ChatBetaIntegrationTests/completionRejectsAnObsoleteChoiceAfterCatalogRefresh()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "staticCompletionsFilterNavigateDismissAndRespectCapabilities()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/staticCompletionsFilterNavigateDismissAndRespectCapabilities()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "completionCursorRejectsMismatchedPasteAndDeletionRevisions()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/completionCursorRejectsMismatchedPasteAndDeletionRevisions()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "completionCursorCountsUnicodeCharactersAtEveryValidBoundary()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/completionCursorCountsUnicodeCharactersAtEveryValidBoundary()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "completionCursorRejectsNonBoundaryIndicesAndSelectedText()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/completionCursorRejectsNonBoundaryIndicesAndSelectedText()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "sendingAnnotationsOnlyRemovesSubmittedDrafts()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/sendingAnnotationsOnlyRemovesSubmittedDrafts()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "completionPreservesUnicodeSuffixAndRejectsStaleText()",
+      "errorMessages": [],
+      "identifier": "ChatBetaIntegrationTests/completionPreservesUnicodeSuffixAndRejectsStaleText()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "fileCompletionKeepsNewestResultsWhenSearchesFinishOutOfOrder()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/fileCompletionKeepsNewestResultsWhenSearchesFinishOutOfOrder()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "fileCompletionDiscardsRepliesAfterScopeChangeDismissalAndCancellation()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/fileCompletionDiscardsRepliesAfterScopeChangeDismissalAndCancellation()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "fileCompletionRetriesIndexingAndFailureWithoutSplittingUnicodeQuery()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/fileCompletionRetriesIndexingAndFailureWithoutSplittingUnicodeQuery()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "draftStorePersistsTheActiveDraft()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/draftStorePersistsTheActiveDraft()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "sendSnapshotsDraftBeforeProviderStartup()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/sendSnapshotsDraftBeforeProviderStartup()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "annotationSendRetainsFailedDraftAndEditsMadeDuringSuccessfulSend()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/annotationSendRetainsFailedDraftAndEditsMadeDuringSuccessfulSend()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "13 tests: 12 passed, 1 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 13,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.27_15-15-15--0400.xcresult"
+}

@@ -152,7 +152,7 @@ final class PromptCompletionModel {
             clearPresentation()
             return
         }
-        if suppressedInput == SuppressedInput(text: text, cursorOffset: cursorOffset) {
+        if suppressedInput?.matches(text: text, cursorOffset: cursorOffset) == true {
             clearPresentation()
             return
         }
@@ -188,7 +188,7 @@ final class PromptCompletionModel {
     }
 
     func edit(selecting match: PromptCompletionMatch, in text: String) -> PromptCompletionEdit? {
-        guard matches.contains(where: { $0.id == match.id }),
+        guard matches.contains(match),
             let context,
             let edit = context.edit(
                 replacingWith: match.insertionValue,
@@ -200,10 +200,9 @@ final class PromptCompletionModel {
         requestCursor(for: edit)
         latestText = edit.text
         latestCursorOffset = edit.cursorOffset
-        suppressedInput = SuppressedInput(
-            text: edit.text,
-            cursorOffset: edit.cursorOffset
-        )
+        // TextField can publish the inserted text before its new selection.
+        // Keep an accepted token closed across those cursor updates.
+        suppressedInput = .completed(text: edit.text)
         clearPresentation()
         return edit
     }
@@ -233,7 +232,7 @@ final class PromptCompletionModel {
     func dismiss() -> Bool {
         guard context != nil else { return false }
         if let latestCursorOffset {
-            suppressedInput = SuppressedInput(
+            suppressedInput = .dismissed(
                 text: latestText,
                 cursorOffset: latestCursorOffset
             )
@@ -436,8 +435,17 @@ final class PromptCompletionModel {
         return String(value[..<end])
     }
 
-    private struct SuppressedInput: Equatable {
-        let text: String
-        let cursorOffset: Int
+    private enum SuppressedInput {
+        case completed(text: String)
+        case dismissed(text: String, cursorOffset: Int)
+
+        func matches(text: String, cursorOffset: Int) -> Bool {
+            switch self {
+            case .completed(let completedText):
+                completedText == text
+            case .dismissed(let dismissedText, let dismissedOffset):
+                dismissedText == text && dismissedOffset == cursorOffset
+            }
+        }
     }
 }

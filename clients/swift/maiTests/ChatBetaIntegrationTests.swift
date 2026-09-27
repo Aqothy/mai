@@ -5,6 +5,88 @@ import Testing
 
 struct ChatBetaIntegrationTests {
     @Test @MainActor
+    func acceptedCompletionStaysClosedAcrossDelayedCursorUpdates() throws {
+        let model = PromptCompletionModel(store: ThreadStore(), scope: .workingDirectory("/qa"))
+        model.updateCatalog(commands: [SlashCommand(description: nil, hasInput: false, inputHint: nil, name: "review")], skills: [])
+        model.update(text: "/", cursorOffset: 1)
+        let edit = try #require(model.editBySelectingCurrentMatch(in: "/"))
+        #expect(edit.text == "/review")
+        // The actual text field reports new text with its old cursor first.
+        for cursor in [1, edit.cursorOffset, 3] {
+            model.update(text: edit.text, cursorOffset: cursor)
+            #expect(!model.isPresented)
+        }
+        model.update(text: "/revie", cursorOffset: 6)
+        #expect(model.isPresented)
+        #expect(model.dismiss())
+        model.update(text: "/revie", cursorOffset: 6)
+        #expect(!model.isPresented)
+        // Escape still suppresses only the dismissed text/cursor pair.
+        model.update(text: "/revie", cursorOffset: 5)
+        #expect(model.isPresented)
+    }
+
+    @Test @MainActor
+    func completionRejectsAnObsoleteChoiceAfterCatalogRefresh() throws {
+        let model = PromptCompletionModel(store: ThreadStore(), scope: .workingDirectory("/qa"))
+        let old = Skill(description: nil, enabled: true, name: "old", path: "/qa/skill", scope: nil, shortDescription: nil)
+        let refreshed = old.with(name: "new")
+        model.updateCatalog(commands: [], skills: [old])
+        model.update(text: "$", cursorOffset: 1)
+        let oldChoice = try #require(model.selectedMatch)
+        model.updateCatalog(commands: [], skills: [refreshed])
+        #expect(model.selectedMatch?.id == oldChoice.id)
+        #expect(model.selectedMatch?.insertionValue == "new")
+        #expect(model.edit(selecting: oldChoice, in: "$") == nil)
+        #expect(model.isPresented)
+        #expect(model.editBySelectingCurrentMatch(in: "$")?.text == "$new ")
+    }
+
+    @Test @MainActor
+    func staticCompletionsFilterNavigateDismissAndRespectCapabilities() throws {
+        let model = PromptCompletionModel(store: ThreadStore(), scope: .workingDirectory(""))
+        model.update(text: "/", cursorOffset: 1)
+        #expect(!model.isPresented)
+        model.updateCatalog(commands: [
+            SlashCommand(description: "Inspect changes", hasInput: false, inputHint: nil, name: "review"),
+            SlashCommand(description: "Choose a model", hasInput: true, inputHint: "model name", name: "model")
+        ], skills: [
+            Skill(description: "Résumé documents", enabled: true, name: "writer", path: "/qa/writer", scope: "project", shortDescription: nil),
+            Skill(description: nil, enabled: false, name: "disabled", path: nil, scope: nil, shortDescription: nil)
+        ])
+        #expect(model.isPresented)
+        #expect(model.selectedMatch?.insertionValue == "review")
+        #expect(model.moveSelection(by: -1))
+        #expect(model.selectedMatch?.insertionValue == "model")
+        #expect(model.moveSelection(by: 1))
+        #expect(model.selectedMatch?.insertionValue == "review")
+        model.update(text: "/MODEL", cursorOffset: 6)
+        #expect(model.matches.count == 1)
+        #expect(model.editBySelectingCurrentMatch(in: "/MODEL")?.text == "/model ")
+        #expect(model.cursorRequest?.cursorOffset == 7)
+        #expect(!model.isPresented)
+        model.update(text: "/review", cursorOffset: 7)
+        #expect(model.editBySelectingCurrentMatch(in: "/review")?.text == "/review")
+        model.update(text: "/review", cursorOffset: 7)
+        #expect(!model.isPresented)
+        model.update(text: "$resume", cursorOffset: 7)
+        #expect(model.matches.map(\.insertionValue) == ["writer"])
+        #expect(model.dismiss())
+        model.updateCatalog(commands: [], skills: [
+            Skill(description: "Résumé documents", enabled: true, name: "writer", path: "/qa/writer", scope: nil, shortDescription: nil)
+        ])
+        #expect(!model.isPresented)
+        model.update(text: "$resum", cursorOffset: 6)
+        #expect(model.isPresented)
+        model.updateCatalog(commands: [], skills: [])
+        #expect(!model.isPresented)
+        model.update(text: "@", cursorOffset: 1)
+        #expect(!model.isFileCompletionAvailable)
+        #expect(!model.isPresented)
+        #expect(!model.moveSelection(by: 1))
+    }
+
+    @Test @MainActor
     func completionCursorRejectsMismatchedPasteAndDeletionRevisions() {
         let pasted = "Release QA\nStreaming café 👩🏽‍💻 stays intact.\n@file"
         let selection = TextSelection(insertionPoint: pasted.endIndex)
