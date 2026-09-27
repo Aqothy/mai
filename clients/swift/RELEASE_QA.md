@@ -52,7 +52,7 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 - [ ] Camera/photo/file picker availability and permission descriptions match the built platform; denied permissions recover.
 - [ ] Select quote, open Comment, edit/cancel/remove, send annotation-only and mixed prompts; failed send preserves draft; successful send removes only submitted annotations.
 - [x] Queued annotated prompts retain quote/note and steer to their owning chat while another chat is selected; exact message/reference IDs are checked through real Codex and Swift store calls. The existing failed-dispatch regression covers queue retention on rejection.
-- [ ] Verify annotation provenance through fork and the rendered selection/comment controls after row reuse.
+- [ ] Verify annotation provenance through fork and the rendered selection/comment controls after row reuse. September 26 confirms a failure: real Codex reload/fork preserve quote/note as plain text but lose annotation cards and original message references. Native selection/menu reuse passes separately. See [annotation replay finding](qa/2026-09-beta-integration/selection-20260926/ANNOTATION_REPLAY.md); durable metadata repair remains required.
 - [ ] Completion: @file, /command and $skill triggers, filtering, cursor insertion, Unicode, keyboard up/down/enter/escape, mouse selection, stale-result cancellation and provider capability gating.
 - [ ] Enter/Shift+Enter, composer focus, attachment removal, draft persistence, config changes and switching provider/workspace behave correctly.
 

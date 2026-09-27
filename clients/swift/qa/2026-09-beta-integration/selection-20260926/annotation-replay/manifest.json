@@ -1,0 +1,62 @@
+[
+  {
+    "file": "annotation-replay/failure.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay/failure.json",
+    "uncompressedBytes": 92,
+    "uncompressedSHA256": "bf17f0ea6eb78c6fffe9321bbd70bcfa5db465672bdb65142bbf0a6c5a495f2b"
+  },
+  {
+    "file": "annotation-replay/cleanup.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay/cleanup.json",
+    "uncompressedBytes": 50,
+    "uncompressedSHA256": "2ce28ac8e3fb44e3d9d94a8ef4643abce2e818317b41145eb644e28974481516"
+  },
+  {
+    "file": "annotation-replay/daemon.log.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay/daemon.log",
+    "uncompressedBytes": 0,
+    "uncompressedSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "annotation-replay-b/metadata.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/metadata.json",
+    "uncompressedBytes": 471,
+    "uncompressedSHA256": "8a2cd69690194e237f6e6ae7a5e392a4666b227471bcd29bfa4c8586c03b7120"
+  },
+  {
+    "file": "annotation-replay-b/cleanup.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/cleanup.json",
+    "uncompressedBytes": 42,
+    "uncompressedSHA256": "8de72cdc9ab4e9d014f76103102eec70835a9dc02655ccb9848fb3964bb5d5e4"
+  },
+  {
+    "file": "annotation-replay-b/daemon.log.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/daemon.log",
+    "uncompressedBytes": 1348,
+    "uncompressedSHA256": "b6c6a5a94a871a25d9bfbd56bb342a2ec0e7daacde3553495771ecf7f88ea4b5"
+  },
+  {
+    "file": "annotation-replay-b/replayed.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/replayed.json",
+    "uncompressedBytes": 26625,
+    "uncompressedSHA256": "c27b10c99d18e83097c3347db17af63c66eb36cc186fefd90f0b09ddd314e45f"
+  },
+  {
+    "file": "annotation-replay-b/fork.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/fork.json",
+    "uncompressedBytes": 84,
+    "uncompressedSHA256": "670d443b3f561a06dcc4e8a4309bbae7739ba074eadcc692f242c46283570042"
+  },
+  {
+    "file": "annotation-replay-b/fork-replayed.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/fork-replayed.json",
+    "uncompressedBytes": 26777,
+    "uncompressedSHA256": "6c01be17b27df9ae8e2ebfe6053f951813e9a3df3ace145f27691f920700b444"
+  },
+  {
+    "file": "annotation-replay-b/result.json.gz",
+    "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-26/annotation-replay-b/result.json",
+    "uncompressedBytes": 1326,
+    "uncompressedSHA256": "21d3ce94664740fa019511b67e7f5cd2d75345d8e341b89886c73f1d5b13f72b"
+  }
+]
