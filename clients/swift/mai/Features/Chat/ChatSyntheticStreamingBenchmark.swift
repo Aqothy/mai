@@ -14,11 +14,17 @@
         private let messageID = "synthetic-stream-assistant"
         private let characters: [Character]
         private let includesActivity: Bool
+        // Unique section numbers make stale tiles distinguishable in recordings;
+        // identical repeated paragraphs can hide a one-paragraph displacement.
         private let firstThought = String(
-            String(repeating: "**Checking layout**\n\nKeep the thought, tool output and working row in the same frame. Preserve Unicode café 👩🏽‍💻 and partial `inline code` while the text wraps.\n\n", count: 50)
+            (1...50).map { section in
+                "**Checking layout \(section)**\n\nSection \(section) keeps the thought, tool output and working row in the same frame. Preserve Unicode café 👩🏽‍💻 and partial `inline code` while the text wraps.\n\n"
+            }.joined()
                 .prefix(6_000))
         private let secondThought = String(
-            String(repeating: "**Reviewing the result**\n\nThe tool has finished. Keep the next thought stable before the final answer begins.\n\n", count: 20)
+            (1...20).map { section in
+                "**Reviewing result \(section)**\n\nReview \(section): the tool has finished. Keep this thought stable before the final answer begins.\n\n"
+            }.joined()
                 .prefix(1_600))
         private(set) var isFinished = false
 

@@ -1,0 +1,10 @@
+{
+  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
+  "codeImageSHA256": "4ecc21e932c088a5de1ac33e541597285e794b14792b683897be9130c2a2bf3f",
+  "requestedCaptureHz": 120,
+  "container": "custom",
+  "activity": true,
+  "scope": "captured frame inspection; capture overhead invalidates FPS comparisons",
+  "completed": false,
+  "failure": "Synthetic stream did not finish"
+}

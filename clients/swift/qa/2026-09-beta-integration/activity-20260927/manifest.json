@@ -1,0 +1,466 @@
+{
+  "baseCommit": "a3ae5422ff6406e0dde486bce58cb8f7d1119576",
+  "platform": "macOS 27 (26A428), Mac14,9, built-in display maximum 120 Hz",
+  "viewportPoints": [
+    1280,
+    900
+  ],
+  "captures": [
+    {
+      "name": "native-repeated",
+      "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented",
+      "codeImageSHA256": "0d7179a2c59e06122af1f37ab07cd2058f0eb3884392784c4b67cd47d504a4cf",
+      "movieSHA256": "ef55ad267199081db495d9bb58b47aa0d9ad2e6341310a8299aebd2feb5987b1",
+      "movieBytes": 39547290
+    },
+    {
+      "name": "list-repeated",
+      "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented",
+      "codeImageSHA256": "0d7179a2c59e06122af1f37ab07cd2058f0eb3884392784c4b67cd47d504a4cf",
+      "movieSHA256": "2892c6c83b00c5c9506ab98540a013b021c644fd66fc6d6b12076a009dc1afb1",
+      "movieBytes": 46979114
+    },
+    {
+      "name": "native-numbered",
+      "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered",
+      "codeImageSHA256": "b346570400909e9f1c9afa9df9630f6bdd0513b6fe64357a8181679b9bac8ac1",
+      "movieSHA256": "2c528c074af2faa92d3f31c6beb55241bb9b2f54403212c45b5c44c1d1cea618",
+      "movieBytes": 41306203
+    },
+    {
+      "name": "list-numbered",
+      "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry",
+      "codeImageSHA256": "b346570400909e9f1c9afa9df9630f6bdd0513b6fe64357a8181679b9bac8ac1",
+      "movieSHA256": "1873ed67b778b4a5531531f579cc73a7d18835b9c9d71907f651f126c73ddca1",
+      "movieBytes": 52940070
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "native-repeated/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/metadata.json",
+      "sourceSHA256": "0d410bc49b0970cedfaca9eb9f031d3be1febcc1223ae6153cc6396898483891",
+      "sourceBytes": 1470
+    },
+    {
+      "path": "native-repeated/frame-5.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/frame-5.png",
+      "sourceSHA256": "fbdd9fb84ab49511e53762fa86be02ee9389e93630ede4816c0f3dbe1d72b164",
+      "sourceBytes": 195157
+    },
+    {
+      "path": "native-repeated/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/app.log",
+      "sourceSHA256": "76fdae53aefb727adba54f2d1e47b9285aba472ada8251288c86bf36546b5883",
+      "sourceBytes": 27869
+    },
+    {
+      "path": "native-repeated/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "native-repeated/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/capture.log",
+      "sourceSHA256": "485de840c5bd485380cd46925f22d351ccaaba09f3e88329b3c1d741d9f58bc0",
+      "sourceBytes": 10226
+    },
+    {
+      "path": "native-repeated/frames.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-presented/frames.json",
+      "sourceSHA256": "017ac14eb23915384e95a8af395f857198d62208536256f0dd38fd84a8851cd3",
+      "sourceBytes": 239498
+    },
+    {
+      "path": "native-repeated/summary.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/summary.json",
+      "sourceSHA256": "d62f617bef4b7b2002d518a1fd561bb09969056e3d372d4364bdfee66fe32404",
+      "sourceBytes": 1845
+    },
+    {
+      "path": "native-repeated/frame-analysis.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/frame-analysis.json.gz",
+      "sourceSHA256": "4a841e36656fb3b91676a5b36c4dcf29c19aab3b9f0e993695dbb8eed1d26e6f",
+      "sourceBytes": 38134
+    },
+    {
+      "path": "native-repeated/star.csv.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/star.csv",
+      "sourceSHA256": "2a2cefe374355240b4aaca1e13e0539552661786ad4d9a64e628d9842e25ee76",
+      "sourceBytes": 110006
+    },
+    {
+      "path": "native-repeated/overview-1.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/overview-1.png",
+      "sourceSHA256": "106e34027672d01813d79fe593daf8a705f1a6591d0012fd4802044dae8ae93e",
+      "sourceBytes": 719512
+    },
+    {
+      "path": "native-repeated/overview-2.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/overview-2.png",
+      "sourceSHA256": "44e6e1dc6b7222ff18ef92d380feaa4a3c35247d0fd1fcdc5c1329fdbf5d8e45",
+      "sourceBytes": 708402
+    },
+    {
+      "path": "native-repeated/overview-3.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native/overview-3.png",
+      "sourceSHA256": "cb6ec814f4dd2c887615a2a60b5d4e3d5d83d4fba49d7d0bfa93bdc16ba34880",
+      "sourceBytes": 391436
+    },
+    {
+      "path": "list-repeated/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/metadata.json",
+      "sourceSHA256": "b3bc0199e6ea4fefd6e3e196aecd257156f7a7e48b7b3fe7a90c1aa7636e7493",
+      "sourceBytes": 1465
+    },
+    {
+      "path": "list-repeated/frame-5.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/frame-5.png",
+      "sourceSHA256": "ebaa25845700c05c2d22d7eee7765dd5f123b2fd9130c2a4fa2fdf712d9a56dc",
+      "sourceBytes": 173592
+    },
+    {
+      "path": "list-repeated/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/app.log",
+      "sourceSHA256": "4af6f149823f6e57a34476a9cec2772d81c9c081ecdb4bfbb393d2b3a7bf8064",
+      "sourceBytes": 36195
+    },
+    {
+      "path": "list-repeated/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "list-repeated/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/capture.log",
+      "sourceSHA256": "20820e14b5ab898dea2af63e38bb467571ed11f03ae2c2687390a5cb523fc1ec",
+      "sourceBytes": 10703
+    },
+    {
+      "path": "list-repeated/frames.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented/frames.json",
+      "sourceSHA256": "9a0c43e7bf54a6de4984cec4b748bcbe896e912240a97821eb3c0428351260fe",
+      "sourceBytes": 246994
+    },
+    {
+      "path": "list-repeated/summary.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/summary.json",
+      "sourceSHA256": "6825536be47345776791c70a0b1f9e0ff129f095e80e79af5e22ca69003ad907",
+      "sourceBytes": 1955
+    },
+    {
+      "path": "list-repeated/frame-analysis.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/frame-analysis.json.gz",
+      "sourceSHA256": "fd899574f5d970b6d65363a23777ccdd7100a8640b323fcc549467e1dcd9ca0f",
+      "sourceBytes": 40029
+    },
+    {
+      "path": "list-repeated/star.csv.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/star.csv",
+      "sourceSHA256": "94c0c0fca968b3c4c5eb8a78b92c5219a917590ccb776c26465a9a87b95a943e",
+      "sourceBytes": 76942
+    },
+    {
+      "path": "list-repeated/overview-4.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/overview-4.png",
+      "sourceSHA256": "1650121c702c8e5f09e86777595b519bd71cbdc0b470ebd34bfa2b6a270f1647",
+      "sourceBytes": 660647
+    },
+    {
+      "path": "list-repeated/overview-5.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/overview-5.png",
+      "sourceSHA256": "e7c97fd53f12eed6ea2294afb43a1cae61fd717bf593ce4e7cb2cee6b63fa05c",
+      "sourceBytes": 540952
+    },
+    {
+      "path": "list-repeated/overview-1.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/overview-1.png",
+      "sourceSHA256": "2809c5de76507b706aabf6a6faac8e5259cec5b342ec0f33c263a2a3ffe1ae81",
+      "sourceBytes": 997821
+    },
+    {
+      "path": "list-repeated/overview-2.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/overview-2.png",
+      "sourceSHA256": "9e018ef3f55b843288c49b4a1fb2652d5a832857356812ca06b7f4094222ed7a",
+      "sourceBytes": 829529
+    },
+    {
+      "path": "list-repeated/overview-3.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list/overview-3.png",
+      "sourceSHA256": "f7a5a5e5baf2f456e3e1bf69aa17a0eb237ad82cbd9bb7d9fd07add4b6fca05b",
+      "sourceBytes": 774387
+    },
+    {
+      "path": "native-numbered/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/metadata.json",
+      "sourceSHA256": "cdb0042d0475f40b96ac4a3bcf0d4bbedf45c28abab9e418fae97603bab38fd8",
+      "sourceBytes": 1468
+    },
+    {
+      "path": "native-numbered/frame-5.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/frame-5.png",
+      "sourceSHA256": "bfe4f707974edf90e9e7a95a8b33be6cc862d5b238a8e753928e963bf2e6f5de",
+      "sourceBytes": 203544
+    },
+    {
+      "path": "native-numbered/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/app.log",
+      "sourceSHA256": "f697b712f9b39425664b696c21a593a517f4400817f6d186172854292edfdb87",
+      "sourceBytes": 27868
+    },
+    {
+      "path": "native-numbered/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "native-numbered/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/capture.log",
+      "sourceSHA256": "38b9f7e9d2b964c0951247f2447e6c5600c6c8d97b53503e15f0466ab19d2fc0",
+      "sourceBytes": 10466
+    },
+    {
+      "path": "native-numbered/frames.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-numbered/frames.json",
+      "sourceSHA256": "5845041bf1247a7dbac95a6d1d86f4d3f600699444a46de3fd608fca64f55a54",
+      "sourceBytes": 240268
+    },
+    {
+      "path": "native-numbered/summary.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/summary.json",
+      "sourceSHA256": "9a24231ebcd82e390971f18b8c2ff1c89b5d4631744e9317975ecc49b5bb6cdc",
+      "sourceBytes": 1726
+    },
+    {
+      "path": "native-numbered/frame-analysis.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/frame-analysis.json.gz",
+      "sourceSHA256": "ac192c077b379e3006d0fbc7e0fdc4de2839e00161a0b93aa4594c6604dbd3fb",
+      "sourceBytes": 37396
+    },
+    {
+      "path": "native-numbered/star.csv.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/star.csv",
+      "sourceSHA256": "cfcfbaf7a8243fb1348bf81bf1a7c5476b5e0daf2164cc116af35ed2b1037a61",
+      "sourceBytes": 111925
+    },
+    {
+      "path": "native-numbered/overview-1.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/overview-1.png",
+      "sourceSHA256": "ebd0f07ad2f560629f6d4f19fb2b8a3bf6401a12e663ab53181dbc0084239627",
+      "sourceBytes": 518156
+    },
+    {
+      "path": "native-numbered/candidate-1163.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/candidates/candidate-1163.png",
+      "sourceSHA256": "4fe83bc338b97a6874da7b6dc71f0cd9f7344a02a52675812ae53151d1a17da8",
+      "sourceBytes": 346904
+    },
+    {
+      "path": "native-numbered/candidate-2454.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/candidates/candidate-2454.png",
+      "sourceSHA256": "05b980a5034c3f218a32f812dfad13c6e4de0913e081970e60ba13c58530823d",
+      "sourceBytes": 238252
+    },
+    {
+      "path": "native-numbered/candidate-2393.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/candidates/candidate-2393.png",
+      "sourceSHA256": "3efc41f24c55e1c27a56972f1e9c537c9d09f00da6ff408dc0d71a5bcaa0b29d",
+      "sourceBytes": 296956
+    },
+    {
+      "path": "native-numbered/candidate-1196.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-native-numbered/candidates/candidate-1196.png",
+      "sourceSHA256": "6bdb73a3eb3decaea01108c381523c2d92a7a5ba40b2a03ba68e610108bb9e5e",
+      "sourceBytes": 279160
+    },
+    {
+      "path": "list-numbered/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/metadata.json",
+      "sourceSHA256": "48d6b683e61ad81116a46095e181d0fe65de5e1d5f102f8383723fce15b98b63",
+      "sourceBytes": 1471
+    },
+    {
+      "path": "list-numbered/frame-5.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/frame-5.png",
+      "sourceSHA256": "21cfa05c675b5933746a516ac7a55ef967f0ca795c4fa5d995bc69b419c3438d",
+      "sourceBytes": 184705
+    },
+    {
+      "path": "list-numbered/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/app.log",
+      "sourceSHA256": "98338cc0a974d8c1c9b5a0dbe7d6a8e9a0a07a9f4cff58958465f0fbe33a0b2b",
+      "sourceBytes": 35870
+    },
+    {
+      "path": "list-numbered/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "list-numbered/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/capture.log",
+      "sourceSHA256": "fe50ea5f7bef1a95ed152054a42a702dc8088cb3dff762717993609e8fd23e99",
+      "sourceBytes": 10860
+    },
+    {
+      "path": "list-numbered/frames.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry/frames.json",
+      "sourceSHA256": "779e1b908a55a098c5a9c43ac847d313915fbcf8c3256eb519d7bbeff50b9805",
+      "sourceBytes": 253268
+    },
+    {
+      "path": "list-numbered/summary.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/summary.json",
+      "sourceSHA256": "0fd4f7cda7dc1f06f9cc92aee671d12c77d363475146156156b9b7d073bc1266",
+      "sourceBytes": 1721
+    },
+    {
+      "path": "list-numbered/frame-analysis.json.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/frame-analysis.json.gz",
+      "sourceSHA256": "225249a0174ca335f86511ddbb3285b1b9dbdeb535888e4af1489272beb42af7",
+      "sourceBytes": 41034
+    },
+    {
+      "path": "list-numbered/star.csv.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/star.csv",
+      "sourceSHA256": "275a62d7b15cd980c65311c86ffc0834e42b62224df7b16a957964a30e014f37",
+      "sourceBytes": 82393
+    },
+    {
+      "path": "list-numbered/overview-1.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/overview-1.png",
+      "sourceSHA256": "a3ea0281f2038bcaea327a77d1275bf18df64aa8ddddca3887f042f8c88b1162",
+      "sourceBytes": 265825
+    },
+    {
+      "path": "list-numbered/candidate-2567.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/candidates/candidate-2567.png",
+      "sourceSHA256": "79b5bb83852cf1689e09db0d0bbd7eb67bffe2ed66f6703d3c1b0c7934e9a2dd",
+      "sourceBytes": 327408
+    },
+    {
+      "path": "list-numbered/candidate-2500.png",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/analysis-list-numbered/candidates/candidate-2500.png",
+      "sourceSHA256": "ea6a812204eafaa9308e6403736501c992cc333a1fa5e7a213f3659990451209",
+      "sourceBytes": 301729
+    },
+    {
+      "path": "failed-attempts/activity-native/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native/metadata.json",
+      "sourceSHA256": "3ff8c644a0f26be78db9c6b68abd58c80cc2b9afc72df8f7b3f5fdde8e0695e0",
+      "sourceBytes": 446
+    },
+    {
+      "path": "failed-attempts/activity-native/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native/app.log",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-native/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-native/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native/capture.log",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-native-windowed/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-windowed/metadata.json",
+      "sourceSHA256": "16f8e2ef4bee2452333443a44809dd4b1e9eddf1161aebbd9eab384e85ba66b3",
+      "sourceBytes": 809
+    },
+    {
+      "path": "failed-attempts/activity-native-windowed/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-windowed/app.log",
+      "sourceSHA256": "65c5bf506013b0ab046bb4a0232af6777ae86e5a3679748bbd8be1d45f9fb8f0",
+      "sourceBytes": 7810
+    },
+    {
+      "path": "failed-attempts/activity-native-windowed/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-windowed/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-native-windowed/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-native-windowed/capture.log",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-list-numbered/metadata.json",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered/metadata.json",
+      "sourceSHA256": "86f56fcf459062774667e3a4aa17f5fa1fd5a09c0bd12b395fecbe88139bbe5e",
+      "sourceBytes": 1494
+    },
+    {
+      "path": "failed-attempts/activity-list-numbered/app.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered/app.log",
+      "sourceSHA256": "de2c420ae1a3af8f6ba2a6a67695d94a5da450741114baa262a0c57f03ac4c76",
+      "sourceBytes": 25517
+    },
+    {
+      "path": "failed-attempts/activity-list-numbered/app.stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered/app.stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/activity-list-numbered/capture.log.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered/capture.log",
+      "sourceSHA256": "38a1a47a058da7d8185ffc9d85888897261066326776c733ed8e7bf886a3021c",
+      "sourceBytes": 7487
+    },
+    {
+      "path": "failed-attempts/launch-diagnostic/stdout.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/launch-diagnostic/stdout",
+      "sourceSHA256": "a6b9ca4736e6adaa4b988262194b71a0fc942235cdc49d865f95094ffa4b00f4",
+      "sourceBytes": 7967
+    },
+    {
+      "path": "failed-attempts/launch-diagnostic/stderr.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/launch-diagnostic/stderr",
+      "sourceSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sourceBytes": 0
+    },
+    {
+      "path": "failed-attempts/launch-diagnostic/sample.txt.gz",
+      "source": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/launch-diagnostic/sample.txt",
+      "sourceSHA256": "201ce3adf9d94b9c228495210253642649082f8a66e8c7677b2416fb16dcefa1",
+      "sourceBytes": 230057
+    },
+    {
+      "path": "viewport-build.log.gz",
+      "source": "/private/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260927-010820.txt",
+      "sourceSHA256": "e2d30b8db7a2da4a42997f0a1739b2c75cc6f4cb69533bf0a23904c944d4b64d",
+      "sourceBytes": 189765
+    },
+    {
+      "path": "numbered-build.log.gz",
+      "source": "/private/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260927-101202.txt",
+      "sourceSHA256": "622a63ce2eef7ca4cfcd80b5a5fd0ce2e7b8d42c4b3940a965b104bce0465d20",
+      "sourceBytes": 191634
+    },
+    {
+      "path": "ios18-build.log.gz",
+      "source": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260927-101747.txt",
+      "sourceSHA256": "dfbee193db9006ce63b23af164fdc78ef9fea6d804fbdab07ecf449e7ddc8068",
+      "sourceBytes": 194717
+    }
+  ],
+  "sourceFiles": {
+    "clients/swift/mai/Features/Chat/ChatRealThreadBenchmarkRunner.swift": "b9991bd58f0e5ed17f0a7fdc1ea18c9e8b32133cad97dccdb62f2dee97711daa",
+    "clients/swift/mai/Features/Chat/ChatSyntheticStreamingBenchmark.swift": "acc4db7ce990000c935b1dd9e1a3e31498851ee493bdc1600baf9f5f1ce2f70a",
+    "clients/swift/qa/2026-09-beta-integration/activity-20260927/analyze-activity.py": "d2e848e957feec48008483840425f988f1c8b1eb80190646f24499aae35ce41c",
+    "clients/swift/qa/2026-09-beta-integration/activity-20260927/export-candidates.py": "206ef13e43942182f0aa0ea119f0504e684ac818797da370e6405524fd67edba"
+  }
+}

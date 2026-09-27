@@ -1,0 +1,83 @@
+{
+  "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-presented",
+  "movieSHA256": "2892c6c83b00c5c9506ab98540a013b021c644fd66fc6d6b12076a009dc1afb1",
+  "movieBytes": 46979114,
+  "codeImageSHA256": "0d7179a2c59e06122af1f37ab07cd2058f0eb3884392784c4b67cd47d504a4cf",
+  "frames": 3017,
+  "durationSeconds": 38.592,
+  "effectiveCaptureHz": 78.15091210613599,
+  "captureIntervalMs": {
+    "median": 11.167000000000371,
+    "p99": 22.334000000000742,
+    "maximum": 156.333
+  },
+  "starMatchedFrames": 2778,
+  "starYHistogram": {
+    "750": 2778
+  },
+  "firstStarSeconds": 2.434333,
+  "lastStarSeconds": 37.910833,
+  "unmatchedBetweenFirstAndLast": [],
+  "stationaryCapturedStar": true,
+  "seamCandidates": [
+    518,
+    522,
+    535,
+    540,
+    554,
+    574,
+    588,
+    603,
+    620,
+    639,
+    643,
+    656,
+    742,
+    796,
+    813,
+    818,
+    850,
+    863,
+    1128,
+    1131,
+    1139,
+    1143,
+    1160,
+    1183,
+    1194,
+    1227,
+    2448,
+    2514
+  ],
+  "phases": [
+    {
+      "name": "first-thought-start",
+      "secondsFromRecorderLaunch": 2.937969207763672
+    },
+    {
+      "name": "first-thought-completed",
+      "secondsFromRecorderLaunch": 11.707357168197632
+    },
+    {
+      "name": "tool-start",
+      "secondsFromRecorderLaunch": 11.707798957824707
+    },
+    {
+      "name": "tool-completed",
+      "secondsFromRecorderLaunch": 13.587899208068848
+    },
+    {
+      "name": "second-thought-completed",
+      "secondsFromRecorderLaunch": 15.688886165618896
+    },
+    {
+      "name": "reply-start",
+      "secondsFromRecorderLaunch": 15.689162254333496
+    },
+    {
+      "name": "turn-completed",
+      "secondsFromRecorderLaunch": 38.139525175094604
+    }
+  ],
+  "scope": "Recorded star tracking and seam candidate ranking only. Recorder launch is an approximate phase offset; capture startup adds latency. Missing display frames and all disclosure interactions remain outside this evidence."
+}

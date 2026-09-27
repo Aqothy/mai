@@ -297,8 +297,9 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             window.setContentSize(target)
             window.center()
             window.makeKeyAndOrderFront(nil)
-            // Window restoration can race the first SwiftUI task. Verify the
-            // actual viewport instead of accepting a successful resize request.
+            // Window restoration can race the first SwiftUI task. AppKit can
+            // report the requested frame before WindowServer presents it, so
+            // verify both sides before a recorder consumes the ready marker.
             // A cold full-history List can occupy the main actor during its
             // first mount. Keep setup separate from measured scrolling and
             // allow it to settle before applying the same viewport checks.
@@ -307,10 +308,19 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             while ContinuousClock.now < deadline {
                 let actual = window.contentRect(forFrameRect: window.frame).size
                 let onScreen = window.screen?.frame.contains(window.frame) == true
+                    && window.isOnActiveSpace && window.occlusionState.contains(.visible)
+                let presentedWindows = CGWindowListCopyWindowInfo(
+                    .optionIncludingWindow, CGWindowID(window.windowNumber)) as? [[String: Any]]
+                let presented = presentedWindows?.first
+                let bounds = presented?[kCGWindowBounds as String] as? [String: Double]
+                let presentationMatches = presented?[kCGWindowIsOnscreen as String] as? Bool == true
+                    && bounds?["Width"].map { abs($0 - window.frame.width) <= 1 } == true
+                    && bounds?["Height"].map { abs($0 - window.frame.height) <= 1 } == true
                 if abs(actual.width - target.width) <= 1,
-                    abs(actual.height - target.height) <= 1, onScreen
+                    abs(actual.height - target.height) <= 1, onScreen, presentationMatches,
+                    !window.styleMask.contains(.fullScreen)
                 {
-                    if stableSince.duration(to: .now) >= .milliseconds(200) {
+                    if stableSince.duration(to: .now) >= .milliseconds(750) {
                         ChatBenchmarkAutoRun.trace(
                             "benchmark viewport verified windowNumber=\(window.windowNumber) content=\(actual) frame=\(window.frame)")
                         return true

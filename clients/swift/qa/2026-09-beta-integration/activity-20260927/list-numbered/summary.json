@@ -1,0 +1,57 @@
+{
+  "capture": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-27/activity-list-numbered-retry",
+  "movieSHA256": "1873ed67b778b4a5531531f579cc73a7d18835b9c9d71907f651f126c73ddca1",
+  "movieBytes": 52940070,
+  "codeImageSHA256": "b346570400909e9f1c9afa9df9630f6bdd0513b6fe64357a8181679b9bac8ac1",
+  "frames": 3094,
+  "durationSeconds": 39.061,
+  "effectiveCaptureHz": 79.18384065948132,
+  "captureIntervalMs": {
+    "median": 11.167000000000371,
+    "p99": 22.334000000000742,
+    "maximum": 122.83300000000001
+  },
+  "starMatchedFrames": 2857,
+  "starYHistogram": {
+    "750": 2857
+  },
+  "firstStarSeconds": 2.412,
+  "lastStarSeconds": 38.458,
+  "unmatchedBetweenFirstAndLast": [],
+  "stationaryCapturedStar": true,
+  "seamCandidates": [
+    2500,
+    2567
+  ],
+  "phases": [
+    {
+      "name": "first-thought-start",
+      "secondsFromRecorderLaunch": 2.823763847351074
+    },
+    {
+      "name": "first-thought-completed",
+      "secondsFromRecorderLaunch": 11.62163496017456
+    },
+    {
+      "name": "tool-start",
+      "secondsFromRecorderLaunch": 11.622097969055176
+    },
+    {
+      "name": "tool-completed",
+      "secondsFromRecorderLaunch": 13.490481853485107
+    },
+    {
+      "name": "second-thought-completed",
+      "secondsFromRecorderLaunch": 15.611616134643555
+    },
+    {
+      "name": "reply-start",
+      "secondsFromRecorderLaunch": 15.611932039260864
+    },
+    {
+      "name": "turn-completed",
+      "secondsFromRecorderLaunch": 38.47934913635254
+    }
+  ],
+  "scope": "Recorded star tracking and seam candidate ranking only. Recorder launch is an approximate phase offset; capture startup adds latency. Missing display frames and all disclosure interactions remain outside this evidence."
+}
