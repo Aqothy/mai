@@ -276,7 +276,13 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: promptTextWithAnnotations(view.Message.Text, view.Message.Annotations), Attachments: view.Message.Attachments, Annotations: view.Message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection)}); err != nil {
+	presentation := &provider.PromptPresentation{MessageID: string(view.Message.ID)}
+	if len(view.Message.Annotations) > 0 {
+		text := view.Message.Text
+		presentation.Text = &text
+		presentation.Annotations = append([]provider.PromptAnnotation(nil), view.Message.Annotations...)
+	}
+	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: promptTextWithAnnotations(view.Message.Text, view.Message.Annotations), Attachments: view.Message.Attachments, Annotations: view.Message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
 }

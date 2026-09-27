@@ -377,6 +377,19 @@ type SendTurnInput struct {
 	Annotations    []PromptAnnotation `json:"annotations,omitempty"`
 	ModelSelection *ModelSelection    `json:"modelSelection,omitempty"`
 	Options        json.RawMessage    `json:"options,omitempty"`
+	// Presentation and ClientMessageID are local replay bookkeeping, never
+	// provider-visible prompt text or client API fields.
+	Presentation    *PromptPresentation `json:"-"`
+	ClientMessageID string              `json:"-"`
+}
+
+// PromptPresentation retains client-owned identity and annotation cards. Text
+// is present only when annotations changed the provider-facing prompt; ordinary
+// conversation content remains provider-owned.
+type PromptPresentation struct {
+	MessageID   string             `json:"messageId"`
+	Text        *string            `json:"text,omitempty"`
+	Annotations []PromptAnnotation `json:"annotations,omitempty"`
 }
 
 type InterruptTurnInput struct {
@@ -605,15 +618,18 @@ type PlanEntry struct {
 // arguments; Data is retained only for adapter diagnostics and non-tool native
 // details, and must not be projected into client-visible tool items.
 type RuntimeEventPayload struct {
-	TurnState   RuntimeTurnState         `json:"turnState,omitempty"`
-	StopReason  string                   `json:"stopReason,omitempty"`
-	StreamKind  RuntimeContentStreamKind `json:"streamKind,omitempty"`
-	Delta       string                   `json:"delta,omitempty"`
-	Attachments []Attachment             `json:"attachments,omitempty"`
-	ItemType    ItemKind                 `json:"itemType,omitempty"`
-	ItemStatus  ItemStatus               `json:"status,omitempty"`
-	RequestType RuntimeRequestType       `json:"requestType,omitempty"`
-	Decision    ApprovalDecision         `json:"decision,omitempty"`
+	// Internal replay metadata, resolved by the service from exact client IDs.
+	ClientMessageID string                   `json:"-"`
+	Presentation    *PromptPresentation      `json:"-"`
+	TurnState       RuntimeTurnState         `json:"turnState,omitempty"`
+	StopReason      string                   `json:"stopReason,omitempty"`
+	StreamKind      RuntimeContentStreamKind `json:"streamKind,omitempty"`
+	Delta           string                   `json:"delta,omitempty"`
+	Attachments     []Attachment             `json:"attachments,omitempty"`
+	ItemType        ItemKind                 `json:"itemType,omitempty"`
+	ItemStatus      ItemStatus               `json:"status,omitempty"`
+	RequestType     RuntimeRequestType       `json:"requestType,omitempty"`
+	Decision        ApprovalDecision         `json:"decision,omitempty"`
 	// Detail is free-form context for the event. On an ItemCompleted event for
 	// a reasoning item it carries the provider's full reasoning text, which
 	// ingestion treats as authoritative over the streamed deltas.

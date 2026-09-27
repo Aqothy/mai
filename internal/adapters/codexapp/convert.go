@@ -343,11 +343,16 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 	switch item.Type {
 	case "userMessage":
 		text, attachments := userMessageContent(item.Content)
+		clientID := ""
+		if item.ClientID != nil {
+			clientID = *item.ClientID
+		}
 		event.Payload = provider.RuntimeEventPayload{
-			ItemType:    provider.ItemKindUserMessage,
-			ItemStatus:  status,
-			Detail:      text,
-			Attachments: attachments,
+			ClientMessageID: clientID,
+			ItemType:        provider.ItemKindUserMessage,
+			ItemStatus:      status,
+			Detail:          text,
+			Attachments:     attachments,
 		}
 	case "agentMessage":
 		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindAssistantMessage, ItemStatus: status}

@@ -485,7 +485,17 @@ func (i *ProviderRuntimeIngestion) ingestUserMessage(event provider.RuntimeEvent
 	i.completeThreadText(event.ThreadID, createdAt)
 	messageID := i.userMessageID(event)
 	text := firstNonEmpty(event.Payload.Detail, event.Payload.Message, event.Payload.Delta)
-	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
+	var annotations []provider.PromptAnnotation
+	if presentation := event.Payload.Presentation; presentation != nil {
+		if presentation.MessageID != "" {
+			messageID = MessageID(presentation.MessageID)
+		}
+		if presentation.Text != nil {
+			text = *presentation.Text
+		}
+		annotations = append([]provider.PromptAnnotation(nil), presentation.Annotations...)
+	}
+	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, Annotations: annotations, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
 }
 
 func (i *ProviderRuntimeIngestion) userMessageID(event provider.RuntimeEvent) MessageID {

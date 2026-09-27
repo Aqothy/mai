@@ -138,6 +138,10 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 }
 
 func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
+	clientMessageID := input.ClientMessageID
+	if clientMessageID == "" {
+		clientMessageID = input.TurnID
+	}
 	h.mu.Lock()
 	session := h.sessionsByLocal[input.ThreadID]
 	if session == nil {
@@ -163,7 +167,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		if err := h.rpc.call(ctx, "turn/steer", map[string]any{
 			"threadId":            nativeThread,
 			"expectedTurnId":      activeNativeTurn,
-			"clientUserMessageId": input.TurnID,
+			"clientUserMessageId": clientMessageID,
 			"input":               turnInput,
 		}, &response); err != nil {
 			return err
@@ -191,7 +195,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	}
 	params := map[string]any{
 		"threadId":            nativeThread,
-		"clientUserMessageId": input.TurnID,
+		"clientUserMessageId": clientMessageID,
 		"input":               turnInput,
 	}
 	if input.ModelSelection != nil && input.ModelSelection.Model != "" {

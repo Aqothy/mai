@@ -1,5 +1,7 @@
 # Confirmed failure: annotation metadata does not survive reload/fork
 
+The forward-looking repair and its successful checks are recorded in [ANNOTATION_FIX.md](ANNOTATION_FIX.md). This report retains the original failure and its limits.
+
 The actual daemon at `034ab57` (production source unchanged through `eada62a`) and bundled Codex `0.158.0-alpha.2` reproduce this on the disposable annotated steering chat from the September 22 workflow QA. A consistent SQLite backup is used in a fresh data directory. Only that known chat is resumed and forked; no new model turn or account-wide history listing is performed.
 
 ## Result
@@ -20,7 +22,7 @@ The actual daemon at `034ab57` (production source unchanged through `eada62a`) a
 
 A repair should persist client-owned annotation metadata separately from provider-owned conversation history, identify it by provider instance/session and an exact stable client message identity, and apply it only to the matching replay item. It must preserve the original visible prompt, quote, note and referenced message ID through restart and fork, support distinct steering messages within one turn, and keep identical-looking repeated prompts distinct. Storage failures must not silently accept an annotated send while dropping its metadata. Copying fork metadata must leave the source untouched and not attach records to unrelated native sessions. Old records that never stored this metadata cannot be reconstructed reliably; keep their readable text instead of guessing references.
 
-The locally generated schema from the installed Codex executable exposes `clientUserMessageId` on turn start/steer and nullable `clientId` on replayed user-message items. The current adapter sends the **turn ID** for `clientUserMessageId` and does not decode `clientId`; reusing a turn ID for steering cannot identify individual prompts. This provides a concrete protocol path for a repair, but it still needs implementation and end-to-end validation. Providers/runtimes without this identity need an explicit compatibility policy, not text matching.
+The locally generated schema from the installed Codex executable exposes `clientUserMessageId` on turn start/steer and nullable `clientId` on replayed user-message items. The original adapter sends the **turn ID** for `clientUserMessageId` and does not propagate the decoded `clientId` into replay; reusing a turn ID for steering cannot identify individual prompts. This provides the protocol path used by the subsequent repair. Providers/runtimes without this identity need an explicit compatibility policy, not text matching.
 
 ## Harness notes
 

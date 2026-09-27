@@ -24,6 +24,7 @@ var _ RouteStore = (*SQLite)(nil)
 var _ ThreadStore = (*SQLite)(nil)
 var _ ImportStore = (*SQLite)(nil)
 var _ TerminalStore = (*SQLite)(nil)
+var _ PromptStore = (*SQLite)(nil)
 
 const schema = `
 CREATE TABLE IF NOT EXISTS threads (
@@ -69,6 +70,15 @@ CREATE TABLE IF NOT EXISTS terminal_threads (
 	cwd         TEXT NOT NULL,
 	created_at  TEXT NOT NULL,
 	updated_at  TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS prompt_presentations (
+	instance_id TEXT NOT NULL,
+	provider_session_id TEXT NOT NULL,
+	client_message_id TEXT NOT NULL,
+	input_hash TEXT NOT NULL,
+	presentation TEXT NOT NULL,
+	PRIMARY KEY (instance_id, provider_session_id, client_message_id)
 ) STRICT;
 `
 

@@ -1,5 +1,6 @@
 // Package store persists thread and provider-session metadata.
-// Conversation history remains provider-owned.
+// Conversation history remains provider-owned; client annotation presentation
+// is stored separately and only applied to exact native replay identities.
 package store
 
 import (
@@ -30,6 +31,22 @@ type RouteStore interface {
 
 	SaveInstance(spec provider.InstanceSpec) error
 	LoadInstances() ([]provider.InstanceSpec, error)
+}
+
+type PromptRecord struct {
+	ClientMessageID string
+	InputHash       string
+	Presentation    provider.PromptPresentation
+}
+
+// PromptStore stores only client-owned message identity and annotation cards.
+// Records never create history rows; the owning provider must replay the same
+// client ID and input hash before presentation metadata can be applied.
+type PromptStore interface {
+	SavePrompt(instanceID provider.InstanceID, sessionID string, record PromptRecord) error
+	LoadPrompts(instanceID provider.InstanceID, sessionID string) (map[string]PromptRecord, error)
+	ForkPrompts(instanceID provider.InstanceID, sourceSessionID, destinationSessionID string) error
+	DeletePrompts(instanceID provider.InstanceID, sessionID string) error
 }
 
 // ThreadMeta contains durable thread-list metadata.

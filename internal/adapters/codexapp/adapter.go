@@ -102,6 +102,8 @@ type Instance struct {
 	closeErr   error
 }
 
+func (*Instance) ReplaysClientMessageIDs() bool { return true }
+
 func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (*Instance, error) {
 	if spec.InstanceID == "" {
 		return nil, fmt.Errorf("missing provider instance id")

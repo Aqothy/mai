@@ -30,6 +30,21 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestInstanceUsesDistinctClientMessageIDsForSteering(t *testing.T) {
+	instance := openFakeInstance(t, "message-identities", func(provider.RuntimeEvent) {})
+	if _, err := instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", Cwd: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+	for index, input := range []provider.SendTurnInput{
+		{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello", ClientMessageID: "client-start"},
+		{ThreadID: "local-thread", TurnID: "local-turn", Input: "one more detail", ClientMessageID: "client-steer"},
+	} {
+		if err := instance.SendTurn(testContext(t), input); err != nil {
+			t.Fatalf("send %d: %v", index, err)
+		}
+	}
+}
+
 func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	events := make(chan provider.RuntimeEvent, 32)
 	instance := openFakeInstance(t, "lifecycle", func(event provider.RuntimeEvent) { events <- event })
@@ -729,7 +744,11 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "turn/start":
-			if err := validateTurnStart(message); err != nil {
+			clientID := "local-turn"
+			if scenario == "message-identities" {
+				clientID = "client-start"
+			}
+			if err := validateTurnStart(message, clientID); err != nil {
 				return err
 			}
 			if scenario == "service-tier" {
@@ -780,7 +799,11 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "turn/steer":
-			if err := validateTurnSteer(message); err != nil {
+			clientID := "local-turn"
+			if scenario == "message-identities" {
+				clientID = "client-steer"
+			}
+			if err := validateTurnSteer(message, clientID); err != nil {
 				return err
 			}
 			if err := writeFakeResult(encoder, message["id"], map[string]any{"turnId": "native-turn"}); err != nil {
@@ -870,7 +893,7 @@ func validateInitialize(message fakeWireMessage) error {
 	return nil
 }
 
-func validateTurnStart(message fakeWireMessage) error {
+func validateTurnStart(message fakeWireMessage, clientID string) error {
 	var params struct {
 		ThreadID            string         `json:"threadId"`
 		ClientUserMessageID string         `json:"clientUserMessageId"`
@@ -879,22 +902,23 @@ func validateTurnStart(message fakeWireMessage) error {
 	if err := decodeFakeParams(message, &params); err != nil {
 		return err
 	}
-	if params.ThreadID != "native-thread" || params.ClientUserMessageID != "local-turn" || len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "hello" {
+	if params.ThreadID != "native-thread" || params.ClientUserMessageID != clientID || len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "hello" {
 		return fmt.Errorf("invalid turn/start params: %s", fakeMessageJSON(message))
 	}
 	return nil
 }
 
-func validateTurnSteer(message fakeWireMessage) error {
+func validateTurnSteer(message fakeWireMessage, clientID string) error {
 	var params struct {
-		ThreadID       string         `json:"threadId"`
-		ExpectedTurnID string         `json:"expectedTurnId"`
-		Input          []appUserInput `json:"input"`
+		ThreadID            string         `json:"threadId"`
+		ExpectedTurnID      string         `json:"expectedTurnId"`
+		ClientUserMessageID string         `json:"clientUserMessageId"`
+		Input               []appUserInput `json:"input"`
 	}
 	if err := decodeFakeParams(message, &params); err != nil {
 		return err
 	}
-	if params.ThreadID != "native-thread" || params.ExpectedTurnID != "native-turn" || len(params.Input) != 1 || params.Input[0].Text != "one more detail" {
+	if params.ThreadID != "native-thread" || params.ExpectedTurnID != "native-turn" || params.ClientUserMessageID != clientID || len(params.Input) != 1 || params.Input[0].Text != "one more detail" {
 		return fmt.Errorf("invalid turn/steer params: %s", fakeMessageJSON(message))
 	}
 	return nil

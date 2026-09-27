@@ -65,6 +65,12 @@ type SessionForker interface {
 	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
 }
 
+// ClientMessageIdentityProvider can return the exact dispatch identity in
+// native history. Providers without it retain their ordinary text replay.
+type ClientMessageIdentityProvider interface {
+	ReplaysClientMessageIDs() bool
+}
+
 // OptionsSessionProvider is optional. Providers with a static catalog can
 // implement these methods without opening a native session; ACP uses an
 // unbound session so dependent configuration remains spec-correct.
@@ -116,6 +122,7 @@ type Service struct {
 	nextEventGeneration    uint64
 
 	routeStore     store.RouteStore
+	promptStore    store.PromptStore
 	storeMu        sync.Mutex
 	routeBindMu    sync.Mutex
 	dirtyInstances map[provider.InstanceID]struct{}
@@ -140,6 +147,10 @@ type Option func(*Service)
 // WithRouteStore enables persistence for routes and instance specs.
 func WithRouteStore(routeStore store.RouteStore) Option {
 	return func(s *Service) { s.routeStore = routeStore }
+}
+
+func WithPromptStore(promptStore store.PromptStore) Option {
+	return func(s *Service) { s.promptStore = promptStore }
 }
 
 func New(openInstance InstanceFactory, opts ...Option) *Service {
@@ -737,7 +748,13 @@ const sessionManageRPCTimeout = 60 * time.Second
 
 func (s *Service) DeleteSession(ctx context.Context, instanceID provider.InstanceID, sessionID string) error {
 	return s.manageSession(ctx, instanceID, sessionID, "delete", func(ctx context.Context, manager SessionManager) error {
-		return manager.DeleteSession(ctx, sessionID)
+		if err := manager.DeleteSession(ctx, sessionID); err != nil {
+			return err
+		}
+		if s.promptStore != nil {
+			return s.promptStore.DeletePrompts(instanceID, sessionID)
+		}
+		return nil
 	})
 }
 
@@ -783,6 +800,21 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (provi
 	}
 	if result.Summary.SessionID == route.ProviderSessionID {
 		return "", provider.SessionSummary{}, fmt.Errorf("provider fork returned the source session id")
+	}
+	if s.promptStore != nil {
+		if err := s.promptStore.ForkPrompts(route.InstanceID, route.ProviderSessionID, result.Summary.SessionID); err != nil {
+			// The caller cannot import a fork with silently missing cards. Undo
+			// only this newly created native fork when metadata cannot be copied.
+			if manager, ok := instance.(SessionManager); ok {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionManageRPCTimeout)
+				cleanupErr := manager.DeleteSession(cleanupCtx, result.Summary.SessionID)
+				cancel()
+				if cleanupErr != nil {
+					return "", provider.SessionSummary{}, fmt.Errorf("copy fork annotations: %w; clean up native fork %q: %v", err, result.Summary.SessionID, cleanupErr)
+				}
+			}
+			return "", provider.SessionSummary{}, fmt.Errorf("copy fork annotations: %w", err)
+		}
 	}
 	if result.Summary.Cwd == "" {
 		result.Summary.Cwd = route.StartInput.Cwd
@@ -973,11 +1005,24 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 		}
 	}
+	// Read before starting replay: a storage error must not consume the
+	// adapter's one-shot history response and silently drop annotation cards.
+	var prompts map[string]store.PromptRecord
+	if s.promptStore != nil && input.ReplayHistory && input.ProviderSessionID != "" {
+		var err error
+		prompts, err = s.promptStore.LoadPrompts(input.ProviderInstanceID, input.ProviderSessionID)
+		if err != nil {
+			return provider.StartSessionResult{}, nil, 0, err
+		}
+	}
 	result, err := instance.StartSession(ctx, input)
 	if err != nil {
 		return provider.StartSessionResult{}, nil, 0, err
 	}
 	info := instance.Info()
+	if result.Session.ProviderSessionID == input.ProviderSessionID {
+		restorePromptPresentations(result.Replay, prompts)
+	}
 	for index := range result.Replay {
 		result.Replay[index].Provider = info.Driver
 		result.Replay[index].ProviderInstanceID = input.ProviderInstanceID
@@ -1006,6 +1051,11 @@ func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) er
 		return fmt.Errorf("provider turn route requires threadId")
 	}
 	return s.withThreadInstance(ctx, input.ThreadID, true, "send", func(instance ProviderInstance) error {
+		var err error
+		input, err = s.preparePromptPresentation(instance, input)
+		if err != nil {
+			return err
+		}
 		return instance.SendTurn(ctx, input)
 	})
 }

@@ -108,6 +108,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	var providerOptions []providerservice.Option
 	if metadata != nil {
 		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
+		providerOptions = append(providerOptions, providerservice.WithPromptStore(metadata))
 		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
 	}
 	s.providerService = providerservice.New(openProviderInstance, providerOptions...)

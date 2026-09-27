@@ -10,6 +10,22 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
+func TestReplayPreservesClientIdentityWithoutParsingPromptText(t *testing.T) {
+	var item appItem
+	if err := json.Unmarshal([]byte(`{"type":"userMessage","id":"native-item","clientId":"maid:dispatch","content":[{"type":"text","text":"quoted context"}]}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	events := replayEvents("local", appThread{Turns: []appTurn{{ID: "turn", Status: "completed", Items: []appItem{item}}}})
+	if len(events) != 3 || events[1].Payload.ClientMessageID != "maid:dispatch" || events[1].Payload.Detail != "quoted context" {
+		t.Fatalf("replay identity: %#v", events)
+	}
+	item.ClientID = nil
+	event, ok := runtimeEventFromItem("local", "turn", item, provider.RuntimeEventItemCompleted, time.Now())
+	if !ok || event.Payload.ClientMessageID != "" || event.Payload.Presentation != nil {
+		t.Fatal("legacy prompt was guessed into an annotation")
+	}
+}
+
 func TestUserInputsFromTurnConvertsSkillsAndMedia(t *testing.T) {
 	input := provider.SendTurnInput{
 		Input: "Use $review, but not $reviewer or $disabled.",
