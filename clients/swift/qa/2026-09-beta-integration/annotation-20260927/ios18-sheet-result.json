@@ -1,0 +1,29 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 1,
+    "notRun": 0,
+    "passed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-27T20-22-08-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/EC31BF2F-698E-4B85-A91E-C56693A07542.txt",
+  "results": [
+    {
+      "displayName": "longQuoteLeavesAnEditableNoteAboveTheKeyboard()",
+      "errorMessages": [
+        "mai/maiTests/ChatAnnotationLayoutTests.swift:43 ChatAnnotationLayoutTests/longQuoteLeavesAnEditableNoteAboveTheKeyboard(): Expectation failed: keyboard.height > window.safeAreaInsets.bottom\nkeyboard.height → 34.0\nwindow.safeAreaInsets.bottom → 34.0"
+      ],
+      "identifier": "ChatAnnotationLayoutTests/longQuoteLeavesAnEditableNoteAboveTheKeyboard()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "1 tests: 0 passed, 1 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 1,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.27_20-22-08--0400.xcresult"
+}

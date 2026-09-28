@@ -63,7 +63,7 @@
     }
   },
   "files": {
-    "REPORT.md": "fbf96cc042dfa436c20d2de29387a8ace0f73cf0a6d5cfa633d45bf35ac828ce",
+    "REPORT.md": "ca6a47e45c3004e3de0116bcf4d5937f04baf0bb23709a1a91f1c36d21c15ace",
     "after-fix.log": "f362b665c4f8e5da0f2f1c3edee13c503ab10143fecb8ef78c226a67c4f440c1",
     "backend.jsonl.gz": "3a7513b2f574eb889da07443e38ca1b9a6394a6b391bedf7c8bb9a22916441ae",
     "before-fix.log": "49c7b37d42568f89de69aaec8c07ade01e65b2e7b51ebd8c11b910128d2d54e0",
@@ -77,5 +77,6 @@
     "snippet-initial-compile-error.txt": "e05b2f2592d82c40ff740aae7a9ee1f23c2dbeaa30f2acc936bb2bca4d38d2e5",
     "source.patch": "ef63e1decae7ddb3d70a3d933648d5b42cd3c98896491502a163e48ec7fc557a",
     "vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  }
+  },
+  "runtimeCorrection": "clientDestinations records selected Xcode destinations, not independently identified snippet runtimes; see ../RUNTIME_EVIDENCE.md."
 }

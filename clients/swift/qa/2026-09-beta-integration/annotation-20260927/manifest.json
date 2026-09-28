@@ -1,0 +1,27 @@
+{
+  "baseCommit": "85dd5faa4dea1dc0c05d3054dab74be1562f2b15",
+  "productSourceChanged": false,
+  "iOSPreviewRuntime": "27.0",
+  "iOSTestRuntime": "18.6",
+  "keyboardClearanceOnIOS18": "incomplete: software keyboard absent; assertion failed",
+  "files": {
+    "BuildProject-Log-20260927-202133.txt.gz": "c9cfa6f59b9c1ceac7c9c8e76dbe086c34ddd07565f45752f7219e221bdf2249",
+    "BuildProject-Log-20260927-202146.txt.gz": "3b9d7bd9eab07f0b5972f6cba3ef1f70ffed3a81cccbdc02c1813faa7e42970c",
+    "BuildProject-Log-20260927-202208.txt.gz": "cbf248f883d662144a8137d603b4ab6eae747d530f706b507d6f5910c8f7c43a",
+    "ChatAnnotationLayoutTests.swift": "eaddb885f7ed17d1efc6f9473a99ef205285eb699b320f0acbbad0b65a65460a",
+    "REPORT.md": "f39be6a9bf74d4443b2d311f321bafe744f8400b4e66392efb4bc12004d74e8b",
+    "ios-before.json": "4470388ebd3f347f27ef331207ff13f7edf4d94606ae912af1fdce43737264a1",
+    "ios-edit-controls.json": "cb0b6c4cc06dfdeb9a0622274d1a0bb14e8f54399d8dcc710cf6c5cc6d4f37bb",
+    "ios-focused-before.json": "49f6982b14d176d9d8c3e270221ee13ac2d7b9044921df7ea11814177ed2f6de",
+    "ios-hierarchy-diagnostic.json": "f1456316a542be55e99f1f68a8e1c3bd4adf2786a05851280db7457f42f3c991",
+    "ios-root-guide-before.json": "2e65faf73324424bd2ba4ed6649181195818b4d8f87b07d38a2abf3dcf0fe63b",
+    "ios18-runtime-summary.json": "4b5f1aaa5caff0820b84790265d72342d779fede9c68e9be6ffcf4c28fe7596d",
+    "ios18-sheet-console.txt.gz": "4e946b5406cbf6f160b4bab3b7f888e406dca9b0646e093cf85bb5641a80edb8",
+    "ios18-sheet-result.json": "d9e707feaaebdd99fb4bd9147d6c57c1e96d3db1f449de9dffe4e072ca100f48",
+    "ios18-sheet-summary.txt.gz": "1b3383ad524525a9c54f44f365ccce0024623fc2cdf78f97b17cf69fc1c99f60",
+    "mac-before.json": "e8f369fa861bf4b00d98e093242ff995595f1a2298a990e74bca9ae8e4208d14",
+    "measure-editor-ios.swift": "d6e50e784ba16b3868ebbe7bb0fa0cd1f49959e9b6b1b2d9c2ada6bc26b2a432",
+    "measure-editor.swift": "ccfb2ad03bc29dc04eefb55677141ff6a4d54c3fd0ee5f90ebe10436be769e14",
+    "runtime.json": "c5fb07e6452c89664035f64c5416c0d63cb5a6be743054d93fa4b6b33793dc32"
+  }
+}

@@ -17,6 +17,7 @@
     "mac-final-console.txt.gz": "364d83f42f7f5041a02d0fc2f421faa4c3accddc976a4e17e1f37d64e487af7b",
     "mac-final-summary.txt.gz": "88dd7d08546591f77a9ff8203b5cdfa3e7ef564a28203d50cd5615c05fb7c525",
     "normal-app-build.txt.gz": "91ef0f32ad7a71e14353ebfd2cb107bac193ebe2b31502091edf36822e25d520",
-    "normal-app-observations.json": "aa2828c1f8fe8379232b73effc31b88d0663b21a8461bf29c7abab48d0f69425"
+    "normal-app-observations.json": "aa2828c1f8fe8379232b73effc31b88d0663b21a8461bf29c7abab48d0f69425",
+    "ios18-runtime-summary.json": "6033de4e6da9d66ca1f8d20d0fbe077c46c44113ac87830a2a3b63e6432a8f1f"
   }
 }
