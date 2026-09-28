@@ -1,0 +1,21 @@
+{
+  "method": "Observed CUA accessibility excerpts from the normal Debug app, synthetic three-turn chat; these are selected observations, not a full accessibility dump.",
+  "baseCommit": "3b3e77468fe9cb1f0b20c44f90131c9c29656778",
+  "before": {
+    "action": "Place cursor after QA first line, then Shift+Return",
+    "result": "Selected text: QA first line; draft unchanged instead of a newline"
+  },
+  "after": [
+    {"action": "Shift+Return at end, then type x", "prompt": "QA first line\nx"},
+    {"action": "Undo", "prompt": "QA first line"},
+    {"action": "Select middle in café 👩🏽‍💻 middle suffix, then Shift+Return", "prompt": "café 👩🏽‍💻 \n suffix"},
+    {"action": "Undo", "prompt": "café 👩🏽‍💻 middle suffix", "selectedText": "middle"},
+    {"action": "Enter", "alert": "Something Went Wrong Not connected to maiD"},
+    {"action": "Dismiss alert", "prompt": "café 👩🏽‍💻 middle suffix"},
+    {"action": "Clear prompt", "prompt": "", "sendDisabled": true},
+    {"action": "Enter on empty prompt", "result": "No accessibility-tree change; Prompt remains focused and empty; no alert"}
+  ],
+  "sourceScope": "Normal-app checks used the 15:31 Xcode build of PromptComposer.swift with native Shift+Return and Enter submission. The subsequent refinement ignores Caps Lock/numeric-pad flags when classifying Return modifiers; the final hosted-control run additionally covers Caps Lock.",
+  "binaryIdentityLimit": "The fixed launch metadata accidentally copied the earlier executable hash. That hash is excluded; the intermediate executable was overwritten by later builds. Build logs and the observed source/action sequence identify this run, but there is no verified archived binary hash for the intermediate normal-app check.",
+  "providerScope": "Synthetic store deliberately has no daemon connection; the alert proves Enter reaches Send and retains the failed draft, not a completed live-provider turn."
+}

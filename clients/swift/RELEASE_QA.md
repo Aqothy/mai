@@ -58,6 +58,7 @@ Execute every item in [CHAT_QA_CHECKLIST.md](CHAT_QA_CHECKLIST.md), keeping dire
 - [ ] Completion: @file, /command and $skill triggers, filtering, cursor insertion, Unicode, keyboard up/down/enter/escape, mouse selection, stale-result cancellation and provider capability gating.
 - [x] Completion model and focused Mac controls: stale catalog selection and immediate menu reopening after insertion are fixed. Fourteen focused checks pass on Mac/iOS 18.6, including out-of-order search replies, scope/dismiss/cancel, retries, Unicode and draft/annotation preservation. Actual hosted Mac completion keys and focus release pass; mouse selection, ordinary Enter behavior and iOS keyboard controls remain separate. See [composer report](qa/2026-09-beta-integration/composer-20260927/REPORT.md).
 - [ ] Enter/Shift+Enter, composer focus, attachment removal, draft persistence, config changes and switching provider/workspace behave correctly.
+- [x] Desktop Return behavior follows the user's choice: Enter sends; Shift+Enter adds a line. The normal app verifies Unicode selection replacement, native Undo, failed-send draft retention and empty-send gating. Hosted controls verify completion precedence and no repeated/busy sends; final Mac/iOS 18.6 builds and 14 focused regressions pass. Input-method and remaining mobile controls are separate. See [keyboard report](qa/2026-09-beta-integration/keyboard-20260927/REPORT.md).
 
 ## Terminal and surrounding app
 

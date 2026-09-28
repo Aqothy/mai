@@ -2,7 +2,9 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-#if os(iOS)
+#if os(macOS)
+    import AppKit
+#elseif os(iOS)
     import UIKit
 #endif
 
@@ -110,7 +112,8 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
                 inputChanged: updatePromptCompletion,
                 moveCompletionSelection: moveCompletionSelection,
                 selectCompletion: selectCompletion,
-                dismissCompletion: dismissCompletion
+                dismissCompletion: dismissCompletion,
+                submitPrompt: submitPrompt
             )
 
             HStack {
@@ -244,6 +247,11 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         promptCompletion?.dismiss() ?? false
     }
 
+    private func submitPrompt() {
+        guard isEnabled, canSend, !isSending, !isStopping else { return }
+        send()
+    }
+
     private func applyCursorRequest(_ request: PromptCompletionCursorRequest?) {
         guard let promptCompletion,
             let request,
@@ -276,6 +284,7 @@ private struct DraftPromptEditor: View {
     let moveCompletionSelection: (Int) -> Bool
     let selectCompletion: () -> Bool
     let dismissCompletion: () -> Bool
+    let submitPrompt: () -> Void
 
     @FocusState private var isFocused: Bool
 
@@ -318,6 +327,28 @@ private struct DraftPromptEditor: View {
         .disabled(!isEnabled)
         .accessibilityLabel("Prompt")
         .onKeyPress(phases: .down) { keyPress in
+            let modifiers = keyPress.modifiers.intersection([.shift, .control, .option, .command])
+            #if os(macOS)
+                if keyPress.key == .return,
+                    let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                    editor.hasMarkedText()
+                {
+                    return .ignored
+                }
+                if keyPress.key == .return, modifiers == .shift {
+                    // Use the editor's native newline action so replacement,
+                    // marked text and undo keep their normal AppKit behavior.
+                    return NSApp.sendAction(
+                        #selector(NSStandardKeyBindingResponding.insertNewlineIgnoringFieldEditor(_:)),
+                        to: nil,
+                        from: nil
+                    ) ? .handled : .ignored
+                }
+                if keyPress.key == .return, modifiers.isEmpty {
+                    if !selectCompletion() { submitPrompt() }
+                    return .handled
+                }
+            #endif
             if keyPress.key == .downArrow,
                 moveCompletionSelection(1)
             {
@@ -333,7 +364,7 @@ private struct DraftPromptEditor: View {
             {
                 return .handled
             }
-            if keyPress.key == .return,
+            if keyPress.key == .return, modifiers.isEmpty,
                 selectCompletion()
             {
                 return .handled
