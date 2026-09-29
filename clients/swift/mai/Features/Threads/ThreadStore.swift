@@ -140,7 +140,7 @@ final class ThreadStore {
     private let now: () -> Date
     // Reused across notifications: receiveNotification runs on every streamed
     // event, and a fresh JSONDecoder per frame is pure allocation.
-    private let decoder = newJSONDecoder()
+    private let decoder = WireJSON.makeDecoder()
     // sessionsByID is deliberately outside observation: it mutates on every
     // streamed event of every subscribed thread, and @Observable treats the
     // dictionary as one unit — a hidden thread's stream would invalidate every

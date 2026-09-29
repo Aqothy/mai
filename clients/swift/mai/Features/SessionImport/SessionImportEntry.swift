@@ -23,8 +23,7 @@ struct SessionImportEntry: Identifiable, Equatable {
     /// optional, so parsing tries both forms.
     private static func parseTimestamp(_ raw: String?) -> Date? {
         guard let raw else { return nil }
-        return (try? Date(raw, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
-            ?? (try? Date(raw, strategy: .iso8601))
+        return WireJSON.parseDate(raw)
     }
 }
 

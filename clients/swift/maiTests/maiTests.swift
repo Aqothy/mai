@@ -6,6 +6,51 @@ import Testing
 
 struct ThreadStoreTests {
     @Test
+    func fractionalDateNotificationsUpdateChatAndSidebar() async throws {
+        let original = makeThread("date-wire")
+        let rpc = MockThreadRPCClient(threads: [original])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread(original.id)
+        await waitUntil { store.subscribedThreadIDs.contains(original.id) }
+        let stamp = "2026-09-24T00:26:41.437657-04:00"
+        let expectedEpochSeconds = 1_790_224_001.437657
+        let refreshed = original.with(title: "Fractional snapshot")
+        let encoded = try newJSONEncoder().encode(refreshed)
+        var thread = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        thread["createdAt"] = stamp
+        thread["updatedAt"] = stamp
+        let snapshot: [String: Any] = ["params": [
+            "kind": "snapshot",
+            "snapshot": ["snapshotSequence": 100, "thread": thread]
+        ]]
+        rpc.onNotification?(MaidRPCMethod.orchestrationSubscribeThread,
+                            try JSONSerialization.data(withJSONObject: snapshot))
+        #expect(store.errorMessage == nil)
+        #expect(store.selectedThread?.title == "Fractional snapshot")
+        let selected = try #require(store.selectedThread)
+        // Date stores binary floating-point seconds; conversion between the
+        // Unix and Foundation epochs can differ by a fraction of a microsecond.
+        #expect(abs(selected.createdAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
+        #expect(abs(selected.updatedAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
+
+        let entryData = try newJSONEncoder().encode(makeThreadListEntry(refreshed))
+        var entry = try #require(JSONSerialization.jsonObject(with: entryData) as? [String: Any])
+        entry["title"] = "Fractional sidebar"
+        entry["createdAt"] = stamp
+        entry["updatedAt"] = stamp
+        let update: [String: Any] = ["params": [
+            "kind": "thread-upserted", "sequence": 101, "thread": entry
+        ]]
+        rpc.onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList,
+                            try JSONSerialization.data(withJSONObject: update))
+        #expect(store.errorMessage == nil)
+        #expect(store.threads.first?.title == "Fractional sidebar")
+        let listed = try #require(store.threads.first)
+        #expect(abs(listed.updatedAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
+    }
+
+    @Test
     func fileCompletionKeepsNewestResultsWhenSearchesFinishOutOfOrder() async throws {
         let rpc = MockThreadRPCClient(threads: [])
         defer { rpc.cancelFileSearches() }

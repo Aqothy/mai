@@ -139,9 +139,7 @@ final class RPCClient {
         _ type: Value.Type,
         from data: Data
     ) async throws -> sending Value {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(type, from: data)
+        try WireJSON.makeDecoder().decode(type, from: data)
     }
 
     // Encoding runs off the main actor for the same reason decoding does: a
@@ -272,11 +270,7 @@ final class RPCClient {
         }
     }
 
-    private static let listNotificationDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+    private static let listNotificationDecoder = WireJSON.makeDecoder()
 
     nonisolated private struct TerminalListNotification: Decodable {
         let params: TerminalListStreamItem
