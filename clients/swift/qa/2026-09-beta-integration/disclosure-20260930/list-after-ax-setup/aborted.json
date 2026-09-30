@@ -1,0 +1,5 @@
+{
+  "reason": "Repeated accessibility inspection changes the List geometry after initial setup; disclosure action could not be performed because the reported target was offscreen. Sequence not passed.",
+  "launchReference": "76c5cb5c80",
+  "pid": 13151
+}

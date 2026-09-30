@@ -1,0 +1,132 @@
+{
+  "checkpoints" : [
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 995,
+      "isNearBottom" : true,
+      "name" : "initial",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : true,
+      "streamCharacters" : 547,
+      "unixTime" : 1790759785.07704,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16194
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 8274,
+      "isNearBottom" : false,
+      "name" : "last-activity-open",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 11285,
+      "unixTime" : 1790759812.250896,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16194
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 14747,
+      "isNearBottom" : false,
+      "name" : "last-thought-open",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 21196,
+      "unixTime" : 1790759835.7480931,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16194
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 24921,
+      "isNearBottom" : false,
+      "name" : "last-thought-close",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 37785,
+      "unixTime" : 1790759875.1160011,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16194
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 33114,
+      "isNearBottom" : false,
+      "name" : "last-group-open",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 50717,
+      "unixTime" : 1790759905.75934,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16194
+    }
+  ],
+  "error" : "Error Domain=DisclosureQA Code=1 \"Window capture missing: last-group-open\" UserInfo={NSLocalizedDescription=Window capture missing: last-group-open}",
+  "passed" : false,
+  "stages" : [
+    {
+      "charactersAfter" : 11285,
+      "charactersBefore" : 978,
+      "following" : false,
+      "heightAfter" : 8274,
+      "heightBefore" : 1663,
+      "name" : "last-activity-open",
+      "nearBottom" : false,
+      "originAfter" : 297,
+      "originBefore" : 297
+    },
+    {
+      "charactersAfter" : 21196,
+      "charactersBefore" : 11338,
+      "following" : false,
+      "heightAfter" : 14747,
+      "heightBefore" : 8307,
+      "name" : "last-thought-open",
+      "nearBottom" : false,
+      "originAfter" : 297,
+      "originBefore" : 297
+    },
+    {
+      "charactersAfter" : 37785,
+      "charactersBefore" : 21302,
+      "following" : false,
+      "heightAfter" : 24921,
+      "heightBefore" : 14781,
+      "name" : "last-thought-close",
+      "nearBottom" : false,
+      "originAfter" : 297,
+      "originBefore" : 297
+    },
+    {
+      "charactersAfter" : 50717,
+      "charactersBefore" : 37838,
+      "following" : false,
+      "heightAfter" : 33114,
+      "heightBefore" : 24954,
+      "name" : "last-group-open",
+      "nearBottom" : false,
+      "originAfter" : 297,
+      "originBefore" : 297
+    }
+  ]
+}

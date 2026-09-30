@@ -1,0 +1,38 @@
+{
+  "base": "8d0d2a89ce12f11e6940da1fec7f9f52c2ee5eeb",
+  "temporaryHooks": true,
+  "existingExternalProjectChange": true,
+  "sourceHashes": {
+    "clients/swift/mai/ContentView.swift": "1d66d023ef63cb3ab7af6f12df5dad2d960d19e86cd5e764456e263c846d1423",
+    "clients/swift/mai/Features/Chat/ChatView.swift": "2d8af565b076be3753d02fad3ae059d3d0a39fda9424df17228948eab3717dee",
+    "clients/swift/mai/Features/Chat/ChatDisclosureQA.swift": "c7e4e57139b71b69dd65587c518120f6c360e4b0e35a9dcefcc0921c701c5a33"
+  },
+  "nativeLaunch": {
+    "pid": 97388,
+    "reference": "76d5368780"
+  },
+  "macOS": "27.0 (26A428)",
+  "listRuns": [
+    {
+      "purpose": "initial disclosure attempt",
+      "pid": 97486,
+      "reference": "76c5ca7000"
+    },
+    {
+      "purpose": "position-only probe",
+      "pid": 12992,
+      "reference": "76d536a100"
+    },
+    {
+      "purpose": "AX activation trace",
+      "pid": 13055,
+      "reference": "76d54f0900"
+    },
+    {
+      "purpose": "AX-before-baseline attempt",
+      "pid": 13151,
+      "reference": "76c5cb5c80"
+    }
+  ],
+  "finalHarnessSHA256": "2c573f06f8a7141f99a7f2bb1c837c09c6ce6988fe0c3c1a4790c2b1e11ff60c"
+}

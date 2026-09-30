@@ -1,0 +1,62 @@
+[
+  {
+    "currentDocument" : "Optional<NSView>",
+    "currentHeight" : 995,
+    "currentID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "currentOrigin" : 297,
+    "currentWindow" : 16557,
+    "following" : true,
+    "name" : "before-stream",
+    "oldDocument" : "Optional<NSView>",
+    "oldHeight" : 995,
+    "oldID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "oldOrigin" : 297,
+    "oldWindow" : 16557,
+    "requestedStaticBottom" : 297
+  },
+  {
+    "currentDocument" : "Optional<NSView>",
+    "currentHeight" : 1459,
+    "currentID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "currentOrigin" : 761,
+    "currentWindow" : 16557,
+    "following" : true,
+    "name" : "before-scroll",
+    "oldDocument" : "Optional<NSView>",
+    "oldHeight" : 1459,
+    "oldID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "oldOrigin" : 761,
+    "oldWindow" : 16557,
+    "requestedStaticBottom" : 297
+  },
+  {
+    "currentDocument" : "Optional<NSView>",
+    "currentHeight" : 1459,
+    "currentID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "currentOrigin" : 297,
+    "currentWindow" : 16557,
+    "following" : false,
+    "name" : "after-scroll",
+    "oldDocument" : "Optional<NSView>",
+    "oldHeight" : 1459,
+    "oldID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "oldOrigin" : 297,
+    "oldWindow" : 16557,
+    "requestedStaticBottom" : 297
+  },
+  {
+    "currentDocument" : "Optional<NSView>",
+    "currentHeight" : 1477,
+    "currentID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "currentOrigin" : 297,
+    "currentWindow" : 16557,
+    "following" : false,
+    "name" : "after-settle",
+    "oldDocument" : "Optional<NSView>",
+    "oldHeight" : 1477,
+    "oldID" : "ObjectIdentifier(0x0000007ae0808000)",
+    "oldOrigin" : 297,
+    "oldWindow" : 16557,
+    "requestedStaticBottom" : 297
+  }
+]

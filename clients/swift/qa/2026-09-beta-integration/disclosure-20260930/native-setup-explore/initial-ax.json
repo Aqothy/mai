@@ -1,0 +1,552 @@
+[
+  {
+    "height" : 832,
+    "label" : "STREAM CHAT A",
+    "role" : "AXWindow",
+    "type" : "NSWindow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 100
+  },
+  {
+    "height" : 800,
+    "label" : "",
+    "role" : "AXGroup",
+    "type" : "NSHostingView<ChatView>",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 100
+  },
+  {
+    "height" : 698,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "NSScrollView",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 202
+  },
+  {
+    "height" : 250,
+    "label" : "CSS code block",
+    "role" : "AXGroup",
+    "type" : "ChatNativePreparedRow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 1401
+  },
+  {
+    "height" : 18,
+    "label" : "",
+    "role" : "AXStaticText",
+    "type" : "NSTextFieldCell",
+    "value" : "CSS",
+    "width" : 694,
+    "x" : 307,
+    "y" : 1620
+  },
+  {
+    "height" : 19,
+    "label" : "Copy",
+    "role" : "AXButton",
+    "type" : "NSButtonCell",
+    "value" : "",
+    "width" : 25.5,
+    "x" : 1009,
+    "y" : 1620
+  },
+  {
+    "height" : 202,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "ChatMacCodeBlockHostView",
+    "value" : "",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1409
+  },
+  {
+    "height" : 202,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : ".code-block[data-language=\"swift\"] {\n  color: var(--syntax-foreground);\n  background: color-mix(in srgb, var(--surface) 92%, black);\n  border: 1px solid rgb(128 128 128 \/ 24%);\n  overflow-x: auto;\n}\n\n@media (prefers-color-scheme: dark) {\n  .code-block { --syntax-foreground: #abb2bf; }\n}",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1409
+  },
+  {
+    "height" : 20,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "JSON payload",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1381
+  },
+  {
+    "height" : 307,
+    "label" : "JSON code block",
+    "role" : "AXGroup",
+    "type" : "ChatNativePreparedRow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 1066
+  },
+  {
+    "height" : 18,
+    "label" : "",
+    "role" : "AXStaticText",
+    "type" : "NSTextFieldCell",
+    "value" : "JSON",
+    "width" : 694,
+    "x" : 307,
+    "y" : 1342
+  },
+  {
+    "height" : 19,
+    "label" : "Copy",
+    "role" : "AXButton",
+    "type" : "NSButtonCell",
+    "value" : "",
+    "width" : 25.5,
+    "x" : 1009,
+    "y" : 1342
+  },
+  {
+    "height" : 259,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "ChatMacCodeBlockHostView",
+    "value" : "",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1074
+  },
+  {
+    "height" : 259,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "{\n  \"type\": \"message.delta\",\n  \"message_id\": \"fixture-assistant-001\",\n  \"sequence\": 42,\n  \"delta\": {\n    \"text\": \"A chunk with **partial Markdown\",\n    \"is_final\": false\n  },\n  \"diagnostics\": {\n    \"received_at\": \"2026-07-31T12:34:56Z\",\n    \"profile\": \"daemon\"\n  }\n}",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1074
+  },
+  {
+    "height" : 20,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "Unlabelled diagnostic output",
+    "width" : 760,
+    "x" : 290,
+    "y" : 1046
+  },
+  {
+    "height" : 155,
+    "label" : "Code code block",
+    "role" : "AXGroup",
+    "type" : "ChatNativePreparedRow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 883
+  },
+  {
+    "height" : 18,
+    "label" : "",
+    "role" : "AXStaticText",
+    "type" : "NSTextFieldCell",
+    "value" : "Code",
+    "width" : 694,
+    "x" : 307,
+    "y" : 1007
+  },
+  {
+    "height" : 19,
+    "label" : "Copy",
+    "role" : "AXButton",
+    "type" : "NSButtonCell",
+    "value" : "",
+    "width" : 25.5,
+    "x" : 1009,
+    "y" : 1007
+  },
+  {
+    "height" : 107,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "ChatMacCodeBlockHostView",
+    "value" : "",
+    "width" : 760,
+    "x" : 290,
+    "y" : 891
+  },
+  {
+    "height" : 107,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "[stream] connected\n[stream] sequence=40 bytes=17 render=pending\n[stream] sequence=41 bytes=3 render=coalesced\n[stream] sequence=42 bytes=29 render=committed\n[stream] complete checksum=fixture",
+    "width" : 760,
+    "x" : 290,
+    "y" : 891
+  },
+  {
+    "height" : 20,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "SQL query",
+    "width" : 760,
+    "x" : 290,
+    "y" : 863
+  },
+  {
+    "height" : 212,
+    "label" : "SQL code block",
+    "role" : "AXGroup",
+    "type" : "ChatNativePreparedRow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 643
+  },
+  {
+    "height" : 18,
+    "label" : "",
+    "role" : "AXStaticText",
+    "type" : "NSTextFieldCell",
+    "value" : "SQL",
+    "width" : 694,
+    "x" : 307,
+    "y" : 824
+  },
+  {
+    "height" : 19,
+    "label" : "Copy",
+    "role" : "AXButton",
+    "type" : "NSButtonCell",
+    "value" : "",
+    "width" : 25.5,
+    "x" : 1009,
+    "y" : 824
+  },
+  {
+    "height" : 164,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "ChatMacCodeBlockHostView",
+    "value" : "",
+    "width" : 760,
+    "x" : 290,
+    "y" : 651
+  },
+  {
+    "height" : 164,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "SELECT\n    message_id,\n    MAX(sequence) AS latest_sequence,\n    SUM(LENGTH(delta)) AS received_bytes\nFROM streamed_message_events\nWHERE thread_id = 'mock-thread'\nGROUP BY message_id\nORDER BY latest_sequence DESC;",
+    "width" : 760,
+    "x" : 290,
+    "y" : 651
+  },
+  {
+    "height" : 20,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "Long lines and delimiter-like content",
+    "width" : 760,
+    "x" : 290,
+    "y" : 623
+  },
+  {
+    "height" : 98,
+    "label" : "Text code block",
+    "role" : "AXGroup",
+    "type" : "ChatNativePreparedRow",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 517
+  },
+  {
+    "height" : 18,
+    "label" : "",
+    "role" : "AXStaticText",
+    "type" : "NSTextFieldCell",
+    "value" : "Text",
+    "width" : 694,
+    "x" : 307,
+    "y" : 584
+  },
+  {
+    "height" : 19,
+    "label" : "Copy",
+    "role" : "AXButton",
+    "type" : "NSButtonCell",
+    "value" : "",
+    "width" : 25.5,
+    "x" : 1009,
+    "y" : 584
+  },
+  {
+    "height" : 50,
+    "label" : "",
+    "role" : "AXScrollArea",
+    "type" : "ChatMacCodeBlockHostView",
+    "value" : "",
+    "width" : 760,
+    "x" : 290,
+    "y" : 525
+  },
+  {
+    "height" : 50,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "debug event=message.delta thread=mock-thread message=fixture-assistant-001 sequence=0000042 payload=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 path=\/an\/intentionally\/long\/path\/that\/should\/not\/wrap\/aggressively\/in\/a\/code\/block\nliteral delimiters inside code: **strong?** _emphasis?_ ~~strike?~~ [link?](https:\/\/example.com) <html?>",
+    "width" : 1850,
+    "x" : 290,
+    "y" : 525
+  },
+  {
+    "height" : 19,
+    "label" : "",
+    "role" : "AXScrollBar",
+    "type" : "NSScroller",
+    "value" : "0",
+    "width" : 762,
+    "x" : 289,
+    "y" : 524
+  },
+  {
+    "height" : 6,
+    "label" : "",
+    "role" : "AXValueIndicator",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "0",
+    "width" : 309.5,
+    "x" : 293,
+    "y" : 528
+  },
+  {
+    "height" : 0,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 0,
+    "x" : 290,
+    "y" : 542
+  },
+  {
+    "height" : 0,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 0,
+    "x" : 290,
+    "y" : 542
+  },
+  {
+    "height" : 6,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 444,
+    "x" : 603,
+    "y" : 528
+  },
+  {
+    "height" : 6,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 0,
+    "x" : 293,
+    "y" : 528
+  },
+  {
+    "height" : 139,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "After the code\n\nProse after the final fence confirms that the renderer closes code-block presentation and returns to the normal text style.\n\nConclusion\n\nThe end marker makes it easy to confirm that a large message remains selectable, accessible, and correctly positioned after every section has rendered.",
+    "width" : 760,
+    "x" : 290,
+    "y" : 378
+  },
+  {
+    "height" : 56,
+    "label" : "",
+    "role" : "AXGroup",
+    "type" : "NSHostingView<ChatMeasuredTranscriptRow<ModifiedContent<ModifiedContent<IDView<ChatNativeTimelineItemView, String>, _FrameLayout>, _FlexFrameLayout>>>",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 312
+  },
+  {
+    "height" : 16,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "Turn 6: explain the change, show the table of options, and include the code we discussed for module5.",
+    "width" : 732,
+    "x" : 304,
+    "y" : 332
+  },
+  {
+    "height" : 32,
+    "label" : "",
+    "role" : "AXGroup",
+    "type" : "NSHostingView<ChatMeasuredTranscriptRow<ModifiedContent<ModifiedContent<IDView<ChatNativeTimelineItemView, String>, _FrameLayout>, _FlexFrameLayout>>>",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 280
+  },
+  {
+    "height" : 34,
+    "label" : "",
+    "role" : "AXTextArea",
+    "type" : "ChatAnnotationTextView",
+    "value" : "Short answer for turn 6: the fix lands in ThreadStore.applyThreadEvent and keeps the timeline buffer uniquely referenced while text streams.",
+    "width" : 760,
+    "x" : 290,
+    "y" : 236
+  },
+  {
+    "height" : 24,
+    "label" : "",
+    "role" : "AXGroup",
+    "type" : "NSHostingView<ChatMeasuredTranscriptRow<ModifiedContent<ModifiedContent<IDView<ChatNativeTimelineItemView, String>, _FrameLayout>, _FlexFrameLayout>>>",
+    "value" : "",
+    "width" : 1100,
+    "x" : 120,
+    "y" : 202
+  },
+  {
+    "height" : 700,
+    "label" : "",
+    "role" : "AXScrollBar",
+    "type" : "NSScroller",
+    "value" : "1",
+    "width" : 19,
+    "x" : 1202,
+    "y" : 201
+  },
+  {
+    "height" : 26,
+    "label" : "",
+    "role" : "AXValueIndicator",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "1",
+    "width" : 6,
+    "x" : 1211,
+    "y" : 205
+  },
+  {
+    "height" : 0,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 0,
+    "x" : 1203,
+    "y" : 900
+  },
+  {
+    "height" : 0,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 0,
+    "x" : 1203,
+    "y" : 900
+  },
+  {
+    "height" : 0,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 6,
+    "x" : 1211,
+    "y" : 205
+  },
+  {
+    "height" : 666,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "NSAccessibilityScrollerPart",
+    "value" : "",
+    "width" : 6,
+    "x" : 1211,
+    "y" : 231
+  },
+  {
+    "height" : 18,
+    "label" : "Prompt",
+    "role" : "AXTextField",
+    "type" : "_SystemTextFieldCell",
+    "value" : "",
+    "width" : 734,
+    "x" : 303,
+    "y" : 171
+  },
+  {
+    "height" : 16,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "_NSThemeCloseWidgetCell",
+    "value" : "",
+    "width" : 16,
+    "x" : 128,
+    "y" : 908
+  },
+  {
+    "height" : 16,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "_NSThemeZoomWidgetCell",
+    "value" : "",
+    "width" : 16,
+    "x" : 174,
+    "y" : 908
+  },
+  {
+    "height" : 14,
+    "label" : "",
+    "role" : "AXGroup",
+    "type" : "NSThemeWidgetZoomMenuRemoteView",
+    "value" : "",
+    "width" : 14,
+    "x" : 175,
+    "y" : 909
+  },
+  {
+    "height" : 16,
+    "label" : "",
+    "role" : "AXButton",
+    "type" : "_NSThemeWidgetCell",
+    "value" : "",
+    "width" : 16,
+    "x" : 151,
+    "y" : 908
+  }
+]

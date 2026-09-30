@@ -1,0 +1,25 @@
+{
+  "checkpoints" : [
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 297,
+      "documentHeight" : 995,
+      "isNearBottom" : true,
+      "name" : "initial",
+      "renderer" : "list",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : true,
+      "streamCharacters" : 547,
+      "unixTime" : 1790760104.118108,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 16280
+    }
+  ],
+  "error" : "Error Domain=DisclosureQA Code=1 \"Missing accessibility input for last-activity-open\" UserInfo={NSLocalizedDescription=Missing accessibility input for last-activity-open}",
+  "passed" : false,
+  "stages" : [
+
+  ]
+}
