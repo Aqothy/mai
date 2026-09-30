@@ -1,0 +1,12 @@
+{
+  "baseCommit": "446b2b272656cc79dd6d202ceadfb558aae75271",
+  "pid": 94278,
+  "launchSessionReference": "76bd13c300",
+  "runtime": "macOS 27.0 (26A428)",
+  "sourceHashes": {
+    "clients/swift/mai/Features/Chat/ChatDisclosureQA.swift": "4ed07809290a26b0de467cc01ab81386a4ae0b24c30f09f753a54771301d2dcd",
+    "clients/swift/mai/Features/Chat/ChatMacScrollPositionPreserver.swift": "bda8474c3dda34222d35545c66c279aeba04c15e96df14964086a68b18a972e8",
+    "clients/swift/mai/Features/Chat/ChatView.swift": "0263fdd3f7013ee355f768e2db76c495f7c2d0adaff578d3f67ced32d5be293f",
+    "clients/swift/mai/ContentView.swift": "1d66d023ef63cb3ab7af6f12df5dad2d960d19e86cd5e764456e263c846d1423"
+  }
+}

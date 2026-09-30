@@ -1,0 +1,48 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 1,
+    "notRun": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 3
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-30T12-42-55-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/9858B832-894C-42CC-84D3-0CD75808B982.txt",
+  "message": "Some error messages were truncated to 5. Full logs available at /var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/9858B832-894C-42CC-84D3-0CD75808B982.txt.",
+  "results": [
+    {
+      "displayName": "appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved()",
+      "errorMessages": [
+        "mai/maiTests/ChatMacScrollPositionPreserverTests.swift:59 ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved(): Expectation failed: scroll.contentView.bounds.minY == expectedOrigin\nscroll.contentView.bounds.minY → 450.0\nexpectedOrigin → 350.0",
+        "mai/maiTests/ChatMacScrollPositionPreserverTests.swift:60 ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved(): Expectation failed: document.rect(ofRow: 2).minY - scroll.contentView.bounds.minY == -50\ndocument.rect(ofRow: 2).minY - scroll.contentView.bounds.minY → -150.0\n-50 → -50.0",
+        "mai/maiTests/ChatMacScrollPositionPreserverTests.swift:59 ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved(): Expectation failed: scroll.contentView.bounds.minY == expectedOrigin\nscroll.contentView.bounds.minY → 50.0\nexpectedOrigin → 200.0",
+        "mai/maiTests/ChatMacScrollPositionPreserverTests.swift:60 ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved(): Expectation failed: document.rect(ofRow: 2).minY - scroll.contentView.bounds.minY == -50\ndocument.rect(ofRow: 2).minY - scroll.contentView.bounds.minY → 100.0\n-50 → -50.0",
+        "mai/maiTests/ChatMacScrollPositionPreserverTests.swift:59 ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved(): Expectation failed: scroll.contentView.bounds.minY == expectedOrigin\nscroll.contentView.bounds.minY → 450.0\nexpectedOrigin → 325.0"
+      ],
+      "identifier": "ChatMacScrollPositionPreserverTests/appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "remeasurementPreservesTheAnchorWhenAppKitDoesNotMoveTheClip()",
+      "errorMessages": [],
+      "identifier": "ChatMacScrollPositionPreserverTests/remeasurementPreservesTheAnchorWhenAppKitDoesNotMoveTheClip()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "remeasurementDuringUserScrollingKeepsTheUsersNewPosition()",
+      "errorMessages": [],
+      "identifier": "ChatMacScrollPositionPreserverTests/remeasurementDuringUserScrollingKeepsTheUsersNewPosition()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "3 tests: 2 passed, 1 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 3,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.30_12-42-55--0400.xcresult"
+}

@@ -1,0 +1,62 @@
+diff --git i/clients/swift/mai/Features/Chat/ChatMacScrollPositionPreserver.swift w/clients/swift/mai/Features/Chat/ChatMacScrollPositionPreserver.swift
+index 1767511..8bdbf0b 100644
+--- i/clients/swift/mai/Features/Chat/ChatMacScrollPositionPreserver.swift
++++ w/clients/swift/mai/Features/Chat/ChatMacScrollPositionPreserver.swift
+@@ -493,15 +493,17 @@
+             preservedAnchor = PreservedAnchor(
+                 row: row,
+                 stableID: snapshot.stableID,
+-                lastAnchorY: anchorRect.minY
++                lastAnchorY: anchorRect.minY,
++                lastVisibleY: target.y
+             )
+             self.snapshot = nil
+             applyScrollPosition(target, in: scrollView)
+         }
+ 
+-        /// Adjust by exactly the layout-induced anchor delta. The clip view's
+-        /// current position already includes any intervening trackpad motion,
+-        /// so adding the delta preserves both the visible content and momentum.
++        /// Keep the reader's offset within the anchor. AppKit may already have
++        /// moved the clip for these same row-height changes, so adding the delta
++        /// to its current origin would apply the layout correction twice.
++        /// User gestures discard this anchor and rebase it when scrolling ends.
+         private func compensateForAnchorMovementIfNeeded() {
+             guard var preservedAnchor, let document,
+                 let scrollView = document.enclosingScrollView,
+@@ -520,13 +522,13 @@
+             let anchorY = document.rect(ofRow: row).minY
+             let delta = anchorY - preservedAnchor.lastAnchorY
+             guard abs(delta) >= Self.minimumLayoutCorrection else { return }
+-            preservedAnchor.lastAnchorY = anchorY
+-            self.preservedAnchor = preservedAnchor
+-
+             let clipView = scrollView.contentView
+             var proposedBounds = clipView.bounds
+-            proposedBounds.origin.y += delta
++            proposedBounds.origin.y = preservedAnchor.lastVisibleY + delta
+             let target = clipView.constrainBoundsRect(proposedBounds).origin
++            preservedAnchor.lastAnchorY = anchorY
++            preservedAnchor.lastVisibleY = target.y
++            self.preservedAnchor = preservedAnchor
+             applyScrollPosition(target, in: scrollView)
+         }
+ 
+@@ -544,7 +546,8 @@
+             preservedAnchor = PreservedAnchor(
+                 row: row,
+                 stableID: document.stableIdentity(forRow: row),
+-                lastAnchorY: rect.minY
++                lastAnchorY: rect.minY,
++                lastVisibleY: visibleRect.minY
+             )
+         }
+ 
+@@ -571,6 +574,7 @@
+             let row: Int
+             let stableID: String?
+             var lastAnchorY: CGFloat
++            var lastVisibleY: CGFloat
+         }
+ 
+         deinit {

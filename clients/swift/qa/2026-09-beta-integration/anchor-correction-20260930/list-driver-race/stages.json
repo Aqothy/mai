@@ -1,0 +1,30 @@
+[
+  {
+    "anchorAfter" : -14,
+    "anchorBefore" : -14,
+    "anchorRow" : 8,
+    "charactersAfter" : 3540,
+    "charactersBefore" : 2518,
+    "following" : false,
+    "heightAfter" : 1882,
+    "heightBefore" : 1288,
+    "name" : "last-activity-open",
+    "nearBottom" : false,
+    "originAfter" : 490,
+    "originBefore" : 108
+  },
+  {
+    "anchorAfter" : -14,
+    "anchorBefore" : -14,
+    "anchorRow" : 8,
+    "charactersAfter" : 4196,
+    "charactersBefore" : 3556,
+    "following" : false,
+    "heightAfter" : 2256,
+    "heightBefore" : 1411,
+    "name" : "last-thought-open",
+    "nearBottom" : false,
+    "originAfter" : 490,
+    "originBefore" : 84
+  }
+]

@@ -1,0 +1,70 @@
+{
+  "checkpoints" : [
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 275,
+      "documentHeight" : 973,
+      "isNearBottom" : true,
+      "name" : "initial",
+      "renderer" : "list",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 547,
+      "unixTime" : 1790804515.3060269,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 17753
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 275,
+      "documentHeight" : 973,
+      "isNearBottom" : true,
+      "name" : "ready",
+      "renderer" : "list",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : true,
+      "streamCharacters" : 547,
+      "unixTime" : 1790804516.371887,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 17753
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 490,
+      "documentHeight" : 1792,
+      "isNearBottom" : false,
+      "name" : "last-activity-open",
+      "renderer" : "list",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : false,
+      "streamCharacters" : 2952,
+      "unixTime" : 1790804526.4394469,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 17753
+    }
+  ],
+  "error" : "Error Domain=DisclosureQA Code=1 \"Window capture missing: last-activity-open\" UserInfo={NSLocalizedDescription=Window capture missing: last-activity-open}",
+  "passed" : false,
+  "stages" : [
+    {
+      "anchorAfter" : -14,
+      "anchorBefore" : -14,
+      "anchorRow" : 8,
+      "charactersAfter" : 2952,
+      "charactersBefore" : 2525,
+      "following" : false,
+      "heightAfter" : 1792,
+      "heightBefore" : 1455,
+      "name" : "last-activity-open",
+      "nearBottom" : false,
+      "originAfter" : 490,
+      "originBefore" : 275
+    }
+  ]
+}
