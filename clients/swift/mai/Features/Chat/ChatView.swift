@@ -849,6 +849,19 @@ struct ChatTimeline: View {
                                 rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
                                 hasEarlierSections: hasEarlierSections)
                         }
+                        // Observe the List itself. The native transcript reports
+                        // its own geometry; an observer above both renderers can
+                        // mistake a nested code/table scroller for the transcript.
+                        .onScrollGeometryChange(for: ChatMacScrollGeometry.self) {
+                            geometry in
+                            Self.macScrollGeometry(from: geometry)
+                        } action: { oldGeometry, newGeometry in
+                            handleMacScrollGeometryChange(
+                                from: oldGeometry,
+                                to: newGeometry,
+                                hasEarlierSections: hasEarlierSections
+                            )
+                        }
                     }
                 #else
                     List {
@@ -1009,18 +1022,7 @@ struct ChatTimeline: View {
                     proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 #endif
             }
-            #if os(macOS)
-                .onScrollGeometryChange(for: ChatMacScrollGeometry.self) {
-                    geometry in
-                    Self.macScrollGeometry(from: geometry)
-                } action: { oldGeometry, newGeometry in
-                    handleMacScrollGeometryChange(
-                        from: oldGeometry,
-                        to: newGeometry,
-                        hasEarlierSections: hasEarlierSections
-                    )
-                }
-            #else
+            #if !os(macOS)
                 .onScrollGeometryChange(for: ChatScrollGeometry.self) {
                     geometry in
                     Self.scrollGeometry(from: geometry)

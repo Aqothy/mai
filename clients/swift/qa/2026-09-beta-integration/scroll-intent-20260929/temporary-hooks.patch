@@ -1,0 +1,38 @@
+diff --git i/clients/swift/mai/ContentView.swift w/clients/swift/mai/ContentView.swift
+index b1f3301..04b5e05 100644
+--- i/clients/swift/mai/ContentView.swift
++++ w/clients/swift/mai/ContentView.swift
+@@ -46,6 +46,13 @@ struct MaiApp: App {
+                 terminalStore: terminalStore
+             )
+             .task {
++                #if os(macOS) && DEBUG
++                if ChatScrollIntentQA.isRequested {
++                    await ChatScrollIntentQA.run()
++                    NSApplication.shared.terminate(nil)
++                    return
++                }
++                #endif
+                 guard !usesSyntheticBenchmarkStore else { return }
+                 await connection.start()
+             }
+diff --git i/clients/swift/mai/Features/Chat/ChatView.swift w/clients/swift/mai/Features/Chat/ChatView.swift
+index 49bae43..fa77574 100644
+--- i/clients/swift/mai/Features/Chat/ChatView.swift
++++ w/clients/swift/mai/Features/Chat/ChatView.swift
+@@ -20,6 +20,7 @@ struct ChatView: View {
+     init(
+         store: ThreadStore,
+         draftStore: ThreadDraftStore,
++        qaScrollState: ChatScrollState? = nil,
+         projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
+         initialWorkingDirectory: String? = nil,
+         openThread: ((String) -> Void)? = nil
+@@ -27,6 +28,7 @@ struct ChatView: View {
+         self.store = store
+         self.draftStore = draftStore
+         self.openThread = openThread
++        _scrollState = State(initialValue: qaScrollState ?? ChatScrollState())
+         _draftModel = State(
+             initialValue: DraftPromptModel(
+                 store: store,

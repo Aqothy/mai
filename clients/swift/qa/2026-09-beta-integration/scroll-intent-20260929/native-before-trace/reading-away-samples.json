@@ -1,0 +1,1690 @@
+[
+  {
+    "bottomGap" : 1740,
+    "characters" : 2656,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729719.9537201
+  },
+  {
+    "bottomGap" : 1740,
+    "characters" : 2656,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729719.973047
+  },
+  {
+    "bottomGap" : 1758,
+    "characters" : 2688,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729719.9925671
+  },
+  {
+    "bottomGap" : 1758,
+    "characters" : 2688,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.0099239
+  },
+  {
+    "bottomGap" : 1758,
+    "characters" : 2720,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.0267529
+  },
+  {
+    "bottomGap" : 1795,
+    "characters" : 2720,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.0448561
+  },
+  {
+    "bottomGap" : 1795,
+    "characters" : 2720,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.0631881
+  },
+  {
+    "bottomGap" : 1813,
+    "characters" : 2752,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.081486
+  },
+  {
+    "bottomGap" : 1813,
+    "characters" : 2752,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.098654
+  },
+  {
+    "bottomGap" : 1831,
+    "characters" : 2784,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.118988
+  },
+  {
+    "bottomGap" : 1831,
+    "characters" : 2784,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.1370931
+  },
+  {
+    "bottomGap" : 1831,
+    "characters" : 2816,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.156949
+  },
+  {
+    "bottomGap" : 1849,
+    "characters" : 2816,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.1751111
+  },
+  {
+    "bottomGap" : 1849,
+    "characters" : 2816,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.1916618
+  },
+  {
+    "bottomGap" : 1867,
+    "characters" : 2848,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.209759
+  },
+  {
+    "bottomGap" : 1867,
+    "characters" : 2848,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.226578
+  },
+  {
+    "bottomGap" : 1885,
+    "characters" : 2880,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.2456899
+  },
+  {
+    "bottomGap" : 1885,
+    "characters" : 2880,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.263391
+  },
+  {
+    "bottomGap" : 1885,
+    "characters" : 2880,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.280488
+  },
+  {
+    "bottomGap" : 1885,
+    "characters" : 2912,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.2976511
+  },
+  {
+    "bottomGap" : 1885,
+    "characters" : 2912,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.3157821
+  },
+  {
+    "bottomGap" : 1940,
+    "characters" : 2944,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.3338771
+  },
+  {
+    "bottomGap" : 1940,
+    "characters" : 2944,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.3499861
+  },
+  {
+    "bottomGap" : 2075,
+    "characters" : 2976,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.3825679
+  },
+  {
+    "bottomGap" : 2075,
+    "characters" : 2976,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.4000001
+  },
+  {
+    "bottomGap" : 2094,
+    "characters" : 3008,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.417274
+  },
+  {
+    "bottomGap" : 2094,
+    "characters" : 3008,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.4353809
+  },
+  {
+    "bottomGap" : 2130,
+    "characters" : 3040,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.453378
+  },
+  {
+    "bottomGap" : 2130,
+    "characters" : 3040,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.4696531
+  },
+  {
+    "bottomGap" : 2130,
+    "characters" : 3040,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.4882021
+  },
+  {
+    "bottomGap" : 2167,
+    "characters" : 3072,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.5061531
+  },
+  {
+    "bottomGap" : 2167,
+    "characters" : 3072,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.5243101
+  },
+  {
+    "bottomGap" : 2185,
+    "characters" : 3104,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.5417681
+  },
+  {
+    "bottomGap" : 2185,
+    "characters" : 3104,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.55987
+  },
+  {
+    "bottomGap" : 2203,
+    "characters" : 3136,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.583863
+  },
+  {
+    "bottomGap" : 2203,
+    "characters" : 3136,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.6019979
+  },
+  {
+    "bottomGap" : 2221,
+    "characters" : 3168,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.6264319
+  },
+  {
+    "bottomGap" : 2221,
+    "characters" : 3168,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.6445551
+  },
+  {
+    "bottomGap" : 2263,
+    "characters" : 3200,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.666003
+  },
+  {
+    "bottomGap" : 2263,
+    "characters" : 3200,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.6846929
+  },
+  {
+    "bottomGap" : 2369,
+    "characters" : 3232,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.7189541
+  },
+  {
+    "bottomGap" : 2369,
+    "characters" : 3232,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.737078
+  },
+  {
+    "bottomGap" : 2405,
+    "characters" : 3264,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.756283
+  },
+  {
+    "bottomGap" : 2405,
+    "characters" : 3264,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.77439
+  },
+  {
+    "bottomGap" : 2423,
+    "characters" : 3296,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.7945008
+  },
+  {
+    "bottomGap" : 2423,
+    "characters" : 3296,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.8141179
+  },
+  {
+    "bottomGap" : 2459,
+    "characters" : 3328,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729720.8353651
+  },
+  {
+    "bottomGap" : 2459,
+    "characters" : 3328,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.853472
+  },
+  {
+    "bottomGap" : 2459,
+    "characters" : 3360,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.874058
+  },
+  {
+    "bottomGap" : 2496,
+    "characters" : 3360,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.8921709
+  },
+  {
+    "bottomGap" : 2496,
+    "characters" : 3360,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.91028
+  },
+  {
+    "bottomGap" : 2532,
+    "characters" : 3392,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.9283938
+  },
+  {
+    "bottomGap" : 2532,
+    "characters" : 3392,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.9468341
+  },
+  {
+    "bottomGap" : 2613,
+    "characters" : 3424,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.9717669
+  },
+  {
+    "bottomGap" : 2613,
+    "characters" : 3424,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729720.989306
+  },
+  {
+    "bottomGap" : 2701,
+    "characters" : 3456,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.016386
+  },
+  {
+    "bottomGap" : 2701,
+    "characters" : 3456,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.0345001
+  },
+  {
+    "bottomGap" : 2719,
+    "characters" : 3488,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.0526071
+  },
+  {
+    "bottomGap" : 2719,
+    "characters" : 3488,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.0727561
+  },
+  {
+    "bottomGap" : 2719,
+    "characters" : 3520,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.0907111
+  },
+  {
+    "bottomGap" : 2719,
+    "characters" : 3520,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.1069789
+  },
+  {
+    "bottomGap" : 2719,
+    "characters" : 3520,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.123642
+  },
+  {
+    "bottomGap" : 2737,
+    "characters" : 3552,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.1417599
+  },
+  {
+    "bottomGap" : 2737,
+    "characters" : 3552,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.159863
+  },
+  {
+    "bottomGap" : 2755,
+    "characters" : 3584,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.1779809
+  },
+  {
+    "bottomGap" : 2755,
+    "characters" : 3584,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.196841
+  },
+  {
+    "bottomGap" : 2755,
+    "characters" : 3616,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.2160912
+  },
+  {
+    "bottomGap" : 2755,
+    "characters" : 3616,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.234205
+  },
+  {
+    "bottomGap" : 2755,
+    "characters" : 3616,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.2513828
+  },
+  {
+    "bottomGap" : 2792,
+    "characters" : 3648,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.268043
+  },
+  {
+    "bottomGap" : 2792,
+    "characters" : 3648,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.286185
+  },
+  {
+    "bottomGap" : 2917,
+    "characters" : 3680,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.3141561
+  },
+  {
+    "bottomGap" : 2917,
+    "characters" : 3680,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.3309669
+  },
+  {
+    "bottomGap" : 2918,
+    "characters" : 3712,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.349978
+  },
+  {
+    "bottomGap" : 2918,
+    "characters" : 3712,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.368084
+  },
+  {
+    "bottomGap" : 2937,
+    "characters" : 3744,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.3923759
+  },
+  {
+    "bottomGap" : 2937,
+    "characters" : 3744,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.408977
+  },
+  {
+    "bottomGap" : 2955,
+    "characters" : 3776,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.433115
+  },
+  {
+    "bottomGap" : 2955,
+    "characters" : 3776,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.451261
+  },
+  {
+    "bottomGap" : 2955,
+    "characters" : 3808,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.4686351
+  },
+  {
+    "bottomGap" : 2955,
+    "characters" : 3808,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.4867439
+  },
+  {
+    "bottomGap" : 2955,
+    "characters" : 3808,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.5053658
+  },
+  {
+    "bottomGap" : 2973,
+    "characters" : 3840,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.5274971
+  },
+  {
+    "bottomGap" : 2973,
+    "characters" : 3840,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.546875
+  },
+  {
+    "bottomGap" : 2991,
+    "characters" : 3872,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.5654821
+  },
+  {
+    "bottomGap" : 2991,
+    "characters" : 3872,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.5834689
+  },
+  {
+    "bottomGap" : 3045,
+    "characters" : 3904,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.6011472
+  },
+  {
+    "bottomGap" : 3045,
+    "characters" : 3904,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.6192651
+  },
+  {
+    "bottomGap" : 3064,
+    "characters" : 3936,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.6437659
+  },
+  {
+    "bottomGap" : 3064,
+    "characters" : 3936,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.6619182
+  },
+  {
+    "bottomGap" : 3082,
+    "characters" : 3968,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.6839519
+  },
+  {
+    "bottomGap" : 3082,
+    "characters" : 3968,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.70207
+  },
+  {
+    "bottomGap" : 3212,
+    "characters" : 4000,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.7268891
+  },
+  {
+    "bottomGap" : 3212,
+    "characters" : 4000,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.745008
+  },
+  {
+    "bottomGap" : 3248,
+    "characters" : 4032,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.7669311
+  },
+  {
+    "bottomGap" : 3248,
+    "characters" : 4032,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.7833462
+  },
+  {
+    "bottomGap" : 3248,
+    "characters" : 4064,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.800858
+  },
+  {
+    "bottomGap" : 3248,
+    "characters" : 4064,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.8190179
+  },
+  {
+    "bottomGap" : 3248,
+    "characters" : 4064,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.837105
+  },
+  {
+    "bottomGap" : 3285,
+    "characters" : 4096,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.8555131
+  },
+  {
+    "bottomGap" : 3285,
+    "characters" : 4096,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.8736129
+  },
+  {
+    "bottomGap" : 3303,
+    "characters" : 4128,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729721.8917861
+  },
+  {
+    "bottomGap" : 3303,
+    "characters" : 4128,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.909878
+  },
+  {
+    "bottomGap" : 3303,
+    "characters" : 4160,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.9276381
+  },
+  {
+    "bottomGap" : 3321,
+    "characters" : 4160,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.9466691
+  },
+  {
+    "bottomGap" : 3321,
+    "characters" : 4160,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.96438
+  },
+  {
+    "bottomGap" : 3357,
+    "characters" : 4192,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729721.9828138
+  },
+  {
+    "bottomGap" : 3357,
+    "characters" : 4192,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.000921
+  },
+  {
+    "bottomGap" : 3375,
+    "characters" : 4224,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.020237
+  },
+  {
+    "bottomGap" : 3375,
+    "characters" : 4224,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.0364962
+  },
+  {
+    "bottomGap" : 3375,
+    "characters" : 4224,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.0529752
+  },
+  {
+    "bottomGap" : 3393,
+    "characters" : 4256,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.074023
+  },
+  {
+    "bottomGap" : 3393,
+    "characters" : 4256,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.0921299
+  },
+  {
+    "bottomGap" : 3475,
+    "characters" : 4288,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.1142421
+  },
+  {
+    "bottomGap" : 3475,
+    "characters" : 4288,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.1323729
+  },
+  {
+    "bottomGap" : 3562,
+    "characters" : 4320,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.159116
+  },
+  {
+    "bottomGap" : 3562,
+    "characters" : 4320,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.1772151
+  },
+  {
+    "bottomGap" : 3581,
+    "characters" : 4352,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.195318
+  },
+  {
+    "bottomGap" : 3581,
+    "characters" : 4352,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.2148471
+  },
+  {
+    "bottomGap" : 3599,
+    "characters" : 4384,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.232533
+  },
+  {
+    "bottomGap" : 3599,
+    "characters" : 4384,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.2488279
+  },
+  {
+    "bottomGap" : 3599,
+    "characters" : 4416,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.2655981
+  },
+  {
+    "bottomGap" : 3599,
+    "characters" : 4416,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.2837369
+  },
+  {
+    "bottomGap" : 3599,
+    "characters" : 4416,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.300653
+  },
+  {
+    "bottomGap" : 3617,
+    "characters" : 4448,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.3178749
+  },
+  {
+    "bottomGap" : 3617,
+    "characters" : 4448,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.335974
+  },
+  {
+    "bottomGap" : 3635,
+    "characters" : 4480,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.3572421
+  },
+  {
+    "bottomGap" : 3635,
+    "characters" : 4480,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.3753839
+  },
+  {
+    "bottomGap" : 3635,
+    "characters" : 4512,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.3927131
+  },
+  {
+    "bottomGap" : 3673,
+    "characters" : 4512,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.4101381
+  },
+  {
+    "bottomGap" : 3673,
+    "characters" : 4512,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.4279032
+  },
+  {
+    "bottomGap" : 3779,
+    "characters" : 4544,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.4567041
+  },
+  {
+    "bottomGap" : 3779,
+    "characters" : 4544,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.474822
+  },
+  {
+    "bottomGap" : 3797,
+    "characters" : 4576,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.492903
+  },
+  {
+    "bottomGap" : 3797,
+    "characters" : 4576,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.5110011
+  },
+  {
+    "bottomGap" : 3815,
+    "characters" : 4608,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.5352221
+  },
+  {
+    "bottomGap" : 3815,
+    "characters" : 4608,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.5533481
+  },
+  {
+    "bottomGap" : 3834,
+    "characters" : 4640,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.5769401
+  },
+  {
+    "bottomGap" : 3834,
+    "characters" : 4640,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.5950699
+  },
+  {
+    "bottomGap" : 3852,
+    "characters" : 4672,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.6185689
+  },
+  {
+    "bottomGap" : 3852,
+    "characters" : 4672,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.634913
+  },
+  {
+    "bottomGap" : 3852,
+    "characters" : 4704,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.6518669
+  },
+  {
+    "bottomGap" : 3870,
+    "characters" : 4704,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.669992
+  },
+  {
+    "bottomGap" : 3870,
+    "characters" : 4704,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.6886411
+  },
+  {
+    "bottomGap" : 3888,
+    "characters" : 4736,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.7066741
+  },
+  {
+    "bottomGap" : 3888,
+    "characters" : 4736,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.7246909
+  },
+  {
+    "bottomGap" : 3929,
+    "characters" : 4768,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.7558651
+  },
+  {
+    "bottomGap" : 3929,
+    "characters" : 4768,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.773989
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4800,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729722.792454
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4800,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.809468
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4832,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.8275719
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4832,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.8481331
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4864,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.8673139
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4864,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.8854389
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4896,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.902761
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4896,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.922117
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4896,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.9393082
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4928,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.9564319
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4928,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.9745631
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4960,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729722.9927239
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4960,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.0108728
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4992,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.032429
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 4992,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.0505409
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 5024,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.0689631
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 5024,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.0871038
+  },
+  {
+    "bottomGap" : 4016,
+    "characters" : 5024,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.1060281
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5056,
+    "following" : false,
+    "nearBottom" : true,
+    "originY" : 18432,
+    "unixTime" : 1790729723.126127
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5056,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.1442609
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5088,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.1663079
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5088,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.184428
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5120,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.2018719
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5120,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.218297
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5120,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.236428
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5152,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.256144
+  },
+  {
+    "bottomGap" : 4035,
+    "characters" : 5152,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.2731509
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5184,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.293443
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5184,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.3115821
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5216,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.328788
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5216,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.3470678
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5216,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.365211
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5248,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.3833661
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5248,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.399972
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5280,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.4172921
+  },
+  {
+    "bottomGap" : 4103,
+    "characters" : 5280,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.4354081
+  },
+  {
+    "bottomGap" : 4140,
+    "characters" : 5312,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.4636199
+  },
+  {
+    "bottomGap" : 4140,
+    "characters" : 5312,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.4817419
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5344,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.505563
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5344,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.5236669
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5376,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.541713
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5376,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.55985
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5408,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.57883
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5408,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.5970221
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5408,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.6136642
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5440,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.6309471
+  },
+  {
+    "bottomGap" : 4175,
+    "characters" : 5440,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.6490841
+  },
+  {
+    "bottomGap" : 4193,
+    "characters" : 5472,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.6681981
+  },
+  {
+    "bottomGap" : 4193,
+    "characters" : 5472,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.686336
+  },
+  {
+    "bottomGap" : 4227,
+    "characters" : 5504,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.7145262
+  },
+  {
+    "bottomGap" : 4227,
+    "characters" : 5504,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.7318211
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5536,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.7539589
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5536,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.7720771
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5568,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.789324
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5568,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.807483
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5600,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.8260951
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5600,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.8442621
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5600,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.8624291
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5632,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.8788781
+  },
+  {
+    "bottomGap" : 4261,
+    "characters" : 5632,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.897022
+  },
+  {
+    "bottomGap" : 4279,
+    "characters" : 5664,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.9163499
+  },
+  {
+    "bottomGap" : 4279,
+    "characters" : 5664,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.9344721
+  },
+  {
+    "bottomGap" : 4279,
+    "characters" : 5696,
+    "following" : false,
+    "nearBottom" : false,
+    "originY" : 18432,
+    "unixTime" : 1790729723.9523859
+  }
+]

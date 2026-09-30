@@ -1,0 +1,38 @@
+{
+  "checkpoints" : [
+    {
+      "clipWidth" : -1,
+      "clipX" : -1,
+      "clipY" : -1,
+      "documentHeight" : -1,
+      "isNearBottom" : true,
+      "name" : "a-initial",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : true,
+      "streamCharacters" : 142,
+      "unixTime" : 1790729435.2916451,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 15412
+    },
+    {
+      "clipWidth" : 1100,
+      "clipX" : 0,
+      "clipY" : 19805,
+      "documentHeight" : 20503,
+      "isNearBottom" : true,
+      "name" : "following",
+      "renderer" : "native",
+      "selected" : "qa-chat-a",
+      "shouldFollowBottom" : true,
+      "streamCharacters" : 2272,
+      "unixTime" : 1790729438.546243,
+      "visible" : true,
+      "width" : 1100,
+      "windowID" : 15412
+    }
+  ],
+  "error" : "Error Domain=ScrollIntentQA Code=1 \"Unexpected follow\/jump-button state transition during reading-away\" UserInfo={NSLocalizedDescription=Unexpected follow\/jump-button state transition during reading-away}",
+  "passed" : false
+}
