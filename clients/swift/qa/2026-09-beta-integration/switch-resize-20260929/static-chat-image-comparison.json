@@ -1,0 +1,43 @@
+{
+  "native": {
+    "sameSize": true,
+    "beforeSize": [
+      2424,
+      1888
+    ],
+    "afterSize": [
+      2424,
+      1888
+    ],
+    "differenceBounds": [
+      451,
+      745,
+      2306,
+      1530
+    ],
+    "contentDifferenceBounds": [
+      331,
+      615,
+      2184,
+      1400
+    ]
+  },
+  "list": {
+    "sameSize": true,
+    "beforeSize": [
+      2292,
+      1756
+    ],
+    "afterSize": [
+      2292,
+      1756
+    ],
+    "differenceBounds": [
+      2228,
+      1427,
+      2240,
+      1486
+    ],
+    "contentDifferenceBounds": null
+  }
+}

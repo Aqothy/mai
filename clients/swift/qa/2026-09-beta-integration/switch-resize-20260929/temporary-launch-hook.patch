@@ -1,0 +1,18 @@
+diff --git i/clients/swift/mai/ContentView.swift w/clients/swift/mai/ContentView.swift
+index b1f3301..e98e8dd 100644
+--- i/clients/swift/mai/ContentView.swift
++++ w/clients/swift/mai/ContentView.swift
+@@ -46,6 +46,13 @@ struct MaiApp: App {
+                 terminalStore: terminalStore
+             )
+             .task {
++                #if os(macOS) && DEBUG
++                if ChatSwitchResizeQA.isRequested || UserDefaults.standard.bool(forKey: "ChatSwitchResizeQA") {
++                    await ChatSwitchResizeQA.run()
++                    NSApplication.shared.terminate(nil)
++                    return
++                }
++                #endif
+                 guard !usesSyntheticBenchmarkStore else { return }
+                 await connection.start()
+             }

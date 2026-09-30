@@ -1,0 +1,21 @@
+# Chat switching and resize QA — September 29, 2026
+
+The normal Debug app passes the same scripted scenario with native macOS and List transcripts on macOS 27.0 (26A428). A 12,047-character Unicode/Markdown reply continues in chat A while chat B is selected. Four width changes (700, 1280, 800 and 1100 points), four visits to B during streaming, returns to A and a final visit to B preserve the correct content.
+
+The fixture deliberately shares older message/item IDs between the two chats and gives B's final message the same ID as A's streaming reply. Each hidden-stream checkpoint compares A against every character sent so far and compares B's complete encoded model against its original snapshot. Completion verifies the exact full source, completed turn, unchanged older timeline identities and no duplicate entries. Both `native/result.json` and `list/result.json` report a pass.
+
+Twenty-two actual window captures accompany the state assertions. The resize overviews and full-resolution completion/static-chat captures were inspected: content is centered at the sampled widths, the reply remains above the composer and the correct static/final markers appear. All ten post-initial checkpoints in each renderer have zero horizontal clip offset. The initial native capture still shows loading and reports no transcript scroll view; it is not evidence for the separate cold-opening requirement. Each renderer reaches its subsequent streaming checkpoints and final complete transcript.
+
+Comparing B's last during-stream capture with B after completion produces identical interior pixels for List. Native captures retain the same text and layout but differ in code-block background/highlighting presentation and scrollbar appearance; they are not asserted to be pixel-identical. The original PNGs and `static-chat-image-comparison.json` preserve that distinction. These are discrete correctness snapshots, not continuous frame inspection, scroll-intent validation or FPS measurements.
+
+## Execution and cleanup
+
+The successful runs used Xcode MCP `RunProject` with the debugger attached, launch references `76c4448180` (native, PID 62039) and `76c5cadc80` (List, PID 62116). The tested code-image hash is recorded in each renderer's `metadata.json`. Source is based on `0c28a3f` with the exact temporary harness in `ChatSwitchResizeQA.swift.txt` and launch change in `temporary-launch-hook.patch`. There was also an existing, separately modified Xcode project file at execution time; it was not edited or reverted for this QA. Do not describe the measured binary as a pristine build of the base commit.
+
+The harness drives the production `ThreadStore` notification path and full `ChatView`, with an in-process fixture transport. It does not call a provider account, send prompts, or change persistent app preferences. Renderer selection uses a restored process-local argument domain; draft storage uses a disposable suite. A request file in the app's temporary directory allows Xcode to launch the scenario without editing scheme arguments.
+
+Earlier preview attempts were rejected because their windows were occluded. The first evidence location also proved unwritable by the sandboxed host. A Launch Services attempt failed with error -10810; a subsequent direct launch produced no completion artifact and was not counted. `setup-failure.json` and `preview-occluded-result.json` retain the identified setup failures. Successful captures were taken only from the normal app after its own window reported visible. Expired launch-session references prevented fetching the complete console after stopping; the persistent per-run result and captures, plus the recorded successful launch and observed final PASS output, are the evidence.
+
+After both runs, the request marker, temporary app source and launch hook were removed, and the owned app/capture processes stopped. `ContentView.swift` again matches the committed source. Xcode MCP build-for-testing succeeds after removal (`BuildProject-Log-20260929-204402.txt`). No production change was required for this scenario.
+
+The sidebar/fullscreen matrix, scrolling away and resuming follow, disclosure interaction, physical devices and iOS switching/rotation remain independent open requirements. The generated timestamp-decoder approval and its older-runtime replay failures also remain open.
