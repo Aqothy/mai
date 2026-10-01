@@ -65,4 +65,4 @@ Additional earlier attempt reports (`rendering-20260919`, `live-release-20260920
 2. Identify UI owner → command/event boundary → provider/persistence responsibility → verification.
 3. Link the smallest relevant source/test/report; state platform and capability differences.
 4. Record known limits and unresolved product issues separately from harness failures.
-5. Update alongside code, with a lightweight automated drift/link check. The next agent is responsible for implementing this maintenance workflow; this handoff did not create a recurring automation.
+5. Update alongside code, with a lightweight automated drift/link check. Track B (the second handoff) owns implementing the feature-map and maintenance workflow; Track A focuses on review/QA/unfinished correctness work. This handoff did not create a recurring automation.

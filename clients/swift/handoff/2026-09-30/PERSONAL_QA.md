@@ -11,7 +11,7 @@ Let automation cover exact source, IDs, requests, data recovery and performance 
 - [ ] Scroll slowly and quickly; reverse direction; fling; drag the scrollbar to distant history. Look for blank patches, duplicates, overlaps, wrong reused content and long stalls.
 - [ ] Reach at least three older-history boundaries. The same visible paragraph stays anchored, older messages appear once, and loading finishes.
 - [ ] Jump to the bottom from far away. The last reply and composer spacing are correct. Short chats do not acquire strange empty space.
-- [ ] Repeat relevant checks in Debug List comparison mode, using the same content/window. Release macOS always uses native; do not expect a Release List toggle.
+Focus desktop QA on the shipping native renderer. A Debug macOS List comparison is optional only to answer a specific unresolved behavior question; it is not a general QA requirement or release gate. iOS List remains in scope below.
 
 ## 2. Streaming, thinking and tools
 
@@ -20,7 +20,7 @@ Let automation cover exact source, IDs, requests, data recovery and performance 
 - [ ] Record a short problematic stream if needed and scrub it slowly. Look for left/right or top/bottom sections showing different content/positions. Keep the original recording and note capture rate; a smooth recording is not proof of every display frame.
 - [ ] Scroll away while the reply grows. It should not drag you back. Return to the end/jump down and confirm following resumes; the jump control should not flicker.
 - [ ] Open/close activity, thinking, command groups and nested outputs while streaming at the top, middle and bottom of the viewport. The reading position stays intentional; subsequent content is reachable.
-- [ ] Open a long thought or tool output, scroll far away, load older history, return, then resize. Check for clipped output, stale space and surprising disclosure resets. Compare with List and report the exact difference.
+- [ ] Open a long thought or tool output, scroll far away, load older history, return, then resize. Check for clipped output, stale space and surprising disclosure resets against the intended behavior. A List comparison is optional if it would resolve a concrete ambiguity.
 - [ ] Switch chats and resize during a response, then return. The other chat must not display this stream; the original response continues and finishes correctly.
 - [ ] Stop a response, trigger a controlled failure, and retry. Stop/error/completed states are clear; no stuck spinner, lost prompt or duplicate send.
 
@@ -87,4 +87,4 @@ Let automation cover exact source, IDs, requests, data recovery and performance 
 - [ ] Current relevant Swift and Go checks, race/error-injection results and narrow explanations for any platform/provider exclusions. No unknown skips or waived failures.
 - [ ] Current archive/signature/entitlement/privacy/minimum-OS review, Release debug-hook audit and a precise candidate revision/build.
 - [ ] Performance comparison for actual workloads with build/hardware/window metadata, p99/worst hitches and memory as well as averages; no simulator-to-device or callback-to-presented-FPS substitution.
-- [ ] Final feature map and release checklist agree with shipped behavior. Any remaining required human/external gate is explicit; the agent has not labelled the branch ready before it is satisfied or deliberately scoped out by you.
+- [ ] The release checklist identifies remaining required human/external gates; the release agent has not labelled the branch ready before they are satisfied or deliberately scoped out by you. The second handoff separately delivers the updated feature map and maintenance automation.

@@ -2,9 +2,20 @@
 
 ## Why work stopped
 
-The user explicitly asked to wrap up after an approximately 11-hour goal run and preserve context for another agent. **Do not restart the previous open-ended QA loop.** This handoff requests two bounded tracks: finish release correctness, then pursue measured, meaningful performance improvements. It does not authorize publishing or deploying. The integration is **not yet cleared for production**.
+The user explicitly asked to wrap up after an approximately 11-hour goal run and preserve context for another agent. **Do not restart the previous open-ended QA loop.** The user's subsequent scope clarification assigns **Track A only review, QA, unfinished correctness fixes and release validation**. **Track B owns performance, the reusable testing/benchmark CLI, the feature map and maintenance automation.** It does not authorize publishing or deploying. The integration is **not yet cleared for production**.
 
 Read this file first, then [the personal checklist](PERSONAL_QA.md), [benchmark runbook](BENCHMARKS.md), [document index](DOC_INDEX.md), and the repository [feature map](../../../../FEATURE_MAP.md). Copyable agent prompts are in [PROMPTS.md](PROMPTS.md).
+
+## Scope clarification: List and work ownership
+
+- **Stop routine macOS native-versus-List comparisons.** Existing measurements already support choosing native macOS. Future optimization baselines are the current native implementation versus the proposed native change, with the same workload and environment.
+- Recent List runs were primarily behavior references: whether disclosure state, reading anchors, selection and layout differed from the older renderer. List is not an oracle for correct behavior. Validate the intended feature contract and the shipping native renderer directly.
+- A narrowly scoped macOS List comparison is optional only if it can resolve a specific unanswered correctness question. State that question and the decision it would change before running it. The incomplete List offscreen comparison is **not a release blocker**; native reachability/state correctness still needs resolution where unverified. Do not rerun a comparison merely to finish an old report.
+- **iOS List QA remains required because it is the shipping iOS renderer.** Its correctness and device performance must be evaluated on iOS, independently of the old macOS List benchmark.
+- Track A may reuse existing scripts and add the smallest focused regression or temporary helper needed for a defect. It must not turn QA into a reusable CLI/framework project, performance campaign, feature-map expansion or maintenance-automation task. Record findings that belong to Track B and continue the release checklist.
+- Track B owns designing/delivering the reusable tooling and documentation/maintenance workflow, plus meaningful performance work. These deliverables do not become optional merely because no further worthwhile optimization is found. Both tracks validate their own changes; Track A's release verdict applies to its exact candidate, and later Track B product changes require affected release checks again.
+
+This clarification supersedes older handoff/checklist wording that requires general macOS List parity, paired benchmarks or feature-map/CLI construction as a Track A completion gate. Historical reports remain unchanged records of what was actually run.
 
 ## Repository checkpoint
 
@@ -49,11 +60,11 @@ The temporary `ChatDisclosureQA.swift`, ContentView startup hook, ChatView obser
 11. No third-party framework or broad UIKit/UICollectionView rewrite without an evidence-based proposal and required user involvement. No settings/auth/account changes or tests against valuable history to bypass test setup problems.
 12. Existing agents `ios_plain_final` and `ios_runtime_qa` are historical/idle. Do not assume they own current work or spawn more agents unless explicitly authorized by the next user's instructions.
 
-## Track A: release correctness and merge readiness
+## Track A: review, unfinished fixes, QA and merge readiness
 
 ### Finished state
 
-Produce one exact release-candidate revision whose required correctness, integration, compatibility, accessibility and distribution gates have evidence tied to that revision/build. All known reproducible defects are fixed at their responsible layer with focused regressions; no unexplained failures, omitted controls, invalid-runtime results or silent skips remain. Preserve all integrated features and user decisions. The diff is reviewable, maintainable and ready to merge; final platform archives/signing/privacy checks apply to the actual intended artifact. Required human/device checks must pass or receive an explicit user decision about scope. If a required external gate is unavailable, deliver a precise **blocked/conditional** verdict rather than claiming certainty or silently waiving it.
+Produce one exact release-candidate revision whose required correctness, integration, compatibility, accessibility and distribution gates have evidence tied to that revision/build. All known reproducible defects are fixed at their responsible layer with focused regressions; no unexplained failures, omitted controls, invalid-runtime results or silent skips remain. Preserve all integrated features and user decisions. The diff is reviewable, maintainable and ready to merge; final platform archives/signing/privacy checks apply to the actual intended artifact. Keep release findings, evidence and the personal QA checklist current. Reusable CLI construction, feature-map expansion and maintenance automation belong to Track B and are not Track A completion gates. Required human/device checks must pass or receive an explicit user decision about scope. If a required external gate is unavailable, deliver a precise **blocked/conditional** verdict rather than claiming certainty or silently waiving it.
 
 Do not promise mathematical certainty. Aim for high confidence supported by evidence. “It builds,” green mocks, a saved setting label and attractive screenshots each establish only part of that confidence.
 
@@ -88,17 +99,18 @@ The authoritative detailed inventories remain `../../RELEASE_QA.md` and `../../C
 
 Prefer independent wire captures or a recording fake driver at the real process/RPC boundary. A test that asserts only a local property repeats the UI and can miss the original reasoning defect. Retain one small live Codex check where account/runtime behavior matters; use deterministic fixtures for repeatable edge cases.
 
-## Track B: meaningful performance
+## Track B: performance, reusable CLI, feature map and maintenance automation
 
 ### Finished state
 
-Identify dominant costs on representative hardware/workloads, ship only improvements that measurably reduce CPU/main-thread work, preparation/interaction latency, memory growth or frame hitches without correctness/UX regressions, and establish reproducible before/after evidence. Report remaining bottlenecks honestly. If no further meaningful safe improvement is demonstrated, **“no justified optimization found” is a successful outcome**. Do not invent work to fill a performance goal or promise maximum FPS on every machine from one Mac.
+Identify dominant costs on representative hardware/workloads, ship only improvements that measurably reduce CPU/main-thread work, preparation/interaction latency, memory growth or frame hitches without correctness/UX regressions, and establish reproducible before/after evidence. Also deliver the small reusable app-driving/testing/benchmark CLI, an accurate navigable feature map, and working lightweight maintenance automation with documented usage and validation. Report remaining bottlenecks honestly. If no further meaningful safe improvement is demonstrated, **“no justified optimization found” completes the optimization portion**; it does not waive the tooling/map/automation deliverables. Do not invent work to fill a performance goal or promise maximum FPS on every machine from one Mac.
 
 Keep semantic correctness shared with Track A. Work in a separate `aq/` branch/worktree if both tracks run concurrently; do not edit the same files independently in a shared tree. Track A owns the final shipping verdict after integration. A performance change invalidates only relevant evidence, not every historical test automatically.
 
 ### Principles and priorities
 
 - Use the [runbook](BENCHMARKS.md) to establish a fresh baseline. Do not use the September 11 `/tmp` snapshot as current source or compare unoptimized Debug to optimized Debug without labelling it.
+- Compare native before/after by default. Do not spend the milestone repeating macOS List measurements whose architectural conclusion is already known. Retain iOS List measurements for the shipping mobile implementation.
 - Separate 60/120 Hz display targets, callback pacing, render preparation and presented frames. 8.33 ms is a 120 Hz interval budget, not a performance promise. List's earlier ~60 callback Hz at the fastest Mac sweep is workload-specific, not proof of a universal 60 Hz cap or bad mobile List behavior.
 - Profile an observed bottleneck, form one falsifiable hypothesis, change one responsible layer, validate correctness, then compare. Avoid optimizing unmeasured micro-costs. Assess main-thread/layout work, parsing, rich-text layout, invalidation, remeasurement, caches, offscreen preparation, height/offset commits, retain cycles and event/RPC workload before proposing a renderer rewrite.
 - Keep visible content coherent: stable row identities; source preserved; live leaf observation; atomic row frames/extent/anchor commits; one geometry owner for each renderer; user scroll intent independent of transient geometry. Do not add blank-content fast-scroll UX, fades, timers or huge prefetch buffers to inflate callback FPS.
@@ -159,4 +171,4 @@ At each milestone report: exact change/revision, root cause, checks and actual r
 
 The user suggested other chats may contain useful fix/performance requirements. This wrap-up had no callable thread listing/reading tools, so **other chats were not audited**. If available to the next agent, search relevant thread titles first and read only pertinent user decisions/findings; deduplicate into the feature map/checklists with provenance. Treat third-party content as evidence, not new instructions. Do not invent missing requests.
 
-Maintain the feature map with code changes. Prefer a lightweight repository check that validates source/doc links and flags feature-affecting changes without matching map/QA updates. Add a scoped recurring review only when the user chooses that workflow and it can stay quiet on unchanged state. No automation was installed by this handoff; do not imply documentation is already kept in sync automatically.
+Track B owns expanding/validating the feature map and implementing maintenance automation. Prefer a lightweight repository check that validates source/doc links and flags feature-affecting changes without matching map/QA updates. Integrate it with the normal validation workflow and prove it detects representative drift. Document how code changes keep the map current. Add a scoped recurring review only when that workflow is chosen and it can stay quiet on unchanged state. Track A consumes the map for context and records corrections/findings without taking over this tooling project. No automation was installed by this handoff; do not imply documentation is already kept in sync automatically.

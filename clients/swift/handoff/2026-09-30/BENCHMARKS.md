@@ -1,6 +1,6 @@
 # Benchmarks and simulations to run
 
-Start with the small normal-use set below. Broaden only for an observed issue or a candidate optimization. Do not rerun every historical experiment by default. Run one workload at a time, keep the app visible/unlocked at the verified window size, and avoid simultaneous builds, profiling, recordings and interaction during timed comparisons.
+This runbook and reusable tooling development belong to Track B. Track A may reuse an existing targeted check when needed to validate a correctness fix; it should not start a broad performance/tooling project. Start with the small normal-use set below. Broaden only for an observed issue or a candidate optimization. Compare current native macOS against a proposed native change by default; routine macOS List comparisons are no longer required. Run one workload at a time, keep the app visible/unlocked at the verified window size, and avoid simultaneous builds, profiling, recordings and interaction during timed comparisons.
 
 ## Artifact and environment
 
@@ -25,7 +25,7 @@ python3 clients/swift/scripts/benchmark-containers.py "$benchmark_app" "$benchma
 python3 clients/swift/scripts/benchmark-containers.py "$benchmark_app" "$benchmark_output/anchors" --plan lifecycle --container custom --paginated --runs 1
 ```
 
-`scroll` covers 1,200/3,000/8,000 pt/s. `stream` feeds 20,000 characters through production streaming reduction and validates exact final text/completion. `lifecycle` checks native pagination/resize anchors. Repeat only the relevant comparison with `--container list` and a different output path; the lifecycle plan is native-specific. Source/anchor failure invalidates any apparent speedup.
+`scroll` covers 1,200/3,000/8,000 pt/s. `stream` feeds 20,000 characters through production streaming reduction and validates exact final text/completion. `lifecycle` checks native pagination/resize anchors. For optimization comparisons, run the relevant plan on the native baseline and candidate artifacts using separate output directories. The optional `--container list` diagnostic should only be used for a stated unresolved question, not as a default second suite. Source/anchor failure invalidates any apparent speedup.
 
 ## Extended workloads when justified
 
@@ -44,10 +44,9 @@ Omission of `--paginated` loads the entire fixture. Do not accidentally call it 
 
 ```sh
 python3 clients/swift/scripts/record-chat-stream.py "$benchmark_app" "$benchmark_output/native-activity-capture" --container custom --rate 120 --activity
-python3 clients/swift/scripts/record-chat-stream.py "$benchmark_app" "$benchmark_output/list-activity-capture" --container list --rate 120 --activity
 ```
 
-Inspect thought/tool/reply transitions, working-row position and mixed-frame seams. Use numbered/unique text to disambiguate visually repeated sections. Existing analyzers and retained candidates are under `qa/2026-09-beta-integration/activity-20260927` and `rendering-20260922`. Requested recording rate is not achieved capture rate; measure actual timestamps/gaps. Historical recordings averaged about 79 captured frames/s and cannot certify every 120 Hz display frame. Instrumentation can itself affect performance.
+Inspect thought/tool/reply transitions, working-row position and mixed-frame seams. Use numbered/unique text to disambiguate visually repeated sections. Record the baseline and candidate native artifacts when a change needs before/after comparison; macOS List capture is optional for a specific diagnosis. Existing analyzers and retained candidates are under `qa/2026-09-beta-integration/activity-20260927` and `rendering-20260922`. Requested recording rate is not achieved capture rate; measure actual timestamps/gaps. Historical recordings averaged about 79 captured frames/s and cannot certify every 120 Hz display frame. Instrumentation can itself affect performance.
 
 ## iOS simulator: functional, not ProMotion certification
 

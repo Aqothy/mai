@@ -2,7 +2,7 @@
 
 This is a source-navigation and behavior map, seeded at integration product revision `641a886` on 2026-09-30. It describes intended contracts and links to implementations; **it is not a claim that every release gate has passed**. Current execution status is in [release QA](clients/swift/RELEASE_QA.md), [chat QA](clients/swift/CHAT_QA_CHECKLIST.md) and the [handoff](clients/swift/handoff/2026-09-30/HANDOFF.md).
 
-Update a feature's contract, implementation links and verification links in the same change that alters behavior. Historical reports are evidence for their recorded revision/runtime, not evergreen specifications. Automated drift checking is requested for the next agent; no sync automation has been installed yet.
+Update a feature's contract, implementation links and verification links in the same change that alters behavior. Historical reports are evidence for their recorded revision/runtime, not evergreen specifications. The second handoff (Track B) owns completing this map and implementing maintenance automation; no sync automation has been installed yet. The release-review handoff consumes it as context rather than taking over that project.
 
 ## Main flow and ownership
 
@@ -48,4 +48,4 @@ Keep user intent, transport state, persisted provider data and rendered layout s
 
 Each feature change should update: user-visible contract, owning layer/source links, request/event/persistence effect, regression coverage, platform/capability limits, and any changed manual QA step. Use stable feature names and source symbols; avoid line-number inventories that immediately go stale.
 
-The next agent should implement a lightweight map/QA drift check in the repository's normal validation workflow: verify local links, detect changed feature areas, and require either matching documentation/QA updates or a reviewable explanation of no behavior change. Generated docs must not automatically assert test success. A periodic assistant review may propose updates, but must not invent behavior or overwrite human contracts from a code heuristic. See the handoff for bounded automation and approval constraints.
+Track B should implement a lightweight map/QA drift check in the repository's normal validation workflow: verify local links, detect changed feature areas, and require either matching documentation/QA updates or a reviewable explanation of no behavior change. Generated docs must not automatically assert test success. A periodic assistant review may propose updates, but must not invent behavior or overwrite human contracts from a code heuristic. See the handoff for bounded automation and approval constraints.
