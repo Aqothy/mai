@@ -1,0 +1,12 @@
+diff --git c/clients/swift/CHAT_QA_CHECKLIST.md i/clients/swift/CHAT_QA_CHECKLIST.md
+index 03e13a9..a77eb3c 100644
+--- c/clients/swift/CHAT_QA_CHECKLIST.md
++++ i/clients/swift/CHAT_QA_CHECKLIST.md
+@@ -50,6 +50,7 @@ Unmarked items are QA to perform, not already-verified claims. See CHAT_PERFORMA
+ 
+ ## iOS regression pass
+ 
++- [ ] Complete the iOS 18.6 provider-replay retest after the pending generated timestamp-decoder change. Live response/chat/terminal paths pass the shared decoder fix and 32 related checks pass on each platform; two generated-model replay failures remain open. See [timestamp/replay report](qa/2026-09-beta-integration/runtime-replay-20260927/REPORT.md).
+ - [ ] Confirm iOS still uses List. Repeat opening, pagination, scrolling, thought/tool expansion, streaming follow/scroll-away, keyboard and rotation checks.
+ - [ ] Exercise supported 60/120 Hz devices, text sizes and memory pressure. Mac callback measurements do not establish iOS performance.
+ 

@@ -1,0 +1,60 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "9BE259FD-5083-4C60-9D6A-0AAC4CDB2F48",
+        "deviceName" : "mai QA iOS 18.6",
+        "modelName" : "iPhone 16",
+        "osBuildNumber" : "22G86",
+        "osVersion" : "18.6",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 2,
+      "passedTests" : 1,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "mai · Built with macOS 27.0",
+  "expectedFailures" : 0,
+  "failedTests" : 2,
+  "finishTime" : 1790555420.068,
+  "passedTests" : 1,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1790555379.004,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Caught error: .dataCorrupted(Swift.DecodingError.Context(codingPath: [CodingKeys(stringValue: \"initial\", intValue: nil)], debugDescription: \"Expected date string to be ISO8601-formatted.\", underlyingError: nil))",
+      "targetName" : "maiTests",
+      "testIdentifier" : 2,
+      "testIdentifierString" : "ChatProviderReplayTests/reasoningWireAndReloadPreserveTextAndIdentities()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatProviderReplayTests/reasoningWireAndReloadPreserveTextAndIdentities()",
+      "testName" : "reasoningWireAndReloadPreserveTextAndIdentities()"
+    },
+    {
+      "failureText" : "Caught error: .dataCorrupted(Swift.DecodingError.Context(codingPath: [_CodingKey(stringValue: \"Index 0\", intValue: 0)], debugDescription: \"Expected date string to be ISO8601-formatted.\", underlyingError: nil))",
+      "targetName" : "maiTests",
+      "testIdentifier" : 3,
+      "testIdentifierString" : "ChatProviderReplayTests/snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "testIdentifierURL" : "test://com.apple.xcode/mai/maiTests/ChatProviderReplayTests/snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "testName" : "snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()"
+    }
+  ],
+  "title" : "Test - mai",
+  "topInsights" : [
+
+  ],
+  "totalTestCount" : 3
+}

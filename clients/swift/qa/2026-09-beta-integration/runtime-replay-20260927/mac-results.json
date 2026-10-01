@@ -1,0 +1,76 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 0,
+    "notRun": 0,
+    "passed": 8,
+    "skipped": 0,
+    "total": 8
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-29T15-39-39-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/A2F1EC0E-0AE4-4183-BE95-7845A660D71E.txt",
+  "results": [
+    {
+      "displayName": "completeThoughtToolReplyStreamPreservesSourceAndHistory()",
+      "errorMessages": [],
+      "identifier": "ChatProviderReplayTests/completeThoughtToolReplyStreamPreservesSourceAndHistory()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "reasoningWireAndReloadPreserveTextAndIdentities()",
+      "errorMessages": [],
+      "identifier": "ChatProviderReplayTests/reasoningWireAndReloadPreserveTextAndIdentities()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "errorMessages": [],
+      "identifier": "ChatProviderReplayTests/snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "fractionalAndWholeSecondsRetainTheirInstant()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/fractionalAndWholeSecondsRetainTheirInstant()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "capturedDaemonTimestampRetainsMicroseconds()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/capturedDaemonTimestampRetainsMicroseconds()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "malformedDatesFailAtTheirField()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/malformedDatesFailAtTheirField()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "existingWholeSecondEncoderRemainsCompatible()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/existingWholeSecondEncoderRemainsCompatible()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "actualRPCResponseAndTerminalNotificationsDecodeDaemonDates()",
+      "errorMessages": [],
+      "identifier": "WireTransportRuntimeQA/actualRPCResponseAndTerminalNotificationsDecodeDaemonDates()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "8 tests: 8 passed, 0 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 8,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.29_15-39-39--0400.xcresult"
+}

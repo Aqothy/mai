@@ -1,0 +1,333 @@
+diff --git i/tools/client-gen/generate.mjs w/tools/client-gen/generate.mjs
+index 57bd4a7..db83303 100644
+--- i/tools/client-gen/generate.mjs
++++ w/tools/client-gen/generate.mjs
+@@ -88,6 +88,22 @@ for (const declaration of [
+   );
+ }
+ 
++// Keep generated convenience initializers on the same wire-date policy as
++// RPC responses and notifications, including on older supported OS runtimes.
++const defaultDecoder = `func newJSONDecoder() -> JSONDecoder {
++    let decoder = JSONDecoder()
++    if #available(iOS 10.0, OSX 10.12, tvOS 10.0, watchOS 3.0, *) {
++        decoder.dateDecodingStrategy = .iso8601
++    }
++    return decoder
++}`;
++if (swiftSource.split(defaultDecoder).length !== 2) {
++  throw new Error("Expected exactly one quicktype JSON decoder helper");
++}
++swiftSource = swiftSource.replace(defaultDecoder, `func newJSONDecoder() -> JSONDecoder {
++    WireJSON.makeDecoder()
++}`);
++
+ await writeFile(swiftModelsPath, swiftSource);
+ 
+ const registry = JSON.parse(await readFile(methodsPath, "utf8"));
+diff --git 1/clients/swift/maiTests/ChatProviderReplayTests.swift 2/clients/swift/maiTests/ChatProviderReplayTests.swift
+new file mode 100644
+index 0000000..787e395
+--- /dev/null
++++ 2/clients/swift/maiTests/ChatProviderReplayTests.swift
+@@ -0,0 +1,177 @@
++import Foundation
++import Testing
++@testable import mai
++
++struct ChatProviderReplayTests {
++    @Test @MainActor
++    func completeThoughtToolReplyStreamPreservesSourceAndHistory() async throws {
++        print("PROVIDER_REPLAY_RUNTIME completeThoughtToolReplyStreamPreservesSourceAndHistory \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
++        let thread = ChatSyntheticBenchmarkThread.thread(turnCount: 20)
++        let store = ThreadStore(previewThreads: [ChatSyntheticBenchmarkThread.listEntry(for: thread)], selectedThread: thread)
++        func identity(_ entry: TimelineEntry) -> String {
++            entry.message?.id ?? entry.item?.id ?? entry.approval?.requestID ?? "missing-id"
++        }
++        let beforeIDs = thread.timeline.map(identity)
++        let driver = ChatSyntheticStreamingBenchmark(store: store, includesActivity: true)
++        driver.prepare()
++        await driver.run()
++        guard driver.isFinished, driver.sourceMatches, let final = store.selectedThread else {
++            throw NSError(domain: "ActivityQA", code: 1, userInfo: [NSLocalizedDescriptionKey: "Incomplete or mismatched stream"])
++        }
++        let actualIDs = final.timeline.map(identity)
++        guard Set(actualIDs).count == actualIDs.count, Array(actualIDs.prefix(beforeIDs.count)) == beforeIDs else {
++            throw NSError(domain: "ActivityQA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Changed or duplicated existing history"])
++        }
++        let entries = final.timeline.filter { ($0.message?.turnID ?? $0.item?.turnID) == "synthetic-stream-turn" }
++        guard entries.count == 5 else { throw NSError(domain: "ActivityQA", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unexpected final entry count: \(entries.count)"]) }
++        print("PASS: two exact completed thoughts, twelve tool updates, exact 20,000-character reply, completed turn, five unique new entries, original history identity preserved")
++    }
++
++    @Test @MainActor
++    func reasoningWireAndReloadPreserveTextAndIdentities() async throws {
++        print("PROVIDER_REPLAY_RUNTIME reasoningWireAndReloadPreserveTextAndIdentities \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
++        struct Value: Decodable, Equatable {
++            let kind: String
++            let id: String
++            let status: String
++            let text: String
++        }
++        struct Fixture: Decodable {
++            let initial: mai.Thread
++            let events: [Event]
++            let live: mai.Thread
++            let reload: mai.Thread
++            let expected: [Value]
++        }
++        func require(_ condition: Bool, _ message: String) throws {
++            guard condition else {
++                throw NSError(domain: "ReasoningPipelineQA", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
++            }
++        }
++        @MainActor func values(_ thread: mai.Thread) -> [Value] {
++            thread.timeline.compactMap { entry in
++                if let item = entry.item {
++                    return Value(kind: item.kind, id: item.id, status: item.status ?? "", text: ChatTimelineLayout.reasoningText(item) ?? "")
++                }
++                if let message = entry.message {
++                    return Value(kind: message.role, id: message.id, status: "", text: message.text)
++                }
++                return nil
++            }
++        }
++        let data = try inflate(ChatProviderReplayFixtures.reasoningPipeline)
++        let fixture = try newJSONDecoder().decode(Fixture.self, from: data)
++        var session = ThreadSession(thread: fixture.initial)
++        var thoughtText: [String: String] = [:]
++        var deltaCount = 0
++        var completedCount = 0
++        for event in fixture.events {
++            try require(session.apply(event).applied, "Event was not applied: \(event.eventID)")
++            if let item = event.payload.item, item.itemKind == .reasoning {
++                if let delta = item.textDelta {
++                    thoughtText[item.id, default: ""] += delta
++                    deltaCount += 1
++                } else if let text = (item.payload?.value as? [String: Any])?["text"] as? String {
++                    thoughtText[item.id] = text
++                }
++                let projected = session.thread?.timeline.compactMap(\.item).first { $0.id == item.id }
++                try require(projected != nil, "Missing thought after event")
++                try require(projected.flatMap(ChatTimelineLayout.reasoningText) == thoughtText[item.id], "Live thought differs from the exact wire text")
++                if item.itemStatus == .completed {
++                    completedCount += 1
++                    try require(projected?.itemStatus == .completed, "Thought did not settle")
++                }
++            }
++            try require(!session.apply(event).applied, "Duplicate sequence was accepted")
++        }
++        guard let final = session.thread else { throw NSError(domain: "ReasoningPipelineQA", code: 2) }
++        try require(deltaCount == 3 && completedCount == 3, "Unexpected fixture coverage")
++        try require(values(final) == fixture.expected, "Client final timeline differs")
++        try require(values(fixture.live) == fixture.expected, "Server live snapshot differs")
++        try require(values(fixture.reload) == fixture.expected, "Provider history reload differs")
++        try require(final.latestTurn?.state == "completed" && !session.isProtected, "Completed turn retains activity")
++        print("PASS: \(fixture.events.count) server events, 3 live thought checkpoints, 3 authoritative completions, exact 5-entry timeline and stable identities after reload, duplicate sequences rejected, activity cleared")
++    }
++
++    @Test @MainActor
++    func snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime() async throws {
++        print("PROVIDER_REPLAY_RUNTIME snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
++        struct AnnotationValue: Equatable {
++            let id: String
++            let messageID: String?
++            let role: String?
++            let quote: String
++            let note: String?
++        }
++        struct MessageValue: Equatable {
++            let id: String
++            let role: String
++            let text: String
++            let annotations: [AnnotationValue]
++        }
++        func require(_ condition: Bool, _ detail: String) throws {
++            guard condition else {
++                throw NSError(domain: "AnnotationReplayQA", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
++            }
++        }
++        func values(_ thread: mai.Thread) -> [MessageValue] {
++            thread.timeline.compactMap(\.message).map { message in
++                MessageValue(id: message.id, role: message.role, text: message.text,
++                    annotations: (message.annotations ?? []).map {
++                        AnnotationValue(id: $0.id, messageID: $0.messageID, role: $0.role, quote: $0.quote, note: $0.note)
++                    })
++            }
++        }
++        let json = try inflate(ChatProviderReplayFixtures.annotationSnapshots)
++        let threads = try newJSONDecoder().decode([mai.Thread].self, from: json)
++        try require(threads.count == 5, "Incomplete live/restart/fork/runtime fixture")
++        // Establish the baseline independently of the generated model decoder,
++        // so consistently losing optional annotation fields cannot pass.
++        let rawThreads = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
++        let rawThread = try #require(rawThreads.first)
++        let timeline = try #require(rawThread["timeline"] as? [[String: Any]])
++        let expected = try timeline.compactMap { entry -> MessageValue? in
++            guard let message = entry["message"] as? [String: Any] else { return nil }
++            let annotations = try (message["annotations"] as? [[String: Any]] ?? []).map { annotation in
++                AnnotationValue(
++                    id: try #require(annotation["id"] as? String),
++                    messageID: annotation["messageId"] as? String,
++                    role: annotation["role"] as? String,
++                    quote: try #require(annotation["quote"] as? String),
++                    note: annotation["note"] as? String
++                )
++            }
++            return MessageValue(
++                id: try #require(message["id"] as? String),
++                role: try #require(message["role"] as? String),
++                text: try #require(message["text"] as? String),
++                annotations: annotations
++            )
++        }
++        try require(expected.filter { !$0.annotations.isEmpty }.count == 5, "Missing annotation-only, repeated or steering prompt")
++        try require(expected.contains { $0.text.isEmpty && !$0.annotations.isEmpty }, "Missing annotation-only prompt")
++        for thread in threads {
++            let session = ThreadSession(thread: thread)
++            try require(!session.isProtected, "Completed replay retains activity")
++            try require(values(thread) == expected, "Decoded message IDs/text/annotation cards differ")
++            let messages = thread.timeline.compactMap(\.message)
++            let ids = Set(messages.map(\.id))
++            try require(ids.count == messages.count, "Duplicate messages")
++            let rows = ChatTimeline.renderRows(messages.map(ChatTimelineRowModel.message), streamingTurnID: nil, segmentCache: session.markdownSegmentCache)
++            for message in messages where !(message.annotations ?? []).isEmpty {
++                let retained = rows.compactMap { row -> Message? in
++                    if case .standard(.message(let value)) = row, value.id == message.id { return value }
++                    return nil
++                }
++                try require(retained.count == 1 && retained.first?.annotations?.count == message.annotations?.count, "Annotation cards lost before rendering")
++                try require((message.annotations ?? []).allSatisfy { $0.messageID.map(ids.contains) ?? false }, "Quote reference points outside this chat")
++            }
++        }
++        print("PASS: five live/restart/fork/runtime snapshots, five annotation cards each, exact prompt/quote/note/message identities, all references resolve, standard annotation renderer retained, activity cleared")
++    }
++
++    @MainActor private func inflate(_ base64: String) throws -> Data {
++        let data = try #require(Data(base64Encoded: base64, options: .ignoreUnknownCharacters))
++        return try (data as NSData).decompressed(using: .zlib) as Data
++    }
++}
+diff --git 1/clients/swift/maiTests/ChatProviderReplayFixtures.swift 2/clients/swift/maiTests/ChatProviderReplayFixtures.swift
+new file mode 100644
+index 0000000..2de5c04
+--- /dev/null
++++ 2/clients/swift/maiTests/ChatProviderReplayFixtures.swift
+@@ -0,0 +1,117 @@
++// Captured daemon/provider fixtures; original evidence paths and decoded hashes are below.
++nonisolated enum ChatProviderReplayFixtures {
++    // qa/2026-09-beta-integration/reasoning-reload-20260924/pipeline.json
++    // Decoded SHA-256: df2ca1e1b68d6f604f86aac9cfec5bef345bde891ee11a2fbc4fac9f1e2dfa23
++    static let reasoningPipeline = """
++    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
++    """
++
++    // qa/2026-09-beta-integration/selection-20260926/annotation-fix/client-annotation-fixture.deflate
++    // Decoded SHA-256: 0e0ac73ab16e905155460da3995b86b6507552e5fca0def0b9ae73165d32782c
++    static let annotationSnapshots = """
++    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
++    SZEUvU+F74Ivtc0shEWqF3gJGFUemyKQiUxyP4IIP4rUe4n/jGc5RKbnJ8fi/xuY3n5x+r+HyYV5/5j3j3n/mPfvMN6/lVNj2r8dtH8Ok/4x6d+vg/Rv1DyA
++    cM3n/VjuiknbXagrGfrqYqpuquobL1hlB+SVqJhZkJkFmVmQmQWZWZCZBZlZkJkFmVmQmQWZWZCZBZlZkJkFHxOLzCzIzILMLMjMgswsyMyCzCzIzILMLMjM
++    gswsyMyCzCzIzILMLMjMgswsyMyCzCzIzILMLMjMgswsyMyCzCzIzILMLMjMgswsyMyCzCzIzILMLMjMgv9FzIKuF/pRxMyCzCzIzILMLMjMgswsyMyCzCzI
++    zILMLMjMgswsyMyCzCz4G2MWdH1mFmRmQWYWZGZBZhZ86syCd8fgW9EQj5ITWH5u+bFpZaljepZ0zTgNPTMHXxGEfhi4Qb4Kw7rWKPi+wwNTzbJn3BLbS4pH
++    apk6NFAn1B/GVF4f8FNJddm47WdLlpwPI/KsD1O6AokxdvTFEt4+wU3xjdagzwI/YlkgZxpeplSb83N1/IRXzKf70oJRYItxq3qB951QRCpf+BVNT1FcrRT0
++    eQ+yRpvbTuzHtq83t+/fC18rfj9vpX8/YLHIktlrlK/8JKBj2w68QJi560LgdsGCYEXom9J24iyF1UoWpiMQ7mWsPDkWVeWSh+4X56r8IsEwZeUvQlnJjItP
++    gXFxZJtMubiDctGe+ky6yKSLvw7SxW08ooqZD5H5EJkPkfkQmQ+R+RCZD5H5EJkPkfkQmQ+R+RCZD5H5EB8Ti8yHyHyIzIfIfIjMh8h8iMyHyHyIzIfIfIjM
++    h8h8iMyHyHyIzIfIfIjMh8h8iMyHyHyIzIfIfIjMh8h8iMyHyHyIzIfIfIjMh8h8iMyH+OvlQ3zd42qDLsBjCf1tglRLBDWUqaG+DSSKvVW2Rd8ukPTVDY3h
++    QGjNilWlZ7vNiF4+VzFDpUna7Z7iDd+5ssZi+JSBcAL+52foduncJ7SYQAvSOWtdl+MVHNMwMg3j49Aw3vEVaYAkc7btMKEiEyqeMKHiDpEwoSITKjKhIhMq
++    MqEiEyoyoSITKjKhIhMqMqHifzWhou0xoSITKjKhIhMqMqHiUydUvI/yznWmbmQ70f0Ne1PLC2LbH/HfKZaj96nwXfCltpmFsEj1Ai8Bo8pjUwQykUnuRxDh
++    Tw4gvjOe5RCZnp8ck/8Omc5+cfq7h8mFee+Y9+43xXunbJJp75j2jmnvfs20d6PmAYRrXu9H/ft9XagbTfryXqruauo7H1hlB+SVqJhbj7n1mFuPufWYW4+5
++    9Zhbj7n1mFuPufWYW4+59Zhbj7n1HhOLzK3H3HrMrcfcesytx9x6zK3H3HrMrcfcesytx9x6zK3H3HrMrcfcesytx9x6zK3H3HrMrcfcesytx9x6zK3H3HrM
++    rcfcesytx9x6zK3H3HrMrcfcesytN+LWc6IwCEMm12NyPSbXY3I9Jtdjcj0m12NyPSbXY3I9Jtdjcj0m12Nyvd8YuZ7L5HpMrsfkekyux+R6T55c7+4YfCsa
++    YmIKLTdJsxS9o4Q/whBWudJ2TMvPhWOHPmDPWYVhXWsUfNWxgiKaM26JLybFQ7lMbfirM+4PYzqwD/ixpbqu3PazJc8OlQlMJIMQH6Z0iRJj7OibJ7y/gvvb
++    G61BnwV+BgMZEh166H32uTrAwkvq031pwSiwRbjrvMAbUygilS/8iqanSLJWCvq8B1nj/3BM4PhBoDe3D/jvzIyL30/d6N8PWCzy+V//Bw==
++    """
++
++}

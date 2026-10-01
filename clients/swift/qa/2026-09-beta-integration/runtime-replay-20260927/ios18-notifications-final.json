@@ -1,0 +1,55 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 0,
+    "notRun": 0,
+    "passed": 5,
+    "skipped": 0,
+    "total": 5
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-29T15-43-23-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/30DEF1EA-6E61-48A6-8FB9-A1033A6EDF9D.txt",
+  "results": [
+    {
+      "displayName": "fractionalDateNotificationsUpdateChatAndSidebar()",
+      "errorMessages": [],
+      "identifier": "ThreadStoreTests/fractionalDateNotificationsUpdateChatAndSidebar()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "fractionalAndWholeSecondsRetainTheirInstant()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/fractionalAndWholeSecondsRetainTheirInstant()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "capturedDaemonTimestampRetainsMicroseconds()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/capturedDaemonTimestampRetainsMicroseconds()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "malformedDatesFailAtTheirField()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/malformedDatesFailAtTheirField()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "existingWholeSecondEncoderRemainsCompatible()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/existingWholeSecondEncoderRemainsCompatible()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "5 tests: 5 passed, 0 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 5,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.29_15-43-23--0400.xcresult"
+}

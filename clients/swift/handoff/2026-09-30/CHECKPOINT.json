@@ -1,0 +1,9 @@
+{
+  "productRevision": "641a886",
+  "branch": "aq/beta-01-08-integration-20260912",
+  "statusAtCapture": "MM clients/swift/CHAT_QA_CHECKLIST.md\n M clients/swift/RELEASE_QA.md\n M clients/swift/mai.xcodeproj/project.pbxproj\n M tools/client-gen/generate.mjs\n?? FEATURE_MAP.md\n?? clients/swift/handoff/\n?? clients/swift/maiTests/ChatProviderReplayFixtures.swift\n?? clients/swift/maiTests/ChatProviderReplayTests.swift\n?? clients/swift/qa/2026-09-beta-integration/offscreen-disclosure-20260930/\n?? clients/swift/qa/2026-09-beta-integration/runtime-replay-20260927/\n",
+  "externalProjectChange": "Preserved; not read/edited; not included in patches.",
+  "pendingPatches": "Backups only; current workspace already contains changes.",
+  "generatedApproval": "Pending separate timestamp-helper regeneration response; earlier JSONAny/JSONNull cleanup permission not reused.",
+  "finalCleanupBuild": "BuildProject-Log-20260930-224337.txt"
+}

@@ -1,0 +1,45 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 2,
+    "notRun": 0,
+    "passed": 1,
+    "skipped": 0,
+    "total": 3
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-27T20-29-39-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/D877E37B-4380-42C4-8636-7CF6C49293EA.txt",
+  "results": [
+    {
+      "displayName": "reasoningWireAndReloadPreserveTextAndIdentities()",
+      "errorMessages": [
+        "mai/maiTests/ChatProviderReplayTests.swift:30 ChatProviderReplayTests/reasoningWireAndReloadPreserveTextAndIdentities(): Caught error: .dataCorrupted(Swift.DecodingError.Context(codingPath: [CodingKeys(stringValue: \"initial\", intValue: nil)], debugDescription: \"Expected date string to be ISO8601-formatted.\", underlyingError: nil))"
+      ],
+      "identifier": "ChatProviderReplayTests/reasoningWireAndReloadPreserveTextAndIdentities()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "errorMessages": [
+        "mai/maiTests/ChatProviderReplayTests.swift:96 ChatProviderReplayTests/snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime(): Caught error: .dataCorrupted(Swift.DecodingError.Context(codingPath: [_CodingKey(stringValue: \"Index 0\", intValue: 0)], debugDescription: \"Expected date string to be ISO8601-formatted.\", underlyingError: nil))"
+      ],
+      "identifier": "ChatProviderReplayTests/snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "completeThoughtToolReplyStreamPreservesSourceAndHistory()",
+      "errorMessages": [],
+      "identifier": "ChatProviderReplayTests/completeThoughtToolReplyStreamPreservesSourceAndHistory()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "3 tests: 1 passed, 2 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 3,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.27_20-29-39--0400.xcresult"
+}

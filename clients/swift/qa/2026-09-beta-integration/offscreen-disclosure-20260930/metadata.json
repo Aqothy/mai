@@ -1,0 +1,16 @@
+{
+  "baseCommit": "641a88655db88aad99b2cadc3e87ae37851c5880",
+  "native": {
+    "pid": 94811,
+    "launchSessionReference": "76d54f1c80"
+  },
+  "listIncomplete": {
+    "pid": 94921,
+    "launchSessionReference": "76c6d2e100"
+  },
+  "sourceHashes": {
+    "clients/swift/mai/Features/Chat/ChatDisclosureQA.swift": "e1c6c749a79ce91b3a82a5ac6ad2cc20ec485ecb88258c282632cb436173f94a",
+    "clients/swift/mai/ContentView.swift": "1d66d023ef63cb3ab7af6f12df5dad2d960d19e86cd5e764456e263c846d1423",
+    "clients/swift/mai/Features/Chat/ChatView.swift": "0263fdd3f7013ee355f768e2db76c495f7c2d0adaff578d3f67ced32d5be293f"
+  }
+}

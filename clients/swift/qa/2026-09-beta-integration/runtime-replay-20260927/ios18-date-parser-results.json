@@ -1,0 +1,48 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 0,
+    "notRun": 0,
+    "passed": 4,
+    "skipped": 0,
+    "total": 4
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-28T07-35-55-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/02CD3E8C-943E-44F7-8A40-BAF8B9CB95F4.txt",
+  "results": [
+    {
+      "displayName": "fractionalAndWholeSecondsRetainTheirInstant()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/fractionalAndWholeSecondsRetainTheirInstant()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "capturedDaemonTimestampRetainsMicroseconds()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/capturedDaemonTimestampRetainsMicroseconds()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "malformedDatesFailAtTheirField()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/malformedDatesFailAtTheirField()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    },
+    {
+      "displayName": "existingWholeSecondEncoderRemainsCompatible()",
+      "errorMessages": [],
+      "identifier": "WireJSONTests/existingWholeSecondEncoderRemainsCompatible()",
+      "state": "Passed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "4 tests: 4 passed, 0 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 4,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.28_07-35-55--0400.xcresult"
+}

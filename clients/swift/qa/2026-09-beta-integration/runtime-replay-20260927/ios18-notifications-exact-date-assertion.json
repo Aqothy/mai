@@ -1,0 +1,31 @@
+{
+  "activeTestPlanName": "mai",
+  "counts": {
+    "expectedFailures": 0,
+    "failed": 1,
+    "notRun": 0,
+    "passed": 0,
+    "skipped": 0,
+    "total": 1
+  },
+  "fullConsoleLogsPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/test-console-log-2026-09-29T15-42-46-04-00.txt",
+  "fullSummaryPath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/1D0D01FB-93FC-4BA4-9D25-1785BB4C9F25.txt",
+  "results": [
+    {
+      "displayName": "fractionalDateNotificationsUpdateChatAndSidebar()",
+      "errorMessages": [
+        "mai/maiTests/maiTests.swift:31 ThreadStoreTests/fractionalDateNotificationsUpdateChatAndSidebar(): Expectation failed: store.selectedThread?.createdAt == expectedDate\nstore.selectedThread?.createdAt → 2026-09-24 04:26:41 +0000\nexpectedDate → 2026-09-24 04:26:41 +0000",
+        "mai/maiTests/maiTests.swift:32 ThreadStoreTests/fractionalDateNotificationsUpdateChatAndSidebar(): Expectation failed: store.selectedThread?.updatedAt == expectedDate\nstore.selectedThread?.updatedAt → 2026-09-24 04:26:41 +0000\nexpectedDate → 2026-09-24 04:26:41 +0000",
+        "mai/maiTests/maiTests.swift:46 ThreadStoreTests/fractionalDateNotificationsUpdateChatAndSidebar(): Expectation failed: store.threads.first?.updatedAt == expectedDate\nstore.threads.first?.updatedAt → 2026-09-24 04:26:41 +0000\nexpectedDate → 2026-09-24 04:26:41 +0000"
+      ],
+      "identifier": "ThreadStoreTests/fractionalDateNotificationsUpdateChatAndSidebar()",
+      "state": "Failed",
+      "targetName": "maiTests"
+    }
+  ],
+  "schemeName": "mai",
+  "summary": "1 tests: 0 passed, 1 failed, 0 skipped, 0 expected failures, 0 not run",
+  "totalResults": 1,
+  "truncated": false,
+  "xcresultBundlePath": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/RunSomeTests/Test-mai-2026.09.29_15-42-46--0400.xcresult"
+}

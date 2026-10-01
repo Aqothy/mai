@@ -1,0 +1,21 @@
+{
+  "baseCommit": "c31f21197b4de7880fc3181814b7515b7097cd80",
+  "stage": "Shared live-path fix verified; generated decoder unchanged and pending approval",
+  "sha256": {
+    "clients/swift/mai/Network/WireJSON.swift": "3690d50c394069e73f5f3191a6c13bf412cd5f4aa43bda27572b1c3ed096d20a",
+    "clients/swift/mai/Network/RPCClient.swift": "5748527d9e22807c1944415befc6dafc21389cd4ca14533dac8595c569b7b919",
+    "clients/swift/mai/Features/Threads/ThreadStore.swift": "26947a134ae029fb9cf3aed9400aab6d4e38bade415ba64b6b0f640bf02b1bd8",
+    "clients/swift/mai/Features/SessionImport/SessionImportEntry.swift": "36ab7fc29fde805506e679a4c4ceb108c86808253de4ee42b9bd3f20981a31cd",
+    "clients/swift/mai/Generated/MaidModels.swift": "58f0372851fa1b77fb2d628a8da112ea00291b59b7bfbae2fa5826d415b73ddf",
+    "clients/swift/maiTests/WireJSONTests.swift": "03191ea734019af923919efe98910e88bc69f5c83891e856036f8565dba1aeec",
+    "clients/swift/maiTests/maiTests.swift": "106bc748ef6582ed3ecbbb5cead31f4a7067d46eb8bc2f6fe55371cd4dbeb4f7",
+    "clients/swift/maiTests/ChatProviderReplayTests.swift": "4625e30a6687d62ed92d6c3229f8572012a56d62740537359255701af55eb83d",
+    "clients/swift/maiTests/ChatProviderReplayFixtures.swift": "afdafc4dae7e27036504f876343bf6a582acdc75ec466f65b560449a5afb8e91",
+    "tools/client-gen/generate.mjs": "cbebca43f322fe43c3de0718f05725065c3af6e251905d95d124681a737595ac"
+  },
+  "buildLogs": {
+    "ios18Final": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260929-154323.txt",
+    "macFinal": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260929-154445.txt"
+  },
+  "livePathFixCommit": "0c28a3f"
+}
