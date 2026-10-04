@@ -459,7 +459,7 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	i.trackOpenItem(event, itemID, status)
 	// ToolCall is a complete neutral replacement snapshot when present;
 	// status-only updates leave it absent so projection preserves the previous
-	// one. Provider-shaped Data must never cross this boundary for tool items.
+	// one.
 	item := &Item{ID: itemID, Kind: kind, Title: firstNonEmpty(event.Payload.Title, event.Payload.Detail), Status: status, ToolCall: event.Payload.ToolCall, TurnID: TurnID(event.TurnID)}
 	i.recordItem(event, item, createdAt)
 }

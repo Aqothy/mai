@@ -104,8 +104,7 @@ func selectionEqual(a, b *provider.ModelSelection) bool {
 
 // applyThreadProviderSelectionPatch applies a selection EVENT. The payload
 // carries the complete resolved aggregate (resolveProviderSelectionChange),
-// so it is applied by REPLACEMENT — clients mirror the same rule (CLIENT_API
-// §7): a present providerInstanceId replaces both the identity and the model
+// so it is applied by REPLACEMENT — clients mirror the same rule: a present providerInstanceId replaces both the identity and the model
 // selection (an absent modelSelection means "none" — a provider-only switch
 // cleared the old instance's model); a payload with only modelSelection (a
 // empty thread with no instance, or a config-derived model update) replaces

@@ -586,7 +586,7 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 }
 
 // The provider's stop reason (end_turn, max_tokens, refusal, ...) is part of
-// the client contract (latestTurn.stopReason, CLIENT_API §11): a settle update
+// the client contract (latestTurn.stopReason): a settle update
 // carrying one must surface it on the settle event and the completed turn —
 // otherwise a max_tokens/refusal turn is indistinguishable from a clean
 // completion.
@@ -1401,7 +1401,7 @@ func TestEnginePreMutationPanicIsRecoverableWithoutFatal(t *testing.T) {
 // TestSessionStatusEventPayloadIsTheCompleteClientState is the client
 // conformance test for the thread.session-status-set contract: the event's
 // session payload IS the complete new session state, and clients must REPLACE
-// their cached binding with it (CLIENT_API §7) — no field merging. It pins
+// their cached binding with it — no field merging. It pins
 // that (a) the engine-derived payload byte-equals the server projection after
 // every status event, (b) metadata set between status events (slash commands)
 // is carried forward in the next payload, so replacement loses nothing, and
@@ -1494,7 +1494,7 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 }
 
 // TestProviderSelectionEventsCarryTheCompleteAggregate is the client
-// conformance test for selection events (CLIENT_API §7): when an event
+// conformance test for selection events: when an event
 // carries providerInstanceId it is the COMPLETE new selection — clients
 // replace both providerInstanceId and modelSelection with the event's values
 // (absent modelSelection = cleared); an event with only modelSelection

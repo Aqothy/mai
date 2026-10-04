@@ -594,8 +594,7 @@ func interruptTargetsActiveTurn(thread *Thread, turnID TurnID) bool {
 	return activeTurnID(*thread) == turnID
 }
 
-// applyItemPayload implements the two item-payload rules clients must mirror
-// (CLIENT_API §5):
+// applyItemPayload implements the two item-payload rules clients must mirror:
 //   - textDelta (coalesced reasoning chunk): append it to the payload's
 //     "text" — events stay O(chunk) instead of re-sending accumulated text;
 //   - otherwise a non-empty payload REPLACES the previous one, and an absent

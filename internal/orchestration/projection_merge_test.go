@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// The item-payload contract has exactly two client-visible rules (CLIENT_API
-// §5): a textDelta appends to the payload's "text"; otherwise a non-empty
+// The item-payload contract has exactly two client-visible rules: a textDelta appends to the payload's "text"; otherwise a non-empty
 // payload replaces the previous one and an absent payload keeps it. These
 // tests pin applyItemPayload as that contract's reference implementation.
 

@@ -621,8 +621,7 @@ type PlanEntry struct {
 
 // RuntimeEventPayload is a provider-neutral tagged payload. Structured fields
 // cover orchestration and client-visible facts. Args carries opaque approval
-// arguments; Data is retained only for adapter diagnostics and non-tool native
-// details, and must not be projected into client-visible tool items.
+// arguments.
 type RuntimeEventPayload struct {
 	// Internal replay metadata, resolved by the service from exact client IDs.
 	ClientMessageID string                   `json:"-"`
@@ -646,7 +645,6 @@ type RuntimeEventPayload struct {
 	Cancelled  bool             `json:"cancelled,omitempty"`
 	Args       json.RawMessage  `json:"args,omitempty"`
 	Resolution json.RawMessage  `json:"resolution,omitempty"`
-	Data       json.RawMessage  `json:"data,omitempty"`
 	ToolCall   *ToolCall        `json:"toolCall,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
