@@ -3,7 +3,7 @@ package codexapp
 import "encoding/json"
 
 // These DTOs model only the stable fields consumed by the adapter; unknown
-// fields are ignored, and appItem keeps its raw JSON for the generic fallback.
+// fields are ignored.
 
 type initializeParams struct {
 	ClientInfo   appClientInfo         `json:"clientInfo"`
@@ -118,8 +118,8 @@ type appByteRange struct {
 }
 
 // appItem covers the stable ThreadItem variants. The flat representation lets
-// newer variants decode without failing; Type and Raw remain available for a
-// generic timeline fallback.
+// newer variants decode without failing; Type drives a generic timeline
+// fallback.
 type appItem struct {
 	Type             string         `json:"type"`
 	ID               string         `json:"id,omitempty"`
@@ -142,7 +142,6 @@ type appItem struct {
 	Server       string             `json:"server,omitempty"`
 	Tool         string             `json:"tool,omitempty"`
 	Namespace    *string            `json:"namespace,omitempty"`
-	Arguments    json.RawMessage    `json:"arguments,omitempty"`
 	ReadOnlyHint *bool              `json:"readOnlyHint,omitempty"`
 	Result       json.RawMessage    `json:"result,omitempty"`
 	Error        *appMCPError       `json:"error,omitempty"`
@@ -160,10 +159,9 @@ type appItem struct {
 	Action *appWebAction `json:"action,omitempty"`
 	Path   string        `json:"path,omitempty"`
 
-	RevisedPrompt *string         `json:"revisedPrompt,omitempty"`
-	SavedPath     *string         `json:"savedPath,omitempty"`
-	Review        string          `json:"review,omitempty"`
-	Raw           json.RawMessage `json:"-"`
+	RevisedPrompt *string `json:"revisedPrompt,omitempty"`
+	SavedPath     *string `json:"savedPath,omitempty"`
+	Review        string  `json:"review,omitempty"`
 }
 
 func (value *appItem) UnmarshalJSON(data []byte) error {
@@ -190,7 +188,6 @@ func (value *appItem) UnmarshalJSON(data []byte) error {
 			}
 		}
 	}
-	value.Raw = cloneRawJSON(data)
 	return nil
 }
 
@@ -293,8 +290,4 @@ type appSkillInterface struct {
 type appPlanStep struct {
 	Step   string `json:"step"`
 	Status string `json:"status"`
-}
-
-func cloneRawJSON(data []byte) json.RawMessage {
-	return append(json.RawMessage(nil), data...)
 }

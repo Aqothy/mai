@@ -286,19 +286,19 @@ func sessionRuntimeEvent(notification schema.SessionNotification) provider.Runti
 		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
 	case schema.SessionUpdatePlan:
 		update.Type = provider.RuntimeEventTurnPlanUpdated
-		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries), Data: marshalRaw(schema.Plan{Entries: u.Entries})}
+		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries)}
 	case schema.SessionUpdateAvailableCommandsUpdate:
 		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands), Data: marshalRaw(schema.AvailableCommandsUpdate{AvailableCommands: u.AvailableCommands})}
+		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands)}
 	case schema.SessionUpdateSessionInfoUpdate:
 		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title), Data: marshalRaw(schema.SessionInfoUpdate{Title: u.Title, UpdatedAt: u.UpdatedAt})}
+		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title)}
 	case schema.SessionUpdateUsageUpdate:
 		update.Type = provider.RuntimeEventThreadTokenUsage
-		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u), Data: marshalRaw(usageUpdateFromACP(u))}
+		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u)}
 	default:
 		update.Type = provider.RuntimeEventRuntimeWarning
-		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update", Data: marshalRaw(notification.Update)}
+		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update"}
 	}
 	return update
 }
@@ -890,10 +890,6 @@ func slashCommandsFromACP(commands []schema.AvailableCommand) []provider.SlashCo
 		converted = append(converted, convertedCommand)
 	}
 	return converted
-}
-
-func usageUpdateFromACP(u schema.SessionUpdate) schema.UsageUpdate {
-	return schema.UsageUpdate{Used: uint64Value(u.Used), Size: uint64Value(u.Size), Cost: u.Cost}
 }
 
 func tokenUsageFromACP(u schema.SessionUpdate) *provider.TokenUsage {

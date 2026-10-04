@@ -401,7 +401,6 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 			ItemType:   provider.ItemKindToolCall,
 			ItemStatus: status,
 			Title:      humanizeIdentifier(item.Type),
-			Data:       cloneRawJSON(item.Raw),
 			ToolCall: &provider.ToolCall{
 				Action:       provider.ToolActionOther,
 				Name:         humanizeIdentifier(item.Type),

@@ -151,9 +151,6 @@ func TestProtocolDecodingToleratesUnknownFieldsAndItems(t *testing.T) {
 	if !ok || event.Payload.ItemType != provider.ItemKindToolCall || event.Payload.ToolCall == nil || event.Payload.ToolCall.ProviderKind != "futureTool" {
 		t.Fatalf("unknown item fallback = %#v, ok = %v", event, ok)
 	}
-	if !strings.Contains(string(event.Payload.Data), `"futurePayload"`) {
-		t.Fatalf("unknown item fallback data = %s, want the native payload", event.Payload.Data)
-	}
 }
 
 func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {

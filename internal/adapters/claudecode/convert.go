@@ -26,7 +26,6 @@ type toolInput struct {
 	Path         string `json:"path,omitempty"`
 	Query        string `json:"query,omitempty"`
 	URL          string `json:"url,omitempty"`
-	Prompt       string `json:"prompt,omitempty"`
 	Plan         string `json:"plan,omitempty"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Skill        string `json:"skill,omitempty"`
