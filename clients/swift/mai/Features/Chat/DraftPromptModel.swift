@@ -128,7 +128,7 @@ final class DraftPromptModel {
     }
 
     var providerLabel: String {
-        selectedProvider?.name ?? "Provider"
+        selectedProvider?.title ?? "Provider"
     }
 
     var directoryLabel: String {

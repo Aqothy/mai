@@ -1749,3 +1749,47 @@ func TestIngestionCompletedReasoningSnapshotIsAuthoritative(t *testing.T) {
 	}
 	t.Fatalf("reasoning item %s missing from %#v", reasoningID, thread.Timeline.Items())
 }
+
+// A stopped turn keeps its own outcome and timing after a late tool completion
+// and the next turn replace it as the latest turn.
+func TestPreviousTurnKeepsStoppedOutcomeAfterNextTurnStarts(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-previous-turn-outcome")
+	newThreadWithSession(t, engine, threadID)
+	start := time.Now()
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stopped", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stopped", Text: "long command"}, CreatedAt: start}); err != nil {
+		t.Fatalf("first turn.start: %v", err)
+	}
+	thread, _ := engine.Thread(threadID)
+	stoppedTurn := string(thread.LatestTurn.ID)
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-stopped-started", Type: provider.RuntimeEventTurnStarted, Provider: "test", ThreadID: string(threadID), TurnID: stoppedTurn, CreatedAt: start})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-stopped", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: stoppedTurn, CreatedAt: start.Add(9 * time.Second), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted}})
+	thread, _ = engine.Thread(threadID)
+	stopped := *thread.LatestTurn
+	if stopped.State != TurnStateInterrupted || stopped.CompletedAt == nil {
+		t.Fatalf("stopped turn = %#v, want interrupted", stopped)
+	}
+	// The provider's command still finishes after the stop.
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-late-tool", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: stoppedTurn, ItemID: "late-tool", CreatedAt: start.Add(49 * time.Second), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusCompleted}})
+
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-next", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-next", Text: "next"}, CreatedAt: start.Add(60 * time.Second)}); err != nil {
+		t.Fatalf("next turn.start: %v", err)
+	}
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
+	if err != nil {
+		t.Fatalf("SubscribeThread: %v", err)
+	}
+	client := snapshot.Snapshot.Thread
+	if client.LatestTurn == nil || client.LatestTurn.ID == TurnID(stoppedTurn) {
+		t.Fatalf("latest turn = %#v, want the next turn", client.LatestTurn)
+	}
+	if len(client.PreviousTurns) != 1 {
+		t.Fatalf("previous turns = %#v, want the stopped turn", client.PreviousTurns)
+	}
+	previous := client.PreviousTurns[0]
+	if previous.ID != TurnID(stoppedTurn) || previous.State != TurnStateInterrupted || previous.CompletedAt == nil || !previous.CompletedAt.Equal(*stopped.CompletedAt) || !previous.RequestedAt.Equal(stopped.RequestedAt) {
+		t.Fatalf("previous turn = %#v, want stopped outcome and timing %#v", previous, stopped)
+	}
+}

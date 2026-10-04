@@ -257,7 +257,7 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) {
 	if session.ActiveTurnID != "" {
 		if thread.LatestTurn == nil || thread.LatestTurn.ID != session.ActiveTurnID {
-			thread.LatestTurn = &Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt}
+			replaceLatestTurn(thread, Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt})
 			return
 		}
 		thread.LatestTurn.State = TurnStateRunning
@@ -317,7 +317,7 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 	// A turn.start for the already-running turn is steering: the same logical
 	// turn keeps going, so its RequestedAt/StartedAt must survive.
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != turnID {
-		thread.LatestTurn = &Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now}
+		replaceLatestTurn(thread, Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now})
 	}
 	// A server-requeued start moves an already-recorded steering message onto a
 	// fresh turn after the old turn won the completion race.
@@ -331,6 +331,15 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 		thread.Session.ActiveTurnID = turnID
 		thread.Session.UpdatedAt = event.OccurredAt
 	}
+}
+
+// replaceLatestTurn starts a new latest turn. The replaced turn has settled,
+// so it keeps its own outcome and timing in PreviousTurns.
+func replaceLatestTurn(thread *Thread, turn Turn) {
+	if thread.LatestTurn != nil {
+		thread.PreviousTurns = append(thread.PreviousTurns, *thread.LatestTurn)
+	}
+	thread.LatestTurn = &turn
 }
 
 func (p *Projection) applyThreadTurnInterruptRequested(event Event) {

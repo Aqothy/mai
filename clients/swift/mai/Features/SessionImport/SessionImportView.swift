@@ -85,7 +85,7 @@ struct SessionImportProviderPicker: View {
             Spacer()
             Picker("Provider", selection: $selection) {
                 ForEach(choices) { choice in
-                    Text(choice.name).tag(Optional(choice.id))
+                    Text(choice.title).tag(Optional(choice.id))
                 }
             }
             .labelsHidden()

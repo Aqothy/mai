@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 
-nonisolated struct ChatPendingAnnotation: Identifiable, Equatable, Sendable {
+nonisolated struct ChatPendingAnnotation: Identifiable, Equatable, Codable, Sendable {
     let id: String
     let messageID: String?
     let quote: String
@@ -49,8 +49,28 @@ final class ChatAnnotationModel {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    private(set) var annotations: [ChatPendingAnnotation] = []
+    private(set) var annotations: [ChatPendingAnnotation] = [] {
+        didSet {
+            if let owner {
+                owner.draftStore.setAnnotations(annotations, for: owner.threadID)
+            }
+        }
+    }
     var editorDraft: ChatAnnotationDraft?
+
+    /// The chat whose unsent annotations are shown. Without one (previews and
+    /// tests), annotations live only in this model.
+    @ObservationIgnored private var owner: (threadID: String, draftStore: ThreadDraftStore)?
+
+    /// Shows the selected chat's unsent annotations. Each chat's pending
+    /// annotations stay in `draftStore`, so switching chats neither loses them
+    /// nor carries them into another chat. An open editor is dismissed.
+    func show(threadID: String?, draftStore: ThreadDraftStore) {
+        editorDraft = nil
+        owner = nil
+        annotations = threadID.map { draftStore.annotations(for: $0) } ?? []
+        owner = threadID.map { ($0, draftStore) }
+    }
 
     func beginComment(
         quote: String,
@@ -94,11 +114,6 @@ final class ChatAnnotationModel {
 
     func removeSent(ids: Set<String>) {
         annotations.removeAll { ids.contains($0.id) }
-    }
-
-    func reset() {
-        annotations.removeAll()
-        editorDraft = nil
     }
 }
 

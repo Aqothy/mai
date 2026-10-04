@@ -10,6 +10,35 @@ import Testing
 /// that hides a finished turn's work behind a "Worked for Ns" header.
 struct ChatTimelineLayoutTests {
 
+    // MARK: Disclosure choices
+
+    @Test @MainActor
+    func disclosureChoicesAreOwnedByTheTimelineNotItsRows() {
+        let fold = ChatTimelineFoldModel()
+        let thought = ChatDisclosure.thought(itemID: "thought-1")
+        // An untouched thought follows its streaming default.
+        #expect(fold.isExpanded(thought, default: true))
+        #expect(!fold.isExpanded(thought, default: false))
+
+        fold.setExpanded(thought, true)
+        fold.setExpanded(.activityGroup(id: "group-tool-1"), true)
+        fold.setExpanded(.activityItem(itemID: "tool-1"), true)
+        // A recreated row reads the same choice, and an explicit choice
+        // survives the thought completing.
+        #expect(fold.isExpanded(thought, default: false))
+        #expect(fold.isExpanded(.activityGroup(id: "group-tool-1")))
+        #expect(fold.isExpanded(.activityItem(itemID: "tool-1")))
+
+        // Collapsing a group keeps the nested step's own choice for reopening.
+        fold.setExpanded(.activityGroup(id: "group-tool-1"), false)
+        #expect(!fold.isExpanded(.activityGroup(id: "group-tool-1")))
+        #expect(fold.isExpanded(.activityItem(itemID: "tool-1")))
+
+        fold.setExpanded(thought, false)
+        #expect(!fold.isExpanded(thought, default: true))
+        #expect(!fold.isExpanded(.activityItem(itemID: "tool-2")))
+    }
+
     // MARK: Pagination
 
     #if os(macOS)
@@ -653,6 +682,37 @@ struct ChatTimelineLayoutTests {
         )
 
         #expect(turnActivity(rows[0])?.title == "Stopped after 12s")
+    }
+
+    @Test
+    func stoppedOlderTurnKeepsItsOutcomeAfterLateToolCompletion() {
+        let startedAt = Date(timeIntervalSince1970: 3_000)
+        let rows = ChatTimelineLayout.rows(
+            timeline: [
+                // The provider finished the command after the stop.
+                itemEntry(
+                    id: "i1", kind: .commandExecution, turnID: "turn-1",
+                    createdAt: startedAt, updatedAt: startedAt.addingTimeInterval(49)
+                ),
+                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2"),
+            ],
+            streamingTurnID: nil,
+            latestTurn: Turn(
+                completedAt: nil, error: nil, interruptRequested: nil,
+                requestedAt: startedAt.addingTimeInterval(60), startedAt: startedAt.addingTimeInterval(60),
+                state: MaidTurnState.completed.rawValue, stopReason: nil, turnID: "turn-2"
+            ),
+            previousTurns: [
+                Turn(
+                    completedAt: startedAt.addingTimeInterval(9), error: nil, interruptRequested: nil,
+                    requestedAt: startedAt, startedAt: startedAt,
+                    state: MaidTurnState.interrupted.rawValue, stopReason: nil, turnID: "turn-1"
+                )
+            ],
+            expandedSectionIDs: []
+        )
+
+        #expect(turnActivity(rows[0])?.title == "Stopped after 9s")
     }
 
     @Test

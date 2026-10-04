@@ -874,6 +874,76 @@ struct ThreadStoreTests {
     }
 
     @Test
+    func unsentAnnotationsAndAttachmentsStayWithTheirChat() async throws {
+        let suite = "ChatDraftOwnershipQA-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let drafts = ThreadDraftStore(defaults: defaults)
+        let annotations = ChatAnnotationModel()
+
+        annotations.show(threadID: "a", draftStore: drafts)
+        annotations.beginComment(quote: "Quote A 雪", messageID: "message-a", role: "assistant")
+        annotations.editorDraft?.note = "Note A 🧪"
+        annotations.addEditorDraft()
+        let image = FileManager.default.temporaryDirectory
+            .appending(path: "draft-ownership-\(UUID().uuidString).png")
+        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
+            .write(to: image)
+        defer { try? FileManager.default.removeItem(at: image) }
+        let chatA = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
+        await chatA.addImages(from: [image])
+        let attachmentID = try #require(chatA.attachments.first?.id)
+
+        annotations.show(threadID: "b", draftStore: drafts)
+        #expect(annotations.annotations.isEmpty)
+        #expect(ChatPromptModel(store: store, draftStore: drafts, threadID: "b").attachments.isEmpty)
+        annotations.beginComment(quote: "Quote B", messageID: "message-b", role: "assistant")
+        annotations.addEditorDraft()
+        annotations.beginComment(quote: "Cancelled in B", messageID: "message-b", role: "assistant")
+
+        annotations.show(threadID: "a", draftStore: drafts)
+        #expect(annotations.editorDraft == nil)
+        #expect(annotations.annotations.map(\.quote) == ["Quote A 雪"])
+        #expect(annotations.annotations.first?.note == "Note A 🧪")
+        let returnedA = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
+        #expect(returnedA.attachments.map(\.id) == [attachmentID])
+
+        // Pending annotations survive relaunch with the text draft.
+        drafts.flushPendingSave()
+        let relaunched = ThreadDraftStore(defaults: defaults)
+        #expect(relaunched.annotations(for: "a").map(\.messageID) == ["message-a"])
+        #expect(relaunched.annotations(for: "b").map(\.quote) == ["Quote B"])
+
+        // A send that completes after switching clears only what it submitted
+        // from its own chat.
+        let submittedID = try #require(annotations.annotations.first?.id)
+        returnedA.removeAttachment(id: attachmentID)
+        #expect(ChatPromptModel(store: store, draftStore: drafts, threadID: "a").attachments.isEmpty)
+        returnedA.text = "Accepted 雪"
+        rpc.shouldBlockTurnDispatch = true
+        let sending = Task { await returnedA.send(annotations: annotations) }
+        await waitUntil { rpc.dispatchedCommands.contains { $0.type == "thread.turn.start" } }
+        annotations.show(threadID: "b", draftStore: drafts)
+        rpc.resumeTurnDispatches()
+        await sending.value
+        let sent = try #require(rpc.dispatchedCommands.last?.message)
+        #expect(sent.text == "Accepted 雪")
+        #expect(sent.annotations?.map(\.id) == [submittedID])
+        #expect(drafts.annotations(for: "a").isEmpty)
+        #expect(annotations.annotations.map(\.quote) == ["Quote B"])
+
+        // An accepted send is persisted at once: an immediate relaunch cannot
+        // offer the sent prompt again as an unsent draft.
+        let relaunchedAfterSend = ThreadDraftStore(defaults: defaults)
+        #expect(relaunchedAfterSend.text(for: "a").isEmpty)
+        #expect(relaunchedAfterSend.annotations(for: "a").isEmpty)
+        #expect(relaunchedAfterSend.annotations(for: "b").map(\.quote) == ["Quote B"])
+    }
+
+    @Test
     func queuedAnnotationSteersToItsOwnThreadAndSurvivesDispatchFailure() async throws {
         let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true), makeThread("b")])
         let store = ThreadStore(rpc: rpc)

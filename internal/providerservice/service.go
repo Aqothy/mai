@@ -719,8 +719,7 @@ func (s *Service) RegisterImportedSession(threadID string, instanceID provider.I
 	defer s.routeBindMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	generation, ok := s.activeEventGenerations[instanceID]
-	if !ok || s.instances[instanceID] == nil {
+	if _, ok := s.activeEventGenerations[instanceID]; !ok || s.instances[instanceID] == nil {
 		return fmt.Errorf("provider instance %q is not initialized", instanceID)
 	}
 	if existing, ok := s.threadRoutes[threadID]; ok {
@@ -734,9 +733,12 @@ func (s *Service) RegisterImportedSession(threadID string, instanceID provider.I
 			return fmt.Errorf("provider session %q is already bound to thread %q", sessionID, existingThreadID)
 		}
 	}
+	// No live session exists yet. Like a boot-restored route, use a generation
+	// no instance owns so the first start restores the stored preferences.
+	s.nextEventGeneration++
 	s.threadRoutes[threadID] = threadRoute{
 		InstanceID:        instanceID,
-		Generation:        generation,
+		Generation:        s.nextEventGeneration,
 		ProviderSessionID: sessionID,
 		StartInput:        persistentStartSessionInput(startInput),
 	}
@@ -764,42 +766,51 @@ func (s *Service) CloseSession(ctx context.Context, instanceID provider.Instance
 	})
 }
 
+// ForkedSession is a new native fork ready for the import path. Settings
+// carries the source route's model and config preferences so the fork resumes
+// with the source's settings rather than provider defaults.
+type ForkedSession struct {
+	InstanceID provider.InstanceID
+	Summary    provider.SessionSummary
+	Settings   provider.StartSessionInput
+}
+
 // ForkSession forks the provider-owned session bound to sourceThreadID. The
 // returned summary can be committed through the same atomic import path used
 // for sessions discovered by provider.listSessions.
-func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (provider.InstanceID, provider.SessionSummary, error) {
+func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (ForkedSession, error) {
 	if sourceThreadID == "" {
-		return "", provider.SessionSummary{}, fmt.Errorf("provider session fork requires sourceThreadId")
+		return ForkedSession{}, fmt.Errorf("provider session fork requires sourceThreadId")
 	}
 	route := s.routeForThread(sourceThreadID)
 	if route.InstanceID == "" || route.ProviderSessionID == "" {
-		return "", provider.SessionSummary{}, fmt.Errorf("thread %q has no forkable provider session", sourceThreadID)
+		return ForkedSession{}, fmt.Errorf("thread %q has no forkable provider session", sourceThreadID)
 	}
 	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
-		return "", provider.SessionSummary{}, err
+		return ForkedSession{}, err
 	}
 	instance, err := s.instance(route.InstanceID)
 	if err != nil {
-		return "", provider.SessionSummary{}, err
+		return ForkedSession{}, err
 	}
 	if !instance.Info().Capabilities.Fork {
-		return "", provider.SessionSummary{}, fmt.Errorf("provider does not support session fork")
+		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
 	}
 	forker, ok := instance.(SessionForker)
 	if !ok {
-		return "", provider.SessionSummary{}, fmt.Errorf("provider does not support session fork")
+		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
 	}
 	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
 	defer cancel()
 	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{ProviderSessionID: route.ProviderSessionID})
 	if err != nil {
-		return "", provider.SessionSummary{}, err
+		return ForkedSession{}, err
 	}
 	if result.Summary.SessionID == "" {
-		return "", provider.SessionSummary{}, fmt.Errorf("provider fork returned an empty session id")
+		return ForkedSession{}, fmt.Errorf("provider fork returned an empty session id")
 	}
 	if result.Summary.SessionID == route.ProviderSessionID {
-		return "", provider.SessionSummary{}, fmt.Errorf("provider fork returned the source session id")
+		return ForkedSession{}, fmt.Errorf("provider fork returned the source session id")
 	}
 	if s.promptStore != nil {
 		if err := s.promptStore.ForkPrompts(route.InstanceID, route.ProviderSessionID, result.Summary.SessionID); err != nil {
@@ -810,10 +821,10 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (provi
 				cleanupErr := manager.DeleteSession(cleanupCtx, result.Summary.SessionID)
 				cancel()
 				if cleanupErr != nil {
-					return "", provider.SessionSummary{}, fmt.Errorf("copy fork annotations: %w; clean up native fork %q: %v", err, result.Summary.SessionID, cleanupErr)
+					return ForkedSession{}, fmt.Errorf("copy fork annotations: %w; clean up native fork %q: %v", err, result.Summary.SessionID, cleanupErr)
 				}
 			}
-			return "", provider.SessionSummary{}, fmt.Errorf("copy fork annotations: %w", err)
+			return ForkedSession{}, fmt.Errorf("copy fork annotations: %w", err)
 		}
 	}
 	if result.Summary.Cwd == "" {
@@ -822,7 +833,16 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (provi
 	if result.Summary.AdditionalDirectories == nil {
 		result.Summary.AdditionalDirectories = append([]string(nil), route.StartInput.AdditionalDirectories...)
 	}
-	return route.InstanceID, result.Summary, nil
+	source := route.StartInput // routeForThread returned a detached copy.
+	return ForkedSession{
+		InstanceID: route.InstanceID,
+		Summary:    result.Summary,
+		Settings: provider.StartSessionInput{
+			ModelSelection:   source.ModelSelection,
+			ConfigSelections: canonicalModelConfigSelections(source.ModelSelection, source.ConfigSelections),
+			Options:          source.Options,
+		},
+	}, nil
 }
 
 // The bound-session guard is best-effort against a concurrent bind. The adapter
@@ -1005,6 +1025,7 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 		}
 	}
+	input.ConfigSelections = canonicalModelConfigSelections(input.ModelSelection, input.ConfigSelections)
 	// Read before starting replay: a storage error must not consume the
 	// adapter's one-shot history response and silently drop annotation cards.
 	var prompts map[string]store.PromptRecord
@@ -1151,6 +1172,7 @@ func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigO
 					start.ModelSelection = &provider.ModelSelection{}
 				}
 				start.ModelSelection.Model = model
+				start.ConfigSelections = canonicalModelConfigSelections(start.ModelSelection, start.ConfigSelections)
 				return
 			}
 
@@ -1344,6 +1366,24 @@ func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSess
 		cloned.ModelSelection = &model
 	}
 	return cloned
+}
+
+// canonicalModelConfigSelections makes string model-category selections agree
+// with ModelSelection, which is the canonical model. A draft sends its model
+// both ways, but later model changes update only ModelSelection; adapters let
+// config selections win, so a stale draft entry would otherwise revert the
+// model on the next session start or resume.
+func canonicalModelConfigSelections(model *provider.ModelSelection, selections []provider.ConfigOptionSelection) []provider.ConfigOptionSelection {
+	if model == nil || model.Model == "" {
+		return selections
+	}
+	canonical := append([]provider.ConfigOptionSelection(nil), selections...)
+	for index, selection := range canonical {
+		if _, isString := selection.Value.(string); isString && selection.Category == provider.ConfigOptionCategoryModel {
+			canonical[index].Value = model.Model
+		}
+	}
+	return canonical
 }
 
 func persistentStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {

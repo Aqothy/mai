@@ -23,6 +23,38 @@ struct ACPRegistryModelTests {
     }
 
     @Test
+    func sameNamedProvidersRemainDistinguishable() async throws {
+        let rpc = ACPRegistryMockRPCClient()
+        rpc.providers = [try newJSONDecoder().decode(InstanceInfo.self, from: Data("""
+            {"auth":{"status":"authenticated"},"capabilities":{},"driver":"codex-app-server",
+             "instanceId":"codex-app-server","name":"Codex","status":"initialized",
+             "initializedAt":"2026-09-23T00:00:00Z","startedAt":"2026-09-23T00:00:00Z"}
+            """.utf8))]
+        _ = try await rpc.installRegistryAgent("codex-acp")
+        rpc.installedAgents += [
+            makeCustomAgent(id: "Codex", name: "Codex"),
+            makeCustomAgent(id: "Gemini", name: "Gemini"),
+        ]
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+
+        let choices = store.availableProviders
+        #expect(choices.map(\.id) == ["codex-app-server", "custom-Codex", "registry-codex-acp", "custom-Gemini"])
+        #expect(choices.map(\.kind) == ["Built-in", "Custom ACP", "ACP Registry", "Custom ACP"])
+        #expect(choices.map(\.title) == [
+            "Codex (Built-in)", "Codex (Custom ACP)", "Codex (ACP Registry)", "Gemini",
+        ])
+
+        let suite = "SameNamedProviders-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let draft = DraftPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults))
+        draft.selectProvider(id: "registry-codex-acp")
+        #expect(draft.selectedProviderID == "registry-codex-acp")
+        #expect(draft.providerLabel == "Codex (ACP Registry)")
+    }
+
+    @Test
     func searchMatchesNamesDescriptionsIDsAndCustomAgents() async throws {
         let rpc = ACPRegistryMockRPCClient()
         rpc.registryAgents = [

@@ -15,7 +15,7 @@ struct ProviderAccountsView: View {
                 ForEach(store.availableProviders) { choice in
                     NavigationLink(value: Destination(providerID: choice.id)) {
                         VStack(alignment: .leading) {
-                            Text(choice.name)
+                            Text(choice.title)
                             if let status = store.providerInfo(for: choice.id)?.auth.status {
                                 Text(status.replacing("_", with: " ").capitalized)
                                     .font(.caption)

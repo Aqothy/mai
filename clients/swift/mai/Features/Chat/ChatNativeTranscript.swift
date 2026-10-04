@@ -334,11 +334,29 @@
                 }
             }
 
+            /// The transcript scrolls vertically only. Sidebar, divider and window
+            /// changes resize the clip without a new install, so keep the document
+            /// and every resident row as wide as the clip, and drop a horizontal
+            /// offset that a previously wider document allowed.
+            private func matchViewportWidth(_ scroll: NSScrollView) {
+                let width = scroll.contentSize.width
+                if frame.width != width {
+                    setFrameSize(NSSize(width: width, height: frame.height))
+                    repositionMountedRows()
+                }
+                let clip = scroll.contentView
+                if clip.bounds.origin.x != 0 {
+                    clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
+                    scroll.reflectScrolledClipView(clip)
+                }
+            }
+
             @objc func viewportChanged() {
                 notifyGeometryChange()
                 guard !isApplyingHeights, let content, offsets.count > 1,
                     let scroll = enclosingScrollView
                 else { return }
+                matchViewportWidth(scroll)
                 let visible = scroll.contentView.documentVisibleRect
                 // One viewport of preparation on either side bounds resident views
                 // while allowing ordinary wheel input to reuse already mounted rows.

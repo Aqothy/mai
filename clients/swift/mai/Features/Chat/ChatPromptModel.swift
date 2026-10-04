@@ -27,7 +27,7 @@ final class ChatPromptModel {
     private var retryRequestedTurnID: String?
 
     private let draftStore: ThreadDraftStore
-    private let attachmentsModel = ComposerAttachmentsModel()
+    private let attachmentsModel: ComposerAttachmentsModel
 
     init(store: ThreadStore, draftStore: ThreadDraftStore, threadID: String) {
         self.store = store
@@ -38,6 +38,7 @@ final class ChatPromptModel {
             scope: .thread(id: threadID)
         )
         text = draftStore.text(for: threadID)
+        attachmentsModel = draftStore.attachmentsModel(for: threadID)
         attachmentsModel.reportError = { [weak self] message in
             self?.errorMessage = message
         }
@@ -140,7 +141,13 @@ final class ChatPromptModel {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
+            // The annotation model may show another chat by now; the draft
+            // store owns this chat's annotations either way.
+            draftStore.removeAnnotations(ids: submittedAnnotationIDs, for: threadID)
             annotationModel?.removeSent(ids: submittedAnnotationIDs)
+            // The daemon accepted this prompt; persist the cleared draft now so
+            // an exit within the save debounce cannot restore it as unsent.
+            draftStore.flushPendingSave()
         } catch is CancellationError {
             return
         } catch {

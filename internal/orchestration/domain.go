@@ -64,6 +64,9 @@ type Thread struct {
 	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
 	Session               *SessionBinding                  `json:"session,omitempty"`
 	LatestTurn            *Turn                            `json:"latestTurn,omitempty"`
+	// PreviousTurns are the thread's earlier turns, oldest first, with their
+	// final outcome and timing. LatestTurn is not repeated here.
+	PreviousTurns []Turn `json:"previousTurns,omitempty"`
 	// Timeline is the canonical conversation order. New entries append; updates
 	// mutate their existing entry without moving it.
 	Timeline  Timeline  `json:"timeline"`

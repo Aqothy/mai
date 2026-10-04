@@ -196,6 +196,19 @@ struct ChatBetaIntegrationTests {
         #expect(retained.annotations?.first?.quote == "Guide")
     }
 
+    @Test
+    func textSelectionFromReplacedTextIsInvalid() {
+        let typed = "Prompt café 🧪 tail"
+        let caret = TextSelection(insertionPoint: typed.endIndex)
+        #expect(caret.isValid(in: typed))
+        #expect(!caret.isValid(in: ""))
+        #expect(!caret.isValid(in: "short"))
+        let emoji = typed.firstIndex(of: "🧪") ?? typed.endIndex
+        let range = TextSelection(range: typed.startIndex..<emoji)
+        #expect(range.isValid(in: typed + " longer"))
+        #expect(TextSelection(insertionPoint: "".startIndex).isValid(in: ""))
+    }
+
     @Test @MainActor
     func sendingAnnotationsOnlyRemovesSubmittedDrafts() throws {
         let model = ChatAnnotationModel()

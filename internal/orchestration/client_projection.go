@@ -16,6 +16,7 @@ func projectThreadForClient(thread Thread) Thread {
 	projected.ConfigSelections = nil
 	projected.Session = cloneSessionPtr(thread.Session)
 	projected.LatestTurn = cloneTurnPtr(thread.LatestTurn)
+	projected.PreviousTurns = cloneTurns(thread.PreviousTurns)
 	projected.Plan = clonePlanPtr(thread.Plan)
 	projected.Timeline = make(Timeline, len(thread.Timeline))
 

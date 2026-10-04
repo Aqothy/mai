@@ -114,7 +114,7 @@ struct DraftSessionControlsView: View {
                     SearchableSelectionChoice(
                         id: provider.id,
                         title: provider.name,
-                        subtitle: nil,
+                        subtitle: provider.kind,
                         systemImage: "server.rack"
                     )
                 },

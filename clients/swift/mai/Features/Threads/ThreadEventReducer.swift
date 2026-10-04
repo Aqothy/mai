@@ -92,7 +92,7 @@ enum ThreadEventReducer {
             // A turn.start for the already-running turn is steering: the same
             // logical turn continues, so its timestamps must survive.
             if thread.latestTurn?.turnID != turnID {
-                thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID)
+                replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID))
             }
             if thread.session != nil {
                 thread.session?.activeTurnID = turnID
@@ -141,7 +141,7 @@ enum ThreadEventReducer {
 
             if let active = session.activeTurnID, !active.isEmpty {
                 if thread.latestTurn?.turnID != active {
-                    thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: active)
+                    replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: active))
                 } else {
                     thread.latestTurn?.state = MaidTurnState.running.rawValue
                 }
@@ -266,6 +266,15 @@ enum ThreadEventReducer {
             break
         }
         return firstChangedIndex
+    }
+
+    /// Mirrors the daemon: the replaced turn has settled, so it keeps its own
+    /// outcome and timing in `previousTurns`.
+    private static func replaceLatestTurn(of thread: inout Thread, with turn: Turn) {
+        if let latest = thread.latestTurn {
+            thread.previousTurns = (thread.previousTurns ?? []) + [latest]
+        }
+        thread.latestTurn = turn
     }
 
     private static func applyProviderSelection(_ payload: EventPayload, to thread: inout Thread) {

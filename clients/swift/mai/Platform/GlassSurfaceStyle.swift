@@ -33,3 +33,36 @@ extension View {
         modifier(GlassSurfaceStyle(shape: shape, isShadowed: isShadowed))
     }
 }
+
+/// Circular icon buttons: the system glass style where available. Earlier
+/// systems get the same footprint on the material surface, since a bare
+/// material circle would hug the icon.
+struct GlassCircleButtonStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            content
+                .buttonBorderShape(.circle)
+                .buttonStyle(.glass)
+        } else {
+            content.buttonStyle(MaterialCircleButtonStyle())
+        }
+    }
+}
+
+private struct MaterialCircleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // Matches the glass style's 7-point inset around a 24-point icon.
+            .padding(7)
+            .glassSurface(in: .circle, isShadowed: true)
+            .contentShape(.circle)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+extension View {
+    func glassCircleButton() -> some View {
+        modifier(GlassCircleButtonStyle())
+    }
+}

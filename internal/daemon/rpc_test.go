@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -248,6 +249,62 @@ func TestForkProviderThreadDeletesUnpersistedNativeFork(t *testing.T) {
 	}
 }
 
+func TestForkProviderThreadCarriesSourceSettings(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	adapter := newForkRPCProvider()
+	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork"}
+	cwd := t.TempDir()
+	installForkRPCProvider(t, s, adapter, cwd)
+	if err := s.metadataStore.SaveInstance(provider.InstanceSpec{InstanceID: adapter.info.InstanceID, Driver: "test", Name: "Fork test"}); err != nil {
+		t.Fatalf("SaveInstance: %v", err)
+	}
+	// The source was started from a draft at Luna/Low; route preferences are
+	// what the source itself would resume with.
+	sourceSettings := []provider.ConfigOptionSelection{
+		{OptionID: "model", Value: "gpt-6-luna", Category: provider.ConfigOptionCategoryModel},
+		{OptionID: "reasoning_effort", Value: "low", Category: provider.ConfigOptionCategoryThoughtLevel},
+	}
+	if _, err := s.providerService.StartSession(context.Background(), "source", provider.StartSessionInput{
+		ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd,
+		ModelSelection:   &provider.ModelSelection{Model: "gpt-6-luna"},
+		ConfigSelections: sourceSettings,
+	}); err != nil {
+		t.Fatalf("start source session: %v", err)
+	}
+
+	forkID, imported, err := s.ForkProviderThread(context.Background(), "source")
+	if err != nil || !imported {
+		t.Fatalf("ForkProviderThread = %q, %v, %v", forkID, imported, err)
+	}
+	entry, ok := s.orchestration.ThreadListEntry(forkID)
+	if !ok || entry.ModelSelection == nil || entry.ModelSelection.Model != "gpt-6-luna" {
+		t.Fatalf("fork thread model = %#v, want source model", entry.ModelSelection)
+	}
+	routes, err := s.metadataStore.LoadRoutes()
+	if err != nil {
+		t.Fatalf("LoadRoutes: %v", err)
+	}
+	if got := routes[string(forkID)].StartInput.ConfigSelections; !reflect.DeepEqual(got, sourceSettings) {
+		t.Fatalf("persisted fork config selections = %#v, want %#v", got, sourceSettings)
+	}
+
+	// Opening the fork resumes its native session with the source settings,
+	// even though the fresh projection only carries the model.
+	if _, err := s.providerService.StartSession(context.Background(), string(forkID), provider.StartSessionInput{
+		ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd,
+		ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"}, ReplayHistory: true,
+	}); err != nil {
+		t.Fatalf("open fork: %v", err)
+	}
+	adapter.mu.Lock()
+	resume := adapter.starts[len(adapter.starts)-1]
+	adapter.mu.Unlock()
+	if resume.ProviderSessionID != "native-fork" || !reflect.DeepEqual(resume.ConfigSelections, sourceSettings) {
+		t.Fatalf("fork resume input = %#v, want native-fork with source settings", resume)
+	}
+}
+
 func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	s := newTestServer(t)
 	s.providerService.Close()
@@ -440,12 +497,16 @@ type optionsRPCProvider struct {
 	forkCalls    int
 	forkSummary  provider.SessionSummary
 	deleted      chan string
+	starts       []provider.StartSessionInput
 }
 
 func (p *optionsRPCProvider) Info() provider.InstanceInfo { return p.info }
 func (p *optionsRPCProvider) Close() error                { return nil }
-func (p *optionsRPCProvider) StartSession(context.Context, provider.StartSessionInput) (provider.StartSessionResult, error) {
-	return provider.StartSessionResult{}, nil
+func (p *optionsRPCProvider) StartSession(_ context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.starts = append(p.starts, input)
+	return provider.StartSessionResult{Session: provider.Session{ProviderSessionID: input.ProviderSessionID}}, nil
 }
 func (p *optionsRPCProvider) SendTurn(context.Context, provider.SendTurnInput) error { return nil }
 func (p *optionsRPCProvider) InterruptTurn(context.Context, provider.InterruptTurnInput) error {

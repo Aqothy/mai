@@ -396,8 +396,12 @@ final class TerminalAttachment {
             phase = .exited(item.exitCode)
             controller.processDidEnd(exitCode: item.exitCode)
         case .stopped:
+            // An intentional stop is not a process exit Ghostty can explain:
+            // its generic exit report treats a zero runtime as a launch
+            // failure. Match the restored-snapshot path and let the app's
+            // stopped overlay present the state.
             phase = .stopped
-            controller.processDidEnd(exitCode: item.exitCode)
+            controller.setInputEnabled(false)
         case .error:
             phase = .failed(item.message ?? String(localized: "The terminal failed"))
             controller.setInputEnabled(false)

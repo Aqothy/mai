@@ -59,7 +59,10 @@ struct DesktopAppContainer: View {
                 ChatView(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders
+                    projectFolders: projectFolders,
+                    openThread: { threadID in
+                        store.selectThread(threadID)
+                    }
                 )
             }
         }

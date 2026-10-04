@@ -273,6 +273,7 @@ extension Thread {
             latestTurn: latestTurn,
             modelSelection: modelSelection,
             plan: plan,
+            previousTurns: nil,
             providerInstanceID: providerInstanceID,
             session: session,
             timeline: timeline,

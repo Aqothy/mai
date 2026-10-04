@@ -509,3 +509,114 @@ func TestServiceCloseKeepsDurableRoutes(t *testing.T) {
 		t.Fatalf("route lost on shutdown: %+v", routes)
 	}
 }
+
+// draftModelSelections is the start input orchestration builds for a client
+// draft: the selected model appears both as ModelSelection and as a
+// model-category config selection.
+func draftModelSelections(model string, effort string) provider.StartSessionInput {
+	return provider.StartSessionInput{
+		ProviderInstanceID: "codex",
+		ModelSelection:     &provider.ModelSelection{Model: model},
+		ConfigSelections: []provider.ConfigOptionSelection{
+			{OptionID: "model", Value: model, Category: provider.ConfigOptionCategoryModel},
+			{OptionID: "reasoning_effort", Value: effort, Category: provider.ConfigOptionCategoryThoughtLevel},
+		},
+	}
+}
+
+func assertCanonicalModel(t *testing.T, label string, input provider.StartSessionInput, model string, effort string) {
+	t.Helper()
+	if input.ModelSelection == nil || input.ModelSelection.Model != model {
+		t.Fatalf("%s model selection = %#v, want %s", label, input.ModelSelection, model)
+	}
+	for _, selection := range input.ConfigSelections {
+		switch selection.OptionID {
+		case "model":
+			if selection.Value != model {
+				t.Fatalf("%s model config selection = %#v, want %s", label, selection, model)
+			}
+		case "reasoning_effort":
+			if selection.Value != effort {
+				t.Fatalf("%s reasoning selection = %#v, want %s", label, selection, effort)
+			}
+		}
+	}
+}
+
+func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T) {
+	st := openRouteStore(t)
+	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+
+	first := &resumeCursorAdapter{}
+	before := New(first.StartInstance, WithRouteStore(st))
+	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
+		t.Fatalf("StartInstance: %v", err)
+	}
+	if _, err := before.StartSession(context.Background(), "thread-1", draftModelSelections("model-a", "high")); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := before.SetConfigOption(context.Background(), provider.SetConfigOptionInput{
+		ThreadID: "thread-1", OptionID: "model", Value: "model-b", Category: provider.ConfigOptionCategoryModel,
+	}); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	// The following turn rebinds the live route with the projection's view: the
+	// current model selection, the draft's original model entry, and the
+	// provider-normalized reasoning.
+	if _, err := before.StartSession(context.Background(), "thread-1", draftModelSelections("model-b", "low")); err != nil {
+		t.Fatalf("following-turn StartSession: %v", err)
+	}
+	following := draftModelSelections("model-b", "low")
+	following.ConfigSelections[0].Value = "model-a"
+	if _, err := before.StartSession(context.Background(), "thread-1", following); err != nil {
+		t.Fatalf("stale projection StartSession: %v", err)
+	}
+	assertCanonicalModel(t, "following-turn adapter input", first.instance(0).lastStartInput(), "model-b", "low")
+	before.Close()
+
+	routes, err := st.LoadRoutes()
+	if err != nil {
+		t.Fatalf("LoadRoutes: %v", err)
+	}
+	assertCanonicalModel(t, "persisted route", routes["thread-1"].StartInput, "model-b", "low")
+
+	second := &resumeCursorAdapter{}
+	after := New(second.StartInstance, WithRouteStore(st))
+	defer after.Close()
+	// After a daemon restart the projection only knows the route's model, so
+	// the stored route supplies the remaining preferences.
+	restored := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "model-b"}}
+	if _, err := after.StartSession(context.Background(), "thread-1", restored); err != nil {
+		t.Fatalf("StartSession after restart: %v", err)
+	}
+	assertCanonicalModel(t, "recovered adapter input", second.instance(0).lastStartInput(), "model-b", "low")
+}
+
+func TestRestoredConflictingRouteResumesWithCanonicalModel(t *testing.T) {
+	st := openRouteStore(t)
+	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	if err := st.SaveInstance(spec); err != nil {
+		t.Fatalf("SaveInstance: %v", err)
+	}
+	// Routes written before the fix kept the draft's model entry next to the
+	// later model change.
+	conflicting := draftModelSelections("model-b", "low")
+	conflicting.ConfigSelections[0].Value = "model-a"
+	conflicting.ConfigSelections = append(conflicting.ConfigSelections, provider.ConfigOptionSelection{OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel})
+	if err := st.SaveRoute("thread-1", store.RouteRecord{InstanceID: "codex", ProviderSessionID: "sess-1", StartInput: conflicting}); err != nil {
+		t.Fatalf("SaveRoute: %v", err)
+	}
+
+	adapter := &resumeCursorAdapter{}
+	s := New(adapter.StartInstance, WithRouteStore(st))
+	defer s.Close()
+	restored := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "model-b"}}
+	if _, err := s.StartSession(context.Background(), "thread-1", restored); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	input := adapter.instance(0).lastStartInput()
+	assertCanonicalModel(t, "recovered adapter input", input, "model-b", "low")
+	if last := input.ConfigSelections[len(input.ConfigSelections)-1]; last.OptionID != "fast" || last.Value != true {
+		t.Fatalf("non-model value in model category = %#v, want unchanged", last)
+	}
+}

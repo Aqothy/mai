@@ -497,13 +497,15 @@ struct ChatSelectableText: UIViewRepresentable {
             )
         }
 
+        /// The single-range callback is the one available on every supported
+        /// iOS version; iOS 26 calls it with the selection's union range when
+        /// the multi-range variant is not implemented.
         func textView(
             _ textView: UITextView,
-            editMenuForTextInRanges ranges: [NSValue],
+            editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
             guard let annotationContext,
-                let range = ranges.first?.rangeValue,
                 let selection = selection(in: textView, range: range)
             else {
                 return UIMenu(children: suggestedActions)

@@ -161,8 +161,8 @@ struct ChatView: View {
             threadID in
             if previousThreadID != threadID {
                 currentPromptCompletion.dismiss()
-                annotationModel.reset()
             }
+            annotationModel.show(threadID: threadID, draftStore: draftStore)
             if previousThreadID != threadID, previousThreadID != nil {
                 scrollState.reset()
             }
@@ -234,6 +234,7 @@ struct ChatView: View {
             ),
             streamingTurnID: streamingTurnID(of: thread),
             latestTurn: thread.latestTurn,
+            previousTurns: thread.previousTurns ?? [],
             expandedSectionIDs: []
         )
     }
@@ -312,6 +313,7 @@ struct ChatView: View {
             timelineEntryCount: thread.timeline.count,
             plan: thread.plan,
             latestTurn: thread.latestTurn,
+            previousTurns: thread.previousTurns ?? [],
             streamingTurnID: Self.streamingTurnID(of: thread),
             segmentCache: segmentCache,
             store: store,
@@ -608,6 +610,10 @@ final class ChatTimelineFoldModel {
     nonisolated deinit {}
 
     private(set) var expandedSectionIDs: Set<String> = []
+    /// The reader's explicit choices for disclosures inside sections, keyed by
+    /// stable item identity. Rows are recreated when they leave the viewport,
+    /// so a choice must outlive them for the rest of this chat's timeline.
+    private(set) var disclosureChoices: [ChatDisclosure: Bool] = [:]
     @ObservationIgnored var prepareForToggle: () -> Void = {}
 
     func toggle(_ sectionID: String) {
@@ -616,6 +622,22 @@ final class ChatTimelineFoldModel {
             expandedSectionIDs.formSymmetricDifference([sectionID])
         }
     }
+
+    func isExpanded(_ disclosure: ChatDisclosure, default defaultValue: Bool = false) -> Bool {
+        disclosureChoices[disclosure] ?? defaultValue
+    }
+
+    func setExpanded(_ disclosure: ChatDisclosure, _ isExpanded: Bool) {
+        withChatContentExpansionTransaction {
+            disclosureChoices[disclosure] = isExpanded
+        }
+    }
+}
+
+nonisolated enum ChatDisclosure: Hashable {
+    case thought(itemID: String)
+    case activityGroup(id: String)
+    case activityItem(itemID: String)
 }
 
 /// A disclosure should grow in place without an animated layout transition.
@@ -723,6 +745,7 @@ struct ChatTimeline: View {
     let timelineEntryCount: Int
     let plan: Plan?
     let latestTurn: Turn?
+    let previousTurns: [Turn]
     let streamingTurnID: String?
     let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
@@ -777,6 +800,7 @@ struct ChatTimeline: View {
             sections: loadedSections,
             streamingTurnID: effectiveStreamingTurnID,
             latestTurn: latestTurn,
+            previousTurns: previousTurns,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         let rows = Self.renderRows(
@@ -961,6 +985,7 @@ struct ChatTimeline: View {
                         sections: loadedSections,
                         streamingTurnID: streamingTurnID,
                         latestTurn: latestTurn,
+                        previousTurns: previousTurns,
                         expandedSectionIDs: foldModel.expandedSectionIDs
                     )
                 await Self.prepare(
@@ -1449,6 +1474,7 @@ struct ChatTimeline: View {
             sections: pageSections,
             streamingTurnID: streamingTurnID,
             latestTurn: latestTurn,
+            previousTurns: previousTurns,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         await Self.prepare(
@@ -2172,6 +2198,7 @@ private struct ChatTimelineRow: View {
                         threadID: threadID,
                         itemID: item.id
                     ),
+                    foldModel: foldModel,
                     scrollState: scrollState
                 )
             case .turnActivity(let activity):
@@ -2187,6 +2214,7 @@ private struct ChatTimelineRow: View {
                         item: item,
                         threadID: threadID,
                         store: store,
+                        foldModel: foldModel,
                         scrollState: scrollState
                     )
                     .padding(.vertical, 4)
@@ -2195,6 +2223,7 @@ private struct ChatTimelineRow: View {
                         group: group,
                         threadID: threadID,
                         store: store,
+                        foldModel: foldModel,
                         scrollState: scrollState
                     )
                 }
@@ -2216,18 +2245,15 @@ private struct ChatTimelineRow: View {
 private struct ChatThoughtRow: View {
     let item: Item
     let streamingText: ThreadStreamingText?
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
-
-    @State private var isExpandedOverride: Bool?
 
     var body: some View {
         if let text = ChatTimelineLayout.reasoningText(item) {
             VStack(alignment: .leading, spacing: 8) {
                 Button {
                     scrollState.noteContentExpansion()
-                    withChatContentExpansionTransaction {
-                        isExpandedOverride = !isExpanded
-                    }
+                    foldModel.setExpanded(.thought(itemID: item.id), !isExpanded)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "brain")
@@ -2263,8 +2289,13 @@ private struct ChatThoughtRow: View {
         }
     }
 
+    /// Untouched thoughts are open only while streaming; an explicit choice
+    /// survives completion and offscreen reuse.
     private var isExpanded: Bool {
-        isExpandedOverride ?? (item.itemStatus == .inProgress)
+        foldModel.isExpanded(
+            .thought(itemID: item.id),
+            default: item.itemStatus == .inProgress
+        )
     }
 }
 
@@ -2407,15 +2438,18 @@ private struct ChatActivityGroupRow: View {
     let group: ChatActivityGroup
     let threadID: String
     let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
 
-    @State private var isExpanded = false
+    private var isExpanded: Bool {
+        foldModel.isExpanded(.activityGroup(id: group.id))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 scrollState.noteContentExpansion()
-                withChatContentExpansionTransaction { isExpanded.toggle() }
+                foldModel.setExpanded(.activityGroup(id: group.id), !isExpanded)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: Self.iconName(for: group.items.first))
@@ -2446,6 +2480,7 @@ private struct ChatActivityGroupRow: View {
                             item: item,
                             threadID: threadID,
                             store: store,
+                            foldModel: foldModel,
                             scrollState: scrollState
                         )
                     }
@@ -2463,7 +2498,7 @@ private struct ChatActivityGroupRow: View {
         switch verb {
         case .ranCommand:
             if let command = summary?.commandPreview, !command.isEmpty {
-                return Text("Ran ") + monospaced(command)
+                return Text("Ran \(monospaced(command))")
             }
         case .thought:
             let seconds = item.updatedAt.timeIntervalSince(item.createdAt)
@@ -2473,17 +2508,17 @@ private struct ChatActivityGroupRow: View {
             return Text("Thought")
         case .read:
             if let path = summary?.locations?.first?.path, !path.isEmpty {
-                return Text("Read ") + monospaced(lastPathComponent(path))
+                return Text("Read \(monospaced(lastPathComponent(path)))")
             }
         case .edited:
             if let path = summary?.changes?.first?.path, !path.isEmpty {
                 let extra = max(0, (summary?.changeCount ?? 1) - 1)
                 let suffix = extra > 0 ? " +\(extra)" : ""
-                return Text("Edited ") + monospaced(lastPathComponent(path)) + Text(suffix)
+                return Text("Edited \(monospaced(lastPathComponent(path)))\(suffix)")
             }
         case .searched:
             if let query = summary?.queryPreview, !query.isEmpty {
-                return Text("Searched ") + monospaced(query)
+                return Text("Searched \(monospaced(query))")
             }
         case .fetched, .tool:
             break
@@ -2526,9 +2561,9 @@ private struct ChatActivityItemRow: View {
     let item: Item
     let threadID: String
     let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
 
-    @State private var isExpanded = false
     // Captured at presentation: `detail` is cleared whenever the item
     // updates, and an open sheet must not lose its content to that.
     @State private var presentedChanges: [FileChange]?
@@ -2544,10 +2579,7 @@ private struct ChatActivityItemRow: View {
                         Task { await openDiff() }
                     } else {
                         scrollState.noteContentExpansion()
-                        withChatContentExpansionTransaction { isExpanded.toggle() }
-                        if isExpanded, detail == nil, item.detailAvailable == true {
-                            Task { await loadDetail() }
-                        }
+                        isExpanded.toggle()
                     }
                 } label: {
                     lineLabel
@@ -2571,6 +2603,12 @@ private struct ChatActivityItemRow: View {
         ) {
             UnifiedDiffView(changes: presentedChanges ?? [])
                 .presentationDragIndicator(.visible)
+        }
+        .task(id: isExpanded) {
+            // Also runs when a reused row reappears already expanded.
+            if isExpanded, detail == nil, item.detailAvailable == true {
+                await loadDetail()
+            }
         }
         .onChange(of: item.sequence) { _, _ in
             itemDidUpdate()
@@ -2673,6 +2711,13 @@ private struct ChatActivityItemRow: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// Fetched detail stays transient row state; the open choice is the
+    /// reader's and outlives this row.
+    private var isExpanded: Bool {
+        get { foldModel.isExpanded(.activityItem(itemID: item.id)) }
+        nonmutating set { foldModel.setExpanded(.activityItem(itemID: item.id), newValue) }
     }
 
     private var summary: ToolCallSummary? { item.toolCallSummary }
@@ -2993,7 +3038,8 @@ private struct ChatApprovalRow: View {
 
     private func decision(for option: ApprovalOption) -> MaidApprovalDecision {
         switch option.kind {
-        case "allow_always": .acceptForSession
+        // ACP options say allow_*; the Codex and Claude adapters say accept_*.
+        case "allow_always", "accept_always": .acceptForSession
         case "reject_once", "reject_always": .decline
         default: .accept
         }
@@ -3094,25 +3140,11 @@ struct ChatScrollToBottomButton: View {
                         .frame(width: 24, height: 24)
                         .contentShape(.circle)
                 }
-                .buttonBorderShape(.circle)
-                .modifier(ChatScrollButtonStyle())
+                .glassCircleButton()
                 .transition(.scale.combined(with: .opacity))
             }
         }
         .animation(.snappy, value: scrollState.isNearBottom)
-    }
-}
-
-private struct ChatScrollButtonStyle: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            content.buttonStyle(.glass)
-        } else {
-            content
-                .background(.regularMaterial, in: .circle)
-                .buttonStyle(.plain)
-        }
     }
 }
 

@@ -106,7 +106,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
 
             DraftPromptEditor(
                 text: $text,
-                selection: $textSelection,
+                selection: editorSelection,
                 isEnabled: isEnabled,
                 focusID: focusID,
                 inputChanged: updatePromptCompletion,
@@ -186,6 +186,16 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
             updatePromptCompletion(text: text, selection: nil)
             applyCursorRequest(promptCompletion?.cursorRequest)
         }
+    }
+
+    /// The editor only ever receives a selection valid for the text it shows.
+    /// Accepted sends, the draft-to-chat transition and accessibility edits
+    /// replace the text without updating the selection in the same change.
+    private var editorSelection: Binding<TextSelection?> {
+        Binding(
+            get: { textSelection.flatMap { $0.isValid(in: text) ? $0 : nil } },
+            set: { textSelection = $0 }
+        )
     }
 
     /// While a turn is running the button stops it, unless there is a draft to

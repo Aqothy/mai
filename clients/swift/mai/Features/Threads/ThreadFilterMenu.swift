@@ -15,7 +15,7 @@ struct ThreadFilterMenu: View {
     var body: some View {
         let projectName = filter.projectCwd.map { URL(filePath: $0).lastPathComponent }
         let providerName = filter.providerID.flatMap { selectedID in
-            store.availableProviders.first { $0.id == selectedID }?.name
+            store.availableProviders.first { $0.id == selectedID }?.title
         }
         let projectPaths = projectFolders.folders
             + store.recentWorkingDirectories.filter { !projectFolders.contains($0) }
@@ -78,7 +78,7 @@ struct ThreadFilterMenu: View {
                     SearchableSelectionChoice(
                         id: provider.id,
                         title: provider.name,
-                        subtitle: nil,
+                        subtitle: provider.kind,
                         systemImage: "server.rack"
                     )
                 },

@@ -4476,6 +4476,7 @@ public struct Thread: Codable {
     public var latestTurn: Turn?
     public var modelSelection: ModelSelection?
     public var plan: Plan?
+    public var previousTurns: [Turn]?
     public var providerInstanceID: String?
     public var session: SessionBinding?
     public var timeline: [TimelineEntry]
@@ -4483,12 +4484,12 @@ public struct Thread: Codable {
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories, createdAt, cwd, id, latestTurn, modelSelection, plan
+        case additionalDirectories, createdAt, cwd, id, latestTurn, modelSelection, plan, previousTurns
         case providerInstanceID = "providerInstanceId"
         case session, timeline, title, updatedAt
     }
 
-    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, previousTurns: [Turn]?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
         self.additionalDirectories = additionalDirectories
         self.createdAt = createdAt
         self.cwd = cwd
@@ -4496,6 +4497,7 @@ public struct Thread: Codable {
         self.latestTurn = latestTurn
         self.modelSelection = modelSelection
         self.plan = plan
+        self.previousTurns = previousTurns
         self.providerInstanceID = providerInstanceID
         self.session = session
         self.timeline = timeline
@@ -4530,6 +4532,7 @@ public extension Thread {
         latestTurn: Turn?? = nil,
         modelSelection: ModelSelection?? = nil,
         plan: Plan?? = nil,
+        previousTurns: [Turn]?? = nil,
         providerInstanceID: String?? = nil,
         session: SessionBinding?? = nil,
         timeline: [TimelineEntry]? = nil,
@@ -4544,6 +4547,7 @@ public extension Thread {
             latestTurn: latestTurn ?? self.latestTurn,
             modelSelection: modelSelection ?? self.modelSelection,
             plan: plan ?? self.plan,
+            previousTurns: previousTurns ?? self.previousTurns,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             session: session ?? self.session,
             timeline: timeline ?? self.timeline,
@@ -5298,11 +5302,7 @@ public extension WorkspaceSearchFilesResult {
 // MARK: - Helper functions for creating encoders and decoders
 
 func newJSONDecoder() -> JSONDecoder {
-    let decoder = JSONDecoder()
-    if #available(iOS 10.0, OSX 10.12, tvOS 10.0, watchOS 3.0, *) {
-        decoder.dateDecodingStrategy = .iso8601
-    }
-    return decoder
+    WireJSON.makeDecoder()
 }
 
 func newJSONEncoder() -> JSONEncoder {

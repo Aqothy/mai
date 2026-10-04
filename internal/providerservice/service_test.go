@@ -1579,9 +1579,13 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		Capabilities: provider.Capabilities{Fork: true, AdditionalDirectories: true},
 	}}
 	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		sessionID := input.ProviderSessionID
+		if sessionID == "" {
+			sessionID = "native-source"
+		}
 		return provider.Session{
 			ProviderInstanceID: input.ProviderInstanceID,
-			ProviderSessionID:  "native-source",
+			ProviderSessionID:  sessionID,
 			ThreadID:           input.ThreadID,
 			Cwd:                input.Cwd,
 		}, nil
@@ -1600,26 +1604,51 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		t.Fatalf("StartInstance: %v", err)
 	}
 	additional := []string{"/workspace/two", "/workspace/three"}
-	if _, err := s.StartSession(context.Background(), "thread-source", provider.StartSessionInput{ThreadID: "thread-source", ProviderInstanceID: "codex", Cwd: "/workspace/one", AdditionalDirectories: additional}); err != nil {
+	if _, err := s.StartSession(context.Background(), "thread-source", provider.StartSessionInput{
+		ThreadID: "thread-source", ProviderInstanceID: "codex", Cwd: "/workspace/one", AdditionalDirectories: additional,
+		ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"},
+		ConfigSelections: []provider.ConfigOptionSelection{
+			{OptionID: "model", Value: "gpt-6-luna", Category: provider.ConfigOptionCategoryModel},
+			{OptionID: "reasoning_effort", Value: "low", Category: provider.ConfigOptionCategoryThoughtLevel},
+		},
+	}); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	instanceID, summary, err := s.ForkSession(context.Background(), "thread-source")
+	fork, err := s.ForkSession(context.Background(), "thread-source")
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
-	if instanceID != "codex" || summary.SessionID != "native-fork" || summary.Cwd != "/workspace/one" || len(summary.AdditionalDirectories) != 2 || summary.AdditionalDirectories[1] != "/workspace/three" {
-		t.Fatalf("fork result = %q, %#v", instanceID, summary)
+	summary := fork.Summary
+	if fork.InstanceID != "codex" || summary.SessionID != "native-fork" || summary.Cwd != "/workspace/one" || len(summary.AdditionalDirectories) != 2 || summary.AdditionalDirectories[1] != "/workspace/three" {
+		t.Fatalf("fork result = %q, %#v", fork.InstanceID, summary)
 	}
 	additional[1] = "mutated"
 	if summary.AdditionalDirectories[1] != "/workspace/three" {
 		t.Fatal("fork summary aliases caller workspace roots")
+	}
+	settings := fork.Settings
+	if settings.ModelSelection == nil || settings.ModelSelection.Model != "gpt-6-luna" || len(settings.ConfigSelections) != 2 || settings.ConfigSelections[1].Value != "low" {
+		t.Fatalf("fork settings = %#v, want source Luna/Low", settings)
+	}
+
+	// The imported fork route has no live session; its first start must apply
+	// the stored settings even when the caller supplies only the model.
+	if err := s.RegisterImportedSession("thread-fork", "codex", "native-fork", provider.StartSessionInput{Cwd: summary.Cwd, ModelSelection: settings.ModelSelection, ConfigSelections: settings.ConfigSelections}); err != nil {
+		t.Fatalf("RegisterImportedSession: %v", err)
+	}
+	if _, err := s.StartSession(context.Background(), "thread-fork", provider.StartSessionInput{ProviderInstanceID: "codex", Cwd: summary.Cwd, ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"}}); err != nil {
+		t.Fatalf("open fork: %v", err)
+	}
+	resume := instance.lastStartInput()
+	if resume.ProviderSessionID != "native-fork" || len(resume.ConfigSelections) != 2 || resume.ConfigSelections[1].Value != "low" || resume.Cwd != "/workspace/one" {
+		t.Fatalf("fork resume input = %#v, want native-fork at Luna/Low in source cwd", resume)
 	}
 	instance.mu.Lock()
 	instance.forkSession = func(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error) {
 		return provider.ForkSessionResult{Summary: provider.SessionSummary{SessionID: "native-source"}}, nil
 	}
 	instance.mu.Unlock()
-	if _, _, err := s.ForkSession(context.Background(), "thread-source"); err == nil || !strings.Contains(err.Error(), "source session id") {
+	if _, err := s.ForkSession(context.Background(), "thread-source"); err == nil || !strings.Contains(err.Error(), "source session id") {
 		t.Fatalf("same-session fork err = %v, want source-id rejection", err)
 	}
 }

@@ -68,7 +68,7 @@ func TestPromptPresentationRestartForkAndDistinctSteering(t *testing.T) {
 	if records[sent[2].ClientMessageID].Presentation.Text != nil {
 		t.Fatal("ordinary conversation text was persisted")
 	}
-	if _, _, err := s.ForkSession(context.Background(), "source"); err != nil {
+	if _, err := s.ForkSession(context.Background(), "source"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -153,7 +153,7 @@ func TestPromptStorageFailuresDoNotDispatchConsumeReplayOrLeaveNativeFork(t *tes
 			case "fork":
 				var deleted string
 				instance.deleteSess = func(_ context.Context, id string) error { deleted = id; return nil }
-				_, _, err := s.ForkSession(context.Background(), "source")
+				_, err := s.ForkSession(context.Background(), "source")
 				if !errors.Is(err, failure) || deleted != "native-fork" {
 					t.Fatalf("fork failure cleanup: %v, deleted %q", err, deleted)
 				}

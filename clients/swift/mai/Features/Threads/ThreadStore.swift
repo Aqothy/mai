@@ -4,6 +4,18 @@ import Observation
 struct ProviderChoice: Identifiable, Equatable {
     let id: String
     let name: String
+    /// Where the provider runtime comes from. Several instances can share a
+    /// display name, such as the built-in Codex and Codex ACP agents.
+    let kind: String
+    /// `name`, qualified with `kind` only when another provider shares it.
+    var title: String
+
+    init(id: String, name: String, kind: String) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        title = name
+    }
 }
 
 struct QueuedChatPrompt: Identifiable {
@@ -970,16 +982,19 @@ final class ThreadStore {
             uniquingKeysWith: { first, _ in first }
         )
         let nativeProviders = providers.filter { !isACPProvider($0) }.map {
-            ProviderChoice(id: $0.instanceID, name: $0.name)
+            ProviderChoice(id: $0.instanceID, name: $0.name, kind: String(localized: "Built-in"))
         }
         let installedACPProviders = installedAgents.map { agent in
             ProviderChoice(
                 id: agent.instanceID,
-                name: agent.name
+                name: agent.name,
+                kind: agent.source == "custom"
+                    ? String(localized: "Custom ACP")
+                    : String(localized: "ACP Registry")
             )
         }
         var seenProviderIDs: Set<String> = []
-        availableProviders = (nativeProviders + installedACPProviders).filter {
+        var choices = (nativeProviders + installedACPProviders).filter {
             seenProviderIDs.insert($0.id).inserted
         }.sorted {
             let nameOrder = $0.name.localizedStandardCompare($1.name)
@@ -988,6 +1003,11 @@ final class ThreadStore {
             }
             return nameOrder == .orderedAscending
         }
+        let nameCounts = Dictionary(choices.map { ($0.name, 1) }, uniquingKeysWith: +)
+        for index in choices.indices where nameCounts[choices[index].name, default: 0] > 1 {
+            choices[index].title = "\(choices[index].name) (\(choices[index].kind))"
+        }
+        availableProviders = choices
     }
 
     /// Recomputes every cache derived from `threads`. Must be called after

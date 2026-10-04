@@ -123,6 +123,7 @@ func cloneThread(thread Thread) Thread {
 	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
 	thread.Session = cloneSessionPtr(thread.Session)
 	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
+	thread.PreviousTurns = cloneTurns(thread.PreviousTurns)
 	thread.Timeline = thread.Timeline.Clone()
 	thread.Plan = clonePlanPtr(thread.Plan)
 	return thread
@@ -191,6 +192,17 @@ func cloneTurnPtr(value *Turn) *Turn {
 	clone.StartedAt = cloneTimePtr(value.StartedAt)
 	clone.CompletedAt = cloneTimePtr(value.CompletedAt)
 	return &clone
+}
+
+func cloneTurns(turns []Turn) []Turn {
+	if turns == nil {
+		return nil
+	}
+	cloned := make([]Turn, len(turns))
+	for index := range turns {
+		cloned[index] = *cloneTurnPtr(&turns[index])
+	}
+	return cloned
 }
 
 func cloneTimePtr(value *time.Time) *time.Time {

@@ -1793,6 +1793,12 @@
         "latestTurn": {
           "$ref": "#/$defs/Turn"
         },
+        "previousTurns": {
+          "items": {
+            "$ref": "#/$defs/Turn"
+          },
+          "type": "array"
+        },
         "timeline": {
           "$ref": "#/$defs/Timeline"
         },

@@ -95,6 +95,23 @@ struct ThreadEventReducerTests {
     }
 
     @Test
+    func newTurnKeepsTheSettledTurnInPreviousTurns() {
+        let started = Date(timeIntervalSince1970: 1_000)
+        var stopped = makeTurn(id: "turn-1", state: .interrupted, at: started)
+        stopped.completedAt = started.addingTimeInterval(9)
+        var thread = makeThread(latestTurn: stopped)
+
+        thread.apply(
+            makeEvent(.threadTurnStartRequested, occurredAt: started.addingTimeInterval(60), payload: makePayload(turnID: "turn-2"))
+        )
+
+        #expect(thread.latestTurn?.turnID == "turn-2")
+        #expect(thread.previousTurns?.map(\.turnID) == ["turn-1"])
+        #expect(thread.previousTurns?.first?.turnState == .interrupted)
+        #expect(thread.previousTurns?.first?.completedAt == started.addingTimeInterval(9))
+    }
+
+    @Test
     func interruptRequestMarksTurnAndConfirmationCompletesIt() {
         var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
 

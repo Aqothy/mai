@@ -296,7 +296,15 @@ func (s *Server) doClose() error {
 // ImportProviderSession persists an explicitly selected provider session and
 // installs its empty, replay-pending thread stub in the live engine. Import is
 // serialized so duplicate requests always observe the first completed stub.
+// An external session has no app-selected settings, so it resumes with the
+// provider's own model and configuration.
 func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
+	return s.importProviderSession(ctx, instanceID, summary, provider.StartSessionInput{})
+}
+
+// importProviderSession imports summary with settings' model, config
+// selections and options as the route's resume preferences.
+func (s *Server) importProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary, settings provider.StartSessionInput) (orchestration.ThreadID, bool, error) {
 	if s.metadataStore == nil {
 		return "", false, fmt.Errorf("provider session import requires metadata persistence")
 	}
@@ -341,6 +349,9 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		ProviderInstanceID:    instanceID,
 		Cwd:                   summary.Cwd,
 		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
+		ModelSelection:        settings.ModelSelection,
+		ConfigSelections:      settings.ConfigSelections,
+		Options:               settings.Options,
 	}
 	meta := store.ThreadMeta{
 		ThreadID:              string(threadID),
@@ -348,6 +359,7 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		Cwd:                   summary.Cwd,
 		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
 		ProviderInstanceID:    instanceID,
+		ModelSelection:        settings.ModelSelection,
 		CreatedAt:             updatedAt,
 		UpdatedAt:             updatedAt,
 	}
@@ -422,18 +434,18 @@ func (s *Server) ForkProviderThread(ctx context.Context, sourceThreadID orchestr
 	if source.LatestTurn != nil && source.LatestTurn.State == orchestration.TurnStateRunning {
 		return "", false, fmt.Errorf("cannot fork thread %q while its turn is running", sourceThreadID)
 	}
-	instanceID, summary, err := s.providerService.ForkSession(ctx, string(sourceThreadID))
+	fork, err := s.providerService.ForkSession(ctx, string(sourceThreadID))
 	if err != nil {
 		return "", false, err
 	}
-	if summary.Title == "" {
+	if fork.Summary.Title == "" {
 		if source, ok := s.orchestration.ThreadListEntry(sourceThreadID); ok {
-			summary.Title = source.Title + " (fork)"
+			fork.Summary.Title = source.Title + " (fork)"
 		}
 	}
-	threadID, imported, err := s.ImportProviderSession(ctx, instanceID, summary)
+	threadID, imported, err := s.importProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
 	if err != nil {
-		s.cleanupUnpersistedProviderFork(ctx, instanceID, summary.SessionID)
+		s.cleanupUnpersistedProviderFork(ctx, fork.InstanceID, fork.Summary.SessionID)
 		return "", false, err
 	}
 	return threadID, imported, nil

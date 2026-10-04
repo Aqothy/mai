@@ -22,12 +22,14 @@ nonisolated enum ChatTimelineLayout {
         timeline: [TimelineEntry],
         streamingTurnID: String?,
         latestTurn: Turn?,
+        previousTurns: [Turn] = [],
         expandedSectionIDs: Set<String>
     ) -> [ChatTimelineRowModel] {
         rows(
             sections: sections(timeline: timeline),
             streamingTurnID: streamingTurnID,
             latestTurn: latestTurn,
+            previousTurns: previousTurns,
             expandedSectionIDs: expandedSectionIDs
         )
     }
@@ -40,15 +42,25 @@ nonisolated enum ChatTimelineLayout {
         sections: [Section],
         streamingTurnID: String?,
         latestTurn: Turn?,
+        previousTurns: [Turn] = [],
         expandedSectionIDs: Set<String>
     ) -> [ChatTimelineRowModel] {
+        // Each section renders its own turn's outcome and timing, not only
+        // the latest turn's.
+        var turnsByID = Dictionary(
+            previousTurns.map { ($0.turnID, $0) },
+            uniquingKeysWith: { _, later in later }
+        )
+        if let latestTurn {
+            turnsByID[latestTurn.turnID] = latestTurn
+        }
         var rows: [ChatTimelineRowModel] = []
         for section in sections {
             appendRows(
                 for: section,
                 into: &rows,
                 streamingTurnID: streamingTurnID,
-                latestTurn: latestTurn,
+                turn: section.turnID.flatMap { turnsByID[$0] },
                 isExpanded: expandedSectionIDs.contains(section.id)
             )
         }
@@ -214,7 +226,7 @@ nonisolated enum ChatTimelineLayout {
         for section: Section,
         into rows: inout [ChatTimelineRowModel],
         streamingTurnID: String?,
-        latestTurn: Turn?,
+        turn: Turn?,
         isExpanded: Bool
     ) {
         let isRunning = streamingTurnID != nil && section.turnID == streamingTurnID
@@ -227,7 +239,7 @@ nonisolated enum ChatTimelineLayout {
         let header = ChatTimelineRowModel.turnActivity(
             turnActivity(
                 for: section,
-                latestTurn: latestTurn,
+                turn: turn,
                 isRunning: isRunning,
                 isExpanded: isExpanded
             )
@@ -256,7 +268,7 @@ nonisolated enum ChatTimelineLayout {
 
     private static func turnActivity(
         for section: Section,
-        latestTurn: Turn?,
+        turn: Turn?,
         isRunning: Bool,
         isExpanded: Bool
     ) -> ChatTurnActivity {
@@ -276,41 +288,31 @@ nonisolated enum ChatTimelineLayout {
                 break
             }
         }
-        if latestTurn?.turnID == section.turnID,
-            latestTurn?.turnState == .interrupted
-        {
+        if turn?.turnState == .interrupted {
             wasInterrupted = true
         }
         return ChatTurnActivity(
             sectionID: section.id,
             stepCount: stepCount,
-            duration: isRunning ? nil : sectionDuration(section, latestTurn: latestTurn),
+            duration: isRunning ? nil : sectionDuration(section, turn: turn),
             isRunning: isRunning,
-            startedAt: isRunning && latestTurn?.turnID == section.turnID
-                ? latestTurn?.startedAt ?? latestTurn?.requestedAt
-                : nil,
+            startedAt: isRunning ? turn?.startedAt ?? turn?.requestedAt : nil,
             isExpanded: isExpanded,
             hasFailure: hasFailure,
             wasInterrupted: wasInterrupted
         )
     }
 
-    /// The latest turn keeps authoritative timestamps; older turns are gone
-    /// from the wire model, so their span is derived from entry timestamps.
-    /// Restored history re-stamps entries at replay time, so those turns
-    /// genuinely have no duration to show.
+    /// A turn's authoritative timestamps give its duration. Without them,
+    /// such as restored history re-stamped at replay time, the span falls
+    /// back to entry timestamps, which genuinely may have no duration to show.
     private static func sectionDuration(
         _ section: Section,
-        latestTurn: Turn?
+        turn: Turn?
     ) -> Duration? {
         var interval: TimeInterval?
-        if let latestTurn,
-            latestTurn.turnID == section.turnID,
-            let completedAt = latestTurn.completedAt
-        {
-            interval = completedAt.timeIntervalSince(
-                latestTurn.startedAt ?? latestTurn.requestedAt
-            )
+        if let turn, let completedAt = turn.completedAt {
+            interval = completedAt.timeIntervalSince(turn.startedAt ?? turn.requestedAt)
         } else if let earliest = section.earliest, let latest = section.latest {
             interval = latest.timeIntervalSince(earliest)
         }
