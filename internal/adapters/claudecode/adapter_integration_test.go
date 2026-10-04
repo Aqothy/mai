@@ -40,6 +40,11 @@ func fakeCLIMain() {
 			sessionID = os.Args[index+1]
 		}
 	}
+	// One line per launch in the session cwd lets tests assert launch flags.
+	if launches, err := os.OpenFile(fakeLaunchLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		fmt.Fprintln(launches, strings.Join(os.Args[1:], " "))
+		_ = launches.Close()
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	initSent := false
@@ -286,6 +291,55 @@ func TestTurnLifecycleWithApproval(t *testing.T) {
 	})
 	if turnDone.Payload.TurnState != provider.RuntimeTurnCompleted {
 		t.Fatalf("turn completion = %#v", turnDone.Payload)
+	}
+}
+
+const fakeLaunchLog = "fake-cli-launches.log"
+
+func fakeLaunches(t *testing.T, cwd string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(cwd, fakeLaunchLog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+func TestEffortChangeAppliesFromTheNextTurn(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	cwd := t.TempDir()
+	start := provider.StartSessionInput{ThreadID: "thread-effort", Cwd: cwd, ConfigSelections: []provider.ConfigOptionSelection{{OptionID: "effort", Value: "default"}}}
+	if _, err := instance.StartSession(context.Background(), start); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if launch := fakeLaunches(t, cwd)[0]; strings.Contains(launch, "--effort") {
+		t.Fatalf("model-selected effort launched with %q", launch)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-effort", TurnID: "turn-slow", Input: "SLOW work"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventContentDelta && event.TurnID == "turn-slow"
+	})
+	// Changed while a turn runs: the running process must not be replaced.
+	if err := instance.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-effort", OptionID: "effort", Value: "high"}); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	if launches := fakeLaunches(t, cwd); len(launches) != 1 {
+		t.Fatalf("launches during turn = %q", launches)
+	}
+	if err := instance.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-effort", TurnID: "turn-slow"}); err != nil {
+		t.Fatalf("InterruptTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-slow"
+	})
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-effort", TurnID: "turn-next", Input: "next"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	launches := fakeLaunches(t, cwd)
+	if len(launches) != 2 || !strings.Contains(launches[1], "--effort high") {
+		t.Fatalf("launches = %q, want the next turn relaunched with --effort high", launches)
 	}
 }
 

@@ -266,7 +266,7 @@ func (i *ProviderRuntimeIngestion) RestoreHistory(
 		gate.mu.Lock()
 		queued := gate.queued
 		if len(queued) == 0 {
-			i.completeHistoryReplay(threadID)
+			i.completeHistoryReplay(threadID, replayedTurns(result.Replay))
 			ready(result.Session)
 			gate.closed = true
 			gate.mu.Unlock()
@@ -284,7 +284,7 @@ func (i *ProviderRuntimeIngestion) RestoreHistory(
 	return nil
 }
 
-func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string) {
+func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string, turns []Turn) {
 	createdAt := time.Now()
 	i.completeThreadText(threadID, createdAt)
 	i.clearThreadBuffers(threadID)
@@ -292,7 +292,41 @@ func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string) {
 		Type:       EventThreadHistoryReplayCompleted,
 		ThreadID:   ThreadID(threadID),
 		OccurredAt: createdAt,
+		Payload:    EventPayload{ReplayedTurns: turns},
 	})
+}
+
+// replayedTurns derives each settled history turn's outcome and timing from the
+// replay's turn boundary events. Live turn events apply only to a bound session,
+// which a restored thread gets after its replay, so the engine drops these.
+func replayedTurns(events []provider.RuntimeEvent) []Turn {
+	startedAt := make(map[string]time.Time)
+	var turns []Turn
+	for _, event := range events {
+		if event.TurnID == "" || event.CreatedAt.IsZero() {
+			continue
+		}
+		switch event.Type {
+		case provider.RuntimeEventTurnStarted:
+			startedAt[event.TurnID] = event.CreatedAt
+		case provider.RuntimeEventTurnCompleted:
+			started, ok := startedAt[event.TurnID]
+			if !ok {
+				continue
+			}
+			completed := event.CreatedAt
+			turn := Turn{ID: TurnID(event.TurnID), State: TurnStateCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &completed, StopReason: event.Payload.StopReason}
+			switch event.Payload.TurnState {
+			case provider.RuntimeTurnFailed:
+				turn.State = TurnStateError
+				turn.Error = firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Turn failed")
+			case provider.RuntimeTurnInterrupted, provider.RuntimeTurnCancelled:
+				turn.State = TurnStateInterrupted
+			}
+			turns = append(turns, turn)
+		}
+	}
+	return turns
 }
 
 func (i *ProviderRuntimeIngestion) ingestContentDelta(event provider.RuntimeEvent, createdAt time.Time) {

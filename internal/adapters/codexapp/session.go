@@ -26,18 +26,8 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		_ = json.Unmarshal(input.ResumeCursor, &nativeID)
 	}
 	model, effort, serviceTier := modelEffortAndTier(input.ModelSelection, input.ConfigSelections)
-	params := map[string]any{"cwd": input.Cwd}
-	if model != "" {
-		params["model"] = model
-	}
-	if effort != "" {
-		// Thread requests accept reasoning through config; only turn/start has
-		// a top-level effort field. Apply it before adopting the effective config.
-		params["config"] = map[string]any{"model_reasoning_effort": effort}
-	}
-	if serviceTier != "" {
-		params["serviceTier"] = serviceTier
-	}
+	params := threadSettingsParams(model, effort, serviceTier)
+	params["cwd"] = input.Cwd
 	var response threadStartResponse
 	method := "thread/start"
 	var provisional, previous *sessionState
@@ -397,7 +387,10 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 	if input.ProviderSessionID == "" {
 		return provider.ForkSessionResult{}, fmt.Errorf("Codex fork requires a provider session id")
 	}
-	params := map[string]any{"threadId": input.ProviderSessionID}
+	// Codex keeps the fork loaded, so a later thread/resume cannot change its
+	// settings; the fork itself must carry the source's model and reasoning.
+	params := threadSettingsParams(modelEffortAndTier(input.ModelSelection, input.ConfigSelections))
+	params["threadId"] = input.ProviderSessionID
 	var response threadStartResponse
 	if err := h.rpc.call(ctx, "thread/fork", params, &response); err != nil {
 		return provider.ForkSessionResult{}, err
@@ -406,6 +399,23 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 		return provider.ForkSessionResult{}, fmt.Errorf("thread/fork returned an empty thread id")
 	}
 	return provider.ForkSessionResult{Summary: sessionSummaryFromThread(response.Thread)}, nil
+}
+
+// threadSettingsParams are the thread/start, thread/resume and thread/fork
+// settings overrides. Thread requests accept reasoning through config; only
+// turn/start has a top-level effort field.
+func threadSettingsParams(model, effort, serviceTier string) map[string]any {
+	params := map[string]any{}
+	if model != "" {
+		params["model"] = model
+	}
+	if effort != "" {
+		params["config"] = map[string]any{"model_reasoning_effort": effort}
+	}
+	if serviceTier != "" {
+		params["serviceTier"] = serviceTier
+	}
+	return params
 }
 
 func modelEffortAndTier(selection *provider.ModelSelection, selections []provider.ConfigOptionSelection) (string, string, string) {

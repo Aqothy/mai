@@ -52,11 +52,12 @@ final class ChatPromptModel {
         store.queuedPrompts(for: threadID)
     }
 
-    var canSend: Bool {
-        canSend(annotations: [])
+    /// This chat's unsent annotations; the draft store owns them.
+    var annotations: [ChatPendingAnnotation] {
+        draftStore.annotations(for: threadID)
     }
 
-    func canSend(annotations: [ChatPendingAnnotation]) -> Bool {
+    var canSend: Bool {
         store.connectionState == .connected
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !attachments.isEmpty
@@ -117,14 +118,14 @@ final class ChatPromptModel {
         }
     }
 
-    func send(annotations annotationModel: ChatAnnotationModel? = nil) async {
+    func send() async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
         let submittedAttachmentIDs = Set(submittedAttachments.map(\.id))
-        let submittedAnnotations = annotationModel?.annotations ?? []
+        let submittedAnnotations = annotations
         let submittedAnnotationIDs = Set(submittedAnnotations.map(\.id))
-        guard canSend(annotations: submittedAnnotations) else { return }
+        guard canSend else { return }
 
         isSending = true
         defer { isSending = false }
@@ -141,10 +142,7 @@ final class ChatPromptModel {
                 text = ""
             }
             attachmentsModel.remove(ids: submittedAttachmentIDs)
-            // The annotation model may show another chat by now; the draft
-            // store owns this chat's annotations either way.
             draftStore.removeAnnotations(ids: submittedAnnotationIDs, for: threadID)
-            annotationModel?.removeSent(ids: submittedAnnotationIDs)
             // The daemon accepted this prompt; persist the cleared draft now so
             // an exit within the save debounce cannot restore it as unsent.
             draftStore.flushPendingSave()

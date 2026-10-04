@@ -235,8 +235,28 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 }
 
 func (p *Projection) applyThreadHistoryReplayCompleted(event Event) {
-	if thread := p.threads[event.ThreadID()]; thread != nil {
-		thread.ReplayHistoryPending = false
+	thread := p.threads[event.ThreadID()]
+	if thread == nil {
+		return
+	}
+	thread.ReplayHistoryPending = false
+	// Replay restores the whole provider history. During replay the engine can
+	// only adopt the first replayed turn (later ones conflict with it), so the
+	// last settled turn becomes the latest unless a turn is still running.
+	previous := append([]Turn(nil), event.Payload.ReplayedTurns...)
+	if len(previous) > 0 && (thread.LatestTurn == nil || thread.LatestTurn.CompletedAt != nil) {
+		latest := previous[len(previous)-1]
+		thread.LatestTurn = &latest
+		previous = previous[:len(previous)-1]
+	}
+	thread.PreviousTurns = previous[:0]
+	for _, turn := range previous {
+		if thread.LatestTurn == nil || turn.ID != thread.LatestTurn.ID {
+			thread.PreviousTurns = append(thread.PreviousTurns, turn)
+		}
+	}
+	if len(thread.PreviousTurns) == 0 {
+		thread.PreviousTurns = nil
 	}
 }
 

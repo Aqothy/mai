@@ -38,6 +38,7 @@ type sessionProcess struct {
 	cmd        *exec.Cmd
 	stdin      io.WriteCloser
 	client     *streamClient
+	effort     string // launch --effort; changing it needs a new process
 	done       chan struct{}
 	reaped     bool
 	killedTree bool

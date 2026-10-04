@@ -364,6 +364,7 @@ final class DraftPromptModel {
         let requestedCwd = workingDirectory
         let requestedAdditionalDirectories = additionalDirectories
         let selections = currentSelections(providerID: requestedProviderID)
+        let submittedAttachments = attachments
         isSending = true
         defer { isSending = false }
 
@@ -396,12 +397,15 @@ final class DraftPromptModel {
                 additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
                     annotations: nil,
-                    attachments: attachments.compactMap(\.attachment),
+                    attachments: submittedAttachments.compactMap(\.attachment),
                     messageID: UUID().uuidString,
                     text: text
                 ),
                 configSelections: selections
             )
+            // The model outlives this chat; the next new chat must not offer
+            // the sent images again.
+            attachmentsModel.remove(ids: Set(submittedAttachments.map(\.id)))
             draftStore.removeDraft(for: threadID)
             store.selectThread(threadID)
         } catch is CancellationError {

@@ -445,7 +445,7 @@ func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw js
 	if detail == "" {
 		detail = strings.TrimSpace(request.Command)
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: []provider.ApprovalOption{{ID: "accept", Name: "Allow once", Kind: "accept_once"}, {ID: "acceptForSession", Name: "Allow for session", Kind: "accept_always"}, {ID: "decline", Name: "Decline", Kind: "reject_once"}}}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: []provider.ApprovalOption{{ID: "accept", Name: "Allow once", Kind: "allow_once"}, {ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"}, {ID: "decline", Name: "Decline", Kind: "reject_once"}}}})
 }
 
 func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {

@@ -843,8 +843,13 @@ final class ThreadStore {
             }
             sessionsByID[id] = session
 
-            if connectionState == .connected,
-                !session.subscriptionState.isSubscribed,
+            if session.subscriptionState.isSubscribed {
+                // A background subscription (such as one restored after a
+                // reconnect) only prepares history once the chat is shown.
+                if session.canPrepareHistoryRestore {
+                    Task { await prepareSelectedRestoredThreadIfNeeded(id) }
+                }
+            } else if connectionState == .connected,
                 !isSubscribing(session.subscriptionState)
             {
                 ensureSubscribed(id)

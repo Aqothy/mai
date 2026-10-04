@@ -73,7 +73,13 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 		t.Fatalf("thread title = %q", title.Payload.Title)
 	}
 
-	fork, err := instance.ForkSession(testContext(t), provider.ForkSessionInput{ProviderSessionID: "native-thread"})
+	// Codex keeps a fork loaded, so the fork request itself carries the
+	// source's model and reasoning.
+	fork, err := instance.ForkSession(testContext(t), provider.ForkSessionInput{
+		ProviderSessionID: "native-thread",
+		ModelSelection:    &provider.ModelSelection{Model: "fork-model"},
+		ConfigSelections:  []provider.ConfigOptionSelection{{OptionID: "reasoning_effort", Value: "low", Category: provider.ConfigOptionCategoryThoughtLevel}},
+	})
 	if err != nil {
 		t.Fatalf("fork session: %v", err)
 	}
@@ -338,6 +344,14 @@ func TestInstanceApprovalResponseUsesStableDecision(t *testing.T) {
 	})
 	if opened.RequestID != "approval-1" || opened.Payload.RequestType != provider.RuntimeRequestCommandExecution {
 		t.Fatalf("approval opened = %#v", opened)
+	}
+	// Options use the provider-neutral (ACP) permission kinds.
+	kinds := map[string]string{}
+	for _, option := range opened.Payload.Options {
+		kinds[option.ID] = option.Kind
+	}
+	if kinds["accept"] != "allow_once" || kinds["acceptForSession"] != "allow_always" || kinds["decline"] != "reject_once" {
+		t.Fatalf("approval option kinds = %v", kinds)
 	}
 	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptForSession"}); err != nil {
 		t.Fatalf("respond to approval: %v", err)
@@ -822,8 +836,12 @@ func runFakeAppServer(scenario string) error {
 			var params struct {
 				ThreadID   string `json:"threadId"`
 				LastTurnID string `json:"lastTurnId"`
+				Model      string `json:"model"`
+				Config     struct {
+					Effort string `json:"model_reasoning_effort"`
+				} `json:"config"`
 			}
-			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.LastTurnID != "" {
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.LastTurnID != "" || params.Model != "fork-model" || params.Config.Effort != "low" {
 				return fmt.Errorf("invalid thread/fork params: %s", fakeMessageJSON(message))
 			}
 			if err := writeFakeResult(encoder, message["id"], fakeThreadResponse("forked-thread")); err != nil {

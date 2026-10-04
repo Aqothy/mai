@@ -800,9 +800,19 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (Forke
 	if !ok {
 		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
 	}
+	source := route.StartInput // routeForThread returned a detached copy.
+	settings := provider.StartSessionInput{
+		ModelSelection:   source.ModelSelection,
+		ConfigSelections: canonicalModelConfigSelections(source.ModelSelection, source.ConfigSelections),
+		Options:          source.Options,
+	}
 	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
 	defer cancel()
-	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{ProviderSessionID: route.ProviderSessionID})
+	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{
+		ProviderSessionID: route.ProviderSessionID,
+		ModelSelection:    settings.ModelSelection,
+		ConfigSelections:  settings.ConfigSelections,
+	})
 	if err != nil {
 		return ForkedSession{}, err
 	}
@@ -833,16 +843,7 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (Forke
 	if result.Summary.AdditionalDirectories == nil {
 		result.Summary.AdditionalDirectories = append([]string(nil), route.StartInput.AdditionalDirectories...)
 	}
-	source := route.StartInput // routeForThread returned a detached copy.
-	return ForkedSession{
-		InstanceID: route.InstanceID,
-		Summary:    result.Summary,
-		Settings: provider.StartSessionInput{
-			ModelSelection:   source.ModelSelection,
-			ConfigSelections: canonicalModelConfigSelections(source.ModelSelection, source.ConfigSelections),
-			Options:          source.Options,
-		},
-	}, nil
+	return ForkedSession{InstanceID: route.InstanceID, Summary: result.Summary, Settings: settings}, nil
 }
 
 // The bound-session guard is best-effort against a concurrent bind. The adapter

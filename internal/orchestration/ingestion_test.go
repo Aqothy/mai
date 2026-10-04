@@ -182,7 +182,7 @@ func TestTickerDoesNotFlushThreadDuringHistoryReplay(t *testing.T) {
 		t.Fatalf("ticker exposed partial replay: %#v", thread.Timeline)
 	}
 
-	ingestion.completeHistoryReplay(string(threadID))
+	ingestion.completeHistoryReplay(string(threadID), nil)
 	gate.mu.Lock()
 	gate.closed = true
 	gate.mu.Unlock()
@@ -392,7 +392,7 @@ func TestIngestionPreservesReplayedConversationOrderWithoutTurnIDs(t *testing.T)
 	for _, event := range events {
 		ingestion.Ingest(event)
 	}
-	ingestion.completeHistoryReplay(string(threadID))
+	ingestion.completeHistoryReplay(string(threadID), nil)
 
 	thread, _ := engine.Thread(threadID)
 	want := []string{"first question", "first answer", "second question", "second answer"}
@@ -427,7 +427,7 @@ func TestIngestionPreservesReplayedConversationOrderWithTurnIDs(t *testing.T) {
 	for _, event := range events {
 		ingestion.Ingest(event)
 	}
-	ingestion.completeHistoryReplay(string(threadID))
+	ingestion.completeHistoryReplay(string(threadID), nil)
 
 	thread, _ := engine.Thread(threadID)
 	if len(thread.Timeline) != 5 {
@@ -480,7 +480,7 @@ func TestIngestionPreservesRestoredThreadRecencyDuringReplay(t *testing.T) {
 		t.Fatalf("replay changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
 	}
 
-	ingestion.completeHistoryReplay(string(threadID))
+	ingestion.completeHistoryReplay(string(threadID), nil)
 	thread, _ = engine.Thread(threadID)
 	if !thread.UpdatedAt.Equal(restoredAt) {
 		t.Fatalf("replay completion changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
@@ -527,7 +527,7 @@ func TestIngestionCoalescesIDLessReplayChunks(t *testing.T) {
 	for _, event := range events {
 		ingestion.Ingest(event)
 	}
-	ingestion.completeHistoryReplay(string(threadID))
+	ingestion.completeHistoryReplay(string(threadID), nil)
 
 	thread, _ := engine.Thread(threadID)
 	want := []string{"first question", "first answer", "second question", "second answer"}
@@ -1791,5 +1791,62 @@ func TestPreviousTurnKeepsStoppedOutcomeAfterNextTurnStarts(t *testing.T) {
 	previous := client.PreviousTurns[0]
 	if previous.ID != TurnID(stoppedTurn) || previous.State != TurnStateInterrupted || previous.CompletedAt == nil || !previous.CompletedAt.Equal(*stopped.CompletedAt) || !previous.RequestedAt.Equal(stopped.RequestedAt) {
 		t.Fatalf("previous turn = %#v, want stopped outcome and timing %#v", previous, stopped)
+	}
+}
+
+// After a daemon restart the thread is rebuilt from provider history. Each
+// settled turn keeps the outcome and timing its history reports, including an
+// interrupted turn whose late tool completed after the stop.
+func TestRestoredHistoryKeepsEachTurnOutcomeAndTiming(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	ingestion := NewProviderRuntimeIngestion(engine)
+	threadID := ThreadID("thread-restored-turn-outcomes")
+	now := time.Now().UTC()
+	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+	// Like reopening the thread: the session is starting while history replays.
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionPrepareRequested, ThreadID: threadID, Actor: ActorKindClient, OccurredAt: now}); err != nil {
+		t.Fatalf("prepare session: %v", err)
+	}
+	stoppedAt := now.Add(-time.Hour)
+	nextAt := stoppedAt.Add(time.Minute)
+	boundary := func(eventType provider.RuntimeEventType, turnID string, at time.Time, state provider.RuntimeTurnState) provider.RuntimeEvent {
+		return provider.RuntimeEvent{EventID: provider.RuntimeEventID(turnID + string(eventType)), Type: eventType, ThreadID: string(threadID), TurnID: turnID, CreatedAt: at, Payload: provider.RuntimeEventPayload{TurnState: state}}
+	}
+	replay := []provider.RuntimeEvent{
+		boundary(provider.RuntimeEventTurnStarted, "turn-stopped", stoppedAt, ""),
+		{EventID: "late-tool", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), TurnID: "turn-stopped", ItemID: "late-tool", CreatedAt: stoppedAt.Add(time.Microsecond), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusCompleted}},
+		boundary(provider.RuntimeEventTurnCompleted, "turn-stopped", stoppedAt.Add(9*time.Second), provider.RuntimeTurnInterrupted),
+		boundary(provider.RuntimeEventTurnStarted, "turn-next", nextAt, ""),
+		boundary(provider.RuntimeEventTurnCompleted, "turn-next", nextAt.Add(4*time.Second), provider.RuntimeTurnCompleted),
+	}
+	if err := ingestion.RestoreHistory(string(threadID), func() (provider.StartSessionResult, error) {
+		return provider.StartSessionResult{Session: provider.Session{ThreadID: string(threadID), ProviderInstanceID: "codex"}, Replay: replay}, nil
+	}, func(provider.Session) {}); err != nil {
+		t.Fatalf("RestoreHistory: %v", err)
+	}
+
+	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
+	if err != nil {
+		t.Fatalf("SubscribeThread: %v", err)
+	}
+	thread := snapshot.Snapshot.Thread
+	if thread.LatestTurn == nil || thread.LatestTurn.ID != "turn-next" {
+		t.Fatalf("latest turn = %#v, want the last replayed turn", thread.LatestTurn)
+	}
+	turns := append(append([]Turn(nil), thread.PreviousTurns...), *thread.LatestTurn)
+	if len(turns) != 2 {
+		t.Fatalf("previous turns = %#v, want only the stopped turn", thread.PreviousTurns)
+	}
+	want := []struct {
+		id       TurnID
+		state    TurnState
+		duration time.Duration
+	}{{"turn-stopped", TurnStateInterrupted, 9 * time.Second}, {"turn-next", TurnStateCompleted, 4 * time.Second}}
+	for index, expected := range want {
+		turn := turns[index]
+		if turn.ID != expected.id || turn.State != expected.state || turn.StartedAt == nil || turn.CompletedAt == nil || turn.CompletedAt.Sub(*turn.StartedAt) != expected.duration {
+			t.Fatalf("previous turn %d = %#v, want %s %s over %s", index, turn, expected.id, expected.state, expected.duration)
+		}
 	}
 }

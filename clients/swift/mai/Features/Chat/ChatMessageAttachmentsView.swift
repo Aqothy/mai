@@ -349,29 +349,22 @@ private struct ChatTranscriptImagePlaceholder: View {
     }
 }
 
+// A failed decode has no pixels to reserve space for, so it stays a compact
+// row instead of an empty image-sized box.
 private struct ChatTranscriptImageFallback: View {
     let name: String
 
     var body: some View {
-        ZStack {
-            Color.secondary.opacity(0.1)
-            VStack {
-                Image(systemName: "photo")
-                    .imageScale(.large)
-                Text("Image unavailable")
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding()
-        }
-        .foregroundStyle(.secondary)
-        .aspectRatio(4 / 3, contentMode: .fit)
-        .frame(maxWidth: .infinity)
-        .clipShape(.rect(cornerRadius: 12))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(name)
-        .accessibilityValue("Image unavailable")
+        Label("Image unavailable", systemImage: "photo")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.secondary.opacity(0.1), in: .rect(cornerRadius: 12))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(name)
+            .accessibilityValue("Image unavailable")
     }
 }
 

@@ -670,6 +670,32 @@ struct ThreadStoreTests {
     }
 
     @Test
+    func reopeningARestoredChatSubscribedInTheBackgroundPreparesIt() async {
+        let rpc = MockThreadRPCClient(
+            threads: [makeThread("restored"), makeThread("other")],
+            historyRestorePendingThreadIDs: ["restored"]
+        )
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        rpc.shouldBlockSubscribe = true
+
+        // The restored chat's subscription finishes while another chat is
+        // selected, as after a reconnect restores recent subscriptions.
+        store.selectThread("restored")
+        await waitUntil { rpc.subscriptionCount(for: "restored") == 1 }
+        store.selectThread("other")
+        rpc.resumeSubscribes()
+        await waitUntil { store.selectedThread?.id == "other" }
+
+        store.selectThread("restored")
+        await waitUntil {
+            rpc.dispatchedCommands.contains {
+                $0.type == "thread.session.prepare" && $0.threadID == "restored"
+            }
+        }
+    }
+
+    @Test
     func draftStorePersistsTheActiveDraft() throws {
         let suiteName = "ThreadDraftStoreTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -809,6 +835,42 @@ struct ThreadStoreTests {
     }
 
     @Test
+    func startedDraftDoesNotOfferItsSentImagesAgain() async throws {
+        let suiteName = "DraftSentImagesTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let rpc = MockThreadRPCClient(threads: [])
+        rpc.supportsImages = true
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let draftStore = ThreadDraftStore(defaults: defaults)
+        let model = DraftPromptModel(store: store, draftStore: draftStore)
+        model.activate()
+        model.ensureLocalDraft()
+        model.selectedProviderID = "codex"
+        model.workingDirectory = "/tmp/project"
+        let image = FileManager.default.temporaryDirectory
+            .appending(path: "draft-sent-image-\(UUID().uuidString).png")
+        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
+            .write(to: image)
+        defer { try? FileManager.default.removeItem(at: image) }
+        await model.addImages(from: [image])
+        await waitUntil { model.attachments.allSatisfy { !$0.isProcessing } }
+        #expect(model.attachments.count == 1)
+        #expect(model.supportsImageAttachments)
+        #expect(model.canSend)
+
+        await model.send()
+        let start = try #require(rpc.dispatchedCommands.first { $0.type == "thread.start" })
+        #expect(start.message?.attachments?.count == 1)
+
+        // The next new chat starts empty instead of offering the sent image.
+        model.ensureLocalDraft()
+        #expect(model.attachments.isEmpty)
+        #expect(!model.canSend)
+    }
+
+    @Test
     func authoritativeThreadListReconcilesAcceptedDraftAfterEdits() async throws {
         let suiteName = "DraftReconnectReconciliationTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -843,20 +905,22 @@ struct ThreadStoreTests {
         let rpc = MockThreadRPCClient(threads: [makeThread("a")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
-        let model = ChatPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults), threadID: "a")
+        let drafts = ThreadDraftStore(defaults: defaults)
+        let model = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
         let annotations = ChatAnnotationModel()
+        annotations.show(threadID: "a", draftStore: drafts)
         annotations.beginComment(quote: "Original quote", messageID: "message-a", role: "assistant")
         annotations.addEditorDraft()
         let originalID = try #require(annotations.annotations.first?.id)
-        #expect(model.canSend(annotations: annotations.annotations))
+        #expect(model.canSend)
         rpc.turnFailuresRemaining = 1
-        await model.send(annotations: annotations)
+        await model.send()
         #expect(annotations.annotations.first?.id == originalID)
         #expect(model.errorMessage != nil)
         #expect(!model.isSending)
 
         rpc.shouldBlockTurnDispatch = true
-        let sending = Task { await model.send(annotations: annotations) }
+        let sending = Task { await model.send() }
         await waitUntil { rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 2 }
         #expect(model.isSending)
         annotations.beginComment(quote: "New quote", messageID: "message-b", role: "assistant")
@@ -924,7 +988,7 @@ struct ThreadStoreTests {
         #expect(ChatPromptModel(store: store, draftStore: drafts, threadID: "a").attachments.isEmpty)
         returnedA.text = "Accepted 雪"
         rpc.shouldBlockTurnDispatch = true
-        let sending = Task { await returnedA.send(annotations: annotations) }
+        let sending = Task { await returnedA.send() }
         await waitUntil { rpc.dispatchedCommands.contains { $0.type == "thread.turn.start" } }
         annotations.show(threadID: "b", draftStore: drafts)
         rpc.resumeTurnDispatches()
@@ -1001,6 +1065,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     var threadSubscriptionFailuresRemaining = 0
     var prepareFailuresRemaining = 0
     var providerStatus = "initialized"
+    var supportsImages = false
     var providerOptions = [
         ConfigOption(
             category: "model",
@@ -1290,7 +1355,9 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 logout: nil,
                 mcp: nil,
                 modelSwitch: nil,
-                promptContent: nil,
+                promptContent: supportsImages
+                    ? PromptContentCapabilities(audio: nil, embeddedContext: nil, image: true)
+                    : nil,
                 resume: nil,
                 sessionList: nil
             ),

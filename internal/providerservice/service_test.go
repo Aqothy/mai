@@ -1591,7 +1591,8 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		}, nil
 	}
 	instance.forkSession = func(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
-		if input.ProviderSessionID != "native-source" {
+		// The provider receives the source's settings with the fork request.
+		if input.ProviderSessionID != "native-source" || input.ModelSelection == nil || input.ModelSelection.Model != "gpt-6-luna" || len(input.ConfigSelections) != 2 || input.ConfigSelections[1].Value != "low" {
 			t.Fatalf("fork input = %#v", input)
 		}
 		return provider.ForkSessionResult{Summary: provider.SessionSummary{SessionID: "native-fork"}}, nil

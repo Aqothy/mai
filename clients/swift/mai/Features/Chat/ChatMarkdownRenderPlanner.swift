@@ -35,7 +35,7 @@ nonisolated enum ChatMarkdownRenderPlanner {
             lineStarts.append(offset + 1)
         }
 
-        let document = Markdown.Document(parsing: source)
+        let document = Markdown.Document(chatSource: source)
         var locatedChildren: [(offset: Int, block: Markup)] = []
         locatedChildren.reserveCapacity(document.childCount)
 

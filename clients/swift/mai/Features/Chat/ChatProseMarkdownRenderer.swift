@@ -23,7 +23,7 @@ extension NSAttributedString.Key {
 nonisolated enum ChatProseMarkdownRenderer {
     static func attributedString(from source: String) -> NSAttributedString {
         var builder = ChatProseAttributedStringBuilder(source: source)
-        for block in Markdown.Document(parsing: source).children {
+        for block in Markdown.Document(chatSource: source).children {
             builder.append(block: block, environment: .root)
         }
         return builder.finish()
@@ -369,7 +369,8 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                 nested.font = codeFont
                 result.append(inlineText(html.rawHTML, style: nested))
             case is SoftBreak:
-                result.append(inlineText(" ", style: style))
+                // Chat text keeps the line breaks its author typed.
+                result.append(inlineText("\n", style: style))
             case is LineBreak:
                 result.append(inlineText("\n", style: style))
             default:

@@ -106,6 +106,9 @@ type EventPayload struct {
 	SlashCommands    []provider.SlashCommand          `json:"slashCommands,omitzero"`
 	Skills           []provider.Skill                 `json:"skills,omitzero"`
 	TokenUsage       *provider.TokenUsage             `json:"tokenUsage,omitempty"`
+	// ReplayedTurns are the settled turns restored by a history replay. Clients
+	// receive them through the snapshot that replaces the coalesced replay.
+	ReplayedTurns []Turn `json:"-"`
 }
 
 // ThreadID names the thread an event belongs to. Every event constructor

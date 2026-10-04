@@ -129,6 +129,7 @@ struct ChatView: View {
                     draftModel: draftModel,
                     chatModel: chatModel,
                     annotationModel: annotationModel,
+                    scrollState: scrollState,
                     promptText: promptText,
                     promptCompletion: promptCompletion
                 )
@@ -379,6 +380,7 @@ private struct ChatComposerStack: View {
     let draftModel: DraftPromptModel
     let chatModel: ChatPromptModel?
     let annotationModel: ChatAnnotationModel
+    let scrollState: ChatScrollState
     let promptText: Binding<String>
     let promptCompletion: PromptCompletionModel
 
@@ -415,23 +417,22 @@ private struct ChatComposerStack: View {
                 focusID: chatModel == nil ? draftModel.promptFocusID : nil,
                 canSend: chatModel == nil
                     ? draftModel.canSend
-                    : state.exists
-                        && chatModel?.canSend(
-                            annotations: annotationModel.annotations
-                        ) == true,
+                    : state.exists && chatModel?.canSend == true,
                 isSending: isSendingNow,
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
-                annotations: chatModel == nil
-                    ? [] : annotationModel.annotations,
+                annotations: chatModel?.annotations ?? [],
                 promptCompletion: promptCompletion,
                 commands: state.slashCommands,
                 skills: state.skills,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
             ) {
                 if let chatModel {
-                    Task { await chatModel.send(annotations: annotationModel) }
+                    // Sending is explicit intent to see the new turn, even
+                    // after the reader scrolled away or expanded content.
+                    scrollState.requestScrollToBottom(animated: true)
+                    Task { await chatModel.send() }
                 } else {
                     Task { await draftModel.send() }
                 }
@@ -3020,7 +3021,7 @@ private struct ChatApprovalRow: View {
                     }
                 }
             } else {
-                Text(approval.decision.map(ChatTimelineText.humanized) ?? "Resolved")
+                Text(resolutionLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -3036,10 +3037,19 @@ private struct ChatApprovalRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var resolutionLabel: String {
+        switch approval.decision.flatMap(MaidApprovalDecision.init(rawValue:)) {
+        case .accept: "Allowed"
+        case .acceptForSession: "Allowed for this session"
+        case .decline: "Declined"
+        case .cancel: "Cancelled"
+        case nil: "Resolved"
+        }
+    }
+
     private func decision(for option: ApprovalOption) -> MaidApprovalDecision {
         switch option.kind {
-        // ACP options say allow_*; the Codex and Claude adapters say accept_*.
-        case "allow_always", "accept_always": .acceptForSession
+        case "allow_always": .acceptForSession
         case "reject_once", "reject_always": .decline
         default: .accept
         }

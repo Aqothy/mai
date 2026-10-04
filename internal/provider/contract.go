@@ -406,6 +406,10 @@ type StopSessionInput struct {
 // surface exists to choose one.
 type ForkSessionInput struct {
 	ProviderSessionID string `json:"-"`
+	// ModelSelection and ConfigSelections are the source session's settings.
+	// Providers that keep a fork loaded apply them when creating it.
+	ModelSelection   *ModelSelection         `json:"-"`
+	ConfigSelections []ConfigOptionSelection `json:"-"`
 }
 
 type ForkSessionResult struct {
@@ -431,6 +435,8 @@ const (
 type ApprovalOption struct {
 	ID   string `json:"optionId"`
 	Name string `json:"name"`
+	// Kind uses ACP's permission option kinds for every provider: allow_once,
+	// allow_always, reject_once or reject_always.
 	Kind string `json:"kind,omitempty"`
 }
 

@@ -49,26 +49,32 @@ final class ChatAnnotationModel {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    private(set) var annotations: [ChatPendingAnnotation] = [] {
-        didSet {
+    /// The chat whose unsent annotations are shown. Each chat's pending
+    /// annotations live in its draft store, so switching chats neither loses
+    /// them nor carries them into another chat.
+    private var owner: (threadID: String, draftStore: ThreadDraftStore)?
+    /// Annotations of a model shown without a chat, such as in previews.
+    private var ownerlessAnnotations: [ChatPendingAnnotation] = []
+    var editorDraft: ChatAnnotationDraft?
+
+    private(set) var annotations: [ChatPendingAnnotation] {
+        get {
+            owner.map { $0.draftStore.annotations(for: $0.threadID) } ?? ownerlessAnnotations
+        }
+        set {
             if let owner {
-                owner.draftStore.setAnnotations(annotations, for: owner.threadID)
+                owner.draftStore.setAnnotations(newValue, for: owner.threadID)
+            } else {
+                ownerlessAnnotations = newValue
             }
         }
     }
-    var editorDraft: ChatAnnotationDraft?
 
-    /// The chat whose unsent annotations are shown. Without one (previews and
-    /// tests), annotations live only in this model.
-    @ObservationIgnored private var owner: (threadID: String, draftStore: ThreadDraftStore)?
-
-    /// Shows the selected chat's unsent annotations. Each chat's pending
-    /// annotations stay in `draftStore`, so switching chats neither loses them
-    /// nor carries them into another chat. An open editor is dismissed.
+    /// Shows the selected chat's unsent annotations. An open editor is
+    /// dismissed.
     func show(threadID: String?, draftStore: ThreadDraftStore) {
         editorDraft = nil
-        owner = nil
-        annotations = threadID.map { draftStore.annotations(for: $0) } ?? []
+        ownerlessAnnotations = []
         owner = threadID.map { ($0, draftStore) }
     }
 
@@ -110,10 +116,6 @@ final class ChatAnnotationModel {
 
     func remove(id: String) {
         annotations.removeAll { $0.id == id }
-    }
-
-    func removeSent(ids: Set<String>) {
-        annotations.removeAll { ids.contains($0.id) }
     }
 }
 

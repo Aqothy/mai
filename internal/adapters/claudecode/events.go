@@ -435,8 +435,8 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 	}
 	detail := approvalDetail(request)
 	options := []provider.ApprovalOption{
-		{ID: "accept", Name: "Allow once", Kind: "accept_once"},
-		{ID: "acceptForSession", Name: "Allow for session", Kind: "accept_always"},
+		{ID: "accept", Name: "Allow once", Kind: "allow_once"},
+		{ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"},
 		{ID: "decline", Name: "Decline", Kind: "reject_once"},
 	}
 	pending.requestType = approvalRequestType(request.ToolName)
@@ -450,7 +450,7 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 			options = options[:0]
 			for index, option := range first.Options {
 				name := option.Label
-				options = append(options, provider.ApprovalOption{ID: fmt.Sprintf("answer:%d", index), Name: name, Kind: "accept_once"})
+				options = append(options, provider.ApprovalOption{ID: fmt.Sprintf("answer:%d", index), Name: name, Kind: "allow_once"})
 			}
 			options = append(options, provider.ApprovalOption{ID: "decline", Name: "Dismiss", Kind: "reject_once"})
 		} else {
@@ -461,7 +461,7 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		}
 	case "ExitPlanMode":
 		options = []provider.ApprovalOption{
-			{ID: "accept", Name: "Approve plan", Kind: "accept_once"},
+			{ID: "accept", Name: "Approve plan", Kind: "allow_once"},
 			{ID: "decline", Name: "Keep planning", Kind: "reject_once"},
 		}
 	}

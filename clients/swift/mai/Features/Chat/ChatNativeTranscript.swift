@@ -26,10 +26,7 @@
             scroll.drawsBackground = false
             let document = context.coordinator.virtualDocument
             scroll.documentView = document
-            scroll.contentView.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                document, selector: #selector(document.viewportChanged),
-                name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+            document.observeViewport(of: scroll)
             return scroll
         }
 
@@ -349,6 +346,26 @@
                     clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
                     scroll.reflectScrolledClipView(clip)
                 }
+            }
+
+            /// Scrolling moves the clip's bounds, which changes the mounted rows.
+            /// Sidebar, divider and window changes resize the clip's frame, which
+            /// can leave its bounds origin unchanged; rows must still match it.
+            func observeViewport(of scroll: NSScrollView) {
+                let clip = scroll.contentView
+                clip.postsBoundsChangedNotifications = true
+                clip.postsFrameChangedNotifications = true
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(viewportChanged),
+                    name: NSView.boundsDidChangeNotification, object: clip)
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(viewportResized),
+                    name: NSView.frameDidChangeNotification, object: clip)
+            }
+
+            @objc private func viewportResized() {
+                guard !isApplyingHeights, let scroll = enclosingScrollView else { return }
+                matchViewportWidth(scroll)
             }
 
             @objc func viewportChanged() {

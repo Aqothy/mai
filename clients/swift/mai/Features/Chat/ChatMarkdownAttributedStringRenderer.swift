@@ -11,7 +11,7 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
 
         let builder = ChatMarkdownAttributedStringBuilder()
         let result = builder.render(
-            document: Markdown.Document(parsing: source)
+            document: Markdown.Document(chatSource: source)
         )
 
         // Reference definitions and other non-rendering nodes can produce an
@@ -287,7 +287,8 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
                 )
 
             case is SoftBreak:
-                result.append(attributed(" ", environment: environment))
+                // Chat text keeps the line breaks its author typed.
+                result.append(attributed("\n", environment: environment))
 
             case is LineBreak:
                 result.append(attributed("\n", environment: environment))

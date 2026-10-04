@@ -124,7 +124,9 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 	if model := strings.TrimSpace(session.model); model != "" && model != "default" {
 		extra = append(extra, "--model", model)
 	}
-	if effort := strings.TrimSpace(session.effort); effort != "" {
+	// "default" means model-selected effort, which is the CLI's behaviour
+	// without the flag; it is not a value --effort accepts.
+	if effort := strings.TrimSpace(session.effort); effort != "" && effort != "default" {
 		extra = append(extra, "--effort", effort)
 	}
 	if mode := launchPermissionMode(session.permissionMode); mode != "" {
@@ -151,7 +153,7 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 		_ = stdout.Close()
 		return fmt.Errorf("start Claude Code CLI: %w", err)
 	}
-	proc := &sessionProcess{cmd: command, stdin: stdin, done: make(chan struct{})}
+	proc := &sessionProcess{cmd: command, stdin: stdin, effort: session.effort, done: make(chan struct{})}
 	proc.client = newStreamClient(stdout, stdin)
 	proc.client.onMessage = func(message sdkMessage) { h.handleMessage(session, proc, message) }
 	proc.client.onControlRequest = func(requestID string, request controlRequestBody, raw json.RawMessage) {
@@ -257,7 +259,14 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	}
 	proc := session.proc
 	model := session.model
+	// Effort is a launch flag with no in-session control message: an idle
+	// process launched with another effort is relaunched for this turn.
+	relaunch := proc != nil && proc.effort != session.effort && session.activeLocalTurn == "" && len(session.queuedTurns) == 0
 	h.mu.Unlock()
+	if relaunch {
+		h.stopProcess(session)
+		proc = nil
+	}
 	if proc == nil {
 		if err := h.spawnProcess(ctx, session, true); err != nil {
 			return err
@@ -270,7 +279,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		}
 	}
 	if input.ModelSelection != nil && input.ModelSelection.Model != "" && input.ModelSelection.Model != model {
-		if err := h.applyModelLocked(ctx, session, input.ModelSelection.Model); err != nil {
+		if err := h.applyModel(ctx, session, input.ModelSelection.Model); err != nil {
 			return err
 		}
 	}
@@ -391,7 +400,7 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 	}
 	switch input.OptionID {
 	case "model":
-		if err := h.applyModelLocked(ctx, session, value); err != nil {
+		if err := h.applyModel(ctx, session, value); err != nil {
 			return err
 		}
 	case "effort":
@@ -402,14 +411,9 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 			h.mu.Unlock()
 			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)
 		}
+		// Applied when the next turn starts (see SendTurn).
 		session.effort = value
-		idle := session.activeLocalTurn == "" && len(session.queuedTurns) == 0
 		h.mu.Unlock()
-		// Effort is a launch flag with no in-session control message; an idle
-		// process restarts on the next turn so the new effort takes effect.
-		if idle {
-			h.stopProcess(session)
-		}
 	case "permission_mode":
 		if !validPermissionMode(value) {
 			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)
@@ -436,9 +440,9 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 	return nil
 }
 
-// applyModelLocked validates a model switch and applies it in-session when a
-// process is live.
-func (h *Instance) applyModelLocked(ctx context.Context, session *claudeSession, model string) error {
+// applyModel validates a model switch and applies it in-session when a
+// process is live. It takes h.mu itself.
+func (h *Instance) applyModel(ctx context.Context, session *claudeSession, model string) error {
 	h.mu.Lock()
 	valid := modelValueValid(h.models, model)
 	proc := session.proc

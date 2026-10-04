@@ -130,7 +130,7 @@ nonisolated enum ChatMarkdownSegmenter {
             lineStarts.append(offset + 1)
         }
 
-        let document = Markdown.Document(parsing: source)
+        let document = Markdown.Document(chatSource: source)
         var blocks: [(offset: Int, kind: ChatMarkdownSegment.Kind)] = []
         for block in document.children {
             guard let location = block.range?.lowerBound,

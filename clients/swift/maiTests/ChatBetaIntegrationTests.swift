@@ -209,8 +209,23 @@ struct ChatBetaIntegrationTests {
         #expect(TextSelection(insertionPoint: "".startIndex).isValid(in: ""))
     }
 
+    @Test
+    func prosePunctuationMatchesTheSource() {
+        let source = #"Run git push --force with "quoted" and 'single' args... then `code "x"`"#
+        let shown = #"Run git push --force with "quoted" and 'single' args... then code "x""#
+        #expect(String(ChatMarkdownAttributedStringRenderer.attributedString(from: source).characters) == shown)
+        #expect(ChatProseMarkdownRenderer.attributedString(from: source).string == shown)
+    }
+
+    @Test
+    func singleNewlinesStayLineBreaks() {
+        let source = "First line\nsecond line\n\nNext paragraph"
+        #expect(String(ChatMarkdownAttributedStringRenderer.attributedString(from: source).characters).hasPrefix("First line\nsecond line"))
+        #expect(ChatProseMarkdownRenderer.attributedString(from: source).string.hasPrefix("First line\nsecond line"))
+    }
+
     @Test @MainActor
-    func sendingAnnotationsOnlyRemovesSubmittedDrafts() throws {
+    func removingAnAnnotationKeepsOthers() throws {
         let model = ChatAnnotationModel()
         model.beginComment(quote: "  First 🌍 quote\n", messageID: "first", role: "assistant")
         model.editorDraft?.note = "  Clarify this  "
@@ -220,7 +235,7 @@ struct ChatBetaIntegrationTests {
         #expect(submitted.note == "Clarify this")
         model.beginComment(quote: "Added while sending", messageID: "second", role: "assistant")
         model.addEditorDraft()
-        model.removeSent(ids: [submitted.id])
+        model.remove(id: submitted.id)
         #expect(model.annotations.count == 1)
         #expect(model.annotations.first?.messageID == "second")
         model.beginComment(quote: "Cancelled", messageID: "third", role: "assistant")
