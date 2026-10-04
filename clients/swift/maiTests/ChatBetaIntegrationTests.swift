@@ -86,15 +86,6 @@ struct ChatBetaIntegrationTests {
         #expect(!model.moveSelection(by: 1))
     }
 
-    @Test @MainActor
-    func completionCursorRejectsMismatchedPasteAndDeletionRevisions() {
-        let pasted = "Release QA\nStreaming café 👩🏽‍💻 stays intact.\n@file"
-        let selection = TextSelection(insertionPoint: pasted.endIndex)
-        #expect(PromptCompletionCursor.offset(for: selection, in: "") == nil)
-        #expect(PromptCompletionCursor.offset(for: selection, in: "short") == nil)
-        #expect(PromptCompletionCursor.offset(for: selection, in: pasted) == pasted.count)
-        #expect(PromptCompletionCursor.offset(for: nil, in: "") == 0)
-    }
 
     @Test @MainActor
     func completionCursorCountsUnicodeCharactersAtEveryValidBoundary() {
@@ -108,8 +99,16 @@ struct ChatBetaIntegrationTests {
         #expect(PromptCompletionCursor.offset(for: end, in: text) == text.count)
     }
 
+    /// SwiftUI can report a selection from the previous text revision, such
+    /// as before a paste or deletion; it must never be walked in the new text.
     @Test @MainActor
-    func completionCursorRejectsNonBoundaryIndicesAndSelectedText() {
+    func completionCursorRejectsSelectionsFromOtherTextAndSelectedRanges() {
+        let pasted = "Pasted\nStreaming café 👩🏽‍💻 stays intact.\n@file"
+        let end = TextSelection(insertionPoint: pasted.endIndex)
+        #expect(PromptCompletionCursor.offset(for: end, in: "") == nil)
+        #expect(PromptCompletionCursor.offset(for: end, in: "short") == nil)
+        #expect(PromptCompletionCursor.offset(for: end, in: pasted) == pasted.count)
+        #expect(PromptCompletionCursor.offset(for: nil, in: "") == 0)
         let old = "abc"
         let stale = TextSelection(insertionPoint: old.index(after: old.startIndex))
         #expect(PromptCompletionCursor.offset(for: stale, in: "👩🏽‍💻") == nil)

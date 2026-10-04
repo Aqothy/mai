@@ -160,40 +160,21 @@ struct ThreadStoreTests {
         await waitUntil { store.subscribedThreadIDs.contains("a") }
         try rpc.sendReasoning(threadID: "a", delta: "Start", sequence: 100)
         let liveText = try #require(store.streamingReasoningText(threadID: "a", itemID: "thought"))
-        let timelineInvalidated = Mutex(false)
-        let sidebarInvalidated = Mutex(false)
-        let textInvalidated = Mutex(false)
-        withObservationTracking {
-            _ = store.selectedThread
-        } onChange: {
-            timelineInvalidated.withLock { $0 = true }
-        }
-        withObservationTracking {
-            _ = store.threads
-            _ = store.selectedThreadTitle
-        } onChange: {
-            sidebarInvalidated.withLock { $0 = true }
-        }
-        withObservationTracking {
-            _ = liveText.text
-            _ = liveText.revision
-        } onChange: {
-            textInvalidated.withLock { $0 = true }
-        }
+        let invalidated = trackInvalidations(of: store, liveText: liveText)
         for index in 1...20 {
             try rpc.sendReasoning(threadID: "a", delta: " café 👩🏽‍💻", sequence: 100 + index)
         }
-        #expect(textInvalidated.withLock { $0 })
-        #expect(!timelineInvalidated.withLock { $0 })
-        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(invalidated.text.withLock { $0 })
+        #expect(!invalidated.timeline.withLock { $0 })
+        #expect(!invalidated.sidebar.withLock { $0 })
         #expect(liveText.text == "Start" + String(repeating: " café 👩🏽‍💻", count: 20))
 
         // The completed payload can correct streamed text. Publish that change
         // to the disclosure row and discard its live buffer in the same event.
         let authoritative = "Completed **thought** with corrected Unicode 👩🏽‍💻."
         try rpc.sendReasoning(threadID: "a", completedText: authoritative, sequence: 121)
-        #expect(timelineInvalidated.withLock { $0 })
-        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(invalidated.timeline.withLock { $0 })
+        #expect(!invalidated.sidebar.withLock { $0 })
         #expect(store.streamingReasoningText(threadID: "a", itemID: "thought") == nil)
         let settled = try #require(store.selectedThread?.timeline.last?.item)
         #expect(settled.itemStatus == .completed)
@@ -209,37 +190,18 @@ struct ThreadStoreTests {
         await waitUntil { store.subscribedThreadIDs.contains("a") }
         try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: "Start", sequence: 100)
         let liveText = try #require(store.streamingMessageText(threadID: "a", messageID: "reply"))
-        let timelineInvalidated = Mutex(false)
-        let sidebarInvalidated = Mutex(false)
-        let textInvalidated = Mutex(false)
-        withObservationTracking {
-            _ = store.selectedThread
-        } onChange: {
-            timelineInvalidated.withLock { $0 = true }
-        }
-        withObservationTracking {
-            _ = store.threads
-            _ = store.selectedThreadTitle
-        } onChange: {
-            sidebarInvalidated.withLock { $0 = true }
-        }
-        withObservationTracking {
-            _ = liveText.text
-            _ = liveText.revision
-        } onChange: {
-            textInvalidated.withLock { $0 = true }
-        }
+        let invalidated = trackInvalidations(of: store, liveText: liveText)
         for index in 1...20 {
             try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: " 👋🏽", sequence: 100 + index)
         }
-        #expect(textInvalidated.withLock { $0 })
-        #expect(!timelineInvalidated.withLock { $0 })
-        #expect(!sidebarInvalidated.withLock { $0 })
+        #expect(invalidated.text.withLock { $0 })
+        #expect(!invalidated.timeline.withLock { $0 })
+        #expect(!invalidated.sidebar.withLock { $0 })
         #expect(liveText.text == "Start" + String(repeating: " 👋🏽", count: 20))
         #expect(store.selectedThread?.timeline.last?.message?.text == liveText.text)
         // A new message is structural and must publish the enclosing timeline.
         try rpc.sendAssistantDelta(threadID: "a", messageID: "next", text: "Next", sequence: 121)
-        #expect(timelineInvalidated.withLock { $0 })
+        #expect(invalidated.timeline.withLock { $0 })
     }
 
     @Test
@@ -991,6 +953,38 @@ struct ThreadStoreTests {
         #expect(sent.message?.annotations?.first?.note == "Clarify")
         #expect(store.queuedPrompts(for: "a").isEmpty)
         #expect(store.selectedThreadID == "b")
+    }
+
+    private final class Invalidations: Sendable {
+        let timeline = Mutex(false)
+        let sidebar = Mutex(false)
+        let text = Mutex(false)
+    }
+
+    /// Flags that flip when the selected timeline, the sidebar, or the live
+    /// streaming text publishes a change.
+    private func trackInvalidations(
+        of store: ThreadStore, liveText: ThreadStreamingText
+    ) -> Invalidations {
+        let flags = Invalidations()
+        withObservationTracking {
+            _ = store.selectedThread
+        } onChange: {
+            flags.timeline.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = store.threads
+            _ = store.selectedThreadTitle
+        } onChange: {
+            flags.sidebar.withLock { $0 = true }
+        }
+        withObservationTracking {
+            _ = liveText.text
+            _ = liveText.revision
+        } onChange: {
+            flags.text.withLock { $0 = true }
+        }
+        return flags
     }
 
     private func waitUntil(
