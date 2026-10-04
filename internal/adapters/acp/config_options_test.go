@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/maiD/internal/provider"
@@ -23,13 +22,9 @@ func TestInitializeOmitsUnstableBooleanCapability(t *testing.T) {
 		},
 	}
 	_ = newWireTestHandle(t, agent)
-	select {
-	case request := <-initializeRequests:
-		if request.ClientCapabilities != nil {
-			t.Fatalf("client capabilities = %#v, want stable-only capabilities omitted", request.ClientCapabilities)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("initialize request was not observed")
+	request := waitFor(t, initializeRequests, "initialize request was not observed")
+	if request.ClientCapabilities != nil {
+		t.Fatalf("client capabilities = %#v, want stable-only capabilities omitted", request.ClientCapabilities)
 	}
 }
 
@@ -115,13 +110,9 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 		"sessionUpdate": "config_option_update",
 		"configOptions": wireOptions("fast"),
 	})
-	select {
-	case update := <-updates:
-		if len(update) != 1 || update[0].CurrentValue != "fast" {
-			t.Fatalf("update = %#v, want model=fast", update)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("spontaneous options update was not published")
+	update := waitFor(t, updates, "spontaneous options update was not published")
+	if len(update) != 1 || update[0].CurrentValue != "fast" {
+		t.Fatalf("update = %#v, want model=fast", update)
 	}
 
 	if err := instance.CloseOptionsSession(context.Background(), opened.Handle); err != nil {

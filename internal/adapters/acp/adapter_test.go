@@ -250,24 +250,20 @@ func TestFilesystemAndTerminalClientMethodsRemainUnsupported(t *testing.T) {
 
 	seen := make(map[string]struct{}, len(requests))
 	for range requests {
-		select {
-		case response := <-agent.responses:
-			responseID := strings.Trim(string(response.ID), `"`)
-			if _, duplicate := seen[responseID]; duplicate {
-				t.Fatalf("duplicate response for unsupported client method %q", responseID)
-			}
-			seen[responseID] = struct{}{}
-			var rpcErr struct {
-				Code int `json:"code"`
-			}
-			if err := json.Unmarshal(response.Error, &rpcErr); err != nil {
-				t.Fatalf("decode response error: %v", err)
-			}
-			if rpcErr.Code != -32601 {
-				t.Fatalf("response %s error = %s, want MethodNotFound", response.ID, response.Error)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("timed out waiting for unsupported client-method response")
+		response := waitFor(t, agent.responses, "timed out waiting for unsupported client-method response")
+		responseID := strings.Trim(string(response.ID), `"`)
+		if _, duplicate := seen[responseID]; duplicate {
+			t.Fatalf("duplicate response for unsupported client method %q", responseID)
+		}
+		seen[responseID] = struct{}{}
+		var rpcErr struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal(response.Error, &rpcErr); err != nil {
+			t.Fatalf("decode response error: %v", err)
+		}
+		if rpcErr.Code != -32601 {
+			t.Fatalf("response %s error = %s, want MethodNotFound", response.ID, response.Error)
 		}
 	}
 	for _, request := range requests {
@@ -754,11 +750,7 @@ func TestPermissionOpenWaitsForPriorSessionUpdates(t *testing.T) {
 	h.mu.Unlock()
 
 	agent.sendUpdate("sess", agentMessageUpdate("msg-1", "explanation"))
-	select {
-	case <-updateEntered:
-	case <-time.After(time.Second):
-		t.Fatal("prior session update did not enter the stream consumer")
-	}
+	waitFor(t, updateEntered, "prior session update did not enter the stream consumer")
 
 	permissionDone := make(chan schema.RequestPermissionResponse, 1)
 	go func() {
@@ -781,13 +773,9 @@ func TestPermissionOpenWaitsForPriorSessionUpdates(t *testing.T) {
 	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
 		t.Fatalf("RespondToRequest: %v", err)
 	}
-	select {
-	case resp := <-permissionDone:
-		if selectedOption(resp) != "allow" {
-			t.Fatalf("permission outcome = %#v, want allow", resp.Outcome)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("permission response did not complete")
+	resp := waitFor(t, permissionDone, "permission response did not complete")
+	if selectedOption(resp) != "allow" {
+		t.Fatalf("permission outcome = %#v, want allow", resp.Outcome)
 	}
 
 	events := recorder.snapshot()
@@ -832,13 +820,9 @@ func TestTerminalToolUpdateCancelsPendingPermission(t *testing.T) {
 	close(releaseTerminal)
 	<-handled
 
-	select {
-	case resp := <-done:
-		if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
-			t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("terminal tool update did not resolve pending permission")
+	resp := waitFor(t, done, "terminal tool update did not resolve pending permission")
+	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
+		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
 	}
 	foundResolved := false
 	for _, event := range recorder.snapshot() {
@@ -915,13 +899,9 @@ func TestPermissionCancelsWhenToolSettledBeforeRequestRegistration(t *testing.T)
 		t.Fatal("RespondToRequest accepted an approval for an already-settled tool")
 	}
 	close(releaseOpened)
-	select {
-	case resp := <-done:
-		if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
-			t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("permission stayed pending after its tool had already settled")
+	resp := waitFor(t, done, "permission stayed pending after its tool had already settled")
+	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
+		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
 	}
 }
 
@@ -963,13 +943,9 @@ func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
 	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
 		t.Fatalf("RespondToRequest for re-opened permission: %v", err)
 	}
-	select {
-	case resp := <-done:
-		if selectedOption(resp) != "allow" {
-			t.Fatalf("permission outcome = %#v, want client-selected allow", resp.Outcome)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("re-opened permission was not resolved by the client answer")
+	resp := waitFor(t, done, "re-opened permission was not resolved by the client answer")
+	if selectedOption(resp) != "allow" {
+		t.Fatalf("permission outcome = %#v, want client-selected allow", resp.Outcome)
 	}
 }
 
@@ -992,29 +968,17 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 		_, _ = h.requestPermission(firstCtx, schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
 		close(firstDone)
 	}()
-	select {
-	case <-opened:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first permission request was never published")
-	}
+	waitFor(t, opened, "first permission request was never published")
 	secondDone := make(chan schema.RequestPermissionResponse, 1)
 	go func() {
 		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
 		secondDone <- resp
 	}()
-	select {
-	case <-opened:
-	case <-time.After(2 * time.Second):
-		t.Fatal("duplicate permission request was never published")
-	}
+	waitFor(t, opened, "duplicate permission request was never published")
 
 	// First request resolves (agent-side cancel); its cleanup runs.
 	cancelFirst()
-	select {
-	case <-firstDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first permission request did not resolve after its context was cancelled")
-	}
+	waitFor(t, firstDone, "first permission request did not resolve after its context was cancelled")
 
 	// An interrupt must still find and cancel the second (live) request.
 	if !h.promptCancellationMatches("sess", "turn-1") {
@@ -1027,13 +991,9 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 	for _, cancel := range cancels {
 		cancel()
 	}
-	select {
-	case resp := <-secondDone:
-		if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
-			t.Fatalf("duplicate permission outcome = %#v, want cancelled by interrupt", resp.Outcome)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("duplicate permission request was orphaned: interrupt could not cancel it")
+	resp := waitFor(t, secondDone, "duplicate permission request was orphaned: interrupt could not cancel it")
+	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeCancelled {
+		t.Fatalf("duplicate permission outcome = %#v, want cancelled by interrupt", resp.Outcome)
 	}
 }
 
@@ -1205,13 +1165,9 @@ func TestStopSessionClosesNeverUsedSessionWhenSupported(t *testing.T) {
 	if err := h.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-draft"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	select {
-	case sessionID := <-closed:
-		if sessionID != "sess" {
-			t.Fatalf("closed session = %q, want sess", sessionID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("never-used session did not call session/close")
+	sessionID := waitFor(t, closed, "never-used session did not call session/close")
+	if sessionID != "sess" {
+		t.Fatalf("closed session = %q, want sess", sessionID)
 	}
 	if got := h.sessionIDForThread("thread-draft"); got != "" {
 		t.Fatalf("thread binding after close = %q, want unbound", got)
@@ -1251,21 +1207,13 @@ func TestStopSessionCancelsThenClosesActiveSessionWhenSupported(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-promptStarted:
-	case <-time.After(time.Second):
-		t.Fatal("prompt did not start")
-	}
+	waitFor(t, promptStarted, "prompt did not start")
 	if err := h.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	select {
-	case sessionID := <-closed:
-		if sessionID != "sess" {
-			t.Fatalf("closed session = %q, want sess", sessionID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("active session was cancelled but not closed")
+	sessionID := waitFor(t, closed, "active session was cancelled but not closed")
+	if sessionID != "sess" {
+		t.Fatalf("closed session = %q, want sess", sessionID)
 	}
 	if got := h.sessionIDForThread("thread-1"); got != "" {
 		t.Fatalf("thread binding after close = %q, want unbound", got)
@@ -1294,11 +1242,7 @@ func TestStopSessionCloseTimeoutKeepsBindingForRetry(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-promptStarted:
-	case <-time.After(time.Second):
-		t.Fatal("prompt did not start")
-	}
+	waitFor(t, promptStarted, "prompt did not start")
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if err := h.StopSession(ctx, provider.StopSessionInput{ThreadID: "thread-1"}); !errors.Is(err, context.DeadlineExceeded) {
@@ -1328,11 +1272,7 @@ func TestInterruptTurnCancelFailureLeavesTurnLive(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-promptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("prompt did not start")
-	}
+	waitFor(t, promptStarted, "prompt did not start")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := h.InterruptTurn(ctx, provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"}); err == nil {
@@ -1377,13 +1317,9 @@ func TestCurrentModeUpdateRefreshesProjectedSessionMode(t *testing.T) {
 		}
 	}
 	agent.sendUpdate("sess", map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "architect"})
-	select {
-	case event := <-events:
-		if len(event.Payload.ConfigOptions) != 1 || event.Payload.ConfigOptions[0].CurrentValue != "architect" || len(event.Payload.ConfigOptions[0].Choices) != 2 || event.Payload.ConfigOptions[0].Choices[0].Value != "code" || event.Payload.ConfigOptions[0].Choices[1].Value != "architect" {
-			t.Fatalf("config options event = %#v, want architect current mode", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for current mode update")
+	event := waitFor(t, events, "timed out waiting for current mode update")
+	if len(event.Payload.ConfigOptions) != 1 || event.Payload.ConfigOptions[0].CurrentValue != "architect" || len(event.Payload.ConfigOptions[0].Choices) != 2 || event.Payload.ConfigOptions[0].Choices[0].Value != "code" || event.Payload.ConfigOptions[0].Choices[1].Value != "architect" {
+		t.Fatalf("config options event = %#v, want architect current mode", event)
 	}
 }
 
@@ -2033,11 +1969,7 @@ func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "run"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-turnDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for turn completion")
-	}
+	waitFor(t, turnDone, "timed out waiting for turn completion")
 
 	var itemEvents []provider.RuntimeEvent
 	for _, event := range recorder.snapshot() {
@@ -2111,11 +2043,7 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
 	}
-	select {
-	case <-firstPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first prompt did not start")
-	}
+	waitFor(t, firstPromptStarted, "first prompt did not start")
 	if err := h.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"}); err != nil {
 		t.Fatalf("InterruptTurn: %v", err)
 	}
@@ -2137,21 +2065,13 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	}
 
 	close(firstPromptRelease)
-	select {
-	case <-secondPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("follow-up prompt did not start after cancelled prompt drained")
-	}
+	waitFor(t, secondPromptStarted, "follow-up prompt did not start after cancelled prompt drained")
 	if err := <-followUpDone; err != nil {
 		t.Fatalf("follow-up SendTurn: %v", err)
 	}
-	select {
-	case event := <-eventCh:
-		if event.TurnID != "turn-2" || event.Payload.Delta != "hello" {
-			t.Fatalf("event = %#v, want delivered turn-2 assistant delta", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for follow-up assistant delta")
+	event := waitFor(t, eventCh, "timed out waiting for follow-up assistant delta")
+	if event.TurnID != "turn-2" || event.Payload.Delta != "hello" {
+		t.Fatalf("event = %#v, want delivered turn-2 assistant delta", event)
 	}
 }
 
@@ -2187,19 +2107,11 @@ func TestSteeringPreservesEveryQueuedPrompt(t *testing.T) {
 			t.Fatalf("SendTurn(%q): %v", input, err)
 		}
 		if input == "first" {
-			select {
-			case <-firstPromptStarted:
-			case <-time.After(2 * time.Second):
-				t.Fatal("first prompt did not start")
-			}
+			waitFor(t, firstPromptStarted, "first prompt did not start")
 		}
 	}
 	close(firstPromptRelease)
-	select {
-	case <-allPromptsDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("queued steering prompts did not all dispatch")
-	}
+	waitFor(t, allPromptsDone, "queued steering prompts did not all dispatch")
 	promptMu.Lock()
 	defer promptMu.Unlock()
 	want := []string{"first", "steer one", "steer two"}
@@ -2269,11 +2181,7 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
 	}
-	select {
-	case <-firstPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first prompt did not start")
-	}
+	waitFor(t, firstPromptStarted, "first prompt did not start")
 	started := waitForEvent("tool start", func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventItemStarted && event.Payload.ItemStatus == provider.ItemStatusInProgress
 	})
@@ -2284,22 +2192,14 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
 		t.Fatalf("steering SendTurn: %v", err)
 	}
-	select {
-	case <-cancelCalls:
-	case <-time.After(2 * time.Second):
-		t.Fatal("steering prompt did not send session/cancel")
-	}
+	waitFor(t, cancelCalls, "steering prompt did not send session/cancel")
 	select {
 	case <-secondPromptStarted:
 		t.Fatal("steering prompt dispatched while first prompt still in flight")
 	case <-time.After(50 * time.Millisecond):
 	}
 	close(firstPromptRelease)
-	select {
-	case <-secondPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("steering prompt did not dispatch after cancelled prompt settled")
-	}
+	waitFor(t, secondPromptStarted, "steering prompt did not dispatch after cancelled prompt settled")
 
 	settled := waitForEvent("abandoned tool settlement", func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventItemUpdated && event.ItemID == started.ItemID && event.Payload.ItemStatus == provider.ItemStatusInterrupted
@@ -2373,11 +2273,7 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
 	}
-	select {
-	case <-completing:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first turn never reached its completion emission")
-	}
+	waitFor(t, completing, "first turn never reached its completion emission")
 
 	// Steer lands while turn-1's completion emission is still in progress.
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
@@ -2453,21 +2349,13 @@ func TestInterruptedTurnToolStatesClearedAtTurnEnd(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "run"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-toolStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("tool never started")
-	}
+	waitFor(t, toolStarted, "tool never started")
 	if err := h.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"}); err != nil {
 		t.Fatalf("InterruptTurn: %v", err)
 	}
-	select {
-	case event := <-turnDone:
-		if event.Payload.TurnState != provider.RuntimeTurnCancelled {
-			t.Fatalf("turn completion = %#v, want cancelled", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for cancelled turn completion")
+	event := waitFor(t, turnDone, "timed out waiting for cancelled turn completion")
+	if event.Payload.TurnState != provider.RuntimeTurnCancelled {
+		t.Fatalf("turn completion = %#v, want cancelled", event)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -2530,33 +2418,21 @@ func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
 	}
-	select {
-	case <-firstPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first prompt did not start")
-	}
+	waitFor(t, firstPromptStarted, "first prompt did not start")
 	// Steer while the first prompt is in flight, then interrupt while the
 	// steer is still waiting for the cancelled prompt to settle.
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
 		t.Fatalf("steering SendTurn: %v", err)
 	}
-	select {
-	case <-cancelCalls:
-	case <-time.After(2 * time.Second):
-		t.Fatal("steering prompt did not send session/cancel")
-	}
+	waitFor(t, cancelCalls, "steering prompt did not send session/cancel")
 	if err := h.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"}); err != nil {
 		t.Fatalf("InterruptTurn: %v", err)
 	}
 	close(firstPromptRelease)
 
-	select {
-	case event := <-turnEvents:
-		if event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnCancelled {
-			t.Fatalf("turn completion = %#v, want turn-1 cancelled", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for cancelled turn completion")
+	event := waitFor(t, turnEvents, "timed out waiting for cancelled turn completion")
+	if event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnCancelled {
+		t.Fatalf("turn completion = %#v, want turn-1 cancelled", event)
 	}
 	promptMu.Lock()
 	calls := promptCalls
@@ -2604,11 +2480,7 @@ func TestInterruptTurnWithStaleTurnIDDoesNotCancelNewerPrompt(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-2", Input: "newer"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-promptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("prompt did not start")
-	}
+	waitFor(t, promptStarted, "prompt did not start")
 
 	// Stale interrupt for a turn that already completed elsewhere.
 	if err := h.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"}); err != nil {
@@ -2621,13 +2493,9 @@ func TestInterruptTurnWithStaleTurnIDDoesNotCancelNewerPrompt(t *testing.T) {
 	}
 
 	close(promptRelease)
-	select {
-	case event := <-turnEvents:
-		if event.TurnID != "turn-2" || event.Payload.TurnState != provider.RuntimeTurnCompleted {
-			t.Fatalf("turn completion = %#v, want turn-2 completed (not cancelled)", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for newer turn completion")
+	event := waitFor(t, turnEvents, "timed out waiting for newer turn completion")
+	if event.TurnID != "turn-2" || event.Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("turn completion = %#v, want turn-2 completed (not cancelled)", event)
 	}
 }
 
@@ -2657,21 +2525,13 @@ func TestAgentExitAbandonsPromptAndUnbindsDeadSession(t *testing.T) {
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case <-promptEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("prompt was not dispatched")
-	}
+	waitFor(t, promptEntered, "prompt was not dispatched")
 
 	agent.closeTransport()
 
-	select {
-	case event := <-turnEvents:
-		if event.ThreadID != "thread-1" || event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnFailed {
-			t.Fatalf("turn completion = %#v, want failed turn-1 on thread-1", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for prompt failure after agent exit")
+	event := waitFor(t, turnEvents, "timed out waiting for prompt failure after agent exit")
+	if event.ThreadID != "thread-1" || event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnFailed {
+		t.Fatalf("turn completion = %#v, want failed turn-1 on thread-1", event)
 	}
 	waitForSessionUnbound(t, h, "thread-1", "sess")
 
@@ -2714,13 +2574,9 @@ func TestPromptOnStaleSessionUnbindsSoNextPromptStartsFreshSession(t *testing.T)
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	select {
-	case event := <-turnEvents:
-		if event.Payload.TurnState != provider.RuntimeTurnFailed || !strings.Contains(event.Payload.Message, "fresh session") {
-			t.Fatalf("stale-session turn completion = %#v, want failed turn with fresh-session guidance", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for stale-session turn failure")
+	event := waitFor(t, turnEvents, "timed out waiting for stale-session turn failure")
+	if event.Payload.TurnState != provider.RuntimeTurnFailed || !strings.Contains(event.Payload.Message, "fresh session") {
+		t.Fatalf("stale-session turn completion = %#v, want failed turn with fresh-session guidance", event)
 	}
 	if got := h.sessionIDForThread("thread-1"); got != "" {
 		t.Fatalf("thread still bound to %q after stale-session prompt failure, want unbound", got)
@@ -2738,13 +2594,9 @@ func TestPromptOnStaleSessionUnbindsSoNextPromptStartsFreshSession(t *testing.T)
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-2", Input: "again"}); err != nil {
 		t.Fatalf("SendTurn after fresh session: %v", err)
 	}
-	select {
-	case event := <-turnEvents:
-		if event.Payload.TurnState != provider.RuntimeTurnCompleted {
-			t.Fatalf("fresh-session turn completion = %#v, want completed turn", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for fresh-session turn completion")
+	event = waitFor(t, turnEvents, "timed out waiting for fresh-session turn completion")
+	if event.Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("fresh-session turn completion = %#v, want completed turn", event)
 	}
 }
 
@@ -2786,4 +2638,17 @@ func waitForNoActiveCollector(t *testing.T, h *Instance, sessionID string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("collector still active after turn settled: %#v", registeredCollector())
+}
+
+// waitFor receives from ch, failing the test with failure after two seconds.
+func waitFor[T any](t *testing.T, ch <-chan T, failure string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal(failure)
+		var zero T
+		return zero
+	}
 }
