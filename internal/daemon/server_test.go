@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -82,9 +81,6 @@ func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
 // only the direct child would leak the agent process it spawned. The fake agent
 // runs behind a non-exec'ing shell so it is a grandchild of the daemon.
 func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process-group kill is unix-only")
-	}
 	s := NewServer()
 	dir := t.TempDir()
 	pidPath := dir + "/agent.pid"

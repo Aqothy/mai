@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -269,16 +270,8 @@ func TestNormalizeTitle(t *testing.T) {
 			t.Errorf("normalizeTitle(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
-	long := normalizeTitle(string(make([]rune, 0, 0)) + strings200())
+	long := normalizeTitle(strings.Repeat("a", 200))
 	if runes := []rune(long); len(runes) != normalizedTitleScalarCap {
 		t.Errorf("cap = %d runes", len(runes))
 	}
-}
-
-func strings200() string {
-	runes := make([]rune, 200)
-	for i := range runes {
-		runes[i] = 'a'
-	}
-	return string(runes)
 }
