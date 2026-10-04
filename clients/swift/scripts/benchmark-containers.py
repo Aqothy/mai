@@ -67,9 +67,7 @@ def main():
         "macOS": platform.mac_ver()[0],
         "machine": subprocess.check_output(["sysctl", "-n", "hw.model"], text=True).strip(),
         "plan": args.plan,
-        "reuseNativeBodies": args.container == "custom",
-        "directNativeRows": args.container == "custom",
-        "container": args.container, "scheduledPrewarm": args.container == "custom", "scrubPeriodSeconds": args.scrub_period,
+        "container": args.container, "scrubPeriodSeconds": args.scrub_period,
         "syntheticTurns": args.turns,
         "measurement": ("prepared aligned viewport" if args.plan == "open" else
                         "session checkpoints, sampled RSS and final/peak physical footprint"
