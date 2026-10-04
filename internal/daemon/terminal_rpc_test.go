@@ -70,16 +70,23 @@ func (c *recordingClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Fatalf("timed out waiting for %d terminal output bytes; received %d", minimum, c.outputLength())
 }
 
-func (c *recordingClient) statusItems() []wire.TerminalStreamItem {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var statuses []wire.TerminalStreamItem
-	for _, item := range c.terminalItems {
-		if item.Kind == terminal.StreamItemStatus {
-			statuses = append(statuses, item)
+// waitForStatus returns the first status item the terminal stream delivers.
+func (c *recordingClient) waitForStatus(t *testing.T) wire.TerminalStreamItem {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		for _, item := range c.terminalItems {
+			if item.Kind == terminal.StreamItemStatus {
+				c.mu.Unlock()
+				return item
+			}
 		}
+		c.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
 	}
-	return statuses
+	t.Fatal("timed out waiting for terminal status stream item")
+	return wire.TerminalStreamItem{}
 }
 
 func createTestTerminal(t *testing.T, c *recordingClient) wire.TerminalAttachSnapshot {
@@ -232,66 +239,6 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	if intruder.outputContains("OWNER-21") {
 		t.Fatal("terminal output streamed to a client that never attached")
 	}
-}
-
-func TestTerminalTerminateStreamsFinalStatus(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialRecordingClient(t, url)
-
-	snapshot := createTestTerminal(t, client)
-	client.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: snapshot.Terminal.TerminalID}, nil)
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		statuses := client.statusItems()
-		if len(statuses) > 0 {
-			last := statuses[len(statuses)-1]
-			if last.Status != terminal.StatusStopped {
-				t.Fatalf("final status = %s, want stopped", last.Status)
-			}
-			if last.RunID != snapshot.RunID {
-				t.Fatalf("status run id = %s, want %s", last.RunID, snapshot.RunID)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for terminal status stream item")
-}
-
-func TestTerminalNaturalExitStreamsExitCode(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialRecordingClient(t, url)
-
-	snapshot := createTestTerminal(t, client)
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("exit 5\n"),
-	})
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		statuses := client.statusItems()
-		if len(statuses) > 0 {
-			last := statuses[len(statuses)-1]
-			if last.Status != terminal.StatusExited {
-				t.Fatalf("final status = %s, want exited", last.Status)
-			}
-			if last.ExitCode == nil || *last.ExitCode != 5 {
-				t.Fatalf("exit code = %v, want 5", last.ExitCode)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for exit status stream item")
 }
 
 // useQuietTestShell keeps login-shell startup deterministic for daemon tests.

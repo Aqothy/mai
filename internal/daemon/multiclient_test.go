@@ -36,14 +36,15 @@ func newWSTestServer(t testing.TB, s *Server) string {
 type recordingClient struct {
 	conn *jsonrpc2.Connection
 
-	mu                sync.Mutex
-	threadItems       []orchestration.ThreadStreamItem
-	threadCursor      int
-	threadEvents      map[orchestration.ThreadID][]orchestration.Event
-	shellItems        []orchestration.ThreadListStreamItem
-	terminalItems     []wire.TerminalStreamItem
-	terminalListItems []wire.TerminalListStreamItem
-	terminalOutput    bytes.Buffer
+	mu                 sync.Mutex
+	threadItems        []orchestration.ThreadStreamItem
+	threadCursor       int
+	threadEvents       map[orchestration.ThreadID][]orchestration.Event
+	shellItems         []orchestration.ThreadListStreamItem
+	terminalItems      []wire.TerminalStreamItem
+	terminalListItems  []wire.TerminalListStreamItem
+	terminalListCursor int
+	terminalOutput     bytes.Buffer
 }
 
 func dialRecordingClient(t testing.TB, url string) *recordingClient {

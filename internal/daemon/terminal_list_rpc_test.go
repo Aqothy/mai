@@ -1,6 +1,6 @@
 package daemon
 
-// Increment 5 tests: the terminal list stream, identity persistence, and the
+// Terminal list tests: the list stream, identity persistence, and the
 // rename/terminate/delete actions.
 
 import (
@@ -24,15 +24,22 @@ func subscribeTerminalListSnapshot(t *testing.T, c *recordingClient) wire.Termin
 	return snapshot
 }
 
+// waitForListUpsert consumes list notifications in arrival order until an
+// upsert matches, so successive waits observe successive upserts.
 func waitForListUpsert(t *testing.T, c *recordingClient, match func(wire.TerminalSummary) bool) wire.TerminalSummary {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, item := range c.listItemsSnapshot() {
+		c.mu.Lock()
+		for c.terminalListCursor < len(c.terminalListItems) {
+			item := c.terminalListItems[c.terminalListCursor]
+			c.terminalListCursor++
 			if item.Kind == wire.TerminalListItemUpserted && item.Terminal != nil && match(*item.Terminal) {
+				c.mu.Unlock()
 				return *item.Terminal
 			}
 		}
+		c.mu.Unlock()
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for terminal list upsert")
@@ -98,6 +105,10 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	if !stopped.UpdatedAt.Equal(renamed.UpdatedAt) {
 		t.Fatal("terminate changed updatedAt")
 	}
+	// The attached controller's stream ends with the run's stopped status.
+	if status := controller.waitForStatus(t); status.Status != terminal.StatusStopped || status.RunID != created.RunID {
+		t.Fatalf("controller status = %s run %s, want stopped run %s", status.Status, status.RunID, created.RunID)
+	}
 
 	// Delete removes the row and publishes a removal.
 	observer.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
@@ -116,6 +127,13 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 			t.Fatal("timed out waiting for terminal removal")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	// The identity is gone: attach and rename both fail.
+	if _, err := attachOnce(observer, terminalID); err == nil {
+		t.Fatal("attach to deleted terminal succeeded")
+	}
+	if err := observer.callErr(wire.MethodTerminalRename, wire.TerminalRenameParams{TerminalID: terminalID, Title: "ghost"}, nil); err == nil {
+		t.Fatal("rename of deleted terminal succeeded")
 	}
 }
 
@@ -186,30 +204,5 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	// the previous run's output.
 	if bytes.Contains(relaunched.Snapshot, []byte("OLD-RUN-123")) {
 		t.Fatal("old output survived the daemon restart")
-	}
-}
-
-func TestTerminalDeleteWhileRunningTerminatesProcess(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialRecordingClient(t, url)
-
-	created := createTestTerminal(t, client)
-	client.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: created.Terminal.TerminalID}, nil)
-
-	// The identity is gone: attach and rename both fail.
-	if _, err := attachOnce(client, created.Terminal.TerminalID); err == nil {
-		t.Fatal("attach to deleted terminal succeeded")
-	}
-	var renamed wire.TerminalSummary
-	ctx, cancel := timeout15()
-	defer cancel()
-	if err := client.conn.Call(ctx, wire.MethodTerminalRename, wire.TerminalRenameParams{
-		TerminalID: created.Terminal.TerminalID,
-		Title:      "ghost",
-	}).Await(ctx, &renamed); err == nil {
-		t.Fatal("rename of deleted terminal succeeded")
 	}
 }

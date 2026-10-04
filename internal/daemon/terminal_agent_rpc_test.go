@@ -1,6 +1,6 @@
 package daemon
 
-// Increment 8 tests: semantic agent activity flows to terminal-list
+// Agent activity tests: semantic agent activity flows to terminal-list
 // subscribers while raw evidence stays out of the wire. The foreground job
 // here is an unrecognized `sh` script, which exercises the generic
 // spinner-title path; recognized-agent classification is covered by the
@@ -25,24 +25,31 @@ func waitForAgentActivity(t *testing.T, c *recordingClient, terminalID string, a
 	})
 }
 
-func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
+// startSpinnerJob runs spinnerTitleScript in a terminal created by controller
+// while observer watches the terminal list.
+func startSpinnerJob(t *testing.T) (observer, controller *recordingClient, created wire.TerminalAttachSnapshot) {
+	t.Helper()
 	useQuietTestShell(t)
 	s := newTestServer(t)
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
 	url := newWSTestServer(t, s)
 
-	observer := dialRecordingClient(t, url)
+	observer = dialRecordingClient(t, url)
 	subscribeTerminalListSnapshot(t, observer)
 
-	controller := dialRecordingClient(t, url)
-	created := createTestTerminal(t, controller)
-	terminalID := created.Terminal.TerminalID
-
+	controller = dialRecordingClient(t, url)
+	created = createTestTerminal(t, controller)
 	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
+		TerminalID: created.Terminal.TerminalID,
 		RunID:      created.RunID,
 		Data:       []byte(spinnerTitleScript),
 	})
+	return observer, controller, created
+}
+
+func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
+	observer, _, created := startSpinnerJob(t)
+	terminalID := created.Terminal.TerminalID
 
 	working := waitForAgentActivity(t, observer, terminalID, terminal.AgentActivityWorking)
 	if working.AgentKind != terminal.AgentUnknown {
@@ -69,8 +76,8 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 			sum.AgentActivity == terminal.AgentActivityNone &&
 			sum.AgentKind == terminal.AgentNone
 	})
-	if cleared.Status != terminal.StatusRunning {
-		t.Fatalf("cleared upsert status = %s", cleared.Status)
+	if cleared.Status != terminal.StatusRunning || cleared.ObservedTitle != "" {
+		t.Fatalf("cleared upsert = status %s, observed title %q; want running with no title", cleared.Status, cleared.ObservedTitle)
 	}
 	if !cleared.UpdatedAt.Equal(working.UpdatedAt) {
 		t.Fatal("agent activity change bumped updatedAt; rows must not reorder on activity")
@@ -78,23 +85,8 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 }
 
 func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-
-	observer := dialRecordingClient(t, url)
-	subscribeTerminalListSnapshot(t, observer)
-
-	controller := dialRecordingClient(t, url)
-	created := createTestTerminal(t, controller)
+	observer, controller, created := startSpinnerJob(t)
 	terminalID := created.Terminal.TerminalID
-
-	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-		Data:       []byte(spinnerTitleScript),
-	})
 	waitForAgentActivity(t, observer, terminalID, terminal.AgentActivityWorking)
 
 	// Navigate away: the shell keeps running with no attached client, and

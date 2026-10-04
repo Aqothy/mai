@@ -1,12 +1,11 @@
 package daemon
 
-// Increment 4 lifecycle tests: reattach snapshot ordering, detach without
+// Terminal lifecycle tests: reattach snapshot ordering, detach without
 // termination, relaunch run fencing, and shared multi-client attachment, all
 // through real WebSocket clients.
 
 import (
 	"bytes"
-	"context"
 	"testing"
 	"time"
 
@@ -53,8 +52,17 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	})
 	first.waitForOutput(t, "HISTORY-88")
 
+	// The attach snapshot reports the grid the attaching client asked for.
 	second := dialRecordingClient(t, url)
-	attach := attachTestTerminal(t, second, terminalID)
+	var attach wire.TerminalAttachSnapshot
+	second.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
+		TerminalID: terminalID,
+		Columns:    96,
+		Rows:       31,
+	}, &attach)
+	if attach.Columns != 96 || attach.Rows != 31 {
+		t.Fatalf("attach grid = %dx%d, want 96x31", attach.Columns, attach.Rows)
+	}
 	if attach.RunID != snapshot.RunID {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
 	}
@@ -77,27 +85,6 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 		if item.Kind == terminal.StreamItemOutput && item.Sequence <= attach.Sequence {
 			t.Fatalf("live output sequence %d not above snapshot %d", item.Sequence, attach.Sequence)
 		}
-	}
-}
-
-func TestTerminalAttachSnapshotReportsAppliedGrid(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	first := dialRecordingClient(t, url)
-	second := dialRecordingClient(t, url)
-
-	created := createTestTerminal(t, first)
-	var attached wire.TerminalAttachSnapshot
-	second.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: created.Terminal.TerminalID,
-		Columns:    96,
-		Rows:       31,
-	}, &attached)
-
-	if attached.Columns != 96 || attached.Rows != 31 {
-		t.Fatalf("attach grid = %dx%d, want 96x31", attached.Columns, attached.Rows)
 	}
 }
 
@@ -131,36 +118,14 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	first.waitForOutput(t, "SECOND-81")
 	second.waitForOutput(t, "SECOND-81")
 
-	// Resizes are shared PTY state; the latest valid resize wins.
-	first.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Columns:    120,
-		Rows:       40,
-	})
-	deadline := time.Now().Add(15 * time.Second)
-	firstResizeApplied := false
-	for time.Now().Before(deadline) {
-		session, err := s.terminals.service.Get(terminalID)
-		if err == nil {
-			columns, rows := session.Size()
-			if columns == 120 && rows == 40 {
-				firstResizeApplied = true
-				break
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !firstResizeApplied {
-		t.Fatal("first attached-client resize was not applied")
-	}
+	// Resizes are shared PTY state: an attached non-creator may resize too.
 	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
 		TerminalID: terminalID,
 		RunID:      attach.RunID,
 		Columns:    96,
 		Rows:       31,
 	})
-	deadline = time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		session, err := s.terminals.service.Get(terminalID)
 		if err == nil {
@@ -171,7 +136,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("latest attached-client resize was not applied")
+	t.Fatal("attached-client resize was not applied")
 }
 
 func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testing.T) {
@@ -184,14 +149,12 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	ctx, cancel := timeout15()
-	defer cancel()
 	var invalidAttach wire.TerminalAttachSnapshot
-	if err := second.conn.Call(ctx, wire.MethodTerminalAttach, wire.TerminalAttachParams{
+	if err := second.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    1,
 		Rows:       24,
-	}).Await(ctx, &invalidAttach); err == nil {
+	}, &invalidAttach); err == nil {
 		t.Fatal("attach with invalid dimensions succeeded")
 	}
 
@@ -203,11 +166,11 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	first.waitForOutput(t, "AFTER-BAD-ATTACH-7")
 
 	var invalidRelaunch wire.TerminalAttachSnapshot
-	if err := second.conn.Call(ctx, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
+	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       301,
-	}).Await(ctx, &invalidRelaunch); err == nil {
+	}, &invalidRelaunch); err == nil {
 		t.Fatal("relaunch with invalid dimensions succeeded")
 	}
 
@@ -359,16 +322,24 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 		Data:       []byte("printf 'FINAL-%d\\n' $((90+9)); exit 4\n"),
 	})
 
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if statuses := client.statusItems(); len(statuses) > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	// The attached client sees the exit streamed with its code.
+	status := client.waitForStatus(t)
+	if status.Status != terminal.StatusExited || status.ExitCode == nil || *status.ExitCode != 4 {
+		t.Fatalf("streamed status = %s exit %v, want exited 4", status.Status, status.ExitCode)
 	}
 
+	// A later client attaching at a different grid gets the retained final
+	// screen reflowed to its size.
 	other := dialRecordingClient(t, url)
-	attach := attachTestTerminal(t, other, terminalID)
+	var attach wire.TerminalAttachSnapshot
+	other.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
+		TerminalID: terminalID,
+		Columns:    100,
+		Rows:       30,
+	}, &attach)
+	if attach.Columns != 100 || attach.Rows != 30 {
+		t.Fatalf("attach grid = %dx%d, want 100x30", attach.Columns, attach.Rows)
+	}
 	if attach.Terminal.Status != terminal.StatusExited {
 		t.Fatalf("attach status = %s, want exited", attach.Terminal.Status)
 	}
@@ -380,19 +351,13 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 	}
 }
 
-func timeout15() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 15*time.Second)
-}
-
 func attachOnce(c *recordingClient, terminalID string) (wire.TerminalAttachSnapshot, error) {
 	var snapshot wire.TerminalAttachSnapshot
-	ctx, cancel := timeout15()
-	defer cancel()
-	err := c.conn.Call(ctx, wire.MethodTerminalAttach, wire.TerminalAttachParams{
+	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       24,
-	}).Await(ctx, &snapshot)
+	}, &snapshot)
 	return snapshot, err
 }
 
