@@ -27,6 +27,29 @@
     }
 
     struct ChatMacScrollPositionPreserverTests {
+        @Test
+        func bottomOriginIncludesComposerInsetAndKeepsShortContentAtTopInset() {
+            #expect(
+                ChatMacScrollPositionPreserver.bottomOrigin(
+                    documentMinY: 0, documentMaxY: 27_978, viewportHeight: 928,
+                    topInset: 0, bottomInset: 102) == 27_152)
+            #expect(
+                ChatMacScrollPositionPreserver.bottomOrigin(
+                    documentMinY: 0, documentMaxY: 400, viewportHeight: 928,
+                    topInset: 14, bottomInset: 102) == -14)
+        }
+
+        /// Upward scrolls cannot resume following from transient bottom geometry.
+        @Test
+        func onlyAScrollEndingDownwardAtTheBottomRestoresFollowing() {
+            #expect(
+                !ChatMacScrollPositionPreserver.shouldRestoreFollowingAfterUserScroll(
+                    startY: 10_000, endY: 9_000, isNearBottom: true))
+            #expect(
+                ChatMacScrollPositionPreserver.shouldRestoreFollowingAfterUserScroll(
+                    startY: 9_000, endY: 10_000, isNearBottom: true))
+        }
+
         @Test @MainActor
         func appKitRemeasurementIsAppliedOnceWhenTheClipAlreadyMoved() async {
             await checkRemeasurement(appKitAdjustsOffset: true)

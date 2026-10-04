@@ -39,59 +39,7 @@ struct ChatTimelineLayoutTests {
         #expect(!fold.isExpanded(.activityItem(itemID: "tool-2")))
     }
 
-    // MARK: Pagination
-
     #if os(macOS)
-        @Test
-        func macBottomOriginIncludesComposerInset() {
-            let origin = ChatMacScrollPositionPreserver.bottomOrigin(
-                documentMinY: 0,
-                documentMaxY: 27_978,
-                viewportHeight: 928,
-                topInset: 0,
-                bottomInset: 102
-            )
-
-            #expect(origin == 27_152)
-        }
-
-        @Test
-        func macBottomOriginKeepsShortContentAtTopInset() {
-            let origin = ChatMacScrollPositionPreserver.bottomOrigin(
-                documentMinY: 0,
-                documentMaxY: 400,
-                viewportHeight: 928,
-                topInset: 14,
-                bottomInset: 102
-            )
-
-            #expect(origin == -14)
-        }
-
-        @Test
-        func upwardNativeScrollCannotResumeFromTransientBottomGeometry() {
-            let shouldRestore = ChatMacScrollPositionPreserver
-                .shouldRestoreFollowingAfterUserScroll(
-                    startY: 10_000,
-                    endY: 9_000,
-                    isNearBottom: true
-                )
-
-            #expect(!shouldRestore)
-        }
-
-        @Test
-        func nativeScrollEndingAtBottomRestoresFollowing() {
-            let shouldRestore = ChatMacScrollPositionPreserver
-                .shouldRestoreFollowingAfterUserScroll(
-                    startY: 9_000,
-                    endY: 10_000,
-                    isNearBottom: true
-                )
-
-            #expect(shouldRestore)
-        }
-
         @Test @MainActor
         func macResolvedProseRunKeepsSelectionContentAndSemantics() async {
             let source = """
@@ -600,88 +548,41 @@ struct ChatTimelineLayoutTests {
     // MARK: Turn header
 
     @Test
-    func headerUsesLatestTurnTimestampsWhenAvailable() {
-        let startedAt = Date(timeIntervalSince1970: 1_000)
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1")
-            ],
-            streamingTurnID: nil,
-            latestTurn: Turn(
-                completedAt: startedAt.addingTimeInterval(65),
-                error: nil,
-                interruptRequested: nil,
-                requestedAt: startedAt,
-                startedAt: startedAt,
-                state: MaidTurnState.completed.rawValue,
-                stopReason: nil,
-                turnID: "turn-1"
-            ),
-            expandedSectionIDs: []
-        )
-
-        #expect(turnActivity(rows[0])?.title == "Worked for 1m 5s")
-        #expect(turnActivity(rows[0])?.stepCount == 1)
-    }
-
-    @Test
-    func headerDerivesDurationFromItemTimestampsForOlderTurns() {
-        let createdAt = Date(timeIntervalSince1970: 500)
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(
-                    id: "i1",
-                    kind: .toolCall,
-                    turnID: "turn-1",
-                    createdAt: createdAt,
-                    updatedAt: createdAt.addingTimeInterval(42)
-                )
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(turnActivity(rows[0])?.title == "Worked for 42s")
-    }
-
-    @Test
-    func headerFallsBackToPlainTitleWhenDurationIsUnknown() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(turnActivity(rows[0])?.title == "Worked")
-    }
-
-    @Test
-    func interruptedTurnReadsStoppedInsteadOfWorked() {
-        let startedAt = Date(timeIntervalSince1970: 3_000)
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)
-            ],
-            streamingTurnID: nil,
-            latestTurn: Turn(
-                completedAt: startedAt.addingTimeInterval(12),
-                error: nil,
-                interruptRequested: nil,
-                requestedAt: startedAt,
-                startedAt: startedAt,
-                state: MaidTurnState.interrupted.rawValue,
-                stopReason: nil,
-                turnID: "turn-1"
-            ),
-            expandedSectionIDs: []
-        )
-
-        #expect(turnActivity(rows[0])?.title == "Stopped after 12s")
+    func headerTitleReflectsDurationAndOutcome() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        func turn(_ state: MaidTurnState, seconds: TimeInterval) -> Turn {
+            Turn(
+                completedAt: start.addingTimeInterval(seconds), error: nil, interruptRequested: nil,
+                requestedAt: start, startedAt: start, state: state.rawValue, stopReason: nil,
+                turnID: "turn-1")
+        }
+        let cases: [(timeline: [TimelineEntry], latestTurn: Turn?, title: String)] = [
+            // The latest turn's own timestamps win.
+            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1")],
+             turn(.completed, seconds: 65), "Worked for 1m 5s"),
+            // Older turns derive a duration from their items.
+            ([itemEntry(
+                id: "i1", kind: .toolCall, turnID: "turn-1",
+                createdAt: start, updatedAt: start.addingTimeInterval(42))],
+             nil, "Worked for 42s"),
+            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
+             nil, "Worked"),
+            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)],
+             turn(.interrupted, seconds: 12), "Stopped after 12s"),
+            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)],
+             nil, "Stopped"),
+        ]
+        for testCase in cases {
+            let rows = ChatTimelineLayout.rows(
+                timeline: testCase.timeline,
+                streamingTurnID: nil,
+                latestTurn: testCase.latestTurn,
+                expandedSectionIDs: []
+            )
+            #expect(turnActivity(rows[0])?.title == testCase.title)
+            #expect(turnActivity(rows[0])?.stepCount == testCase.timeline.count)
+        }
     }
 
     @Test
