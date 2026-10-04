@@ -873,8 +873,13 @@ func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 		t.Fatalf("thread.start: %v", err)
 	}
 	waitForSessionStatus(t, engine, threadID, SessionStatusError)
+	if thread, _ := engine.Thread(threadID); thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError || !strings.Contains(thread.LatestTurn.Error, "agent unavailable") || thread.LatestTurn.CompletedAt == nil {
+		t.Fatalf("latest turn after start failure = %#v, want completed error turn", thread.LatestTurn)
+	}
 
+	fake.mu.Lock()
 	fake.startErr = nil
+	fake.mu.Unlock()
 	if _, err := engine.Dispatch(context.Background(), Command{
 		Type: CommandThreadTurnRetry, CommandID: "retry-first-turn-config", ThreadID: threadID,
 	}); err != nil {
@@ -893,11 +898,9 @@ func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 		input.ConfigSelections[0].Value != "plan" {
 		t.Fatalf("retry config selections = %#v, want mode=plan", input.ConfigSelections)
 	}
-	if messages := func() []Message {
-		thread, _ := engine.Thread(threadID)
-		return thread.Timeline.Messages()
-	}(); len(messages) != 1 || messages[0].ID != "message-first-turn-retry-config" {
-		t.Fatalf("messages after retry = %#v, want the one original message", messages)
+	thread, _ := engine.Thread(threadID)
+	if messages := thread.Timeline.Messages(); len(messages) != 1 || messages[0].ID != "message-first-turn-retry-config" || thread.LatestTurn == nil || messages[0].TurnID != thread.LatestTurn.ID {
+		t.Fatalf("thread after retry = %#v, want the one original message rebound to the retry turn", thread)
 	}
 }
 

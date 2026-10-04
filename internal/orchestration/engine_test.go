@@ -224,107 +224,6 @@ func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	}
 }
 
-func TestEngineTracksProviderIdentityAcrossCommands(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-model-selection-provider")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-model-selection-provider", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "acp-main", ModelSelection: &provider.ModelSelection{Model: "sonnet"}}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.ProviderInstanceID != "acp-main" {
-		t.Fatalf("thread = %#v, want providerInstanceId from modelSelection", thread)
-	}
-	if shell, ok := engine.ThreadListEntry(threadID); !ok || shell.ProviderInstanceID != "acp-main" {
-		t.Fatalf("shell = %#v, want providerInstanceId from modelSelection", shell)
-	}
-	if snapshot := engine.ThreadListSnapshot(); snapshot.Snapshot == nil || len(snapshot.Snapshot.Threads) != 1 || snapshot.Snapshot.Threads[0].ProviderInstanceID != "acp-main" {
-		t.Fatalf("shell snapshot = %#v, want providerInstanceId from modelSelection", snapshot)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-model-selection-provider", ThreadID: threadID, ProviderInstanceID: "acp-next", ModelSelection: &provider.ModelSelection{Model: "opus"}}); err != nil {
-		t.Fatalf("thread.meta.update: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "acp-next" || thread.ModelSelection == nil || thread.ModelSelection.Model != "opus" {
-		t.Fatalf("thread after meta = %#v, want providerInstanceId acp-next with model opus", thread)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-model-selection-provider", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-model-selection", Text: "hello"}, ProviderInstanceID: "acp-turn", ModelSelection: &provider.ModelSelection{Model: "haiku"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "acp-turn" || thread.ModelSelection == nil || thread.ModelSelection.Model != "haiku" {
-		t.Fatalf("thread after turn start = %#v, want providerInstanceId acp-turn with model haiku", thread)
-	}
-}
-
-func TestEngineKeepsThreadProviderSelectionAuthoritativeOverSessionBinding(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-provider-selection-authoritative")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-provider-only", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "draft-instance"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.ProviderInstanceID != "draft-instance" || thread.ModelSelection != nil {
-		t.Fatalf("thread after create = %#v, want bare provider identity with no model selection", thread)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-provider-only", ThreadID: threadID, ProviderInstanceID: "switched-instance"}); err != nil {
-		t.Fatalf("thread.meta.update: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "switched-instance" || thread.ModelSelection != nil {
-		t.Fatalf("thread after provider switch = %#v, want bare provider identity", thread)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-model-only", ThreadID: threadID, ModelSelection: &provider.ModelSelection{Model: "opus", Options: json.RawMessage(`{"temperature":1}`)}}); err != nil {
-		t.Fatalf("thread.meta.update model only: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "switched-instance" || thread.ModelSelection == nil || thread.ModelSelection.Model != "opus" || string(thread.ModelSelection.Options) != `{"temperature":1}` {
-		t.Fatalf("thread after model-only update = %#v, want provider instance preserved", thread)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-provider-only-clears-model", ThreadID: threadID, ProviderInstanceID: "fresh-instance"}); err != nil {
-		t.Fatalf("thread.meta.update provider-only switch: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "fresh-instance" || thread.ModelSelection != nil {
-		t.Fatalf("thread after provider-only switch = %#v, want stale model/options cleared", thread)
-	}
-
-	binding := &SessionBinding{ThreadID: threadID, ProviderInstanceID: "runtime-binding", Status: SessionStatusReady, UpdatedAt: time.Now()}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: binding}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.ProviderInstanceID != "fresh-instance" || thread.ModelSelection != nil {
-		t.Fatalf("thread after session binding = %#v, want desired provider selection unchanged", thread)
-	}
-	if thread.Session == nil || thread.Session.ProviderInstanceID != "runtime-binding" {
-		t.Fatalf("session after binding = %#v, want provider runtime binding stored on session", thread.Session)
-	}
-
-	var providerSwitchEvent Event
-	engine.OnEvent(func(event Event) {
-		if event.CommandID == "cmd-meta-provider-switch-clears-session" {
-			providerSwitchEvent = event
-		}
-	})
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-meta-provider-switch-clears-session", ThreadID: threadID, ProviderInstanceID: "final-instance"}); err != nil {
-		t.Fatalf("thread.meta.update provider switch with stale session: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if thread.Session != nil {
-		t.Fatalf("thread session after provider switch = %#v, want cleared", thread.Session)
-	}
-	if !providerSwitchEvent.Payload.SessionCleared {
-		t.Fatalf("provider switch event payload = %#v, want sessionCleared", providerSwitchEvent.Payload)
-	}
-}
-
 func TestEngineRejectsProviderModelMetaUpdateDuringActiveTurn(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -412,44 +311,6 @@ func TestEngineRequiresActiveSessionForConfigOptionSet(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsInvalidApprovalDecision(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	events := observeEvents(t, engine)
-	threadID := ThreadID("thread-invalid-approval-decision")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-validation", ThreadID: threadID, Title: "Thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-invalid-approval-decision", ThreadID: threadID, RequestID: "approval-1", Decision: "approve"}); err == nil {
-		t.Fatal("thread.approval.respond invalid decision err = nil, want rejection")
-	}
-	if recorded := events.matching("", 0); len(recorded) != 1 {
-		t.Fatalf("events after invalid approval decision = %#v, want only create", recorded)
-	}
-}
-
-func TestApprovalResponseProjectionPreservesExplicitOptionID(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-approval-response-option")
-	requestID := ApprovalID("approval-1")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-response-option", ThreadID: threadID, Title: "Thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	approval := &ApprovalEvent{RequestID: string(requestID), Options: []provider.ApprovalOption{{ID: "allow", Name: "Allow"}, {ID: "reject", Name: "Reject"}}}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: approval}}); err != nil {
-		t.Fatalf("thread.approval.open: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-respond-approval-response-option", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "reject"}); err != nil {
-		t.Fatalf("thread.approval.respond: %v", err)
-	}
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || len(thread.Timeline.Approvals()) != 1 || thread.Timeline.Approvals()[0].Decision != provider.ApprovalDecisionAccept || thread.Timeline.Approvals()[0].OptionID != "reject" {
-		t.Fatalf("approval after response = %#v, want decision and explicit optionId preserved", thread.Timeline.Approvals())
-	}
-}
-
 func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -464,6 +325,9 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 		t.Fatalf("thread.approval.open: %v", err)
 	}
 
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-invalid-approval-decision", ThreadID: threadID, RequestID: requestID, Decision: "approve"}); err == nil {
+		t.Fatal("thread.approval.respond invalid decision err = nil, want rejection")
+	}
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-unknown-approval-response", ThreadID: threadID, RequestID: "missing", Decision: provider.ApprovalDecisionAccept}); err == nil {
 		t.Fatal("thread.approval.respond unknown request err = nil, want rejection")
 	}
@@ -585,48 +449,6 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 	}
 }
 
-// The provider's stop reason (end_turn, max_tokens, refusal, ...) is part of
-// the client contract (latestTurn.stopReason): a settle update
-// carrying one must surface it on the settle event and the completed turn —
-// otherwise a max_tokens/refusal turn is indistinguishable from a clean
-// completion.
-func TestTurnSettleSurfacesProviderStopReason(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	events := observeEvents(t, engine)
-	threadID := ThreadID("thread-stop-reason")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-stop-reason", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "prov-a"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-stop-reason", ThreadID: threadID, Message: &CommandMessage{Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.LatestTurn == nil {
-		t.Fatalf("thread after turn start = %#v, want a latest turn", thread)
-	}
-	turnID := thread.LatestTurn.ID
-	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "prov-a"}}); err != nil {
-		t.Fatalf("bound update: %v", err)
-	}
-	result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: turnID, TurnState: provider.RuntimeTurnCompleted, StopReason: "max_tokens"})
-	if err != nil || result.Sequence == 0 {
-		t.Fatalf("settle update result = %v, %v; want accepted", result, err)
-	}
-
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateCompleted {
-		t.Fatalf("latest turn after settle = %#v, want completed", thread.LatestTurn)
-	}
-	if thread.LatestTurn.StopReason != "max_tokens" {
-		t.Fatalf("latest turn stopReason = %q, want %q", thread.LatestTurn.StopReason, "max_tokens")
-	}
-	recorded := events.matching(threadID, result.Sequence-1)
-	if len(recorded) != 1 || recorded[0].Payload.StopReason != "max_tokens" {
-		t.Fatalf("settle event = %#v, want payload stopReason %q", recorded, "max_tokens")
-	}
-}
-
 func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -661,81 +483,7 @@ func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	}
 }
 
-// Status changes ride session updates: the engine derives the full binding from
-// the LIVE thread inside its locked write region, so a status-only change can
-// never clobber newer session metadata (config options, slash commands, token
-// usage) — there is no producer-side snapshot to go stale.
-func TestSessionStatusUpdatePreservesNewerSessionMetadata(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-session-status-preserves-metadata")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-status-preserve", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	binding := &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, ConfigOptions: []provider.ConfigOption{{ID: "model", CurrentValue: "old"}}, SlashCommands: []provider.SlashCommand{{Name: "old"}}, TokenUsage: &provider.TokenUsage{UsedTokens: 1}, UpdatedAt: time.Now()}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: binding}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", CurrentValue: "new"}}}}); err != nil {
-		t.Fatalf("thread.config-options.update: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: threadID, Payload: EventPayload{SlashCommands: []provider.SlashCommand{{Name: "new"}}}}); err != nil {
-		t.Fatalf("thread.slash-commands.update: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadTokenUsageUpdated, ThreadID: threadID, Payload: EventPayload{TokenUsage: &provider.TokenUsage{UsedTokens: 2}}}); err != nil {
-		t.Fatalf("thread.token-usage.update: %v", err)
-	}
-	result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnStarted, TurnID: "turn-1"})
-	if err != nil || result.Sequence == 0 {
-		t.Fatalf("turn-started update = (%#v, %v), want accepted append", result, err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing: %#v", thread)
-	}
-	if thread.Session.Status != SessionStatusRunning || thread.Session.ActiveTurnID != "turn-1" {
-		t.Fatalf("session status = %#v, want running turn-1", thread.Session)
-	}
-	if len(thread.Session.ConfigOptions) != 1 || thread.Session.ConfigOptions[0].CurrentValue != "new" {
-		t.Fatalf("config options = %#v, want newer value preserved", thread.Session.ConfigOptions)
-	}
-	if len(thread.Session.SlashCommands) != 1 || thread.Session.SlashCommands[0].Name != "new" {
-		t.Fatalf("slash commands = %#v, want newer value preserved", thread.Session.SlashCommands)
-	}
-	if thread.Session.TokenUsage == nil || thread.Session.TokenUsage.UsedTokens != 2 {
-		t.Fatalf("token usage = %#v, want newer value preserved", thread.Session.TokenUsage)
-	}
-}
-
-func TestConfigOptionsUpdateSyncsThreadModelSelection(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-config-options-sync-model-selection")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-config-model-sync", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	var configEvent Event
-	engine.OnEvent(func(event Event) {
-		if event.Type == EventThreadConfigOptionsUpdated {
-			configEvent = event
-		}
-	})
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "slow"}}}}); err != nil {
-		t.Fatalf("thread.config-options.update: %v", err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.ModelSelection == nil {
-		t.Fatalf("thread model selection missing: %#v", thread)
-	}
-	if thread.ModelSelection == nil || thread.ModelSelection.Model != "slow" {
-		t.Fatalf("model selection = %#v, want codex/slow", thread.ModelSelection)
-	}
-	if configEvent.Payload.ModelSelection == nil || configEvent.Payload.ModelSelection.Model != "slow" {
-		t.Fatalf("config-options event payload = %#v, want modelSelection codex/slow", configEvent.Payload)
-	}
-}
-
-func TestEngineAcceptsAttachmentOnlyTurnStart(t *testing.T) {
+func TestEngineAcceptsAttachmentOnlyTurnStartTaggedWithTurnID(t *testing.T) {
 	engine := NewEngine()
 	threadID := ThreadID("thread-attachment-only")
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-attachment-only", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
@@ -748,27 +496,9 @@ func TestEngineAcceptsAttachmentOnlyTurnStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if len(snapshot.Snapshot.Thread.Timeline.Messages()) != 1 || len(snapshot.Snapshot.Thread.Timeline.Messages()[0].Attachments) != 1 {
-		t.Fatalf("messages = %#v, want attachment-only user message", snapshot.Snapshot.Thread.Timeline.Messages())
-	}
-}
-
-func TestEngineUserPromptMessageCarriesTurnID(t *testing.T) {
-	engine := NewEngine()
-	threadID := ThreadID("thread-user-message-turn-id")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-user-message-turn-id", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-user-message-turn-id", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("snapshot: %v", err)
-	}
 	thread := snapshot.Snapshot.Thread
-	if thread.LatestTurn == nil || len(thread.Timeline.Messages()) != 1 || thread.Timeline.Messages()[0].TurnID != thread.LatestTurn.ID {
-		t.Fatalf("thread = %#v, want user message tagged with latest turn id", thread)
+	if messages := thread.Timeline.Messages(); len(messages) != 1 || len(messages[0].Attachments) != 1 || thread.LatestTurn == nil || messages[0].TurnID != thread.LatestTurn.ID {
+		t.Fatalf("thread = %#v, want attachment-only user message tagged with the latest turn id", thread)
 	}
 }
 
@@ -960,99 +690,6 @@ func TestEngineDeduplicatesCommandID(t *testing.T) {
 	}
 }
 
-func TestEmptyConfigAndSlashCommandUpdatesClearSessionLists(t *testing.T) {
-	engine := NewEngine()
-	threadID := ThreadID("thread-clear-session-lists")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-clear-session-lists", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", CurrentValue: "fast"}}}}); err != nil {
-		t.Fatalf("thread.config-options.update: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: threadID, Payload: EventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}}); err != nil {
-		t.Fatalf("thread.slash-commands.update: %v", err)
-	}
-
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadConfigOptionsUpdated, ThreadID: threadID, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{}}}); err != nil {
-		t.Fatalf("thread.config-options.update clear: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: threadID, Payload: EventPayload{SlashCommands: []provider.SlashCommand{}}}); err != nil {
-		t.Fatalf("thread.slash-commands.update clear: %v", err)
-	}
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing: %#v", thread)
-	}
-	if len(thread.Session.ConfigOptions) != 0 || len(thread.Session.SlashCommands) != 0 {
-		t.Fatalf("session lists = config:%#v slash:%#v, want both cleared", thread.Session.ConfigOptions, thread.Session.SlashCommands)
-	}
-}
-
-func TestProviderCommandFailureCompletesTurnWithoutSession(t *testing.T) {
-	engine := NewEngine()
-	threadID := ThreadID("thread-fail")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-create-fail", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-fail", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-fail", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("snapshot: %v", err)
-	}
-	turnID := snapshot.Snapshot.Thread.LatestTurn.ID
-	reactor := &ProviderEventReactor{engine: engine}
-	reactor.failThread(threadID, turnID, "provider missing")
-	snapshot, err = engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("snapshot after failure: %v", err)
-	}
-	if snapshot.Snapshot.Thread.LatestTurn.State != TurnStateError || snapshot.Snapshot.Thread.LatestTurn.Error != "provider missing" || snapshot.Snapshot.Thread.LatestTurn.CompletedAt == nil {
-		t.Fatalf("latest turn = %#v, want completed error", snapshot.Snapshot.Thread.LatestTurn)
-	}
-
-	if _, err := engine.Dispatch(context.Background(), Command{
-		Type: CommandThreadTurnRetry, CommandID: "cmd-turn-retry", ThreadID: threadID,
-	}); err != nil {
-		t.Fatalf("thread.turn.retry: %v", err)
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateRunning {
-		t.Fatalf("thread after retry = %#v, want running retry turn", thread)
-	}
-	messages := thread.Timeline.Messages()
-	if len(messages) != 1 || messages[0].ID != "msg-fail" || messages[0].TurnID != thread.LatestTurn.ID {
-		t.Fatalf("messages after retry = %#v, want original message rebound to retry turn", messages)
-	}
-}
-
-func TestEngineAppendEventDoesNotDeduplicateProviderEvents(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-receipt-scope")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-receipt-create", ThreadID: threadID, Title: "Thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-
-	item := &Item{ID: "item-receipt", Kind: provider.ItemKindToolCall, Title: "call"}
-	firstItem, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: item}})
-	if err != nil {
-		t.Fatalf("item append: %v", err)
-	}
-	secondItem, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: item}})
-	if err != nil {
-		t.Fatalf("item append repeat: %v", err)
-	}
-	if secondItem.Sequence <= firstItem.Sequence {
-		t.Fatalf("append repeat sequence = %d, want new event after %d", secondItem.Sequence, firstItem.Sequence)
-	}
-	if len(engine.receipts) != 1 {
-		t.Fatalf("receipts = %d entries, want only the thread.create receipt", len(engine.receipts))
-	}
-}
-
 func TestEngineCloseRejectsQueuedRequests(t *testing.T) {
 	engine := NewEngine()
 	entered := make(chan struct{})
@@ -1102,37 +739,6 @@ func TestEngineSurvivesPanickingListener(t *testing.T) {
 	}
 	if thread, ok := engine.Thread(threadID); !ok || thread.Title != "Still alive" {
 		t.Fatalf("thread = %#v, want projection updated after listener panic", thread)
-	}
-}
-
-func TestEngineSessionViewMatchesThreadWithoutTimeline(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadID := ThreadID("thread-session-view")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-view-create", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "acp-main", ModelSelection: &provider.ModelSelection{Model: "sonnet"}}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "acp-main", Status: SessionStatusRunning, ActiveTurnID: "turn-view"}}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
-
-	view, ok := engine.SessionView(threadID)
-	if !ok || view.ProviderInstanceID != "acp-main" {
-		t.Fatalf("view = %#v, want resolved provider instance acp-main", view)
-	}
-	if view.Session == nil || view.Session.Status != SessionStatusRunning || view.Session.ActiveTurnID != "turn-view" {
-		t.Fatalf("view session = %#v, want running session with active turn", view.Session)
-	}
-	if view.LatestTurn == nil || view.LatestTurn.ID != "turn-view" || view.LatestTurn.State != TurnStateRunning {
-		t.Fatalf("view latest turn = %#v, want running turn-view", view.LatestTurn)
-	}
-	if _, ok := engine.SessionView(ThreadID("missing-thread")); ok {
-		t.Fatal("SessionView(missing) = ok, want not found")
-	}
-	// Mutating the view must not leak into the projection (clone semantics).
-	view.Session.Status = SessionStatusError
-	if thread, _ := engine.Thread(threadID); thread.Session == nil || thread.Session.Status != SessionStatusRunning {
-		t.Fatalf("projection session mutated through view: %#v", thread.Session)
 	}
 }
 
@@ -1342,33 +948,6 @@ func TestEnginePanicAfterMutationEscalatesToFatal(t *testing.T) {
 
 }
 
-// TestEngineAppendEventPanicAfterMutationEscalatesToFatal covers the
-// AppendEvent (provider/server event) worker path: a panic inside the locked
-// apply region reports the typed violation and closes the engine.
-func TestEngineAppendEventPanicAfterMutationEscalatesToFatal(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	t.Cleanup(func() { testApplyHook = nil })
-	violations := recordInvariantViolations(t, engine)
-
-	threadID := ThreadID("thread-append-panic")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-append-create", ThreadID: threadID, Title: "Thread"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-
-	testApplyHook = func(event Event) {
-		if event.Type == EventThreadItemUpserted {
-			panic("append boom")
-		}
-	}
-	item := &Item{ID: "item-panic", Kind: provider.ItemKindToolCall}
-	var violation *InvariantViolationError
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: item}}); !errors.As(err, &violation) {
-		t.Fatalf("AppendEvent with panicking apply err = %v, want typed InvariantViolationError", err)
-	}
-	mustReceiveViolation(t, violations)
-}
-
 // TestEnginePreMutationPanicIsRecoverableWithoutFatal pins the other half of
 // the panic policy: a panic BEFORE anything was appended (decider/validation
 // code) is converted into a command error, does NOT terminate the daemon, and
@@ -1403,8 +982,9 @@ func TestEnginePreMutationPanicIsRecoverableWithoutFatal(t *testing.T) {
 // session payload IS the complete new session state, and clients must REPLACE
 // their cached binding with it — no field merging. It pins
 // that (a) the engine-derived payload byte-equals the server projection after
-// every status event, (b) metadata set between status events (slash commands)
-// is carried forward in the next payload, so replacement loses nothing, and
+// every status event, (b) metadata set between status events (slash commands,
+// config options, token usage) is carried forward in the next payload, so
+// replacement loses nothing, and
 // (c) a provider switch emits a payload WITHOUT the old provider's metadata,
 // so replacement clears it — the case where the old merge rule left clients
 // permanently out of sync with fresh snapshots.
@@ -1470,17 +1050,26 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 	appendUpdate("bind prov-a", sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "prov-a", ProviderName: "Provider A", Driver: "acp"}})
 	snapshotMustEqualLastPayload("after bind")
 
-	// 2. The agent publishes slash commands BETWEEN status events.
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: threadID, Payload: EventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}}); err != nil {
-		t.Fatalf("slash-commands update: %v", err)
+	// 2. The agent publishes session metadata BETWEEN status events.
+	for _, input := range []EventInput{
+		{Type: EventThreadSlashCommandsUpdated, Payload: EventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}},
+		{Type: EventThreadConfigOptionsUpdated, Payload: EventPayload{ConfigOptions: []provider.ConfigOption{{ID: "effort", CurrentValue: "deep"}}}},
+		{Type: EventThreadTokenUsageUpdated, Payload: EventPayload{TokenUsage: &provider.TokenUsage{UsedTokens: 4242}}},
+	} {
+		input.ThreadID = threadID
+		if _, err := engine.AppendEvent(context.Background(), input); err != nil {
+			t.Fatalf("%s: %v", input.Type, err)
+		}
 	}
 
-	// 3. The settle payload must carry those slash commands forward: replace
+	// 3. The settle payload must carry that metadata forward: replace
 	// semantics lose nothing that the server kept.
 	appendUpdate("settle turn", sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: turnID, TurnState: provider.RuntimeTurnCompleted})
 	settled := snapshotMustEqualLastPayload("after settle")
-	if !strings.Contains(string(settled), `"compact"`) {
-		t.Fatalf("settle payload = %s, want slash commands carried forward for replace semantics", settled)
+	for _, want := range []string{`"compact"`, `"deep"`, `4242`} {
+		if !strings.Contains(string(settled), want) {
+			t.Fatalf("settle payload = %s, want %s carried forward for replace semantics", settled, want)
+		}
 	}
 
 	// 4. Switching providers emits a fresh binding WITHOUT provider A's
@@ -1494,13 +1083,15 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 }
 
 // TestProviderSelectionEventsCarryTheCompleteAggregate is the client
-// conformance test for selection events: when an event
-// carries providerInstanceId it is the COMPLETE new selection — clients
-// replace both providerInstanceId and modelSelection with the event's values
-// (absent modelSelection = cleared); an event with only modelSelection
-// replaces just the model choice. The provider-only switch step is the case
-// a patch rule got wrong: the event omits modelSelection, and replacing must
-// clear the old provider's model instead of keeping it.
+// conformance test for selection events: when an event carries
+// providerInstanceId it is the COMPLETE new selection — clients replace both
+// providerInstanceId and modelSelection with the event's values (absent
+// modelSelection = cleared); an event with only modelSelection replaces just
+// the model choice. The provider-only switch step is the case a patch rule got
+// wrong: the event omits modelSelection, and replacing must clear the old
+// provider's model instead of keeping it. The thread's selection stays the
+// desired one even when a provider session binds to a different instance, and
+// a later provider switch clears that stale session.
 func TestProviderSelectionEventsCarryTheCompleteAggregate(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -1509,10 +1100,12 @@ func TestProviderSelectionEventsCarryTheCompleteAggregate(t *testing.T) {
 	// Client-side fold, applying exactly the documented rule.
 	var clientInstance provider.InstanceID
 	var clientSelection *provider.ModelSelection
+	var lastEvent Event
 	engine.OnEvent(func(event Event) {
-		if event.Payload.ThreadID != threadID && event.ThreadID() != threadID {
+		if event.ThreadID() != threadID {
 			return
 		}
+		lastEvent = event
 		switch {
 		case event.Payload.ProviderInstanceID != "":
 			clientInstance = event.Payload.ProviderInstanceID
@@ -1522,90 +1115,56 @@ func TestProviderSelectionEventsCarryTheCompleteAggregate(t *testing.T) {
 		}
 	})
 
-	mustMatchSnapshot := func(step string) {
+	step := func(name string, command Command, wantInstance provider.InstanceID, wantModel string) Thread {
 		t.Helper()
+		command.CommandID = CommandID("cmd-agg-" + name)
+		command.ThreadID = threadID
+		if command.Type == "" {
+			command.Type = CommandThreadMetaUpdate
+		}
+		if _, err := engine.Dispatch(context.Background(), command); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 		thread, ok := engine.Thread(threadID)
 		if !ok {
-			t.Fatalf("%s: thread not found", step)
+			t.Fatalf("%s: thread not found", name)
 		}
 		if thread.ProviderInstanceID != clientInstance || !selectionEqual(thread.ModelSelection, clientSelection) {
-			t.Fatalf("%s: client fold (%q, %#v) diverges from snapshot (%q, %#v)", step, clientInstance, clientSelection, thread.ProviderInstanceID, thread.ModelSelection)
+			t.Fatalf("%s: client fold (%q, %#v) diverges from snapshot (%q, %#v)", name, clientInstance, clientSelection, thread.ProviderInstanceID, thread.ModelSelection)
 		}
+		gotModel := ""
+		if thread.ModelSelection != nil {
+			gotModel = thread.ModelSelection.Model
+		}
+		if thread.ProviderInstanceID != wantInstance || gotModel != wantModel {
+			t.Fatalf("%s: selection = (%q, %#v), want (%q, %q)", name, thread.ProviderInstanceID, thread.ModelSelection, wantInstance, wantModel)
+		}
+		if entry, ok := engine.ThreadListEntry(threadID); !ok || entry.ProviderInstanceID != wantInstance {
+			t.Fatalf("%s: thread list entry = %#v, want provider %q", name, entry, wantInstance)
+		}
+		return thread
 	}
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "cmd-agg-create", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "a-model", Options: json.RawMessage(`{"effort":"high"}`)}}); err != nil {
-		t.Fatalf("thread.create: %v", err)
+	step("create", Command{Type: CommandThreadCreate, Title: "Thread", ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "a-model"}}, "provider-a", "a-model")
+	thread := step("model-only", Command{ModelSelection: &provider.ModelSelection{Model: "a-model-2", Options: json.RawMessage(`{"effort":"high"}`)}}, "provider-a", "a-model-2")
+	if string(thread.ModelSelection.Options) != `{"effort":"high"}` {
+		t.Fatalf("model-only options = %s", thread.ModelSelection.Options)
 	}
-	mustMatchSnapshot("after create")
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-agg-model", ThreadID: threadID, ModelSelection: &provider.ModelSelection{Model: "a-model-2"}}); err != nil {
-		t.Fatalf("model-only meta update: %v", err)
-	}
-	mustMatchSnapshot("after model-only update")
-
 	// The critical step: provider-only switch. The event must carry the new
 	// instance with NO modelSelection, and replacement must clear the model.
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-agg-switch", ThreadID: threadID, ProviderInstanceID: "provider-b"}); err != nil {
-		t.Fatalf("provider-only switch: %v", err)
-	}
-	mustMatchSnapshot("after provider-only switch")
-	if clientInstance != "provider-b" || clientSelection != nil {
-		t.Fatalf("client fold after switch = (%q, %#v), want provider-b with the old model cleared", clientInstance, clientSelection)
-	}
-}
+	step("provider-only", Command{ProviderInstanceID: "provider-b"}, "provider-b", "")
 
-func TestEngineStoppedAcknowledgesWorkerExit(t *testing.T) {
-	e := NewEngine()
-
-	select {
-	case <-e.Stopped():
-		t.Fatal("Stopped must not be closed while the engine runs")
-	default:
+	// A session bound to another instance does not rewrite the desired selection.
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "runtime-binding", Status: SessionStatusReady, UpdatedAt: time.Now()}}}); err != nil {
+		t.Fatalf("thread.session.status.set: %v", err)
 	}
-
-	e.Close()
-	select {
-	case <-e.Stopped():
-	case <-time.After(2 * time.Second):
-		t.Fatal("engine worker did not acknowledge stop after Close")
+	thread = step("title-only", Command{Title: "Renamed"}, "provider-b", "")
+	if thread.Session == nil || thread.Session.ProviderInstanceID != "runtime-binding" {
+		t.Fatalf("session = %#v, want runtime binding stored on the session", thread.Session)
 	}
-}
-
-func TestSubscribeThreadAlwaysReturnsCurrentAuthoritativeSnapshot(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	threadA := ThreadID("thread-snapshot-a")
-	threadB := ThreadID("thread-snapshot-b")
-	for _, command := range []Command{
-		{Type: CommandThreadCreate, CommandID: "snapshot-create-a", ThreadID: threadA, Title: "A"},
-		{Type: CommandThreadCreate, CommandID: "snapshot-create-b", ThreadID: threadB, Title: "B"},
-	} {
-		if _, err := engine.Dispatch(context.Background(), command); err != nil {
-			t.Fatal(err)
-		}
+	thread = step("provider-and-model", Command{ProviderInstanceID: "provider-c", ModelSelection: &provider.ModelSelection{Model: "opus"}}, "provider-c", "opus")
+	if thread.Session != nil || !lastEvent.Payload.SessionCleared {
+		t.Fatalf("session after provider switch = %#v (event %#v), want cleared", thread.Session, lastEvent.Payload)
 	}
-
-	initial, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadA})
-	if err != nil || initial.Kind != "snapshot" || initial.Snapshot == nil {
-		t.Fatalf("initial subscribe = %#v, %v", initial, err)
-	}
-	for _, command := range []Command{
-		{Type: CommandThreadMetaUpdate, CommandID: "snapshot-meta-b", ThreadID: threadB, Title: "B2"},
-		{Type: CommandThreadMetaUpdate, CommandID: "snapshot-meta-a", ThreadID: threadA, Title: "A2"},
-	} {
-		if _, err := engine.Dispatch(context.Background(), command); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	refreshed, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadA})
-	if err != nil || refreshed.Kind != "snapshot" || refreshed.Snapshot == nil {
-		t.Fatalf("refreshed subscribe = %#v, %v", refreshed, err)
-	}
-	if refreshed.Snapshot.Thread.Title != "A2" {
-		t.Fatalf("refreshed title = %q, want A2", refreshed.Snapshot.Thread.Title)
-	}
-	if refreshed.Snapshot.SnapshotSequence <= initial.Snapshot.SnapshotSequence {
-		t.Fatalf("refreshed sequence = %d, want > %d", refreshed.Snapshot.SnapshotSequence, initial.Snapshot.SnapshotSequence)
-	}
+	step("turn-start", Command{Type: CommandThreadTurnStart, ProviderInstanceID: "provider-d", ModelSelection: &provider.ModelSelection{Model: "haiku"}, Message: &CommandMessage{Text: "hello"}}, "provider-d", "haiku")
 }

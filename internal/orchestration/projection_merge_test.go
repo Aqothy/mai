@@ -4,9 +4,10 @@ import (
 	"testing"
 )
 
-// The item-payload contract has exactly two client-visible rules: a textDelta appends to the payload's "text"; otherwise a non-empty
-// payload replaces the previous one and an absent payload keeps it. These
-// tests pin applyItemPayload as that contract's reference implementation.
+// The item-payload contract has exactly two client-visible rules: a textDelta
+// appends to the payload's "text"; otherwise a non-empty payload replaces the
+// previous one and an absent payload keeps it. These tests pin
+// applyItemPayload as that contract's reference implementation.
 
 func TestApplyItemPayloadReplacesWithIncoming(t *testing.T) {
 	existing := []byte(`{"itemType":"tool_call","data":{"status":"pending","title":"Old"}}`)
