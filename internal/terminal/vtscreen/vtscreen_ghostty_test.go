@@ -128,6 +128,6 @@ func BenchmarkHeadlessScreens25(b *testing.B) {
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	// Native VT memory lives outside the Go heap, so this is a floor, not a
-	// ceiling; the recorded budget uses process RSS from the benchmark run.
+	// ceiling.
 	b.ReportMetric(float64(after.HeapAlloc-before.HeapAlloc)/float64(screens), "heapB/screen")
 }
