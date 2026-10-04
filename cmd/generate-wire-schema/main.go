@@ -113,49 +113,30 @@ func main() {
 		definition.Title = name
 	}
 
-	data, err := json.MarshalIndent(schema, "", "  ")
+	writeJSON(*out, schema)
+	writeJSON(*methodsOut, struct {
+		Methods       []wire.MethodDefinition       `json:"methods"`
+		Notifications []wire.NotificationDefinition `json:"notifications"`
+	}{wire.Methods, wire.Notifications})
+	// Closed string vocabularies are emitted separately: the JSON Schema
+	// reflector sees only `string` for Go named-string constants, so without
+	// this every client would re-type the literals by hand.
+	writeJSON(*vocabularyOut, struct {
+		Vocabularies []wire.VocabularyDefinition `json:"vocabularies"`
+	}{wire.Vocabularies})
+}
+
+// writeJSON writes v as indented JSON with a trailing newline.
+func writeJSON(path string, v any) {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		fatal(err)
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fatal(err)
 	}
-	if err := os.WriteFile(*out, data, 0o644); err != nil {
-		fatal(err)
-	}
-
-	methods := struct {
-		Methods       []wire.MethodDefinition       `json:"methods"`
-		Notifications []wire.NotificationDefinition `json:"notifications"`
-	}{wire.Methods, wire.Notifications}
-	methodData, err := json.MarshalIndent(methods, "", "  ")
-	if err != nil {
-		fatal(err)
-	}
-	methodData = append(methodData, '\n')
-	if err := os.MkdirAll(filepath.Dir(*methodsOut), 0o755); err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(*methodsOut, methodData, 0o644); err != nil {
-		fatal(err)
-	}
-
-	// Closed string vocabularies are emitted separately: the JSON Schema
-	// reflector sees only `string` for Go named-string constants, so without
-	// this every client would re-type the literals by hand.
-	vocabularies := struct {
-		Vocabularies []wire.VocabularyDefinition `json:"vocabularies"`
-	}{wire.Vocabularies}
-	vocabularyData, err := json.MarshalIndent(vocabularies, "", "  ")
-	if err != nil {
-		fatal(err)
-	}
-	vocabularyData = append(vocabularyData, '\n')
-	if err := os.MkdirAll(filepath.Dir(*vocabularyOut), 0o755); err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(*vocabularyOut, vocabularyData, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		fatal(err)
 	}
 }
