@@ -641,8 +641,6 @@ func toolActionFromACP(kind string) provider.ToolAction {
 		return provider.ToolActionFetch
 	case "switch_mode":
 		return provider.ToolActionSwitchMode
-	case "":
-		return provider.ToolActionOther
 	default:
 		return provider.ToolActionOther
 	}

@@ -714,11 +714,9 @@ func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, mo
 	return nil
 }
 
+// resolveModelConfigChoice finds the model-category option whose choice (by
+// value or label) or current value matches model, case-insensitively.
 func (h *Instance) resolveModelConfigChoice(sessionID string, model string) (string, string, bool) {
-	return h.resolveConfigChoice(sessionID, provider.ConfigOptionCategoryModel, []string{model})
-}
-
-func (h *Instance) resolveConfigChoice(sessionID string, category provider.ConfigOptionCategory, aliases []string) (string, string, bool) {
 	var options []provider.ConfigOption
 	h.mu.Lock()
 	if session := h.sessionLocked(sessionID); session != nil {
@@ -726,31 +724,19 @@ func (h *Instance) resolveConfigChoice(sessionID string, category provider.Confi
 	}
 	h.mu.Unlock()
 	for _, option := range options {
-		if option.Category != category || option.ID == "" {
-			continue
-		}
-		if value, ok := configChoiceValue(option, aliases); ok {
-			return option.ID, value, true
-		}
-	}
-	return "", "", false
-}
-
-func configChoiceValue(option provider.ConfigOption, aliases []string) (string, bool) {
-	for _, alias := range aliases {
-		if alias == "" {
+		if option.Category != provider.ConfigOptionCategoryModel || option.ID == "" {
 			continue
 		}
 		for _, choice := range option.Choices {
-			if strings.EqualFold(choice.Value, alias) || strings.EqualFold(choice.Label, alias) {
-				return choice.Value, true
+			if strings.EqualFold(choice.Value, model) || strings.EqualFold(choice.Label, model) {
+				return option.ID, choice.Value, true
 			}
 		}
-		if current, ok := option.CurrentValue.(string); ok && strings.EqualFold(current, alias) {
-			return current, true
+		if current, ok := option.CurrentValue.(string); ok && strings.EqualFold(current, model) {
+			return option.ID, current, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID string, value any) bool {
