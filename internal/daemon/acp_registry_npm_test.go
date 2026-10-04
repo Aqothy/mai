@@ -103,9 +103,9 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	s.acpRegistry = &acpRegistry{url: registryURL + "/acp.json", client: server.Client(), dataDir: filepath.Join(dir, "data"), npm: npm}
 	client := dialRecordingClient(t, newWSTestServer(t, s))
 	var catalog []wire.ACPRegistryAgent
-	client.call(t, RPCMethodACPRegistryList, nil, &catalog)
+	client.call(t, wire.MethodACPRegistryList, nil, &catalog)
 	var installed wire.ACPRegistryInstalledAgent
-	client.call(t, RPCMethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
+	client.call(t, wire.MethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
 	if installed.Version != "1.0.0" {
 		t.Fatalf("initial version=%s", installed.Version)
 	}
@@ -119,7 +119,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 		t.Fatal("install should register a cold provider")
 	}
 	var info provider.InstanceInfo
-	client.call(t, RPCMethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
+	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
 	firstPID := info.PID
 	id := orchestration.ThreadID("registry-update-qa")
 	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: id, Title: "Registry QA", Cwd: dir, ProviderInstanceID: info.InstanceID})
@@ -128,12 +128,12 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	mu.Lock()
 	ceiling = "2.0.0"
 	mu.Unlock()
-	client.call(t, RPCMethodACPRegistryList, nil, &catalog)
-	client.call(t, RPCMethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
+	client.call(t, wire.MethodACPRegistryList, nil, &catalog)
+	client.call(t, wire.MethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
 	if installed.Version != "2.0.0" {
 		t.Fatalf("updated version=%s", installed.Version)
 	}
-	client.call(t, RPCMethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
+	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
 	if info.PID != firstPID {
 		t.Fatal("update replaced the running provider")
 	}

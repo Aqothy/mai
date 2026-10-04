@@ -554,12 +554,12 @@ func (s *Server) publishTerminalListItem(item wire.TerminalListStreamItem) {
 	if len(subscribers) == 0 {
 		return
 	}
-	params, ok := s.marshalNotification(item, RPCMethodTerminalSubscribeList)
+	params, ok := s.marshalNotification(item, wire.MethodTerminalSubscribeList)
 	if !ok {
 		return
 	}
 	for _, client := range subscribers {
-		client.notify(RPCMethodTerminalSubscribeList, params)
+		client.notify(wire.MethodTerminalSubscribeList, params)
 	}
 }
 
@@ -590,12 +590,12 @@ func (s *Server) publishTerminalStreamItem(terminalID string, item wire.Terminal
 	if len(subscribers) == 0 {
 		return
 	}
-	params, ok := s.marshalNotification(item, RPCMethodTerminalSubscribe)
+	params, ok := s.marshalNotification(item, wire.MethodTerminalSubscribe)
 	if !ok {
 		return
 	}
 	for _, client := range subscribers {
-		client.notify(RPCMethodTerminalSubscribe, params)
+		client.notify(wire.MethodTerminalSubscribe, params)
 	}
 }
 

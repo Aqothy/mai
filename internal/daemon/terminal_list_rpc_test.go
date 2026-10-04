@@ -17,7 +17,7 @@ import (
 func subscribeTerminalListSnapshot(t *testing.T, c *terminalTestClient) wire.TerminalListStreamItem {
 	t.Helper()
 	var snapshot wire.TerminalListStreamItem
-	c.call(t, RPCMethodTerminalSubscribeList, wire.EmptyParams{}, &snapshot)
+	c.call(t, wire.MethodTerminalSubscribeList, wire.EmptyParams{}, &snapshot)
 	if snapshot.Kind != wire.TerminalListItemSnapshot {
 		t.Fatalf("subscribeList kind = %s, want snapshot", snapshot.Kind)
 	}
@@ -64,7 +64,7 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 
 	// Rename returns and publishes the new title with a bumped updatedAt.
 	var renamed wire.TerminalSummary
-	observer.call(t, RPCMethodTerminalRename, wire.TerminalRenameParams{
+	observer.call(t, wire.MethodTerminalRename, wire.TerminalRenameParams{
 		TerminalID: terminalID,
 		Title:      "Build terminal",
 	}, &renamed)
@@ -80,7 +80,7 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 
 	// Ordinary output must not publish list updates or bump updatedAt.
 	before := len(observer.listItemsSnapshot())
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      created.RunID,
 		Data:       []byte("printf 'NOISE-%d\\n' $((3+4))\n"),
@@ -91,7 +91,7 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	}
 
 	// Terminate publishes a stopped upsert without changing updatedAt.
-	observer.call(t, RPCMethodTerminalTerminate, wire.TerminalIDParams{TerminalID: terminalID}, nil)
+	observer.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: terminalID}, nil)
 	stopped := waitForListUpsert(t, observer, func(s wire.TerminalSummary) bool {
 		return s.TerminalID == terminalID && s.Status == terminal.StatusStopped
 	})
@@ -100,7 +100,7 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	}
 
 	// Delete removes the row and publishes a removal.
-	observer.call(t, RPCMethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
+	observer.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		removed := false
@@ -131,13 +131,13 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	client := dialTerminalClient(t, url)
 
 	created := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalRename, wire.TerminalRenameParams{
+	client.call(t, wire.MethodTerminalRename, wire.TerminalRenameParams{
 		TerminalID: created.Terminal.TerminalID,
 		Title:      "Survivor",
 	}, nil)
 	// A distinctive marker proves later that no pre-restart output can
 	// reach a post-restart attach.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: created.Terminal.TerminalID,
 		RunID:      created.RunID,
 		Data:       []byte("printf 'OLD-RUN-%d\\n' $((100+23))\n"),
@@ -174,7 +174,7 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 		t.Fatal("attach to stopped terminal succeeded, want relaunch requirement")
 	}
 	var relaunched wire.TerminalAttachSnapshot
-	client2.call(t, RPCMethodTerminalRelaunch, wire.TerminalAttachParams{
+	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
 		TerminalID: restored.TerminalID,
 		Columns:    80,
 		Rows:       24,
@@ -197,7 +197,7 @@ func TestTerminalDeleteWhileRunningTerminatesProcess(t *testing.T) {
 	client := dialTerminalClient(t, url)
 
 	created := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalDelete, wire.TerminalIDParams{TerminalID: created.Terminal.TerminalID}, nil)
+	client.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: created.Terminal.TerminalID}, nil)
 
 	// The identity is gone: attach and rename both fail.
 	if _, err := attachOnce(client, created.Terminal.TerminalID); err == nil {
@@ -206,7 +206,7 @@ func TestTerminalDeleteWhileRunningTerminatesProcess(t *testing.T) {
 	var renamed wire.TerminalSummary
 	ctx, cancel := timeout15()
 	defer cancel()
-	if err := client.conn.Call(ctx, RPCMethodTerminalRename, wire.TerminalRenameParams{
+	if err := client.conn.Call(ctx, wire.MethodTerminalRename, wire.TerminalRenameParams{
 		TerminalID: created.Terminal.TerminalID,
 		Title:      "ghost",
 	}).Await(ctx, &renamed); err == nil {

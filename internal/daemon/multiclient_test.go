@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/jsonrpc2"
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/coder/websocket"
@@ -57,7 +58,7 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 		return nil, jsonrpc2.ErrNotHandled
 	}
 	switch req.Method {
-	case RPCMethodOrchestrationSubscribeThread:
+	case wire.MethodOrchestrationSubscribeThread:
 		var item orchestration.ThreadStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
@@ -68,7 +69,7 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			c.threadEvents[threadID] = append(c.threadEvents[threadID], *item.Event)
 			c.mu.Unlock()
 		}
-	case RPCMethodOrchestrationSubscribeThreadList:
+	case wire.MethodOrchestrationSubscribeThreadList:
 		var item orchestration.ThreadListStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
@@ -95,7 +96,7 @@ func (c *recordingClient) call(t *testing.T, method string, params any, result a
 
 func (c *recordingClient) dispatchErr(command orchestration.Command) (orchestration.DispatchResult, error) {
 	var receipt orchestration.DispatchResult
-	err := c.callErr(RPCMethodOrchestrationDispatchCommand, command, &receipt)
+	err := c.callErr(wire.MethodOrchestrationDispatchCommand, command, &receipt)
 	return receipt, err
 }
 
@@ -111,7 +112,7 @@ func (c *recordingClient) dispatch(t *testing.T, command orchestration.Command) 
 func (c *recordingClient) subscribeThread(t *testing.T, threadID orchestration.ThreadID) orchestration.ThreadDetailSnapshot {
 	t.Helper()
 	var item orchestration.ThreadStreamItem
-	c.call(t, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &item)
+	c.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &item)
 	if item.Kind != "snapshot" || item.Snapshot == nil {
 		t.Fatalf("subscribeThread %s = %#v, want snapshot", threadID, item)
 	}
@@ -121,7 +122,7 @@ func (c *recordingClient) subscribeThread(t *testing.T, threadID orchestration.T
 func (c *recordingClient) subscribeThreadList(t *testing.T) orchestration.ThreadListSnapshot {
 	t.Helper()
 	var snapshot orchestration.ThreadListSnapshot
-	c.call(t, RPCMethodOrchestrationSubscribeThreadList, nil, &snapshot)
+	c.call(t, wire.MethodOrchestrationSubscribeThreadList, nil, &snapshot)
 	return snapshot
 }
 
@@ -488,7 +489,7 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 		t.Fatalf("slow client dial: %v", err)
 	}
 	defer slow.Close(websocket.StatusNormalClosure, "")
-	subscribe, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": RPCMethodOrchestrationSubscribeThread, "params": orchestration.SubscribeThreadInput{ThreadID: threadID}})
+	subscribe, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": wire.MethodOrchestrationSubscribeThread, "params": orchestration.SubscribeThreadInput{ThreadID: threadID}})
 	if err != nil {
 		t.Fatalf("marshal subscribe: %v", err)
 	}
@@ -572,7 +573,7 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	// transferring thousands of missed deltas.
 	recovered := dialRecordingClient(t, url)
 	var recoveredItem orchestration.ThreadStreamItem
-	recovered.call(t, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &recoveredItem)
+	recovered.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &recoveredItem)
 	if recoveredItem.Kind != "snapshot" || recoveredItem.Snapshot == nil {
 		t.Fatalf("recovery = %#v, want authoritative snapshot", recoveredItem)
 	}

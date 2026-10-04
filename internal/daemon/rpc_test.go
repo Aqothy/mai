@@ -25,7 +25,7 @@ type rpcTestClientHandler struct {
 
 func (h rpcTestClientHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
 	switch req.Method {
-	case RPCMethodOrchestrationSubscribeThread:
+	case wire.MethodOrchestrationSubscribeThread:
 		var item orchestration.ThreadStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
@@ -93,7 +93,7 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	threadID := orchestration.ThreadID("missing-thread")
 	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
 	handler := &rpcHandler{server: s, client: client}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("new call: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRPCGetItemDetailReturnsCanonicalToolData(t *testing.T) {
 	}
 	req, err := jsonrpc2.NewCall(
 		jsonrpc2.StringID("1"),
-		RPCMethodOrchestrationGetItemDetail,
+		wire.MethodOrchestrationGetItemDetail,
 		orchestration.GetItemDetailInput{ThreadID: threadID, ItemID: "tool-1"},
 	)
 	if err != nil {
@@ -337,7 +337,7 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{}),
 	}
 	handler := &rpcHandler{server: s, client: client}
-	first, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+	first, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
 		ProviderInstanceID: "provider-a", Cwd: "/first",
 	})
 	if err != nil {
@@ -346,13 +346,13 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	if len(first.Skills) != 1 || first.Skills[0].Name != "review" {
 		t.Fatalf("first options skills = %#v", first.Skills)
 	}
-	_, err = handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+	_, err = handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
 		ProviderInstanceID: "provider-b", Cwd: "/other",
 	})
 	if err != nil {
 		t.Fatalf("second provider get: %v", err)
 	}
-	reused, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+	reused, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
 		ProviderInstanceID: "provider-a", Cwd: "/first",
 	})
 	if err != nil {
@@ -371,7 +371,7 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	}})
 	select {
 	case message := <-client.outbound:
-		update, ok := message.params.(providerOptionsResult)
+		update, ok := message.params.(wire.ProviderOptionsResult)
 		if message.method != wire.MethodProviderOptionsUpdated ||
 			!ok ||
 			update.OptionsSessionID != first.OptionsSessionID ||
@@ -384,7 +384,7 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("spontaneous options update was not routed to the client")
 	}
-	setResult, err := handler.setProviderOption(context.Background(), providerOptionsSetParams{
+	setResult, err := handler.setProviderOption(context.Background(), wire.ProviderOptionsSetParams{
 		OptionsSessionID: first.OptionsSessionID, OptionID: "model", Value: "fast",
 	})
 	if err != nil {
@@ -401,12 +401,12 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	instances["provider-a"].closeBlock = closeBlock
 	instances["provider-a"].mu.Unlock()
 	type replacementResult struct {
-		result providerOptionsResult
+		result wire.ProviderOptionsResult
 		err    error
 	}
 	replacementDone := make(chan replacementResult, 1)
 	go func() {
-		result, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+		result, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
 			ProviderInstanceID: "provider-a", Cwd: "/second",
 		})
 		replacementDone <- replacementResult{result: result, err: err}
@@ -417,7 +417,7 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		close(closeBlock)
 		t.Fatal("replacement did not begin closing the old options session")
 	}
-	var replacement providerOptionsResult
+	var replacement wire.ProviderOptionsResult
 	select {
 	case result := <-replacementDone:
 		if result.err != nil {
@@ -458,12 +458,12 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("options invalidation was not routed to the client")
 	}
-	if _, err := handler.setProviderOption(context.Background(), providerOptionsSetParams{
+	if _, err := handler.setProviderOption(context.Background(), wire.ProviderOptionsSetParams{
 		OptionsSessionID: replacement.OptionsSessionID, OptionID: "model", Value: "slow",
 	}); err == nil {
 		t.Fatal("set with invalidated optionsSessionId succeeded")
 	}
-	reopenedAfterInvalidation, err := handler.getProviderOptions(context.Background(), providerOptionsGetParams{
+	reopenedAfterInvalidation, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
 		ProviderInstanceID: "provider-a", Cwd: "/second",
 	})
 	if err != nil || reopenedAfterInvalidation.OptionsSessionID == replacement.OptionsSessionID {
@@ -650,7 +650,7 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 	}()
 
 	handler := &rpcHandler{server: s, client: client}
-	subscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+	subscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("new subscribe call: %v", err)
 	}
@@ -664,14 +664,14 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 	}
 	select {
 	case msg := <-client.outbound:
-		if msg.method != RPCMethodOrchestrationSubscribeThread {
+		if msg.method != wire.MethodOrchestrationSubscribeThread {
 			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
 		}
 	default:
 		t.Fatal("expected a live event while subscribed")
 	}
 
-	unsubscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("2"), RPCMethodOrchestrationUnsubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+	unsubscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("2"), wire.MethodOrchestrationUnsubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("new unsubscribe call: %v", err)
 	}
@@ -708,21 +708,21 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-permission-option")
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
 		t.Fatalf("subscribeThread: %v", err)
 	}
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "hello"}}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "hello"}}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
 
 	approvalEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
 	})
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), Decision: provider.ApprovalDecisionAccept, OptionID: "reject"}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), Decision: provider.ApprovalDecisionAccept, OptionID: "reject"}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.approval.respond: %v", err)
 	}
 
@@ -741,7 +741,7 @@ func TestRPCFailedDispatchReturnsNilResult(t *testing.T) {
 	defer s.Close()
 	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
 	handler := &rpcHandler{server: s, client: client}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnInterrupt, CommandID: "cmd-bad-interrupt", ThreadID: "missing-thread"})
+	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnInterrupt, CommandID: "cmd-bad-interrupt", ThreadID: "missing-thread"})
 	if err != nil {
 		t.Fatalf("new call: %v", err)
 	}
@@ -764,7 +764,7 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 
 	threadID := orchestration.ThreadID("thread-reject-internal")
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-reject-internal", ThreadID: threadID, Title: "Reject internal", ProviderInstanceID: "codex"}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-reject-internal", ThreadID: threadID, Title: "Reject internal", ProviderInstanceID: "codex"}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 
@@ -790,7 +790,7 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 		internalCommands = append(internalCommands, orchestration.Command{Type: commandType, CommandID: orchestration.CommandID("cmd-reject-" + commandType), ThreadID: threadID})
 	}
 	for _, command := range internalCommands {
-		if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, command).Await(ctx, &receipt); err == nil {
+		if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, command).Await(ctx, &receipt); err == nil {
 			t.Fatalf("%s dispatched over RPC without error", command.Type)
 		}
 	}
@@ -806,7 +806,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	ctx := context.Background()
 
 	var started provider.InstanceInfo
-	if err := client.Call(ctx, RPCMethodProviderStart, map[string]any{
+	if err := client.Call(ctx, wire.MethodProviderStart, map[string]any{
 		"instanceId": "codex",
 		"name":       "codex",
 		"driver":     "acp",
@@ -822,7 +822,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	}
 
 	var list []provider.InstanceInfo
-	if err := client.Call(ctx, RPCMethodProviderList, nil).Await(ctx, &list); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderList, nil).Await(ctx, &list); err != nil {
 		t.Fatalf("provider.list: %v", err)
 	}
 	if len(list) != 3 {
@@ -847,7 +847,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	ctx := context.Background()
 
 	var started provider.InstanceInfo
-	if err := client.Call(ctx, RPCMethodProviderStart, providerStartRPCParams{InstanceSpec: acpInstanceSpec("codex", "codex", helperCommand("rich-sessions"))}).Await(ctx, &started); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", helperCommand("rich-sessions"))}).Await(ctx, &started); err != nil {
 		t.Fatalf("provider.start: %v", err)
 	}
 	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 1 || started.Auth.Methods[0].ID != "agent-login" {
@@ -855,12 +855,12 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	}
 
 	var rejected provider.AuthenticationResult
-	if err := client.Call(ctx, RPCMethodProviderAuthenticate, providerAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}).Await(ctx, &rejected); err == nil {
+	if err := client.Call(ctx, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}).Await(ctx, &rejected); err == nil {
 		t.Fatal("authenticate with unadvertised method err = nil, want error")
 	}
 
 	var authenticated provider.AuthenticationResult
-	if err := client.Call(ctx, RPCMethodProviderAuthenticate, providerAuthenticateParams{InstanceID: "codex", MethodID: "agent-login"}).Await(ctx, &authenticated); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "agent-login"}).Await(ctx, &authenticated); err != nil {
 		t.Fatalf("provider.authenticate: %v", err)
 	}
 	if authenticated.Instance.Auth.Status != provider.AuthStatusAuthenticated {
@@ -868,7 +868,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	}
 
 	var loggedOut provider.InstanceInfo
-	if err := client.Call(ctx, RPCMethodProviderLogout, providerInstanceParams{InstanceID: "codex"}).Await(ctx, &loggedOut); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderLogout, wire.ProviderInstanceParams{InstanceID: "codex"}).Await(ctx, &loggedOut); err != nil {
 		t.Fatalf("provider.logout: %v", err)
 	}
 	if loggedOut.Auth.Status != provider.AuthStatusUnauthenticated {
@@ -889,20 +889,20 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", Cwd: importCwd, UpdatedAt: "2026-07-15T12:00:00Z"}
 	invalid := summary
 	invalid.Cwd = "relative/project"
-	var rejected providerImportSessionResult
-	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: invalid}).Await(ctx, &rejected); err == nil {
+	var rejected wire.ProviderImportSessionResult
+	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: invalid}).Await(ctx, &rejected); err == nil {
 		t.Fatal("provider.importSession with relative cwd err = nil")
 	}
 
-	var first providerImportSessionResult
-	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &first); err != nil {
+	var first wire.ProviderImportSessionResult
+	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &first); err != nil {
 		t.Fatalf("provider.importSession: %v", err)
 	}
 	if first.ThreadID == "" || !first.Imported {
 		t.Fatalf("first import = %+v, want a newly imported thread", first)
 	}
-	var duplicate providerImportSessionResult
-	if err := client.Call(ctx, RPCMethodProviderImportSession, providerImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &duplicate); err != nil {
+	var duplicate wire.ProviderImportSessionResult
+	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &duplicate); err != nil {
 		t.Fatalf("duplicate provider.importSession: %v", err)
 	}
 	if duplicate.ThreadID != first.ThreadID || duplicate.Imported {
@@ -910,14 +910,14 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	}
 
 	var subscribed orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
 		t.Fatalf("subscribe imported thread: %v", err)
 	}
 	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd != importCwd || subscribed.Snapshot.Thread.ProviderInstanceID != "codex" {
 		t.Fatalf("imported snapshot = %+v", subscribed.Snapshot)
 	}
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("prepare imported thread: %v", err)
 	}
 	refreshed := waitForThreadSnapshot(t, threadItems, func(snapshot orchestration.ThreadDetailSnapshot) bool {
@@ -942,8 +942,8 @@ func TestRPCImportProviderSessionRejectsProviderWithoutRestore(t *testing.T) {
 		t.Fatalf("provider start: %v", err)
 	}
 	client := newRPCTestClient(t, s, rpcTestClientHandler{})
-	var result providerImportSessionResult
-	err := client.Call(context.Background(), RPCMethodProviderImportSession, providerImportSessionParams{
+	var result wire.ProviderImportSessionResult
+	err := client.Call(context.Background(), wire.MethodProviderImportSession, wire.ProviderImportSessionParams{
 		InstanceID: "list-only",
 		Session: provider.SessionSummary{
 			SessionID: "external-session",
@@ -968,14 +968,14 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	cwd := t.TempDir()
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-mgmt", ThreadID: threadID, Title: "Session mgmt", ProviderInstanceID: "codex", Cwd: cwd}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-mgmt", ThreadID: threadID, Title: "Session mgmt", ProviderInstanceID: "codex", Cwd: cwd}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
 		t.Fatalf("subscribeThread: %v", err)
 	}
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-mgmt", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-mgmt", Text: "hello"}}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-mgmt", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-mgmt", Text: "hello"}}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
 	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
@@ -983,7 +983,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	})
 
 	var sessions []provider.SessionSummary
-	if err := client.Call(ctx, RPCMethodProviderListSessions, providerListSessionsParams{InstanceID: "codex"}).Await(ctx, &sessions); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "codex"}).Await(ctx, &sessions); err != nil {
 		t.Fatalf("provider.listSessions: %v", err)
 	}
 	if len(sessions) != 1 || sessions[0].SessionID != "sess_new" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" {
@@ -991,22 +991,22 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	}
 
 	var ignored json.RawMessage
-	err := client.Call(ctx, RPCMethodProviderDeleteSession, providerSessionParams{InstanceID: "codex", SessionID: "unbound-session"}).Await(ctx, &ignored)
+	err := client.Call(ctx, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "unbound-session"}).Await(ctx, &ignored)
 	if err == nil || !strings.Contains(err.Error(), "session delete") {
 		t.Fatalf("provider.deleteSession err = %v, want capability-gated session-delete error", err)
 	}
 
-	err = client.Call(ctx, RPCMethodProviderCloseSession, providerSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored)
+	err = client.Call(ctx, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored)
 	if err == nil || !strings.Contains(err.Error(), "bound to thread") {
 		t.Fatalf("provider.closeSession bound session err = %v, want rejection", err)
 	}
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionStop, CommandID: "cmd-stop-mgmt", ThreadID: threadID}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionStop, CommandID: "cmd-stop-mgmt", ThreadID: threadID}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.session.stop: %v", err)
 	}
 	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadSessionStatusSet && event.Payload.Session != nil && event.Payload.Session.Status == orchestration.SessionStatusStopped
 	})
-	if err := client.Call(ctx, RPCMethodProviderCloseSession, providerSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored); err != nil {
+	if err := client.Call(ctx, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored); err != nil {
 		t.Fatalf("provider.closeSession after stop: %v", err)
 	}
 }
@@ -1027,14 +1027,14 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-metadata")
 
 	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.create: %v", err)
 	}
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
 		t.Fatalf("subscribeThread: %v", err)
 	}
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "hello"}}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "hello"}}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.turn.start: %v", err)
 	}
 
@@ -1074,7 +1074,7 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 
 	// Model switching round-trips through session/set_config_option. Keeping the
 	// category-specific case also verifies the thread's model projection.
-	if err := client.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-model-metadata", ThreadID: threadID, OptionID: "model", Value: "test-model-2"}).Await(ctx, &receipt); err != nil {
+	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-model-metadata", ThreadID: threadID, OptionID: "model", Value: "test-model-2"}).Await(ctx, &receipt); err != nil {
 		t.Fatalf("thread.config-option.set: %v", err)
 	}
 	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
@@ -1087,7 +1087,7 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 
 	lateClient := newRPCTestClient(t, s, rpcTestClientHandler{})
 	var late orchestration.ThreadStreamItem
-	if err := lateClient.Call(ctx, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &late); err != nil {
+	if err := lateClient.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &late); err != nil {
 		t.Fatalf("late subscribeThread: %v", err)
 	}
 	if late.Kind != "snapshot" || late.Snapshot == nil {
@@ -1313,7 +1313,7 @@ func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1328,7 +1328,7 @@ func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 
 	select {
 	case msg := <-client.outbound:
-		if msg.method != RPCMethodOrchestrationSubscribeThread {
+		if msg.method != wire.MethodOrchestrationSubscribeThread {
 			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
 		}
 		raw, ok := msg.params.(json.RawMessage)

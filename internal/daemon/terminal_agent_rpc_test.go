@@ -38,7 +38,7 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      created.RunID,
 		Data:       []byte(spinnerTitleScript),
@@ -90,7 +90,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      created.RunID,
 		Data:       []byte(spinnerTitleScript),
@@ -99,7 +99,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 
 	// Navigate away: the shell keeps running with no attached client, and
 	// activity keeps updating server-side.
-	controller.notify(t, RPCMethodTerminalDetach, wire.TerminalDetachParams{
+	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{
 		TerminalID: terminalID,
 		RunID:      created.RunID,
 	})
@@ -113,7 +113,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 
 	// Reattaching acknowledges done and returns the row to no activity.
 	var attach wire.TerminalAttachSnapshot
-	controller.call(t, RPCMethodTerminalAttach, wire.TerminalAttachParams{
+	controller.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       24,

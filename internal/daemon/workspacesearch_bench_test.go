@@ -67,7 +67,7 @@ func BenchmarkWorkspaceSearchFilesRPC100k(b *testing.B) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var result wire.WorkspaceSearchFilesResult
 		started := time.Now()
-		err := conn.Call(ctx, RPCMethodWorkspaceSearchFiles, params).Await(ctx, &result)
+		err := conn.Call(ctx, wire.MethodWorkspaceSearchFiles, params).Await(ctx, &result)
 		samples = append(samples, time.Since(started))
 		cancel()
 		if err != nil {

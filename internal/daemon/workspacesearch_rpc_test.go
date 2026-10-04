@@ -44,7 +44,7 @@ func searchUntilWarm(t *testing.T, conn *jsonrpc2.Connection, params wire.Worksp
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var result wire.WorkspaceSearchFilesResult
-		err := conn.Call(ctx, RPCMethodWorkspaceSearchFiles, params).Await(ctx, &result)
+		err := conn.Call(ctx, wire.MethodWorkspaceSearchFiles, params).Await(ctx, &result)
 		cancel()
 		if err != nil {
 			t.Fatalf("workspace.searchFiles: %v", err)
@@ -90,7 +90,7 @@ func TestWorkspaceSearchFilesForExistingThread(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var receipt orchestration.DispatchResult
-	err := conn.Call(ctx, RPCMethodOrchestrationDispatchCommand, orchestration.Command{
+	err := conn.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{
 		Type:     orchestration.CommandThreadCreate,
 		ThreadID: threadID,
 		Title:    "workspace search fixture",
@@ -116,7 +116,7 @@ func TestWorkspaceSearchFilesRejectsInvalidRequests(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		var result wire.WorkspaceSearchFilesResult
-		return conn.Call(ctx, RPCMethodWorkspaceSearchFiles, params).Await(ctx, &result)
+		return conn.Call(ctx, wire.MethodWorkspaceSearchFiles, params).Await(ctx, &result)
 	}
 
 	invalid := []struct {

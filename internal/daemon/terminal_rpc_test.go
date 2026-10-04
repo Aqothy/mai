@@ -47,7 +47,7 @@ func (c *terminalTestClient) Handle(_ context.Context, req *jsonrpc2.Request) (a
 		return nil, jsonrpc2.ErrNotHandled
 	}
 	switch req.Method {
-	case RPCMethodTerminalSubscribe:
+	case wire.MethodTerminalSubscribe:
 		var item wire.TerminalStreamItem
 		if err := jsonUnmarshalParams(req, &item); err != nil {
 			return nil, err
@@ -59,7 +59,7 @@ func (c *terminalTestClient) Handle(_ context.Context, req *jsonrpc2.Request) (a
 			c.output.Write(item.Data)
 		}
 		return nil, nil
-	case RPCMethodTerminalSubscribeList:
+	case wire.MethodTerminalSubscribeList:
 		var item wire.TerminalListStreamItem
 		if err := jsonUnmarshalParams(req, &item); err != nil {
 			return nil, err
@@ -166,7 +166,7 @@ func (c *terminalTestClient) statusItems() []wire.TerminalStreamItem {
 func createTestTerminal(t *testing.T, c *terminalTestClient) wire.TerminalAttachSnapshot {
 	t.Helper()
 	var snapshot wire.TerminalAttachSnapshot
-	c.call(t, RPCMethodTerminalCreate, wire.TerminalCreateParams{
+	c.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{
 		Cwd:     t.TempDir(),
 		Columns: 80,
 		Rows:    24,
@@ -189,20 +189,20 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 		t.Fatalf("status = %s, want running", snapshot.Terminal.Status)
 	}
 
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'RPC-%d\\n' $((40+2))\n"),
 	})
 	client.waitForOutput(t, "RPC-42")
 
-	client.notify(t, RPCMethodTerminalResize, wire.TerminalResizeParams{
+	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Columns:    111,
 		Rows:       31,
 	})
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n"),
@@ -236,7 +236,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	const outputBytes = 5 * 1024 * 1024
 	const maximumNotificationBytes = 64 * 1024
 	started := time.Now()
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data: []byte(fmt.Sprintf(
@@ -264,7 +264,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 
 	// A subsequent command proves the same attached connection remains live
 	// after the output burst instead of being overflow-closed.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'AFTER-LARGE-OUTPUT\\n'\n"),
@@ -295,12 +295,12 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 
 	snapshot := createTestTerminal(t, controller)
 
-	intruder.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	intruder.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'INTRUDER-%d\\n' $((7*3))\n"),
 	})
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'OWNER-%d\\n' $((7*3))\n"),
@@ -323,7 +323,7 @@ func TestTerminalTerminateStreamsFinalStatus(t *testing.T) {
 	client := dialTerminalClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalTerminate, wire.TerminalIDParams{TerminalID: snapshot.Terminal.TerminalID}, nil)
+	client.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: snapshot.Terminal.TerminalID}, nil)
 
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -351,7 +351,7 @@ func TestTerminalNaturalExitStreamsExitCode(t *testing.T) {
 	client := dialTerminalClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: snapshot.Terminal.TerminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("exit 5\n"),

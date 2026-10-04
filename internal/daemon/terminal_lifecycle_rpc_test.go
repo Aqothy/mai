@@ -17,7 +17,7 @@ import (
 func attachTestTerminal(t *testing.T, c *terminalTestClient, terminalID string) wire.TerminalAttachSnapshot {
 	t.Helper()
 	var snapshot wire.TerminalAttachSnapshot
-	c.call(t, RPCMethodTerminalAttach, wire.TerminalAttachParams{
+	c.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       24,
@@ -46,7 +46,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	first.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'HISTORY-%d\\n' $((80+8))\n"),
@@ -67,7 +67,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 
 	// The new listener can write; live output arrives above the snapshot
 	// sequence in order.
-	second.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	second.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      attach.RunID,
 		Data:       []byte("printf 'LIVE-%d\\n' $((60+6))\n"),
@@ -90,7 +90,7 @@ func TestTerminalAttachSnapshotReportsAppliedGrid(t *testing.T) {
 
 	created := createTestTerminal(t, first)
 	var attached wire.TerminalAttachSnapshot
-	second.call(t, RPCMethodTerminalAttach, wire.TerminalAttachParams{
+	second.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: created.Terminal.TerminalID,
 		Columns:    96,
 		Rows:       31,
@@ -115,7 +115,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 
 	// Both attached clients may write, and each sees the resulting shared
 	// stream from the one PTY.
-	first.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'FIRST-%d\\n' $((9*9))\n"),
@@ -123,7 +123,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	first.waitForOutput(t, "FIRST-81")
 	second.waitForOutput(t, "FIRST-81")
 
-	second.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	second.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      attach.RunID,
 		Data:       []byte("printf 'SECOND-%d\\n' $((9*9))\n"),
@@ -132,7 +132,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	second.waitForOutput(t, "SECOND-81")
 
 	// Resizes are shared PTY state; the latest valid resize wins.
-	first.notify(t, RPCMethodTerminalResize, wire.TerminalResizeParams{
+	first.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Columns:    120,
@@ -154,7 +154,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	if !firstResizeApplied {
 		t.Fatal("first attached-client resize was not applied")
 	}
-	second.notify(t, RPCMethodTerminalResize, wire.TerminalResizeParams{
+	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
 		TerminalID: terminalID,
 		RunID:      attach.RunID,
 		Columns:    96,
@@ -187,7 +187,7 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	ctx, cancel := timeout15()
 	defer cancel()
 	var invalidAttach wire.TerminalAttachSnapshot
-	if err := second.conn.Call(ctx, RPCMethodTerminalAttach, wire.TerminalAttachParams{
+	if err := second.conn.Call(ctx, wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    1,
 		Rows:       24,
@@ -195,7 +195,7 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 		t.Fatal("attach with invalid dimensions succeeded")
 	}
 
-	first.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n"),
@@ -203,7 +203,7 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	first.waitForOutput(t, "AFTER-BAD-ATTACH-7")
 
 	var invalidRelaunch wire.TerminalAttachSnapshot
-	if err := second.conn.Call(ctx, RPCMethodTerminalRelaunch, wire.TerminalAttachParams{
+	if err := second.conn.Call(ctx, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       301,
@@ -211,7 +211,7 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 		t.Fatal("relaunch with invalid dimensions succeeded")
 	}
 
-	first.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'AFTER-BAD-RELAUNCH-%d\\n' $((4+4))\n"),
@@ -228,20 +228,20 @@ func TestTerminalDetachKeepsShellRunning(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'BEFORE-%d\\n' $((10+1))\n"),
 	})
 	client.waitForOutput(t, "BEFORE-11")
 
-	client.notify(t, RPCMethodTerminalDetach, wire.TerminalDetachParams{
+	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 	})
 
 	// Detached input must be ignored, and the shell must stay alive.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'DETACHED-%d\\n' $((10+2))\n"),
@@ -268,7 +268,7 @@ func TestTerminalDisconnectLeavesShellForNextClient(t *testing.T) {
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	first.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'SURVIVES-%d\\n' $((30+3))\n"),
@@ -307,7 +307,7 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'OLDRUN-%d\\n' $((20+2))\n"),
@@ -315,7 +315,7 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	client.waitForOutput(t, "OLDRUN-22")
 
 	var relaunched wire.TerminalAttachSnapshot
-	client.call(t, RPCMethodTerminalRelaunch, wire.TerminalAttachParams{
+	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       24,
@@ -328,12 +328,12 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	}
 
 	// Stale input carrying the old run id cannot reach the new shell.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'STALERUN-%d\\n' $((40+4))\n"),
 	})
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      relaunched.RunID,
 		Data:       []byte("printf 'FRESH-%d\\n' $((40+5))\n"),
@@ -353,7 +353,7 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
+	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
 		TerminalID: terminalID,
 		RunID:      snapshot.RunID,
 		Data:       []byte("printf 'FINAL-%d\\n' $((90+9)); exit 4\n"),
@@ -388,7 +388,7 @@ func attachOnce(c *terminalTestClient, terminalID string) (wire.TerminalAttachSn
 	var snapshot wire.TerminalAttachSnapshot
 	ctx, cancel := timeout15()
 	defer cancel()
-	err := c.conn.Call(ctx, RPCMethodTerminalAttach, wire.TerminalAttachParams{
+	err := c.conn.Call(ctx, wire.MethodTerminalAttach, wire.TerminalAttachParams{
 		TerminalID: terminalID,
 		Columns:    80,
 		Rows:       24,

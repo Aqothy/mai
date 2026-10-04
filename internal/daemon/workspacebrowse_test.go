@@ -59,7 +59,7 @@ func TestBrowseWorkspaceDirectoriesRPCAndValidation(t *testing.T) {
 	var result wire.WorkspaceBrowseDirectoriesResult
 	if err := client.Call(
 		context.Background(),
-		RPCMethodWorkspaceBrowseDirectories,
+		wire.MethodWorkspaceBrowseDirectories,
 		wire.WorkspaceBrowseDirectoriesParams{Path: root},
 	).Await(context.Background(), &result); err != nil {
 		t.Fatalf("workspace.browseDirectories: %v", err)
@@ -72,7 +72,7 @@ func TestBrowseWorkspaceDirectoriesRPCAndValidation(t *testing.T) {
 	var homeResult wire.WorkspaceBrowseDirectoriesResult
 	if err := client.Call(
 		context.Background(),
-		RPCMethodWorkspaceBrowseDirectories,
+		wire.MethodWorkspaceBrowseDirectories,
 		wire.WorkspaceBrowseDirectoriesParams{},
 	).Await(context.Background(), &homeResult); err != nil {
 		t.Fatalf("browse home directory: %v", err)
@@ -89,7 +89,7 @@ func TestBrowseWorkspaceDirectoriesRPCAndValidation(t *testing.T) {
 		var invalidResult wire.WorkspaceBrowseDirectoriesResult
 		err := client.Call(
 			context.Background(),
-			RPCMethodWorkspaceBrowseDirectories,
+			wire.MethodWorkspaceBrowseDirectories,
 			wire.WorkspaceBrowseDirectoriesParams{Path: path},
 		).Await(context.Background(), &invalidResult)
 		if err == nil {
