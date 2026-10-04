@@ -4,7 +4,6 @@ package daemon
 // simultaneous actions, cross-client approvals/interrupts, reconnect
 // mid-turn, and a slow client that gets overflow-closed and recovers from an
 // authoritative snapshot.
-// Every client here follows the documented CLIENT_API.md sync contract.
 
 import (
 	"context"

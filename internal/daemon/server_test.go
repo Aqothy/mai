@@ -294,7 +294,7 @@ func TestHelperProcess(t *testing.T) {
 
 func isSessionMode(mode string) bool {
 	switch mode {
-	case "sessions", "blocked-sessions", "permission-deny-sessions", "permission-allow-sessions", "lingering-sessions",
+	case "sessions", "blocked-sessions", "permission-deny-sessions", "lingering-sessions",
 		"rich-sessions", "scripted-sessions", "list-only-sessions":
 		return true
 	}
@@ -321,11 +321,8 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 	linger := mode == "lingering-sessions"
 	rich := mode == "rich-sessions"
 	expectedPermissionOption := ""
-	switch mode {
-	case "permission-deny-sessions":
+	if mode == "permission-deny-sessions" {
 		expectedPermissionOption = "reject"
-	case "permission-allow-sessions":
-		expectedPermissionOption = "allow"
 	}
 
 	cwdBySession := map[string]string{}
