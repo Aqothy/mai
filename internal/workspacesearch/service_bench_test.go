@@ -1,8 +1,7 @@
 //go:build darwin && arm64 && cgo
 
-// Service-layer benchmarks over a real FFF index: what root
-// canonicalization, registry lookup, and result sanitization add on top of
-// the native search, and how the registry behaves under concurrent clients.
+// Service-layer benchmark over a real FFF index: how the registry behaves
+// under concurrent clients.
 //
 //	go test ./internal/workspacesearch -bench . -benchtime 1000x
 package workspacesearch
@@ -33,24 +32,6 @@ func warmBenchService(b *testing.B, root string) *Service {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-}
-
-func BenchmarkServiceWarmSearch100k(b *testing.B) {
-	root := searchtest.Corpus(b, 100_000)
-	s := warmBenchService(b, root)
-	ctx := context.Background()
-	samples := make([]time.Duration, 0, b.N)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		started := time.Now()
-		if _, err := s.Search(ctx, root, "file0421go", 50); err != nil {
-			b.Fatalf("Search: %v", err)
-		}
-		samples = append(samples, time.Since(started))
-	}
-	b.StopTimer()
-	searchtest.ReportPercentiles(b, samples)
 }
 
 // BenchmarkServiceWarmSearchParallel models several clients querying one

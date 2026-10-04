@@ -58,10 +58,6 @@ func (f *fakeFinder) SearchFiles(string, int) ([]fff.FileMatch, error) {
 	return f.matches, nil
 }
 
-func (f *fakeFinder) ScanProgress() (fff.ScanProgress, error) {
-	return fff.ScanProgress{}, nil
-}
-
 func (f *fakeFinder) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

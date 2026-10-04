@@ -172,28 +172,6 @@ func (f *finder) SearchFiles(query string, limit int) ([]FileMatch, error) {
 	return matches, nil
 }
 
-func (f *finder) ScanProgress() (ScanProgress, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.closed {
-		return ScanProgress{}, ErrClosed
-	}
-	handle, _, err := consumeResult(C.fff_get_scan_progress(f.handle), "scan progress")
-	if err != nil {
-		return ScanProgress{}, err
-	}
-	progress := (*C.FffScanProgress)(handle)
-	if progress == nil {
-		return ScanProgress{}, fmt.Errorf("fff: scan progress returned no payload")
-	}
-	defer C.fff_free_scan_progress(progress)
-	return ScanProgress{
-		ScannedFiles: uint64(progress.scanned_files_count),
-		Scanning:     bool(progress.is_scanning),
-		WatcherReady: bool(progress.is_watcher_ready),
-	}, nil
-}
-
 func (f *finder) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
