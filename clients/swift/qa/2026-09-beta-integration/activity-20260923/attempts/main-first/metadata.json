@@ -1,9 +1,0 @@
-{
-  "app": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-23/activity-build/mai.app",
-  "codeImageSHA256": "d068b58c7ccd2c7afca5e2d39263644155a0a7144467c031457994a75da1a2de",
-  "requestedCaptureHz": 120,
-  "container": "custom",
-  "activity": true,
-  "scope": "captured frame inspection; capture overhead invalidates FPS comparisons",
-  "completed": false
-}

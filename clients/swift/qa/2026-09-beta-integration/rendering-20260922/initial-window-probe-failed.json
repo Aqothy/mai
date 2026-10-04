@@ -1,8 +1,0 @@
-{
-  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
-  "codeImageSHA256": "bba11d79339a8289fc44ad5eddd10ff31cbc62a4460391b5cf830c6e71cc1e2c",
-  "requestedCaptureHz": 120,
-  "container": "custom",
-  "scope": "captured frame inspection; capture overhead invalidates FPS comparisons",
-  "completed": false
-}

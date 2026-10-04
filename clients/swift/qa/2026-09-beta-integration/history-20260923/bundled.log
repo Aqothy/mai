@@ -1,7 +1,0 @@
-=== RUN   TestLiveHistoryPagination
-    history_live_test.go:98: scoped history: 2 sessions, 2 one-item pages, same complete order
-    history_live_test.go:114: actual adapter pagination: 737 unique sessions across its 100-item boundary; metadata not logged
-    history_live_test.go:152: fixture resume/replay: 2 completed turns; exact user text, images and assistant replies preserved
---- PASS: TestLiveHistoryPagination (3.08s)
-PASS
-ok  	github.com/Aqothy/maiD/internal/adapters/codexapp	3.292s

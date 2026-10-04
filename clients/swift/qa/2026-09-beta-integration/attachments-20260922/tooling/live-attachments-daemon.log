@@ -1,6 +1,0 @@
-time=2026-09-22T21:46:31.809-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/live-attachments/data/maid.db
-time=2026-09-22T21:46:31.809-04:00 level=INFO msg="restored persisted threads" count=0
-time=2026-09-22T21:46:31.810-04:00 level=INFO msg="server listening" http=http://127.0.0.1:63596 websocket=ws://127.0.0.1:63596/rpc
-time=2026-09-22T21:46:31.916-04:00 level=INFO msg="client connected" client=client-1
-time=2026-09-22T21:46:32.735-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=814ms
-time=2026-09-22T22:06:32.869-04:00 level=INFO msg="client disconnected" client=client-1

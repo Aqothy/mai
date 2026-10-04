@@ -1,6 +1,0 @@
-=== RUN   TestManifestDefaultDoesNotOverrideCustomLaunchOnRecovery
-    manifest_update_test.go:108: configs=[{"command":["/custom/pinned-codex"]} ], want explicit custom launch preserved
---- FAIL: TestManifestDefaultDoesNotOverrideCustomLaunchOnRecovery (0.00s)
-FAIL
-FAIL	github.com/Aqothy/maiD/internal/providerservice	0.266s
-FAIL

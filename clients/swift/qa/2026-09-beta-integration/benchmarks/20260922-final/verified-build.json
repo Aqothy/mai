@@ -1,8 +1,0 @@
-{
-  "baseCommit": "2be528a68475b744df516f5cc9527e0d293aed4b",
-  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
-  "codeImageSHA256": "bba11d79339a8289fc44ad5eddd10ff31cbc62a4460391b5cf830c6e71cc1e2c",
-  "xcodeBuildLog": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260922-093438.txt",
-  "changes": "source.patch records benchmark window validation and revisit checkpoints",
-  "buildSucceeded": true
-}

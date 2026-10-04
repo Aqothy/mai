@@ -1,8 +1,0 @@
---- FAIL: TestProcessExitSettlesActiveTurn (10.02s)
-    --- FAIL: TestProcessExitSettlesActiveTurn/intentional=false (5.01s)
-        adapter_integration_test.go:405: timed out waiting for Codex runtime event
-    --- FAIL: TestProcessExitSettlesActiveTurn/intentional=true (5.01s)
-        adapter_integration_test.go:405: timed out waiting for Codex runtime event
-FAIL
-FAIL	github.com/Aqothy/maiD/internal/adapters/codexapp	10.251s
-FAIL

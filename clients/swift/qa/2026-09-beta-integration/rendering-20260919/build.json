@@ -1,8 +1,0 @@
-{
-  "commit": "217e4886faa6bfb9ef13dbdaf7f97ca495060ddf",
-  "app": "/Users/aqothy/Library/Caches/maiD-QA/2026-09-19/217e488/mai.app",
-  "codeImageSHA256": "b121cf4480f260ff6e55bf6221a9ba54395538d804ab3a879c523df11b032e35",
-  "macOS": "27.0",
-  "buildLog": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260919-202334.txt",
-  "scope": "ordinary Debug, animations removed, benchmark anchor corrected, atomic native geometry"
-}

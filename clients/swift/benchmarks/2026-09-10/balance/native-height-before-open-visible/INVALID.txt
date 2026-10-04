@@ -1,1 +1,0 @@
-Rejected: selected benchmark window was not visible at readiness. No performance result is quoted.

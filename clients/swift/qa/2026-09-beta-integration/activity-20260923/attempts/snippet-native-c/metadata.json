@@ -1,6 +1,0 @@
-{
-  "completed": false,
-  "scope": "Actual owned-window sampled frame inspection, not presented FPS",
-  "failure": "Command '['osascript', '-l', 'JavaScript', '-e', \"\\nObjC.import('CoreGraphics'); ObjC.import('AppKit');\\nvar windows=ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1,0)));\\nvar owned=windows.filter(function(w){return w.kCGWindowOwnerPID===38842 && w.kCGWindowLayer===0 &&\\n    (1624!==null ? w.kCGWindowNumber===1624 :\\n     Math.abs(w.kCGWindowBounds.Width-1280)<=1 && Math.abs(w.kCGWindowBounds.Height-900)<=1);});\\nvar screens=$.NSScreen.screens;\\nif(Number(screens.count)!==1 || owned.length!==1) throw Error('Expected one display and exactly one matching visible owned window');\\nJSON.stringify({windowId:owned[0].kCGWindowNumber,bounds:owned[0].kCGWindowBounds,\\nscale:Number(screens.objectAtIndex(0).backingScaleFactor),screen:screens.objectAtIndex(0).frame});\\n\"]' returned non-zero exit status 1.",
-  "captureExitCode": null
-}

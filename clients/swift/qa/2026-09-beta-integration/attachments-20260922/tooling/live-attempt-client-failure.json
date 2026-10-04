@@ -1,4 +1,0 @@
-{
-  "completed" : "Image-only prompt passed the composer, actual Swift RPC, daemon and Codex and rendered the original red image in the native transcript",
-  "error" : "Error Domain=AttachmentQA Code=4 \"Uploaded image was not visible in mixed-image-list\" UserInfo={NSLocalizedDescription=Uploaded image was not visible in mixed-image-list}"
-}

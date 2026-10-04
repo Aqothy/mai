@@ -1,6 +1,0 @@
-{
-  "oldTaskIdentityEqual": true,
-  "payloadsEqual": false,
-  "encodedLength": 632,
-  "expected": "Replacing red.png with blue.png in the same attachment slot must refresh the image."
-}

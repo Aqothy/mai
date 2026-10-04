@@ -1,3 +1,0 @@
-{
-  "reason": "CUA batch advanced faster than app-side capture completion. A thought-close event arrived before its stage began, so this driver run cannot pass."
-}

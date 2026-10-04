@@ -1,9 +1,0 @@
-# Runtime evidence correction — September 27, 2026
-
-Xcode `RunCodeSnippet` used an iOS 27 preview host while the selected run destination was `mai QA iOS 18.6`. The actual runtime was verified with `UIDevice.current.systemVersion`, the process OS string and simulator environment identifiers; see `annotation-20260927/runtime.json`. Selecting a build destination is insufficient evidence of a snippet's execution runtime.
-
-Earlier iOS snippets still demonstrate their recorded platform/data assertions. Their exact historical runtime was not recorded, so they cannot independently prove those scenarios on iOS 18.6. This affects the full activity-state snippet (September 23), reasoning pipeline snippet (September 24), and five-snapshot annotation client replay (September 26). Their reports and checklist labels are corrected. Their actual historical runtime is **unverified**, not retroactively asserted to be iOS 27. The separate app builds, actual daemon/provider runs, macOS checks and test-runner results retain their stated scope.
-
-The completion/keyboard regression runs use the test runner, and their `.xcresult` metadata confirms **iOS 18.6, build 22G86, iPhone 16**. The September 27 keyboard checkpoint preserves that metadata in `keyboard-20260927/ios18-runtime-summary.json`. The older-runtime annotation-sheet attempt also confirms iOS 18.6, but fails its software-keyboard-presence requirement; it is not a clearance pass. Attachment preview reports already identified their actual iOS 27 runtime and need no correction.
-
-Before release, repeat the full activity-state, reasoning-wire and annotation-snapshot scenarios in a runner that records the actual older runtime. Future snippet harnesses must print the runtime; future test reports must retain the result bundle's device/configuration summary. Rendering, physical-device performance and input-method behavior keep their independent QA requirements.

@@ -1,8 +1,0 @@
-{
-  "reason": "List origin changed during first external accessibility activation before any disclosure action; baseline invalid for disclosure sequence. Preserve as separate activation regression candidate.",
-  "observedOrigins": [
-    297,
-    0,
-    193
-  ]
-}

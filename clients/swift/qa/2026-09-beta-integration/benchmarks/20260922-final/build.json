@@ -1,9 +1,0 @@
-{
-  "head": "2be528a68475b744df516f5cc9527e0d293aed4b",
-  "app": "/Users/aqothy/Library/Developer/Xcode/DerivedData/mai-ajvexhhktjwtgvgbkhqoplogzozb/Build/Products/Debug/mai.app",
-  "codeImageSHA256": "7069f81f70959c12b3e43f9cfbfbd44aeaac4f644e200549e77e0b9e35dd8fa2",
-  "xcodeBuildLog": "/var/folders/dh/6dql449d3dncd76y6yrp2f6w0000gn/T/ActionArtifacts/default/BuildProject/BuildProject-Log-20260921-221345.txt",
-  "buildSucceeded": true,
-  "warnings": 0,
-  "measurement": "callback pacing and prepared/aligned opening; not presented FPS"
-}

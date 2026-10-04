@@ -1,9 +1,0 @@
-time=2026-09-22T16:39:57.055-04:00 level=INFO msg="metadata store opened" path=/Users/aqothy/Library/Caches/maiD-QA/2026-09-22/client-retry-a/data/maid.db
-time=2026-09-22T16:39:57.055-04:00 level=INFO msg="restored persisted threads" count=0
-time=2026-09-22T16:39:57.055-04:00 level=INFO msg="server listening" http=http://127.0.0.1:59170 websocket=ws://127.0.0.1:59170/rpc
-time=2026-09-22T16:39:57.099-04:00 level=INFO msg="client connected" client=client-1
-time=2026-09-22T16:39:57.398-04:00 level=INFO msg="provider started" provider=codex-app-server driver=codex-app-server restart=false duration=295ms
-time=2026-09-22T16:40:55.080-04:00 level=INFO msg="client connected" client=client-2
-{"timestamp":"2026-09-22T20:40:55.535079Z","level":"WARN","fields":{"message":"MCP server startup failed","server_name":"RevenueCat","error":"OAuth refresh credentials for server RevenueCat are missing an authorization server issuer; authorization required: OAuth authorization required"},"target":"codex_mcp::rmcp_client"}
-time=2026-09-22T16:41:15.055-04:00 level=INFO msg="client disconnected" client=client-2
-time=2026-09-22T16:41:53.057-04:00 level=INFO msg="client disconnected" client=client-1

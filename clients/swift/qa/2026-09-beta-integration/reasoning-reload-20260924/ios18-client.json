@@ -1,3 +1,0 @@
-{
-  "executionResults": "PASS: 11 server events, 3 live thought checkpoints, 3 authoritative completions, exact 5-entry timeline and stable identities after reload, duplicate sequences rejected, activity cleared\n"
-}

@@ -1,6 +1,0 @@
-{
-  "renderer": "native",
-  "codeImageSHA256": "9eb34b9f4cda704b693e0706e1b0f73a69edc517f09854b1d5c4063870e518c9",
-  "baseCommit": "5d5fc5b",
-  "scope": "normal-app correctness with temporary state injection; debugger attached"
-}
