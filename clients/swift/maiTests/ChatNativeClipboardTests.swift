@@ -107,7 +107,6 @@ struct ChatNativeClipboardTests {
         try require(host.subviews.compactMap { $0 as? NSButton }.allSatisfy(\.isHidden), "Old copy button remained visible")
         try await Task.sleep(for: .milliseconds(1700))
         try require(host.accessibilityValue() == nil, "Delayed feedback restored stale accessibility content")
-        print("PASS: exact Unicode prose clipboard, code/table copy actions, feedback reset, horizontal scrolling/reset, light/dark prepared syntax, cleared selection/accessibility after reuse, detached menu rejected")
     }
 }
 #endif

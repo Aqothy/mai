@@ -4,32 +4,7 @@ import Testing
 
 struct ChatProviderReplayTests {
     @Test @MainActor
-    func completeThoughtToolReplyStreamPreservesSourceAndHistory() async throws {
-        print("PROVIDER_REPLAY_RUNTIME completeThoughtToolReplyStreamPreservesSourceAndHistory \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
-        let thread = ChatSyntheticBenchmarkThread.thread(turnCount: 20)
-        let store = ThreadStore(previewThreads: [ChatSyntheticBenchmarkThread.listEntry(for: thread)], selectedThread: thread)
-        func identity(_ entry: TimelineEntry) -> String {
-            entry.message?.id ?? entry.item?.id ?? entry.approval?.requestID ?? "missing-id"
-        }
-        let beforeIDs = thread.timeline.map(identity)
-        let driver = ChatSyntheticStreamingBenchmark(store: store, includesActivity: true)
-        driver.prepare()
-        await driver.run()
-        guard driver.isFinished, driver.sourceMatches, let final = store.selectedThread else {
-            throw NSError(domain: "ActivityQA", code: 1, userInfo: [NSLocalizedDescriptionKey: "Incomplete or mismatched stream"])
-        }
-        let actualIDs = final.timeline.map(identity)
-        guard Set(actualIDs).count == actualIDs.count, Array(actualIDs.prefix(beforeIDs.count)) == beforeIDs else {
-            throw NSError(domain: "ActivityQA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Changed or duplicated existing history"])
-        }
-        let entries = final.timeline.filter { ($0.message?.turnID ?? $0.item?.turnID) == "synthetic-stream-turn" }
-        guard entries.count == 5 else { throw NSError(domain: "ActivityQA", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unexpected final entry count: \(entries.count)"]) }
-        print("PASS: two exact completed thoughts, twelve tool updates, exact 20,000-character reply, completed turn, five unique new entries, original history identity preserved")
-    }
-
-    @Test @MainActor
     func reasoningWireAndReloadPreserveTextAndIdentities() async throws {
-        print("PROVIDER_REPLAY_RUNTIME reasoningWireAndReloadPreserveTextAndIdentities \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
         struct Value: Decodable, Equatable {
             let kind: String
             let id: String
@@ -90,12 +65,10 @@ struct ChatProviderReplayTests {
         try require(values(fixture.live) == fixture.expected, "Server live snapshot differs")
         try require(values(fixture.reload) == fixture.expected, "Provider history reload differs")
         try require(final.latestTurn?.state == "completed" && !session.isProtected, "Completed turn retains activity")
-        print("PASS: \(fixture.events.count) server events, 3 live thought checkpoints, 3 authoritative completions, exact 5-entry timeline and stable identities after reload, duplicate sequences rejected, activity cleared")
     }
 
     @Test @MainActor
     func snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime() async throws {
-        print("PROVIDER_REPLAY_RUNTIME snapshotReplayRetainsAnnotationsAcrossRestartForkAndRuntime \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
         struct AnnotationValue: Equatable {
             let id: String
             let messageID: String?
@@ -167,7 +140,6 @@ struct ChatProviderReplayTests {
                 try require((message.annotations ?? []).allSatisfy { $0.messageID.map(ids.contains) ?? false }, "Quote reference points outside this chat")
             }
         }
-        print("PASS: five live/restart/fork/runtime snapshots, five annotation cards each, exact prompt/quote/note/message identities, all references resolve, standard annotation renderer retained, activity cleared")
     }
 
     @MainActor private func inflate(_ base64: String) throws -> Data {

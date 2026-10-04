@@ -93,7 +93,6 @@ struct ChatBetaIntegrationTests {
         #expect(PromptCompletionCursor.offset(for: selection, in: "") == nil)
         #expect(PromptCompletionCursor.offset(for: selection, in: "short") == nil)
         #expect(PromptCompletionCursor.offset(for: selection, in: pasted) == pasted.count)
-        #expect(PromptCompletionCursor.offset(for: selection, in: "") == nil)
         #expect(PromptCompletionCursor.offset(for: nil, in: "") == 0)
     }
 
@@ -259,5 +258,4 @@ struct ChatBetaIntegrationTests {
         }
         #expect(PromptCompletionInsertionContext.detect(in: "mail@example.com", cursorOffset: 16) == nil)
     }
-
 }

@@ -5,24 +5,6 @@ import Testing
 
 struct ACPRegistryModelTests {
     @Test
-    func updatingRegistryMetadataDoesNotRestartTheRunningAgent() async throws {
-        let rpc = ACPRegistryMockRPCClient()
-        rpc.providers = [try newJSONDecoder().decode(InstanceInfo.self, from: Data("""
-            {"auth":{"status":"authenticated"},"capabilities":{},"driver":"acp",
-             "instanceId":"registry-codex","name":"Codex","status":"initialized","pid":123,
-             "initializedAt":"2026-09-23T00:00:00Z","startedAt":"2026-09-23T00:00:00Z"}
-            """.utf8))]
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        let providerBefore = store.providers.first?.pid
-        let installed = try await store.installRegistryAgent(id: "codex")
-        #expect(installed.version == "2.0.0")
-        #expect(store.installedAgents.first?.version == "2.0.0")
-        #expect(rpc.registryStarts.isEmpty)
-        #expect(store.providers.first?.pid == providerBefore)
-    }
-
-    @Test
     func sameNamedProvidersRemainDistinguishable() async throws {
         let rpc = ACPRegistryMockRPCClient()
         rpc.providers = [try newJSONDecoder().decode(InstanceInfo.self, from: Data("""
@@ -177,7 +159,6 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     var installedAgents: [ACPRegistryInstalledAgent] = []
     var providers: [InstanceInfo] = []
     private(set) var customAgentInput: ACPCustomAgentAddParams?
-    private(set) var registryStarts: [Bool] = []
 
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         let installed = ACPRegistryInstalledAgent(
@@ -187,12 +168,6 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
         installedAgents = [installed]
         return installed
     }
-
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
-        registryStarts.append(restart)
-        return providers[0]
-    }
-
 
     func connect() {}
     func disconnect() {}

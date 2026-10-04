@@ -307,11 +307,15 @@ struct ThreadStoreTests {
         #expect(originalLayouts == nil)
         #expect(preparedLayout == nil)
 
+        // Reopening shows the cached model at once, then resubscribes for a
+        // fresh snapshot.
+        let subscriptionCount = rpc.subscriptionCount(for: "thread-0")
         store.selectThread("thread-0")
+        #expect(store.selectedThread?.id == "thread-0")
         let freshSegments = try #require(store.selectedThreadMarkdownSegmentCache)
         #expect(freshSegments.entryCount == 0)
+        await waitUntil { rpc.subscriptionCount(for: "thread-0") == subscriptionCount + 1 }
         await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
-        #expect(store.selectedThread?.id == "thread-0")
     }
 
     @Test
@@ -359,30 +363,6 @@ struct ThreadStoreTests {
         #expect(!store.subscribedThreadIDs.contains("a"))
         #expect(store.cachedThreadIDs.contains("a"))
         #expect(rpc.unsubscribedThreadIDs.contains("a"))
-    }
-
-    @Test
-    func reopeningUnsubscribedThreadUsesCachedModelThenFreshSnapshot() async {
-        let threadIDs = (0...6).map { "thread-\($0)" }
-        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-
-        for threadID in threadIDs {
-            store.selectThread(threadID)
-            await waitUntil { store.subscribedThreadIDs.contains(threadID) }
-        }
-        #expect(!store.subscribedThreadIDs.contains("thread-0"))
-        #expect(store.cachedThreadIDs.contains("thread-0"))
-
-        let subscriptionCount = rpc.subscriptionInputs.count
-        store.selectThread("thread-0")
-        #expect(store.selectedThread?.id == "thread-0")
-        await waitUntil { rpc.subscriptionInputs.count == subscriptionCount + 1 }
-        await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
-
-        let reopen = rpc.subscriptionInputs.last
-        #expect(reopen?.threadID == "thread-0")
     }
 
     @Test

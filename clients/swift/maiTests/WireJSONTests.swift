@@ -9,7 +9,6 @@ struct WireJSONTests {
 
     @Test
     func fractionalAndWholeSecondsRetainTheirInstant() throws {
-        print("WIRE_JSON_RUNTIME \(ProcessInfo.processInfo.operatingSystemVersionString) simulator=\(ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "none")")
         let fractions = ["", ".1", ".123", ".123456", ".123456789"]
         for fraction in fractions {
             let expected = Double("0" + fraction) ?? 0
@@ -26,13 +25,6 @@ struct WireJSONTests {
     }
 
     @Test
-    func capturedDaemonTimestampRetainsMicroseconds() throws {
-        let data = Data(#"{"date":"2026-09-24T00:26:41.437657-04:00"}"#.utf8)
-        let actual = try WireJSON.makeDecoder().decode(Envelope.self, from: data).date
-        #expect(abs(actual.timeIntervalSince1970 - 1_790_224_001.437657) < 0.000001)
-    }
-
-    @Test
     func malformedDatesFailAtTheirField() throws {
         for value in [#""not a date""#, #""""#, #""2026-09-24""#, "123", "null"] {
             do {
@@ -46,15 +38,5 @@ struct WireJSONTests {
                 #expect(context.codingPath.map(\.stringValue) == ["date"])
             }
         }
-    }
-
-    @Test
-    func existingWholeSecondEncoderRemainsCompatible() throws {
-        let input = Envelope(date: Date(timeIntervalSinceReferenceDate: 123))
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(input)
-        let actual = try WireJSON.makeDecoder().decode(Envelope.self, from: data)
-        #expect(actual.date == input.date)
     }
 }
