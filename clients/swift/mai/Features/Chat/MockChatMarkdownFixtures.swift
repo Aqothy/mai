@@ -190,11 +190,6 @@ enum MockChatMarkdownFixtures {
         ),
     ]
 
-    static let malformedMarkdown = catalog(
-        title: "Malformed and incomplete Markdown",
-        samples: malformedSamples
-    )
-
     static let unclosedFence =
         malformedSamples.first { $0.id == "unclosed-fence" }?.markdown ?? ""
 

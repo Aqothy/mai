@@ -405,7 +405,7 @@ struct MockChatView: View {
         try? await Task.sleep(for: .seconds(4))
         await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 120)
 
-        if plan == "scroll" || plan == "all" {
+        if plan == "scroll" {
             _ = await benchmark.runScrollBenchmark(
                 pointsPerSecond: 1_200,
                 maximumSweepSeconds: 10,
@@ -424,7 +424,7 @@ struct MockChatView: View {
                 label: "fling-10k-8000pps"
             )
         }
-        if plan == "stream" || plan == "all" {
+        if plan == "stream" {
             try? await Task.sleep(for: .seconds(1))
             _ = await runStreamingBenchmark()
         }
