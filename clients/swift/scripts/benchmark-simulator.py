@@ -58,7 +58,7 @@ def main():
         launch = simctl(
             "launch", "--terminate-running-process", f"--stdout={log}",
             f"--stderr={log.with_suffix('.stderr')}", args.device, bundle,
-            "-ChatPerformanceLab", "-ChatAutoBenchmark", args.plan,
+            "-ChatAutoBenchmark", args.plan,
             "-ChatBenchmarkSyntheticTurns", str(args.turns),
             "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO")
         (log.with_suffix(".launch.txt")).write_text(launch + "\n")

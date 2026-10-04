@@ -592,8 +592,8 @@ final class ChatBenchmarkModel {
     }
 }
 
-/// Headless benchmarking: launching with `-ChatPerformanceLab
-/// -ChatAutoBenchmark <plan>` opens the lab directly and runs
+/// Headless benchmarking: launching a Debug build with
+/// `-ChatAutoBenchmark <plan>` opens the lab directly and runs
 /// the selected passes, printing one `CHAT_BENCHMARK_RESULT` JSON line per
 /// pass and `CHAT_BENCHMARK_COMPLETE` at the end.
 nonisolated enum ChatBenchmarkAutoRun {

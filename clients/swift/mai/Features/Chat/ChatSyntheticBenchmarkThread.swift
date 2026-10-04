@@ -5,7 +5,7 @@
     /// chat timeline (`ChatView` → `ChatTimeline`), as opposed to the mock lab
     /// which drives only the row renderers.
     ///
-    ///     -ChatPerformanceLab -ChatAutoBenchmark scroll -ChatBenchmarkSyntheticTurns 400
+    ///     -ChatAutoBenchmark scroll -ChatBenchmarkSyntheticTurns 400
     ///
     /// Every turn is a finished agent turn: a user prompt, a thought, a few
     /// tool steps (folded behind the "Worked for" header exactly as in

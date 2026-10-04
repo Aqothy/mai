@@ -82,7 +82,7 @@ def main():
             parser.error(f"Refusing to overwrite {log}")
         command = ["open", "-n", "-a", str(app), "--stdout", str(log),
                    "--stderr", str(log.with_suffix(".stderr")), "--args",
-                   "-ChatPerformanceLab", "-ChatAutoBenchmark", args.plan,
+                   "-ChatAutoBenchmark", args.plan,
                    "-ChatBenchmarkAnchorRow", "4800",
                    "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO",
                    "-ChatBenchmarkScrubPeriod", str(args.scrub_period),

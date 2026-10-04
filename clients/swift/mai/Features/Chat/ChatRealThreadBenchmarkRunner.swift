@@ -10,8 +10,8 @@ import SwiftUI
 /// Runs the auto-benchmark plans against the production chat timeline,
 /// either a real thread from the connected daemon or the synthetic transcript:
 ///
-///     -ChatPerformanceLab -ChatAutoBenchmark scroll -ChatBenchmarkThread "<title substring>"
-///     -ChatPerformanceLab -ChatAutoBenchmark <plan> -ChatBenchmarkSyntheticTurns 300
+///     -ChatAutoBenchmark scroll -ChatBenchmarkThread "<title substring>"
+///     -ChatAutoBenchmark <plan> -ChatBenchmarkSyntheticTurns 300
 ///
 /// The runner waits for the thread list, selects the first thread whose
 /// title matches, waits for its history to restore and its markdown and

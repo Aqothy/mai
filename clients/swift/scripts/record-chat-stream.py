@@ -67,7 +67,7 @@ def main():
     metadata["completed"] = False
     try:
         subprocess.run(["open", "-n", "-a", str(app), "--stdout", str(log),
-                        "--stderr", str(out / "app.stderr"), "--args", "-ChatPerformanceLab",
+                        "--stderr", str(out / "app.stderr"), "--args",
                         "-ChatBenchmarkSyntheticTurns", "20", "-ChatAutoBenchmark", "stream",
                         "-ChatBenchmarkUseList", "YES" if args.container == "list" else "NO",
                         "-ChatBenchmarkStreamActivity", "YES" if args.activity else "NO",
