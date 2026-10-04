@@ -180,7 +180,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	go h.rpc.run()
 	go h.waitProcess()
 
-	var response initializeResponse
 	params := initializeParams{
 		ClientInfo: appClientInfo{Name: "maiD", Title: "maiD", Version: "beta"},
 		Capabilities: appClientCapabilities{
@@ -188,7 +187,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			RequestAttestation: false,
 		},
 	}
-	if err := h.rpc.call(ctx, "initialize", params, &response); err != nil {
+	if err := h.rpc.call(ctx, "initialize", params, nil); err != nil {
 		_ = h.Close()
 		return nil, fmt.Errorf("initialize Codex app-server: %w", err)
 	}

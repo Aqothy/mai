@@ -643,7 +643,9 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "skills/list":
-			var params skillsListParams
+			var params struct {
+				Cwds []string `json:"cwds"`
+			}
 			if err := decodeFakeParams(message, &params); err != nil || len(params.Cwds) != 1 {
 				return fmt.Errorf("invalid skills/list params: %s", fakeMessageJSON(message))
 			}
@@ -806,7 +808,10 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "turn/interrupt":
-			var params turnInterruptParams
+			var params struct {
+				ThreadID string `json:"threadId"`
+				TurnID   string `json:"turnId"`
+			}
 			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.TurnID != "native-turn" {
 				return fmt.Errorf("invalid turn/interrupt params: %s", fakeMessageJSON(message))
 			}

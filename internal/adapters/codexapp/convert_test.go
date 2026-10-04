@@ -129,7 +129,7 @@ func TestSetConfigOptionValidatesCatalogAndNormalizesEffortForModel(t *testing.T
 	}
 }
 
-func TestProtocolDecodingRetainsUnknownFieldsAndReasoningContent(t *testing.T) {
+func TestProtocolDecodingToleratesUnknownFieldsAndItems(t *testing.T) {
 	var thread appThread
 	err := json.Unmarshal([]byte(`{
 		"id":"thread-1","cwd":"/repo","createdAt":123,"updatedAt":456,
@@ -142,20 +142,17 @@ func TestProtocolDecodingRetainsUnknownFieldsAndReasoningContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(thread.Raw), "futureThreadField") {
-		t.Fatalf("thread raw JSON did not retain unknown field: %s", thread.Raw)
-	}
 	reasoning := thread.Turns[0].Items[0]
 	if len(reasoning.ReasoningContent) != 1 || reasoning.ReasoningContent[0] != "Detail" {
 		t.Fatalf("reasoning content = %#v", reasoning.ReasoningContent)
-	}
-	if !strings.Contains(string(reasoning.Raw), "futureItemField") {
-		t.Fatalf("item raw JSON did not retain unknown field: %s", reasoning.Raw)
 	}
 	unknown := thread.Turns[0].Items[1]
 	event, ok := runtimeEventFromItem("local-1", "local-turn-1", unknown, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
 	if !ok || event.Payload.ItemType != provider.ItemKindToolCall || event.Payload.ToolCall == nil || event.Payload.ToolCall.ProviderKind != "futureTool" {
 		t.Fatalf("unknown item fallback = %#v, ok = %v", event, ok)
+	}
+	if !strings.Contains(string(event.Payload.Data), `"futurePayload"`) {
+		t.Fatalf("unknown item fallback data = %s, want the native payload", event.Payload.Data)
 	}
 }
 
@@ -332,8 +329,8 @@ func TestConfigOptionsFromModelsUsesSelectedCatalogCapabilities(t *testing.T) {
 
 func TestSkillsFromResponseFallsBackToInterfaceDescriptionAndDeduplicates(t *testing.T) {
 	response := skillsListResponse{Data: []appSkillsListEntry{
-		{Cwd: "/a", Skills: []appSkill{{Name: "review", Description: "Review changes", Interface: &appSkillInterface{ShortDescription: "Short"}, Path: "/skills/review", Scope: "user", Enabled: true}}},
-		{Cwd: "/b", Skills: []appSkill{{Name: "review", Description: "Duplicate", Path: "/skills/review", Scope: "user", Enabled: true}, {Name: "test", ShortDescription: "Run tests", Path: "/skills/test", Scope: "repo", Enabled: false}}},
+		{Skills: []appSkill{{Name: "review", Description: "Review changes", Interface: &appSkillInterface{ShortDescription: "Short"}, Path: "/skills/review", Scope: "user", Enabled: true}}},
+		{Skills: []appSkill{{Name: "review", Description: "Duplicate", Path: "/skills/review", Scope: "user", Enabled: true}, {Name: "test", ShortDescription: "Run tests", Path: "/skills/test", Scope: "repo", Enabled: false}}},
 	}}
 	skills := skillsFromResponse(response)
 	if len(skills) != 2 {

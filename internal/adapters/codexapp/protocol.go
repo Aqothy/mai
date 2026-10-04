@@ -2,9 +2,8 @@ package codexapp
 
 import "encoding/json"
 
-// These DTOs intentionally model only the stable fields consumed by the
-// adapter. Unknown fields are retained on the main catalog/history values so
-// an app-server upgrade does not make otherwise usable responses undecodable.
+// These DTOs model only the stable fields consumed by the adapter; unknown
+// fields are ignored, and appItem keeps its raw JSON for the generic fallback.
 
 type initializeParams struct {
 	ClientInfo   appClientInfo         `json:"clientInfo"`
@@ -22,130 +21,41 @@ type appClientCapabilities struct {
 	RequestAttestation bool `json:"requestAttestation"`
 }
 
-type initializeResponse struct {
-	UserAgent string          `json:"userAgent,omitempty"`
-	Raw       json.RawMessage `json:"-"`
-}
-
-func (value *initializeResponse) UnmarshalJSON(data []byte) error {
-	type plain initializeResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
 type threadStartResponse struct {
-	Thread          appThread       `json:"thread"`
-	Model           string          `json:"model,omitempty"`
-	ModelProvider   string          `json:"modelProvider,omitempty"`
-	ServiceTier     string          `json:"serviceTier,omitempty"`
-	Cwd             string          `json:"cwd,omitempty"`
-	ReasoningEffort string          `json:"reasoningEffort,omitempty"`
-	Raw             json.RawMessage `json:"-"`
-}
-
-func (value *threadStartResponse) UnmarshalJSON(data []byte) error {
-	type plain threadStartResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	Thread          appThread `json:"thread"`
+	Model           string    `json:"model,omitempty"`
+	ServiceTier     string    `json:"serviceTier,omitempty"`
+	Cwd             string    `json:"cwd,omitempty"`
+	ReasoningEffort string    `json:"reasoningEffort,omitempty"`
 }
 
 type threadListResponse struct {
-	Data            []appThread     `json:"data"`
-	NextCursor      *string         `json:"nextCursor"`
-	BackwardsCursor *string         `json:"backwardsCursor"`
-	Raw             json.RawMessage `json:"-"`
-}
-
-func (value *threadListResponse) UnmarshalJSON(data []byte) error {
-	type plain threadListResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	Data       []appThread `json:"data"`
+	NextCursor *string     `json:"nextCursor"`
 }
 
 type appThread struct {
-	ID             string          `json:"id"`
-	SessionID      string          `json:"sessionId,omitempty"`
-	ForkedFromID   *string         `json:"forkedFromId,omitempty"`
-	ParentThreadID *string         `json:"parentThreadId,omitempty"`
-	Preview        string          `json:"preview,omitempty"`
-	Ephemeral      bool            `json:"ephemeral,omitempty"`
-	ModelProvider  string          `json:"modelProvider,omitempty"`
-	CreatedAt      float64         `json:"createdAt,omitempty"`
-	UpdatedAt      float64         `json:"updatedAt,omitempty"`
-	RecencyAt      *float64        `json:"recencyAt,omitempty"`
-	Status         appThreadStatus `json:"status,omitempty"`
-	Path           *string         `json:"path,omitempty"`
-	Cwd            string          `json:"cwd,omitempty"`
-	CLIVersion     string          `json:"cliVersion,omitempty"`
-	Source         json.RawMessage `json:"source,omitempty"`
-	Name           *string         `json:"name,omitempty"`
-	Turns          []appTurn       `json:"turns"`
-	Raw            json.RawMessage `json:"-"`
-}
-
-func (value *appThread) UnmarshalJSON(data []byte) error {
-	type plain appThread
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type appThreadStatus struct {
-	Type        string          `json:"type,omitempty"`
-	ActiveFlags []string        `json:"activeFlags,omitempty"`
-	Raw         json.RawMessage `json:"-"`
-}
-
-func (value *appThreadStatus) UnmarshalJSON(data []byte) error {
-	type plain appThreadStatus
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	ID        string    `json:"id"`
+	Preview   string    `json:"preview,omitempty"`
+	CreatedAt float64   `json:"createdAt,omitempty"`
+	UpdatedAt float64   `json:"updatedAt,omitempty"`
+	Cwd       string    `json:"cwd,omitempty"`
+	Name      *string   `json:"name,omitempty"`
+	Turns     []appTurn `json:"turns"`
 }
 
 type appTurn struct {
-	ID          string          `json:"id"`
-	Items       []appItem       `json:"items"`
-	ItemsView   json.RawMessage `json:"itemsView,omitempty"`
-	Status      string          `json:"status,omitempty"`
-	Error       *appTurnError   `json:"error,omitempty"`
-	StartedAt   *float64        `json:"startedAt,omitempty"`
-	CompletedAt *float64        `json:"completedAt,omitempty"`
-	DurationMS  *int64          `json:"durationMs,omitempty"`
-	Raw         json.RawMessage `json:"-"`
-}
-
-func (value *appTurn) UnmarshalJSON(data []byte) error {
-	type plain appTurn
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	ID          string        `json:"id"`
+	Items       []appItem     `json:"items"`
+	Status      string        `json:"status,omitempty"`
+	Error       *appTurnError `json:"error,omitempty"`
+	StartedAt   *float64      `json:"startedAt,omitempty"`
+	CompletedAt *float64      `json:"completedAt,omitempty"`
 }
 
 type appTurnError struct {
-	Message           string          `json:"message,omitempty"`
-	AdditionalDetails *string         `json:"additionalDetails,omitempty"`
-	CodexErrorInfo    json.RawMessage `json:"codexErrorInfo,omitempty"`
-}
-
-type turnInterruptParams struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
+	Message           string  `json:"message,omitempty"`
+	AdditionalDetails *string `json:"additionalDetails,omitempty"`
 }
 
 // appUserInput is the stable v2 UserInput union represented as a tolerant flat
@@ -158,16 +68,6 @@ type appUserInput struct {
 	URL          string           `json:"url,omitempty"`
 	Path         string           `json:"path,omitempty"`
 	Name         string           `json:"name,omitempty"`
-	Raw          json.RawMessage  `json:"-"`
-}
-
-func (value *appUserInput) UnmarshalJSON(data []byte) error {
-	type plain appUserInput
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
 }
 
 func (value appUserInput) MarshalJSON() ([]byte, error) {
@@ -201,9 +101,6 @@ func (value appUserInput) MarshalJSON() ([]byte, error) {
 			Path string `json:"path"`
 		}{Type: value.Type, Name: value.Name, Path: value.Path})
 	default:
-		if len(value.Raw) > 0 {
-			return cloneRawJSON(value.Raw), nil
-		}
 		return json.Marshal(struct {
 			Type string `json:"type"`
 		}{Type: value.Type})
@@ -224,22 +121,16 @@ type appByteRange struct {
 // newer variants decode without failing; Type and Raw remain available for a
 // generic timeline fallback.
 type appItem struct {
-	Type             string            `json:"type"`
-	ID               string            `json:"id,omitempty"`
-	ClientID         *string           `json:"clientId,omitempty"`
-	Content          []appUserInput    `json:"-"`
-	ReasoningContent []string          `json:"-"`
-	Text             string            `json:"text,omitempty"`
-	Phase            *string           `json:"phase,omitempty"`
-	Summary          []string          `json:"summary,omitempty"`
-	Fragments        []json.RawMessage `json:"fragments,omitempty"`
+	Type             string         `json:"type"`
+	ID               string         `json:"id,omitempty"`
+	ClientID         *string        `json:"clientId,omitempty"`
+	Content          []appUserInput `json:"-"`
+	ReasoningContent []string       `json:"-"`
+	Text             string         `json:"text,omitempty"`
+	Summary          []string       `json:"summary,omitempty"`
 
-	PluginID         *string            `json:"pluginId,omitempty"`
-	ScriptPath       *string            `json:"scriptPath,omitempty"`
 	Command          string             `json:"command,omitempty"`
 	Cwd              string             `json:"cwd,omitempty"`
-	ProcessID        *string            `json:"processId,omitempty"`
-	Source           string             `json:"source,omitempty"`
 	Status           string             `json:"status,omitempty"`
 	CommandActions   []appCommandAction `json:"commandActions,omitempty"`
 	AggregatedOutput *string            `json:"aggregatedOutput,omitempty"`
@@ -252,33 +143,27 @@ type appItem struct {
 	Tool         string             `json:"tool,omitempty"`
 	Namespace    *string            `json:"namespace,omitempty"`
 	Arguments    json.RawMessage    `json:"arguments,omitempty"`
-	AppContext   *appMCPAppContext  `json:"appContext,omitempty"`
 	ReadOnlyHint *bool              `json:"readOnlyHint,omitempty"`
 	Result       json.RawMessage    `json:"result,omitempty"`
 	Error        *appMCPError       `json:"error,omitempty"`
 	ContentItems []appOutputContent `json:"contentItems,omitempty"`
 	Success      *bool              `json:"success,omitempty"`
 
-	SenderThreadID    string                    `json:"senderThreadId,omitempty"`
-	ReceiverThreadIDs []string                  `json:"receiverThreadIds,omitempty"`
-	Prompt            *string                   `json:"prompt,omitempty"`
-	Model             *string                   `json:"model,omitempty"`
-	ReasoningEffort   *string                   `json:"reasoningEffort,omitempty"`
-	AgentsStates      map[string]appCollabState `json:"agentsStates,omitempty"`
-	Kind              string                    `json:"kind,omitempty"`
-	AgentThreadID     string                    `json:"agentThreadId,omitempty"`
-	AgentPath         string                    `json:"agentPath,omitempty"`
+	ReceiverThreadIDs []string `json:"receiverThreadIds,omitempty"`
+	Prompt            *string  `json:"prompt,omitempty"`
+	Model             *string  `json:"model,omitempty"`
+	ReasoningEffort   *string  `json:"reasoningEffort,omitempty"`
+	Kind              string   `json:"kind,omitempty"`
+	AgentThreadID     string   `json:"agentThreadId,omitempty"`
 
-	Query   string            `json:"query,omitempty"`
-	Action  *appWebAction     `json:"action,omitempty"`
-	Results []json.RawMessage `json:"results,omitempty"`
-	Path    string            `json:"path,omitempty"`
+	Query  string        `json:"query,omitempty"`
+	Action *appWebAction `json:"action,omitempty"`
+	Path   string        `json:"path,omitempty"`
 
-	RevisedPrompt         *string         `json:"revisedPrompt,omitempty"`
-	TransparentBackground *bool           `json:"transparentBackground,omitempty"`
-	SavedPath             *string         `json:"savedPath,omitempty"`
-	Review                string          `json:"review,omitempty"`
-	Raw                   json.RawMessage `json:"-"`
+	RevisedPrompt *string         `json:"revisedPrompt,omitempty"`
+	SavedPath     *string         `json:"savedPath,omitempty"`
+	Review        string          `json:"review,omitempty"`
+	Raw           json.RawMessage `json:"-"`
 }
 
 func (value *appItem) UnmarshalJSON(data []byte) error {
@@ -328,14 +213,6 @@ type appPatchChangeKind struct {
 	MovePath *string `json:"move_path,omitempty"`
 }
 
-type appMCPAppContext struct {
-	ConnectorID string  `json:"connectorId,omitempty"`
-	LinkID      *string `json:"linkId,omitempty"`
-	ResourceURI *string `json:"resourceUri,omitempty"`
-	AppName     *string `json:"appName,omitempty"`
-	ActionName  *string `json:"actionName,omitempty"`
-}
-
 type appMCPResult struct {
 	Content           []json.RawMessage `json:"content,omitempty"`
 	StructuredContent json.RawMessage   `json:"structuredContent,omitempty"`
@@ -347,25 +224,10 @@ type appMCPError struct {
 }
 
 type appOutputContent struct {
-	Type     string          `json:"type,omitempty"`
-	Text     string          `json:"text,omitempty"`
-	ImageURL string          `json:"imageUrl,omitempty"`
-	AudioURL string          `json:"audioUrl,omitempty"`
-	Raw      json.RawMessage `json:"-"`
-}
-
-func (value *appOutputContent) UnmarshalJSON(data []byte) error {
-	type plain appOutputContent
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
-type appCollabState struct {
-	Status  string  `json:"status,omitempty"`
-	Message *string `json:"message,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	AudioURL string `json:"audioUrl,omitempty"`
 }
 
 type appWebAction struct {
@@ -377,18 +239,8 @@ type appWebAction struct {
 }
 
 type modelListResponse struct {
-	Data       []appModel      `json:"data"`
-	NextCursor *string         `json:"nextCursor"`
-	Raw        json.RawMessage `json:"-"`
-}
-
-func (value *modelListResponse) UnmarshalJSON(data []byte) error {
-	type plain modelListResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	Data       []appModel `json:"data"`
+	NextCursor *string    `json:"nextCursor"`
 }
 
 type appModel struct {
@@ -401,9 +253,7 @@ type appModel struct {
 	DefaultReasoningEffort    string                     `json:"defaultReasoningEffort,omitempty"`
 	ServiceTiers              []appModelServiceTier      `json:"serviceTiers,omitempty"`
 	DefaultServiceTier        string                     `json:"defaultServiceTier,omitempty"`
-	InputModalities           []string                   `json:"inputModalities,omitempty"`
 	IsDefault                 bool                       `json:"isDefault,omitempty"`
-	Raw                       json.RawMessage            `json:"-"`
 }
 
 type appModelServiceTier struct {
@@ -412,53 +262,17 @@ type appModelServiceTier struct {
 	Description string `json:"description,omitempty"`
 }
 
-func (value *appModel) UnmarshalJSON(data []byte) error {
-	type plain appModel
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
-}
-
 type appReasoningEffortOption struct {
 	ReasoningEffort string `json:"reasoningEffort"`
 	Description     string `json:"description,omitempty"`
 }
 
-type skillsListParams struct {
-	Cwds        []string `json:"cwds,omitempty"`
-	ForceReload bool     `json:"forceReload,omitempty"`
-}
-
 type skillsListResponse struct {
 	Data []appSkillsListEntry `json:"data"`
-	Raw  json.RawMessage      `json:"-"`
-}
-
-func (value *skillsListResponse) UnmarshalJSON(data []byte) error {
-	type plain skillsListResponse
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
 }
 
 type appSkillsListEntry struct {
-	Cwd    string          `json:"cwd,omitempty"`
-	Skills []appSkill      `json:"skills,omitempty"`
-	Errors []appSkillError `json:"errors,omitempty"`
-	Raw    json.RawMessage `json:"-"`
-}
-
-func (value *appSkillsListEntry) UnmarshalJSON(data []byte) error {
-	type plain appSkillsListEntry
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
+	Skills []appSkill `json:"skills,omitempty"`
 }
 
 type appSkill struct {
@@ -469,37 +283,11 @@ type appSkill struct {
 	Path             string             `json:"path,omitempty"`
 	Scope            string             `json:"scope,omitempty"`
 	Enabled          bool               `json:"enabled"`
-	Raw              json.RawMessage    `json:"-"`
-}
-
-func (value *appSkill) UnmarshalJSON(data []byte) error {
-	type plain appSkill
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
 }
 
 type appSkillInterface struct {
 	DisplayName      string `json:"displayName,omitempty"`
 	ShortDescription string `json:"shortDescription,omitempty"`
-	DefaultPrompt    string `json:"defaultPrompt,omitempty"`
-}
-
-type appSkillError struct {
-	Path    string          `json:"path,omitempty"`
-	Message string          `json:"message,omitempty"`
-	Raw     json.RawMessage `json:"-"`
-}
-
-func (value *appSkillError) UnmarshalJSON(data []byte) error {
-	type plain appSkillError
-	if err := json.Unmarshal(data, (*plain)(value)); err != nil {
-		return err
-	}
-	value.Raw = cloneRawJSON(data)
-	return nil
 }
 
 type appPlanStep struct {
