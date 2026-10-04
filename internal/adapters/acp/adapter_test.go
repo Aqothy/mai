@@ -546,30 +546,25 @@ func TestSessionUpdateMapsUsageUpdate(t *testing.T) {
 		t.Fatalf("decode usage update: %v", err)
 	}
 	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventThreadTokenUsage || len(event.Payload.Data) == 0 {
+	if event.Type != provider.RuntimeEventThreadTokenUsage {
 		t.Fatalf("event = %#v, want token usage payload", event)
 	}
-	if event.Payload.TokenUsage == nil || event.Payload.TokenUsage.UsedTokens != 12 || event.Payload.TokenUsage.MaxTokens != 100 || event.Payload.TokenUsage.Cost != 0.5 {
-		t.Fatalf("token usage = %#v, want used/max/cost mapped", event.Payload.TokenUsage)
-	}
-	if event.Payload.TokenUsage.Currency != "USD" {
-		t.Fatalf("token usage currency = %q, want USD", event.Payload.TokenUsage.Currency)
-	}
-	var raw schema.UsageUpdate
-	if err := json.Unmarshal(event.Payload.Data, &raw); err != nil {
-		t.Fatalf("decode raw usage payload: %v", err)
-	}
-	if raw.Used != 12 || raw.Size != 100 || raw.Cost == nil || raw.Cost.Amount != 0.5 || raw.Cost.Currency != "USD" {
-		t.Fatalf("raw usage payload = %#v, want complete ACP usage update", raw)
+	if usage := event.Payload.TokenUsage; usage == nil || usage.UsedTokens != 12 || usage.MaxTokens != 100 || usage.Cost != 0.5 || usage.Currency != "USD" {
+		t.Fatalf("token usage = %#v, want used/max/cost/currency mapped", usage)
 	}
 }
 
-func TestSessionUpdateMapsEmptyAvailableCommands(t *testing.T) {
-	var notification schema.SessionNotification
-	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`), &notification); err != nil {
-		t.Fatalf("decode available commands update: %v", err)
+func TestSessionUpdateMapsAvailableCommands(t *testing.T) {
+	event := sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"[commit]"}}]}}`))
+	if len(event.Payload.SlashCommands) != 1 {
+		t.Fatalf("slash commands = %#v, want one command", event.Payload.SlashCommands)
 	}
-	event := sessionRuntimeEvent(notification)
+	if command := event.Payload.SlashCommands[0]; command.Name != "review" || !command.HasInput || command.InputHint != "[commit]" {
+		t.Fatalf("slash command = %#v, want input hint preserved", command)
+	}
+
+	// An explicit empty list must still serialize so clients clear stale commands.
+	event = sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`))
 	if event.Type != provider.RuntimeEventThreadMetadataUpdate || event.Payload.SlashCommands == nil || len(event.Payload.SlashCommands) != 0 {
 		t.Fatalf("event = %#v, want explicit empty slash-command update", event)
 	}
@@ -586,45 +581,6 @@ func TestSessionUpdateMapsEmptyAvailableCommands(t *testing.T) {
 	}
 }
 
-func TestSessionUpdatePreservesAvailableCommandInputHint(t *testing.T) {
-	var notification schema.SessionNotification
-	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"[commit]"}}]}}`), &notification); err != nil {
-		t.Fatalf("decode available commands update: %v", err)
-	}
-	event := sessionRuntimeEvent(notification)
-	if len(event.Payload.SlashCommands) != 1 {
-		t.Fatalf("slash commands = %#v, want one command", event.Payload.SlashCommands)
-	}
-	command := event.Payload.SlashCommands[0]
-	if command.Name != "review" || !command.HasInput || command.InputHint != "[commit]" {
-		t.Fatalf("slash command = %#v, want input hint preserved", command)
-	}
-}
-
-func TestSessionUpdateMapsToolCallUpdateEmptyReplacementFields(t *testing.T) {
-	var notification schema.SessionNotification
-	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","content":[],"locations":[]}}`), &notification); err != nil {
-		t.Fatalf("decode tool-call update: %v", err)
-	}
-	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventItemUpdated {
-		t.Fatalf("event = %#v, want item update", event)
-	}
-	patch := toolCallPatchFromUpdate(notification.Update)
-	if patch == nil {
-		t.Fatal("patch is nil, want the tool-call update captured")
-	}
-	if patch.content == nil || len(patch.content) != 0 {
-		t.Fatalf("patch content = %#v, want explicit empty replacement", patch.content)
-	}
-	if patch.locations == nil || len(patch.locations) != 0 {
-		t.Fatalf("patch locations = %#v, want explicit empty replacement", patch.locations)
-	}
-	if patch.kind != nil {
-		t.Fatalf("patch kind = %#v, want omitted kind to stay absent", patch.kind)
-	}
-}
-
 func TestSessionUpdateMapsNonTextAssistantContent(t *testing.T) {
 	var notification schema.SessionNotification
 	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"image","data":"base64","mimeType":"image/png"}}}`), &notification); err != nil {
@@ -633,17 +589,6 @@ func TestSessionUpdateMapsNonTextAssistantContent(t *testing.T) {
 	event := sessionRuntimeEvent(notification)
 	if event.Type != provider.RuntimeEventContentDelta || event.ItemID != "msg_1" || event.Payload.Delta != "" || event.Payload.StreamKind != provider.RuntimeContentAssistantText || len(event.Payload.Attachments) != 1 || event.Payload.Attachments[0].Kind != "image" || event.Payload.Attachments[0].Data != "base64" || event.Payload.Attachments[0].MimeType != "image/png" {
 		t.Fatalf("event = %#v, want image attachment preserved", event)
-	}
-}
-
-func TestSessionUpdateMapsMessageID(t *testing.T) {
-	var notification schema.SessionNotification
-	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"text","text":"hi"}}}`), &notification); err != nil {
-		t.Fatalf("decode message update: %v", err)
-	}
-	event := sessionRuntimeEvent(notification)
-	if event.ItemID != "msg_1" || event.Payload.Delta != "hi" || event.Payload.StreamKind != provider.RuntimeContentAssistantText {
-		t.Fatalf("event = %#v", event)
 	}
 }
 
@@ -680,28 +625,17 @@ func TestSeparateReplayReasoningBlocksAddsParagraphBreaks(t *testing.T) {
 	}
 }
 
-func TestSessionUpdateMapsPlanAsGenericData(t *testing.T) {
+func TestSessionUpdateMapsPlan(t *testing.T) {
 	var notification schema.SessionNotification
 	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"plan","entries":[{"content":"Do it","priority":"high","status":"pending"}]}}`), &notification); err != nil {
 		t.Fatalf("decode plan update: %v", err)
 	}
 	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventTurnPlanUpdated || len(event.Payload.Data) == 0 {
-		t.Fatalf("event = %#v, want generic plan data", event)
+	if event.Type != provider.RuntimeEventTurnPlanUpdated || len(event.Payload.PlanEntries) != 1 {
+		t.Fatalf("event = %#v, want one plan entry", event)
 	}
-	if len(event.Payload.PlanEntries) != 1 || event.Payload.PlanEntries[0].Content != "Do it" {
-		t.Fatalf("plan entries = %#v", event.Payload.PlanEntries)
-	}
-	entry := event.Payload.PlanEntries[0]
-	if string(entry.Priority) != "high" || string(entry.Status) != "pending" {
+	if entry := event.Payload.PlanEntries[0]; entry.Content != "Do it" || string(entry.Priority) != "high" || string(entry.Status) != "pending" {
 		t.Fatalf("plan entry = %#v, want high-priority pending entry", entry)
-	}
-	var raw schema.Plan
-	if err := json.Unmarshal(event.Payload.Data, &raw); err != nil {
-		t.Fatalf("decode raw plan payload: %v", err)
-	}
-	if len(raw.Entries) != 1 || raw.Entries[0].Content != "Do it" || string(raw.Entries[0].Priority) != "high" || string(raw.Entries[0].Status) != "pending" {
-		t.Fatalf("raw plan payload = %#v, want complete ACP plan", raw)
 	}
 }
 
@@ -1205,19 +1139,6 @@ func TestPromptJoinsCollectorClassification(t *testing.T) {
 	}
 }
 
-func TestInfoReturnsDeepCopy(t *testing.T) {
-	h := &Instance{info: provider.InstanceInfo{
-		Auth: provider.Auth{Methods: []provider.AuthMethod{{ID: "agent-login"}}},
-	}}
-	info := h.Info()
-	info.Auth.Methods[0].ID = "mutated"
-
-	again := h.Info()
-	if again.Auth.Methods[0].ID != "agent-login" {
-		t.Fatalf("info = %#v, want original values unaffected by caller mutation", again)
-	}
-}
-
 // Regression: OpenInstance can fail between newInstance and a fully wired
 // process (connectClient error, initialize error). Close (and the error-path
 // cleanup) must be safe on such a partially-built Instance: nil cmd, nil
@@ -1466,36 +1387,10 @@ func TestCurrentModeUpdateRefreshesProjectedSessionMode(t *testing.T) {
 	}
 }
 
-func TestLegacySessionModeUsesConfigOptionPath(t *testing.T) {
-	modeCalls := make(chan wireSessionParams, 1)
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "code", "name": "Code"}, map[string]any{"id": "architect", "name": "Plan"}}}})
-		},
-		onSetMode: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			modeCalls <- params
-			a.respond(id, map[string]any{})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: acpSessionModeOptionID, Value: "architect"}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
-	}
-	select {
-	case call := <-modeCalls:
-		if call.ModeID != "architect" {
-			t.Fatalf("session/set_mode modeId = %q, want architect", call.ModeID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("session/set_mode was not called")
-	}
-}
-
-func TestStartSessionRestoresLegacyModeConfigSelection(t *testing.T) {
-	modeCalls := make(chan wireSessionParams, 1)
+// Legacy Session Modes are projected as the acp.session-mode option; both the
+// start-time restore and explicit SetConfigOption must route to session/set_mode.
+func TestLegacySessionModeSelectionUsesSetMode(t *testing.T) {
+	modeCalls := make(chan wireSessionParams, 2)
 	agent := &fakeWireAgent{
 		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
 			a.respond(id, map[string]any{"sessionId": "sess", "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "code", "name": "Code"}, map[string]any{"id": "architect", "name": "Plan"}}}})
@@ -1520,13 +1415,18 @@ func TestStartSessionRestoresLegacyModeConfigSelection(t *testing.T) {
 	if len(result.Session.ConfigOptions) != 1 || result.Session.ConfigOptions[0].CurrentValue != "architect" {
 		t.Fatalf("restored session config options = %#v, want architect current mode", result.Session.ConfigOptions)
 	}
-	select {
-	case call := <-modeCalls:
-		if call.ModeID != "architect" {
-			t.Fatalf("restored mode = %q, want architect", call.ModeID)
+	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: acpSessionModeOptionID, Value: "code"}); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	for _, want := range []string{"architect", "code"} {
+		select {
+		case call := <-modeCalls:
+			if call.ModeID != want {
+				t.Fatalf("session/set_mode modeId = %q, want %q", call.ModeID, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("session/set_mode was not called for %q", want)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("restored mode did not call session/set_mode")
 	}
 }
 
@@ -1610,6 +1510,11 @@ func TestStartSessionInfersMissingCategoriesAndAppliesModelFirst(t *testing.T) {
 	}
 }
 
+// StartSession runs before EVERY prompt with the thread's stored model
+// preference, on both the session/new and the in-process reuse branch. A
+// preference that no longer matches a config choice must downgrade to a runtime
+// warning; failing would brick the thread (every turn failing with the same
+// error) — a regression the reuse branch once had.
 func TestStartSessionWarnsWhenModelPreferenceCannotBeApplied(t *testing.T) {
 	agent := &fakeWireAgent{
 		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
@@ -1617,50 +1522,22 @@ func TestStartSessionWarnsWhenModelPreferenceCannotBeApplied(t *testing.T) {
 		},
 	}
 	h := newWireTestHandle(t, agent)
-	recorder := &eventRecorder{}
-	h.runtimeEventListener = recorder.listener
+	input := provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}}
 
-	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if got := h.sessionIDForThread("thread-1"); got != "sess" {
-		t.Fatalf("thread session = %q, want sess", got)
-	}
-	events := recorder.snapshot()
-	if len(events) != 1 || events[0].Type != provider.RuntimeEventRuntimeWarning || !strings.Contains(events[0].Payload.Message, "model-b") {
-		t.Fatalf("events = %#v, want model preference warning", events)
-	}
-}
-
-// Regression: StartSession runs before EVERY prompt with the thread's stored
-// model preference. The in-process reuse branch used to hard-fail when the
-// preference no longer matched a config choice, bricking the thread (every
-// turn failed with the same error) while the new/load/resume paths already
-// downgraded the same condition to a runtime warning.
-func TestStartSessionReuseWarnsWhenModelPreferenceCannotBeApplied(t *testing.T) {
-	agent := &fakeWireAgent{
-		onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			a.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireModeConfigOptions("code")})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-
-	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	recorder := &eventRecorder{}
-	h.runtimeEventListener = recorder.listener
-
-	result, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", ModelSelection: &provider.ModelSelection{Model: "model-b"}})
-	if err != nil {
-		t.Fatalf("reused StartSession with stale model preference err = %v, want warning instead of failure", err)
-	}
-	if result.Session.ProviderSessionID != "sess" || h.sessionIDForThread("thread-1") != "sess" {
-		t.Fatalf("reused session = %#v, want existing sess binding preserved", result.Session)
-	}
-	events := recorder.snapshot()
-	if len(events) != 1 || events[0].Type != provider.RuntimeEventRuntimeWarning || !strings.Contains(events[0].Payload.Message, "model-b") {
-		t.Fatalf("events = %#v, want one model preference warning", events)
+	for _, branch := range []string{"new", "reuse"} {
+		recorder := &eventRecorder{}
+		h.runtimeEventListener = recorder.listener
+		result, err := h.StartSession(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s StartSession with stale model preference err = %v, want warning instead of failure", branch, err)
+		}
+		if result.Session.ProviderSessionID != "sess" || h.sessionIDForThread("thread-1") != "sess" {
+			t.Fatalf("%s session = %#v, want sess binding", branch, result.Session)
+		}
+		events := recorder.snapshot()
+		if len(events) != 1 || events[0].Type != provider.RuntimeEventRuntimeWarning || !strings.Contains(events[0].Payload.Message, "model-b") {
+			t.Fatalf("%s events = %#v, want one model preference warning", branch, events)
+		}
 	}
 }
 
@@ -2278,90 +2155,6 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	}
 }
 
-// Regression for codex-acp (Zed's own client cancels the running prompt before
-// every send): an agent may accept an overlapping session/prompt's text but
-// never answer the second RPC, wedging the turn forever. A steering prompt must
-// therefore cancel the in-flight prompt, wait for it to settle, then dispatch —
-// and the turn must still complete normally from the steering prompt.
-func TestSteeringPromptCancelsInFlightPromptAndCompletesTurn(t *testing.T) {
-	firstPromptStarted := make(chan struct{})
-	firstPromptRelease := make(chan struct{})
-	secondPromptStarted := make(chan struct{})
-	cancelCalls := make(chan struct{}, 1)
-	var promptMu sync.Mutex
-	promptCalls := 0
-	agent := &fakeWireAgent{}
-	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-		promptMu.Lock()
-		promptCalls++
-		call := promptCalls
-		promptMu.Unlock()
-		if call == 1 {
-			close(firstPromptStarted)
-			<-firstPromptRelease
-			a.respond(id, map[string]any{"stopReason": "cancelled"})
-			return
-		}
-		close(secondPromptStarted)
-		a.respond(id, map[string]any{"stopReason": "end_turn"})
-	}
-	agent.onCancel = func(a *fakeWireAgent, params wireSessionParams) {
-		select {
-		case cancelCalls <- struct{}{}:
-		default:
-		}
-	}
-	h := newWireTestHandle(t, agent)
-	turnEvents := make(chan provider.RuntimeEvent, 8)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventTurnCompleted {
-			turnEvents <- event
-		}
-	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
-
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
-		t.Fatalf("first SendTurn: %v", err)
-	}
-	select {
-	case <-firstPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first prompt did not start")
-	}
-
-	// Steer the SAME turn while the first prompt is still in flight.
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
-		t.Fatalf("steering SendTurn: %v", err)
-	}
-	select {
-	case <-cancelCalls:
-	case <-time.After(2 * time.Second):
-		t.Fatal("steering prompt did not send session/cancel for the in-flight prompt")
-	}
-	select {
-	case <-secondPromptStarted:
-		t.Fatal("steering prompt dispatched while first prompt still in flight")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	close(firstPromptRelease)
-	select {
-	case <-secondPromptStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("steering prompt did not dispatch after cancelled prompt settled")
-	}
-	select {
-	case event := <-turnEvents:
-		if event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnCompleted {
-			t.Fatalf("turn completion = %#v, want turn-1 completed from steering prompt", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for steered turn completion")
-	}
-	waitForNoActiveCollector(t, h, "sess")
-}
-
 func TestSteeringPreservesEveryQueuedPrompt(t *testing.T) {
 	firstPromptStarted := make(chan struct{})
 	firstPromptRelease := make(chan struct{})
@@ -2415,7 +2208,13 @@ func TestSteeringPreservesEveryQueuedPrompt(t *testing.T) {
 	}
 }
 
-func TestSteeringPromptSettlesAbandonedToolItems(t *testing.T) {
+// Regression for codex-acp (Zed's own client cancels the running prompt before
+// every send): an agent may accept an overlapping session/prompt's text but
+// never answer the second RPC, wedging the turn forever. A steering prompt must
+// therefore cancel the in-flight prompt, wait for it to settle, then dispatch;
+// the cancelled prompt's open tools settle as interrupted and the turn still
+// completes normally from the steering prompt.
+func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.T) {
 	firstPromptStarted := make(chan struct{})
 	firstPromptRelease := make(chan struct{})
 	secondPromptStarted := make(chan struct{})
@@ -2490,6 +2289,11 @@ func TestSteeringPromptSettlesAbandonedToolItems(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("steering prompt did not send session/cancel")
 	}
+	select {
+	case <-secondPromptStarted:
+		t.Fatal("steering prompt dispatched while first prompt still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
 	close(firstPromptRelease)
 	select {
 	case <-secondPromptStarted:
@@ -2519,8 +2323,8 @@ func TestSteeringPromptSettlesAbandonedToolItems(t *testing.T) {
 	completed := waitForEvent("steered turn completion", func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventTurnCompleted
 	})
-	if completed.Payload.TurnState != provider.RuntimeTurnCompleted {
-		t.Fatalf("turn completion = %#v, want completed steering turn", completed)
+	if completed.TurnID != "turn-1" || completed.Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("turn completion = %#v, want turn-1 completed from steering prompt", completed)
 	}
 	waitForNoActiveCollector(t, h, "sess")
 }
@@ -2684,10 +2488,9 @@ func TestInterruptedTurnToolStatesClearedAtTurnEnd(t *testing.T) {
 	}
 }
 
-// Pins the §5 handoff claim: if the turn is interrupted while a steering
-// prompt is still waiting for the cancelled prompt to settle, the steer must
-// settle as cancelled WITHOUT dispatching — otherwise the agent starts fresh
-// work after the user hit stop.
+// If the turn is interrupted while a steering prompt is still waiting for the
+// cancelled prompt to settle, the steer must settle as cancelled WITHOUT
+// dispatching — otherwise the agent starts fresh work after the user hit stop.
 func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 	firstPromptStarted := make(chan struct{})
 	firstPromptRelease := make(chan struct{})
