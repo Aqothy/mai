@@ -20,25 +20,130 @@ func fakeInstanceConfig(command []string) json.RawMessage {
 	return config
 }
 
-type fakeStartAdapter struct {
-	mu          sync.Mutex
-	starts      int
-	instanceSeq int
+// fakeSpec is a launchable fake instance spec whose config names its agent.
+func fakeSpec(id provider.InstanceID) provider.InstanceSpec {
+	return provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: "fake", Config: fakeInstanceConfig([]string{string(id) + "-agent"})}
 }
 
-func (a *fakeStartAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
+// fakeAdapter launches one fakeProviderInstance per StartInstance call and
+// records every launch's config, instance and event listener in order.
+type fakeAdapter struct {
+	mu        sync.Mutex
+	configs   []string
+	instances []*fakeProviderInstance
+	listeners []provider.RuntimeEventListener
+	// beforeLaunch runs before launch n (1-based); it may block or fail it.
+	beforeLaunch func(ctx context.Context, n int) error
+	// configure customizes each launched instance before it is returned.
+	configure func(*fakeProviderInstance)
+}
+
+func (a *fakeAdapter) StartInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error) {
 	a.mu.Lock()
-	a.starts++
-	a.instanceSeq++
-	seq := a.instanceSeq
+	a.configs = append(a.configs, string(spec.Config))
+	n := len(a.configs)
+	beforeLaunch, configure := a.beforeLaunch, a.configure
 	a.mu.Unlock()
-	return &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}, nil
+	if beforeLaunch != nil {
+		if err := beforeLaunch(ctx, n); err != nil {
+			return nil, err
+		}
+	}
+	instance := &fakeProviderInstance{info: provider.InstanceInfo{
+		InstanceID: spec.InstanceID, Name: spec.Name, Driver: spec.Driver, Status: provider.InstanceStatusInitialized, PID: n,
+		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
+	}}
+	if configure != nil {
+		configure(instance)
+	}
+	a.mu.Lock()
+	a.instances = append(a.instances, instance)
+	a.listeners = append(a.listeners, emit)
+	a.mu.Unlock()
+	return instance, nil
 }
 
-func (a *fakeStartAdapter) startCount() int {
+func (a *fakeAdapter) launchConfigs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.starts
+	return append([]string(nil), a.configs...)
+}
+
+// instance returns the index-th successfully launched instance.
+func (a *fakeAdapter) instance(index int) *fakeProviderInstance {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if index < 0 || index >= len(a.instances) {
+		return nil
+	}
+	return a.instances[index]
+}
+
+// latest returns the most recently launched instance for id.
+func (a *fakeAdapter) latest(id provider.InstanceID) *fakeProviderInstance {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for index := len(a.instances) - 1; index >= 0; index-- {
+		if a.instances[index].info.InstanceID == id {
+			return a.instances[index]
+		}
+	}
+	return nil
+}
+
+// emit publishes event through the index-th launched instance's listener.
+func (a *fakeAdapter) emit(index int, event provider.RuntimeEvent) {
+	a.mu.Lock()
+	listener := a.listeners[index]
+	a.mu.Unlock()
+	listener(event)
+}
+
+// resumableSessions makes an instance report native session "sess-1" and echo
+// the resume cursor it is given (sess-1's cursor for a new session).
+func resumableSessions(instance *fakeProviderInstance) {
+	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		cursor := input.ResumeCursor
+		if len(cursor) == 0 {
+			cursor = json.RawMessage(`{"sessionId":"sess-1"}`)
+		}
+		return provider.Session{ProviderInstanceID: input.ProviderInstanceID, ProviderSessionID: "sess-1", ThreadID: input.ThreadID, ResumeCursor: append(json.RawMessage(nil), cursor...)}, nil
+	}
+}
+
+func newFakeService(t *testing.T, adapter *fakeAdapter, opts ...Option) *Service {
+	t.Helper()
+	s := New(adapter.StartInstance, opts...)
+	t.Cleanup(s.Close)
+	return s
+}
+
+func mustStartInstance(t *testing.T, s *Service, spec provider.InstanceSpec, restart bool) provider.InstanceInfo {
+	t.Helper()
+	info, err := s.StartInstance(context.Background(), spec, restart)
+	if err != nil {
+		t.Fatalf("StartInstance(%s, restart=%t): %v", spec.InstanceID, restart, err)
+	}
+	return info
+}
+
+func mustStartSession(t *testing.T, s *Service, threadID string, input provider.StartSessionInput) provider.StartSessionResult {
+	t.Helper()
+	input.ThreadID = threadID
+	result, err := s.StartSession(context.Background(), threadID, input)
+	if err != nil {
+		t.Fatalf("StartSession(%s on %s): %v", threadID, input.ProviderInstanceID, err)
+	}
+	return result
+}
+
+// startedRoute starts the codex instance and binds thread-1 to it.
+func startedRoute(t *testing.T, adapter *fakeAdapter, opts ...Option) *Service {
+	t.Helper()
+	s := newFakeService(t, adapter, opts...)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
+	return s
 }
 
 type fakeProviderInstance struct {
@@ -205,259 +310,20 @@ func (i *fakeProviderInstance) operationCount(name string) int {
 	return count
 }
 
-type resumeCursorAdapter struct {
-	mu        sync.Mutex
-	instances []*fakeProviderInstance
-}
-
-type cursorRebindAdapter struct {
-	mu        sync.Mutex
-	instances map[provider.InstanceID]*fakeProviderInstance
-}
-
-type eventingAdapter struct {
-	mu        sync.Mutex
-	instances map[provider.InstanceID]*fakeProviderInstance
-	listeners map[provider.InstanceID]provider.RuntimeEventListener
-}
-
-func (a *resumeCursorAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	seq := len(a.instances) + 1
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{
-		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq,
-		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
-	}}
-	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
-		cursor := input.ResumeCursor
-		if len(cursor) == 0 {
-			cursor = json.RawMessage(`{"sessionId":"sess-1"}`)
-		}
-		return provider.Session{ProviderInstanceID: req.InstanceID, ProviderSessionID: "sess-1", ThreadID: input.ThreadID, ResumeCursor: append(json.RawMessage(nil), cursor...)}, nil
-	}
-	a.instances = append(a.instances, instance)
-	a.mu.Unlock()
-	return instance, nil
-}
-
-func (a *resumeCursorAdapter) instance(index int) *fakeProviderInstance {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if index < 0 || index >= len(a.instances) {
-		return nil
-	}
-	return a.instances[index]
-}
-
-func (a *cursorRebindAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.instances == nil {
-		a.instances = make(map[provider.InstanceID]*fakeProviderInstance)
-	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{
-		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
-		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
-	}}
-	switch req.InstanceID {
-	case "old":
-		instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
-			return provider.Session{ProviderInstanceID: req.InstanceID, ThreadID: input.ThreadID, ResumeCursor: json.RawMessage(`{"sessionId":"old-session"}`)}, nil
-		}
-	default:
-		instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
-			return provider.Session{ProviderInstanceID: req.InstanceID, ThreadID: input.ThreadID}, nil
-		}
-	}
-	a.instances[req.InstanceID] = instance
-	return instance, nil
-}
-
-func (a *cursorRebindAdapter) instance(id provider.InstanceID) *fakeProviderInstance {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.instances[id]
-}
-
-func (a *eventingAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.instances == nil {
-		a.instances = make(map[provider.InstanceID]*fakeProviderInstance)
-	}
-	if a.listeners == nil {
-		a.listeners = make(map[provider.InstanceID]provider.RuntimeEventListener)
-	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{
-		InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized,
-		Capabilities: provider.Capabilities{SessionList: true, SessionDelete: true, SessionClose: true, AdditionalDirectories: true},
-	}}
-	a.instances[req.InstanceID] = instance
-	a.listeners[req.InstanceID] = emit
-	return instance, nil
-}
-
-func (a *eventingAdapter) instance(id provider.InstanceID) *fakeProviderInstance {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.instances[id]
-}
-
-func (a *eventingAdapter) emit(id provider.InstanceID, event provider.RuntimeEvent) {
-	a.mu.Lock()
-	listener := a.listeners[id]
-	a.mu.Unlock()
-	if listener != nil {
-		listener(event)
-	}
-}
-
-type restartingEventingAdapter struct {
-	mu        sync.Mutex
-	instances []*fakeProviderInstance
-	listeners []provider.RuntimeEventListener
-}
-
-type failingRestartEventingAdapter struct {
-	mu        sync.Mutex
-	starts    int
-	instances []*fakeProviderInstance
-	listeners []provider.RuntimeEventListener
-	entered   chan struct{}
-	release   chan struct{}
-}
-
-type blockingRestartAdapter struct {
-	mu        sync.Mutex
-	starts    int
-	instances []*fakeProviderInstance
-	entered   chan struct{}
-	release   chan struct{}
-}
-
-func (a *restartingEventingAdapter) StartInstance(_ context.Context, req provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	seq := len(a.instances) + 1
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}
-	a.instances = append(a.instances, instance)
-	a.listeners = append(a.listeners, emit)
-	return instance, nil
-}
-
-func (a *restartingEventingAdapter) emit(startIndex int, event provider.RuntimeEvent) {
-	a.mu.Lock()
-	if startIndex < 0 || startIndex >= len(a.listeners) {
-		a.mu.Unlock()
-		return
-	}
-	listener := a.listeners[startIndex]
-	a.mu.Unlock()
-	if listener != nil {
-		listener(event)
-	}
-}
-
-func (a *failingRestartEventingAdapter) StartInstance(ctx context.Context, req provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	if a.entered == nil {
-		a.entered = make(chan struct{})
-	}
-	if a.release == nil {
-		a.release = make(chan struct{})
-	}
-	a.starts++
-	seq := a.starts
-	if seq == 1 {
-		instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}
-		a.instances = append(a.instances, instance)
-		a.listeners = append(a.listeners, emit)
-		a.mu.Unlock()
-		return instance, nil
-	}
-	entered := a.entered
-	release := a.release
-	a.mu.Unlock()
-	close(entered)
-	select {
-	case <-release:
-		return nil, errors.New("restart failed")
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (a *failingRestartEventingAdapter) emit(startIndex int, event provider.RuntimeEvent) {
-	a.mu.Lock()
-	if startIndex < 0 || startIndex >= len(a.listeners) {
-		a.mu.Unlock()
-		return
-	}
-	listener := a.listeners[startIndex]
-	a.mu.Unlock()
-	if listener != nil {
-		listener(event)
-	}
-}
-
-func (a *blockingRestartAdapter) StartInstance(ctx context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
-	a.mu.Lock()
-	if a.entered == nil {
-		a.entered = make(chan struct{})
-	}
-	if a.release == nil {
-		a.release = make(chan struct{})
-	}
-	a.starts++
-	seq := a.starts
-	if seq > 1 {
-		entered := a.entered
-		release := a.release
-		a.mu.Unlock()
-		close(entered)
-		select {
-		case <-release:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		a.mu.Lock()
-	}
-	instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: seq}}
-	a.instances = append(a.instances, instance)
-	a.mu.Unlock()
-	return instance, nil
-}
-
-func (a *blockingRestartAdapter) instance(index int) *fakeProviderInstance {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if index < 0 || index >= len(a.instances) {
-		return nil
-	}
-	return a.instances[index]
-}
-
 func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	var mu sync.Mutex
-	starts := 0
-	s := New(func(ctx context.Context, req provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
-		mu.Lock()
-		starts++
-		pid := starts
-		mu.Unlock()
+	adapter := &fakeAdapter{beforeLaunch: func(ctx context.Context, _ int) error {
 		entered <- struct{}{}
 		select {
 		case <-release:
+			return nil
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		return &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: req.InstanceID, Name: req.Name, Driver: req.Driver, Status: provider.InstanceStatusInitialized, PID: pid}}, nil
-	})
-	defer s.Close()
+	}}
+	s := newFakeService(t, adapter)
 
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
 	var wg sync.WaitGroup
 	results := make(chan provider.InstanceInfo, 2)
 	errs := make(chan error, 2)
@@ -465,7 +331,7 @@ func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			conn, err := s.StartInstance(context.Background(), req, false)
+			conn, err := s.StartInstance(context.Background(), fakeSpec("codex"), false)
 			if err != nil {
 				errs <- err
 				return
@@ -493,14 +359,8 @@ func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("StartInstance error: %v", err)
 	}
-	if secondFactoryCall {
-		t.Fatal("concurrent start entered the provider factory instead of waiting for and reusing the first instance")
-	}
-	mu.Lock()
-	startCount := starts
-	mu.Unlock()
-	if startCount != 1 {
-		t.Fatalf("adapter starts = %d, want 1", startCount)
+	if secondFactoryCall || len(adapter.launchConfigs()) != 1 {
+		t.Fatalf("launches = %d, want the concurrent start to wait for and reuse the first instance", len(adapter.launchConfigs()))
 	}
 	for conn := range results {
 		if conn.PID != 1 {
@@ -510,134 +370,83 @@ func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
 }
 
 func TestStartInstanceReusesSemanticallyEqualConfiguration(t *testing.T) {
-	adapter := &fakeStartAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
 
 	first := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: json.RawMessage(`{"command":["agent"],"env":{"A":"B"}}`)}
 	second := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: json.RawMessage(`{"env":{"A":"B"},"command":["agent"]}`)}
-	firstInfo, err := s.StartInstance(context.Background(), first, false)
-	if err != nil {
-		t.Fatalf("first StartInstance: %v", err)
-	}
-	secondInfo, err := s.StartInstance(context.Background(), second, false)
-	if err != nil {
-		t.Fatalf("second StartInstance: %v", err)
-	}
-	if adapter.startCount() != 1 || secondInfo.PID != firstInfo.PID {
-		t.Fatalf("starts/PIDs = %d/%d/%d, want one reused instance", adapter.startCount(), firstInfo.PID, secondInfo.PID)
+	firstInfo := mustStartInstance(t, s, first, false)
+	secondInfo := mustStartInstance(t, s, second, false)
+	if launches := len(adapter.launchConfigs()); launches != 1 || secondInfo.PID != firstInfo.PID {
+		t.Fatalf("launches/PIDs = %d/%d/%d, want one reused instance", launches, firstInfo.PID, secondInfo.PID)
 	}
 }
 
 func TestStartSessionRespawnsExitedProviderInstance(t *testing.T) {
-	adapter := &fakeStartAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := startedRoute(t, adapter)
+	first := adapter.instance(0)
+	first.mu.Lock()
+	first.info.Status = provider.InstanceStatusExited
+	first.mu.Unlock()
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
+	second := adapter.instance(1)
+	if second == nil || second.startInputCount() != 1 {
+		t.Fatalf("replacement instance = %#v, want the exited instance respawned for the session", second)
 	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	first, err := s.instance("codex")
-	if err != nil {
-		t.Fatalf("first instance: %v", err)
-	}
-	firstFake := first.(*fakeProviderInstance)
-	firstFake.mu.Lock()
-	firstFake.info.Status = provider.InstanceStatusExited
-	firstFake.mu.Unlock()
-
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession after provider exit: %v", err)
-	}
-	second, err := s.instance("codex")
-	if err != nil {
-		t.Fatalf("replacement instance: %v", err)
-	}
-	if second == first {
-		t.Fatal("exited provider instance was reused instead of respawned")
-	}
-	if got := adapter.startCount(); got != 2 {
-		t.Fatalf("adapter starts = %d, want 2", got)
-	}
-	if got := firstFake.startInputCount(); got != 1 {
+	if got := first.startInputCount(); got != 1 {
 		t.Fatalf("exited instance StartSession calls = %d, want only the initial call", got)
 	}
 }
 
 func TestStartInstanceConfigurationChangeRequiresRestart(t *testing.T) {
-	adapter := &fakeStartAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
 
-	first := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent-a"})}
-	changed := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent-b"})}
-	if _, err := s.StartInstance(context.Background(), first, false); err != nil {
-		t.Fatalf("first StartInstance: %v", err)
-	}
+	first := fakeSpec("codex")
+	changed := first
+	changed.Config = fakeInstanceConfig([]string{"agent-b"})
+	mustStartInstance(t, s, first, false)
 	if _, err := s.StartInstance(context.Background(), changed, false); err == nil || !strings.Contains(err.Error(), "different configuration") {
 		t.Fatalf("changed StartInstance err = %v, want restart-required error", err)
 	}
-	if adapter.startCount() != 1 {
-		t.Fatalf("adapter starts after rejected change = %d, want 1", adapter.startCount())
+	if launches := len(adapter.launchConfigs()); launches != 1 {
+		t.Fatalf("launches after rejected change = %d, want 1", launches)
 	}
-	if _, err := s.StartInstance(context.Background(), changed, true); err != nil {
-		t.Fatalf("restart with changed config: %v", err)
-	}
-	if adapter.startCount() != 2 {
-		t.Fatalf("adapter starts after restart = %d, want 2", adapter.startCount())
+	mustStartInstance(t, s, changed, true)
+	if launches := len(adapter.launchConfigs()); launches != 2 {
+		t.Fatalf("launches after restart = %d, want 2", launches)
 	}
 }
 
 func TestRuntimeEventsDoNotRebindThreadRoute(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
 
-	oldReq := provider.InstanceSpec{InstanceID: "old", Name: "old", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}
-	newReq := provider.InstanceSpec{InstanceID: "new", Name: "new", Driver: "fake", Config: fakeInstanceConfig([]string{"new-agent"})}
-	if _, err := s.StartInstance(context.Background(), oldReq, false); err != nil {
-		t.Fatalf("old StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "old"}); err != nil {
-		t.Fatalf("old StartSession: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), newReq, false); err != nil {
-		t.Fatalf("new StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("new StartSession: %v", err)
-	}
+	mustStartInstance(t, s, fakeSpec("old"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
+	mustStartInstance(t, s, fakeSpec("new"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 
-	adapter.emit("old", provider.RuntimeEvent{EventID: "late-old", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "late old event"}})
+	adapter.emit(0, provider.RuntimeEvent{EventID: "late-old", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "late old event"}})
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-
-	oldInstance := adapter.instance("old")
-	newInstance := adapter.instance("new")
-	if oldInstance == nil || newInstance == nil {
-		t.Fatalf("instances missing: old=%#v new=%#v", oldInstance, newInstance)
-	}
-	if oldInstance.sendTurnCount() != 0 || newInstance.sendTurnCount() != 1 {
-		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after stale old event", oldInstance.sendTurnCount(), newInstance.sendTurnCount())
+	if old, current := adapter.latest("old").sendTurnCount(), adapter.latest("new").sendTurnCount(); old != 0 || current != 1 {
+		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after stale old event", old, current)
 	}
 }
 
 func TestRuntimeEventSourceIdentityComesFromEmittingInstance(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
 	events := s.Events()
 
-	req := provider.InstanceSpec{InstanceID: "old", Name: "Old Provider", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	adapter.emit("old", provider.RuntimeEvent{EventID: "spoofed", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "spoofed-driver", ProviderInstanceID: "spoofed-instance", ProviderName: "Spoofed", ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "hello"}})
+	spec := fakeSpec("old")
+	spec.Name = "Old Provider"
+	mustStartInstance(t, s, spec, false)
+	adapter.emit(0, provider.RuntimeEvent{EventID: "spoofed", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "spoofed-driver", ProviderInstanceID: "spoofed-instance", ProviderName: "Spoofed", ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "hello"}})
 
 	select {
 	case event := <-events:
@@ -650,70 +459,53 @@ func TestRuntimeEventSourceIdentityComesFromEmittingInstance(t *testing.T) {
 }
 
 func TestStartSessionNormalizesAdapterReturnedInstanceIDToRequestedInstance(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
 
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "old", Name: "Old Provider", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}, false); err != nil {
-		t.Fatalf("old StartInstance: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "new", Name: "New Provider", Driver: "fake", Config: fakeInstanceConfig([]string{"new-agent"})}, false); err != nil {
-		t.Fatalf("new StartInstance: %v", err)
-	}
-	newInstance := adapter.instance("new")
-	if newInstance == nil {
-		t.Fatal("new provider instance missing")
-	}
+	mustStartInstance(t, s, fakeSpec("old"), false)
+	newSpec := fakeSpec("new")
+	newSpec.Name = "New Provider"
+	mustStartInstance(t, s, newSpec, false)
+	newInstance := adapter.latest("new")
 	newInstance.mu.Lock()
 	newInstance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
 		return provider.Session{Provider: "spoofed", ProviderInstanceID: "old", ProviderName: "Old Provider", ThreadID: input.ThreadID, ResumeCursor: json.RawMessage(`{"sessionId":"new-session"}`)}, nil
 	}
 	newInstance.mu.Unlock()
 
-	result, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	result := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 	if result.Session.ProviderInstanceID != "new" || result.Session.ProviderName != "New Provider" || result.Session.Provider != "fake" {
 		t.Fatalf("session identity = (%q,%q,%q), want selected new provider identity", result.Session.ProviderInstanceID, result.Session.ProviderName, result.Session.Provider)
 	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("second StartSession: %v", err)
-	}
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 	if got := string(newInstance.lastStartInput().ResumeCursor); got != `{"sessionId":"new-session"}` {
 		t.Fatalf("resume cursor for selected instance = %s, want new-session cursor", got)
 	}
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	oldInstance := adapter.instance("old")
-	if oldInstance == nil {
-		t.Fatal("old provider instance missing")
-	}
-	if oldInstance.sendTurnCount() != 0 || newInstance.sendTurnCount() != 1 {
-		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1", oldInstance.sendTurnCount(), newInstance.sendTurnCount())
+	if old, current := adapter.latest("old").sendTurnCount(), newInstance.sendTurnCount(); old != 0 || current != 1 {
+		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1", old, current)
 	}
 }
 
 func TestStartInstanceCreatedDuringCloseIsClosedAndRejected(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	created := make(chan *fakeProviderInstance, 1)
-	s := New(func(ctx context.Context, spec provider.InstanceSpec, _ provider.RuntimeEventListener) (ProviderInstance, error) {
+	adapter := &fakeAdapter{beforeLaunch: func(ctx context.Context, _ int) error {
 		close(entered)
 		select {
 		case <-release:
+			return nil
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		instance := &fakeProviderInstance{info: provider.InstanceInfo{InstanceID: spec.InstanceID, Name: spec.Name, Driver: spec.Driver, Status: provider.InstanceStatusInitialized}}
-		created <- instance
-		return instance, nil
-	})
+	}}
+	s := New(adapter.StartInstance)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake"}, false)
+		_, err := s.StartInstance(context.Background(), fakeSpec("codex"), false)
 		done <- err
 	}()
 	select {
@@ -724,10 +516,10 @@ func TestStartInstanceCreatedDuringCloseIsClosedAndRejected(t *testing.T) {
 
 	s.Close()
 	close(release)
-	instance := <-created
 	if err := <-done; err == nil {
 		t.Fatal("StartInstance completed after Close without an error")
 	}
+	instance := adapter.instance(0)
 	instance.mu.Lock()
 	closed := instance.closed
 	instance.mu.Unlock()
@@ -739,25 +531,13 @@ func TestStartInstanceCreatedDuringCloseIsClosedAndRejected(t *testing.T) {
 	}
 }
 
-func restartedEventService(t *testing.T, rebind bool) (*Service, *restartingEventingAdapter) {
+func restartedEventService(t *testing.T, rebind bool) (*Service, *fakeAdapter) {
 	t.Helper()
-	adapter := &restartingEventingAdapter{}
-	s := New(adapter.StartInstance)
-	t.Cleanup(s.Close)
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-		t.Fatalf("restart StartInstance: %v", err)
-	}
+	adapter := &fakeAdapter{}
+	s := startedRoute(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), true)
 	if rebind {
-		if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-			t.Fatalf("replacement StartSession: %v", err)
-		}
+		mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	}
 	return s, adapter
 }
@@ -816,39 +596,26 @@ func TestRestartAdmitsTurnScopedRuntimeErrorFromReplacedGeneration(t *testing.T)
 }
 
 func TestStartSessionReturnsStampedReplayBatch(t *testing.T) {
-	adapter := &restartingEventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
-
-	adapter.mu.Lock()
-	instance := adapter.instances[0]
-	adapter.mu.Unlock()
-	instance.mu.Lock()
-	instance.startReplay = []provider.RuntimeEvent{{
-		EventID:            "replayed",
-		Type:               provider.RuntimeEventContentDelta,
-		Provider:           "spoofed",
-		ProviderInstanceID: "spoofed",
-		ProviderName:       "spoofed",
-		ThreadID:           "spoofed",
-		Payload: provider.RuntimeEventPayload{
-			StreamKind: provider.RuntimeContentAssistantText,
-			Delta:      "history",
-		},
+	adapter := &fakeAdapter{configure: func(instance *fakeProviderInstance) {
+		instance.startReplay = []provider.RuntimeEvent{{
+			EventID:            "replayed",
+			Type:               provider.RuntimeEventContentDelta,
+			Provider:           "spoofed",
+			ProviderInstanceID: "spoofed",
+			ProviderName:       "spoofed",
+			ThreadID:           "spoofed",
+			Payload: provider.RuntimeEventPayload{
+				StreamKind: provider.RuntimeContentAssistantText,
+				Delta:      "history",
+			},
+		}}
 	}}
-	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
-		return provider.Session{ProviderInstanceID: input.ProviderInstanceID, ThreadID: input.ThreadID}, nil
-	}
-	instance.mu.Unlock()
+	s := newFakeService(t, adapter)
+	spec := fakeSpec("codex")
+	spec.Name = "Codex"
+	mustStartInstance(t, s, spec, false)
 
-	result, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex", ReplayHistory: true})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	result := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true})
 	if len(result.Replay) != 1 {
 		t.Fatalf("replay = %#v, want one returned event", result.Replay)
 	}
@@ -861,69 +628,74 @@ func TestStartSessionReturnsStampedReplayBatch(t *testing.T) {
 	}
 }
 
+// blockRestart makes every launch after the first wait for release and then
+// return err.
+func blockRestart(entered chan<- struct{}, release <-chan struct{}, err error) func(context.Context, int) error {
+	return func(ctx context.Context, n int) error {
+		if n == 1 {
+			return nil
+		}
+		close(entered)
+		select {
+		case <-release:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 func TestFailedRestartKeepsPreviousProviderProcessEventsActive(t *testing.T) {
-	adapter := &failingRestartEventingAdapter{entered: make(chan struct{}), release: make(chan struct{})}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	entered, release := make(chan struct{}), make(chan struct{})
+	adapter := &fakeAdapter{beforeLaunch: blockRestart(entered, release, errors.New("restart failed"))}
+	s := newFakeService(t, adapter)
 	events := s.Events()
 
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, fakeSpec("codex"), false)
 	errs := make(chan error, 1)
 	go func() {
-		_, err := s.StartInstance(context.Background(), req, true)
+		_, err := s.StartInstance(context.Background(), fakeSpec("codex"), true)
 		errs <- err
 	}()
 	select {
-	case <-adapter.entered:
+	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("restart did not enter adapter start")
 	}
 
-	adapter.emit(0, provider.RuntimeEvent{EventID: "old-process-during-failed-restart", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "still live"}})
-	select {
-	case event := <-events:
-		if event.EventID != "old-process-during-failed-restart" {
-			t.Fatalf("event = %q, want old-process-during-failed-restart", event.EventID)
+	expectOldProcessEvent := func(eventID provider.RuntimeEventID) {
+		t.Helper()
+		adapter.emit(0, provider.RuntimeEvent{EventID: eventID, Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "still live"}})
+		select {
+		case event := <-events:
+			if event.EventID != eventID {
+				t.Fatalf("event = %q, want %q", event.EventID, eventID)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for old provider process event %q", eventID)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for old provider process event during failed restart")
 	}
-
-	close(adapter.release)
+	expectOldProcessEvent("old-process-during-failed-restart")
+	close(release)
 	if err := <-errs; err == nil {
 		t.Fatal("restart error = nil, want failure")
 	}
-
-	adapter.emit(0, provider.RuntimeEvent{EventID: "old-process-after-failed-restart", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "still live"}})
-	select {
-	case event := <-events:
-		if event.EventID != "old-process-after-failed-restart" {
-			t.Fatalf("event after failed restart = %q, want old-process-after-failed-restart", event.EventID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for old provider process event after failed restart")
-	}
+	expectOldProcessEvent("old-process-after-failed-restart")
 }
 
 func TestStartSessionWaitsForInFlightRestartBeforeBindingAndSending(t *testing.T) {
-	adapter := &blockingRestartAdapter{entered: make(chan struct{}), release: make(chan struct{})}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	entered, release := make(chan struct{}), make(chan struct{})
+	adapter := &fakeAdapter{beforeLaunch: blockRestart(entered, release, nil)}
+	s := newFakeService(t, adapter)
 
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, fakeSpec("codex"), false)
 	restartDone := make(chan error, 1)
 	go func() {
-		_, err := s.StartInstance(context.Background(), req, true)
+		_, err := s.StartInstance(context.Background(), fakeSpec("codex"), true)
 		restartDone <- err
 	}()
 	select {
-	case <-adapter.entered:
+	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("restart did not enter adapter start")
 	}
@@ -939,7 +711,7 @@ func TestStartSessionWaitsForInFlightRestartBeforeBindingAndSending(t *testing.T
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(adapter.release)
+	close(release)
 	if err := <-restartDone; err != nil {
 		t.Fatalf("restart StartInstance: %v", err)
 	}
@@ -950,44 +722,21 @@ func TestStartSessionWaitsForInFlightRestartBeforeBindingAndSending(t *testing.T
 		t.Fatalf("SendTurn: %v", err)
 	}
 
-	first := adapter.instance(0)
-	second := adapter.instance(1)
-	if first == nil || second == nil {
-		t.Fatalf("instances missing: first=%#v second=%#v", first, second)
+	first, second := adapter.instance(0), adapter.instance(1)
+	if first.startInputCount() != 0 || first.sendTurnCount() != 0 {
+		t.Fatalf("old instance used: starts=%d sends=%d, want 0/0", first.startInputCount(), first.sendTurnCount())
 	}
-	first.mu.Lock()
-	firstStarts := len(first.startInputs)
-	first.mu.Unlock()
-	second.mu.Lock()
-	secondStarts := len(second.startInputs)
-	second.mu.Unlock()
-	if firstStarts != 0 || first.sendTurnCount() != 0 {
-		t.Fatalf("old instance used: starts=%d sends=%d, want 0/0", firstStarts, first.sendTurnCount())
-	}
-	if secondStarts != 1 || second.sendTurnCount() != 1 {
-		t.Fatalf("new instance starts=%d sends=%d, want 1/1", secondStarts, second.sendTurnCount())
+	if second.startInputCount() != 1 || second.sendTurnCount() != 1 {
+		t.Fatalf("new instance starts=%d sends=%d, want 1/1", second.startInputCount(), second.sendTurnCount())
 	}
 }
 
 func TestSendTurnDoesNotSerializeConcurrentTurnsForSameInstance(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := startedRoute(t, adapter)
+	mustStartSession(t, s, "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession thread-1: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-2", provider.StartSessionInput{ThreadID: "thread-2", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession thread-2: %v", err)
-	}
-
-	instance := adapter.instance("codex")
-	if instance == nil {
-		t.Fatal("provider instance missing")
-	}
+	instance := adapter.instance(0)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
@@ -1046,20 +795,9 @@ func TestSessionManagementRejectsBoundSessionAfterProviderRestart(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adapter := &resumeCursorAdapter{}
-			s := New(adapter.StartInstance)
-			defer s.Close()
-
-			req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-			if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-				t.Fatalf("initial StartInstance: %v", err)
-			}
-			if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-				t.Fatalf("StartSession: %v", err)
-			}
-			if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-				t.Fatalf("restart StartInstance: %v", err)
-			}
+			adapter := &fakeAdapter{configure: resumableSessions}
+			s := startedRoute(t, adapter)
+			mustStartInstance(t, s, fakeSpec("codex"), true)
 
 			if err := tt.call(s); err == nil || !strings.Contains(err.Error(), "bound to thread") {
 				t.Fatalf("%s bound session err = %v, want rejection", tt.name, err)
@@ -1072,31 +810,21 @@ func TestSessionManagementRejectsBoundSessionAfterProviderRestart(t *testing.T) 
 }
 
 func TestSlowSessionDeleteDoesNotBlockStartSessionOnSameInstance(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	instance := adapter.instance("codex")
-	if instance == nil {
-		t.Fatal("provider instance missing")
-	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	instance.mu.Lock()
-	instance.deleteSess = func(ctx context.Context, _ string) error {
-		close(entered)
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+	adapter := &fakeAdapter{configure: func(instance *fakeProviderInstance) {
+		instance.deleteSess = func(ctx context.Context, _ string) error {
+			close(entered)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-	}
-	instance.mu.Unlock()
+	}}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
 
 	deleteDone := make(chan error, 1)
 	go func() {
@@ -1129,23 +857,16 @@ func TestSlowSessionDeleteDoesNotBlockStartSessionOnSameInstance(t *testing.T) {
 }
 
 func TestSessionManagementRPCContextIsBounded(t *testing.T) {
-	adapter := &eventingAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	instance := adapter.instance("codex")
 	deadlines := make(chan bool, 1)
-	instance.mu.Lock()
-	instance.deleteSess = func(ctx context.Context, _ string) error {
-		_, hasDeadline := ctx.Deadline()
-		deadlines <- hasDeadline
-		return nil
-	}
-	instance.mu.Unlock()
+	adapter := &fakeAdapter{configure: func(instance *fakeProviderInstance) {
+		instance.deleteSess = func(ctx context.Context, _ string) error {
+			_, hasDeadline := ctx.Deadline()
+			deadlines <- hasDeadline
+			return nil
+		}
+	}}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
 
 	// The client's request context has no deadline; the service must impose one
 	// so a hung agent cannot pin the RPC for as long as the client stays.
@@ -1158,98 +879,57 @@ func TestSessionManagementRPCContextIsBounded(t *testing.T) {
 }
 
 func TestStartSessionReusesStoredResumeCursorAfterRestart(t *testing.T) {
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
-	firstResult, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
-	if err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-		t.Fatalf("restart StartInstance: %v", err)
-	}
-	secondResult, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
-	if err != nil {
-		t.Fatalf("restart StartSession: %v", err)
-	}
+	adapter := &fakeAdapter{configure: resumableSessions}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
+	firstResult := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
+	mustStartInstance(t, s, fakeSpec("codex"), true)
+	secondResult := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	if firstResult.Session.Generation == 0 || secondResult.Session.Generation == 0 || firstResult.Session.Generation == secondResult.Session.Generation {
 		t.Fatalf("session generations before/after restart = %d/%d, want distinct non-zero generations", firstResult.Session.Generation, secondResult.Session.Generation)
 	}
-
-	second := adapter.instance(1)
-	if second == nil {
-		t.Fatal("second provider instance missing")
-	}
-	if got := string(second.lastStartInput().ResumeCursor); got != `{"sessionId":"sess-1"}` {
+	if got := string(adapter.instance(1).lastStartInput().ResumeCursor); got != `{"sessionId":"sess-1"}` {
 		t.Fatalf("resume cursor passed after restart = %s, want sess-1 cursor", got)
 	}
 }
 
+func failStopSession(instance *fakeProviderInstance, err error) {
+	instance.mu.Lock()
+	instance.stopSession = func(context.Context, provider.StopSessionInput) error { return err }
+	instance.mu.Unlock()
+}
+
 func TestSwitchingProviderSucceedsWhenPreviousInstanceStopFails(t *testing.T) {
-	adapter := &cursorRebindAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("old"), false)
+	mustStartInstance(t, s, fakeSpec("new"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
+	oldInstance := adapter.latest("old")
+	failStopSession(oldInstance, errors.New("agent process is gone"))
 
-	for _, id := range []provider.InstanceID{"old", "new"} {
-		req := provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: "fake", Config: fakeInstanceConfig([]string{string(id) + "-agent"})}
-		if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-			t.Fatalf("StartInstance(%s): %v", id, err)
-		}
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "old"}); err != nil {
-		t.Fatalf("old StartSession: %v", err)
-	}
-	oldInstance := adapter.instance("old")
-	oldInstance.mu.Lock()
-	oldInstance.stopSession = func(context.Context, provider.StopSessionInput) error {
-		return errors.New("agent process is gone")
-	}
-	oldInstance.mu.Unlock()
-
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("StartSession on new instance after failed release: %v", err)
-	}
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 	if got := oldInstance.operationCount("StopSession"); got != 1 {
 		t.Fatalf("old provider StopSession calls = %d, want 1", got)
 	}
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	newInstance := adapter.instance("new")
-	if oldInstance.sendTurnCount() != 0 || newInstance.sendTurnCount() != 1 {
-		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after rebind", oldInstance.sendTurnCount(), newInstance.sendTurnCount())
+	if old, current := oldInstance.sendTurnCount(), adapter.latest("new").sendTurnCount(); old != 0 || current != 1 {
+		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after rebind", old, current)
 	}
 }
 
 func TestReleaseSessionDropsRouteWhenProviderStopFails(t *testing.T) {
-	adapter := &cursorRebindAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "old", Name: "old", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "old"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	oldInstance := adapter.instance("old")
-	oldInstance.mu.Lock()
-	oldInstance.stopSession = func(context.Context, provider.StopSessionInput) error {
-		return errors.New("agent process is gone")
-	}
-	oldInstance.mu.Unlock()
+	adapter := &fakeAdapter{}
+	s := startedRoute(t, adapter)
+	failStopSession(adapter.instance(0), errors.New("agent process is gone"))
 
 	if err := s.ReleaseSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("ReleaseSession: %v", err)
 	}
-	if got := oldInstance.operationCount("StopSession"); got != 1 {
-		t.Fatalf("old provider StopSession calls = %d, want 1", got)
+	if got := adapter.instance(0).operationCount("StopSession"); got != 1 {
+		t.Fatalf("provider StopSession calls = %d, want 1", got)
 	}
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "must not route"}); err == nil || !strings.Contains(err.Error(), "no provider session route") {
 		t.Fatalf("SendTurn after release err = %v, want no provider session route", err)
@@ -1257,102 +937,56 @@ func TestReleaseSessionDropsRouteWhenProviderStopFails(t *testing.T) {
 }
 
 func TestSwitchingProviderSkipsStopWhenRouteGenerationIsStale(t *testing.T) {
-	adapter := &cursorRebindAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	for _, id := range []provider.InstanceID{"old", "new"} {
-		req := provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: "fake", Config: fakeInstanceConfig([]string{string(id) + "-agent"})}
-		if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-			t.Fatalf("StartInstance(%s): %v", id, err)
-		}
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "old"}); err != nil {
-		t.Fatalf("old StartSession: %v", err)
-	}
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("old"), false)
+	mustStartInstance(t, s, fakeSpec("new"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
 	// Restart "old" so the thread's route points at a replaced generation: the
 	// session died with the old process, so the switch must not RPC a stop.
-	oldReq := provider.InstanceSpec{InstanceID: "old", Name: "old", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}
-	if _, err := s.StartInstance(context.Background(), oldReq, true); err != nil {
-		t.Fatalf("restart old StartInstance: %v", err)
-	}
-	replacement := adapter.instance("old")
-	replacement.mu.Lock()
-	replacement.stopSession = func(context.Context, provider.StopSessionInput) error {
-		return errors.New("should not be called for a stale-generation route")
-	}
-	replacement.mu.Unlock()
+	mustStartInstance(t, s, fakeSpec("old"), true)
+	replacement := adapter.latest("old")
+	failStopSession(replacement, errors.New("should not be called for a stale-generation route"))
 
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("StartSession on new instance: %v", err)
-	}
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 	if got := replacement.operationCount("StopSession"); got != 0 {
 		t.Fatalf("replacement StopSession calls = %d, want 0 for stale-generation route", got)
 	}
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	if got := adapter.instance("new").sendTurnCount(); got != 1 {
+	if got := adapter.latest("new").sendTurnCount(); got != 1 {
 		t.Fatalf("new instance send turns = %d, want 1 after rebind", got)
 	}
 }
 
 func TestStartSessionClearsStoredResumeCursorWhenReboundSessionReturnsNone(t *testing.T) {
-	adapter := &cursorRebindAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
+	adapter := &fakeAdapter{}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("old"), false)
+	oldInstance := adapter.latest("old")
+	oldInstance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+		return provider.Session{ProviderInstanceID: "old", ThreadID: input.ThreadID, ResumeCursor: json.RawMessage(`{"sessionId":"old-session"}`)}, nil
+	}
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
+	mustStartInstance(t, s, fakeSpec("new"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 
-	oldReq := provider.InstanceSpec{InstanceID: "old", Name: "old", Driver: "fake", Config: fakeInstanceConfig([]string{"old-agent"})}
-	newReq := provider.InstanceSpec{InstanceID: "new", Name: "new", Driver: "fake", Config: fakeInstanceConfig([]string{"new-agent"})}
-	if _, err := s.StartInstance(context.Background(), oldReq, false); err != nil {
-		t.Fatalf("old StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "old"}); err != nil {
-		t.Fatalf("old StartSession: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), newReq, false); err != nil {
-		t.Fatalf("new StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("first new StartSession: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "new"}); err != nil {
-		t.Fatalf("second new StartSession: %v", err)
-	}
-
-	newInstance := adapter.instance("new")
-	if newInstance == nil {
-		t.Fatal("new provider instance missing")
-	}
-	if got := string(newInstance.lastStartInput().ResumeCursor); got != "" {
+	if got := string(adapter.latest("new").lastStartInput().ResumeCursor); got != "" {
 		t.Fatalf("resume cursor passed after no-cursor rebind = %s, want empty", got)
 	}
 }
 
 func TestStopSessionDropsStoredResumeCursorSoNextTurnStartsFresh(t *testing.T) {
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
+	adapter := &fakeAdapter{configure: resumableSessions}
+	s := startedRoute(t, adapter)
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession after stop: %v", err)
-	}
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
-	instance := adapter.instance(0)
-	if instance == nil {
-		t.Fatal("provider instance missing")
-	}
-	if got := string(instance.lastStartInput().ResumeCursor); got != "" {
+	if got := string(adapter.instance(0).lastStartInput().ResumeCursor); got != "" {
 		t.Fatalf("resume cursor passed after stop = %s, want empty (stop unbinds; the next turn starts a fresh session)", got)
 	}
 }
@@ -1388,29 +1022,14 @@ func TestThreadScopedOperationsRecoverStaleRouteBeforeAdapterCall(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adapter := &resumeCursorAdapter{}
-			s := New(adapter.StartInstance)
-			defer s.Close()
-
-			req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-			if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-				t.Fatalf("initial StartInstance: %v", err)
-			}
-			if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-				t.Fatalf("initial StartSession: %v", err)
-			}
-			if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-				t.Fatalf("restart StartInstance: %v", err)
-			}
+			adapter := &fakeAdapter{configure: resumableSessions}
+			s := startedRoute(t, adapter)
+			mustStartInstance(t, s, fakeSpec("codex"), true)
 			if err := tt.call(s); err != nil {
 				t.Fatalf("%s: %v", tt.name, err)
 			}
 
-			first := adapter.instance(0)
-			second := adapter.instance(1)
-			if first == nil || second == nil {
-				t.Fatalf("instances missing: first=%#v second=%#v", first, second)
-			}
+			first, second := adapter.instance(0), adapter.instance(1)
 			if got := first.operationCount(tt.want); got != 0 {
 				t.Fatalf("old instance %s calls = %d, want 0", tt.want, got)
 			}
@@ -1425,29 +1044,25 @@ func TestThreadScopedOperationsRecoverStaleRouteBeforeAdapterCall(t *testing.T) 
 }
 
 func TestPreferenceChangesSurviveProviderRestart(t *testing.T) {
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
-		ThreadID: "thread-1", ProviderInstanceID: "codex",
-		ModelSelection: &provider.ModelSelection{Model: "slow"},
-	}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	adapter := &fakeAdapter{configure: resumableSessions}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow"}})
 	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast", Category: provider.ConfigOptionCategoryModel}); err != nil {
 		t.Fatalf("SetConfigOption model: %v", err)
 	}
 	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "reasoning", Value: "high"}); err != nil {
 		t.Fatalf("SetConfigOption reasoning: %v", err)
 	}
-	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-		t.Fatalf("restart StartInstance: %v", err)
+	// A boolean option can carry the model category; the provider applies it,
+	// so the service must not fail — it only skips recording a model preference.
+	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel}); err != nil {
+		t.Fatalf("SetConfigOption boolean model-category option: %v", err)
 	}
+	if got := adapter.instance(0).operationCount("SetConfigOption"); got != 3 {
+		t.Fatalf("SetConfigOption calls = %d, want 3", got)
+	}
+	mustStartInstance(t, s, fakeSpec("codex"), true)
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
@@ -1462,69 +1077,19 @@ func TestPreferenceChangesSurviveProviderRestart(t *testing.T) {
 }
 
 func TestStopSessionDoesNotRecoverStaleRouteAfterRestart(t *testing.T) {
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("initial StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("initial StartSession: %v", err)
-	}
-	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-		t.Fatalf("restart StartInstance: %v", err)
-	}
+	adapter := &fakeAdapter{configure: resumableSessions}
+	s := startedRoute(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), true)
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 
 	second := adapter.instance(1)
-	if second == nil {
-		t.Fatal("second provider instance missing")
-	}
 	if got := second.startInputCount(); got != 0 {
 		t.Fatalf("restart instance start sessions = %d, want 0 for stop", got)
 	}
 	if got := second.operationCount("StopSession"); got != 1 {
 		t.Fatalf("restart instance StopSession calls = %d, want 1", got)
-	}
-}
-
-func TestSetConfigOptionWithNonModelValueDoesNotFailAfterProviderApplied(t *testing.T) {
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance)
-	defer s.Close()
-
-	req := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), req, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
-		ThreadID: "thread-1", ProviderInstanceID: "codex",
-		ModelSelection: &provider.ModelSelection{Model: "slow"},
-	}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	// A boolean option can carry the model category; the provider applies it,
-	// so the service must not report a failure — it only skips recording a
-	// model preference.
-	if err := s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
-	}
-	if got := adapter.instance(0).operationCount("SetConfigOption"); got != 1 {
-		t.Fatalf("SetConfigOption calls = %d, want 1", got)
-	}
-	if _, err := s.StartInstance(context.Background(), req, true); err != nil {
-		t.Fatalf("restart StartInstance: %v", err)
-	}
-	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
-	input := adapter.instance(1).lastStartInput()
-	if input.ModelSelection == nil || input.ModelSelection.Model != "slow" {
-		t.Fatalf("recovered model selection = %#v, want unchanged slow", input.ModelSelection)
 	}
 }
 
@@ -1685,21 +1250,5 @@ func TestServiceGatesProviderSpecificSessionCapabilities(t *testing.T) {
 	}
 	if instance.operationCount("DeleteSession") != 0 || instance.operationCount("CloseSession") != 0 {
 		t.Fatal("unsupported lifecycle operation reached adapter")
-	}
-}
-
-func TestEventsChannelClosesOnServiceClose(t *testing.T) {
-	s := New(nil)
-	events := s.Events()
-
-	s.Close()
-
-	select {
-	case _, ok := <-events:
-		if ok {
-			t.Fatal("events channel is open after service close")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for events channel to close")
 	}
 }

@@ -26,11 +26,11 @@ func openRouteStore(t *testing.T) *store.SQLite {
 
 func TestRouteWriteThroughPersistence(t *testing.T) {
 	st := openRouteStore(t)
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(st))
 	defer s.Close()
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 
 func TestManifestInstanceDoesNotPersistLaunchConfiguration(t *testing.T) {
 	st := openRouteStore(t)
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(st))
 	defer s.Close()
 
@@ -108,9 +108,9 @@ func TestManifestInstanceDoesNotPersistLaunchConfiguration(t *testing.T) {
 
 func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	st := openRouteStore(t)
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 
-	first := &resumeCursorAdapter{}
+	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
 	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
@@ -134,7 +134,7 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 	// The restarted daemon keeps instances cold: no StartInstance here. The
 	// first session start on the routed thread respawns the persisted instance
 	// and hands the adapter the stored resume cursor.
-	second := &resumeCursorAdapter{}
+	second := &fakeAdapter{configure: resumableSessions}
 	after := New(second.StartInstance, WithRouteStore(st))
 	defer after.Close()
 	result, err := after.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
@@ -187,10 +187,10 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 
 func TestDuplicateProviderSessionBindingDoesNotPublishLiveRoute(t *testing.T) {
 	st := openRouteStore(t)
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	service := New(adapter.StartInstance, WithRouteStore(st))
 	defer service.Close()
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := service.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestDuplicateProviderSessionBindingDoesNotPublishLiveRoute(t *testing.T) {
 
 func TestImportedRoutePassesProviderSessionIDAfterRestart(t *testing.T) {
 	st := openRouteStore(t)
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if err := st.SaveInstance(spec); err != nil {
 		t.Fatalf("SaveInstance: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestImportedRoutePassesProviderSessionIDAfterRestart(t *testing.T) {
 		t.Fatalf("ImportThread = imported %v, err %v", imported, err)
 	}
 
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	service := New(adapter.StartInstance, WithRouteStore(st))
 	defer service.Close()
 	if _, err := service.StartSession(context.Background(), "thread-imported", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true}); err != nil {
@@ -255,11 +255,11 @@ func TestRouteLoadFailureFreezesPersistenceForRun(t *testing.T) {
 		ResumeCursor:      json.RawMessage(`{"sessionId":"session-old"}`),
 	}
 
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 	defer s.Close()
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -279,9 +279,9 @@ func TestRouteLoadFailureFreezesPersistenceForRun(t *testing.T) {
 
 func TestRestoredRouteRecoversSessionBeforeFirstOperation(t *testing.T) {
 	st := openRouteStore(t)
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 
-	first := &resumeCursorAdapter{}
+	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
 	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
@@ -294,7 +294,7 @@ func TestRestoredRouteRecoversSessionBeforeFirstOperation(t *testing.T) {
 	// A restored route's generation never matches a live instance, so an
 	// operation that skips StartSession still recovers the session (with the
 	// stored start input and cursor) before dispatching.
-	second := &resumeCursorAdapter{}
+	second := &fakeAdapter{configure: resumableSessions}
 	after := New(second.StartInstance, WithRouteStore(st))
 	defer after.Close()
 	if _, err := after.StartInstance(context.Background(), spec, false); err != nil {
@@ -383,11 +383,11 @@ func (s *flakyRouteStore) LoadInstances() ([]provider.InstanceSpec, error) { ret
 
 func TestRoutePersistenceHealsFailedInstanceSave(t *testing.T) {
 	flaky := newFlakyRouteStore(1)
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 	defer s.Close()
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -407,10 +407,10 @@ func TestRoutePersistenceHealsFailedInstanceSave(t *testing.T) {
 
 func TestFailedStandaloneInstanceWriteRetriesOnClose(t *testing.T) {
 	flaky := newFlakyRouteStore(1)
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -427,10 +427,10 @@ func TestFailedStandaloneInstanceWriteRetriesOnClose(t *testing.T) {
 func TestFailedRouteWriteRetriesOnClose(t *testing.T) {
 	flaky := newFlakyRouteStore(0)
 	flaky.routeSaveFailures = 1
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -456,11 +456,11 @@ func TestFailedRouteWriteRetriesOnClose(t *testing.T) {
 func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
 	flaky := newFlakyRouteStore(0)
 	flaky.routeSaveFailures = 1
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 	defer s.Close()
 
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
@@ -483,30 +483,6 @@ func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
 	second, secondOK := flaky.routes["thread-2"]
 	if len(flaky.routes) != 2 || !firstOK || !secondOK || first.ProviderSessionID != "sess-1" || second.ProviderSessionID != "sess-2" {
 		t.Fatalf("routes after retry = %+v, want thread-1/sess-1 and thread-2/sess-2", flaky.routes)
-	}
-}
-
-func TestServiceCloseKeepsDurableRoutes(t *testing.T) {
-	st := openRouteStore(t)
-	adapter := &resumeCursorAdapter{}
-	s := New(adapter.StartInstance, WithRouteStore(st))
-
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	s.Close()
-
-	routes, err := st.LoadRoutes()
-	if err != nil {
-		t.Fatalf("LoadRoutes: %v", err)
-	}
-	if route, ok := routes["thread-1"]; !ok || route.ProviderSessionID != "sess-1" {
-		t.Fatalf("route lost on shutdown: %+v", routes)
 	}
 }
 
@@ -545,9 +521,9 @@ func assertCanonicalModel(t *testing.T, label string, input provider.StartSessio
 
 func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T) {
 	st := openRouteStore(t)
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 
-	first := &resumeCursorAdapter{}
+	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
 	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
 		t.Fatalf("StartInstance: %v", err)
@@ -580,7 +556,7 @@ func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T
 	}
 	assertCanonicalModel(t, "persisted route", routes["thread-1"].StartInput, "model-b", "low")
 
-	second := &resumeCursorAdapter{}
+	second := &fakeAdapter{configure: resumableSessions}
 	after := New(second.StartInstance, WithRouteStore(st))
 	defer after.Close()
 	// After a daemon restart the projection only knows the route's model, so
@@ -594,7 +570,7 @@ func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T
 
 func TestRestoredConflictingRouteResumesWithCanonicalModel(t *testing.T) {
 	st := openRouteStore(t)
-	spec := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: fakeInstanceConfig([]string{"agent"})}
+	spec := fakeSpec("codex")
 	if err := st.SaveInstance(spec); err != nil {
 		t.Fatalf("SaveInstance: %v", err)
 	}
@@ -607,7 +583,7 @@ func TestRestoredConflictingRouteResumesWithCanonicalModel(t *testing.T) {
 		t.Fatalf("SaveRoute: %v", err)
 	}
 
-	adapter := &resumeCursorAdapter{}
+	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(st))
 	defer s.Close()
 	restored := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "model-b"}}
