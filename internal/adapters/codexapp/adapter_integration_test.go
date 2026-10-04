@@ -137,26 +137,6 @@ func TestResumeBindsBeforeNotificationsAndRejectsIdentityChanges(t *testing.T) {
 	})
 }
 
-func TestFastCompletionDoesNotReactivateTurn(t *testing.T) {
-	events := make(chan provider.RuntimeEvent, 8)
-	instance := openFakeInstance(t, "fast-completion", func(event provider.RuntimeEvent) { events <- event })
-	if _, err := instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", Cwd: "/tmp"}); err != nil {
-		t.Fatalf("start session: %v", err)
-	}
-	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello"}); err != nil {
-		t.Fatalf("start turn: %v", err)
-	}
-	_ = waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
-		return event.Type == provider.RuntimeEventTurnCompleted
-	})
-	instance.mu.Lock()
-	active := instance.sessionsByLocal["local-thread"].activeNativeTurn
-	instance.mu.Unlock()
-	if active != "" {
-		t.Fatalf("completed turn was reactivated as %q", active)
-	}
-}
-
 func TestStartSessionReusesLiveBinding(t *testing.T) {
 	instance := openFakeInstance(t, "lifecycle", nil)
 	if _, err := instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", Cwd: "/tmp"}); err != nil {
@@ -481,6 +461,8 @@ func TestMalformedTransportSettlesTurnAndStopsProcess(t *testing.T) {
 	}
 }
 
+// The turn completes before its turn/start response arrives. Reactivating it
+// from that late response would make the exit emit a second, failed completion.
 func TestCompletedTurnIsNotFailedOnProcessExit(t *testing.T) {
 	events := make(chan provider.RuntimeEvent, 32)
 	instance := openFakeInstance(t, "complete-and-exit", func(event provider.RuntimeEvent) { events <- event })
@@ -773,7 +755,7 @@ func runFakeAppServer(scenario string) error {
 					return fmt.Errorf("invalid tiered turn/start params: %s", fakeMessageJSON(message))
 				}
 			}
-			if scenario == "fast-completion" || scenario == "complete-and-exit" {
+			if scenario == "complete-and-exit" {
 				if err := writeFakeNotification(encoder, "turn/started", map[string]any{"threadId": "native-thread", "turn": fakeTurn("native-turn", "inProgress")}); err != nil {
 					return err
 				}

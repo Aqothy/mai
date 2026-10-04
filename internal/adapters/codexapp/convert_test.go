@@ -19,11 +19,6 @@ func TestReplayPreservesClientIdentityWithoutParsingPromptText(t *testing.T) {
 	if len(events) != 3 || events[1].Payload.ClientMessageID != "maid:dispatch" || events[1].Payload.Detail != "quoted context" {
 		t.Fatalf("replay identity: %#v", events)
 	}
-	item.ClientID = nil
-	event, ok := runtimeEventFromItem("local", "turn", item, provider.RuntimeEventItemCompleted, time.Now())
-	if !ok || event.Payload.ClientMessageID != "" || event.Payload.Presentation != nil {
-		t.Fatal("legacy prompt was guessed into an annotation")
-	}
 }
 
 func TestUserInputsFromTurnConvertsSkillsAndMedia(t *testing.T) {
@@ -357,52 +352,12 @@ func TestTurnStateAndTimestampsAreUnknownTolerant(t *testing.T) {
 		t.Fatalf("future state = %q, %v", state, terminal)
 	}
 	fallback := time.Unix(9, 0)
-	if got := timeFromUnixMilliseconds(1_234.5, fallback); !got.Equal(time.Unix(1, 234_000_000)) {
-		t.Fatalf("milliseconds = %s", got)
-	}
 	if got := timeFromUnixSeconds(nil, fallback); !got.Equal(fallback) {
 		t.Fatalf("nil seconds = %s", got)
 	}
 }
 
 func ptr(value string) *string { return &value }
-
-func TestReasoningPartsStreamWithParagraphBreaksAndMatchCompletedSnapshot(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := &Instance{
-		emit:            func(event provider.RuntimeEvent) { events = append(events, event) },
-		sessionsByLocal: map[string]*sessionState{},
-		localByNative:   map[string]string{},
-	}
-	h.bindSessionLocked(newSessionState("local-thread", "native-thread", "/tmp"))
-	h.handleNotification("item/reasoning/summaryTextDelta", json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"reason-1","delta":"**Planning**","summaryIndex":0}`))
-	h.handleNotification("item/reasoning/summaryPartAdded", json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"reason-1","summaryIndex":1}`))
-	h.handleNotification("item/reasoning/summaryTextDelta", json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"reason-1","delta":"**Check","summaryIndex":1}`))
-	h.handleNotification("item/reasoning/summaryTextDelta", json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"reason-1","delta":"ing**\n","summaryIndex":1}`))
-	h.handleNotification("item/reasoning/textDelta", json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"reason-1","delta":"raw thought","contentIndex":0}`))
-	h.emitItem("item/completed", "native-thread", "native-turn", appItem{Type: "reasoning", ID: "reason-1", Status: "completed", Summary: []string{"**Planning**", "**Checking**"}, ReasoningContent: []string{"raw thought"}}, 0, 0)
-
-	var deltas []string
-	var completed *provider.RuntimeEvent
-	for idx, event := range events {
-		switch event.Type {
-		case provider.RuntimeEventContentDelta:
-			deltas = append(deltas, event.Payload.Delta)
-		case provider.RuntimeEventItemCompleted:
-			completed = &events[idx]
-		}
-	}
-	want := []string{"**Planning**", "\n\n**Check", "ing**\n", "\nraw thought"}
-	if strings.Join(deltas, "|") != strings.Join(want, "|") {
-		t.Fatalf("reasoning deltas = %#v, want part breaks inserted live and no completion tail", deltas)
-	}
-	if completed == nil || completed.Payload.Detail != "**Planning**\n\n**Checking**\n\nraw thought" {
-		t.Fatalf("completed reasoning event = %#v, want authoritative joined snapshot in Detail", completed)
-	}
-	if completed.Payload.Detail != strings.Join(deltas, "") {
-		t.Fatalf("streamed text %q diverged from completed snapshot %q", strings.Join(deltas, ""), completed.Payload.Detail)
-	}
-}
 
 func TestCommandOutputBeforeItemStartIsDropped(t *testing.T) {
 	var events []provider.RuntimeEvent

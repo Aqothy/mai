@@ -3,9 +3,7 @@ package codexapp
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -94,32 +92,16 @@ func TestReasoningLiveAndReloadTimelineAgree(t *testing.T) {
 			t.Errorf("%s timeline = %#v; want %#v", label, got, want)
 		}
 	}
-	if output := os.Getenv("MAID_REASONING_QA_OUTPUT"); output != "" && !t.Failed() {
-		fixture := map[string]any{"initial": live.initial, "events": live.recordedEvents(), "live": live.snapshot(), "reload": reload.snapshot(), "expected": want}
-		data, err := json.MarshalIndent(fixture, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(output, append(data, '\n'), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 type reasoningTimelineValue struct {
-	Kind   string `json:"kind"`
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Text   string `json:"text"`
+	Kind, ID, Status, Text string
 }
 
 type reasoningPipeline struct {
 	engine    *orchestration.Engine
 	ingestion *orchestration.ProviderRuntimeIngestion
 	threadID  orchestration.ThreadID
-	initial   orchestration.Thread
-	mu        sync.Mutex
-	events    []orchestration.Event
 }
 
 func newReasoningPipeline(t *testing.T, id string) *reasoningPipeline {
@@ -135,24 +117,12 @@ func newReasoningPipeline(t *testing.T, id string) *reasoningPipeline {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.initial = p.snapshot()
-	t.Cleanup(e.OnEvent(func(event orchestration.Event) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.events = append(p.events, event)
-	}))
 	return p
 }
 
 func (p *reasoningPipeline) snapshot() orchestration.Thread {
 	thread, _ := p.engine.Thread(p.threadID)
 	return thread
-}
-
-func (p *reasoningPipeline) recordedEvents() []orchestration.Event {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]orchestration.Event(nil), p.events...)
 }
 
 func (p *reasoningPipeline) values(t *testing.T) []reasoningTimelineValue {

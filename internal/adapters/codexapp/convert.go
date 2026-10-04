@@ -898,15 +898,6 @@ func timeFromUnixSeconds(value *float64, fallback time.Time) time.Time {
 	return converted
 }
 
-func timeFromUnixMilliseconds(value float64, fallback time.Time) time.Time {
-	if value <= 0 {
-		return fallback
-	}
-	seconds := int64(value / 1000)
-	nanoseconds := int64(value-float64(seconds*1000)) * int64(time.Millisecond)
-	return time.Unix(seconds, nanoseconds).UTC()
-}
-
 func sessionSummaryFromThread(thread appThread) provider.SessionSummary {
 	updatedAt := unixSeconds(thread.UpdatedAt)
 	return provider.SessionSummary{
