@@ -85,9 +85,7 @@ func TestScreenResizeKeepsFormatting(t *testing.T) {
 // formatting at the debounced cadence. Run with:
 //
 //	make ghostty-vt && PKG_CONFIG_PATH=build/ghostty-vt/_deps/ghostty-src/zig-out/share/pkgconfig \
-//	  go test -tags ghostty_vt -bench BenchmarkHeadlessScreens -benchmem ./internal/terminal/vtscreen/
-//
-// Recorded results live in docs/TERMINAL_AGENT_DETECTION.md.
+//	  go test -bench BenchmarkHeadlessScreens -benchmem ./internal/terminal/vtscreen/
 func BenchmarkHeadlessScreens25(b *testing.B) {
 	const screens = 25
 	var pool []Screen

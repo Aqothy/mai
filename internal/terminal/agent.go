@@ -7,9 +7,8 @@ import "time"
 // process inspection reports a non-shell foreground job it cannot name.
 type AgentKind string
 
-// Named kinds are the canonical labels of the embedded rule manifests
-// (agentrules.Labels lists them all); Codex and Claude have constants because
-// tests and fixtures reference them directly.
+// Named kinds are the canonical labels of the embedded rule manifests; Codex
+// and Claude have constants because tests and fixtures reference them directly.
 const (
 	// AgentNone means the login shell (or nothing) owns the foreground.
 	AgentNone AgentKind = ""

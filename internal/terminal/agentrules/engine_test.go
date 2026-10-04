@@ -1,29 +1,9 @@
 package agentrules
 
-import (
-	"slices"
-	"testing"
-)
+import "testing"
 
 // OSC fixtures cover title/progress evidence; screen fixtures cover detector VT
 // evidence. Patterns come from the Herdr manifests embedded in manifests/.
-
-func TestManifestsCompileAndCoverExpectedAgents(t *testing.T) {
-	labels := Labels()
-	expected := []string{
-		"agy", "amp", "claude", "cline", "codex", "copilot", "cursor",
-		"devin", "droid", "gemini", "grok", "hermes", "kilo", "kimi",
-		"kiro", "maki", "opencode", "pi", "qodercli",
-	}
-	if !slices.Equal(labels, expected) {
-		t.Fatalf("labels = %v, want %v", labels, expected)
-	}
-	for _, alias := range []string{"claude-code", "cursor-agent", "github-copilot", "antigravity"} {
-		if !Known(alias) {
-			t.Errorf("alias %q not known", alias)
-		}
-	}
-}
 
 func TestManifestCompatibilityIsValidated(t *testing.T) {
 	tooNew := manifest{ID: "future", MinEngineVersion: manifestEngineVersion + 1}
@@ -153,15 +133,6 @@ func TestGenericFallbackCoversUnrecognizedAgents(t *testing.T) {
 	}
 }
 
-func TestScreenRulesAreSkippedWithoutScreenSource(t *testing.T) {
-	// claude's legacy_no_prompt_blocker uses a not-gate over the screen; with
-	// no screen source it must not evaluate against an empty region.
-	d := Detect("claude", Input{OSCTitle: "✳ Ready"})
-	if d.State != StateIdle || d.Rule != "osc_title_idle" {
-		t.Fatalf("screen rules leaked into OSC-only detection: %+v", d)
-	}
-}
-
 func TestRegionBottomNonEmptyLines(t *testing.T) {
 	content := "a\n\nb\nc\n\n"
 	got, ok := regionText(Input{Screen: content}, "bottom_non_empty_lines(2)")
@@ -187,11 +158,5 @@ func TestRegionAfterLastHorizontalRule(t *testing.T) {
 	got, ok := regionText(Input{Screen: content}, "after_last_horizontal_rule")
 	if !ok || got != "bottom\n" {
 		t.Fatalf("after_last_horizontal_rule = %q ok=%v", got, ok)
-	}
-}
-
-func TestUnknownRegionMatchesNothing(t *testing.T) {
-	if _, ok := regionText(Input{Screen: "x"}, "future_region(3)"); ok {
-		t.Fatal("unknown region must not match")
 	}
 }

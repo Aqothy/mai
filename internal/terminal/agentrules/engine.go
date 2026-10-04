@@ -13,7 +13,6 @@ import (
 	"embed"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -257,27 +256,6 @@ func compileGate(g gate) (compiledGate, error) {
 		out.not = append(out.not, compiled)
 	}
 	return out, nil
-}
-
-// Known reports whether a manifest exists for the agent label or alias.
-func Known(label string) bool {
-	_, ok := manifestsByLabel[label]
-	return ok
-}
-
-// Labels returns the canonical manifest ids in sorted order.
-func Labels() []string {
-	seen := make(map[string]struct{})
-	var labels []string
-	for _, m := range manifestsByLabel {
-		if _, dup := seen[m.label]; dup {
-			continue
-		}
-		seen[m.label] = struct{}{}
-		labels = append(labels, m.label)
-	}
-	slices.Sort(labels)
-	return labels
 }
 
 // Detect evaluates the labeled agent's rules over the input. The highest

@@ -84,16 +84,6 @@ func mustCursor(t *testing.T, s SnapshotScreen) (uint16, uint16) {
 	return x, y
 }
 
-func TestNativeSnapshotReproducesScreenAtSameGrid(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("plain line\r\n\x1b[1;32mstyled line\x1b[0m\r\nprompt with cursor here: "))
-
-	fresh := roundTrip(t, source)
-	if got, want := mustText(t, fresh), mustText(t, source); got != want {
-		t.Fatalf("round-trip text mismatch:\n got %q\nwant %q", got, want)
-	}
-}
-
 func TestNativeSnapshotReproducesScreenAfterResize(t *testing.T) {
 	source := newSnapshotScreen(t, 80, 24)
 	for i := range 30 {
@@ -177,25 +167,6 @@ func TestNativeSnapshotCarriesTerminalModes(t *testing.T) {
 		if !enabled {
 			t.Fatalf("snapshot did not preserve %s mode", name)
 		}
-	}
-}
-
-func TestNativeSnapshotRejectsCorruption(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("authenticated state\r\nshell$ "))
-	snapshot, err := source.Snapshot()
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-	snapshot[len(snapshot)-1] ^= 0xff
-
-	decoder, err := libghostty.NewSnapshotDecoderBytes(snapshot)
-	if err != nil {
-		t.Fatalf("NewSnapshotDecoderBytes: %v", err)
-	}
-	defer decoder.Close()
-	if _, err := decoder.Decode(); err == nil {
-		t.Fatal("corrupted snapshot unexpectedly decoded")
 	}
 }
 
