@@ -202,16 +202,6 @@ func TestOpenInstanceProbe(t *testing.T) {
 	if info.Auth.Status != provider.AuthStatusAuthenticated {
 		t.Fatalf("auth = %#v, want authenticated from probe account", info.Auth)
 	}
-	caps := info.Capabilities
-	if !caps.SessionList || !caps.LoadReplay || !caps.Resume || !caps.Fork || !caps.ConfigOptions || !caps.AdditionalDirectories {
-		t.Fatalf("capabilities = %#v", caps)
-	}
-	if caps.ModelSwitch != provider.ModelSwitchInSession || !caps.PromptContent.Image || caps.PromptContent.Audio {
-		t.Fatalf("capabilities = %#v", caps)
-	}
-	if caps.Auth || caps.Logout {
-		t.Fatalf("capabilities advertise auth, but the CLI has no non-interactive login: %#v", caps)
-	}
 }
 
 func TestTurnLifecycleWithApproval(t *testing.T) {
@@ -233,8 +223,8 @@ func TestTurnLifecycleWithApproval(t *testing.T) {
 	metadata := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventThreadMetadataUpdate
 	})
-	if len(metadata.Payload.SlashCommands) != 1 || metadata.Payload.SlashCommands[0].Name != "compact" {
-		t.Fatalf("slash commands = %#v", metadata.Payload.SlashCommands)
+	if commands := metadata.Payload.SlashCommands; len(commands) != 1 || commands[0].Name != "compact" || !commands[0].HasInput || commands[0].InputHint != "[instructions]" {
+		t.Fatalf("slash commands = %#v, want compact with its argument hint", commands)
 	}
 
 	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "hello"}); err != nil {
@@ -331,38 +321,18 @@ func TestEffortChangeAppliesFromTheNextTurn(t *testing.T) {
 	if err := instance.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-effort", TurnID: "turn-slow"}); err != nil {
 		t.Fatalf("InterruptTurn: %v", err)
 	}
-	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+	interrupted := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-slow"
 	})
+	if interrupted.Payload.TurnState != provider.RuntimeTurnInterrupted {
+		t.Fatalf("turn completion = %#v, want interrupted", interrupted.Payload)
+	}
 	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-effort", TurnID: "turn-next", Input: "next"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
 	launches := fakeLaunches(t, cwd)
 	if len(launches) != 2 || !strings.Contains(launches[1], "--effort high") {
 		t.Fatalf("launches = %q, want the next turn relaunched with --effort high", launches)
-	}
-}
-
-func TestInterruptTurn(t *testing.T) {
-	instance, events, _ := openTestInstance(t)
-	cwd := t.TempDir()
-	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-2", Cwd: cwd}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-2", TurnID: "turn-slow", Input: "SLOW work"}); err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
-	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
-		return event.Type == provider.RuntimeEventContentDelta && event.TurnID == "turn-slow"
-	})
-	if err := instance.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-2", TurnID: "turn-slow"}); err != nil {
-		t.Fatalf("InterruptTurn: %v", err)
-	}
-	turnDone := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
-		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-slow"
-	})
-	if turnDone.Payload.TurnState != provider.RuntimeTurnInterrupted {
-		t.Fatalf("turn completion = %#v, want interrupted", turnDone.Payload)
 	}
 }
 

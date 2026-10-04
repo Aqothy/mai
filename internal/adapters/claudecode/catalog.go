@@ -77,7 +77,6 @@ func (h *Instance) probe(ctx context.Context) error {
 // credentials too), so no auth methods are advertised.
 func (h *Instance) updateAccountLocked(account *sdkAccount) {
 	if account != nil && (account.Email != "" || account.SubscriptionType != "") {
-		h.account = account
 		h.info.Auth.Status = provider.AuthStatusAuthenticated
 		return
 	}

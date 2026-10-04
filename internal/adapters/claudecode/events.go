@@ -86,8 +86,6 @@ func (h *Instance) handleSystem(session *claudeSession, message sdkMessage) {
 			h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: session.localThreadID, Payload: provider.RuntimeEventPayload{ConfigOptions: snapshot}})
 		}
 	case "compact_boundary":
-		var boundary compactBoundary
-		_ = json.Unmarshal(message.Raw, &boundary)
 		h.mu.Lock()
 		turn := session.activeLocalTurn
 		h.mu.Unlock()

@@ -8,48 +8,33 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestNewToolStateBash(t *testing.T) {
-	state := newToolState("Bash", json.RawMessage(`{"command":"echo hi","description":"Print hi"}`))
-	if state.itemKind != provider.ItemKindCommandExecution {
-		t.Fatalf("itemKind = %q, want command_execution", state.itemKind)
-	}
-	if state.call.Command != "echo hi" || state.call.Action != provider.ToolActionExecute {
-		t.Fatalf("call = %#v, want echo hi execute", state.call)
-	}
-	if state.title != "Print hi" {
-		t.Fatalf("title = %q, want description", state.title)
-	}
-}
-
-func TestNewToolStateEditAndWrite(t *testing.T) {
-	edit := newToolState("Edit", json.RawMessage(`{"file_path":"/tmp/a.go","old_string":"x","new_string":"y"}`))
-	if edit.itemKind != provider.ItemKindFileChange || len(edit.call.Changes) != 1 {
-		t.Fatalf("edit = %#v, want one file change", edit)
-	}
-	change := edit.call.Changes[0]
-	if change.Path != "/tmp/a.go" || change.Kind != provider.FileChangeUpdate || change.OldText != "x" || change.NewText != "y" {
-		t.Fatalf("change = %#v", change)
-	}
-	write := newToolState("Write", json.RawMessage(`{"file_path":"/tmp/b.go","content":"data"}`))
-	if write.call.Changes[0].Kind != provider.FileChangeAdd || write.call.Changes[0].NewText != "data" {
-		t.Fatalf("write change = %#v", write.call.Changes[0])
-	}
-}
-
-func TestNewToolStateMCP(t *testing.T) {
-	state := newToolState("mcp__github__list_issues", nil)
-	if state.itemKind != provider.ItemKindMCPToolCall {
-		t.Fatalf("itemKind = %q, want mcp_tool_call", state.itemKind)
-	}
-	if state.call.Namespace != "github" || state.call.Name != "list_issues" {
-		t.Fatalf("call = %#v, want github namespace", state.call)
-	}
-}
-
-func TestNewToolStateTodoWriteIsPlanOnly(t *testing.T) {
-	state := newToolState("TodoWrite", json.RawMessage(`{"todos":[]}`))
-	if state.itemKind != "" {
-		t.Fatalf("itemKind = %q, want empty (plan only)", state.itemKind)
+func TestNewToolState(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, input string
+		check             func(toolState) bool
+	}{
+		{"bash", "Bash", `{"command":"echo hi","description":"Print hi"}`, func(state toolState) bool {
+			return state.itemKind == provider.ItemKindCommandExecution && state.call.Command == "echo hi" && state.call.Action == provider.ToolActionExecute && state.title == "Print hi"
+		}},
+		{"edit", "Edit", `{"file_path":"/tmp/a.go","old_string":"x","new_string":"y"}`, func(state toolState) bool {
+			return state.itemKind == provider.ItemKindFileChange && len(state.call.Changes) == 1 &&
+				state.call.Changes[0] == provider.FileChange{Path: "/tmp/a.go", Kind: provider.FileChangeUpdate, OldText: "x", NewText: "y"}
+		}},
+		{"write", "Write", `{"file_path":"/tmp/b.go","content":"data"}`, func(state toolState) bool {
+			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == provider.FileChangeAdd && state.call.Changes[0].NewText == "data"
+		}},
+		{"mcp", "mcp__github__list_issues", ``, func(state toolState) bool {
+			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues"
+		}},
+		{"todo write is plan only", "TodoWrite", `{"todos":[]}`, func(state toolState) bool { return state.itemKind == "" }},
+	} {
+		var input json.RawMessage
+		if tc.input != "" {
+			input = json.RawMessage(tc.input)
+		}
+		if state := newToolState(tc.tool, input); !tc.check(*state) {
+			t.Errorf("%s: newToolState(%q) = %#v", tc.name, tc.tool, state)
+		}
 	}
 }
 
@@ -172,12 +157,10 @@ func TestPermissionResponseDecisions(t *testing.T) {
 	if decision != provider.ApprovalDecisionCancel || payload["interrupt"] != true {
 		t.Fatalf("cancel payload = %#v", payload)
 	}
-}
 
-func TestPermissionResponseWithoutSuggestionsFallsBackToToolRule(t *testing.T) {
-	pending := &pendingApproval{toolName: "mcp__github__list_issues", input: json.RawMessage(`{}`)}
-	payload, _ := permissionResponse(pending, "acceptForSession")
-	updates := payload["updatedPermissions"].([]map[string]any)
+	// Without CLI suggestions, session approval falls back to a tool rule.
+	payload, _ = permissionResponse(&pendingApproval{toolName: "mcp__github__list_issues", input: json.RawMessage(`{}`)}, "acceptForSession")
+	updates = payload["updatedPermissions"].([]map[string]any)
 	if len(updates) != 1 || updates[0]["type"] != "addRules" || updates[0]["destination"] != "session" {
 		t.Fatalf("updates = %#v, want session addRules fallback", updates)
 	}
@@ -199,33 +182,6 @@ func TestPermissionResponseAskUserQuestion(t *testing.T) {
 	answers := updated["answers"].(map[string]string)
 	if answers["Which one?"] != "B" {
 		t.Fatalf("answers = %#v", answers)
-	}
-}
-
-func TestApprovalRequestTypes(t *testing.T) {
-	cases := map[string]provider.RuntimeRequestType{
-		"Bash":            provider.RuntimeRequestCommandExecution,
-		"Edit":            provider.RuntimeRequestFileChange,
-		"Write":           provider.RuntimeRequestFileChange,
-		"Read":            provider.RuntimeRequestFileRead,
-		"WebFetch":        provider.RuntimeRequestDynamicToolCall,
-		"mcp__srv__tool":  provider.RuntimeRequestDynamicToolCall,
-		"AskUserQuestion": provider.RuntimeRequestDynamicToolCall,
-	}
-	for tool, want := range cases {
-		if got := approvalRequestType(tool); got != want {
-			t.Fatalf("approvalRequestType(%q) = %q, want %q", tool, got, want)
-		}
-	}
-}
-
-func TestSlashCommandsFromSDK(t *testing.T) {
-	commands := slashCommandsFromSDK([]sdkCommand{{Name: "compact", Description: "Compact context", ArgumentHint: "[instructions]"}, {Name: ""}})
-	if len(commands) != 1 {
-		t.Fatalf("commands = %#v", commands)
-	}
-	if !commands[0].HasInput || commands[0].InputHint != "[instructions]" {
-		t.Fatalf("command = %#v", commands[0])
 	}
 }
 

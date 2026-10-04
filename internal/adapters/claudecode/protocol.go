@@ -133,13 +133,6 @@ type systemStatus struct {
 	PermissionMode string `json:"permissionMode,omitempty"`
 }
 
-type compactBoundary struct {
-	CompactMetadata struct {
-		Trigger   string `json:"trigger,omitempty"`
-		PreTokens int    `json:"pre_tokens,omitempty"`
-	} `json:"compact_metadata"`
-}
-
 // resultMessage terminates each turn.
 type resultMessage struct {
 	Subtype           string                `json:"subtype"`

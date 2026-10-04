@@ -120,7 +120,6 @@ type Instance struct {
 	pendingApprovals map[string]*pendingApproval
 	models           []sdkModel
 	commands         []sdkCommand
-	account          *sdkAccount
 	options          map[string]*optionsState
 
 	closeOnce sync.Once
