@@ -243,30 +243,6 @@ struct ThreadStoreTests {
     }
 
     @Test
-    func keepsFiveInactiveSubscriptionsAndCachesEvictedModel() async {
-        let threadIDs = (0...6).map { "thread-\($0)" }
-        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-
-        for (index, threadID) in threadIDs.enumerated() {
-            store.selectThread(threadID)
-            await waitUntil {
-                store.subscribedThreadIDs.contains(threadID)
-            }
-            if index > 0 {
-                await Task.yield()
-            }
-        }
-
-        #expect(store.selectedThreadID == "thread-6")
-        #expect(store.inactiveSubscribedThreadIDs == Set(threadIDs[1...5]))
-        #expect(store.subscribedThreadIDs == Set(threadIDs[1...6]))
-        #expect(store.cachedThreadIDs == Set(threadIDs))
-        #expect(rpc.unsubscribedThreadIDs == ["thread-0"])
-    }
-
-    @Test
     func recentChatRetainsPresentationButEvictionReleasesIt() async throws {
         let threadIDs = (0...6).map { "thread-\($0)" }
         let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
@@ -301,8 +277,12 @@ struct ThreadStoreTests {
             store.selectThread(threadID)
             await waitUntil { store.subscribedThreadIDs.contains(threadID) }
         }
-        await waitUntil { rpc.unsubscribedThreadIDs.contains("thread-0") }
-        #expect(store.cachedThread(for: "thread-0") != nil)
+        // Five inactive subscriptions stay warm; the oldest is evicted but
+        // its model stays cached.
+        await waitUntil { rpc.unsubscribedThreadIDs == ["thread-0"] }
+        #expect(store.inactiveSubscribedThreadIDs == Set(threadIDs[1...5]))
+        #expect(store.subscribedThreadIDs == Set(threadIDs[1...6]))
+        #expect(store.cachedThreadIDs == Set(threadIDs))
         #expect(originalSegments == nil)
         #expect(originalLayouts == nil)
         #expect(preparedLayout == nil)
@@ -1355,32 +1335,34 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         onDisconnect?(MockError.disconnected)
     }
 
-    func sendTitleUpdate(threadID: String, title: String, sequence: Int) throws {
+    private func publish<Params: Encodable>(_ method: String, _ params: Params) throws {
+        onNotification?(method, try newJSONEncoder().encode(MockNotification(params: params)))
+    }
+
+    private func sendEvent(
+        _ type: String, payload: EventPayload, sequence: Int, occurredAt: Date = .now
+    ) throws {
         let event = Event(
-            actor: nil,
-            commandID: nil,
-            eventID: "event-\(sequence)",
-            metadata: nil,
-            occurredAt: .now,
-            payload: makeEventPayload(threadID: threadID, title: title),
-            sequence: sequence,
-            type: "thread.meta-updated"
-        )
-        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil,
+            occurredAt: occurredAt, payload: payload, sequence: sequence, type: type)
+        try publish(
+            MaidRPCMethod.orchestrationSubscribeThread,
+            ThreadStreamItem(event: event, kind: "event", snapshot: nil))
+    }
+
+    func sendTitleUpdate(threadID: String, title: String, sequence: Int) throws {
+        try sendEvent(
+            "thread.meta-updated", payload: makeEventPayload(threadID: threadID, title: title),
+            sequence: sequence)
     }
 
     func sendAssistantDelta(threadID: String, messageID: String, text: String, sequence: Int) throws {
-        let event = Event(
-            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil,
-            occurredAt: .now,
-            payload: makeEventPayload(threadID: threadID, messageID: messageID,
-                                      role: "assistant", text: text, turnID: "turn-\(threadID)"),
-            sequence: sequence, type: "thread.message-sent")
-        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+        try sendEvent(
+            "thread.message-sent",
+            payload: makeEventPayload(
+                threadID: threadID, messageID: messageID, role: "assistant", text: text,
+                turnID: "turn-\(threadID)"),
+            sequence: sequence)
     }
 
     func sendReasoning(
@@ -1392,13 +1374,9 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             status: completedText == nil ? MaidItemStatus.inProgress.rawValue : MaidItemStatus.completed.rawValue,
             textDelta: delta, title: nil, toolCall: nil, toolCallSummary: nil,
             turnID: "turn-\(threadID)", updatedAt: .now)
-        let event = Event(
-            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil, occurredAt: .now,
-            payload: makeEventPayload(threadID: threadID, item: reasoning), sequence: sequence,
-            type: MaidEventType.threadItemUpserted.rawValue)
-        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+        try sendEvent(
+            MaidEventType.threadItemUpserted.rawValue,
+            payload: makeEventPayload(threadID: threadID, item: reasoning), sequence: sequence)
     }
 
     func sendUserMessage(
@@ -1411,25 +1389,11 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         guard snapshotsByID[threadID]?.snapshot?.thread != nil else {
             throw MockError.missingThread(threadID)
         }
-        let event = Event(
-            actor: nil,
-            commandID: nil,
-            eventID: "event-\(sequence)",
-            metadata: nil,
-            occurredAt: occurredAt,
+        try sendEvent(
+            "thread.message-sent",
             payload: makeEventPayload(
-                threadID: threadID,
-                messageID: "message-\(sequence)",
-                role: "user",
-                text: text
-            ),
-            sequence: sequence,
-            type: "thread.message-sent"
-        )
-        let threadItem = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-        let threadData = try newJSONEncoder().encode(MockNotification(params: threadItem))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, threadData)
-
+                threadID: threadID, messageID: "message-\(sequence)", role: "user", text: text),
+            sequence: sequence, occurredAt: occurredAt)
         try sendThreadListTimestamp(
             threadID: threadID,
             updatedAt: authoritativeUpdatedAt,
@@ -1445,14 +1409,11 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         guard let thread = snapshotsByID[threadID]?.snapshot?.thread else {
             throw MockError.missingThread(threadID)
         }
-        let item = ThreadListStreamItem(
-            kind: "thread-upserted",
-            sequence: sequence,
-            snapshot: nil,
-            thread: makeThreadListEntry(thread).with(updatedAt: updatedAt)
-        )
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList, data)
+        try publish(
+            MaidRPCMethod.orchestrationSubscribeThreadList,
+            ThreadListStreamItem(
+                kind: "thread-upserted", sequence: sequence, snapshot: nil,
+                thread: makeThreadListEntry(thread).with(updatedAt: updatedAt)))
     }
 
     func sendThreadUpsert(_ thread: mai.Thread, sequence: Int) throws {
@@ -1465,14 +1426,11 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                 thread: thread
             )
         )
-        let item = ThreadListStreamItem(
-            kind: "thread-upserted",
-            sequence: sequence,
-            snapshot: nil,
-            thread: makeThreadListEntry(thread)
-        )
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList, data)
+        try publish(
+            MaidRPCMethod.orchestrationSubscribeThreadList,
+            ThreadListStreamItem(
+                kind: "thread-upserted", sequence: sequence, snapshot: nil,
+                thread: makeThreadListEntry(thread)))
     }
 
     func sendTurnInterrupted(
@@ -1481,19 +1439,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         occurredAt: Date,
         sequence: Int
     ) throws {
-        let event = Event(
-            actor: nil,
-            commandID: nil,
-            eventID: "event-\(sequence)",
-            metadata: nil,
-            occurredAt: occurredAt,
+        try sendEvent(
+            "thread.turn-interrupt-confirmed",
             payload: makeEventPayload(threadID: threadID, turnID: turnID),
-            sequence: sequence,
-            type: "thread.turn-interrupt-confirmed"
-        )
-        let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-        let data = try newJSONEncoder().encode(MockNotification(params: item))
-        onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
+            sequence: sequence, occurredAt: occurredAt)
     }
 
     func resumeTurnDispatches() {
