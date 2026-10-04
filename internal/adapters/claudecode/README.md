@@ -152,7 +152,8 @@ munging replaces every non-alphanumeric char with `-` (configDir =
   `set_model` (`"default"` ⇒ `model: null` resets).
 - `effort` (category `thought_level`): per-selected-model levels + "default".
   **Launch-flag only** — no control message exists; stored and applied at next
-  spawn; an idle process is proactively stopped so it takes effect next turn.
+  spawn: the next `SendTurn` relaunches an idle process started with another
+  effort (a running turn is never replaced).
 - `permission_mode` (category `mode`): default/auto/acceptEdits/plan/dontAsk/
   bypassPermissions. Live switch via `set_permission_mode`. `default` is not a
   valid `--permission-mode` launch value (the flag's ask-mode is `manual`,
@@ -178,12 +179,7 @@ munging replaces every non-alphanumeric char with `-` (configDir =
 `{InstanceID:"claude-code", Name:"Claude Code"}`. Config accepts
 `{command, env, configDir}`; defaults to `["claude"]` on PATH.
 
-## Capabilities declared
-
-SessionList, SessionDelete, SessionClose, LoadReplay, Resume, Fork, Skills,
-ConfigOptions, AdditionalDirectories, PromptContent{Image},
-ModelSwitch=in-session. **Auth/Logout are false** — the CLI has no
-non-interactive login (the Agent SDK requires pre-existing credentials too);
+Auth/Logout capabilities are false — the CLI has no non-interactive login;
 auth *status* is still reported from the probe account, and users log in via
 `claude /login` in a terminal.
 
@@ -206,14 +202,13 @@ reporting, AskUserQuestion option prompts.
 
 ## Testing
 
-- `go test ./internal/adapters/claudecode/` — pure conversion tests plus an
+- `go test ./internal/adapters/claudecode/` — conversion tests plus an
   integration suite driving a **fake CLI**: `TestMain` re-executes the test
   binary with `CLAUDE_FAKE_CLI=1` (see `fakeCLIMain`) and the adapter points
-  `Config.Command` at it. Covers probe, full turn with streaming + approval
-  round trip, interrupt, replay determinism, fork, list, delete.
+  `Config.Command` at it.
 - `CLAUDE_LIVE_TEST=1 go test ./internal/adapters/claudecode/ -run TestLiveSmoke -v`
   — end-to-end against the real CLI on **haiku** (costs ~1¢; skips when
-  logged out). Verified passing on 2026-08-22 (CLI 2.1.226).
+  logged out).
 
 Protocol references: `@anthropic-ai/claude-agent-sdk` typings (`npm pack`,
 see `sdk.d.ts`/`agentSdkTypes.d.ts`/`sdk-tools.d.ts`),
