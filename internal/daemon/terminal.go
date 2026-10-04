@@ -90,11 +90,6 @@ func (rt *terminalRuntime) persist(entry *terminalEntry, logger *slog.Logger) {
 	}
 }
 
-// close terminates every live shell and waits for process-group cleanup.
-func (rt *terminalRuntime) close() {
-	rt.service.Close()
-}
-
 // lockEntry starts an operation on the current identity for terminalID. The
 // identity check after locking prevents an operation that raced deletion from
 // acting on a detached entry pointer.

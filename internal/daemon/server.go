@@ -48,8 +48,6 @@ type Server struct {
 	providerService *providerservice.Service
 	acpRegistry     *acpRegistry
 	orchestration   *orchestration.Engine
-	ingestion       *orchestration.ProviderRuntimeIngestion
-	reactor         *orchestration.ProviderEventReactor
 
 	metadataStore    *store.SQLite
 	threadMetaWriter *threadMetaWriter
@@ -104,7 +102,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			logger.Info("restored persisted threads", "count", count)
 		}
 	}
-	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
+	ingestion := orchestration.NewProviderRuntimeIngestion(s.orchestration)
 	var providerOptions []providerservice.Option
 	if metadata != nil {
 		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
@@ -135,8 +133,9 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			}
 		}
 	}
-	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
-	go s.ingestion.Run(ctx, s.providerService.Events())
+	// The reactor registers itself as an engine listener.
+	orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, ingestion)
+	go ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
 		s.logEvent(event)
 		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
@@ -257,7 +256,7 @@ func (s *Server) doClose() error {
 	s.providerService.Close()
 	// Terminal shells never survive daemon shutdown; wait for every process
 	// group to be cleaned up before releasing clients and the store.
-	s.terminals.close()
+	s.terminals.service.Close()
 	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()

@@ -219,8 +219,7 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 // refreshTerminalAttachment re-derives whether any connected client remains
 // attached to the terminal's live run.
 func (s *Server) refreshTerminalAttachment(terminalID string) {
-	rt := s.terminals
-	session, err := rt.service.Get(terminalID)
+	session, err := s.terminals.service.Get(terminalID)
 	if err != nil {
 		return
 	}
