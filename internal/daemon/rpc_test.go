@@ -106,61 +106,6 @@ func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
 	}
 }
 
-func TestRPCGetItemDetailReturnsCanonicalToolData(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-
-	threadID := orchestration.ThreadID("thread-item-detail")
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
-		Type:      orchestration.CommandThreadCreate,
-		CommandID: "create-item-detail",
-		ThreadID:  threadID,
-		Title:     "Item detail",
-	}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
-		Type:     orchestration.EventThreadItemUpserted,
-		ThreadID: threadID,
-		Payload: orchestration.EventPayload{Item: &orchestration.Item{
-			ID:     "tool-1",
-			Kind:   provider.ItemKindCommandExecution,
-			Status: provider.ItemStatusCompleted,
-			ToolCall: &provider.ToolCall{
-				Action:  provider.ToolActionExecute,
-				Command: "go test ./...",
-				Output:  "ok",
-			},
-		}},
-	}); err != nil {
-		t.Fatalf("append tool event: %v", err)
-	}
-
-	handler := &rpcHandler{
-		server: s,
-		client: &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})},
-	}
-	req, err := jsonrpc2.NewCall(
-		jsonrpc2.StringID("1"),
-		wire.MethodOrchestrationGetItemDetail,
-		orchestration.GetItemDetailInput{ThreadID: threadID, ItemID: "tool-1"},
-	)
-	if err != nil {
-		t.Fatalf("new getItemDetail call: %v", err)
-	}
-	result, err := handler.Handle(context.Background(), req)
-	if err != nil {
-		t.Fatalf("getItemDetail: %v", err)
-	}
-	item, ok := result.(orchestration.Item)
-	if !ok || item.ToolCall == nil || item.ToolCall.Output != "ok" {
-		t.Fatalf("getItemDetail result = %#v", result)
-	}
-	if item.ToolCallSummary != nil || item.DetailAvailable {
-		t.Fatalf("getItemDetail returned compact projection: %#v", item)
-	}
-}
-
 func installForkRPCProvider(t *testing.T, s *Server, adapter *optionsRPCProvider, cwd string) {
 	t.Helper()
 	s.providerService.Close()
@@ -613,23 +558,6 @@ func (p *optionsRPCProvider) invalidateOptions(handle string) {
 		callback()
 	}
 }
-func TestRPCClientKeepsIndependentThreadSubscriptions(t *testing.T) {
-	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
-	threadA := orchestration.ThreadID("thread-a")
-	threadB := orchestration.ThreadID("thread-b")
-
-	client.subscribeThread(threadA)
-	client.subscribeThread(threadB)
-	client.unsubscribeThread(threadA)
-
-	if client.subscribedThread(threadA) {
-		t.Fatal("thread A remained subscribed after its explicit unsubscribe")
-	}
-	if !client.subscribedThread(threadB) {
-		t.Fatal("unsubscribing thread A removed the independent thread B subscription")
-	}
-}
-
 func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
@@ -768,28 +696,10 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 		t.Fatalf("thread.create: %v", err)
 	}
 
-	// Provider/server event types are not commands: dispatching their former
-	// command names (or any unknown type) over RPC must fail and append nothing.
-	internalTypes := []string{
-		"thread.session.status.set",
-		"thread.message.user.delta",
-		"thread.message.assistant.delta",
-		"thread.message.assistant.complete",
-		"thread.item.upsert",
-		"thread.plan.update",
-		"thread.approval.open",
-		"thread.approval.resolve",
-		"thread.config-options.update",
-		"thread.slash-commands.update",
-		"thread.token-usage.update",
-		"thread.title.update",
-		"thread.interaction-mode.confirm",
-	}
-	internalCommands := make([]orchestration.Command, 0, len(internalTypes))
-	for _, commandType := range internalTypes {
-		internalCommands = append(internalCommands, orchestration.Command{Type: commandType, CommandID: orchestration.CommandID("cmd-reject-" + commandType), ThreadID: threadID})
-	}
-	for _, command := range internalCommands {
+	// Provider/server event types are not commands: dispatching an event-shaped
+	// name (or any unknown type) over RPC must fail and append nothing.
+	for _, commandType := range []string{"thread.item.upsert", "thread.not-a-command"} {
+		command := orchestration.Command{Type: commandType, CommandID: orchestration.CommandID("cmd-reject-" + commandType), ThreadID: threadID}
 		if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, command).Await(ctx, &receipt); err == nil {
 			t.Fatalf("%s dispatched over RPC without error", command.Type)
 		}

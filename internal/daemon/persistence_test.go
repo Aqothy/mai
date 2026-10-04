@@ -237,11 +237,8 @@ func TestThreadMetaWriterWritesAfterMarkDirty(t *testing.T) {
 	engine := orchestration.NewEngine()
 	defer engine.Close()
 	threadID := orchestration.ThreadID("thread-async-persistence")
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Cwd: t.TempDir()}); err != nil {
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: threadID, Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
 	}
 
 	stored := &notifyingThreadStore{saved: make(chan store.ThreadMeta, 1)}
@@ -251,8 +248,8 @@ func TestThreadMetaWriterWritesAfterMarkDirty(t *testing.T) {
 
 	select {
 	case meta := <-stored.saved:
-		if meta.ThreadID != string(threadID) {
-			t.Fatalf("persisted thread = %q, want %q", meta.ThreadID, threadID)
+		if meta.ThreadID != string(threadID) || meta.Title != "New thread" {
+			t.Fatalf("persisted thread = %+v, want %q titled New thread", meta, threadID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("metadata writer did not persist after markDirty")
@@ -269,9 +266,6 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 		Cwd:      t.TempDir(),
 	}); err != nil {
 		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
 	}
 
 	flaky := &flakyThreadStore{failures: 1}
@@ -295,23 +289,6 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	w.flush() // nothing left dirty; no duplicate write
 	if len(flaky.saved) != 1 {
 		t.Fatalf("clean flush must not rewrite: %+v", flaky.saved)
-	}
-}
-
-func TestThreadMetaWriterPersistsCreatedRealThread(t *testing.T) {
-	engine := orchestration.NewEngine()
-	defer engine.Close()
-	threadID := orchestration.ThreadID("thread-create-persistence")
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-
-	stored := &flakyThreadStore{}
-	w := &threadMetaWriter{engine: engine, threads: stored, logger: newLoggerFromEnv(), dirty: make(map[orchestration.ThreadID]struct{})}
-	w.markDirty(threadID)
-	w.flush()
-	if len(stored.saved) != 1 || stored.saved[0].Title != "New thread" {
-		t.Fatalf("created metadata = %+v, want one real thread", stored.saved)
 	}
 }
 
