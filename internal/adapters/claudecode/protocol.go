@@ -5,9 +5,10 @@ import (
 	"strings"
 )
 
-// Wire DTOs for the Claude Code CLI stream-json protocol. The shapes mirror
-// the official Agent SDK typings (@anthropic-ai/claude-agent-sdk) because the
-// CLI speaks the same protocol to every SDK; maiD is simply another host.
+// Wire DTOs for the Claude Code CLI stream-json protocol, following the
+// official Agent SDK typings (@anthropic-ai/claude-agent-sdk) because the CLI
+// speaks the same protocol to every SDK; maiD is simply another host. Only the
+// fields maiD consumes are modeled; unknown fields are ignored.
 // These types deliberately import nothing from the provider contract so the
 // protocol layer stays extractable as a standalone client library.
 
@@ -17,7 +18,6 @@ import (
 type sdkMessage struct {
 	Type            string          `json:"type"`
 	Subtype         string          `json:"subtype,omitempty"`
-	SessionID       string          `json:"session_id,omitempty"`
 	UUID            string          `json:"uuid,omitempty"`
 	ParentToolUseID *string         `json:"parent_tool_use_id,omitempty"`
 	Message         json.RawMessage `json:"message,omitempty"`
@@ -30,17 +30,12 @@ type sdkMessage struct {
 
 // apiMessage is the Anthropic API message carried by assistant/user lines.
 type apiMessage struct {
-	ID         string         `json:"id,omitempty"`
-	Role       string         `json:"role,omitempty"`
-	Model      string         `json:"model,omitempty"`
-	Content    []contentBlock `json:"content,omitempty"`
-	StopReason string         `json:"stop_reason,omitempty"`
-	Usage      *apiUsage      `json:"usage,omitempty"`
+	ID      string         `json:"id,omitempty"`
+	Content []contentBlock `json:"content,omitempty"`
 }
 
 // userAPIMessage tolerates the string-content form of user messages.
 type userAPIMessage struct {
-	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 }
 
@@ -74,10 +69,8 @@ type contentBlock struct {
 }
 
 type imageSource struct {
-	Type      string `json:"type"`
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
-	URL       string `json:"url,omitempty"`
 }
 
 type apiUsage struct {
@@ -97,7 +90,6 @@ type streamEvent struct {
 	Index        int           `json:"index,omitempty"`
 	ContentBlock *contentBlock `json:"content_block,omitempty"`
 	Delta        *streamDelta  `json:"delta,omitempty"`
-	Message      *apiMessage   `json:"message,omitempty"`
 	Usage        *apiUsage     `json:"usage,omitempty"`
 }
 
@@ -106,47 +98,30 @@ type streamDelta struct {
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
-	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 // systemInit is the system/init message emitted once per process at the start
 // of the first turn.
 type systemInit struct {
-	SessionID      string            `json:"session_id"`
-	Cwd            string            `json:"cwd,omitempty"`
-	Model          string            `json:"model,omitempty"`
-	PermissionMode string            `json:"permissionMode,omitempty"`
-	Tools          []string          `json:"tools,omitempty"`
-	SlashCommands  []string          `json:"slash_commands,omitempty"`
-	Skills         []string          `json:"skills,omitempty"`
-	Agents         []string          `json:"agents,omitempty"`
-	McpServers     []mcpServerStatus `json:"mcp_servers,omitempty"`
-}
-
-type mcpServerStatus struct {
-	Name   string `json:"name"`
-	Status string `json:"status,omitempty"`
+	SessionID      string `json:"session_id"`
+	PermissionMode string `json:"permissionMode,omitempty"`
 }
 
 type systemStatus struct {
-	Status         string `json:"status,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 }
 
 // resultMessage terminates each turn.
 type resultMessage struct {
-	Subtype           string                `json:"subtype"`
-	IsError           bool                  `json:"is_error"`
-	Result            string                `json:"result,omitempty"`
-	SessionID         string                `json:"session_id,omitempty"`
-	StopReason        string                `json:"stop_reason,omitempty"`
-	TerminalReason    string                `json:"terminal_reason,omitempty"`
-	NumTurns          int                   `json:"num_turns,omitempty"`
-	TotalCostUSD      float64               `json:"total_cost_usd,omitempty"`
-	Usage             json.RawMessage       `json:"usage,omitempty"`
-	ModelUsage        map[string]modelUsage `json:"modelUsage,omitempty"`
-	PermissionDenials json.RawMessage       `json:"permission_denials,omitempty"`
-	Errors            []string              `json:"errors,omitempty"`
+	Subtype        string                `json:"subtype"`
+	IsError        bool                  `json:"is_error"`
+	Result         string                `json:"result,omitempty"`
+	StopReason     string                `json:"stop_reason,omitempty"`
+	TerminalReason string                `json:"terminal_reason,omitempty"`
+	TotalCostUSD   float64               `json:"total_cost_usd,omitempty"`
+	Usage          json.RawMessage       `json:"usage,omitempty"`
+	ModelUsage     map[string]modelUsage `json:"modelUsage,omitempty"`
+	Errors         []string              `json:"errors,omitempty"`
 }
 
 type resultUsage struct {
@@ -163,10 +138,7 @@ type resultUsage struct {
 }
 
 type modelUsage struct {
-	InputTokens   int     `json:"inputTokens"`
-	OutputTokens  int     `json:"outputTokens"`
-	CostUSD       float64 `json:"costUSD"`
-	ContextWindow int     `json:"contextWindow"`
+	ContextWindow int `json:"contextWindow"`
 }
 
 // controlRequestBody is the CLI→host control request payload. can_use_tool is
@@ -177,12 +149,9 @@ type controlRequestBody struct {
 	Input                 json.RawMessage   `json:"input,omitempty"`
 	PermissionSuggestions []json.RawMessage `json:"permission_suggestions,omitempty"`
 	ToolUseID             string            `json:"tool_use_id,omitempty"`
-	AgentID               string            `json:"agent_id,omitempty"`
-	DisplayName           string            `json:"display_name,omitempty"`
 	Description           string            `json:"description,omitempty"`
 	Title                 string            `json:"title,omitempty"`
 	DecisionReason        string            `json:"decision_reason,omitempty"`
-	BlockedPath           string            `json:"blocked_path,omitempty"`
 }
 
 // controlResponse correlates a control_response line to a pending request.
@@ -195,11 +164,9 @@ type controlResponse struct {
 
 // initializeResponse is the success payload of the initialize control request.
 type initializeResponse struct {
-	Commands              []sdkCommand `json:"commands,omitempty"`
-	Models                []sdkModel   `json:"models,omitempty"`
-	Account               *sdkAccount  `json:"account,omitempty"`
-	OutputStyle           string       `json:"output_style,omitempty"`
-	CurrentPermissionMode string       `json:"current_permission_mode,omitempty"`
+	Commands []sdkCommand `json:"commands,omitempty"`
+	Models   []sdkModel   `json:"models,omitempty"`
+	Account  *sdkAccount  `json:"account,omitempty"`
 }
 
 type sdkCommand struct {
@@ -213,46 +180,35 @@ type sdkModel struct {
 	ResolvedModel         string   `json:"resolvedModel,omitempty"`
 	DisplayName           string   `json:"displayName,omitempty"`
 	Description           string   `json:"description,omitempty"`
-	SupportsEffort        bool     `json:"supportsEffort,omitempty"`
 	SupportedEffortLevels []string `json:"supportedEffortLevels,omitempty"`
 }
 
 type sdkAccount struct {
 	Email            string `json:"email,omitempty"`
-	Organization     string `json:"organization,omitempty"`
 	SubscriptionType string `json:"subscriptionType,omitempty"`
-	APIProvider      string `json:"apiProvider,omitempty"`
 }
 
 // transcriptLine is one persisted line of a session transcript under
 // <configDir>/projects/<munged-cwd>/<session-id>.jsonl.
 type transcriptLine struct {
-	Type          string          `json:"type"`
-	Subtype       string          `json:"subtype,omitempty"`
-	UUID          string          `json:"uuid,omitempty"`
-	ParentUUID    *string         `json:"parentUuid,omitempty"`
-	SessionID     string          `json:"sessionId,omitempty"`
-	Timestamp     string          `json:"timestamp,omitempty"`
-	IsSidechain   bool            `json:"isSidechain,omitempty"`
-	IsMeta        bool            `json:"isMeta,omitempty"`
-	UserType      string          `json:"userType,omitempty"`
-	Cwd           string          `json:"cwd,omitempty"`
-	Message       json.RawMessage `json:"message,omitempty"`
-	ToolUseResult json.RawMessage `json:"toolUseResult,omitempty"`
-	AITitle       string          `json:"aiTitle,omitempty"`
-	LastPrompt    string          `json:"lastPrompt,omitempty"`
+	Type        string          `json:"type"`
+	UUID        string          `json:"uuid,omitempty"`
+	SessionID   string          `json:"sessionId,omitempty"`
+	Timestamp   string          `json:"timestamp,omitempty"`
+	IsSidechain bool            `json:"isSidechain,omitempty"`
+	IsMeta      bool            `json:"isMeta,omitempty"`
+	Cwd         string          `json:"cwd,omitempty"`
+	Message     json.RawMessage `json:"message,omitempty"`
+	AITitle     string          `json:"aiTitle,omitempty"`
 }
 
 // askUserQuestion mirrors the AskUserQuestionInput tool schema. Answers are
 // returned via updatedInput as {questions, answers: {questionText: label}}.
 type askUserQuestion struct {
 	Questions []struct {
-		Question    string `json:"question"`
-		Header      string `json:"header,omitempty"`
-		MultiSelect bool   `json:"multiSelect,omitempty"`
-		Options     []struct {
-			Label       string `json:"label"`
-			Description string `json:"description,omitempty"`
+		Question string `json:"question"`
+		Options  []struct {
+			Label string `json:"label"`
 		} `json:"options,omitempty"`
 	} `json:"questions"`
 }

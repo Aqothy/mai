@@ -14,8 +14,8 @@ import (
 // Exercise the adapter and the real ingestion/projection together. Checking
 // only flattened adapter text misses differences in item boundaries on reload.
 func TestReasoningLiveAndReloadTimelineAgree(t *testing.T) {
-	const threadID = "reasoning-qa-thread"
-	const turnID = "reasoning-qa-turn"
+	const threadID = "reasoning-thread"
+	const turnID = "reasoning-turn"
 	live := newReasoningPipeline(t, threadID)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -66,7 +66,7 @@ func TestReasoningLiveAndReloadTimelineAgree(t *testing.T) {
 	startedTool.Status = "inProgress"
 	h.emitItem("item/started", threadID, turnID, startedTool, 0, 0)
 	h.emitItem("item/completed", threadID, turnID, tool, 0, 0)
-	h.emitTextDelta(json.RawMessage(`{"threadId":"reasoning-qa-thread","turnId":"reasoning-qa-turn","itemId":"thought-3","summaryIndex":0,"delta":"**Draft**"}`), provider.RuntimeContentReasoningText, "summary")
+	h.emitTextDelta(json.RawMessage(`{"threadId":"reasoning-thread","turnId":"reasoning-turn","itemId":"thought-3","summaryIndex":0,"delta":"**Draft**"}`), provider.RuntimeContentReasoningText, "summary")
 	live.waitForThought(t, 2, "**Draft**", provider.ItemStatusInProgress)
 	h.emitItem("item/completed", threadID, turnID, third, 0, 0)
 	live.waitForThought(t, 2, reasoningText(third), provider.ItemStatusCompleted)
@@ -109,7 +109,7 @@ func newReasoningPipeline(t *testing.T, id string) *reasoningPipeline {
 	e := orchestration.NewEngine()
 	t.Cleanup(e.Close)
 	p := &reasoningPipeline{engine: e, ingestion: orchestration.NewProviderRuntimeIngestion(e), threadID: orchestration.ThreadID(id)}
-	_, err := e.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create", ThreadID: p.threadID, Title: "Multipart reasoning QA", ProviderInstanceID: "codex"})
+	_, err := e.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create", ThreadID: p.threadID, Title: "Multipart reasoning", ProviderInstanceID: "codex"})
 	if err != nil {
 		t.Fatal(err)
 	}

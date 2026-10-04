@@ -35,7 +35,7 @@ func TestHistoryListingRejectsIncompleteResults(t *testing.T) {
 			finished := make(chan result, 1)
 			ctx := testContext(t)
 			go func() {
-				sessions, err := (&Instance{rpc: client}).ListSessions(ctx, "/qa-history")
+				sessions, err := (&Instance{rpc: client}).ListSessions(ctx, "/history")
 				finished <- result{sessions, err}
 			}()
 			for page := 0; page < 2; page++ {
@@ -60,10 +60,10 @@ func TestHistoryListingRejectsIncompleteResults(t *testing.T) {
 				if page == 1 {
 					wantCursor = "page-two"
 				}
-				if request.Method != "thread/list" || request.Params.Cwd != "/qa-history" || request.Params.Cursor != wantCursor {
+				if request.Method != "thread/list" || request.Params.Cwd != "/history" || request.Params.Cursor != wantCursor {
 					t.Fatalf("page %d lost its history scope/cursor: %s", page, line)
 				}
-				response := `"result":{"data":[{"id":"first-session","cwd":"/qa-history"}],"nextCursor":"page-two"}`
+				response := `"result":{"data":[{"id":"first-session","cwd":"/history"}],"nextCursor":"page-two"}`
 				if page == 1 {
 					response = tc.secondPage
 				}

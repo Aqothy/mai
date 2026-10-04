@@ -690,7 +690,7 @@ func TestHandleSessionUpdateScopesACPItemIDsBySession(t *testing.T) {
 	}
 }
 
-// Regression (audited leak): stray updates draining from a disposed stream
+// Regression (leak): stray updates draining from a disposed stream
 // after unbind must not re-materialize per-session state (scope entries,
 // config caches, tool states) for the dead session.
 func TestStrayUpdatesAfterUnbindDoNotRecreateSessionState(t *testing.T) {
@@ -2310,7 +2310,7 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 	}
 }
 
-// Regression (audited leak): an interrupted turn's tool reconciliation
+// Regression (leak): an interrupted turn's tool reconciliation
 // entries used to live until session unbind — post-cancel updates are
 // dropped, so their terminal statuses never arrive. They must be cleared when
 // the turn ends.

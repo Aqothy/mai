@@ -66,14 +66,7 @@ func TestToolResultContent(t *testing.T) {
 }
 
 func TestTurnStateFromResult(t *testing.T) {
-	state, _, _ := turnStateFromResult(resultMessage{Subtype: "success"})
-	if state != provider.RuntimeTurnCompleted {
-		t.Fatalf("success state = %q", state)
-	}
-	state, stop, _ := turnStateFromResult(resultMessage{Subtype: "error_during_execution", TerminalReason: "aborted_streaming"})
-	if state != provider.RuntimeTurnInterrupted || stop != "aborted_streaming" {
-		t.Fatalf("aborted state = %q stop = %q", state, stop)
-	}
+	// Success and aborted (interrupted) results are covered by the fake-CLI turns.
 	state, _, message := turnStateFromResult(resultMessage{Subtype: "error_max_turns", IsError: true})
 	if state != provider.RuntimeTurnFailed || message == "" {
 		t.Fatalf("max turns state = %q message = %q", state, message)
