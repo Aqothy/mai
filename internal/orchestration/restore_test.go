@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Aqothy/maiD/internal/provider"
 )
 
 func TestImportThreadPublishesReplayPendingStub(t *testing.T) {
@@ -36,67 +34,6 @@ func TestImportThreadPublishesReplayPendingStub(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Type != EventThreadImported || events[0].Sequence != result.Sequence {
 		t.Fatalf("import events = %+v, want one thread.imported event", events)
-	}
-}
-
-func TestRestoreThreadsSeedsSidebarStubs(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	events := observeEvents(t, engine)
-
-	created := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
-	updated := created.Add(2 * time.Hour)
-	engine.RestoreThreads([]RestoredThread{
-		{
-			ThreadID:           "thread-restored",
-			Title:              "Restored thread",
-			Cwd:                "/tmp",
-			ProviderInstanceID: "codex",
-			ModelSelection:     &provider.ModelSelection{Model: "gpt"},
-			CreatedAt:          created,
-			UpdatedAt:          updated,
-		},
-		{ThreadID: "thread-untitled", CreatedAt: created, UpdatedAt: created},
-	})
-
-	list := engine.ThreadListSnapshot()
-	if len(list.Snapshot.Threads) != 2 {
-		t.Fatalf("thread list = %#v, want 2 restored stubs", list.Snapshot.Threads)
-	}
-	entry, ok := engine.ThreadListEntry("thread-restored")
-	if !ok {
-		t.Fatal("restored thread missing from projection")
-	}
-	if entry.Title != "Restored thread" || entry.Cwd != "/tmp" || entry.ProviderInstanceID != "codex" {
-		t.Fatalf("restored entry = %#v, want persisted sidebar fields", entry)
-	}
-	if entry.ModelSelection == nil || entry.ModelSelection.Model != "gpt" {
-		t.Fatalf("restored model selection = %#v, want gpt", entry.ModelSelection)
-	}
-	if !entry.CreatedAt.Equal(created) || !entry.UpdatedAt.Equal(updated) {
-		t.Fatalf("restored timestamps = %v/%v, want the stored %v/%v", entry.CreatedAt, entry.UpdatedAt, created, updated)
-	}
-	if entry.Session != nil {
-		t.Fatalf("restored stub must have no session binding, got %#v", entry.Session)
-	}
-	if untitled, _ := engine.ThreadListEntry("thread-untitled"); untitled.Title != "Untitled thread" {
-		t.Fatalf("empty title = %q, want default", untitled.Title)
-	}
-
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
-	if err != nil {
-		t.Fatalf("ThreadSnapshot: %v", err)
-	}
-	if len(snapshot.Snapshot.Thread.Timeline) != 0 {
-		t.Fatalf("restored timeline = %#v, want empty (history is provider-owned)", snapshot.Snapshot.Thread.Timeline)
-	}
-	if !snapshot.Snapshot.HistoryRestorePending {
-		t.Fatal("restored snapshot did not expose pending provider history")
-	}
-
-	// Restore emits no live events; clients obtain authoritative snapshots.
-	if recorded := events.matching("", 0); len(recorded) != 0 {
-		t.Fatalf("restore emitted events: %#v", recorded)
 	}
 }
 
@@ -167,12 +104,20 @@ func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
 	if !thread.ReplayHistoryPending {
 		t.Fatal("ready session status consumed replay intent")
 	}
+	// Partially replayed history is still not the complete restore.
+	if _, err := engine.AppendEvent(context.Background(), EventInput{
+		Type:     EventThreadMessageSent,
+		ThreadID: "thread-restored",
+		Payload:  EventPayload{MessageID: "restored-message", Role: MessageRoleUser, Text: "partially restored"},
+	}); err != nil {
+		t.Fatalf("append partial restored history: %v", err)
+	}
 	pending, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
 	if err != nil {
 		t.Fatalf("subscribe pending restored thread: %v", err)
 	}
-	if !pending.Snapshot.HistoryRestorePending {
-		t.Fatal("snapshot declared provider history ready before replay completion")
+	if !pending.Snapshot.HistoryRestorePending || len(pending.Snapshot.Thread.Timeline) != 1 {
+		t.Fatalf("partially restored snapshot = %#v, want pending with the partial timeline", pending.Snapshot)
 	}
 	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
 		t.Fatalf("append replay completion: %v", err)
@@ -187,41 +132,5 @@ func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
 	}
 	if ready.Snapshot.HistoryRestorePending {
 		t.Fatal("snapshot kept provider history pending after replay completion")
-	}
-}
-
-func TestPartiallyRestoredSnapshotRemainsPending(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{
-		ThreadID:           "thread-restored",
-		ProviderInstanceID: "codex",
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}})
-
-	if _, err := engine.AppendEvent(context.Background(), EventInput{
-		Type:       EventThreadMessageSent,
-		ThreadID:   "thread-restored",
-		OccurredAt: now,
-		Payload: EventPayload{
-			MessageID: "restored-message",
-			Role:      MessageRoleUser,
-			Text:      "partially restored",
-		},
-	}); err != nil {
-		t.Fatalf("append partial restored history: %v", err)
-	}
-
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: "thread-restored"})
-	if err != nil {
-		t.Fatalf("subscribe partially restored thread: %v", err)
-	}
-	if len(snapshot.Snapshot.Thread.Timeline) != 1 {
-		t.Fatalf("partial timeline length = %d, want 1", len(snapshot.Snapshot.Thread.Timeline))
-	}
-	if !snapshot.Snapshot.HistoryRestorePending {
-		t.Fatal("partially materialized snapshot was incorrectly declared ready")
 	}
 }

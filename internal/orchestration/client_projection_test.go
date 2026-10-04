@@ -153,15 +153,12 @@ func TestThreadSnapshotOmitsFullToolDetailAndGetItemDetailReturnsIt(t *testing.T
 		UpdatedAt: time.Unix(2, 0),
 	}
 
-	engine.mu.Lock()
-	engine.projection.threads[threadID] = &Thread{
-		ID:        threadID,
-		Title:     "Thread",
-		Timeline:  Timeline{{Kind: TimelineEntryItem, Item: &fullItem}},
-		CreatedAt: time.Unix(1, 0),
-		UpdatedAt: time.Unix(1, 0),
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-detail", ThreadID: threadID}); err != nil {
+		t.Fatalf("create thread: %v", err)
 	}
-	engine.mu.Unlock()
+	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: &fullItem}}); err != nil {
+		t.Fatalf("append item: %v", err)
+	}
 
 	stream, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
@@ -243,58 +240,38 @@ func TestItemSequenceChangesWhenUpdateTimestampsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get item detail: %v", err)
 	}
-	if item.Sequence != sequences[1] || detail.Sequence != item.Sequence || item.UpdatedAt != occurredAt ||
+	if item.Sequence != sequences[1] || detail.Sequence != item.Sequence || item.CreatedAt != occurredAt || item.UpdatedAt != occurredAt ||
 		detail.ToolCall == nil || detail.ToolCall.Output != "completed" {
 		t.Fatalf("snapshot item = %#v, detail = %#v", item, detail)
 	}
 }
 
-func TestProjectEventForClientCompactsSparseToolUpdateWithoutKind(t *testing.T) {
+func TestProjectEventForClientCompactsToolUpdatesWithoutMutatingCanonicalEvent(t *testing.T) {
 	t.Parallel()
 
-	event := Event{
-		Type: EventThreadItemUpserted,
-		Payload: EventPayload{Item: &Item{
-			ID:     "tool-1",
-			Status: provider.ItemStatusCompleted,
-			ToolCall: &provider.ToolCall{
-				Action: provider.ToolActionExecute,
-				Output: "complete output",
-			},
-		}},
-	}
+	// A sparse provider update may omit the item kind; it must still compact.
+	for _, kind := range []provider.ItemKind{"", provider.ItemKindCommandExecution} {
+		event := Event{
+			Type: EventThreadItemUpserted,
+			Payload: EventPayload{Item: &Item{
+				ID:     "tool-1",
+				Kind:   kind,
+				Status: provider.ItemStatusCompleted,
+				ToolCall: &provider.ToolCall{
+					Action: provider.ToolActionExecute,
+					Output: "complete output",
+				},
+			}},
+		}
 
-	projected := ProjectEventForClient(event)
-	if projected.Payload.Item.ToolCall != nil ||
-		projected.Payload.Item.ToolCallSummary == nil ||
-		projected.Payload.Item.ToolCallSummary.OutputPreview != "complete output" {
-		t.Fatalf("projected sparse event = %#v", projected)
-	}
-}
-
-func TestProjectEventForClientDoesNotExposeFullToolDetail(t *testing.T) {
-	t.Parallel()
-
-	event := Event{
-		Type: EventThreadItemUpserted,
-		Payload: EventPayload{Item: &Item{
-			ID:     "tool-1",
-			Kind:   provider.ItemKindCommandExecution,
-			Status: provider.ItemStatusCompleted,
-			ToolCall: &provider.ToolCall{
-				Action: provider.ToolActionExecute,
-				Output: "complete output",
-			},
-		}},
-	}
-
-	projected := ProjectEventForClient(event)
-	if projected.Payload.Item.ToolCall != nil ||
-		projected.Payload.Item.ToolCallSummary == nil ||
-		projected.Payload.Item.ToolCallSummary.OutputPreview != "complete output" {
-		t.Fatalf("projected event = %#v", projected)
-	}
-	if event.Payload.Item.ToolCall == nil || event.Payload.Item.ToolCall.Output != "complete output" {
-		t.Fatal("projecting event mutated canonical event")
+		projected := ProjectEventForClient(event)
+		if projected.Payload.Item.ToolCall != nil ||
+			projected.Payload.Item.ToolCallSummary == nil ||
+			projected.Payload.Item.ToolCallSummary.OutputPreview != "complete output" {
+			t.Fatalf("kind %q: projected event = %#v", kind, projected)
+		}
+		if event.Payload.Item.ToolCall == nil || event.Payload.Item.ToolCall.Output != "complete output" {
+			t.Fatalf("kind %q: projecting event mutated canonical event", kind)
+		}
 	}
 }

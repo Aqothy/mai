@@ -92,6 +92,7 @@ func TestAppendPayloadTextUnknownShapesFallBack(t *testing.T) {
 	t.Parallel()
 
 	for _, existing := range []string{
+		`{"text":"accumulated so far"`, // truncated: never reset accumulated text to one chunk
 		`{"note":"x"}`,
 		`not json`,
 		`[]`,
@@ -102,6 +103,39 @@ func TestAppendPayloadTextUnknownShapesFallBack(t *testing.T) {
 		reference := slowAppendPayloadText(json.RawMessage(existing), "delta")
 		if string(merged) != string(reference) {
 			t.Fatalf("appendPayloadText(%q) = %s, want fallback result %s", existing, merged, reference)
+		}
+	}
+}
+
+// The item-payload contract has exactly two client-visible rules: a textDelta
+// appends to the payload's "text"; otherwise a non-empty payload replaces the
+// previous one and an absent payload keeps it.
+func TestApplyItemPayloadRules(t *testing.T) {
+	t.Parallel()
+
+	toolPending := `{"itemType":"tool_call","data":{"status":"pending"}}`
+	toolCompleted := `{"itemType":"tool_call","data":{"status":"completed"}}`
+	for _, tc := range []struct {
+		name     string
+		existing string
+		incoming string
+		delta    string
+		want     string
+	}{
+		{name: "incoming replaces", existing: toolPending, incoming: toolCompleted, want: toolCompleted},
+		{name: "absent incoming keeps existing", existing: toolPending, want: toolPending},
+		{name: "first delta", delta: "Thinking", want: `{"text":"Thinking"}`},
+		{name: "delta appends", existing: `{"text":"Thinking"}`, delta: " harder", want: `{"text":"Thinking harder"}`},
+	} {
+		var existing, incoming json.RawMessage
+		if tc.existing != "" {
+			existing = json.RawMessage(tc.existing)
+		}
+		if tc.incoming != "" {
+			incoming = json.RawMessage(tc.incoming)
+		}
+		if got := applyItemPayload(existing, incoming, tc.delta); string(got) != tc.want {
+			t.Fatalf("%s: applyItemPayload = %s, want %s", tc.name, got, tc.want)
 		}
 	}
 }
