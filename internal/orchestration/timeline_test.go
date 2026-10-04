@@ -86,3 +86,24 @@ func TestTimelineCloneOwnsMutablePayloads(t *testing.T) {
 		t.Fatalf("clone mutated source: %#v", timeline)
 	}
 }
+
+// Items and Approvals are typed timeline views for test assertions.
+func (t Timeline) Items() []Item {
+	items := make([]Item, 0)
+	for _, entry := range t {
+		if entry.Item != nil {
+			items = append(items, *entry.Item)
+		}
+	}
+	return items
+}
+
+func (t Timeline) Approvals() []Approval {
+	approvals := make([]Approval, 0)
+	for _, entry := range t {
+		if entry.Approval != nil {
+			approvals = append(approvals, *entry.Approval)
+		}
+	}
+	return approvals
+}

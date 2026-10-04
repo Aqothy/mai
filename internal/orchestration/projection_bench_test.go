@@ -56,9 +56,9 @@ func BenchmarkProjectionReasoningTurn(b *testing.B) {
 	}
 }
 
-// benchmarkLongThread builds a thread shaped like the handoff's measured long
-// session: interleaved messages and file-change tool calls with large
-// old/new text payloads retained server-side.
+// benchmarkLongThread builds a long coding session: interleaved messages and
+// file-change tool calls with large old/new text payloads retained
+// server-side.
 func benchmarkLongThread(p *Projection, threadID ThreadID, fileChanges int, fileBytes int) {
 	oldText := strings.Repeat("o", fileBytes)
 	newText := strings.Repeat("n", fileBytes)

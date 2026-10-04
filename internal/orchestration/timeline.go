@@ -47,8 +47,8 @@ func (t *Timeline) AppendApproval(approval Approval) {
 	*t = append(*t, TimelineEntry{Kind: TimelineEntryApproval, Approval: &approval})
 }
 
-// Typed views are convenience reads for deciders, sidebar projections, and
-// tests. Conversation clients should iterate Timeline directly.
+// Messages is a typed view for deciders. Conversation clients should iterate
+// Timeline directly.
 func (t Timeline) Messages() []Message {
 	messages := make([]Message, 0)
 	for _, entry := range t {
@@ -57,26 +57,6 @@ func (t Timeline) Messages() []Message {
 		}
 	}
 	return messages
-}
-
-func (t Timeline) Items() []Item {
-	items := make([]Item, 0)
-	for _, entry := range t {
-		if entry.Item != nil {
-			items = append(items, *entry.Item)
-		}
-	}
-	return items
-}
-
-func (t Timeline) Approvals() []Approval {
-	approvals := make([]Approval, 0)
-	for _, entry := range t {
-		if entry.Approval != nil {
-			approvals = append(approvals, *entry.Approval)
-		}
-	}
-	return approvals
 }
 
 func (t Timeline) Clone() Timeline {
