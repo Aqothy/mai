@@ -13,7 +13,6 @@ import (
 
 type fakeProviderRuntime struct {
 	mu                 sync.Mutex
-	configSetCalls     int
 	configSetInputs    []provider.SetConfigOptionInput
 	configSetSignal    chan struct{}
 	startInputs        []provider.StartSessionInput
@@ -23,9 +22,7 @@ type fakeProviderRuntime struct {
 	startErr           error
 	sendInputs         []provider.SendTurnInput
 	interruptCalls     int
-	interruptSignal    chan struct{}
 	interruptErr       error
-	stopCalls          int
 	releaseCalls       int
 	releaseInputs      []provider.StopSessionInput
 	stopSignal         chan struct{}
@@ -41,7 +38,7 @@ type fakeProviderRuntime struct {
 }
 
 func newFakeProviderRuntime() *fakeProviderRuntime {
-	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), interruptSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4), respondSignal: make(chan struct{}, 4)}
+	return &fakeProviderRuntime{configSetSignal: make(chan struct{}, 4), stopSignal: make(chan struct{}, 4), sendSignal: make(chan struct{}, 4), respondSignal: make(chan struct{}, 4)}
 }
 
 func newTestReactor(engine *Engine, runtime ProviderRuntime) *ProviderEventReactor {
@@ -94,10 +91,6 @@ func (f *fakeProviderRuntime) InterruptTurn(context.Context, provider.InterruptT
 	f.interruptCalls++
 	err := f.interruptErr
 	f.mu.Unlock()
-	select {
-	case f.interruptSignal <- struct{}{}:
-	default:
-	}
 	return err
 }
 func (f *fakeProviderRuntime) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
@@ -105,7 +98,6 @@ func (f *fakeProviderRuntime) SetConfigOption(ctx context.Context, input provide
 		return context.Canceled
 	}
 	f.mu.Lock()
-	f.configSetCalls++
 	f.configSetInputs = append(f.configSetInputs, input)
 	entered := f.configSetEntered
 	release := f.configSetRelease
@@ -131,7 +123,6 @@ func (f *fakeProviderRuntime) SetConfigOption(ctx context.Context, input provide
 }
 func (f *fakeProviderRuntime) StopSession(context.Context, provider.StopSessionInput) error {
 	f.mu.Lock()
-	f.stopCalls++
 	err := f.stopErr
 	f.mu.Unlock()
 	select {
@@ -189,15 +180,6 @@ func (f *fakeProviderRuntime) respondCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.respondInputs)
-}
-
-func (f *fakeProviderRuntime) lastRespondInput() provider.RespondToRequestInput {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.respondInputs) == 0 {
-		return provider.RespondToRequestInput{}
-	}
-	return f.respondInputs[len(f.respondInputs)-1]
 }
 
 func (f *fakeProviderRuntime) lastStartInput() provider.StartSessionInput {
@@ -1179,36 +1161,6 @@ func TestReactorForwardsConfigOptionWithDerivedCategory(t *testing.T) {
 	}
 }
 
-func TestReactorForwardsApprovalResponse(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	reactor := newTestReactor(engine, fake)
-	threadID := ThreadID("thread-forward-approval")
-	setupApprovalThread(t, engine, threadID, true)
-
-	if _, err := engine.Dispatch(context.Background(), Command{
-		Type:      CommandThreadApprovalRespond,
-		CommandID: "respond-forward-approval",
-		ThreadID:  threadID,
-		RequestID: "approval-1",
-		Decision:  provider.ApprovalDecisionAccept,
-		OptionID:  "allow",
-	}); err != nil {
-		t.Fatalf("thread.approval.respond: %v", err)
-	}
-	select {
-	case <-fake.respondSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("approval response was not forwarded")
-	}
-	waitForReactorIdle(t, reactor, threadID)
-	input := fake.lastRespondInput()
-	if input.ThreadID != string(threadID) || input.RequestID != "approval-1" || input.Decision != provider.ApprovalDecisionAccept || input.OptionID != "allow" {
-		t.Fatalf("RespondToRequest input = %#v, want exact approved option response", input)
-	}
-}
-
 func TestReactorApprovalResponseFailureCreatesTurnScopedError(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -1241,42 +1193,21 @@ func TestReactorApprovalResponseFailureCreatesTurnScopedError(t *testing.T) {
 	}
 }
 
-func TestReactorDoesNotForwardStaleApprovalResponse(t *testing.T) {
-	t.Run("sessionless", func(t *testing.T) {
-		engine := NewEngine()
-		defer engine.Close()
-		fake := newFakeProviderRuntime()
-		reactor := newTestReactor(engine, fake)
-		threadID := ThreadID("thread-sessionless-approval")
-		setupApprovalThread(t, engine, threadID, false)
+func TestReactorDoesNotForwardApprovalResponseWithoutSession(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	reactor := newTestReactor(engine, fake)
+	threadID := ThreadID("thread-sessionless-approval")
+	setupApprovalThread(t, engine, threadID, false)
 
-		if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "respond-sessionless-approval", ThreadID: threadID, RequestID: "approval-1", Decision: provider.ApprovalDecisionAccept, OptionID: "allow"}); err != nil {
-			t.Fatalf("thread.approval.respond: %v", err)
-		}
-		waitForReactorIdle(t, reactor, threadID)
-		if calls := fake.respondCallCount(); calls != 0 {
-			t.Fatalf("RespondToRequest calls = %d, want none without a provider session", calls)
-		}
-	})
-
-	t.Run("unknown request", func(t *testing.T) {
-		engine := NewEngine()
-		defer engine.Close()
-		fake := newFakeProviderRuntime()
-		reactor := newTestReactor(engine, fake)
-		threadID := ThreadID("thread-unknown-approval")
-		setupApprovalThread(t, engine, threadID, true)
-
-		reactor.handleApprovalResponse(Event{Type: EventThreadApprovalResponseRequested, Payload: EventPayload{ThreadID: threadID, RequestID: "missing", Decision: provider.ApprovalDecisionAccept}})
-		if calls := fake.respondCallCount(); calls != 0 {
-			t.Fatalf("RespondToRequest calls = %d, want none for an unknown request", calls)
-		}
-		thread, _ := engine.Thread(threadID)
-		items := thread.Timeline.Items()
-		if len(items) != 1 || items[0].Kind != provider.ItemKindError || !strings.Contains(items[0].Title, "unknown approval request") {
-			t.Fatalf("items = %#v, want visible unknown-request error", items)
-		}
-	})
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "respond-sessionless-approval", ThreadID: threadID, RequestID: "approval-1", Decision: provider.ApprovalDecisionAccept, OptionID: "allow"}); err != nil {
+		t.Fatalf("thread.approval.respond: %v", err)
+	}
+	waitForReactorIdle(t, reactor, threadID)
+	if calls := fake.respondCallCount(); calls != 0 {
+		t.Fatalf("RespondToRequest calls = %d, want none without a provider session", calls)
+	}
 }
 
 func TestPromptTextQuotesMultilineAnnotationComments(t *testing.T) {

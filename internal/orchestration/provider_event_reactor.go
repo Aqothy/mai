@@ -459,12 +459,10 @@ func configOptionCategory(session *SessionBinding, optionID string) provider.Con
 
 func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	threadID := event.ThreadID()
+	// The decider only appends responses to known approvals, and timeline
+	// entries are never removed; a missing session means the provider moved on.
 	view, ok := r.engine.ApprovalView(threadID, event.Payload.RequestID)
-	if !ok || view.Session == nil {
-		return
-	}
-	if view.Approval == nil {
-		r.appendErrorItem(threadID, event.Payload.TurnID, fmt.Sprintf("unknown approval request %s", event.Payload.RequestID))
+	if !ok || view.Session == nil || view.Approval == nil {
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
