@@ -1,84 +1,10 @@
 package terminal
 
-// Increment 9 tests: screen-accurate classification through the headless VT
-// while no client is attached. Fixture text mirrors the recorded Herdr
-// manifests the rules were written against.
+// Screen-accurate classification through the headless VT while no client is
+// attached. Fixture text mirrors the recorded Herdr manifests the rules were
+// written against.
 
-import (
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/Aqothy/maiD/internal/terminal/vtscreen"
-)
-
-type vtDetectorHarness struct {
-	mu    sync.Mutex
-	fg    int
-	table map[int][]processInfo
-
-	reports chan AgentReport
-	d       *Detector
-}
-
-func newVTDetectorHarness(t *testing.T) *vtDetectorHarness {
-	t.Helper()
-	screen, err := vtscreen.New(80, 24)
-	if err != nil {
-		t.Fatalf("vtscreen.New: %v", err)
-	}
-	h := &vtDetectorHarness{
-		fg:      harnessShellPGID,
-		table:   make(map[int][]processInfo),
-		reports: make(chan AgentReport, 64),
-	}
-	h.d = newDetector(detectorConfig{
-		shellPGID: harnessShellPGID,
-		foregroundPGID: func() (int, bool) {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			return h.fg, true
-		},
-		inspectGroup: func(pgid int) []processInfo {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			return h.table[pgid]
-		},
-		screen:            screen,
-		publish:           func(r AgentReport) { h.reports <- r },
-		recheckInterval:   20 * time.Millisecond,
-		settleInterval:    5 * time.Millisecond,
-		idleStabilization: 30 * time.Millisecond,
-		scanDebounce:      10 * time.Millisecond,
-		scanForce:         50 * time.Millisecond,
-	})
-	t.Cleanup(h.d.Stop)
-	return h
-}
-
-func (h *vtDetectorHarness) setForeground(pgid int, procs ...processInfo) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.fg = pgid
-	if procs != nil {
-		h.table[pgid] = procs
-	}
-}
-
-func (h *vtDetectorHarness) waitReport(t *testing.T, what string, match func(AgentReport) bool) AgentReport {
-	t.Helper()
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case r := <-h.reports:
-			if match(r) {
-				return r
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for %s; last state %+v", what, h.d.Report())
-		}
-	}
-}
+import "testing"
 
 // Claude's permission prompt cannot be recognized from title or progress —
 // the title stays ✳ (idle) and progress sticks at 4;3. The screen rules

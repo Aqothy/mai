@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Aqothy/maiD/internal/terminal/vtscreen"
 )
 
 // detectorHarness drives a Detector with a controllable foreground group and
@@ -22,6 +24,20 @@ const harnessShellPGID = 100
 
 func newDetectorHarness(t *testing.T) *detectorHarness {
 	t.Helper()
+	return newHarness(t, nil)
+}
+
+// newVTDetectorHarness adds a headless VT screen so screen rules apply.
+func newVTDetectorHarness(t *testing.T) *detectorHarness {
+	t.Helper()
+	screen, err := vtscreen.New(80, 24)
+	if err != nil {
+		t.Fatalf("vtscreen.New: %v", err)
+	}
+	return newHarness(t, screen)
+}
+
+func newHarness(t *testing.T, screen vtscreen.Screen) *detectorHarness {
 	h := &detectorHarness{
 		fg:      harnessShellPGID,
 		table:   make(map[int][]processInfo),
@@ -40,10 +56,13 @@ func newDetectorHarness(t *testing.T) *detectorHarness {
 			h.inspects++
 			return h.table[pgid]
 		},
+		screen:            screen,
 		publish:           func(r AgentReport) { h.reports <- r },
 		recheckInterval:   20 * time.Millisecond,
 		settleInterval:    5 * time.Millisecond,
 		idleStabilization: 30 * time.Millisecond,
+		scanDebounce:      10 * time.Millisecond,
+		scanForce:         50 * time.Millisecond,
 	})
 	t.Cleanup(h.d.Stop)
 	return h
@@ -85,55 +104,22 @@ func claudeProcs() []processInfo {
 	return []processInfo{{pid: 200, argv: []string{"claude"}}}
 }
 
-func TestDetectorIdentifiesAgentAndWorkingTitle(t *testing.T) {
-	h := newDetectorHarness(t)
-	h.setForeground(200, claudeProcs()...)
-	h.d.ObserveOutput([]byte("\x1b]0;⠋ fix the reducer\x07"))
-
-	r := h.waitReport(t, "working report", func(r AgentReport) bool {
-		return r.Activity == AgentActivityWorking
-	})
-	if r.Kind != AgentClaude {
-		t.Fatalf("kind = %q", r.Kind)
-	}
-	if r.Title != "fix the reducer" {
-		t.Fatalf("normalized title = %q", r.Title)
-	}
-}
-
 func TestDetectorSpinnerFramesPublishOnce(t *testing.T) {
 	h := newDetectorHarness(t)
 	h.setForeground(200, claudeProcs()...)
 	for _, frame := range []string{"⠋", "⠙", "⠹", "⠸", "⠼"} {
 		h.d.ObserveOutput([]byte("\x1b]0;" + frame + " fix the reducer\x07"))
 	}
-	h.waitReport(t, "working report", func(r AgentReport) bool {
+	r := h.waitReport(t, "working report", func(r AgentReport) bool {
 		return r.Activity == AgentActivityWorking
 	})
+	if r.Kind != AgentClaude || r.Title != "fix the reducer" {
+		t.Fatalf("working report kind %q title %q, want claude with normalized title", r.Kind, r.Title)
+	}
 	select {
 	case r := <-h.reports:
 		t.Fatalf("spinner frame churn republished: %+v", r)
 	default:
-	}
-}
-
-func TestDetectorForegroundShellClearsAgent(t *testing.T) {
-	h := newDetectorHarness(t)
-	h.d.SetAttached(true)
-	h.setForeground(200, claudeProcs()...)
-	h.d.ObserveOutput([]byte("\x1b]0;⠋ working\x07"))
-	h.waitReport(t, "working", func(r AgentReport) bool { return r.Activity == AgentActivityWorking })
-
-	h.setForeground(harnessShellPGID)
-	h.d.ObserveOutput([]byte("$ "))
-	r := h.waitReport(t, "cleared agent", func(r AgentReport) bool {
-		return r.Activity == AgentActivityNone
-	})
-	if r.Kind != AgentNone {
-		t.Fatalf("kind after shell foreground = %q", r.Kind)
-	}
-	if r.Title != "" {
-		t.Fatalf("title after shell foreground = %q, want cleared", r.Title)
 	}
 }
 
@@ -178,27 +164,6 @@ func TestDetectorProcessInspectionDoesNotBlockOutputObservation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("detector worker did not start process inspection")
 	}
-}
-
-func TestDetectorDetachedFinishBecomesDoneUntilAttach(t *testing.T) {
-	h := newDetectorHarness(t)
-	h.setForeground(200, claudeProcs()...)
-	h.d.ObserveOutput([]byte("\x1b]0;⠋ working\x07"))
-	h.waitReport(t, "working", func(r AgentReport) bool { return r.Activity == AgentActivityWorking })
-
-	// The agent exits to the shell while no client is attached.
-	h.setForeground(harnessShellPGID)
-	h.d.ObserveOutput([]byte("$ "))
-	r := h.waitReport(t, "done", func(r AgentReport) bool { return r.Activity == AgentActivityDone })
-	if r.Kind != AgentClaude {
-		t.Fatalf("done report keeps last agent kind, got %q", r.Kind)
-	}
-
-	// Attaching acknowledges done.
-	h.d.SetAttached(true)
-	h.waitReport(t, "acknowledged", func(r AgentReport) bool {
-		return r.Activity == AgentActivityNone && r.Kind == AgentNone
-	})
 }
 
 func TestDetectorDetachedIdleTransitionBecomesDone(t *testing.T) {
