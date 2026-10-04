@@ -18,55 +18,26 @@ nonisolated final class ChatPresentationLifetimeTests: XCTestCase {
             released = object
             withExtendedLifetime(object) {}
         }
-        XCTAssertNil(released)
+        XCTAssertNil(released, "\(T.self) was not released synchronously")
     }
 
-    @MainActor func testProjectionRelease() {
+    @MainActor func testPresentationStateReleasesSynchronously() {
         assertSynchronousRelease { ChatTimelineProjection() }
-    }
-
-    @MainActor func testTextLayoutStoreRelease() {
         assertSynchronousRelease { ChatTextLayoutStore() }
-    }
-
-    @MainActor func testMarkdownSegmentCacheRelease() {
         assertSynchronousRelease { ChatMarkdownSegmentCache() }
-    }
-
-    @MainActor func testAnnotationStateRelease() {
         assertSynchronousRelease { ChatAnnotationModel() }
-    }
-
-    @MainActor func testScrollStateRelease() {
         assertSynchronousRelease { ChatScrollState() }
-    }
-
-    @MainActor func testFoldStateRelease() {
         assertSynchronousRelease { ChatTimelineFoldModel() }
-    }
-
-    @MainActor func testStreamingTextRelease() {
         assertSynchronousRelease { ThreadStreamingText(text: "Hello 👋🏽") }
-    }
-
-    @MainActor func testJSONPayloadRelease() {
         assertSynchronousRelease { JSONAny(["text": "Hello"]) }
-    }
-
-    @MainActor func testJSONNullRelease() {
         assertSynchronousRelease { JSONNull() }
     }
 }
 
-/// Correctness and benchmarks for `ChatTimelineProjection`, the incremental
-/// section projection behind the chat timeline.
-///
-/// Each benchmark pairs the previous behavior (a full re-walk of the
-/// transcript per structural event) with the incremental projection on the
-/// same event stream, at two transcript sizes so the scaling difference is
-/// visible in the numbers themselves.
+/// `ChatTimelineProjection` is the incremental section projection behind the
+/// chat timeline; it must always agree with a full rebuild.
 nonisolated
-final class ChatTimelinePerformanceTests: XCTestCase {
+final class ChatTimelineProjectionTests: XCTestCase {
     // MARK: Timeline fixtures
 
     @MainActor
@@ -320,117 +291,5 @@ final class ChatTimelinePerformanceTests: XCTestCase {
         // An unchanged timeline is a pure cache hit with identical output.
         let unchanged = projection.project(timeline)
         XCTAssertEqual(rowFingerprints(of: unchanged), rowFingerprints(of: sections))
-    }
-
-    // MARK: Benchmarks
-
-    /// Baseline: previous behavior, where every structural streaming event
-    /// re-walked the entire transcript on the main thread.
-    @MainActor
-    func testFullSectionProjectionBaselinePerformance() {
-        let initial = makeTimeline(turnCount: 500)
-        let steps = streamedSteps(initial: initial, runningTurnID: "turn-499", eventCount: 240)
-
-        var sectionCount = 0
-        measure(metrics: [XCTClockMetric()]) {
-            for step in steps {
-                sectionCount = ChatTimelineLayout.sections(timeline: step.timeline).count
-            }
-        }
-        XCTAssertGreaterThan(sectionCount, 0)
-    }
-
-    /// Production: suffix-only reprojection over the same event stream.
-    /// Includes the pessimistic mid-timeline mutations, so steady-state
-    /// tail-only traffic (tool items, message chunks) is cheaper than this.
-    @MainActor
-    func testIncrementalSectionProjectionPerformance() {
-        let initial = makeTimeline(turnCount: 500)
-        let steps = streamedSteps(initial: initial, runningTurnID: "turn-499", eventCount: 240)
-
-        let projection = ChatTimelineProjection()
-        _ = projection.project(initial)
-        var sectionCount = 0
-
-        measure(metrics: [XCTClockMetric()]) {
-            for step in steps {
-                projection.invalidate(from: step.firstChangedIndex)
-                sectionCount = projection.project(step.timeline).count
-            }
-        }
-        XCTAssertGreaterThan(sectionCount, 0)
-    }
-
-    /// Scaling proof at ~10k entries: the full rebuild degrades linearly
-    /// with transcript size (multiple frames per event), while the
-    /// incremental projection stays flat. Compare against the 2,500-entry
-    /// pair above.
-    @MainActor
-    func testFullSectionProjectionAtTenThousandEntriesPerformance() {
-        let initial = makeTimeline(turnCount: 2_000)
-        let steps = streamedSteps(initial: initial, runningTurnID: "turn-1999", eventCount: 60)
-
-        var sectionCount = 0
-        measure(metrics: [XCTClockMetric()]) {
-            for step in steps {
-                sectionCount = ChatTimelineLayout.sections(timeline: step.timeline).count
-            }
-        }
-        XCTAssertGreaterThan(sectionCount, 0)
-    }
-
-    @MainActor
-    func testIncrementalSectionProjectionAtTenThousandEntriesPerformance() {
-        let initial = makeTimeline(turnCount: 2_000)
-        let steps = streamedSteps(initial: initial, runningTurnID: "turn-1999", eventCount: 60)
-
-        let projection = ChatTimelineProjection()
-        _ = projection.project(initial)
-        var sectionCount = 0
-
-        measure(metrics: [XCTClockMetric()]) {
-            for step in steps {
-                projection.invalidate(from: step.firstChangedIndex)
-                sectionCount = projection.project(step.timeline).count
-            }
-        }
-        XCTAssertGreaterThan(sectionCount, 0)
-    }
-
-    /// Steady-state streaming: only tail entries change. This is the common
-    /// case and should cost microseconds per event regardless of length.
-    @MainActor
-    func testIncrementalSectionProjectionTailOnlyPerformance() {
-        let initial = makeTimeline(turnCount: 2_000)
-        var timeline = initial
-        var steps: [(timeline: [TimelineEntry], index: Int)] = []
-        for event in 0..<120 {
-            if event.isMultiple(of: 2) {
-                timeline.append(
-                    itemEntry(
-                        id: "tail-item-\(event)",
-                        kind: .commandExecution,
-                        status: .inProgress,
-                        turnID: "turn-1999"
-                    )
-                )
-                steps.append((timeline, timeline.count - 1))
-            } else {
-                timeline[timeline.count - 1].item?.status = MaidItemStatus.completed.rawValue
-                steps.append((timeline, timeline.count - 1))
-            }
-        }
-
-        let projection = ChatTimelineProjection()
-        _ = projection.project(initial)
-        var sectionCount = 0
-
-        measure(metrics: [XCTClockMetric()]) {
-            for step in steps {
-                projection.invalidate(from: step.index)
-                sectionCount = projection.project(step.timeline).count
-            }
-        }
-        XCTAssertGreaterThan(sectionCount, 0)
     }
 }
