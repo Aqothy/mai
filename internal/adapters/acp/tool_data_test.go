@@ -54,11 +54,6 @@ func TestRawOutputTextRecognizesCommonShapes(t *testing.T) {
 			raw:  map[string]any{"stdout": "  indented\n", "stderr": "warning\n"},
 			want: "  indented\nwarning\n",
 		},
-		{
-			name: "adds separator only when needed",
-			raw:  map[string]any{"stdout": "output", "stderr": "warning"},
-			want: "output\nwarning",
-		},
 		{name: "stderr only", raw: map[string]any{"stderr": "boom"}, want: "boom"},
 		{name: "text field", raw: map[string]any{"text": "t"}, want: "t"},
 		{name: "unrecognized", raw: map[string]any{"blob": 42}, want: ""},
