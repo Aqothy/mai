@@ -220,9 +220,6 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 // attached to the terminal's live run.
 func (s *Server) refreshTerminalAttachment(terminalID string) {
 	rt := s.terminals
-	if rt == nil {
-		return
-	}
 	session, err := rt.service.Get(terminalID)
 	if err != nil {
 		return
@@ -424,14 +421,8 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 	case wire.MethodProviderList:
 		return h.server.providerService.ListInstances(), nil
 	case wire.MethodACPRegistryList:
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
-		}
 		return h.server.acpRegistry.list(ctx)
 	case wire.MethodACPRegistryInstalled:
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
-		}
 		return h.server.acpRegistry.installedAgents()
 	case wire.MethodACPRegistryInstall:
 		var params wire.ACPRegistryInstallParams
@@ -440,9 +431,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		if params.RegistryID == "" {
 			return nil, fmt.Errorf("%w: acp.registry.install requires registryId", jsonrpc2.ErrInvalidParams)
-		}
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
 		}
 		installed, err := h.server.acpRegistry.install(ctx, params.RegistryID)
 		if err != nil {
@@ -463,9 +451,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		if strings.TrimSpace(params.Name) == "" || strings.TrimSpace(params.Command) == "" {
 			return nil, fmt.Errorf("%w: acp.registry.addCustom requires name and command", jsonrpc2.ErrInvalidParams)
-		}
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
 		}
 		return h.server.acpRegistry.addCustom(params)
 	case wire.MethodACPRegistryStart:

@@ -243,9 +243,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) doClose() error {
-	if s.ctxCancel != nil {
-		s.ctxCancel()
-	}
+	s.ctxCancel()
 
 	s.mu.Lock()
 	httpServer := s.httpServer
@@ -255,20 +253,12 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	if s.orchestration != nil {
-		s.orchestration.Close()
-	}
-	if s.providerService != nil {
-		s.providerService.Close()
-	}
+	s.orchestration.Close()
+	s.providerService.Close()
 	// Terminal shells never survive daemon shutdown; wait for every process
 	// group to be cleaned up before releasing clients and the store.
-	if s.terminals != nil {
-		s.terminals.close()
-	}
-	if s.workspaceSearch != nil {
-		s.workspaceSearch.Close()
-	}
+	s.terminals.close()
+	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()
 	clients := make([]*rpcClient, 0, len(s.rpcClients))
@@ -470,9 +460,6 @@ func (s *Server) cleanupUnpersistedProviderFork(ctx context.Context, instanceID 
 }
 
 func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
-	if s.acpRegistry == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
-	}
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err

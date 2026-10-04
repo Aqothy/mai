@@ -119,9 +119,6 @@ func (rt *terminalRuntime) lockEntry(terminalID string) (*terminalEntry, bool) {
 
 func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreateParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	cwd, err := terminal.ResolveCwd(params.Cwd)
 	if err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
@@ -197,9 +194,6 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 // client without loss. The latest resize wins, matching ordinary PTY behavior.
 func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
@@ -253,9 +247,6 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 // persisted cwd and attaches the calling client to the new run.
 func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
@@ -322,9 +313,6 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 // no-op so it cannot remove a newer attachment on the same connection.
 func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachParams) {
 	rt := s.terminals
-	if rt == nil {
-		return
-	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return
@@ -376,9 +364,6 @@ func (s *Server) terminalMetaSummary(entry *terminalEntry) wire.TerminalSummary 
 
 func (s *Server) terminateTerminal(terminalID string) error {
 	rt := s.terminals
-	if rt == nil {
-		return fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -398,9 +383,6 @@ func (s *Server) terminateTerminal(terminalID string) error {
 // and bumps updatedAt.
 func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.TerminalSummary, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalSummary{}, fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return wire.TerminalSummary{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -420,9 +402,6 @@ func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.Terminal
 // deleteTerminal terminates any live run and removes the terminal's identity.
 func (s *Server) deleteTerminal(terminalID string) error {
 	rt := s.terminals
-	if rt == nil {
-		return fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -451,9 +430,6 @@ func (s *Server) deleteTerminal(terminalID string) error {
 func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStreamItem {
 	client.subscribeTerminalList()
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalListStreamItem{Kind: wire.TerminalListItemSnapshot, Terminals: []wire.TerminalSummary{}}
-	}
 	rt.mu.Lock()
 	entries := make([]*terminalEntry, 0, len(rt.entries))
 	for _, entry := range rt.entries {
@@ -507,9 +483,6 @@ func applyAgentReport(summary *wire.TerminalSummary, report terminal.AgentReport
 // free locks are taken so the detector may publish from any context.
 func (s *Server) publishTerminalAgentReport(terminalID, runID string, report terminal.AgentReport) {
 	rt := s.terminals
-	if rt == nil {
-		return
-	}
 	rt.mu.Lock()
 	entry, ok := rt.entries[terminalID]
 	rt.mu.Unlock()
@@ -635,9 +608,6 @@ func (s *Server) resizeTerminal(client *rpcClient, params wire.TerminalResizePar
 // have attached to the terminal on this connection.
 func (s *Server) terminalSessionForSubscriber(client *rpcClient, terminalID, runID string) (*terminal.Session, *terminalEntry, bool) {
 	rt := s.terminals
-	if rt == nil {
-		return nil, nil, false
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return nil, nil, false
