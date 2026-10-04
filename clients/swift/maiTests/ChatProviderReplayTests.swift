@@ -18,11 +18,6 @@ struct ChatProviderReplayTests {
             let reload: mai.Thread
             let expected: [Value]
         }
-        func require(_ condition: Bool, _ message: String) throws {
-            guard condition else {
-                throw NSError(domain: "ReasoningPipelineQA", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
-            }
-        }
         @MainActor func values(_ thread: mai.Thread) -> [Value] {
             thread.timeline.compactMap { entry in
                 if let item = entry.item {
@@ -41,7 +36,7 @@ struct ChatProviderReplayTests {
         var deltaCount = 0
         var completedCount = 0
         for event in fixture.events {
-            try require(session.apply(event).applied, "Event was not applied: \(event.eventID)")
+            try #require(session.apply(event).applied, "Event was not applied: \(event.eventID)")
             if let item = event.payload.item, item.itemKind == .reasoning {
                 if let delta = item.textDelta {
                     thoughtText[item.id, default: ""] += delta
@@ -50,21 +45,21 @@ struct ChatProviderReplayTests {
                     thoughtText[item.id] = text
                 }
                 let projected = session.thread?.timeline.compactMap(\.item).first { $0.id == item.id }
-                try require(projected != nil, "Missing thought after event")
-                try require(projected.flatMap(ChatTimelineLayout.reasoningText) == thoughtText[item.id], "Live thought differs from the exact wire text")
+                try #require(projected != nil, "Missing thought after event")
+                try #require(projected.flatMap(ChatTimelineLayout.reasoningText) == thoughtText[item.id], "Live thought differs from the exact wire text")
                 if item.itemStatus == .completed {
                     completedCount += 1
-                    try require(projected?.itemStatus == .completed, "Thought did not settle")
+                    try #require(projected?.itemStatus == .completed, "Thought did not settle")
                 }
             }
-            try require(!session.apply(event).applied, "Duplicate sequence was accepted")
+            try #require(!session.apply(event).applied, "Duplicate sequence was accepted")
         }
-        guard let final = session.thread else { throw NSError(domain: "ReasoningPipelineQA", code: 2) }
-        try require(deltaCount == 3 && completedCount == 3, "Unexpected fixture coverage")
-        try require(values(final) == fixture.expected, "Client final timeline differs")
-        try require(values(fixture.live) == fixture.expected, "Server live snapshot differs")
-        try require(values(fixture.reload) == fixture.expected, "Provider history reload differs")
-        try require(final.latestTurn?.state == "completed" && !session.isProtected, "Completed turn retains activity")
+        let final = try #require(session.thread)
+        try #require(deltaCount == 3 && completedCount == 3, "Unexpected fixture coverage")
+        try #require(values(final) == fixture.expected, "Client final timeline differs")
+        try #require(values(fixture.live) == fixture.expected, "Server live snapshot differs")
+        try #require(values(fixture.reload) == fixture.expected, "Provider history reload differs")
+        try #require(final.latestTurn?.state == "completed" && !session.isProtected, "Completed turn retains activity")
     }
 
     @Test @MainActor
@@ -82,11 +77,6 @@ struct ChatProviderReplayTests {
             let text: String
             let annotations: [AnnotationValue]
         }
-        func require(_ condition: Bool, _ detail: String) throws {
-            guard condition else {
-                throw NSError(domain: "AnnotationReplayQA", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
-            }
-        }
         func values(_ thread: mai.Thread) -> [MessageValue] {
             thread.timeline.compactMap(\.message).map { message in
                 MessageValue(id: message.id, role: message.role, text: message.text,
@@ -97,7 +87,7 @@ struct ChatProviderReplayTests {
         }
         let json = try inflate(ChatProviderReplayFixtures.annotationSnapshots)
         let threads = try newJSONDecoder().decode([mai.Thread].self, from: json)
-        try require(threads.count == 5, "Incomplete live/restart/fork/runtime fixture")
+        try #require(threads.count == 5, "Incomplete live/restart/fork/runtime fixture")
         // Establish the baseline independently of the generated model decoder,
         // so consistently losing optional annotation fields cannot pass.
         let rawThreads = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
@@ -121,23 +111,23 @@ struct ChatProviderReplayTests {
                 annotations: annotations
             )
         }
-        try require(expected.filter { !$0.annotations.isEmpty }.count == 5, "Missing annotation-only, repeated or steering prompt")
-        try require(expected.contains { $0.text.isEmpty && !$0.annotations.isEmpty }, "Missing annotation-only prompt")
+        try #require(expected.filter { !$0.annotations.isEmpty }.count == 5, "Missing annotation-only, repeated or steering prompt")
+        try #require(expected.contains { $0.text.isEmpty && !$0.annotations.isEmpty }, "Missing annotation-only prompt")
         for thread in threads {
             let session = ThreadSession(thread: thread)
-            try require(!session.isProtected, "Completed replay retains activity")
-            try require(values(thread) == expected, "Decoded message IDs/text/annotation cards differ")
+            try #require(!session.isProtected, "Completed replay retains activity")
+            try #require(values(thread) == expected, "Decoded message IDs/text/annotation cards differ")
             let messages = thread.timeline.compactMap(\.message)
             let ids = Set(messages.map(\.id))
-            try require(ids.count == messages.count, "Duplicate messages")
+            try #require(ids.count == messages.count, "Duplicate messages")
             let rows = ChatTimeline.renderRows(messages.map(ChatTimelineRowModel.message), streamingTurnID: nil, segmentCache: session.markdownSegmentCache)
             for message in messages where !(message.annotations ?? []).isEmpty {
                 let retained = rows.compactMap { row -> Message? in
                     if case .standard(.message(let value)) = row, value.id == message.id { return value }
                     return nil
                 }
-                try require(retained.count == 1 && retained.first?.annotations?.count == message.annotations?.count, "Annotation cards lost before rendering")
-                try require((message.annotations ?? []).allSatisfy { $0.messageID.map(ids.contains) ?? false }, "Quote reference points outside this chat")
+                try #require(retained.count == 1 && retained.first?.annotations?.count == message.annotations?.count, "Annotation cards lost before rendering")
+                try #require((message.annotations ?? []).allSatisfy { $0.messageID.map(ids.contains) ?? false }, "Quote reference points outside this chat")
             }
         }
     }

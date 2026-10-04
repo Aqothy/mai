@@ -1,7 +1,7 @@
-// Captured daemon/provider fixtures; original evidence paths and decoded hashes are below.
+// Captured daemon/provider fixtures, stored as base64 zlib-deflated JSON.
 nonisolated enum ChatProviderReplayFixtures {
-    // qa/2026-09-beta-integration/reasoning-reload-20260924/pipeline.json
-    // Decoded SHA-256: df2ca1e1b68d6f604f86aac9cfec5bef345bde891ee11a2fbc4fac9f1e2dfa23
+    // A reasoning turn from the daemon: the initial thread, its wire events,
+    // the server's live snapshot and the provider history reload.
     static let reasoningPipeline = """
     7Vrdbts2FL7PUwi+NMqGFElJ9F2RdEAxbO2C7qY/KCiRboQqkivRaYIiwF5gGLYX6HUvt9thV7vfQ+wJ+gij5NiWbNGWHCvxGieGE0s81OE53zk836E/HlhW
     T57LWGW9gfVSf7Ksj8W7vp7J92MZB1LfwQ+mF4vBT4S+pv9Vb6DtcB4gDJAcCkAEd4FHGAJBgByIh9gWHurNhNXlKJ+tp05TycXDTGZZmMQgU1yNM5BJNR+a
@@ -24,8 +24,8 @@ nonisolated enum ChatProviderReplayFixtures {
     aDso3BaDMLrF3tSfdpf+3Bn2UCWE9449GL2PN8IM3qUc0B1t8NpuB7fCGoxeIZumANLenV8hXzCah25qV2qwazuuQBnyGG3JFSpCOVc4uDr4Dw==
     """
 
-    // qa/2026-09-beta-integration/selection-20260926/annotation-fix/client-annotation-fixture.deflate
-    // Decoded SHA-256: 0e0ac73ab16e905155460da3995b86b6507552e5fca0def0b9ae73165d32782c
+    // Five snapshots of one annotated chat, taken live, after a daemon
+    // restart, after a fork and from the provider runtime.
     static let annotationSnapshots = """
     7V35c9zGsf5XUKxXRalqscR9KD8xUiyzLMdMJCd5OUoaAAMSERZY4yC1Tul/f909g13sRS6lpR8dt+NIJDBn99fHHPj8j/+cFNnJixNRVXUnuqKuzJ+E6QS2
     HXiBMHPXzU3PlakZB4FvStuJszSxoixMTyYnXdGVEiqfLysbc9m0RdvJKpXGn86hzLypb4pMNhdV2wl4eoG9pXUmP5liPjdb2dzIBsrN4FH5VpYyxXZOXvxH
