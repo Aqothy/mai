@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,48 +15,7 @@ import (
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
-	"github.com/coder/websocket"
 )
-
-type rpcTestClientHandler struct {
-	threadItems chan orchestration.ThreadStreamItem
-}
-
-func (h rpcTestClientHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
-	switch req.Method {
-	case wire.MethodOrchestrationSubscribeThread:
-		var item orchestration.ThreadStreamItem
-		if err := decodeRPCParams(req, &item); err != nil {
-			return nil, err
-		}
-		if h.threadItems != nil {
-			select {
-			case h.threadItems <- item:
-			default:
-			}
-		}
-		return nil, nil
-	default:
-		if req.IsCall() {
-			return nil, jsonrpc2.ErrNotHandled
-		}
-		return nil, nil
-	}
-}
-
-func newRPCTestClient(t testing.TB, s *Server, handler jsonrpc2.Handler) *jsonrpc2.Connection {
-	t.Helper()
-	server := httptest.NewServer(s.WebSocketHandler())
-	t.Cleanup(server.Close)
-	url := "ws" + strings.TrimPrefix(server.URL, "http")
-	ws, _, err := websocket.Dial(context.Background(), url, nil)
-	if err != nil {
-		t.Fatalf("websocket dial: %v", err)
-	}
-	conn := jsonrpc2.NewWebSocketConnection(context.Background(), wsJSONRPC{conn: ws}, handler)
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
-}
 
 func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	s := newTestServer(t)
@@ -630,31 +588,20 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 		t.Fatalf("provider start: %v", err)
 	}
 
-	threadItems := make(chan orchestration.ThreadStreamItem, 16)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-permission-option")
 
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()})
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "hello"}}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "hello"}})
 
-	approvalEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	approvalEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
 	})
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), Decision: provider.ApprovalDecisionAccept, OptionID: "reject"}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.approval.respond: %v", err)
-	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), Decision: provider.ApprovalDecisionAccept, OptionID: "reject"})
 
-	resolved := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	resolved := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalResolved && event.Payload.Approval != nil
 	})
 	// The resolved decision derives from the option the agent actually
@@ -687,20 +634,16 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	events := observeServerEvents(t, s)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 
 	threadID := orchestration.ThreadID("thread-reject-internal")
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-reject-internal", ThreadID: threadID, Title: "Reject internal", ProviderInstanceID: "codex"}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-reject-internal", ThreadID: threadID, Title: "Reject internal", ProviderInstanceID: "codex"})
 
 	// Provider/server event types are not commands: dispatching an event-shaped
 	// name (or any unknown type) over RPC must fail and append nothing.
 	for _, commandType := range []string{"thread.item.upsert", "thread.not-a-command"} {
 		command := orchestration.Command{Type: commandType, CommandID: orchestration.CommandID("cmd-reject-" + commandType), ThreadID: threadID}
-		if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, command).Await(ctx, &receipt); err == nil {
+		if _, err := client.dispatchErr(command); err == nil {
 			t.Fatalf("%s dispatched over RPC without error", command.Type)
 		}
 	}
@@ -712,18 +655,15 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 func TestRPCProviderStartAndList(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	client := newRPCTestClient(t, s, rpcTestClientHandler{})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 
 	var started provider.InstanceInfo
-	if err := client.Call(ctx, wire.MethodProviderStart, map[string]any{
+	client.call(t, wire.MethodProviderStart, map[string]any{
 		"instanceId": "codex",
 		"name":       "codex",
 		"driver":     "acp",
 		"config":     map[string]any{"command": helperCommand("sessions")},
-	}).Await(ctx, &started); err != nil {
-		t.Fatalf("provider.start: %v", err)
-	}
+	}, &started)
 	if started.InstanceID != "codex" || started.Driver != "acp" {
 		t.Fatalf("started = %#v, want codex/acp", started)
 	}
@@ -732,9 +672,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 	}
 
 	var list []provider.InstanceInfo
-	if err := client.Call(ctx, wire.MethodProviderList, nil).Await(ctx, &list); err != nil {
-		t.Fatalf("provider.list: %v", err)
-	}
+	client.call(t, wire.MethodProviderList, nil, &list)
 	if len(list) != 3 {
 		t.Fatalf("provider.list = %#v, want started ACP plus configured Codex app-server and Claude Code instances", list)
 	}
@@ -753,34 +691,27 @@ func TestRPCProviderStartAndList(t *testing.T) {
 func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	client := newRPCTestClient(t, s, rpcTestClientHandler{})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 
 	var started provider.InstanceInfo
-	if err := client.Call(ctx, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", helperCommand("rich-sessions"))}).Await(ctx, &started); err != nil {
-		t.Fatalf("provider.start: %v", err)
-	}
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", helperCommand("rich-sessions"))}, &started)
 	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 1 || started.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("auth state = %#v, want unknown status with the advertised agent-login method", started.Auth)
 	}
 
 	var rejected provider.AuthenticationResult
-	if err := client.Call(ctx, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}).Await(ctx, &rejected); err == nil {
+	if err := client.callErr(wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "not-advertised"}, &rejected); err == nil {
 		t.Fatal("authenticate with unadvertised method err = nil, want error")
 	}
 
 	var authenticated provider.AuthenticationResult
-	if err := client.Call(ctx, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "agent-login"}).Await(ctx, &authenticated); err != nil {
-		t.Fatalf("provider.authenticate: %v", err)
-	}
+	client.call(t, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "agent-login"}, &authenticated)
 	if authenticated.Instance.Auth.Status != provider.AuthStatusAuthenticated {
 		t.Fatalf("auth status after authenticate = %q, want authenticated", authenticated.Instance.Auth.Status)
 	}
 
 	var loggedOut provider.InstanceInfo
-	if err := client.Call(ctx, wire.MethodProviderLogout, wire.ProviderInstanceParams{InstanceID: "codex"}).Await(ctx, &loggedOut); err != nil {
-		t.Fatalf("provider.logout: %v", err)
-	}
+	client.call(t, wire.MethodProviderLogout, wire.ProviderInstanceParams{InstanceID: "codex"}, &loggedOut)
 	if loggedOut.Auth.Status != provider.AuthStatusUnauthenticated {
 		t.Fatalf("auth status after logout = %q, want unauthenticated", loggedOut.Auth.Status)
 	}
@@ -792,45 +723,34 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	threadItems := make(chan orchestration.ThreadStreamItem, 64)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 	importCwd := t.TempDir()
 	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", Cwd: importCwd, UpdatedAt: "2026-07-15T12:00:00Z"}
 	invalid := summary
 	invalid.Cwd = "relative/project"
 	var rejected wire.ProviderImportSessionResult
-	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: invalid}).Await(ctx, &rejected); err == nil {
+	if err := client.callErr(wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: invalid}, &rejected); err == nil {
 		t.Fatal("provider.importSession with relative cwd err = nil")
 	}
 
 	var first wire.ProviderImportSessionResult
-	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &first); err != nil {
-		t.Fatalf("provider.importSession: %v", err)
-	}
+	client.call(t, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}, &first)
 	if first.ThreadID == "" || !first.Imported {
 		t.Fatalf("first import = %+v, want a newly imported thread", first)
 	}
 	var duplicate wire.ProviderImportSessionResult
-	if err := client.Call(ctx, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}).Await(ctx, &duplicate); err != nil {
-		t.Fatalf("duplicate provider.importSession: %v", err)
-	}
+	client.call(t, wire.MethodProviderImportSession, wire.ProviderImportSessionParams{InstanceID: "codex", Session: summary}, &duplicate)
 	if duplicate.ThreadID != first.ThreadID || duplicate.Imported {
 		t.Fatalf("duplicate import = %+v, want existing thread %q", duplicate, first.ThreadID)
 	}
 
 	var subscribed orchestration.ThreadStreamItem
-	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}).Await(ctx, &subscribed); err != nil {
-		t.Fatalf("subscribe imported thread: %v", err)
-	}
+	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: first.ThreadID}, &subscribed)
 	if subscribed.Snapshot == nil || subscribed.Snapshot.Thread.Title != summary.Title || subscribed.Snapshot.Thread.Cwd != importCwd || subscribed.Snapshot.Thread.ProviderInstanceID != "codex" {
 		t.Fatalf("imported snapshot = %+v", subscribed.Snapshot)
 	}
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("prepare imported thread: %v", err)
-	}
-	refreshed := waitForThreadSnapshot(t, threadItems, func(snapshot orchestration.ThreadDetailSnapshot) bool {
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, CommandID: "prepare-imported", ThreadID: first.ThreadID})
+	refreshed := client.waitForThreadSnapshot(t, func(snapshot orchestration.ThreadDetailSnapshot) bool {
 		return snapshot.Thread.ID == first.ThreadID && !snapshot.HistoryRestorePending
 	})
 	encoded, err := json.Marshal(refreshed.Snapshot.Thread.Timeline)
@@ -851,15 +771,15 @@ func TestRPCImportProviderSessionRejectsProviderWithoutRestore(t *testing.T) {
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("list-only", "list-only", helperCommand("list-only-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	client := newRPCTestClient(t, s, rpcTestClientHandler{})
+	client := newRecordingClient(t, s)
 	var result wire.ProviderImportSessionResult
-	err := client.Call(context.Background(), wire.MethodProviderImportSession, wire.ProviderImportSessionParams{
+	err := client.callErr(wire.MethodProviderImportSession, wire.ProviderImportSessionParams{
 		InstanceID: "list-only",
 		Session: provider.SessionSummary{
 			SessionID: "external-session",
 			Cwd:       t.TempDir(),
 		},
-	}).Await(context.Background(), &result)
+	}, &result)
 	if err == nil || !strings.Contains(err.Error(), "does not support restoring imported sessions") {
 		t.Fatalf("provider.importSession err = %v, want restore capability error", err)
 	}
@@ -871,54 +791,39 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	threadItems := make(chan orchestration.ThreadStreamItem, 64)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-session-mgmt")
 	cwd := t.TempDir()
 
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-mgmt", ThreadID: threadID, Title: "Session mgmt", ProviderInstanceID: "codex", Cwd: cwd}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-mgmt", ThreadID: threadID, Title: "Session mgmt", ProviderInstanceID: "codex", Cwd: cwd})
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-mgmt", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-mgmt", Text: "hello"}}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-mgmt", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-mgmt", Text: "hello"}})
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadMessageSent && event.Payload.Role == orchestration.MessageRoleAssistant
 	})
 
 	var sessions []provider.SessionSummary
-	if err := client.Call(ctx, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "codex"}).Await(ctx, &sessions); err != nil {
-		t.Fatalf("provider.listSessions: %v", err)
-	}
+	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "codex"}, &sessions)
 	if len(sessions) != 1 || sessions[0].SessionID != "sess_new" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" {
 		t.Fatalf("provider.listSessions = %#v, want the agent session created for the thread", sessions)
 	}
 
 	var ignored json.RawMessage
-	err := client.Call(ctx, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "unbound-session"}).Await(ctx, &ignored)
+	err := client.callErr(wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "unbound-session"}, &ignored)
 	if err == nil || !strings.Contains(err.Error(), "session delete") {
 		t.Fatalf("provider.deleteSession err = %v, want capability-gated session-delete error", err)
 	}
 
-	err = client.Call(ctx, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored)
+	err = client.callErr(wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}, &ignored)
 	if err == nil || !strings.Contains(err.Error(), "bound to thread") {
 		t.Fatalf("provider.closeSession bound session err = %v, want rejection", err)
 	}
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadSessionStop, CommandID: "cmd-stop-mgmt", ThreadID: threadID}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.session.stop: %v", err)
-	}
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadSessionStop, CommandID: "cmd-stop-mgmt", ThreadID: threadID})
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadSessionStatusSet && event.Payload.Session != nil && event.Payload.Session.Status == orchestration.SessionStatusStopped
 	})
-	if err := client.Call(ctx, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}).Await(ctx, &ignored); err != nil {
-		t.Fatalf("provider.closeSession after stop: %v", err)
-	}
+	client.call(t, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}, &ignored)
 }
 
 // TestRPCSessionMetadataProjectionsReachClient locks in the projections real
@@ -931,25 +836,16 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("rich-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	threadItems := make(chan orchestration.ThreadStreamItem, 64)
-	client := newRPCTestClient(t, s, rpcTestClientHandler{threadItems: threadItems})
-	ctx := context.Background()
+	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-metadata")
 
-	var receipt orchestration.DispatchResult
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()})
 	var snapshot orchestration.ThreadStreamItem
-	if err := client.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &snapshot); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "hello"}}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "hello"}})
 
 	// Session materialization publishes the agent's config options first.
-	configEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	configEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadConfigOptionsUpdated
 	})
 	if value, ok := configOptionValue(configEvent.Payload.ConfigOptions, "mode"); !ok || value != "ask" {
@@ -959,18 +855,18 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		t.Fatalf("initial config options = %#v, want model option with currentValue test-model-1", configEvent.Payload.ConfigOptions)
 	}
 
-	slashEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	slashEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadSlashCommandsUpdated
 	})
 	if len(slashEvent.Payload.SlashCommands) != 1 || slashEvent.Payload.SlashCommands[0].Name != "compact" {
 		t.Fatalf("slash commands = %#v, want the agent's compact command", slashEvent.Payload.SlashCommands)
 	}
 
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadMetaUpdated && event.Payload.Title == "Agent set title"
 	})
 
-	usageEvent := waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	usageEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadTokenUsageUpdated
 	})
 	usage := usageEvent.Payload.TokenUsage
@@ -978,16 +874,14 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		t.Fatalf("token usage = %#v, want used 1200 / max 200000 / cost 0.42 USD", usage)
 	}
 
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadMessageSent && event.Payload.Role == orchestration.MessageRoleAssistant
 	})
 
 	// Model switching round-trips through session/set_config_option. Keeping the
 	// category-specific case also verifies the thread's model projection.
-	if err := client.Call(ctx, wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-model-metadata", ThreadID: threadID, OptionID: "model", Value: "test-model-2"}).Await(ctx, &receipt); err != nil {
-		t.Fatalf("thread.config-option.set: %v", err)
-	}
-	waitForThreadEvent(t, threadItems, func(event orchestration.Event) bool {
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, CommandID: "cmd-model-metadata", ThreadID: threadID, OptionID: "model", Value: "test-model-2"})
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		if event.Type != orchestration.EventThreadConfigOptionsUpdated {
 			return false
 		}
@@ -995,11 +889,9 @@ func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 		return ok && value == "test-model-2"
 	})
 
-	lateClient := newRPCTestClient(t, s, rpcTestClientHandler{})
+	lateClient := newRecordingClient(t, s)
 	var late orchestration.ThreadStreamItem
-	if err := lateClient.Call(ctx, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}).Await(ctx, &late); err != nil {
-		t.Fatalf("late subscribeThread: %v", err)
-	}
+	lateClient.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &late)
 	if late.Kind != "snapshot" || late.Snapshot == nil {
 		t.Fatalf("late subscription = %#v, want snapshot", late)
 	}
@@ -1157,42 +1049,6 @@ func TestRPCHistoryReplayPublishesOneAuthoritativeRefresh(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), "chunk-31") {
 		t.Fatalf("refresh timeline = %s, want final replay content", encoded)
-	}
-}
-
-func waitForThreadSnapshot(t *testing.T, items <-chan orchestration.ThreadStreamItem, match func(orchestration.ThreadDetailSnapshot) bool) orchestration.ThreadStreamItem {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case item := <-items:
-			if item.Kind != orchestration.StreamItemSnapshot || item.Snapshot == nil {
-				continue
-			}
-			if match(*item.Snapshot) {
-				return item
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for orchestration thread snapshot")
-		}
-	}
-}
-
-func waitForThreadEvent(t *testing.T, items <-chan orchestration.ThreadStreamItem, match func(orchestration.Event) bool) orchestration.Event {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case item := <-items:
-			if item.Kind != "event" || item.Event == nil {
-				continue
-			}
-			if match(*item.Event) {
-				return *item.Event
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for orchestration thread event")
-		}
 	}
 }
 

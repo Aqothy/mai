@@ -6,6 +6,7 @@ package daemon
 // authoritative snapshot.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,10 +20,11 @@ import (
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/terminal"
 	"github.com/coder/websocket"
 )
 
-func newWSTestServer(t *testing.T, s *Server) string {
+func newWSTestServer(t testing.TB, s *Server) string {
 	t.Helper()
 	server := httptest.NewServer(s.WebSocketHandler())
 	t.Cleanup(server.Close)
@@ -34,12 +36,17 @@ func newWSTestServer(t *testing.T, s *Server) string {
 type recordingClient struct {
 	conn *jsonrpc2.Connection
 
-	mu           sync.Mutex
-	threadEvents map[orchestration.ThreadID][]orchestration.Event
-	shellItems   []orchestration.ThreadListStreamItem
+	mu                sync.Mutex
+	threadItems       []orchestration.ThreadStreamItem
+	threadCursor      int
+	threadEvents      map[orchestration.ThreadID][]orchestration.Event
+	shellItems        []orchestration.ThreadListStreamItem
+	terminalItems     []wire.TerminalStreamItem
+	terminalListItems []wire.TerminalListStreamItem
+	terminalOutput    bytes.Buffer
 }
 
-func dialRecordingClient(t *testing.T, url string) *recordingClient {
+func dialRecordingClient(t testing.TB, url string) *recordingClient {
 	t.Helper()
 	c := &recordingClient{threadEvents: make(map[orchestration.ThreadID][]orchestration.Event)}
 	ws, _, err := websocket.Dial(context.Background(), url, nil)
@@ -53,30 +60,50 @@ func dialRecordingClient(t *testing.T, url string) *recordingClient {
 	return c
 }
 
+// newRecordingClient serves s over a fresh WebSocket listener and dials it.
+func newRecordingClient(t testing.TB, s *Server) *recordingClient {
+	t.Helper()
+	return dialRecordingClient(t, newWSTestServer(t, s))
+}
+
 func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
 	if req.IsCall() {
 		return nil, jsonrpc2.ErrNotHandled
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	switch req.Method {
 	case wire.MethodOrchestrationSubscribeThread:
 		var item orchestration.ThreadStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
 		}
+		c.threadItems = append(c.threadItems, item)
 		if item.Kind == "event" && item.Event != nil {
-			c.mu.Lock()
 			threadID := item.Event.ThreadID()
 			c.threadEvents[threadID] = append(c.threadEvents[threadID], *item.Event)
-			c.mu.Unlock()
 		}
 	case wire.MethodOrchestrationSubscribeThreadList:
 		var item orchestration.ThreadListStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
 		}
-		c.mu.Lock()
 		c.shellItems = append(c.shellItems, item)
-		c.mu.Unlock()
+	case wire.MethodTerminalSubscribe:
+		var item wire.TerminalStreamItem
+		if err := decodeRPCParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.terminalItems = append(c.terminalItems, item)
+		if item.Kind == terminal.StreamItemOutput {
+			c.terminalOutput.Write(item.Data)
+		}
+	case wire.MethodTerminalSubscribeList:
+		var item wire.TerminalListStreamItem
+		if err := decodeRPCParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.terminalListItems = append(c.terminalListItems, item)
 	}
 	return nil, nil
 }
@@ -87,10 +114,19 @@ func (c *recordingClient) callErr(method string, params any, result any) error {
 	return c.conn.Call(ctx, method, params).Await(ctx, result)
 }
 
-func (c *recordingClient) call(t *testing.T, method string, params any, result any) {
+func (c *recordingClient) call(t testing.TB, method string, params any, result any) {
 	t.Helper()
 	if err := c.callErr(method, params, result); err != nil {
 		t.Fatalf("%s: %v", method, err)
+	}
+}
+
+func (c *recordingClient) notify(t *testing.T, method string, params any) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := c.conn.Notify(ctx, method, params); err != nil {
+		t.Fatalf("notify %s: %v", method, err)
 	}
 }
 
@@ -136,6 +172,43 @@ func (c *recordingClient) shellLog() []orchestration.ThreadListStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]orchestration.ThreadListStreamItem(nil), c.shellItems...)
+}
+
+// nextThreadItem consumes thread stream notifications in arrival order until
+// one matches, so successive waits observe successive items.
+func (c *recordingClient) nextThreadItem(t *testing.T, desc string, match func(orchestration.ThreadStreamItem) bool) orchestration.ThreadStreamItem {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		for c.threadCursor < len(c.threadItems) {
+			item := c.threadItems[c.threadCursor]
+			c.threadCursor++
+			if match(item) {
+				c.mu.Unlock()
+				return item
+			}
+		}
+		c.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", desc)
+	return orchestration.ThreadStreamItem{}
+}
+
+func (c *recordingClient) waitForThreadEvent(t *testing.T, match func(orchestration.Event) bool) orchestration.Event {
+	t.Helper()
+	item := c.nextThreadItem(t, "thread event", func(item orchestration.ThreadStreamItem) bool {
+		return item.Kind == "event" && item.Event != nil && match(*item.Event)
+	})
+	return *item.Event
+}
+
+func (c *recordingClient) waitForThreadSnapshot(t *testing.T, match func(orchestration.ThreadDetailSnapshot) bool) orchestration.ThreadStreamItem {
+	t.Helper()
+	return c.nextThreadItem(t, "thread snapshot", func(item orchestration.ThreadStreamItem) bool {
+		return item.Kind == orchestration.StreamItemSnapshot && item.Snapshot != nil && match(*item.Snapshot)
+	})
 }
 
 func (c *recordingClient) waitThread(t *testing.T, threadID orchestration.ThreadID, desc string, match func([]orchestration.Event) bool) {

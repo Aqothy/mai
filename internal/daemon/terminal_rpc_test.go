@@ -5,109 +5,28 @@ package daemon
 // and terminal.subscribe items stream back ordered by sequence.
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/Aqothy/jsonrpc2"
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/terminal"
-	"github.com/coder/websocket"
 )
 
-// terminalTestClient records terminal.subscribe stream items in arrival order.
-type terminalTestClient struct {
-	conn *jsonrpc2.Connection
-
-	mu        sync.Mutex
-	items     []wire.TerminalStreamItem
-	listItems []wire.TerminalListStreamItem
-	output    bytes.Buffer
-}
-
-func dialTerminalClient(t *testing.T, url string) *terminalTestClient {
-	t.Helper()
-	c := &terminalTestClient{}
-	ws, _, err := websocket.Dial(context.Background(), url, nil)
-	if err != nil {
-		t.Fatalf("websocket dial: %v", err)
-	}
-	ws.SetReadLimit(-1)
-	c.conn = jsonrpc2.NewWebSocketConnection(context.Background(), wsJSONRPC{conn: ws}, c)
-	t.Cleanup(func() { _ = c.conn.Close() })
-	return c
-}
-
-func (c *terminalTestClient) Handle(_ context.Context, req *jsonrpc2.Request) (any, error) {
-	if req.IsCall() {
-		return nil, jsonrpc2.ErrNotHandled
-	}
-	switch req.Method {
-	case wire.MethodTerminalSubscribe:
-		var item wire.TerminalStreamItem
-		if err := jsonUnmarshalParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.items = append(c.items, item)
-		if item.Kind == terminal.StreamItemOutput {
-			c.output.Write(item.Data)
-		}
-		return nil, nil
-	case wire.MethodTerminalSubscribeList:
-		var item wire.TerminalListStreamItem
-		if err := jsonUnmarshalParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.listItems = append(c.listItems, item)
-		return nil, nil
-	default:
-		return nil, jsonrpc2.ErrNotHandled
-	}
-}
-
-func (c *terminalTestClient) listItemsSnapshot() []wire.TerminalListStreamItem {
+func (c *recordingClient) listItemsSnapshot() []wire.TerminalListStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]wire.TerminalListStreamItem(nil), c.listItems...)
+	return append([]wire.TerminalListStreamItem(nil), c.terminalListItems...)
 }
 
-func jsonUnmarshalParams(req *jsonrpc2.Request, dst any) error {
-	return decodeRPCParams(req, dst)
-}
-
-func (c *terminalTestClient) call(t *testing.T, method string, params any, result any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := c.conn.Call(ctx, method, params).Await(ctx, result); err != nil {
-		t.Fatalf("call %s: %v", method, err)
-	}
-}
-
-func (c *terminalTestClient) notify(t *testing.T, method string, params any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := c.conn.Notify(ctx, method, params); err != nil {
-		t.Fatalf("notify %s: %v", method, err)
-	}
-}
-
-func (c *terminalTestClient) outputContains(marker string) bool {
+func (c *recordingClient) outputContains(marker string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return strings.Contains(c.output.String(), marker)
+	return strings.Contains(c.terminalOutput.String(), marker)
 }
 
-func (c *terminalTestClient) waitForOutput(t *testing.T, marker string) {
+func (c *recordingClient) waitForOutput(t *testing.T, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -119,16 +38,16 @@ func (c *terminalTestClient) waitForOutput(t *testing.T, marker string) {
 	t.Fatalf("timed out waiting for terminal output containing %q", marker)
 }
 
-func (c *terminalTestClient) outputLength() int {
+func (c *recordingClient) outputLength() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.output.Len()
+	return c.terminalOutput.Len()
 }
 
-func (c *terminalTestClient) outputStats() (chunks, bytes, largest int) {
+func (c *recordingClient) outputStats() (chunks, bytes, largest int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, item := range c.items {
+	for _, item := range c.terminalItems {
 		if item.Kind != terminal.StreamItemOutput {
 			continue
 		}
@@ -139,7 +58,7 @@ func (c *terminalTestClient) outputStats() (chunks, bytes, largest int) {
 	return chunks, bytes, largest
 }
 
-func (c *terminalTestClient) waitForOutputLength(t *testing.T, minimum int) {
+func (c *recordingClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -151,11 +70,11 @@ func (c *terminalTestClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Fatalf("timed out waiting for %d terminal output bytes; received %d", minimum, c.outputLength())
 }
 
-func (c *terminalTestClient) statusItems() []wire.TerminalStreamItem {
+func (c *recordingClient) statusItems() []wire.TerminalStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var statuses []wire.TerminalStreamItem
-	for _, item := range c.items {
+	for _, item := range c.terminalItems {
 		if item.Kind == terminal.StreamItemStatus {
 			statuses = append(statuses, item)
 		}
@@ -163,7 +82,7 @@ func (c *terminalTestClient) statusItems() []wire.TerminalStreamItem {
 	return statuses
 }
 
-func createTestTerminal(t *testing.T, c *terminalTestClient) wire.TerminalAttachSnapshot {
+func createTestTerminal(t *testing.T, c *recordingClient) wire.TerminalAttachSnapshot {
 	t.Helper()
 	var snapshot wire.TerminalAttachSnapshot
 	c.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{
@@ -179,7 +98,7 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	if snapshot.Terminal.TerminalID == "" || snapshot.RunID == "" {
@@ -212,7 +131,7 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	// Output sequences must be strictly increasing within the run.
 	client.mu.Lock()
 	var last uint64
-	for _, item := range client.items {
+	for _, item := range client.terminalItems {
 		if item.Kind != terminal.StreamItemOutput {
 			continue
 		}
@@ -230,7 +149,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	const outputBytes = 5 * 1024 * 1024
@@ -274,7 +193,7 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	var last uint64
-	for _, item := range client.items {
+	for _, item := range client.terminalItems {
 		if item.Kind != terminal.StreamItemOutput {
 			continue
 		}
@@ -290,8 +209,8 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	controller := dialTerminalClient(t, url)
-	intruder := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
+	intruder := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, controller)
 
@@ -320,7 +239,7 @@ func TestTerminalTerminateStreamsFinalStatus(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	client.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: snapshot.Terminal.TerminalID}, nil)
@@ -348,7 +267,7 @@ func TestTerminalNaturalExitStreamsExitCode(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{

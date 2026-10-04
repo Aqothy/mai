@@ -18,7 +18,7 @@ import (
 // cannot miss the job regardless of chunk timing, then exits back to zsh.
 const spinnerTitleScript = "sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do printf \"\\033]0;⠋ agent task\\007\"; sleep 0.2; done'\n"
 
-func waitForAgentActivity(t *testing.T, c *terminalTestClient, terminalID string, activity wire.TerminalAgentActivity) wire.TerminalSummary {
+func waitForAgentActivity(t *testing.T, c *recordingClient, terminalID string, activity wire.TerminalAgentActivity) wire.TerminalSummary {
 	t.Helper()
 	return waitForListUpsert(t, c, func(s wire.TerminalSummary) bool {
 		return s.TerminalID == terminalID && s.AgentActivity == activity
@@ -31,10 +31,10 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 	defer s.Close()
 	url := newWSTestServer(t, s)
 
-	observer := dialTerminalClient(t, url)
+	observer := dialRecordingClient(t, url)
 	subscribeTerminalListSnapshot(t, observer)
 
-	controller := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 
@@ -83,10 +83,10 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 	defer s.Close()
 	url := newWSTestServer(t, s)
 
-	observer := dialTerminalClient(t, url)
+	observer := dialRecordingClient(t, url)
 	subscribeTerminalListSnapshot(t, observer)
 
-	controller := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 

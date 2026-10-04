@@ -14,7 +14,7 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-func subscribeTerminalListSnapshot(t *testing.T, c *terminalTestClient) wire.TerminalListStreamItem {
+func subscribeTerminalListSnapshot(t *testing.T, c *recordingClient) wire.TerminalListStreamItem {
 	t.Helper()
 	var snapshot wire.TerminalListStreamItem
 	c.call(t, wire.MethodTerminalSubscribeList, wire.EmptyParams{}, &snapshot)
@@ -24,7 +24,7 @@ func subscribeTerminalListSnapshot(t *testing.T, c *terminalTestClient) wire.Ter
 	return snapshot
 }
 
-func waitForListUpsert(t *testing.T, c *terminalTestClient, match func(wire.TerminalSummary) bool) wire.TerminalSummary {
+func waitForListUpsert(t *testing.T, c *recordingClient, match func(wire.TerminalSummary) bool) wire.TerminalSummary {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -45,12 +45,12 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	defer s.Close()
 	url := newWSTestServer(t, s)
 
-	observer := dialTerminalClient(t, url)
+	observer := dialRecordingClient(t, url)
 	if snapshot := subscribeTerminalListSnapshot(t, observer); len(snapshot.Terminals) != 0 {
 		t.Fatalf("initial snapshot has %d terminals, want 0", len(snapshot.Terminals))
 	}
 
-	controller := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 
@@ -128,7 +128,7 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	}
 	s := newServer(newLoggerFromEnv(), metadata)
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	created := createTestTerminal(t, client)
 	client.call(t, wire.MethodTerminalRename, wire.TerminalRenameParams{
@@ -154,7 +154,7 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	restarted := newServer(newLoggerFromEnv(), metadata2)
 	defer restarted.Close()
 	url2 := newWSTestServer(t, restarted)
-	client2 := dialTerminalClient(t, url2)
+	client2 := dialRecordingClient(t, url2)
 
 	snapshot := subscribeTerminalListSnapshot(t, client2)
 	if len(snapshot.Terminals) != 1 {
@@ -194,7 +194,7 @@ func TestTerminalDeleteWhileRunningTerminatesProcess(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	created := createTestTerminal(t, client)
 	client.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: created.Terminal.TerminalID}, nil)

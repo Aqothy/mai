@@ -14,7 +14,7 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-func attachTestTerminal(t *testing.T, c *terminalTestClient, terminalID string) wire.TerminalAttachSnapshot {
+func attachTestTerminal(t *testing.T, c *recordingClient, terminalID string) wire.TerminalAttachSnapshot {
 	t.Helper()
 	var snapshot wire.TerminalAttachSnapshot
 	c.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
@@ -25,11 +25,11 @@ func attachTestTerminal(t *testing.T, c *terminalTestClient, terminalID string) 
 	return snapshot
 }
 
-func (c *terminalTestClient) itemsAbove(sequence uint64) []wire.TerminalStreamItem {
+func (c *recordingClient) itemsAbove(sequence uint64) []wire.TerminalStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []wire.TerminalStreamItem
-	for _, item := range c.items {
+	for _, item := range c.terminalItems {
 		if item.Sequence > sequence {
 			out = append(out, item)
 		}
@@ -42,7 +42,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	first := dialTerminalClient(t, url)
+	first := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
@@ -53,7 +53,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	})
 	first.waitForOutput(t, "HISTORY-88")
 
-	second := dialTerminalClient(t, url)
+	second := dialRecordingClient(t, url)
 	attach := attachTestTerminal(t, second, terminalID)
 	if attach.RunID != snapshot.RunID {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
@@ -85,8 +85,8 @@ func TestTerminalAttachSnapshotReportsAppliedGrid(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	first := dialTerminalClient(t, url)
-	second := dialTerminalClient(t, url)
+	first := dialRecordingClient(t, url)
+	second := dialRecordingClient(t, url)
 
 	created := createTestTerminal(t, first)
 	var attached wire.TerminalAttachSnapshot
@@ -106,8 +106,8 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	first := dialTerminalClient(t, url)
-	second := dialTerminalClient(t, url)
+	first := dialRecordingClient(t, url)
+	second := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
@@ -179,8 +179,8 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	first := dialTerminalClient(t, url)
-	second := dialTerminalClient(t, url)
+	first := dialRecordingClient(t, url)
+	second := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
@@ -224,7 +224,7 @@ func TestTerminalDetachKeepsShellRunning(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
@@ -264,7 +264,7 @@ func TestTerminalDisconnectLeavesShellForNextClient(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	first := dialTerminalClient(t, url)
+	first := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
@@ -276,7 +276,7 @@ func TestTerminalDisconnectLeavesShellForNextClient(t *testing.T) {
 	first.waitForOutput(t, "SURVIVES-33")
 	_ = first.conn.Close()
 
-	second := dialTerminalClient(t, url)
+	second := dialRecordingClient(t, url)
 	deadline := time.Now().Add(15 * time.Second)
 	var attach wire.TerminalAttachSnapshot
 	for {
@@ -303,7 +303,7 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
@@ -349,7 +349,7 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
@@ -367,7 +367,7 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	other := dialTerminalClient(t, url)
+	other := dialRecordingClient(t, url)
 	attach := attachTestTerminal(t, other, terminalID)
 	if attach.Terminal.Status != terminal.StatusExited {
 		t.Fatalf("attach status = %s, want exited", attach.Terminal.Status)
@@ -384,7 +384,7 @@ func timeout15() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 15*time.Second)
 }
 
-func attachOnce(c *terminalTestClient, terminalID string) (wire.TerminalAttachSnapshot, error) {
+func attachOnce(c *recordingClient, terminalID string) (wire.TerminalAttachSnapshot, error) {
 	var snapshot wire.TerminalAttachSnapshot
 	ctx, cancel := timeout15()
 	defer cancel()

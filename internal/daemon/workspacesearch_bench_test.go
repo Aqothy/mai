@@ -1,8 +1,7 @@
 //go:build darwin && arm64 && cgo
 
-// Warm workspace.searchFiles benchmarks against the plan's budget: daemon
-// receive to response p95 under 35ms on a 100,000-path workspace. The
-// handler benchmark isolates daemon cost; the RPC benchmark adds the real
+// Warm workspace.searchFiles benchmark against the budget: daemon receive to
+// response p95 under 35ms on a 100,000-path workspace, including the real
 // WebSocket/JSON-RPC round trip a client pays on loopback.
 //
 //	go test ./internal/daemon -bench WorkspaceSearchFiles -benchtime 1000x
@@ -37,39 +36,18 @@ func warmWorkspaceServer(b *testing.B, root string) *Server {
 	}
 }
 
-func BenchmarkWorkspaceSearchFilesHandler100k(b *testing.B) {
-	root := searchtest.Corpus(b, 100_000)
-	s := warmWorkspaceServer(b, root)
-	params := wire.WorkspaceSearchFilesParams{Cwd: root, Query: "file0421go"}
-	ctx := context.Background()
-	samples := make([]time.Duration, 0, b.N)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		started := time.Now()
-		if _, err := s.searchWorkspaceFiles(ctx, params); err != nil {
-			b.Fatalf("searchWorkspaceFiles: %v", err)
-		}
-		samples = append(samples, time.Since(started))
-	}
-	b.StopTimer()
-	searchtest.ReportPercentiles(b, samples)
-}
-
 func BenchmarkWorkspaceSearchFilesRPC100k(b *testing.B) {
 	root := searchtest.Corpus(b, 100_000)
 	s := warmWorkspaceServer(b, root)
-	conn := newRPCTestClient(b, s, rpcTestClientHandler{})
+	client := newRecordingClient(b, s)
 	params := wire.WorkspaceSearchFilesParams{Cwd: root, Query: "file0421go"}
 	samples := make([]time.Duration, 0, b.N)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var result wire.WorkspaceSearchFilesResult
 		started := time.Now()
-		err := conn.Call(ctx, wire.MethodWorkspaceSearchFiles, params).Await(ctx, &result)
+		err := client.callErr(wire.MethodWorkspaceSearchFiles, params, &result)
 		samples = append(samples, time.Since(started))
-		cancel()
 		if err != nil {
 			b.Fatalf("workspace.searchFiles: %v", err)
 		}
