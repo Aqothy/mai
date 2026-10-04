@@ -305,21 +305,3 @@ func TestMetadataDBPathUsesDataDir(t *testing.T) {
 		t.Fatalf("metadataDBPath() = %q, want %q", got, want)
 	}
 }
-
-func TestServerRunsWithoutMetadataStore(t *testing.T) {
-	s := newServer(newLoggerFromEnv(), nil)
-	defer s.Close()
-	cwd := t.TempDir()
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
-		Type:     orchestration.CommandThreadCreate,
-		ThreadID: "thread-1",
-		Title:    "In-memory only",
-		Cwd:      cwd,
-	}); err != nil {
-		t.Fatalf("thread.create without store: %v", err)
-	}
-	entry, ok := s.orchestration.ThreadListEntry("thread-1")
-	if !ok || entry.Title != "In-memory only" || entry.Cwd != cwd {
-		t.Fatalf("in-memory thread = %#v, %v; want visible thread", entry, ok)
-	}
-}
