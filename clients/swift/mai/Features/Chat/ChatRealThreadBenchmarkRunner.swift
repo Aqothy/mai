@@ -7,17 +7,17 @@ import SwiftUI
     import UIKit
 #endif
 
-/// Runs the frame-pacing scroll benchmark against a real thread from the
-/// connected daemon instead of the mock performance lab:
+/// Runs the auto-benchmark plans against the production chat timeline,
+/// either a real thread from the connected daemon or the synthetic transcript:
 ///
 ///     -ChatPerformanceLab -ChatAutoBenchmark scroll -ChatBenchmarkThread "<title substring>"
+///     -ChatPerformanceLab -ChatAutoBenchmark <plan> -ChatBenchmarkSyntheticTurns 300
 ///
 /// The runner waits for the thread list, selects the first thread whose
 /// title matches, waits for its history to restore and its markdown and
-/// text-layout caches to be prepared, then drives the same sweep velocities
-/// as the lab. Only the scroll plan is meaningful here — streaming against a
-/// real agent would send a live prompt — so any other plan value still runs
-/// only the sweeps.
+/// text-layout caches to be prepared, then runs the plan. Streaming plans
+/// need the synthetic transcript (a real agent would get a live prompt);
+/// for a real thread they fall back to the scroll sweeps.
 struct ChatRealThreadBenchmarkRunner: ViewModifier {
     let store: ThreadStore
     let selectThread: (String) -> Void

@@ -102,7 +102,7 @@ nonisolated enum ChatMarkdownSegmenter {
     }
 
 #if DEBUG
-    /// Full-parser equivalent retained as a benchmark seam. Keeping the
+    /// Full-parser equivalent, the test oracle for the prefilter. Keeping the
     /// semantic result directly comparable prevents the prefilter from
     /// becoming an unverified collection of syntax assumptions.
     static func segmentsUsingFullParser(
