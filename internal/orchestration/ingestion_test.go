@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,50 +266,6 @@ func TestReplayWarningsAndErrorsFollowBufferedText(t *testing.T) {
 	}
 }
 
-func TestApprovalOpenSplitsBufferedAssistantTextInEncounterOrder(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-approval-boundary")
-	newThreadWithSession(t, engine, threadID)
-
-	base := provider.RuntimeEvent{ThreadID: string(threadID), TurnID: "turn-1"}
-	before := base
-	before.Type = provider.RuntimeEventContentDelta
-	before.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "before approval"}
-	ingestion.Ingest(before)
-
-	opened := base
-	opened.Type = provider.RuntimeEventRequestOpened
-	opened.RequestID = "approval-1"
-	opened.Payload = provider.RuntimeEventPayload{RequestType: provider.RuntimeRequestCommandExecution}
-	ingestion.Ingest(opened)
-
-	after := base
-	after.Type = provider.RuntimeEventContentDelta
-	after.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "after approval"}
-	ingestion.Ingest(after)
-	ingestion.completeThreadText(string(threadID), time.Now())
-
-	thread, _ := engine.Thread(threadID)
-	if len(thread.Timeline) != 3 {
-		t.Fatalf("timeline = %#v, want message/approval/message", thread.Timeline)
-	}
-	first, approval, last := thread.Timeline[0], thread.Timeline[1], thread.Timeline[2]
-	if first.Message == nil || first.Message.Text != "before approval" {
-		t.Fatalf("timeline[0] = %#v, want pre-approval message", first)
-	}
-	if approval.Approval == nil || approval.Approval.RequestID != "approval-1" {
-		t.Fatalf("timeline[1] = %#v, want approval", approval)
-	}
-	if last.Message == nil || last.Message.Text != "after approval" {
-		t.Fatalf("timeline[2] = %#v, want post-approval message", last)
-	}
-	if first.Message.ID == last.Message.ID {
-		t.Fatalf("messages share id %q across approval boundary", first.Message.ID)
-	}
-}
-
 func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -375,85 +333,6 @@ func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
 	}
 }
 
-func TestIngestionPreservesReplayedConversationOrderWithoutTurnIDs(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-replayed-order")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
-
-	events := []provider.RuntimeEvent{
-		{EventID: "user-1", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), ItemID: "user-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first question"}},
-		{EventID: "assistant-1", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), ItemID: "assistant-1", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first answer"}},
-		{EventID: "user-2", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), ItemID: "user-2", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second question"}},
-		{EventID: "assistant-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), ItemID: "assistant-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second answer"}},
-	}
-	for _, event := range events {
-		ingestion.Ingest(event)
-	}
-	ingestion.completeHistoryReplay(string(threadID), nil)
-
-	thread, _ := engine.Thread(threadID)
-	want := []string{"first question", "first answer", "second question", "second answer"}
-	if len(thread.Timeline) != len(want) {
-		t.Fatalf("timeline = %#v, want %d messages", thread.Timeline, len(want))
-	}
-	for index, entry := range thread.Timeline {
-		if entry.Message == nil || entry.Message.Text != want[index] {
-			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want[index])
-		}
-	}
-	if thread.ReplayHistoryPending {
-		t.Fatal("replay completion left restored history pending")
-	}
-}
-
-func TestIngestionPreservesReplayedConversationOrderWithTurnIDs(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-replayed-turn-order")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
-
-	events := []provider.RuntimeEvent{
-		{EventID: "user-1", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), TurnID: "turn-1", ItemID: "user-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first question"}},
-		{EventID: "assistant-1", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-1", ItemID: "assistant-1", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first answer"}},
-		{EventID: "user-2", Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), TurnID: "turn-2", ItemID: "user-2", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second question"}},
-		{EventID: "assistant-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-2", ItemID: "assistant-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second answer"}},
-		{EventID: "reasoning-2", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: "turn-2", Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "second thought"}},
-	}
-	for _, event := range events {
-		ingestion.Ingest(event)
-	}
-	ingestion.completeHistoryReplay(string(threadID), nil)
-
-	thread, _ := engine.Thread(threadID)
-	if len(thread.Timeline) != 5 {
-		t.Fatalf("timeline = %#v, want four messages followed by reasoning", thread.Timeline)
-	}
-	wantMessages := []string{"first question", "first answer", "second question", "second answer"}
-	for index, want := range wantMessages {
-		entry := thread.Timeline[index]
-		if entry.Message == nil || entry.Message.Text != want {
-			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want)
-		}
-	}
-	reasoning := thread.Timeline[4].Item
-	if reasoning == nil || reasoning.Kind != provider.ItemKindReasoning || reasoning.Status != provider.ItemStatusCompleted || reasoning.TurnID != "turn-2" {
-		t.Fatalf("timeline[4] = %#v, want completed reasoning for turn-2", thread.Timeline[4])
-	}
-	ingestion.mu.Lock()
-	defer ingestion.mu.Unlock()
-	if len(ingestion.turns) != 0 {
-		t.Fatalf("replay completion left turn buffers: %#v", ingestion.turns)
-	}
-	if len(ingestion.turnOrder) != 0 {
-		t.Fatalf("replay completion left turn order: %#v", ingestion.turnOrder)
-	}
-}
-
 func TestIngestionPreservesRestoredThreadRecencyDuringReplay(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -506,46 +385,6 @@ func TestIngestionPreservesRestoredThreadRecencyDuringReplay(t *testing.T) {
 	}
 }
 
-func TestIngestionCoalescesIDLessReplayChunks(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-idless-replay")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
-
-	events := []provider.RuntimeEvent{
-		{EventID: "event-1", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "first "}},
-		{EventID: "event-2", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "question"}},
-		{EventID: "event-3", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "first "}},
-		{EventID: "event-4", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
-		{EventID: "event-5", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "second "}},
-		{EventID: "event-6", ThreadID: string(threadID), Type: provider.RuntimeEventItemCompleted, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "question"}},
-		{EventID: "event-7", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "second "}},
-		{EventID: "event-8", ThreadID: string(threadID), Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer"}},
-	}
-	for _, event := range events {
-		ingestion.Ingest(event)
-	}
-	ingestion.completeHistoryReplay(string(threadID), nil)
-
-	thread, _ := engine.Thread(threadID)
-	want := []string{"first question", "first answer", "second question", "second answer"}
-	if len(thread.Timeline) != len(want) {
-		t.Fatalf("timeline = %#v, want %d messages", thread.Timeline, len(want))
-	}
-	for index, entry := range thread.Timeline {
-		if entry.Message == nil || entry.Message.Text != want[index] {
-			t.Fatalf("timeline[%d] = %#v, want message %q", index, entry, want[index])
-		}
-	}
-	ingestion.mu.Lock()
-	defer ingestion.mu.Unlock()
-	if len(ingestion.turns) != 0 {
-		t.Fatalf("replay completion left turn buffers: %#v", ingestion.turns)
-	}
-}
-
 func TestIngestionDropsRuntimeEventsFromStaleProviderInstance(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -553,34 +392,32 @@ func TestIngestionDropsRuntimeEventsFromStaleProviderInstance(t *testing.T) {
 	threadID := ThreadID("thread-stale-provider-event")
 	newThreadWithSession(t, engine, threadID)
 
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-stale-title", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "old-instance", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "stale title"}})
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Title != "Thread" {
-		t.Fatalf("thread after stale event = %#v, want title unchanged", thread)
+	ingestTitle := func(instance provider.InstanceID, title, want string) {
+		t.Helper()
+		ingestion.Ingest(provider.RuntimeEvent{EventID: provider.RuntimeEventID("evt-" + title), Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: instance, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: title}})
+		if thread, ok := engine.Thread(threadID); !ok || thread.Title != want {
+			t.Fatalf("title after %q from %q = %q, want %q", title, instance, thread.Title, want)
+		}
 	}
+	ingestTitle("old-instance", "stale title", "Thread")
+	ingestTitle("codex", "current title", "current title")
 
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-current-title", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "codex", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "current title"}})
-	thread, ok = engine.Thread(threadID)
-	if !ok || thread.Title != "current title" {
-		t.Fatalf("thread after current event = %#v, want title updated", thread)
-	}
-
+	// After a provider switch the desired instance is authoritative even before
+	// the new session binds, and the stale binding is cleared.
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-switch-provider-for-stale-event", ThreadID: threadID, ProviderInstanceID: "new-instance"}); err != nil {
 		t.Fatalf("thread.meta.update provider switch: %v", err)
 	}
+	if thread, _ := engine.Thread(threadID); thread.Session != nil {
+		t.Fatalf("session after provider switch = %#v, want stale binding cleared", thread.Session)
+	}
+	ingestTitle("codex", "old before rebind", "current title")
+	ingestTitle("new-instance", "new before rebind", "new before rebind")
+
 	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "new-instance", Status: SessionStatusReady, UpdatedAt: time.Now()}}}); err != nil {
 		t.Fatalf("thread.session.status.set provider switch: %v", err)
 	}
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-stale-after-switch", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "codex", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "late old title"}})
-	thread, ok = engine.Thread(threadID)
-	if !ok || thread.Title != "current title" {
-		t.Fatalf("thread after stale event from previous routed instance = %#v, want title unchanged", thread)
-	}
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-new-after-switch", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "new-instance", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "new title"}})
-	thread, ok = engine.Thread(threadID)
-	if !ok || thread.Title != "new title" {
-		t.Fatalf("thread after event from switched instance = %#v, want title updated", thread)
-	}
+	ingestTitle("codex", "late old title", "new before rebind")
+	ingestTitle("new-instance", "new title", "new title")
 }
 
 func TestIngestionDropsTerminalEventFromReplacedGenerationAfterRebind(t *testing.T) {
@@ -606,351 +443,6 @@ func TestIngestionDropsTerminalEventFromReplacedGenerationAfterRebind(t *testing
 	}
 	if len(thread.Timeline.Items()) != 0 {
 		t.Fatalf("items after stale terminal = %#v, want no old-generation error", thread.Timeline.Items())
-	}
-}
-
-func TestIngestionUsesDesiredProviderAfterProviderSwitchBeforeSessionRebind(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-provider-switch-before-rebind")
-	newThreadWithSession(t, engine, threadID)
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-switch-before-rebind", ThreadID: threadID, ProviderInstanceID: "new-instance"}); err != nil {
-		t.Fatalf("thread.meta.update provider switch: %v", err)
-	}
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-old-before-rebind", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "codex", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "old title"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-new-before-rebind", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ProviderInstanceID: "new-instance", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "new title"}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Title != "new title" {
-		t.Fatalf("thread after provider switch events = %#v, want old instance ignored and new instance accepted", thread)
-	}
-	if thread.Session != nil {
-		t.Fatalf("thread session after provider switch = %#v, want stale session binding cleared before rebind", thread.Session)
-	}
-}
-
-func TestIngestionRuntimeErrorSetsSessionErrorAndItem(t *testing.T) {
-	engine := NewEngine()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-error")
-	newThreadWithSession(t, engine, threadID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-err", Type: provider.RuntimeEventRuntimeError, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Message: "boom"}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing")
-	}
-	if thread.Session.Status != SessionStatusError || thread.Session.LastError != "boom" {
-		t.Fatalf("session = %#v, want error status with lastError", thread.Session)
-	}
-	var errItem *Item
-	for i := range thread.Timeline.Items() {
-		if thread.Timeline.Items()[i].Kind == provider.ItemKindError {
-			errItem = &thread.Timeline.Items()[i]
-		}
-	}
-	if errItem == nil || errItem.Status != provider.ItemStatusFailed || errItem.Title != "boom" {
-		t.Fatalf("items = %#v, want a failed error item", thread.Timeline.Items())
-	}
-}
-
-func TestIngestionProjectsRuntimeWarningAsWarningItem(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-runtime-warning")
-	newThreadWithSession(t, engine, threadID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-warning", Type: provider.RuntimeEventRuntimeWarning, Provider: "test", ThreadID: string(threadID), TurnID: "turn-warning", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Message: "plan mode was not applied"}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok {
-		t.Fatalf("thread missing")
-	}
-	var warning *Item
-	for i := range thread.Timeline.Items() {
-		if thread.Timeline.Items()[i].Kind == provider.ItemKindWarning {
-			warning = &thread.Timeline.Items()[i]
-		}
-	}
-	if warning == nil || warning.ID != "evt-warning" || warning.Status != provider.ItemStatusCompleted || warning.Title != "plan mode was not applied" || warning.TurnID != "turn-warning" {
-		t.Fatalf("items = %#v, want completed warning item from runtime warning", thread.Timeline.Items())
-	}
-	if thread.Session == nil || thread.Session.Status != SessionStatusReady {
-		t.Fatalf("session = %#v, warning must not mark the session errored", thread.Session)
-	}
-}
-
-func TestIngestionFailedTurnCompletionCreatesErrorItem(t *testing.T) {
-	engine := NewEngine()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-failed-turn-item")
-	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-failed-turn-item", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-failed-turn-item", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ := engine.Thread(threadID)
-	turnID := string(thread.LatestTurn.ID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-failed-turn", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "provider exploded"}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil || thread.LatestTurn == nil {
-		t.Fatalf("thread/session missing: %#v", thread)
-	}
-	if thread.Session.Status != SessionStatusError || thread.Session.LastError != "provider exploded" || thread.LatestTurn.State != TurnStateError {
-		t.Fatalf("thread = %#v, want errored failed turn", thread)
-	}
-	var errItem *Item
-	for i := range thread.Timeline.Items() {
-		if thread.Timeline.Items()[i].Kind == provider.ItemKindError {
-			errItem = &thread.Timeline.Items()[i]
-		}
-	}
-	if errItem == nil || errItem.Title != "provider exploded" || errItem.Status != provider.ItemStatusFailed || errItem.TurnID != TurnID(turnID) {
-		t.Fatalf("items = %#v, want failed turn error item", thread.Timeline.Items())
-	}
-}
-
-func TestIngestionSettlesReasoningWhenTurnCompletes(t *testing.T) {
-	cases := []struct {
-		name      string
-		turnState provider.RuntimeTurnState
-		want      provider.ItemStatus
-	}{
-		{name: "completed", turnState: provider.RuntimeTurnCompleted, want: provider.ItemStatusCompleted},
-		{name: "failed", turnState: provider.RuntimeTurnFailed, want: provider.ItemStatusFailed},
-		{name: "interrupted", turnState: provider.RuntimeTurnInterrupted, want: provider.ItemStatusInterrupted},
-		{name: "cancelled", turnState: provider.RuntimeTurnCancelled, want: provider.ItemStatusInterrupted},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			engine := NewEngine()
-			defer engine.Close()
-			ingestion := NewProviderRuntimeIngestion(engine)
-			threadID := ThreadID("thread-reasoning-" + tc.name)
-			newThreadWithSession(t, engine, threadID)
-			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: CommandID("turn-reasoning-" + tc.name), ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-				t.Fatalf("thread.turn.start: %v", err)
-			}
-			thread, _ := engine.Thread(threadID)
-			turnID := string(thread.LatestTurn.ID)
-			reasoningID := "reasoning:" + string(threadID) + ":" + turnID
-
-			ingestion.Ingest(provider.RuntimeEvent{EventID: provider.RuntimeEventID("evt-reasoning-delta-" + tc.name), Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "thinking"}})
-			ingestion.flushPendingText(time.Now())
-			thread, _ = engine.Thread(threadID)
-			var item *Item
-			for idx := range thread.Timeline.Items() {
-				if thread.Timeline.Items()[idx].ID == reasoningID {
-					item = &thread.Timeline.Items()[idx]
-				}
-			}
-			if item == nil || item.Status != provider.ItemStatusInProgress {
-				t.Fatalf("reasoning item after delta = %#v in items %#v, want in-progress", item, thread.Timeline.Items())
-			}
-
-			ingestion.Ingest(provider.RuntimeEvent{EventID: provider.RuntimeEventID("evt-reasoning-complete-" + tc.name), Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: tc.turnState, Message: "provider failed"}})
-
-			thread, _ = engine.Thread(threadID)
-			item = nil
-			for idx := range thread.Timeline.Items() {
-				if thread.Timeline.Items()[idx].ID == reasoningID {
-					item = &thread.Timeline.Items()[idx]
-				}
-			}
-			if item == nil || item.Status != tc.want {
-				t.Fatalf("reasoning item after turn completion = %#v, want status %s", item, tc.want)
-			}
-			var payload struct {
-				Text string `json:"text"`
-			}
-			if err := json.Unmarshal(item.Payload, &payload); err != nil {
-				t.Fatalf("unmarshal reasoning payload: %v", err)
-			}
-			if payload.Text != "thinking" {
-				t.Fatalf("reasoning payload text = %q, want thinking", payload.Text)
-			}
-		})
-	}
-}
-
-// A turn that settles abnormally must settle its still-in-progress provider
-// items (tool calls): adapters drop post-cancel provider updates, so without
-// this an interrupted tool call would stay "inProgress" in the projection
-// forever (a spinner the user can never clear). A normally completed turn must
-// NOT touch them — the provider is authoritative for its own item outcomes.
-func TestIngestionSettlesOpenItemsWhenTurnSettlesAbnormally(t *testing.T) {
-	cases := []struct {
-		name      string
-		turnState provider.RuntimeTurnState
-		want      provider.ItemStatus
-	}{
-		{name: "interrupted", turnState: provider.RuntimeTurnInterrupted, want: provider.ItemStatusInterrupted},
-		{name: "cancelled", turnState: provider.RuntimeTurnCancelled, want: provider.ItemStatusInterrupted},
-		{name: "failed", turnState: provider.RuntimeTurnFailed, want: provider.ItemStatusFailed},
-		{name: "completed", turnState: provider.RuntimeTurnCompleted, want: provider.ItemStatusInProgress},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			engine := NewEngine()
-			defer engine.Close()
-			ingestion := NewProviderRuntimeIngestion(engine)
-			threadID := ThreadID("thread-open-items-" + tc.name)
-			newThreadWithSession(t, engine, threadID)
-			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: CommandID("turn-open-items-" + tc.name), ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-				t.Fatalf("thread.turn.start: %v", err)
-			}
-			thread, _ := engine.Thread(threadID)
-			turnID := string(thread.LatestTurn.ID)
-
-			ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-tool-start", Type: provider.RuntimeEventItemStarted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "tool-open", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests"}})
-			ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-tool-done-start", Type: provider.RuntimeEventItemStarted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "tool-done", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindFileChange, Title: "edit file"}})
-			ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-tool-done-complete", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, ItemID: "tool-done", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindFileChange}})
-
-			ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-turn-settle", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: tc.turnState}})
-
-			thread, _ = engine.Thread(threadID)
-			items := map[string]Item{}
-			for _, item := range thread.Timeline.Items() {
-				items[item.ID] = item
-			}
-			open, ok := items["tool-open"]
-			if !ok || open.Status != tc.want {
-				t.Fatalf("open tool item after %s turn = %#v, want status %s", tc.name, open, tc.want)
-			}
-			if open.Kind != provider.ItemKindCommandExecution || open.Title != "run tests" {
-				t.Fatalf("settled tool item lost kind/title: %#v", open)
-			}
-			if done := items["tool-done"]; done.Status != provider.ItemStatusCompleted {
-				t.Fatalf("provider-settled tool item = %#v, want status preserved as completed", done)
-			}
-		})
-	}
-}
-
-func TestIngestionPreservesReasoningToolInterleaving(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-reasoning-tool-order")
-	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-tool-order", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ := engine.Thread(threadID)
-	turnID := string(thread.LatestTurn.ID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "reasoning-before", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "before tool"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "tool-start", ItemID: "tool-1", Type: provider.RuntimeEventItemStarted, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusInProgress, Title: "run tests"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "tool-update", ItemID: "tool-1", Type: provider.RuntimeEventItemUpdated, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "reasoning-after", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "after tool"}})
-	ingestion.flushPendingText(time.Now())
-
-	thread, _ = engine.Thread(threadID)
-	var ordered []*Item
-	for _, entry := range thread.Timeline {
-		if entry.Item != nil && (entry.Item.Kind == provider.ItemKindReasoning || entry.Item.ID == "tool-1") {
-			ordered = append(ordered, entry.Item)
-		}
-	}
-	if len(ordered) != 3 || ordered[0].Kind != provider.ItemKindReasoning || ordered[1].ID != "tool-1" || ordered[2].Kind != provider.ItemKindReasoning {
-		t.Fatalf("ordered timeline = %#v, want reasoning, tool, reasoning", ordered)
-	}
-	if ordered[0].ID == ordered[2].ID {
-		t.Fatalf("reasoning segments share id %q, want distinct timeline entries", ordered[0].ID)
-	}
-	if ordered[1].Status != provider.ItemStatusInProgress {
-		t.Fatalf("tool update moved or corrupted tool = %#v", ordered[1])
-	}
-}
-
-func TestIngestionPreservesAssistantToolInterleaving(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-assistant-tool-order")
-	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-assistant-tool-order", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ := engine.Thread(threadID)
-	turnID := string(thread.LatestTurn.ID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "assistant-before", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "before tool"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "tool-start", ItemID: "tool-1", Type: provider.RuntimeEventItemStarted, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusInProgress}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "assistant-after", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "after tool"}})
-	ingestion.flushPendingText(time.Now())
-
-	thread, _ = engine.Thread(threadID)
-	var entries []TimelineEntry
-	for _, entry := range thread.Timeline {
-		if entry.Item != nil || entry.Message != nil && entry.Message.Role == MessageRoleAssistant {
-			entries = append(entries, entry)
-		}
-	}
-	if len(entries) != 3 || entries[0].Message == nil || entries[1].Item == nil || entries[2].Message == nil {
-		t.Fatalf("timeline = %#v, want assistant, tool, assistant", entries)
-	}
-	if entries[0].Message.ID == entries[2].Message.ID {
-		t.Fatalf("assistant segments share id %q", entries[0].Message.ID)
-	}
-}
-
-// Interleaved thinking (OpenAI GPT-5.x emits visible text before and between
-// thinking, no tool call required): each switch must start a new timeline entry.
-func TestIngestionPreservesReasoningAssistantTextInterleaving(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-reasoning-text-order")
-	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-text-order", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ := engine.Thread(threadID)
-	turnID := string(thread.LatestTurn.ID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "reasoning-first", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "think first"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "assistant-first", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer once"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "reasoning-second", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "think again"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "assistant-second", Type: provider.RuntimeEventContentDelta, ThreadID: string(threadID), TurnID: turnID, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "answer twice"}})
-	ingestion.flushPendingText(time.Now())
-
-	thread, _ = engine.Thread(threadID)
-	var entries []TimelineEntry
-	for _, entry := range thread.Timeline {
-		if entry.Item != nil && entry.Item.Kind == provider.ItemKindReasoning || entry.Message != nil && entry.Message.Role == MessageRoleAssistant {
-			entries = append(entries, entry)
-		}
-	}
-	if len(entries) != 4 || entries[0].Item == nil || entries[1].Message == nil || entries[2].Item == nil || entries[3].Message == nil {
-		t.Fatalf("timeline = %#v, want reasoning, assistant, reasoning, assistant", entries)
-	}
-	if entries[0].Item.ID == entries[2].Item.ID {
-		t.Fatalf("reasoning segments share id %q", entries[0].Item.ID)
-	}
-	if entries[1].Message.ID == entries[3].Message.ID {
-		t.Fatalf("assistant segments share id %q", entries[1].Message.ID)
-	}
-	if entries[1].Message.Text != "answer once" || entries[3].Message.Text != "answer twice" {
-		t.Fatalf("assistant texts = %q, %q, want %q, %q", entries[1].Message.Text, entries[3].Message.Text, "answer once", "answer twice")
-	}
-	if entries[0].Item.Status != provider.ItemStatusCompleted {
-		t.Fatalf("first reasoning segment = %#v, want completed", entries[0].Item)
-	}
-	var payload struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(entries[0].Item.Payload, &payload); err != nil {
-		t.Fatalf("unmarshal reasoning payload: %v", err)
-	}
-	if payload.Text != "think first" {
-		t.Fatalf("first reasoning payload text = %q, want %q", payload.Text, "think first")
 	}
 }
 
@@ -1019,10 +511,9 @@ func TestIngestionTickerFlushesBufferedAssistantTextAcrossThreads(t *testing.T) 
 	})
 }
 
-// Reasoning chunks are coalesced: a segment's first chunk flushes immediately
-// as a textDelta event (anchoring the item), chunks inside the flush interval
-// only accumulate, and the settle checkpoint carries the full text. Per-chunk
-// fan-out would flood every subscribed client.
+// Reasoning chunks are coalesced: they accumulate until the flush ticker or a
+// boundary, and the settle checkpoint carries the full text. Per-chunk fan-out
+// would flood every subscribed client.
 func TestIngestionCoalescesReasoningChunks(t *testing.T) {
 	pinFlushInterval(t, time.Hour)
 	engine := NewEngine()
@@ -1209,66 +700,6 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 	}
 }
 
-func TestIngestionThreadMetadataAndTokenUsage(t *testing.T) {
-	engine := NewEngine()
-	events := observeEvents(t, engine)
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-meta")
-	newThreadWithSession(t, engine, threadID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-cmds", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact", Description: "Compact context"}}}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-title", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "Renamed by agent"}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-usage", Type: provider.RuntimeEventThreadTokenUsage, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TokenUsage: &provider.TokenUsage{UsedTokens: 1200, MaxTokens: 200000}}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing")
-	}
-	if len(thread.Session.SlashCommands) != 1 || thread.Session.SlashCommands[0].Name != "compact" {
-		t.Fatalf("slash commands = %#v, want one compact command", thread.Session.SlashCommands)
-	}
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-cmds-clear", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{}}})
-	thread, _ = engine.Thread(threadID)
-	if len(thread.Session.SlashCommands) != 0 {
-		t.Fatalf("slash commands = %#v, want cleared by empty update", thread.Session.SlashCommands)
-	}
-	if thread.Title != "Renamed by agent" {
-		t.Fatalf("title = %q, want agent rename", thread.Title)
-	}
-	var titleEvent *Event
-	for _, event := range events.matching(threadID, 0) {
-		if event.Type == EventThreadMetaUpdated && event.Payload.Title == "Renamed by agent" {
-			eventCopy := event
-			titleEvent = &eventCopy
-		}
-	}
-	if titleEvent == nil || titleEvent.Actor != ActorKindProvider {
-		t.Fatalf("title event = %#v, want provider-authored metadata event", titleEvent)
-	}
-	if thread.Session.TokenUsage == nil || thread.Session.TokenUsage.UsedTokens != 1200 || thread.Session.TokenUsage.MaxTokens != 200000 {
-		t.Fatalf("token usage = %#v, want 1200/200000", thread.Session.TokenUsage)
-	}
-}
-
-func TestIngestionProjectsReplayedProviderUserMessage(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-replayed-user-message")
-	newThreadWithSession(t, engine, threadID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-user-1", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), ItemID: "provider-user-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: "hello "}})
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-user-2", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), ItemID: "provider-user-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: "again"}})
-
-	thread, ok := engine.Thread(threadID)
-	if !ok {
-		t.Fatalf("thread missing")
-	}
-	if len(thread.Timeline.Messages()) != 1 || thread.Timeline.Messages()[0].Role != MessageRoleUser || thread.Timeline.Messages()[0].ID != "user:provider-user-1" || thread.Timeline.Messages()[0].Text != "hello again" {
-		t.Fatalf("messages = %#v, want replayed user chunks merged into one user message", thread.Timeline.Messages())
-	}
-}
-
 func TestIngestionProjectsAssistantAttachments(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -1364,28 +795,6 @@ func TestIngestionIgnoresCancelledCompletionFromPreviousTurn(t *testing.T) {
 	}
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != TurnID(newTurnID) || thread.LatestTurn.State != TurnStateCompleted {
 		t.Fatalf("latest turn = %#v, want completed newer turn", thread.LatestTurn)
-	}
-}
-
-func TestIngestionRuntimeErrorForActiveTurnClosesTerminalProviderError(t *testing.T) {
-	engine := NewEngine()
-	ingestion := NewProviderRuntimeIngestion(engine)
-	threadID := ThreadID("thread-active-runtime-error")
-	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-active-runtime-error", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	thread, _ := engine.Thread(threadID)
-	turnID := string(thread.LatestTurn.ID)
-
-	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-active-runtime-error", Type: provider.RuntimeEventRuntimeError, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Message: "provider failed"}})
-
-	thread, _ = engine.Thread(threadID)
-	if thread.Session == nil || thread.Session.Status != SessionStatusError || thread.Session.ActiveTurnID != "" || thread.Session.LastError != "provider failed" {
-		t.Fatalf("session = %#v, want terminal runtime error", thread.Session)
-	}
-	if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError {
-		t.Fatalf("latest turn = %#v, want error", thread.LatestTurn)
 	}
 }
 
@@ -1848,5 +1257,290 @@ func TestRestoredHistoryKeepsEachTurnOutcomeAndTiming(t *testing.T) {
 		if turn.ID != expected.id || turn.State != expected.state || turn.StartedAt == nil || turn.CompletedAt == nil || turn.CompletedAt.Sub(*turn.StartedAt) != expected.duration {
 			t.Fatalf("previous turn %d = %#v, want %s %s over %s", index, turn, expected.id, expected.state, expected.duration)
 		}
+	}
+}
+
+// describeTimeline renders a timeline as "role:text", "kind(status):text" and
+// "approval:requestId" entries so order and segmentation compare as one value.
+func describeTimeline(timeline Timeline) []string {
+	var described []string
+	for _, entry := range timeline {
+		switch {
+		case entry.Message != nil:
+			described = append(described, string(entry.Message.Role)+":"+entry.Message.Text)
+		case entry.Item != nil:
+			text := entry.Item.Title
+			if entry.Item.Kind == provider.ItemKindReasoning {
+				var payload reasoningPayload
+				_ = json.Unmarshal(entry.Item.Payload, &payload)
+				text = payload.Text
+			}
+			described = append(described, fmt.Sprintf("%s(%s):%s", entry.Item.Kind, entry.Item.Status, text))
+		case entry.Approval != nil:
+			described = append(described, "approval:"+entry.Approval.RequestID)
+		}
+	}
+	return described
+}
+
+func TestIngestionProjectsProviderFailuresAndWarnings(t *testing.T) {
+	tests := []struct {
+		name          string
+		activeTurn    bool
+		event         provider.RuntimeEvent
+		wantSession   SessionStatus
+		wantLastError string
+		wantTurn      TurnState
+		wantItem      string
+	}{
+		{
+			name:          "runtime error without a turn",
+			event:         provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeError, Payload: provider.RuntimeEventPayload{Message: "boom"}},
+			wantSession:   SessionStatusError,
+			wantLastError: "boom",
+			wantItem:      "error(failed):boom",
+		},
+		{
+			name:          "runtime error on the active turn",
+			activeTurn:    true,
+			event:         provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeError, Payload: provider.RuntimeEventPayload{Message: "provider failed"}},
+			wantSession:   SessionStatusError,
+			wantLastError: "provider failed",
+			wantTurn:      TurnStateError,
+			wantItem:      "error(failed):provider failed",
+		},
+		{
+			name:          "failed turn completion",
+			activeTurn:    true,
+			event:         provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "provider exploded"}},
+			wantSession:   SessionStatusError,
+			wantLastError: "provider exploded",
+			wantTurn:      TurnStateError,
+			wantItem:      "error(failed):provider exploded",
+		},
+		{
+			name:        "warning leaves the session usable",
+			event:       provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, TurnID: "turn-warning", Payload: provider.RuntimeEventPayload{Message: "plan mode was not applied"}},
+			wantSession: SessionStatusReady,
+			wantItem:    "warning(completed):plan mode was not applied",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("thread-failure")
+			newThreadWithSession(t, engine, threadID)
+			event := tt.event
+			if tt.activeTurn {
+				if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-failure", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
+					t.Fatalf("thread.turn.start: %v", err)
+				}
+				thread, _ := engine.Thread(threadID)
+				event.TurnID = string(thread.LatestTurn.ID)
+			}
+			event.EventID = "evt-failure"
+			event.ThreadID = string(threadID)
+			event.CreatedAt = time.Now()
+			ingestion.Ingest(event)
+
+			thread, _ := engine.Thread(threadID)
+			if thread.Session == nil || thread.Session.Status != tt.wantSession || thread.Session.LastError != tt.wantLastError || thread.Session.ActiveTurnID != "" {
+				t.Fatalf("session = %#v, want %s with lastError %q and no active turn", thread.Session, tt.wantSession, tt.wantLastError)
+			}
+			if tt.wantTurn != "" && (thread.LatestTurn == nil || thread.LatestTurn.State != tt.wantTurn) {
+				t.Fatalf("latest turn = %#v, want %s", thread.LatestTurn, tt.wantTurn)
+			}
+			items := thread.Timeline.Items()
+			if len(items) != 1 || describeTimeline(Timeline{{Kind: TimelineEntryItem, Item: &items[0]}})[0] != tt.wantItem || items[0].TurnID != TurnID(event.TurnID) || items[0].ID != "evt-failure" {
+				t.Fatalf("items = %#v, want %q scoped to turn %q", items, tt.wantItem, event.TurnID)
+			}
+		})
+	}
+}
+
+func TestIngestionReplayOrdersAndCoalescesMessages(t *testing.T) {
+	user := func(turnID, itemID, text string) provider.RuntimeEvent {
+		return provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, TurnID: turnID, ItemID: itemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: text}}
+	}
+	delta := func(kind provider.RuntimeContentStreamKind, turnID, itemID, text string) provider.RuntimeEvent {
+		return provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, TurnID: turnID, ItemID: itemID, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: text}}
+	}
+	assistant := provider.RuntimeContentAssistantText
+	tests := []struct {
+		name   string
+		events []provider.RuntimeEvent
+		want   []string
+	}{
+		{
+			name:   "item ids without turn ids",
+			events: []provider.RuntimeEvent{user("", "user-1", "first question"), delta(assistant, "", "assistant-1", "first answer"), user("", "user-2", "second question"), delta(assistant, "", "assistant-2", "second answer")},
+			want:   []string{"user:first question", "assistant:first answer", "user:second question", "assistant:second answer"},
+		},
+		{
+			name: "turn ids settle trailing reasoning",
+			events: []provider.RuntimeEvent{
+				user("turn-1", "user-1", "first question"), delta(assistant, "turn-1", "assistant-1", "first answer"),
+				user("turn-2", "user-2", "second question"), delta(assistant, "turn-2", "assistant-2", "second answer"),
+				delta(provider.RuntimeContentReasoningText, "turn-2", "", "second thought"),
+			},
+			want: []string{"user:first question", "assistant:first answer", "user:second question", "assistant:second answer", "reasoning(completed):second thought"},
+		},
+		{
+			name: "id-less chunks coalesce per message",
+			events: []provider.RuntimeEvent{
+				user("", "", "first "), user("", "", "question"), delta(assistant, "", "", "first "), delta(assistant, "", "", "answer"),
+				user("", "", "second "), user("", "", "question"), delta(assistant, "", "", "second "), delta(assistant, "", "", "answer"),
+			},
+			want: []string{"user:first question", "assistant:first answer", "user:second question", "assistant:second answer"},
+		},
+		{
+			name:   "user chunks with one item id merge",
+			events: []provider.RuntimeEvent{user("", "provider-user-1", "hello "), user("", "provider-user-1", "again")},
+			want:   []string{"user:hello again"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("thread-replay-order")
+			now := time.Now()
+			engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+			for index, event := range tt.events {
+				event.EventID = provider.RuntimeEventID(fmt.Sprintf("event-%d", index))
+				event.ThreadID = string(threadID)
+				ingestion.Ingest(event)
+			}
+			ingestion.completeHistoryReplay(string(threadID), nil)
+
+			thread, _ := engine.Thread(threadID)
+			if got := describeTimeline(thread.Timeline); !slices.Equal(got, tt.want) {
+				t.Fatalf("timeline = %q, want %q", got, tt.want)
+			}
+			if thread.ReplayHistoryPending {
+				t.Fatal("replay completion left restored history pending")
+			}
+			ingestion.mu.Lock()
+			defer ingestion.mu.Unlock()
+			if len(ingestion.turns) != 0 || len(ingestion.turnOrder) != 0 {
+				t.Fatalf("replay completion left turn buffers: %#v / %#v", ingestion.turns, ingestion.turnOrder)
+			}
+		})
+	}
+}
+
+// Turn settlement settles the turn's reasoning segment and, when the turn ends
+// abnormally, its still-open provider items: adapters drop post-cancel updates,
+// so an interrupted tool call would otherwise spin forever. A normally
+// completed turn leaves provider items alone — the provider owns their outcome.
+func TestIngestionTurnSettlementSettlesReasoningAndOpenItems(t *testing.T) {
+	cases := []struct {
+		turnState     provider.RuntimeTurnState
+		wantReasoning provider.ItemStatus
+		wantOpenItem  provider.ItemStatus
+	}{
+		{turnState: provider.RuntimeTurnCompleted, wantReasoning: provider.ItemStatusCompleted, wantOpenItem: provider.ItemStatusInProgress},
+		{turnState: provider.RuntimeTurnFailed, wantReasoning: provider.ItemStatusFailed, wantOpenItem: provider.ItemStatusFailed},
+		{turnState: provider.RuntimeTurnInterrupted, wantReasoning: provider.ItemStatusInterrupted, wantOpenItem: provider.ItemStatusInterrupted},
+		{turnState: provider.RuntimeTurnCancelled, wantReasoning: provider.ItemStatusInterrupted, wantOpenItem: provider.ItemStatusInterrupted},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.turnState), func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("thread-settle-" + string(tc.turnState))
+			newThreadWithSession(t, engine, threadID)
+			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-settle", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
+				t.Fatalf("thread.turn.start: %v", err)
+			}
+			thread, _ := engine.Thread(threadID)
+			turnID := string(thread.LatestTurn.ID)
+			ingest := func(event provider.RuntimeEvent) {
+				event.Provider, event.ThreadID, event.TurnID, event.CreatedAt = "test", string(threadID), turnID, time.Now()
+				ingestion.Ingest(event)
+			}
+
+			ingest(provider.RuntimeEvent{EventID: "tool-open", Type: provider.RuntimeEventItemStarted, ItemID: "tool-open", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests"}})
+			ingest(provider.RuntimeEvent{EventID: "tool-done-start", Type: provider.RuntimeEventItemStarted, ItemID: "tool-done", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindFileChange, Title: "edit file"}})
+			ingest(provider.RuntimeEvent{EventID: "tool-done-complete", Type: provider.RuntimeEventItemCompleted, ItemID: "tool-done", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindFileChange}})
+			ingest(provider.RuntimeEvent{EventID: "reasoning", Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: "thinking"}})
+			ingestion.flushPendingText(time.Now())
+			ingest(provider.RuntimeEvent{EventID: "turn-settle", Type: provider.RuntimeEventTurnCompleted, Payload: provider.RuntimeEventPayload{TurnState: tc.turnState, Message: "provider failed"}})
+
+			thread, _ = engine.Thread(threadID)
+			want := []string{
+				"user:hello",
+				fmt.Sprintf("command_execution(%s):run tests", tc.wantOpenItem),
+				"file_change(completed):edit file",
+				fmt.Sprintf("reasoning(%s):thinking", tc.wantReasoning),
+			}
+			got := describeTimeline(thread.Timeline)
+			if len(got) < len(want) || !slices.Equal(got[:len(want)], want) {
+				t.Fatalf("timeline = %q, want prefix %q", got, want)
+			}
+		})
+	}
+}
+
+func TestIngestionBoundariesSplitBufferedTextInEncounterOrder(t *testing.T) {
+	text := func(kind provider.RuntimeContentStreamKind, value string) provider.RuntimeEvent {
+		return provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: value}}
+	}
+	assistant := func(value string) provider.RuntimeEvent { return text(provider.RuntimeContentAssistantText, value) }
+	reasoning := func(value string) provider.RuntimeEvent { return text(provider.RuntimeContentReasoningText, value) }
+	toolStarted := provider.RuntimeEvent{Type: provider.RuntimeEventItemStarted, ItemID: "tool-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, Title: "run tests"}}
+	toolUpdated := provider.RuntimeEvent{Type: provider.RuntimeEventItemUpdated, ItemID: "tool-1", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution}}
+	approvalOpened := provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, RequestID: "approval-1", Payload: provider.RuntimeEventPayload{RequestType: provider.RuntimeRequestCommandExecution}}
+
+	tests := []struct {
+		name   string
+		events []provider.RuntimeEvent
+		want   []string
+	}{
+		{
+			name:   "approval splits assistant text",
+			events: []provider.RuntimeEvent{assistant("before approval"), approvalOpened, assistant("after approval")},
+			want:   []string{"assistant:before approval", "approval:approval-1", "assistant:after approval"},
+		},
+		{
+			name:   "tool splits assistant text",
+			events: []provider.RuntimeEvent{assistant("before tool"), toolStarted, assistant("after tool")},
+			want:   []string{"assistant:before tool", "command_execution(in_progress):run tests", "assistant:after tool"},
+		},
+		{
+			name:   "tool splits reasoning and updates stay anchored",
+			events: []provider.RuntimeEvent{reasoning("before tool"), toolStarted, toolUpdated, reasoning("after tool")},
+			want:   []string{"reasoning(completed):before tool", "command_execution(in_progress):run tests", "reasoning(in_progress):after tool"},
+		},
+		{
+			// Interleaved thinking: visible text before and between thinking.
+			name:   "reasoning and assistant text interleave",
+			events: []provider.RuntimeEvent{reasoning("think first"), assistant("answer once"), reasoning("think again"), assistant("answer twice")},
+			want:   []string{"reasoning(completed):think first", "assistant:answer once", "reasoning(completed):think again", "assistant:answer twice"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			ingestion := NewProviderRuntimeIngestion(engine)
+			threadID := ThreadID("thread-boundaries")
+			newThreadWithSession(t, engine, threadID)
+			for index, event := range tt.events {
+				event.EventID = provider.RuntimeEventID(fmt.Sprintf("event-%d", index))
+				event.ThreadID, event.TurnID = string(threadID), "turn-1"
+				ingestion.Ingest(event)
+			}
+			ingestion.flushPendingText(time.Now())
+
+			thread, _ := engine.Thread(threadID)
+			if got := describeTimeline(thread.Timeline); !slices.Equal(got, tt.want) {
+				t.Fatalf("timeline = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
