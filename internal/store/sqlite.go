@@ -148,23 +148,11 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 	if meta.ThreadID == "" {
 		return fmt.Errorf("store: upsert thread requires a thread id")
 	}
-	var modelSelection any
-	var additionalDirectories any
-	if len(meta.AdditionalDirectories) > 0 {
-		encoded, err := json.Marshal(meta.AdditionalDirectories)
-		if err != nil {
-			return fmt.Errorf("store: encode thread %q additional directories: %w", meta.ThreadID, err)
-		}
-		additionalDirectories = string(encoded)
+	additionalDirectories, modelSelection, err := encodeThreadJSONColumns(meta)
+	if err != nil {
+		return err
 	}
-	if meta.ModelSelection != nil {
-		encoded, err := json.Marshal(meta.ModelSelection)
-		if err != nil {
-			return fmt.Errorf("store: encode thread %q model selection: %w", meta.ThreadID, err)
-		}
-		modelSelection = string(encoded)
-	}
-	_, err := s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+	_, err = s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (thread_id) DO UPDATE SET
 			title = excluded.title,
@@ -180,6 +168,25 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 		return fmt.Errorf("store: upsert thread %q: %w", meta.ThreadID, err)
 	}
 	return nil
+}
+
+// encodeThreadJSONColumns encodes the nullable JSON columns of a threads row.
+func encodeThreadJSONColumns(meta ThreadMeta) (additionalDirectories, modelSelection any, err error) {
+	if len(meta.AdditionalDirectories) > 0 {
+		encoded, err := json.Marshal(meta.AdditionalDirectories)
+		if err != nil {
+			return nil, nil, fmt.Errorf("store: encode thread %q additional directories: %w", meta.ThreadID, err)
+		}
+		additionalDirectories = string(encoded)
+	}
+	if meta.ModelSelection != nil {
+		encoded, err := json.Marshal(meta.ModelSelection)
+		if err != nil {
+			return nil, nil, fmt.Errorf("store: encode thread %q model selection: %w", meta.ThreadID, err)
+		}
+		modelSelection = string(encoded)
+	}
+	return additionalDirectories, modelSelection, nil
 }
 
 func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
@@ -237,21 +244,9 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		return "", false, fmt.Errorf("store: import thread %q has conflicting provider instance ids", meta.ThreadID)
 	}
 	meta.ProviderInstanceID = route.InstanceID
-	var modelSelection any
-	var additionalDirectories any
-	if len(meta.AdditionalDirectories) > 0 {
-		encoded, err := json.Marshal(meta.AdditionalDirectories)
-		if err != nil {
-			return "", false, fmt.Errorf("store: encode imported thread %q additional directories: %w", meta.ThreadID, err)
-		}
-		additionalDirectories = string(encoded)
-	}
-	if meta.ModelSelection != nil {
-		encoded, err := json.Marshal(meta.ModelSelection)
-		if err != nil {
-			return "", false, fmt.Errorf("store: encode imported thread %q model selection: %w", meta.ThreadID, err)
-		}
-		modelSelection = string(encoded)
+	additionalDirectories, modelSelection, err := encodeThreadJSONColumns(meta)
+	if err != nil {
+		return "", false, err
 	}
 
 	tx, err := s.db.Begin()

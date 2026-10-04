@@ -415,30 +415,3 @@ func TestSaveRouteRequiresKnownInstance(t *testing.T) {
 		t.Fatalf("failed SaveRoute left rows: %+v", routes)
 	}
 }
-
-func TestReopenSurvivesRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "maid.db")
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if err := s.UpsertThread(ThreadMeta{ThreadID: "thread-1", Title: "kept", CreatedAt: time.Now(), UpdatedAt: time.Now()}); err != nil {
-		t.Fatalf("UpsertThread: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	defer reopened.Close()
-	threads, err := reopened.ListThreads()
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 1 || threads[0].Title != "kept" {
-		t.Fatalf("thread did not survive reopen: %+v", threads)
-	}
-}

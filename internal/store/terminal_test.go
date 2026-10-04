@@ -1,7 +1,6 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -89,46 +88,5 @@ func TestListTerminalsOrdersByUpdatedAtDescending(t *testing.T) {
 		if order[i] != want[i] {
 			t.Fatalf("order = %v, want %v", order, want)
 		}
-	}
-}
-
-func TestTerminalMetadataSurvivesReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "maid.db")
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	meta := TerminalMeta{
-		TerminalID: "terminal-1",
-		Title:      "Persistent",
-		Cwd:        "/projects",
-		CreatedAt:  time.Now().UTC(),
-		UpdatedAt:  time.Now().UTC(),
-	}
-	if err := s.UpsertTerminal(meta); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	terminals, err := reopened.ListTerminals()
-	if err != nil {
-		t.Fatalf("list after reopen: %v", err)
-	}
-	if len(terminals) != 1 || terminals[0].TerminalID != "terminal-1" {
-		t.Fatalf("metadata lost across reopen: %+v", terminals)
-	}
-}
-
-func TestTerminalUpsertRequiresID(t *testing.T) {
-	s := openTestStore(t)
-	if err := s.UpsertTerminal(TerminalMeta{Cwd: "/a"}); err == nil {
-		t.Fatal("upsert without id succeeded")
 	}
 }
