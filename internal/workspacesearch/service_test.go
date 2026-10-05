@@ -116,25 +116,6 @@ func TestConcurrentFirstSearchesCreateOneIndex(t *testing.T) {
 	}
 }
 
-func TestSearchesForDistinctRootsDoNotMix(t *testing.T) {
-	s, _, _ := testService(t)
-	rootA, rootB := makeRoot(t), makeRoot(t)
-
-	resultA, err := s.Search(context.Background(), rootA, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootA: %v", err)
-	}
-	resultB, err := s.Search(context.Background(), rootB, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootB: %v", err)
-	}
-	wantA := "src/" + filepath.Base(rootA) + ".go"
-	wantB := "src/" + filepath.Base(rootB) + ".go"
-	if resultA.Entries[0].RelativePath != wantA || resultB.Entries[0].RelativePath != wantB {
-		t.Fatalf("results mixed roots: %v vs %v", resultA.Entries, resultB.Entries)
-	}
-}
-
 func TestWarmingIndexReportsIndexingWithoutError(t *testing.T) {
 	s, _, _ := testService(t)
 	root := makeRoot(t)

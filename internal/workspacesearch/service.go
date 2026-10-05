@@ -18,8 +18,8 @@ const (
 	// scanWaitBudget bounds how long one request waits for a warming index
 	// before answering Indexing:true and letting the client retry.
 	scanWaitBudget = 100 * time.Millisecond
-	// idleTTL and maxIndexes are initial safety defaults (see the FFF plan);
-	// change them only from measured memory behavior.
+	// idleTTL and maxIndexes bound native index memory; change them only
+	// from measured memory behavior.
 	idleTTL       = 15 * time.Minute
 	maxIndexes    = 8
 	sweepInterval = time.Minute

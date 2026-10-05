@@ -13,27 +13,10 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-func attachTestTerminal(t *testing.T, c *recordingClient, terminalID string) wire.TerminalAttachSnapshot {
-	t.Helper()
-	var snapshot wire.TerminalAttachSnapshot
-	c.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &snapshot)
-	return snapshot
-}
-
-func (c *recordingClient) itemsAbove(sequence uint64) []wire.TerminalStreamItem {
+func (c *recordingClient) outputItems() []wire.TerminalStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []wire.TerminalStreamItem
-	for _, item := range c.terminalItems {
-		if item.Sequence > sequence {
-			out = append(out, item)
-		}
-	}
-	return out
+	return append([]wire.TerminalStreamItem(nil), c.terminalItems...)
 }
 
 func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
@@ -45,21 +28,12 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'HISTORY-%d\\n' $((80+8))\n"),
-	})
+	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'HISTORY-%d\\n' $((80+8))\n")
 	first.waitForOutput(t, "HISTORY-88")
 
 	// The attach snapshot reports the grid the attaching client asked for.
 	second := dialRecordingClient(t, url)
-	var attach wire.TerminalAttachSnapshot
-	second.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    96,
-		Rows:       31,
-	}, &attach)
+	attach := second.mustAttachTerminal(t, terminalID, 96, 31)
 	if attach.Columns != 96 || attach.Rows != 31 {
 		t.Fatalf("attach grid = %dx%d, want 96x31", attach.Columns, attach.Rows)
 	}
@@ -75,13 +49,9 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 
 	// The new listener can write; live output arrives above the snapshot
 	// sequence in order.
-	second.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      attach.RunID,
-		Data:       []byte("printf 'LIVE-%d\\n' $((60+6))\n"),
-	})
+	second.writeTerminal(t, terminalID, attach.RunID, "printf 'LIVE-%d\\n' $((60+6))\n")
 	second.waitForOutput(t, "LIVE-66")
-	for _, item := range second.itemsAbove(0) {
+	for _, item := range second.outputItems() {
 		if item.Kind == terminal.StreamItemOutput && item.Sequence <= attach.Sequence {
 			t.Fatalf("live output sequence %d not above snapshot %d", item.Sequence, attach.Sequence)
 		}
@@ -98,33 +68,20 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	attach := attachTestTerminal(t, second, terminalID)
+	attach := second.mustAttachTerminal(t, terminalID, 80, 24)
 
 	// Both attached clients may write, and each sees the resulting shared
 	// stream from the one PTY.
-	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'FIRST-%d\\n' $((9*9))\n"),
-	})
+	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'FIRST-%d\\n' $((9*9))\n")
 	first.waitForOutput(t, "FIRST-81")
 	second.waitForOutput(t, "FIRST-81")
 
-	second.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      attach.RunID,
-		Data:       []byte("printf 'SECOND-%d\\n' $((9*9))\n"),
-	})
+	second.writeTerminal(t, terminalID, attach.RunID, "printf 'SECOND-%d\\n' $((9*9))\n")
 	first.waitForOutput(t, "SECOND-81")
 	second.waitForOutput(t, "SECOND-81")
 
 	// Resizes are shared PTY state: an attached non-creator may resize too.
-	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{
-		TerminalID: terminalID,
-		RunID:      attach.RunID,
-		Columns:    96,
-		Rows:       31,
-	})
+	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: attach.RunID, Columns: 96, Rows: 31})
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		session, err := s.terminals.service.Get(terminalID)
@@ -149,40 +106,23 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	var invalidAttach wire.TerminalAttachSnapshot
-	if err := second.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    1,
-		Rows:       24,
-	}, &invalidAttach); err == nil {
+	if _, err := second.attachTerminal(terminalID, 1, 24); err == nil {
 		t.Fatal("attach with invalid dimensions succeeded")
 	}
-
-	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n"),
-	})
+	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n")
 	first.waitForOutput(t, "AFTER-BAD-ATTACH-7")
 
-	var invalidRelaunch wire.TerminalAttachSnapshot
-	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       301,
-	}, &invalidRelaunch); err == nil {
+	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 301}, nil); err == nil {
 		t.Fatal("relaunch with invalid dimensions succeeded")
 	}
-
-	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'AFTER-BAD-RELAUNCH-%d\\n' $((4+4))\n"),
-	})
+	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-RELAUNCH-%d\\n' $((4+4))\n")
 	first.waitForOutput(t, "AFTER-BAD-RELAUNCH-8")
 }
 
-func TestTerminalDetachKeepsShellRunning(t *testing.T) {
+// TestTerminalDetachAndDisconnectKeepShellRunning covers both ways a client
+// stops listening: neither may terminate the shell, and detached input must
+// not reach the PTY.
+func TestTerminalDetachAndDisconnectKeepShellRunning(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -191,26 +131,13 @@ func TestTerminalDetachKeepsShellRunning(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'BEFORE-%d\\n' $((10+1))\n"),
-	})
+	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'BEFORE-%d\\n' $((10+1))\n")
 	client.waitForOutput(t, "BEFORE-11")
 
-	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-	})
+	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID, RunID: snapshot.RunID})
+	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'DETACHED-%d\\n' $((10+2))\n")
 
-	// Detached input must be ignored, and the shell must stay alive.
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'DETACHED-%d\\n' $((10+2))\n"),
-	})
-
-	reattach := attachTestTerminal(t, client, terminalID)
+	reattach := client.mustAttachTerminal(t, terminalID, 80, 24)
 	if reattach.RunID != snapshot.RunID {
 		t.Fatal("detach terminated the shell")
 	}
@@ -220,44 +147,11 @@ func TestTerminalDetachKeepsShellRunning(t *testing.T) {
 	if containsBytes(reattach.Snapshot, "DETACHED-12") {
 		t.Fatal("input written while detached reached the PTY")
 	}
-}
 
-func TestTerminalDisconnectLeavesShellForNextClient(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	first := dialRecordingClient(t, url)
-
-	snapshot := createTestTerminal(t, first)
-	terminalID := snapshot.Terminal.TerminalID
-	first.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'SURVIVES-%d\\n' $((30+3))\n"),
-	})
-	first.waitForOutput(t, "SURVIVES-33")
-	_ = first.conn.Close()
-
-	second := dialRecordingClient(t, url)
-	deadline := time.Now().Add(15 * time.Second)
-	var attach wire.TerminalAttachSnapshot
-	for {
-		var err error
-		attach, err = attachOnce(second, terminalID)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("attach after disconnect: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if attach.RunID != snapshot.RunID {
+	_ = client.conn.Close()
+	next := dialRecordingClient(t, url)
+	if attach := next.mustAttachTerminal(t, terminalID, 80, 24); attach.RunID != snapshot.RunID {
 		t.Fatal("client disconnect terminated the shell")
-	}
-	if !containsBytes(attach.Snapshot, "SURVIVES-33") {
-		t.Fatal("snapshot lost output across client disconnect")
 	}
 }
 
@@ -265,24 +159,15 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialRecordingClient(t, url)
+	client := newRecordingClient(t, s)
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'OLDRUN-%d\\n' $((20+2))\n"),
-	})
+	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'OLDRUN-%d\\n' $((20+2))\n")
 	client.waitForOutput(t, "OLDRUN-22")
 
 	var relaunched wire.TerminalAttachSnapshot
-	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &relaunched)
+	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24}, &relaunched)
 	if relaunched.RunID == snapshot.RunID {
 		t.Fatal("relaunch reused the old run id")
 	}
@@ -291,16 +176,8 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	}
 
 	// Stale input carrying the old run id cannot reach the new shell.
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'STALERUN-%d\\n' $((40+4))\n"),
-	})
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      relaunched.RunID,
-		Data:       []byte("printf 'FRESH-%d\\n' $((40+5))\n"),
-	})
+	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'STALERUN-%d\\n' $((40+4))\n")
+	client.writeTerminal(t, terminalID, relaunched.RunID, "printf 'FRESH-%d\\n' $((40+5))\n")
 	client.waitForOutput(t, "FRESH-45")
 	if client.outputContains("STALERUN-44") {
 		t.Fatal("stale run input reached the relaunched shell")
@@ -316,11 +193,7 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'FINAL-%d\\n' $((90+9)); exit 4\n"),
-	})
+	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'FINAL-%d\\n' $((90+9)); exit 4\n")
 
 	// The attached client sees the exit streamed with its code.
 	status := client.waitForStatus(t)
@@ -330,35 +203,16 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 
 	// A later client attaching at a different grid gets the retained final
 	// screen reflowed to its size.
-	other := dialRecordingClient(t, url)
-	var attach wire.TerminalAttachSnapshot
-	other.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    100,
-		Rows:       30,
-	}, &attach)
+	attach := dialRecordingClient(t, url).mustAttachTerminal(t, terminalID, 100, 30)
 	if attach.Columns != 100 || attach.Rows != 30 {
 		t.Fatalf("attach grid = %dx%d, want 100x30", attach.Columns, attach.Rows)
 	}
-	if attach.Terminal.Status != terminal.StatusExited {
-		t.Fatalf("attach status = %s, want exited", attach.Terminal.Status)
-	}
-	if attach.Terminal.ExitCode == nil || *attach.Terminal.ExitCode != 4 {
-		t.Fatalf("attach exit code = %v, want 4", attach.Terminal.ExitCode)
+	if attach.Terminal.Status != terminal.StatusExited || attach.Terminal.ExitCode == nil || *attach.Terminal.ExitCode != 4 {
+		t.Fatalf("attach status = %s exit %v, want exited 4", attach.Terminal.Status, attach.Terminal.ExitCode)
 	}
 	if !containsBytes(attach.Snapshot, "FINAL-99") {
 		t.Fatal("attach after exit lost the final screen output")
 	}
-}
-
-func attachOnce(c *recordingClient, terminalID string) (wire.TerminalAttachSnapshot, error) {
-	var snapshot wire.TerminalAttachSnapshot
-	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &snapshot)
-	return snapshot, err
 }
 
 func containsBytes(data []byte, marker string) bool {

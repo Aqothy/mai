@@ -39,11 +39,7 @@ func startSpinnerJob(t *testing.T) (observer, controller *recordingClient, creat
 
 	controller = dialRecordingClient(t, url)
 	created = createTestTerminal(t, controller)
-	controller.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: created.Terminal.TerminalID,
-		RunID:      created.RunID,
-		Data:       []byte(spinnerTitleScript),
-	})
+	controller.writeTerminal(t, created.Terminal.TerminalID, created.RunID, spinnerTitleScript)
 	return observer, controller, created
 }
 
@@ -91,10 +87,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 
 	// Navigate away: the shell keeps running with no attached client, and
 	// activity keeps updating server-side.
-	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-	})
+	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID, RunID: created.RunID})
 
 	// The job finishes while detached: the working run reports done and
 	// holds it.
@@ -104,13 +97,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 	}
 
 	// Reattaching acknowledges done and returns the row to no activity.
-	var attach wire.TerminalAttachSnapshot
-	controller.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &attach)
-	if attach.Terminal.AgentActivity == terminal.AgentActivityDone {
+	if attach := controller.mustAttachTerminal(t, terminalID, 80, 24); attach.Terminal.AgentActivity == terminal.AgentActivityDone {
 		t.Fatal("attach snapshot still reports done after acknowledgment")
 	}
 	waitForListUpsert(t, observer, func(sum wire.TerminalSummary) bool {

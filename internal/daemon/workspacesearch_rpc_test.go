@@ -4,13 +4,11 @@ package daemon
 
 // End-to-end workspace.searchFiles tests drive a live daemon over a real
 // WebSocket the way the Swift composer does: thread-backed and draft-cwd
-// searches against a real FFF index, plus the parameter validation that must
-// fail before any index is created.
+// searches against a real FFF index, plus the daemon's parameter validation.
 
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -66,11 +64,6 @@ func TestWorkspaceSearchFilesForDraftCwdAndThread(t *testing.T) {
 	if entry.RelativePath != "clients/swift/PromptComposer.swift" || entry.DisplayName != "PromptComposer.swift" {
 		t.Fatalf("unexpected entry: %+v", entry)
 	}
-	for _, entry := range result.Entries {
-		if filepath.IsAbs(entry.RelativePath) || strings.HasPrefix(entry.RelativePath, "../") {
-			t.Fatalf("entry escapes workspace root: %+v", entry)
-		}
-	}
 
 	// A thread resolves the same workspace from its cwd.
 	threadID := orchestration.NewThreadID()
@@ -86,22 +79,20 @@ func TestWorkspaceSearchFilesForDraftCwdAndThread(t *testing.T) {
 	}
 }
 
+// Root and query validation is owned by workspacesearch; these cases cover
+// the daemon's own threadId/cwd resolution.
 func TestWorkspaceSearchFilesRejectsInvalidRequests(t *testing.T) {
 	s := newServer(newLoggerFromEnv(), nil)
 	t.Cleanup(func() { _ = s.Close() })
 	client := newRecordingClient(t, s)
-	root := newWorkspaceFixture(t)
 
 	invalid := []struct {
 		name   string
 		params wire.WorkspaceSearchFilesParams
 	}{
 		{"neither threadId nor cwd", wire.WorkspaceSearchFilesParams{Query: "q"}},
-		{"both threadId and cwd", wire.WorkspaceSearchFilesParams{ThreadID: orchestration.NewThreadID(), Cwd: root, Query: "q"}},
+		{"both threadId and cwd", wire.WorkspaceSearchFilesParams{ThreadID: orchestration.NewThreadID(), Cwd: t.TempDir(), Query: "q"}},
 		{"unknown thread", wire.WorkspaceSearchFilesParams{ThreadID: orchestration.NewThreadID(), Query: "q"}},
-		{"relative cwd", wire.WorkspaceSearchFilesParams{Cwd: "relative/path", Query: "q"}},
-		{"missing directory", wire.WorkspaceSearchFilesParams{Cwd: filepath.Join(root, "does-not-exist"), Query: "q"}},
-		{"oversized query", wire.WorkspaceSearchFilesParams{Cwd: root, Query: strings.Repeat("q", 257)}},
 	}
 	for _, tc := range invalid {
 		var result wire.WorkspaceSearchFilesResult
