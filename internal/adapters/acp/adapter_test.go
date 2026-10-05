@@ -498,6 +498,30 @@ func permissionOptionsWithAllowAlways() []schema.PermissionOption {
 	}
 }
 
+// newPermissionTestInstance binds thread-1 to "sess" with live turn-1 and
+// reports every opened approval's request id.
+func newPermissionTestInstance() (*Instance, <-chan string) {
+	opened := make(chan string, 2)
+	h := newInstance(func(event provider.RuntimeEvent) {
+		if event.Type == provider.RuntimeEventRequestOpened {
+			opened <- event.RequestID
+		}
+	})
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	return h, opened
+}
+
+// requestPermissionAsync issues the agent's permission request for toolCallID
+// on session "sess" and delivers the eventual response.
+func requestPermissionAsync(ctx context.Context, h *Instance, toolCallID string) <-chan schema.RequestPermissionResponse {
+	done := make(chan schema.RequestPermissionResponse, 1)
+	go func() {
+		resp, _ := h.requestPermission(ctx, schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: schema.ToolCallId(toolCallID)}, Options: permissionOptions()})
+		done <- resp
+	}()
+	return done
+}
+
 func selectedOption(resp schema.RequestPermissionResponse) string {
 	optionID, ok := selectedPermissionOptionID(resp)
 	if !ok {
@@ -728,11 +752,7 @@ func TestPermissionOpenWaitsForPriorSessionUpdates(t *testing.T) {
 	agent.sendUpdate("sess", agentMessageUpdate("msg-1", "explanation"))
 	waitFor(t, updateEntered, "prior session update did not enter the stream consumer")
 
-	permissionDone := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool-1"}, Options: permissionOptions()})
-		permissionDone <- resp
-	}()
+	permissionDone := requestPermissionAsync(context.Background(), h, "tool-1")
 	select {
 	case requestID := <-opened:
 		t.Fatalf("approval %q overtook the blocked prior session update", requestID)
@@ -778,11 +798,7 @@ func TestTerminalToolUpdateCancelsPendingPermission(t *testing.T) {
 		}
 	}
 
-	done := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		done <- resp
-	}()
+	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	requestID := <-opened
 	handled := make(chan struct{})
 	go func() {
@@ -829,11 +845,7 @@ func TestTerminalToolUpdateOverridesQueuedApproval(t *testing.T) {
 		}
 	}
 
-	done := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		done <- resp
-	}()
+	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	requestID := <-opened
 	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
 		t.Fatalf("RespondToRequest before terminal update: %v", err)
@@ -865,11 +877,7 @@ func TestPermissionCancelsWhenToolSettledBeforeRequestRegistration(t *testing.T)
 	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool_1","status":"completed"}}`))
 
-	done := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		done <- resp
-	}()
+	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	requestID := <-opened
 	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
 		t.Fatal("RespondToRequest accepted an approval for an already-settled tool")
@@ -886,13 +894,7 @@ func TestPermissionCancelsWhenToolSettledBeforeRequestRegistration(t *testing.T)
 // session/request_permission for that id must reach the client instead of
 // being auto-cancelled by the stale settled marker.
 func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
-	opened := make(chan string, 2)
-	h := newInstance(func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventRequestOpened {
-			opened <- event.RequestID
-		}
-	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	h, opened := newPermissionTestInstance()
 
 	// Tool X runs and settles (declined) within the turn...
 	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call","toolCallId":"tool_1","title":"Edit","kind":"edit","status":"pending"}}`))
@@ -900,11 +902,7 @@ func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
 	// ...then the agent retries: a NEW tool_call with the same id.
 	h.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"tool_call","toolCallId":"tool_1","title":"Edit","kind":"edit","status":"pending"}}`))
 
-	done := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		done <- resp
-	}()
+	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	var requestID string
 	select {
 	case requestID = <-opened:
@@ -929,27 +927,13 @@ func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
 // overwrites the cancel registration; the first request's cleanup must not
 // unregister the second's cancel, or an interrupt can no longer resolve it.
 func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
-	opened := make(chan string, 2)
-	h := newInstance(func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventRequestOpened {
-			opened <- event.RequestID
-		}
-	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	h, opened := newPermissionTestInstance()
 
 	firstCtx, cancelFirst := context.WithCancel(context.Background())
 	defer cancelFirst()
-	firstDone := make(chan struct{})
-	go func() {
-		_, _ = h.requestPermission(firstCtx, schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		close(firstDone)
-	}()
+	firstDone := requestPermissionAsync(firstCtx, h, "tool_1")
 	waitFor(t, opened, "first permission request was never published")
-	secondDone := make(chan schema.RequestPermissionResponse, 1)
-	go func() {
-		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptions()})
-		secondDone <- resp
-	}()
+	secondDone := requestPermissionAsync(context.Background(), h, "tool_1")
 	waitFor(t, opened, "duplicate permission request was never published")
 
 	// First request resolves (agent-side cancel); its cleanup runs.
@@ -974,13 +958,7 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 }
 
 func TestRespondToRequestSelectsExplicitOptionOrDecisionFallback(t *testing.T) {
-	opened := make(chan string, 1)
-	h := newInstance(func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventRequestOpened {
-			opened <- event.RequestID
-		}
-	})
-	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	h, opened := newPermissionTestInstance()
 	request := func(toolCallID string, options []schema.PermissionOption) (string, <-chan schema.RequestPermissionResponse) {
 		t.Helper()
 		done := make(chan schema.RequestPermissionResponse, 1)
