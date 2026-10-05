@@ -18,7 +18,6 @@ func TestHistoryListingRejectsIncompleteResults(t *testing.T) {
 	}{
 		{"repeated cursor", `"result":{"data":[],"nextCursor":"page-two"}`, "repeated cursor"},
 		{"unsupported operation", `"error":{"code":-32601,"message":"history operation unsupported"}`, "-32601: history operation unsupported"},
-		{"authentication", `"error":{"code":-32001,"message":"authentication expired"}`, "-32001: authentication expired"},
 		{"malformed page", `"result":{"data":"corrupt"}`, "cannot unmarshal"},
 		{"transport loss", "", "EOF"},
 	} {

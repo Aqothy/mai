@@ -10,17 +10,6 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestReplayPreservesClientIdentityWithoutParsingPromptText(t *testing.T) {
-	var item appItem
-	if err := json.Unmarshal([]byte(`{"type":"userMessage","id":"native-item","clientId":"maid:dispatch","content":[{"type":"text","text":"quoted context"}]}`), &item); err != nil {
-		t.Fatal(err)
-	}
-	events := replayEvents("local", appThread{Turns: []appTurn{{ID: "turn", Status: "completed", Items: []appItem{item}}}})
-	if len(events) != 3 || events[1].Payload.ClientMessageID != "maid:dispatch" || events[1].Payload.Detail != "quoted context" {
-		t.Fatalf("replay identity: %#v", events)
-	}
-}
-
 func TestUserInputsFromTurnConvertsSkillsAndMedia(t *testing.T) {
 	input := provider.SendTurnInput{
 		Input: "Use $review, but not $reviewer or $disabled.",
@@ -254,7 +243,8 @@ func TestReplayEventsPreservesTurnAndItemOrder(t *testing.T) {
 	thread := appThread{ID: "native-thread", CreatedAt: 90, UpdatedAt: 101, Turns: []appTurn{{
 		ID: "native-turn", Status: "completed", StartedAt: &started, CompletedAt: &completed,
 		Items: []appItem{
-			{Type: "userMessage", ID: "user", Content: []appUserInput{{Type: "text", Text: "hello"}}},
+			// The client identity comes from clientId, never from parsing prompt text.
+			{Type: "userMessage", ID: "user", ClientID: ptr("maid:dispatch"), Content: []appUserInput{{Type: "text", Text: "hello"}}},
 			{Type: "agentMessage", ID: "agent", Text: "answer"},
 			{Type: "commandExecution", ID: "command", Status: "completed", Command: "pwd", AggregatedOutput: &output},
 			{Type: "reasoning", ID: "reason", Summary: []string{"thinking"}},
@@ -284,7 +274,7 @@ func TestReplayEventsPreservesTurnAndItemOrder(t *testing.T) {
 			t.Fatalf("event[%d] identity/timestamp = %#v", index, events[index])
 		}
 	}
-	if events[1].Payload.Detail != "hello" || events[2].Payload.Delta != "answer" || events[6].Payload.Delta != "thinking" {
+	if events[1].Payload.Detail != "hello" || events[1].Payload.ClientMessageID != "maid:dispatch" || events[2].Payload.Delta != "answer" || events[6].Payload.Delta != "thinking" {
 		t.Fatalf("replay content = %#v", events)
 	}
 	if events[len(events)-1].Payload.TurnState != provider.RuntimeTurnCompleted || !events[len(events)-1].CreatedAt.Equal(time.Unix(101, 0)) {

@@ -431,20 +431,26 @@ func TestStartSessionReplaysTranscript(t *testing.T) {
 	}
 }
 
-func TestForkSessionCopiesTranscript(t *testing.T) {
+func TestTranscriptSessionManagement(t *testing.T) {
 	instance, _, configDir := openTestInstance(t)
 	cwd := t.TempDir()
 	sessionID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeTranscriptFixture(t, configDir, cwd, sessionID)
+	path := writeTranscriptFixture(t, configDir, cwd, sessionID)
+
+	summaries, err := instance.ListSessions(context.Background(), cwd)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].SessionID != sessionID || summaries[0].Title != "Fix the bug quickly" || summaries[0].Cwd != cwd {
+		t.Fatalf("summaries = %#v", summaries)
+	}
+
 	forked, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID})
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
-	if forked.Summary.SessionID == sessionID || forked.Summary.SessionID == "" {
-		t.Fatalf("fork id = %q", forked.Summary.SessionID)
-	}
-	if forked.Summary.Title != "Fix the bug quickly" {
-		t.Fatalf("fork title = %q", forked.Summary.Title)
+	if forked.Summary.SessionID == sessionID || forked.Summary.SessionID == "" || forked.Summary.Title != "Fix the bug quickly" {
+		t.Fatalf("fork summary = %#v", forked.Summary)
 	}
 	lines, err := readTranscriptFile(filepath.Join(configDir, "projects", mungeProjectPath(cwd), forked.Summary.SessionID+".jsonl"))
 	if err != nil {
@@ -455,30 +461,7 @@ func TestForkSessionCopiesTranscript(t *testing.T) {
 			t.Fatalf("forked line keeps old session id: %#v", line.SessionID)
 		}
 	}
-}
 
-func TestListSessions(t *testing.T) {
-	instance, _, configDir := openTestInstance(t)
-	cwd := t.TempDir()
-	sessionID := "99999999-8888-7777-6666-555555555555"
-	writeTranscriptFixture(t, configDir, cwd, sessionID)
-	summaries, err := instance.ListSessions(context.Background(), cwd)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(summaries) != 1 || summaries[0].SessionID != sessionID {
-		t.Fatalf("summaries = %#v", summaries)
-	}
-	if summaries[0].Title != "Fix the bug quickly" || summaries[0].Cwd != cwd {
-		t.Fatalf("summary = %#v", summaries[0])
-	}
-}
-
-func TestDeleteSessionRemovesTranscript(t *testing.T) {
-	instance, _, configDir := openTestInstance(t)
-	cwd := t.TempDir()
-	sessionID := "12121212-3434-5656-7878-909090909090"
-	path := writeTranscriptFixture(t, configDir, cwd, sessionID)
 	if err := instance.DeleteSession(context.Background(), sessionID); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
