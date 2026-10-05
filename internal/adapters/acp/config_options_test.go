@@ -28,27 +28,22 @@ func TestInitializeOmitsUnstableBooleanCapability(t *testing.T) {
 	}
 }
 
-func TestConfigOptionsFromACPKeepsSelectWithoutCurrentValue(t *testing.T) {
-	options := configOptionsFromACP([]schema.SessionConfigOption{{
-		ID:      "model",
-		Type:    schema.SessionConfigOptionTypeSelect,
-		Name:    "Model",
-		Options: []schema.SessionConfigSelectOption{{Value: schema.SessionConfigValueId("fast"), Name: "Fast"}},
-	}})
-	if len(options) != 1 || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
-		t.Fatalf("options = %#v, want select kept with empty current value", options)
-	}
-}
-
-func TestConfigOptionsFromACPSkipsMalformedValues(t *testing.T) {
+func TestConfigOptionsFromACPKeepsValidDescriptorsOnly(t *testing.T) {
 	options := configOptionsFromACP([]schema.SessionConfigOption{
+		{
+			ID:      "model",
+			Type:    schema.SessionConfigOptionTypeSelect,
+			Name:    "Model",
+			Options: []schema.SessionConfigSelectOption{{Value: schema.SessionConfigValueId("fast"), Name: "Fast"}},
+		},
 		{ID: "bad-boolean", Type: schema.SessionConfigOptionTypeBoolean, CurrentValue: "true"},
 		{ID: "unsupported-boolean", Type: schema.SessionConfigOptionTypeBoolean, CurrentValue: true},
 		{ID: "bad-select", Type: schema.SessionConfigOptionTypeSelect, CurrentValue: false},
 		{ID: "unknown", Type: "future", CurrentValue: "value"},
 	})
-	if len(options) != 0 {
-		t.Fatalf("options = %#v, want malformed descriptors skipped", options)
+	// A select without a current value is kept; malformed descriptors are skipped.
+	if len(options) != 1 || options[0].ID != "model" || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
+		t.Fatalf("options = %#v, want only the select kept with empty current value", options)
 	}
 }
 

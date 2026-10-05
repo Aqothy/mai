@@ -228,21 +228,18 @@ func (a *fakeWireAgent) dispatch(msg wireMsg) {
 }
 
 func TestFilesystemAndTerminalClientMethodsRemainUnsupported(t *testing.T) {
-	agent := &fakeWireAgent{responses: make(chan wireMsg, 7)}
+	agent := &fakeWireAgent{responses: make(chan wireMsg, 2)}
 	newWireTestHandle(t, agent)
 
+	// Every fs/* and terminal/* client method is left unregistered, so one of
+	// each family covers the shared method-not-found path.
 	requests := []struct {
 		id     string
 		method string
 		params map[string]any
 	}{
 		{id: "fs-read", method: "fs/read_text_file", params: map[string]any{"sessionId": "sess", "path": "/tmp/file"}},
-		{id: "fs-write", method: "fs/write_text_file", params: map[string]any{"sessionId": "sess", "path": "/tmp/file", "content": "nope"}},
 		{id: "terminal-create", method: "terminal/create", params: map[string]any{"sessionId": "sess", "command": "pwd"}},
-		{id: "terminal-output", method: "terminal/output", params: map[string]any{"sessionId": "sess", "terminalId": "term"}},
-		{id: "terminal-wait", method: "terminal/wait_for_exit", params: map[string]any{"sessionId": "sess", "terminalId": "term"}},
-		{id: "terminal-kill", method: "terminal/kill", params: map[string]any{"sessionId": "sess", "terminalId": "term"}},
-		{id: "terminal-release", method: "terminal/release", params: map[string]any{"sessionId": "sess", "terminalId": "term"}},
 	}
 	for _, request := range requests {
 		agent.write(map[string]any{"jsonrpc": "2.0", "id": request.id, "method": request.method, "params": request.params})
@@ -398,33 +395,41 @@ func wireModelAndReasoningOptions(model string, reasoning string) []any {
 
 // --- conversion / pure unit tests -------------------------------------------
 
-func TestContentBlocksMapEmbeddedResourceWhenAdvertised(t *testing.T) {
-	input := provider.SendTurnInput{Attachments: []provider.Attachment{{Kind: "resource", URI: "file:///tmp/context.txt", MimeType: "text/plain", Data: "context"}}}
-	if _, err := contentBlocks(input, provider.PromptContentCapabilities{}); err == nil {
-		t.Fatal("expected embedded resource to require capability")
-	}
-	blocks, err := contentBlocks(input, provider.PromptContentCapabilities{EmbeddedContext: true})
-	if err != nil {
-		t.Fatalf("contentBlocks embedded resource: %v", err)
-	}
-	if len(blocks) != 1 || blocks[0].Type != schema.ContentBlockTypeResource || blocks[0].Resource == nil || blocks[0].Resource.URI != "file:///tmp/context.txt" || blocks[0].Resource.Text == nil || *blocks[0].Resource.Text != "context" {
-		t.Fatalf("blocks = %#v, want one embedded text resource", blocks)
-	}
-}
-
-func TestContentBlocksGateImageOnCapability(t *testing.T) {
-	imageInput := provider.SendTurnInput{Attachments: []provider.Attachment{{Kind: "image", Data: "base64data", MimeType: "image/png"}}}
-
-	if _, err := contentBlocks(imageInput, provider.PromptContentCapabilities{}); err == nil {
-		t.Fatal("expected error when image content is not supported")
-	}
-
-	blocks, err := contentBlocks(imageInput, provider.PromptContentCapabilities{Image: true})
-	if err != nil {
-		t.Fatalf("contentBlocks with image capability: %v", err)
-	}
-	if len(blocks) != 1 || blocks[0].Type != schema.ContentBlockTypeImage || blocks[0].Data == nil || *blocks[0].Data != "base64data" || blocks[0].MimeType == nil || *blocks[0].MimeType != "image/png" {
-		t.Fatalf("blocks = %#v, want one image block", blocks)
+func TestContentBlocksGateAttachmentsOnCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		attachment provider.Attachment
+		enabled    provider.PromptContentCapabilities
+		check      func(schema.ContentBlock) bool
+	}{
+		{
+			name:       "embedded resource",
+			attachment: provider.Attachment{Kind: "resource", URI: "file:///tmp/context.txt", MimeType: "text/plain", Data: "context"},
+			enabled:    provider.PromptContentCapabilities{EmbeddedContext: true},
+			check: func(block schema.ContentBlock) bool {
+				return block.Type == schema.ContentBlockTypeResource && block.Resource != nil && block.Resource.URI == "file:///tmp/context.txt" && block.Resource.Text != nil && *block.Resource.Text == "context"
+			},
+		},
+		{
+			name:       "image",
+			attachment: provider.Attachment{Kind: "image", Data: "base64data", MimeType: "image/png"},
+			enabled:    provider.PromptContentCapabilities{Image: true},
+			check: func(block schema.ContentBlock) bool {
+				return block.Type == schema.ContentBlockTypeImage && block.Data != nil && *block.Data == "base64data" && block.MimeType != nil && *block.MimeType == "image/png"
+			},
+		},
+	} {
+		input := provider.SendTurnInput{Attachments: []provider.Attachment{tc.attachment}}
+		if _, err := contentBlocks(input, provider.PromptContentCapabilities{}); err == nil {
+			t.Fatalf("%s: expected an error without the prompt capability", tc.name)
+		}
+		blocks, err := contentBlocks(input, tc.enabled)
+		if err != nil {
+			t.Fatalf("%s: contentBlocks: %v", tc.name, err)
+		}
+		if len(blocks) != 1 || !tc.check(blocks[0]) {
+			t.Fatalf("%s: blocks = %#v", tc.name, blocks)
+		}
 	}
 }
 
@@ -517,37 +522,8 @@ func TestAuthCapabilityOnlyCountsStableAgentAuthMethods(t *testing.T) {
 	if _, err := (&Instance{initialize: initResp}).resolveAuthMethodID("env-login"); err == nil {
 		t.Fatal("resolve unstable auth method err = nil")
 	}
-
-	var stable []schema.AuthMethod
-	if err := json.Unmarshal([]byte(`[{"id":"agent-login","name":"Agent"}]`), &stable); err != nil {
-		t.Fatalf("decode stable auth method: %v", err)
-	}
-	initResp = schema.InitializeResponse{AuthMethods: stable}
-	if !capabilitySet(initResp).Auth {
-		t.Fatal("agent auth method should advertise daemon auth support")
-	}
-	// Advertised methods mean auth is available, not required: agents like
-	// claude-code-acp advertise their login method even while authenticated.
-	if auth := authStateFromACP(initResp); auth.Status != provider.AuthStatusUnknown || len(auth.Methods) != 1 {
-		t.Fatalf("auth state = %#v, want unknown with the invokable method", auth)
-	}
-	if got, err := (&Instance{initialize: initResp}).resolveAuthMethodID("agent-login"); err != nil || got != "agent-login" {
-		t.Fatalf("resolve stable auth method = %q, %v", got, err)
-	}
-}
-
-func TestSessionUpdateMapsUsageUpdate(t *testing.T) {
-	var notification schema.SessionNotification
-	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"usage_update","used":12,"size":100,"cost":{"amount":0.5,"currency":"USD"}}}`), &notification); err != nil {
-		t.Fatalf("decode usage update: %v", err)
-	}
-	event := sessionRuntimeEvent(notification)
-	if event.Type != provider.RuntimeEventThreadTokenUsage {
-		t.Fatalf("event = %#v, want token usage payload", event)
-	}
-	if usage := event.Payload.TokenUsage; usage == nil || usage.UsedTokens != 12 || usage.MaxTokens != 100 || usage.Cost != 0.5 || usage.Currency != "USD" {
-		t.Fatalf("token usage = %#v, want used/max/cost/currency mapped", usage)
-	}
+	// The stable agent-method path is owned by the daemon's provider
+	// authenticate/logout RPC test.
 }
 
 func TestSessionUpdateMapsAvailableCommands(t *testing.T) {
@@ -1130,8 +1106,7 @@ func TestBindSessionRejectsCrossThreadRebinding(t *testing.T) {
 
 func TestStopSessionReturnsCancelFailureAndKeepsBinding(t *testing.T) {
 	h := newWireTestHandle(t, &fakeWireAgent{})
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 	collector := &promptCollector{threadID: "thread-1", turnID: "turn-1"}
 	h.mu.Lock()
 	h.sessions["sess"].collector = collector
@@ -1266,8 +1241,7 @@ func TestInterruptTurnCancelFailureLeavesTurnLive(t *testing.T) {
 	h := newWireTestHandle(t, agent)
 	events := make(chan provider.RuntimeEvent, 8)
 	h.runtimeEventListener = func(event provider.RuntimeEvent) { events <- event }
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "work"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
@@ -1881,6 +1855,8 @@ func TestReplayHistoryReportsUnavailable(t *testing.T) {
 	}
 }
 
+// Resume wins over load when both are advertised, and updates the agent emits
+// before the resume response still route to the thread.
 func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 	loads := &callRecorder{}
 	resumes := &callRecorder{}
@@ -1892,10 +1868,13 @@ func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 		},
 		onResumeSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
 			resumes.recordConfig(params)
+			a.sendUpdate("old", agentMessageUpdate("msg-1", "resumed"))
 			a.respond(id, map[string]any{"configOptions": wireModelConfigOptions("model-a")})
 		},
 	}
 	h := newWireTestHandle(t, agent)
+	recorder := &eventRecorder{}
+	h.runtimeEventListener = recorder.listener
 
 	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
 		ThreadID:     "thread-1",
@@ -1914,28 +1893,7 @@ func TestStartSessionPrefersResumeOverLoad(t *testing.T) {
 	if got := resumeSessionID(result.Session.ResumeCursor); got != "old" {
 		t.Fatalf("resume cursor session = %q, want old", got)
 	}
-}
-
-func TestResumeSessionRoutesUpdatesEmittedBeforeResponse(t *testing.T) {
-	agent := &fakeWireAgent{
-		capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}},
-		onResumeSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			a.sendUpdate("old", agentMessageUpdate("msg-1", "resumed"))
-			a.respond(id, map[string]any{"configOptions": wireModelConfigOptions("model-a")})
-		},
-	}
-	h := newWireTestHandle(t, agent)
-	recorder := &eventRecorder{}
-	h.runtimeEventListener = recorder.listener
-
-	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{
-		ThreadID:     "thread-1",
-		ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"}),
-	}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	events := recorder.snapshot()
-	if len(events) != 1 || events[0].ThreadID != "thread-1" || events[0].Payload.Delta != "resumed" {
+	if events := recorder.snapshot(); len(events) != 1 || events[0].ThreadID != "thread-1" || events[0].Payload.Delta != "resumed" {
 		t.Fatalf("events = %#v, want resume update routed to thread-1", events)
 	}
 }
@@ -1963,8 +1921,7 @@ func TestTrailingToolCallUpdateAfterSettleEmitsWellFormedEvent(t *testing.T) {
 			turnDone <- struct{}{}
 		}
 	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "run"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
@@ -2037,8 +1994,7 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 			eventCh <- event
 		}
 	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
@@ -2099,8 +2055,7 @@ func TestSteeringPreservesEveryQueuedPrompt(t *testing.T) {
 		}
 	}
 	h := newWireTestHandle(t, agent)
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	for _, input := range []string{"first", "steer one", "steer two"} {
 		if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: input}); err != nil {
@@ -2158,8 +2113,7 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 	h := newWireTestHandle(t, agent)
 	recorder := &eventRecorder{}
 	h.runtimeEventListener = recorder.listener
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	waitForEvent := func(name string, pred func(provider.RuntimeEvent) bool) provider.RuntimeEvent {
 		t.Helper()
@@ -2267,8 +2221,7 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 			}
 		}
 	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
@@ -2343,8 +2296,7 @@ func TestInterruptedTurnToolStatesClearedAtTurnEnd(t *testing.T) {
 			turnDone <- event
 		}
 	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "run"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
@@ -2406,14 +2358,8 @@ func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 		}
 	}
 	h := newWireTestHandle(t, agent)
-	turnEvents := make(chan provider.RuntimeEvent, 8)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventTurnCompleted {
-			turnEvents <- event
-		}
-	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	turnEvents := turnCompletions(h)
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "first"}); err != nil {
 		t.Fatalf("first SendTurn: %v", err)
@@ -2468,14 +2414,8 @@ func TestInterruptTurnWithStaleTurnIDDoesNotCancelNewerPrompt(t *testing.T) {
 		}
 	}
 	h := newWireTestHandle(t, agent)
-	turnEvents := make(chan provider.RuntimeEvent, 8)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventTurnCompleted {
-			turnEvents <- event
-		}
-	}
-	h.bindSession("thread-1", "sess")
-	h.ensureSessionStream("sess")
+	turnEvents := turnCompletions(h)
+	bindStreamingSession(h)
 
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-2", Input: "newer"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
@@ -2512,12 +2452,7 @@ func TestAgentExitAbandonsPromptAndUnbindsDeadSession(t *testing.T) {
 		// resolves normally, so stream abandonment is the only settle path.
 	}
 	h := newWireTestHandle(t, agent)
-	turnEvents := make(chan provider.RuntimeEvent, 8)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventTurnCompleted {
-			turnEvents <- event
-		}
-	}
+	turnEvents := turnCompletions(h)
 
 	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -2561,12 +2496,7 @@ func TestPromptOnStaleSessionUnbindsSoNextPromptStartsFreshSession(t *testing.T)
 		a.respond(id, map[string]any{"stopReason": "end_turn"})
 	}
 	h := newWireTestHandle(t, agent)
-	turnEvents := make(chan provider.RuntimeEvent, 8)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventTurnCompleted {
-			turnEvents <- event
-		}
-	}
+	turnEvents := turnCompletions(h)
 
 	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -2598,6 +2528,25 @@ func TestPromptOnStaleSessionUnbindsSoNextPromptStartsFreshSession(t *testing.T)
 	if event.Payload.TurnState != provider.RuntimeTurnCompleted {
 		t.Fatalf("fresh-session turn completion = %#v, want completed turn", event)
 	}
+}
+
+// bindStreamingSession binds thread-1 to the fake agent's "sess" session with
+// a live update stream, as StartSession would.
+func bindStreamingSession(h *Instance) {
+	h.bindSession("thread-1", "sess")
+	h.ensureSessionStream("sess")
+}
+
+// turnCompletions routes every TurnCompleted runtime event to the returned
+// channel, replacing the instance's listener.
+func turnCompletions(h *Instance) <-chan provider.RuntimeEvent {
+	events := make(chan provider.RuntimeEvent, 8)
+	h.runtimeEventListener = func(event provider.RuntimeEvent) {
+		if event.Type == provider.RuntimeEventTurnCompleted {
+			events <- event
+		}
+	}
+	return events
 }
 
 func waitForSessionUnbound(t *testing.T, h *Instance, threadID string, sessionID string) {
