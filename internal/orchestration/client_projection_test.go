@@ -153,12 +153,8 @@ func TestThreadSnapshotOmitsFullToolDetailAndGetItemDetailReturnsIt(t *testing.T
 		UpdatedAt: time.Unix(2, 0),
 	}
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-detail", ThreadID: threadID}); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: &fullItem}}); err != nil {
-		t.Fatalf("append item: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-detail", ThreadID: threadID})
+	mustAppend(t, engine, EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: &fullItem}})
 
 	stream, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {

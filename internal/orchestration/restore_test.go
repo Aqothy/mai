@@ -44,9 +44,7 @@ func TestRestoreThreadsNeverOverwritesAndCreateStaysIdempotent(t *testing.T) {
 	engine.RestoreThreads([]RestoredThread{{ThreadID: "thread-1", Title: "Restored", Cwd: t.TempDir(), CreatedAt: now, UpdatedAt: now}})
 
 	// A client retrying thread.create against its restored thread is a no-op.
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, ThreadID: "thread-1", Title: "Client copy", Cwd: t.TempDir()}); err != nil {
-		t.Fatalf("thread.create on restored thread: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, ThreadID: "thread-1", Title: "Client copy", Cwd: t.TempDir()})
 	entry, ok := engine.ThreadListEntry("thread-1")
 	if !ok || entry.Title != "Restored" {
 		t.Fatalf("entry = %#v, want restored stub kept", entry)
@@ -119,9 +117,7 @@ func TestRestoredReplayIntentClearsOnlyAfterReplayCompletes(t *testing.T) {
 	if !pending.Snapshot.HistoryRestorePending || len(pending.Snapshot.Thread.Timeline) != 1 {
 		t.Fatalf("partially restored snapshot = %#v, want pending with the partial timeline", pending.Snapshot)
 	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"}); err != nil {
-		t.Fatalf("append replay completion: %v", err)
-	}
+	mustAppend(t, engine, EventInput{Type: EventThreadHistoryReplayCompleted, ThreadID: "thread-restored"})
 	thread, _ = engine.Thread("thread-restored")
 	if thread.ReplayHistoryPending {
 		t.Fatal("replay completion did not consume replay intent")

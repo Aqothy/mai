@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"sync"
 	"testing"
 )
@@ -36,4 +37,22 @@ func (r *testEventRecorder) matching(threadID ThreadID, minimumSequence uint64) 
 		events = append(events, event)
 	}
 	return events
+}
+
+func mustDispatch(t *testing.T, engine *Engine, command Command) DispatchResult {
+	t.Helper()
+	result, err := engine.Dispatch(context.Background(), command)
+	if err != nil {
+		t.Fatalf("dispatch %s: %v", command.Type, err)
+	}
+	return result
+}
+
+func mustAppend(t *testing.T, engine *Engine, input EventInput) DispatchResult {
+	t.Helper()
+	result, err := engine.AppendEvent(context.Background(), input)
+	if err != nil {
+		t.Fatalf("append %s: %v", input.Type, err)
+	}
+	return result
 }

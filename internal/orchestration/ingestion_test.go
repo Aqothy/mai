@@ -43,13 +43,9 @@ func runIngestion(t *testing.T, ingestion *ProviderRuntimeIngestion) chan<- prov
 
 func newThreadWithSession(t *testing.T, engine *Engine, threadID ThreadID) {
 	t.Helper()
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: CommandID("create-" + string(threadID)), ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: CommandID("create-" + string(threadID)), ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	binding := &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: binding}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: binding}})
 }
 
 func TestRestoreHistoryDoesNotBlockOtherThreads(t *testing.T) {
@@ -404,18 +400,14 @@ func TestIngestionDropsRuntimeEventsFromStaleProviderInstance(t *testing.T) {
 
 	// After a provider switch the desired instance is authoritative even before
 	// the new session binds, and the stale binding is cleared.
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-switch-provider-for-stale-event", ThreadID: threadID, ProviderInstanceID: "new-instance"}); err != nil {
-		t.Fatalf("thread.meta.update provider switch: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-switch-provider-for-stale-event", ThreadID: threadID, ProviderInstanceID: "new-instance"})
 	if thread, _ := engine.Thread(threadID); thread.Session != nil {
 		t.Fatalf("session after provider switch = %#v, want stale binding cleared", thread.Session)
 	}
 	ingestTitle("codex", "old before rebind", "current title")
 	ingestTitle("new-instance", "new before rebind", "new before rebind")
 
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "new-instance", Status: SessionStatusReady, UpdatedAt: time.Now()}}}); err != nil {
-		t.Fatalf("thread.session.status.set provider switch: %v", err)
-	}
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "new-instance", Status: SessionStatusReady, UpdatedAt: time.Now()}}})
 	ingestTitle("codex", "late old title", "new before rebind")
 	ingestTitle("new-instance", "new title", "new title")
 }
@@ -425,12 +417,8 @@ func TestIngestionDropsTerminalEventFromReplacedGenerationAfterRebind(t *testing
 	defer engine.Close()
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stale-provider-generation")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-stale-provider-generation", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", ProviderGeneration: 2, Status: SessionStatusRunning, ActiveTurnID: "turn-1", UpdatedAt: time.Now()}}}); err != nil {
-		t.Fatalf("thread.session.status.set: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-stale-provider-generation", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", ProviderGeneration: 2, Status: SessionStatusRunning, ActiveTurnID: "turn-1", UpdatedAt: time.Now()}}})
 
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-old-terminal", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ProviderInstanceID: "codex", Generation: 1, ThreadID: string(threadID), TurnID: "turn-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "old process failed"}})
 
@@ -522,9 +510,7 @@ func TestIngestionCoalescesReasoningChunks(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-reasoning-delta-size")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-delta-size", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-delta-size", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	turnID := string(thread.LatestTurn.ID)
 	reasoningID := "reasoning:" + string(threadID) + ":" + turnID
@@ -577,9 +563,7 @@ func TestIngestionPlanUpdatedProjectsPlan(t *testing.T) {
 	engine := NewEngine()
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-plan")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-plan", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-plan", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-plan", Type: provider.RuntimeEventTurnPlanUpdated, Provider: "test", ThreadID: string(threadID), TurnID: "turn-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{PlanEntries: []provider.PlanEntry{
 		{Content: "investigate", Priority: "high", Status: "in_progress"},
@@ -607,9 +591,7 @@ func TestIngestionSessionScopedUpdatesBeforeBindingSurviveSessionStatusSet(t *te
 	defer engine.Close()
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-prebinding-updates")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-prebinding-updates", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-prebinding-updates", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-config", Type: provider.RuntimeEventConfigOptionsUpdated, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-slash", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}})
@@ -739,9 +721,7 @@ func TestIngestionSeparatesAssistantMessagesByProviderMessageID(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-assistant-message-ids")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-assistant-message-ids", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-assistant-message-ids", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	turnID := string(thread.LatestTurn.ID)
 
@@ -769,18 +749,12 @@ func TestIngestionIgnoresCancelledCompletionFromPreviousTurn(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stale-cancelled-completion")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-old", Text: "old"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("old thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-old", Text: "old"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	oldTurnID := string(thread.LatestTurn.ID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnInterrupt, CommandID: "interrupt-stale-old", ThreadID: threadID, TurnID: TurnID(oldTurnID), CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.interrupt: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnInterrupt, CommandID: "interrupt-stale-old", ThreadID: threadID, TurnID: TurnID(oldTurnID), CreatedAt: time.Now()})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-old-complete", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: oldTurnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted}})
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-new", Text: "new"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("new thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-new", Text: "new"}, CreatedAt: time.Now()})
 	thread, _ = engine.Thread(threadID)
 	newTurnID := string(thread.LatestTurn.ID)
 	if newTurnID == oldTurnID {
@@ -811,9 +785,7 @@ func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stop-vs-completion")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stop-vs-completion", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stop-vs-completion", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stop-vs-completion", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stop-vs-completion", Text: "hello"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	turnID := string(thread.LatestTurn.ID)
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-started-before-stop", Type: provider.RuntimeEventTurnStarted, Provider: "test", ThreadID: string(threadID), TurnID: turnID, CreatedAt: time.Now()})
@@ -857,15 +829,11 @@ func TestIngestionStaleRuntimeErrorDoesNotFailCurrentTurn(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stale-runtime-error")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-error-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-error-old", Text: "old"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("old thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-error-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-error-old", Text: "old"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	oldTurnID := string(thread.LatestTurn.ID)
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-old-settled", Type: provider.RuntimeEventTurnCompleted, Provider: "test", ThreadID: string(threadID), TurnID: oldTurnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted}})
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-error-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-error-new", Text: "new"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("new thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-error-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-error-new", Text: "new"}, CreatedAt: time.Now()})
 	thread, _ = engine.Thread(threadID)
 	newTurnID := thread.LatestTurn.ID
 	if string(newTurnID) == oldTurnID {
@@ -903,9 +871,7 @@ func TestIngestionStaleTurnCompletionStillSettlesStreams(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-stale-settle-buffers")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-buffers-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-buffers-old", Text: "old"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("old thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-buffers-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-buffers-old", Text: "old"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	oldTurnID := string(thread.LatestTurn.ID)
 	// The first chunk flushes immediately; the second stays buffered until the
@@ -918,9 +884,7 @@ func TestIngestionStaleTurnCompletionStillSettlesStreams(t *testing.T) {
 	if result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: TurnID(oldTurnID), TurnState: provider.RuntimeTurnInterrupted}); err != nil || result.Sequence == 0 {
 		t.Fatalf("old turn settle update = (%#v, %v), want accepted", result, err)
 	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-buffers-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-buffers-new", Text: "new"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("new thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stale-buffers-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stale-buffers-new", Text: "new"}, CreatedAt: time.Now()})
 	thread, _ = engine.Thread(threadID)
 	newTurnID := thread.LatestTurn.ID
 
@@ -959,9 +923,7 @@ func TestIngestionSettlesOlderTurnBuffersWhenNewerTurnSettles(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-older-turn-buffers")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-older-buffers-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-older-buffers-old", Text: "old"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("old thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-older-buffers-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-older-buffers-old", Text: "old"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	oldTurnID := string(thread.LatestTurn.ID)
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-older-delta-1", Type: provider.RuntimeEventContentDelta, Provider: "test", ThreadID: string(threadID), TurnID: oldTurnID, CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: "orph"}})
@@ -970,9 +932,7 @@ func TestIngestionSettlesOlderTurnBuffersWhenNewerTurnSettles(t *testing.T) {
 	if result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: TurnID(oldTurnID), TurnState: provider.RuntimeTurnInterrupted}); err != nil || result.Sequence == 0 {
 		t.Fatalf("old turn settle update = (%#v, %v), want accepted", result, err)
 	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-older-buffers-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-older-buffers-new", Text: "new"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("new thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-older-buffers-new", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-older-buffers-new", Text: "new"}, CreatedAt: time.Now()})
 	thread, _ = engine.Thread(threadID)
 	newTurnID := string(thread.LatestTurn.ID)
 
@@ -1003,9 +963,7 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 	engine := NewEngine()
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-item")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-item", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-item", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 
 	// Providers send the COMPLETE neutral tool-call state on every data-bearing
 	// event (the ACP adapter accumulates sparse updates itself); a status-only
@@ -1053,9 +1011,7 @@ func TestIngestionReasoningPreservesNonTextContent(t *testing.T) {
 	events := observeEvents(t, engine)
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-reasoning-content")
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadCreate, CommandID: "create-reasoning-content", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-reasoning-content", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	turnID := "turn-reasoning-content"
 	image := provider.Attachment{Kind: "image", MimeType: "image/png", Data: "iVBORw0K"}
 
@@ -1130,9 +1086,7 @@ func TestIngestionCompletedReasoningSnapshotIsAuthoritative(t *testing.T) {
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-reasoning-snapshot")
 	newThreadWithSession(t, engine, threadID)
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-snapshot", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-reasoning-snapshot", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}, CreatedAt: time.Now()})
 	thread, _ := engine.Thread(threadID)
 	turnID := string(thread.LatestTurn.ID)
 
@@ -1168,9 +1122,7 @@ func TestPreviousTurnKeepsStoppedOutcomeAfterNextTurnStarts(t *testing.T) {
 	threadID := ThreadID("thread-previous-turn-outcome")
 	newThreadWithSession(t, engine, threadID)
 	start := time.Now()
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-stopped", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stopped", Text: "long command"}, CreatedAt: start}); err != nil {
-		t.Fatalf("first turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-stopped", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-stopped", Text: "long command"}, CreatedAt: start})
 	thread, _ := engine.Thread(threadID)
 	stoppedTurn := string(thread.LatestTurn.ID)
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-stopped-started", Type: provider.RuntimeEventTurnStarted, Provider: "test", ThreadID: string(threadID), TurnID: stoppedTurn, CreatedAt: start})
@@ -1183,9 +1135,7 @@ func TestPreviousTurnKeepsStoppedOutcomeAfterNextTurnStarts(t *testing.T) {
 	// The provider's command still finishes after the stop.
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-late-tool", Type: provider.RuntimeEventItemCompleted, Provider: "test", ThreadID: string(threadID), TurnID: stoppedTurn, ItemID: "late-tool", CreatedAt: start.Add(49 * time.Second), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ItemStatus: provider.ItemStatusCompleted}})
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-next", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-next", Text: "next"}, CreatedAt: start.Add(60 * time.Second)}); err != nil {
-		t.Fatalf("next turn.start: %v", err)
-	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-next", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-next", Text: "next"}, CreatedAt: start.Add(60 * time.Second)})
 	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
 		t.Fatalf("SubscribeThread: %v", err)
@@ -1214,9 +1164,7 @@ func TestRestoredHistoryKeepsEachTurnOutcomeAndTiming(t *testing.T) {
 	now := time.Now().UTC()
 	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
 	// Like reopening the thread: the session is starting while history replays.
-	if _, err := engine.AppendEvent(context.Background(), EventInput{Type: EventThreadSessionPrepareRequested, ThreadID: threadID, Actor: ActorKindClient, OccurredAt: now}); err != nil {
-		t.Fatalf("prepare session: %v", err)
-	}
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionPrepareRequested, ThreadID: threadID, Actor: ActorKindClient, OccurredAt: now})
 	stoppedAt := now.Add(-time.Hour)
 	nextAt := stoppedAt.Add(time.Minute)
 	boundary := func(eventType provider.RuntimeEventType, turnID string, at time.Time, state provider.RuntimeTurnState) provider.RuntimeEvent {
@@ -1334,9 +1282,7 @@ func TestIngestionProjectsProviderFailuresAndWarnings(t *testing.T) {
 			newThreadWithSession(t, engine, threadID)
 			event := tt.event
 			if tt.activeTurn {
-				if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-failure", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
-					t.Fatalf("thread.turn.start: %v", err)
-				}
+				mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-failure", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}})
 				thread, _ := engine.Thread(threadID)
 				event.TurnID = string(thread.LatestTurn.ID)
 			}
@@ -1454,9 +1400,7 @@ func TestIngestionTurnSettlementSettlesReasoningAndOpenItems(t *testing.T) {
 			ingestion := NewProviderRuntimeIngestion(engine)
 			threadID := ThreadID("thread-settle-" + string(tc.turnState))
 			newThreadWithSession(t, engine, threadID)
-			if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-settle", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}}); err != nil {
-				t.Fatalf("thread.turn.start: %v", err)
-			}
+			mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-settle", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-user", Text: "hello"}})
 			thread, _ := engine.Thread(threadID)
 			turnID := string(thread.LatestTurn.ID)
 			ingest := func(event provider.RuntimeEvent) {
