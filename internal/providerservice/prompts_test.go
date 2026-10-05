@@ -32,18 +32,14 @@ func newPromptService(t *testing.T, st store.PromptStore, routes store.RouteStor
 		return instance, nil
 	}, WithRouteStore(routes), WithPromptStore(st))
 	t.Cleanup(func() { s.Close() })
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "codex", Driver: "fake"}, false); err != nil {
-		t.Fatal(err)
-	}
+	mustStartInstance(t, s, provider.InstanceSpec{InstanceID: "codex", Driver: "fake"}, false)
 	return s, instance
 }
 
 func TestPromptPresentationRestartForkAndDistinctSteering(t *testing.T) {
 	st := openRouteStore(t)
 	s, instance := newPromptService(t, st, st)
-	if _, err := s.StartSession(context.Background(), "source", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatal(err)
-	}
+	mustStartSession(t, s, "source", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	text := "same visible prompt"
 	first := provider.PromptPresentation{MessageID: "message-one", Text: &text, Annotations: []provider.PromptAnnotation{{ID: "one", MessageID: "quote-one", Quote: "same quote", Note: "same note"}}}
 	second := first
@@ -136,9 +132,7 @@ func TestPromptStorageFailuresDoNotDispatchConsumeReplayOrLeaveNativeFork(t *tes
 				broken.forkErr = failure
 			}
 			s, instance := newPromptService(t, broken, st)
-			if _, err := s.StartSession(context.Background(), "source", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-				t.Fatal(err)
-			}
+			mustStartSession(t, s, "source", provider.StartSessionInput{ProviderInstanceID: "codex"})
 			switch phase {
 			case "save":
 				err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "source", Presentation: &provider.PromptPresentation{MessageID: "message"}})
@@ -181,9 +175,7 @@ func TestPromptReplayNeverMatchesTextOrMergesRetryItems(t *testing.T) {
 func TestPromptPresentationRejectsProviderSwitchBeforePersistence(t *testing.T) {
 	st := openRouteStore(t)
 	s, instance := newPromptService(t, st, st)
-	if _, err := s.StartSession(context.Background(), "source", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatal(err)
-	}
+	mustStartSession(t, s, "source", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	s.mu.Lock()
 	s.threadRoutes["source"] = threadRoute{InstanceID: "other", ProviderSessionID: "other-session"}
 	s.mu.Unlock()

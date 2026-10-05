@@ -31,9 +31,7 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 	defer s.Close()
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
 	specs, err := st.LoadInstances()
 	if err != nil {
 		t.Fatalf("LoadInstances: %v", err)
@@ -112,9 +110,7 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 
 	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
-	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, before, spec, false)
 	if _, err := before.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
 		ProviderInstanceID: "codex",
 		ModelSelection:     &provider.ModelSelection{Model: "gpt"},
@@ -173,9 +169,7 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 
 	// After the restored route has rebound to the live generation, a fresh
 	// session input must not silently inherit the old preferences again.
-	if _, err := after.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("second StartSession: %v", err)
-	}
+	mustStartSession(t, after, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	input = instance.lastStartInput()
 	if input.ModelSelection != nil || len(input.ConfigSelections) != 0 || len(input.Options) != 0 {
 		t.Fatalf("live session inherited restored preferences: %#v", input)
@@ -191,12 +185,8 @@ func TestDuplicateProviderSessionBindingDoesNotPublishLiveRoute(t *testing.T) {
 	service := New(adapter.StartInstance, WithRouteStore(st))
 	defer service.Close()
 	spec := fakeSpec("codex")
-	if _, err := service.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := service.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession thread-1: %v", err)
-	}
+	mustStartInstance(t, service, spec, false)
+	mustStartSession(t, service, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	if _, err := service.StartSession(context.Background(), "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"}); !errors.Is(err, store.ErrProviderSessionBound) {
 		t.Fatalf("StartSession thread-2 err = %v, want ErrProviderSessionBound", err)
 	}
@@ -234,9 +224,7 @@ func TestImportedRoutePassesProviderSessionIDAfterRestart(t *testing.T) {
 	adapter := &fakeAdapter{configure: resumableSessions}
 	service := New(adapter.StartInstance, WithRouteStore(st))
 	defer service.Close()
-	if _, err := service.StartSession(context.Background(), "thread-imported", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true}); err != nil {
-		t.Fatalf("StartSession imported route: %v", err)
-	}
+	mustStartSession(t, service, "thread-imported", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true})
 	input := adapter.instance(0).lastStartInput()
 	if input.ProviderSessionID != "external-session" {
 		t.Fatalf("provider session id = %q, want external-session", input.ProviderSessionID)
@@ -260,12 +248,8 @@ func TestRouteLoadFailureFreezesPersistenceForRun(t *testing.T) {
 	defer s.Close()
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
 	flaky.mu.Lock()
 	defer flaky.mu.Unlock()
@@ -283,12 +267,8 @@ func TestRestoredRouteRecoversSessionBeforeFirstOperation(t *testing.T) {
 
 	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
-	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := before.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	mustStartInstance(t, before, spec, false)
+	mustStartSession(t, before, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	before.Close()
 
 	// A restored route's generation never matches a live instance, so an
@@ -297,9 +277,7 @@ func TestRestoredRouteRecoversSessionBeforeFirstOperation(t *testing.T) {
 	second := &fakeAdapter{configure: resumableSessions}
 	after := New(second.StartInstance, WithRouteStore(st))
 	defer after.Close()
-	if _, err := after.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance after restart: %v", err)
-	}
+	mustStartInstance(t, after, spec, false)
 	if err := after.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn after restart: %v", err)
 	}
@@ -388,12 +366,8 @@ func TestRoutePersistenceHealsFailedInstanceSave(t *testing.T) {
 	defer s.Close()
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
 	flaky.mu.Lock()
 	defer flaky.mu.Unlock()
@@ -411,9 +385,7 @@ func TestFailedStandaloneInstanceWriteRetriesOnClose(t *testing.T) {
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
 
 	s.Close()
 
@@ -431,12 +403,8 @@ func TestFailedRouteWriteRetriesOnClose(t *testing.T) {
 	s := New(adapter.StartInstance, WithRouteStore(flaky))
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	flaky.mu.Lock()
 	if len(flaky.routes) != 0 {
 		flaky.mu.Unlock()
@@ -461,21 +429,15 @@ func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
 	defer s.Close()
 
 	spec := fakeSpec("codex")
-	if _, err := s.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
-	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession thread-1: %v", err)
-	}
+	mustStartInstance(t, s, spec, false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 	instance := adapter.instance(0)
 	instance.mu.Lock()
 	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
 		return provider.Session{ProviderInstanceID: "codex", ProviderSessionID: "sess-2", ThreadID: input.ThreadID}, nil
 	}
 	instance.mu.Unlock()
-	if _, err := s.StartSession(context.Background(), "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"}); err != nil {
-		t.Fatalf("StartSession thread-2: %v", err)
-	}
+	mustStartSession(t, s, "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
 	flaky.mu.Lock()
 	defer flaky.mu.Unlock()
@@ -525,9 +487,7 @@ func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T
 
 	first := &fakeAdapter{configure: resumableSessions}
 	before := New(first.StartInstance, WithRouteStore(st))
-	if _, err := before.StartInstance(context.Background(), spec, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, before, spec, false)
 	if _, err := before.StartSession(context.Background(), "thread-1", draftModelSelections("model-a", "high")); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}

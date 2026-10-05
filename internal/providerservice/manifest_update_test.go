@@ -25,9 +25,7 @@ func TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := service.StartSession(context.Background(), "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID}); err != nil {
-				t.Fatal(err)
-			}
+			mustStartSession(t, service, "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID})
 			if err := service.RegisterManifestInstance(updated); err != nil {
 				t.Fatal(err)
 			}
@@ -55,9 +53,7 @@ func TestManifestUpdatePreservesRunningProcessAndAppliesOnNextLaunch(t *testing.
 			original.mu.Lock()
 			original.info.Status = provider.InstanceStatusExited
 			original.mu.Unlock()
-			if _, err := service.StartSession(context.Background(), "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID}); err != nil {
-				t.Fatal(err)
-			}
+			mustStartSession(t, service, "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID})
 			if configs := adapter.launchConfigs(); len(configs) != 2 || configs[1] != string(updated.Config) {
 				t.Fatalf("launch configs = %v, want old then updated", configs)
 			}
@@ -74,16 +70,12 @@ func TestManifestDefaultDoesNotOverrideCustomLaunchOnRecovery(t *testing.T) {
 	}
 	pinned := configured
 	pinned.Config = fakeInstanceConfig([]string{"/custom/pinned-codex"})
-	if _, err := service.StartInstance(context.Background(), pinned, false); err != nil {
-		t.Fatal(err)
-	}
+	mustStartInstance(t, service, pinned, false)
 	current := adapter.instance(0)
 	current.mu.Lock()
 	current.info.Status = provider.InstanceStatusExited
 	current.mu.Unlock()
-	if _, err := service.StartSession(context.Background(), "thread", provider.StartSessionInput{ProviderInstanceID: pinned.InstanceID}); err != nil {
-		t.Fatal(err)
-	}
+	mustStartSession(t, service, "thread", provider.StartSessionInput{ProviderInstanceID: pinned.InstanceID})
 	if configs := adapter.launchConfigs(); len(configs) != 2 || configs[1] != string(pinned.Config) {
 		t.Fatalf("configs=%v, want explicit custom launch preserved", configs)
 	}
@@ -118,9 +110,7 @@ func TestManifestUpdateDuringLaunchIsNotOverwritten(t *testing.T) {
 	first.mu.Lock()
 	first.info.Status = provider.InstanceStatusExited
 	first.mu.Unlock()
-	if _, err := service.StartSession(context.Background(), "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID}); err != nil {
-		t.Fatal(err)
-	}
+	mustStartSession(t, service, "thread", provider.StartSessionInput{ProviderInstanceID: old.InstanceID})
 	if configs := adapter.launchConfigs(); len(configs) != 2 || configs[1] != string(updated.Config) {
 		t.Fatalf("configs=%v, want in-flight update preserved", configs)
 	}

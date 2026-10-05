@@ -1101,9 +1101,7 @@ func TestServiceGatesAuthenticationCapabilities(t *testing.T) {
 		return instance, nil
 	})
 	defer s.Close()
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "login", Name: "Login", Driver: "test"}, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, provider.InstanceSpec{InstanceID: "login", Name: "Login", Driver: "test"}, false)
 
 	if _, err := s.Authenticate(context.Background(), "login", provider.AuthenticateInput{MethodID: "login"}); err == nil || !strings.Contains(err.Error(), "authentication") {
 		t.Fatalf("Authenticate without capability err = %v", err)
@@ -1166,9 +1164,7 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		return instance, nil
 	})
 	defer s.Close()
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "codex-app-server"}, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, provider.InstanceSpec{InstanceID: "codex", Name: "Codex", Driver: "codex-app-server"}, false)
 	additional := []string{"/workspace/two", "/workspace/three"}
 	if _, err := s.StartSession(context.Background(), "thread-source", provider.StartSessionInput{
 		ThreadID: "thread-source", ProviderInstanceID: "codex", Cwd: "/workspace/one", AdditionalDirectories: additional,
@@ -1202,9 +1198,7 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 	if err := s.RegisterImportedSession("thread-fork", "codex", "native-fork", provider.StartSessionInput{Cwd: summary.Cwd, ModelSelection: settings.ModelSelection, ConfigSelections: settings.ConfigSelections}); err != nil {
 		t.Fatalf("RegisterImportedSession: %v", err)
 	}
-	if _, err := s.StartSession(context.Background(), "thread-fork", provider.StartSessionInput{ProviderInstanceID: "codex", Cwd: summary.Cwd, ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"}}); err != nil {
-		t.Fatalf("open fork: %v", err)
-	}
+	mustStartSession(t, s, "thread-fork", provider.StartSessionInput{ProviderInstanceID: "codex", Cwd: summary.Cwd, ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"}})
 	resume := instance.lastStartInput()
 	if resume.ProviderSessionID != "native-fork" || len(resume.ConfigSelections) != 2 || resume.ConfigSelections[1].Value != "low" || resume.Cwd != "/workspace/one" {
 		t.Fatalf("fork resume input = %#v, want native-fork at Luna/Low in source cwd", resume)
@@ -1227,9 +1221,7 @@ func TestServiceGatesProviderSpecificSessionCapabilities(t *testing.T) {
 		return instance, nil
 	})
 	defer s.Close()
-	if _, err := s.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: "limited", Name: "Limited", Driver: "limited"}, false); err != nil {
-		t.Fatalf("StartInstance: %v", err)
-	}
+	mustStartInstance(t, s, provider.InstanceSpec{InstanceID: "limited", Name: "Limited", Driver: "limited"}, false)
 
 	if _, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{
 		ThreadID: "thread-1", ProviderInstanceID: "limited", AdditionalDirectories: []string{"/extra"},
