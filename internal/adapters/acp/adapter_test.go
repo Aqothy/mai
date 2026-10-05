@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1944,14 +1945,10 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	firstPromptStarted := make(chan struct{})
 	firstPromptRelease := make(chan struct{})
 	secondPromptStarted := make(chan struct{})
-	var promptMu sync.Mutex
-	promptCalls := 0
+	var promptCalls atomic.Int32
 	agent := &fakeWireAgent{}
 	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-		promptMu.Lock()
-		promptCalls++
-		call := promptCalls
-		promptMu.Unlock()
+		call := promptCalls.Add(1)
 		switch call {
 		case 1:
 			close(firstPromptStarted)
@@ -2064,14 +2061,10 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 	firstPromptRelease := make(chan struct{})
 	secondPromptStarted := make(chan struct{})
 	cancelCalls := make(chan struct{}, 1)
-	var promptMu sync.Mutex
-	promptCalls := 0
+	var promptCalls atomic.Int32
 	agent := &fakeWireAgent{}
 	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-		promptMu.Lock()
-		promptCalls++
-		call := promptCalls
-		promptMu.Unlock()
+		call := promptCalls.Add(1)
 		if call == 1 {
 			a.sendUpdate(params.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tool-1", "title": "Run tests", "kind": "execute", "status": "pending"})
 			close(firstPromptStarted)
@@ -2313,14 +2306,10 @@ func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 	firstPromptStarted := make(chan struct{})
 	firstPromptRelease := make(chan struct{})
 	cancelCalls := make(chan struct{}, 2)
-	var promptMu sync.Mutex
-	promptCalls := 0
+	var promptCalls atomic.Int32
 	agent := &fakeWireAgent{}
 	agent.onPrompt = func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-		promptMu.Lock()
-		promptCalls++
-		call := promptCalls
-		promptMu.Unlock()
+		call := promptCalls.Add(1)
 		if call == 1 {
 			close(firstPromptStarted)
 			<-firstPromptRelease
@@ -2358,10 +2347,7 @@ func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 	if event.TurnID != "turn-1" || event.Payload.TurnState != provider.RuntimeTurnCancelled {
 		t.Fatalf("turn completion = %#v, want turn-1 cancelled", event)
 	}
-	promptMu.Lock()
-	calls := promptCalls
-	promptMu.Unlock()
-	if calls != 1 {
+	if calls := promptCalls.Load(); calls != 1 {
 		t.Fatalf("prompt calls = %d, want 1 (interrupted steer must not dispatch)", calls)
 	}
 	select {
