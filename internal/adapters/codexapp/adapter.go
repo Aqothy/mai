@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -130,7 +131,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			command.Env = append(command.Env, key+"="+value)
 		}
 	}
-	configureProcessGroup(command)
+	procgroup.Configure(command)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open Codex app-server stdin: %w", err)
@@ -233,7 +234,7 @@ func (h *Instance) waitProcess() {
 	h.killedTree = true
 	h.mu.Unlock()
 	if !killed {
-		killProcessTree(h.cmd)
+		procgroup.Kill(h.cmd)
 	}
 	if err == nil {
 		err = io.EOF
@@ -281,7 +282,7 @@ func (h *Instance) handleTransportClosed(err error) {
 	}
 	h.mu.Unlock()
 	if shouldKill {
-		killProcessTree(h.cmd)
+		procgroup.Kill(h.cmd)
 	}
 	h.cancel()
 	h.cancelPendingApprovals()
@@ -305,7 +306,7 @@ func (h *Instance) Close() error {
 		_ = h.stdin.Close()
 		_ = h.stdout.Close()
 		if shouldKill {
-			killProcessTree(h.cmd)
+			procgroup.Kill(h.cmd)
 		}
 		<-h.processDone
 		h.mu.Lock()

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -209,7 +210,7 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	}
 	h.mu.Unlock()
 	if !killed {
-		killProcessTree(proc.cmd)
+		procgroup.Kill(proc.cmd)
 	}
 	proc.client.fail(firstError(err, io.EOF))
 	close(proc.done)
@@ -242,7 +243,7 @@ func (h *Instance) stopProcess(session *claudeSession) {
 	h.mu.Unlock()
 	_ = proc.stdin.Close()
 	if shouldKill {
-		killProcessTree(proc.cmd)
+		procgroup.Kill(proc.cmd)
 	}
 	<-proc.done
 }

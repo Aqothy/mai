@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -57,7 +58,7 @@ func (h *Instance) probe(ctx context.Context) error {
 	}()
 	defer func() {
 		_ = stdin.Close()
-		killProcessTree(command)
+		procgroup.Kill(command)
 		<-done
 	}()
 	var response initializeResponse

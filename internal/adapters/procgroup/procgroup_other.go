@@ -1,12 +1,12 @@
 //go:build !unix
 
-package claudecode
+package procgroup
 
 import "os/exec"
 
-func configureProcessGroup(_ *exec.Cmd) {}
+func Configure(*exec.Cmd) {}
 
-func killProcessTree(cmd *exec.Cmd) {
+func Kill(cmd *exec.Cmd) {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}

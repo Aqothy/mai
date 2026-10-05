@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -240,7 +241,7 @@ func (h *Instance) buildCommand(cwd string, extra []string) *exec.Cmd {
 		env = append(env, key+"="+value)
 	}
 	command.Env = env
-	configureProcessGroup(command)
+	procgroup.Configure(command)
 	return command
 }
 

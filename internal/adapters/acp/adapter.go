@@ -25,6 +25,7 @@ import (
 
 	acp "github.com/Aqothy/go-acp"
 	"github.com/Aqothy/go-acp/schema"
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -65,7 +66,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
-	configureProcessGroup(cmd)
+	procgroup.Configure(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -90,7 +91,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	if err := h.connectClient(acp.Combine(stdout, stdin), logger); err != nil {
 		h.cancel()
 		_ = h.closeIO()
-		killProcessTree(cmd)
+		procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
@@ -100,7 +101,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		h.cancel()
 		_ = h.conn.Close()
 		_ = h.closeIO()
-		killProcessTree(cmd)
+		procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
@@ -148,7 +149,7 @@ type Instance struct {
 	// after the reap.
 	reaped bool
 	// killedTree coordinates Close and wait so at most one of them runs
-	// killProcessTree. Guarded by mu.
+	// procgroup.Kill. Guarded by mu.
 	killedTree bool
 	once       sync.Once
 	closeErr   error
@@ -270,7 +271,7 @@ func (h *Instance) Close() error {
 		h.mu.Lock()
 		if !h.reaped && !h.killedTree {
 			h.killedTree = true
-			killProcessTree(h.cmd)
+			procgroup.Kill(h.cmd)
 		}
 		h.mu.Unlock()
 	})
@@ -281,7 +282,7 @@ func (h *Instance) wait() {
 	_ = h.cmd.Wait()
 	// The leader is reaped: record that (and claim the kill) BEFORE any
 	// signalling, so Close never signals a recycled pid/pgid and at most one
-	// killProcessTree runs.
+	// procgroup.Kill runs.
 	h.mu.Lock()
 	h.reaped = true
 	h.info.Status = provider.InstanceStatusExited
@@ -292,7 +293,7 @@ func (h *Instance) wait() {
 		// Wrappers may background the real agent and exit first. Terminate the
 		// process group immediately after reaping the leader, while its
 		// descendants still make the group identity unambiguous.
-		killProcessTree(h.cmd)
+		procgroup.Kill(h.cmd)
 	}
 	_ = h.closeIO()
 }
