@@ -101,7 +101,7 @@ type disconnectReader struct {
 
 func (r *disconnectReader) Read(ctx context.Context) (jsonrpc2.Message, error) {
 	msg, err := r.reader.Read(ctx)
-	if err != nil && r.onDisconnect != nil {
+	if err != nil {
 		r.once.Do(func() { r.onDisconnect(err) })
 	}
 	return msg, err
@@ -234,16 +234,11 @@ func (c *rpcClient) closeOutbound() bool {
 	return false
 }
 
-func (c *rpcClient) overflowClose(what string) {
+// closeConnection closes a client whose outbound stream can no longer be
+// delivered in order; it recovers by reconnecting for fresh snapshots.
+func (c *rpcClient) closeConnection(reason string, attrs ...any) {
 	if c.closeOutbound() {
-		c.logger.Warn("client outbound queue full; closing connection", "method", what)
-		go func() { _ = c.conn.Close() }()
-	}
-}
-
-func (c *rpcClient) outboundWriteFailed(method string, err error) {
-	if c.closeOutbound() {
-		c.logger.Warn("client notification failed; closing connection", "method", method, "error", err)
+		c.logger.Warn(reason+"; closing connection", attrs...)
 		go func() { _ = c.conn.Close() }()
 	}
 }
@@ -257,7 +252,7 @@ func (c *rpcClient) writeOutbound() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := c.conn.Notify(ctx, msg.method, msg.params); err != nil {
 				cancel()
-				c.outboundWriteFailed(msg.method, err)
+				c.closeConnection("client notification failed", "method", msg.method, "error", err)
 				return
 			}
 			cancel()
@@ -349,10 +344,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 	// results from pass-through calls like Dispatch/StartProvider on failure.
 	defer func() {
 		err = rpcError(err)
-		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond)}
-		if h.client != nil && h.client.id != "" {
-			attrs = append(attrs, "client", h.client.id)
-		}
+		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond), "client", h.client.id}
 		if err != nil {
 			result = nil
 			attrs = append(attrs, "error", compactError(err))
@@ -484,7 +476,9 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		threadID, imported, err := h.server.ImportProviderSession(ctx, params.InstanceID, params.Session)
+		// An external session has no app-selected settings, so it resumes with
+		// the provider's own model and configuration.
+		threadID, imported, err := h.server.ImportProviderSession(ctx, params.InstanceID, params.Session, provider.StartSessionInput{})
 		if err != nil {
 			return nil, err
 		}
@@ -714,11 +708,9 @@ func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, option
 	h.client.optionsMu.Lock()
 	current := h.client.optionsSessions[instanceID]
 	active := current != nil && current.optionsSessionID == optionsSessionID
-	if active {
-		current.configOptions = append([]provider.ConfigOption(nil), options...)
-	}
 	var skills []provider.Skill
 	if active {
+		current.configOptions = append([]provider.ConfigOption(nil), options...)
 		skills = append([]provider.Skill(nil), current.skills...)
 	}
 	h.client.optionsMu.Unlock()
@@ -913,6 +905,6 @@ func (c *rpcClient) notify(method string, params any) {
 	case <-c.done:
 	case c.outbound <- rpcOutbound{method: method, params: params}:
 	default:
-		c.overflowClose(method)
+		c.closeConnection("client outbound queue full", "method", method)
 	}
 }

@@ -285,15 +285,9 @@ func (s *Server) doClose() error {
 // ImportProviderSession persists an explicitly selected provider session and
 // installs its empty, replay-pending thread stub in the live engine. Import is
 // serialized so duplicate requests always observe the first completed stub.
-// An external session has no app-selected settings, so it resumes with the
-// provider's own model and configuration.
-func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
-	return s.importProviderSession(ctx, instanceID, summary, provider.StartSessionInput{})
-}
-
-// importProviderSession imports summary with settings' model, config
-// selections and options as the route's resume preferences.
-func (s *Server) importProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary, settings provider.StartSessionInput) (orchestration.ThreadID, bool, error) {
+// settings' model, config selections and options become the route's resume
+// preferences.
+func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary, settings provider.StartSessionInput) (orchestration.ThreadID, bool, error) {
 	if s.metadataStore == nil {
 		return "", false, fmt.Errorf("provider session import requires metadata persistence")
 	}
@@ -428,11 +422,9 @@ func (s *Server) ForkProviderThread(ctx context.Context, sourceThreadID orchestr
 		return "", false, err
 	}
 	if fork.Summary.Title == "" {
-		if source, ok := s.orchestration.ThreadListEntry(sourceThreadID); ok {
-			fork.Summary.Title = source.Title + " (fork)"
-		}
+		fork.Summary.Title = source.Title + " (fork)"
 	}
-	threadID, imported, err := s.importProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
+	threadID, imported, err := s.ImportProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
 	if err != nil {
 		s.cleanupUnpersistedProviderFork(ctx, fork.InstanceID, fork.Summary.SessionID)
 		return "", false, err
@@ -468,9 +460,7 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
-	}
+	s.logProviderStarted(spec, restart, started, err)
 	return info, err
 }
 
@@ -478,19 +468,19 @@ func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, 
 	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
 		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
 	}
-	return s.startProvider(ctx, spec, restart, 30*time.Second)
-}
-
-func (s *Server) startProvider(ctx context.Context, spec provider.InstanceSpec, restart bool, timeout time.Duration) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartInstance(ctx, spec, restart)
+	s.logProviderStarted(spec, restart, started, err)
+	return info, err
+}
+
+func (s *Server) logProviderStarted(spec provider.InstanceSpec, restart bool, started time.Time, err error) {
 	if err == nil {
 		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
 	}
-	return info, err
 }

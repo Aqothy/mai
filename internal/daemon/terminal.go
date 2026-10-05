@@ -141,11 +141,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		Cwd:     cwd,
 		Columns: params.Columns,
 		Rows:    params.Rows,
-	}, terminal.Events{
-		Output: s.publishTerminalOutput,
-		Exit:   s.publishTerminalExit,
-		Agent:  s.publishTerminalAgentReport,
-	})
+	}, s.terminalEvents())
 	if err != nil {
 		if errors.Is(err, terminal.ErrInvalidDimensions) {
 			// Nothing useful was created; a dimension bug should not leave a
@@ -173,7 +169,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		client.unsubscribeTerminal(terminalID)
 		session.SetAttached(false)
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
+		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
@@ -254,11 +250,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		Cwd:     entry.cwd,
 		Columns: params.Columns,
 		Rows:    params.Rows,
-	}, terminal.Events{
-		Output: s.publishTerminalOutput,
-		Exit:   s.publishTerminalExit,
-		Agent:  s.publishTerminalAgentReport,
-	})
+	}, s.terminalEvents())
 	if err != nil {
 		if addedSubscription {
 			client.unsubscribeTerminal(params.TerminalID)
@@ -293,7 +285,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		}
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(params.TerminalID, entry))
+		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
@@ -389,7 +381,7 @@ func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.Terminal
 	rt.mu.Unlock()
 	rt.persist(entry, s.logger)
 
-	summary := s.terminalListSummary(params.TerminalID, entry)
+	summary := s.terminalListSummary(entry)
 	s.publishTerminalListUpsert(summary)
 	return summary, nil
 }
@@ -434,7 +426,7 @@ func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStrea
 
 	summaries := make([]wire.TerminalSummary, 0, len(entries))
 	for _, entry := range entries {
-		summaries = append(summaries, s.terminalListSummary(entry.terminalID, entry))
+		summaries = append(summaries, s.terminalListSummary(entry))
 	}
 	slices.SortFunc(summaries, func(a, b wire.TerminalSummary) int {
 		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
@@ -447,9 +439,9 @@ func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStrea
 
 // terminalListSummary overlays live-run state (without replay bytes) on the
 // persisted identity for list rows.
-func (s *Server) terminalListSummary(terminalID string, entry *terminalEntry) wire.TerminalSummary {
+func (s *Server) terminalListSummary(entry *terminalEntry) wire.TerminalSummary {
 	summary := s.terminalMetaSummary(entry)
-	if session, err := s.terminals.service.Get(terminalID); err == nil {
+	if session, err := s.terminals.service.Get(entry.terminalID); err == nil {
 		summary.Status = session.Status()
 		if code, ok := session.ExitCode(); ok {
 			summary.ExitCode = &code
@@ -490,7 +482,7 @@ func (s *Server) publishTerminalAgentReport(terminalID, runID string, report ter
 	}
 	s.logger.Debug("terminal agent activity", "terminal", terminalID, "run", runID,
 		"agent", report.Kind, "activity", report.Activity)
-	s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
+	s.publishTerminalListUpsert(s.terminalListSummary(entry))
 }
 
 // publishTerminalListUpsert fans one changed summary out to list subscribers.
@@ -619,6 +611,10 @@ func (s *Server) terminalSessionForSubscriber(client *rpcClient, terminalID, run
 	return session, entry, true
 }
 
+func (s *Server) terminalEvents() terminal.Events {
+	return terminal.Events{Output: s.publishTerminalOutput, Exit: s.publishTerminalExit, Agent: s.publishTerminalAgentReport}
+}
+
 func (s *Server) publishTerminalOutput(terminalID, runID string, seq uint64, data []byte) {
 	s.publishTerminalStreamItem(terminalID, wire.TerminalStreamItem{
 		Kind:       terminal.StreamItemOutput,
@@ -642,7 +638,7 @@ func (s *Server) publishTerminalExit(terminalID, runID string, seq uint64, statu
 		entry.operations.Unlock()
 		return
 	}
-	summary := s.terminalListSummary(terminalID, entry)
+	summary := s.terminalListSummary(entry)
 	// Enqueue the run's final list state before releasing the terminal fence,
 	// so a later relaunch/delete update cannot be overtaken by this exit.
 	s.publishTerminalListUpsert(summary)
