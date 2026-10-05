@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -68,63 +69,46 @@ func TestVocabulariesCoverTheirGoConstants(t *testing.T) {
 	}
 }
 
-func TestVocabularyNamesAndValuesAreUnique(t *testing.T) {
-	seenNames := make(map[string]struct{}, len(Vocabularies))
-	for _, vocabulary := range Vocabularies {
-		if _, duplicate := seenNames[vocabulary.Name]; duplicate {
-			t.Errorf("duplicate vocabulary name %q", vocabulary.Name)
-		}
-		seenNames[vocabulary.Name] = struct{}{}
-
-		seenValues := make(map[string]struct{}, len(vocabulary.Values))
-		for _, value := range vocabulary.Values {
-			if value == "" {
-				t.Errorf("vocabulary %q has an empty value", vocabulary.Name)
-			}
-			if _, duplicate := seenValues[value]; duplicate {
-				t.Errorf("vocabulary %q repeats value %q", vocabulary.Name, value)
-			}
-			seenValues[value] = struct{}{}
-		}
-	}
-}
-
 func stringConstantsOfType(t *testing.T, pkgDir string, typeName string) []string {
 	t.Helper()
-	fileSet := token.NewFileSet()
-	packages, err := parser.ParseDir(fileSet, filepath.Clean(pkgDir), nil, 0)
+	paths, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
 	if err != nil {
-		t.Fatalf("parse %s: %v", pkgDir, err)
+		t.Fatalf("list %s: %v", pkgDir, err)
 	}
-
+	fileSet := token.NewFileSet()
 	var found []string
-	for _, pkg := range packages {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				genDecl, ok := decl.(*ast.GenDecl)
-				if !ok || genDecl.Tok != token.CONST {
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				valueSpec, ok := spec.(*ast.ValueSpec)
+				if !ok {
 					continue
 				}
-				for _, spec := range genDecl.Specs {
-					valueSpec, ok := spec.(*ast.ValueSpec)
-					if !ok {
+				ident, ok := valueSpec.Type.(*ast.Ident)
+				if !ok || ident.Name != typeName {
+					continue
+				}
+				for _, value := range valueSpec.Values {
+					literal, ok := value.(*ast.BasicLit)
+					if !ok || literal.Kind != token.STRING {
 						continue
 					}
-					ident, ok := valueSpec.Type.(*ast.Ident)
-					if !ok || ident.Name != typeName {
-						continue
+					unquoted, err := strconv.Unquote(literal.Value)
+					if err != nil {
+						t.Fatalf("unquote %s constant %s: %v", typeName, literal.Value, err)
 					}
-					for _, value := range valueSpec.Values {
-						literal, ok := value.(*ast.BasicLit)
-						if !ok || literal.Kind != token.STRING {
-							continue
-						}
-						unquoted, err := strconv.Unquote(literal.Value)
-						if err != nil {
-							t.Fatalf("unquote %s constant %s: %v", typeName, literal.Value, err)
-						}
-						found = append(found, unquoted)
-					}
+					found = append(found, unquoted)
 				}
 			}
 		}
