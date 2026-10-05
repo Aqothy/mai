@@ -221,35 +221,32 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{}),
 	}
 	handler := &rpcHandler{server: s, client: client}
-	first, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
-		ProviderInstanceID: "provider-a", Cwd: "/first",
-	})
-	if err != nil {
-		t.Fatalf("first get: %v", err)
+	get := func(instanceID provider.InstanceID, cwd string) wire.ProviderOptionsResult {
+		t.Helper()
+		result, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{ProviderInstanceID: instanceID, Cwd: cwd})
+		if err != nil {
+			t.Fatalf("get %s %s: %v", instanceID, cwd, err)
+		}
+		return result
 	}
-	if len(first.Skills) != 1 || first.Skills[0].Name != "review" {
-		t.Fatalf("first options skills = %#v", first.Skills)
+	// Every result path (open, warm reuse, update, set) re-attaches the
+	// session's skills, which only the open call returns from the provider.
+	requireSkills := func(label string, skills []provider.Skill) {
+		t.Helper()
+		if len(skills) != 1 || skills[0].Name != "review" {
+			t.Fatalf("%s skills = %#v, want review", label, skills)
+		}
 	}
-	_, err = handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
-		ProviderInstanceID: "provider-b", Cwd: "/other",
-	})
-	if err != nil {
-		t.Fatalf("second provider get: %v", err)
-	}
-	reused, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
-		ProviderInstanceID: "provider-a", Cwd: "/first",
-	})
-	if err != nil {
-		t.Fatalf("reused get: %v", err)
-	}
+	first := get("provider-a", "/first")
+	requireSkills("first", first.Skills)
+	get("provider-b", "/other")
+	reused := get("provider-a", "/first")
 	if reused.OptionsSessionID != first.OptionsSessionID ||
 		instances["provider-a"].openCount() != 1 ||
 		instances["provider-b"].openCount() != 1 {
 		t.Fatalf("warm switch-back opened another session: first=%#v reused=%#v", first, reused)
 	}
-	if len(reused.Skills) != 1 || reused.Skills[0].Name != "review" {
-		t.Fatalf("reused options skills = %#v", reused.Skills)
-	}
+	requireSkills("reused", reused.Skills)
 	instances["provider-a"].publishOptions("handle-/first", []provider.ConfigOption{{
 		ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow",
 	}})
@@ -260,11 +257,10 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 			!ok ||
 			update.OptionsSessionID != first.OptionsSessionID ||
 			len(update.ConfigOptions) != 1 ||
-			update.ConfigOptions[0].CurrentValue != "slow" ||
-			len(update.Skills) != 1 ||
-			update.Skills[0].Name != "review" {
+			update.ConfigOptions[0].CurrentValue != "slow" {
 			t.Fatalf("options update notification = %#v", message)
 		}
+		requireSkills("update", update.Skills)
 	case <-time.After(2 * time.Second):
 		t.Fatal("spontaneous options update was not routed to the client")
 	}
@@ -274,12 +270,12 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set provider option: %v", err)
 	}
-	if len(setResult.Skills) != 1 || setResult.Skills[0].Name != "review" {
-		t.Fatalf("set options skills = %#v", setResult.Skills)
-	}
+	requireSkills("set", setResult.Skills)
 
 	closeStarted := make(chan struct{}, 1)
 	closeBlock := make(chan struct{})
+	releaseClose := sync.OnceFunc(func() { close(closeBlock) })
+	t.Cleanup(releaseClose)
 	instances["provider-a"].mu.Lock()
 	instances["provider-a"].closeStarted = closeStarted
 	instances["provider-a"].closeBlock = closeBlock
@@ -298,26 +294,22 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	select {
 	case <-closeStarted:
 	case <-time.After(2 * time.Second):
-		close(closeBlock)
 		t.Fatal("replacement did not begin closing the old options session")
 	}
 	var replacement wire.ProviderOptionsResult
 	select {
 	case result := <-replacementDone:
 		if result.err != nil {
-			close(closeBlock)
 			t.Fatalf("replacement get: %v", result.err)
 		}
 		if result.result.OptionsSessionID == first.OptionsSessionID {
-			close(closeBlock)
 			t.Fatal("cwd replacement reused the old options ID")
 		}
 		replacement = result.result
 	case <-time.After(2 * time.Second):
-		close(closeBlock)
 		t.Fatal("replacement waited for best-effort close of the old options session")
 	}
-	close(closeBlock)
+	releaseClose()
 	select {
 	case handle := <-instances["provider-a"].closed:
 		if handle != "handle-/first" {
@@ -347,11 +339,8 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	}); err == nil {
 		t.Fatal("set with invalidated optionsSessionId succeeded")
 	}
-	reopenedAfterInvalidation, err := handler.getProviderOptions(context.Background(), wire.ProviderOptionsGetParams{
-		ProviderInstanceID: "provider-a", Cwd: "/second",
-	})
-	if err != nil || reopenedAfterInvalidation.OptionsSessionID == replacement.OptionsSessionID {
-		t.Fatalf("reopen invalidated provider-a session = %#v, err = %v", reopenedAfterInvalidation, err)
+	if reopened := get("provider-a", "/second"); reopened.OptionsSessionID == replacement.OptionsSessionID {
+		t.Fatalf("reopen invalidated provider-a session = %#v", reopened)
 	}
 	s.disconnectRPCClient(client)
 	for instanceID, wantHandle := range map[provider.InstanceID]string{
