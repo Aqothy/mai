@@ -1309,7 +1309,10 @@ private struct MockChatBubble: View {
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
-        Group {
+        ChatMessageBubble(
+            role: message.role == .user
+                ? MaidMessageRole.user.rawValue : MaidMessageRole.assistant.rawValue
+        ) {
             if message.displayedIsStreaming, message.displayedText.isEmpty {
                 ProgressView()
                     .controlSize(.small)
@@ -1336,24 +1339,6 @@ private struct MockChatBubble: View {
                 }
             }
         }
-        .padding(
-            .horizontal,
-            message.role == .user
-                ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
-        )
-        .padding(
-            .vertical,
-            message.role == .user
-                ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
-        )
-        .background(
-            message.role == .user ? Color.accentColor.opacity(0.15) : Color.clear,
-            in: .rect(cornerRadius: 18)
-        )
-        .frame(
-            maxWidth: .infinity,
-            alignment: message.role == .user ? .trailing : .leading
-        )
     }
 
     private var textPlan: ChatMessageTextPlan {

@@ -22,52 +22,42 @@
         }
 
         static func descriptor(for row: ChatTimelineRenderRow) -> Descriptor? {
+            let id: String
+            let content: Content
             switch row {
             case .prose(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false, segment.annotations?.isEmpty != false else {
-                    return nil
-                }
-                return Descriptor(
-                    id: segment.rowID, content: .prose(segment.source),
-                    top: segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0,
-                    bottom: segment.isLast
-                        ? ChatTimelineMetrics.rowVerticalInset
-                        : ChatTimelineMetrics.interSegmentSpacing)
+                guard segment.role == "assistant", segment.attachments?.isEmpty != false,
+                    segment.annotations?.isEmpty != false
+                else { return nil }
+                id = segment.rowID
+                content = .prose(segment.source)
             case .resolvedMarkdown(let block):
                 guard block.attachments?.isEmpty != false else { return nil }
-                let content: Content
+                id = block.rowID
                 switch block.content {
                 case .proseRun(let prose): content = .resolvedProse(prose)
                 case .code(let code): content = .code(code)
                 case .table(let table): content = .table(table)
                 case .prose: return nil
                 }
-                return Descriptor(
-                    id: block.rowID, content: content,
-                    top: block.isFirst
-                        ? ChatTimelineMetrics.rowVerticalInset
-                        : ChatMarkdownProseStyle.blockSpacing,
-                    bottom: block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0)
             case .richMarkdown(let segment):
-                guard segment.role == "assistant", segment.attachments?.isEmpty != false, segment.annotations?.isEmpty != false,
+                guard segment.role == "assistant", segment.attachments?.isEmpty != false,
+                    segment.annotations?.isEmpty != false,
                     let plan = ChatMarkdownRenderCache.shared.cachedPlan(
                         messageID: segment.rowID, source: segment.source),
                     plan.blocks.count == 1, let block = plan.blocks.first
                 else { return nil }
-                let content: Content
+                // The SwiftUI renderer keys this block's layout the same way.
+                id = "\(segment.rowID)-block-0"
                 switch block {
                 case .prose: return nil
                 case .code(let code): content = .code(code)
                 case .table(let table): content = .table(table)
                 }
-                return Descriptor(
-                    id: "\(segment.rowID)-block-0", content: content,
-                    top: segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0,
-                    bottom: segment.isLast
-                        ? ChatTimelineMetrics.rowVerticalInset
-                        : ChatTimelineMetrics.interSegmentSpacing)
             case .standard: return nil
             }
+            let insets = row.verticalInsets
+            return Descriptor(id: id, content: content, top: insets.top, bottom: insets.bottom)
         }
 
         /// Text and table layouts already contain exact geometry. Code headers

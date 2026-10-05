@@ -887,6 +887,12 @@ struct ChatTimeline: View {
                                 hasEarlierSections: hasEarlierSections
                             )
                         }
+                        .background {
+                            MacListTableViewIntrospector { tableView in
+                                configureMacScrollDocument(tableView)
+                            }
+                            .allowsHitTesting(false)
+                        }
                     }
                 #else
                     List {
@@ -905,12 +911,6 @@ struct ChatTimeline: View {
             .dismissesKeyboardInteractively()
             #if os(macOS)
                 .opacity(isAwaitingInitialBottom ? 0 : 1)
-                .background {
-                    MacListTableViewIntrospector { tableView in
-                        configureMacScrollDocument(tableView)
-                    }
-                    .allowsHitTesting(false)
-                }
             #else
                 .background {
                     ChatListCollectionViewIntrospector { collectionView in
@@ -1922,6 +1922,27 @@ enum ChatTimelineRenderRow: Identifiable {
         }
     }
 
+    /// Vertical spacing around one piece of a split message. Native rows
+    /// reproduce it exactly, so both hosts share this definition.
+    var verticalInsets: (top: CGFloat, bottom: CGFloat) {
+        switch self {
+        case .standard:
+            (0, 0)
+        case .prose(let segment), .richMarkdown(let segment):
+            (
+                segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0,
+                segment.isLast
+                    ? ChatTimelineMetrics.rowVerticalInset : ChatTimelineMetrics.interSegmentSpacing
+            )
+        case .resolvedMarkdown(let block):
+            (
+                block.isFirst
+                    ? ChatTimelineMetrics.rowVerticalInset : ChatMarkdownProseStyle.blockSpacing,
+                block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0
+            )
+        }
+    }
+
     var id: String {
         switch self {
         case .standard(let row): row.id
@@ -1970,67 +1991,30 @@ struct ChatTimelineRenderRowView: View {
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
                 )
-                .environment(
-                    \.chatAnnotationContext,
-                    ChatAnnotationContext(
-                        messageID: segment.messageID,
-                        role: segment.role,
-                        model: annotationModel
-                    )
-                )
-                .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
-                .padding(
-                    .bottom,
-                    segment.isLast
-                        ? ChatTimelineMetrics.rowVerticalInset
-                        : ChatTimelineMetrics.interSegmentSpacing
-                )
 
             case .prose(let segment):
-                ChatNativeTextMessageRow(segment: segment) {
+                ChatMessageBubble(
+                    role: segment.role,
+                    annotations: segment.annotations,
+                    attachments: segment.attachments
+                ) {
                     ChatSelectableText(
                         layoutID: segment.rowID,
                         source: segment.source,
                         layoutStore: textLayoutStore
                     )
                 }
-                .environment(
-                    \.chatAnnotationContext,
-                    ChatAnnotationContext(
-                        messageID: segment.messageID,
-                        role: segment.role,
-                        model: annotationModel
-                    )
-                )
-                .padding(.top, segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0)
-                .padding(
-                    .bottom,
-                    segment.isLast
-                        ? ChatTimelineMetrics.rowVerticalInset
-                        : ChatTimelineMetrics.interSegmentSpacing
-                )
 
             case .resolvedMarkdown(let block):
                 ChatResolvedMarkdownBlockRow(
                     model: block,
                     textLayoutStore: textLayoutStore
                 )
-                .environment(
-                    \.chatAnnotationContext,
-                    ChatAnnotationContext(
-                        messageID: block.messageID,
-                        role: MaidMessageRole.assistant.rawValue,
-                        model: annotationModel
-                    )
-                )
-                    .padding(
-                        .top,
-                    block.isFirst
-                        ? ChatTimelineMetrics.rowVerticalInset : ChatMarkdownProseStyle.blockSpacing
-                    )
-                .padding(.bottom, block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0)
             }
         }
+        .environment(\.chatAnnotationContext, row.annotationContext(model: annotationModel))
+        .padding(.top, row.verticalInsets.top)
+        .padding(.bottom, row.verticalInsets.bottom)
         .frame(
             maxWidth: ChatContentMetrics.maximumWidth,
             alignment: .leading
@@ -2061,42 +2045,34 @@ struct ChatMessageSegmentRowModel {
     var rowID: String { "\(messageID)#segment-\(index)" }
 }
 
-private struct ChatNativeTextMessageRow<NativeText: View>: View {
-    let segment: ChatMessageSegmentRowModel
-    @ViewBuilder let nativeText: () -> NativeText
+/// The shared message layout: a trailing user bubble or a full-width
+/// assistant column, followed by annotation cards and attachments.
+struct ChatMessageBubble<Content: View>: View {
+    let role: String
+    var annotations: [PromptAnnotation]? = nil
+    var attachments: [Attachment]? = nil
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
+        let isUser = role == MaidMessageRole.user.rawValue
         VStack(alignment: .leading) {
-            nativeText()
+            content()
 
-            if let annotations = segment.annotations, !annotations.isEmpty {
+            if let annotations, !annotations.isEmpty {
                 ChatMessageAnnotationsView(annotations: annotations)
             }
 
-            if let attachments = segment.attachments, !attachments.isEmpty {
+            if let attachments, !attachments.isEmpty {
                 ChatMessageAttachmentsView(attachments: attachments)
             }
         }
-        .padding(
-            .horizontal,
-            isUserMessage ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
-        )
-        .padding(
-            .vertical,
-            isUserMessage ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
-        )
+        .padding(.horizontal, isUser ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0)
+        .padding(.vertical, isUser ? ChatTimelineMetrics.userBubbleVerticalPadding : 0)
         .background(
-            isUserMessage ? Color.accentColor.opacity(0.15) : Color.clear,
+            isUser ? Color.accentColor.opacity(0.15) : Color.clear,
             in: .rect(cornerRadius: 18)
         )
-        .frame(
-            maxWidth: .infinity,
-            alignment: isUserMessage ? .trailing : .leading
-        )
-    }
-
-    private var isUserMessage: Bool {
-        segment.role == MaidMessageRole.user.rawValue
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
 
@@ -2108,8 +2084,6 @@ private struct ChatScrollGeometry: Equatable {
     let contentHeight: CGFloat
     let contentOffsetY: CGFloat
 }
-
-
 
 /// Handles explicit jump-to-bottom requests without storing a scroll proxy in
 /// shared state. Automatic following is driven by post-layout geometry below.
@@ -2918,7 +2892,7 @@ private struct ChatMessageRow: View {
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
-        VStack(alignment: .leading) {
+        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments) {
             if !text.isEmpty {
                 // A restored thread can retain a replayed streaming buffer
                 // for its final messages. Once the message presents as
@@ -2941,34 +2915,7 @@ private struct ChatMessageRow: View {
                     )
                 }
             }
-
-            if let annotations, !annotations.isEmpty {
-                ChatMessageAnnotationsView(annotations: annotations)
-            }
-
-            if let attachments, !attachments.isEmpty {
-                ChatMessageAttachmentsView(attachments: attachments)
-            }
         }
-        .padding(
-            .horizontal,
-            role == MaidMessageRole.user.rawValue
-                ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
-        )
-        .padding(
-            .vertical,
-            role == MaidMessageRole.user.rawValue
-                ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
-        )
-        .background(
-            role == MaidMessageRole.user.rawValue
-                ? Color.accentColor.opacity(0.15) : Color.clear,
-            in: .rect(cornerRadius: 18)
-        )
-        .frame(
-            maxWidth: .infinity,
-            alignment: role == MaidMessageRole.user.rawValue ? .trailing : .leading
-        )
     }
 }
 

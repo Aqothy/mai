@@ -38,98 +38,17 @@ nonisolated final class ChatPresentationLifetimeTests: XCTestCase {
 /// chat timeline; it must always agree with a full rebuild.
 nonisolated
 final class ChatTimelineProjectionTests: XCTestCase {
-    // MARK: Timeline fixtures
-
     @MainActor
-    private func makeTimeline(
-        turnCount: Int,
-        itemsPerTurn: Int = 3,
-        responseBytes: Int = 600
-    ) -> [TimelineEntry] {
-        var entries: [TimelineEntry] = []
-        entries.reserveCapacity(turnCount * (2 + itemsPerTurn))
-        let response = String(repeating: "Wrapped prose for the fixture. ", count: max(1, responseBytes / 32))
-        for turn in 0..<turnCount {
-            entries.append(
-                messageEntry(
-                    id: "user-\(turn)",
-                    role: .user,
-                    turnID: "turn-\(turn)",
-                    text: "Fixturized question \(turn)?"
-                )
-            )
-            entries.append(
-                messageEntry(
-                    id: "assistant-\(turn)",
-                    role: .assistant,
-                    turnID: "turn-\(turn)",
-                    text: response
-                )
-            )
-            for item in 0..<itemsPerTurn {
-                entries.append(
-                    itemEntry(
-                        id: "item-\(turn)-\(item)",
-                        kind: .commandExecution,
-                        status: .completed,
-                        turnID: "turn-\(turn)"
-                    )
-                )
+    private func makeTimeline(turnCount: Int) -> [TimelineEntry] {
+        let response = String(repeating: "Wrapped prose for the fixture. ", count: 18)
+        return (0..<turnCount).flatMap { turn in
+            [
+                messageEntry(id: "user-\(turn)", role: .user, turnID: "turn-\(turn)", text: "Question \(turn)?"),
+                messageEntry(id: "assistant-\(turn)", role: .assistant, turnID: "turn-\(turn)", text: response),
+            ] + (0..<3).map { item in
+                itemEntry(id: "item-\(turn)-\(item)", kind: .commandExecution, turnID: "turn-\(turn)")
             }
         }
-        return entries
-    }
-
-    @MainActor
-    private func messageEntry(
-        id: String,
-        role: MaidMessageRole,
-        turnID: String?,
-        text: String
-    ) -> TimelineEntry {
-        TimelineEntry(
-            approval: nil,
-            item: nil,
-            kind: MaidTimelineEntryKind.message.rawValue,
-            message: Message(
-                attachments: nil,
-                createdAt: Date(timeIntervalSince1970: 0),
-                id: id,
-                role: role.rawValue,
-                text: text,
-                turnID: turnID,
-                updatedAt: Date(timeIntervalSince1970: 0)
-            )
-        )
-    }
-
-    @MainActor
-    private func itemEntry(
-        id: String,
-        kind: MaidItemKind,
-        status: MaidItemStatus,
-        turnID: String?
-    ) -> TimelineEntry {
-        TimelineEntry(
-            approval: nil,
-            item: Item(
-                createdAt: Date(timeIntervalSince1970: 0),
-                detailAvailable: nil,
-                id: id,
-                kind: kind.rawValue,
-                payload: nil,
-                sequence: nil,
-                status: status.rawValue,
-                textDelta: nil,
-                title: nil,
-                toolCall: nil,
-                toolCallSummary: nil,
-                turnID: turnID,
-                updatedAt: Date(timeIntervalSince1970: 0)
-            ),
-            kind: MaidTimelineEntryKind.item.rawValue,
-            message: nil
-        )
     }
 
     /// Simulated structural streaming events over `initial`: returns each
@@ -157,8 +76,8 @@ final class ChatTimelineProjectionTests: XCTestCase {
                     itemEntry(
                         id: "streamed-item-\(event)",
                         kind: .commandExecution,
-                        status: .inProgress,
-                        turnID: runningTurnID
+                        turnID: runningTurnID,
+                        status: .inProgress
                     )
                 )
                 steps.append((timeline, index))

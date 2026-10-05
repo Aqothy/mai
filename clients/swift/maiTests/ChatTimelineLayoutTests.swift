@@ -9,36 +9,6 @@ import Testing
 /// renders: contiguous turn sections, compact activity groups, and the fold
 /// that hides a finished turn's work behind a "Worked for Ns" header.
 struct ChatTimelineLayoutTests {
-
-    // MARK: Disclosure choices
-
-    @Test @MainActor
-    func disclosureChoicesAreOwnedByTheTimelineNotItsRows() {
-        let fold = ChatTimelineFoldModel()
-        let thought = ChatDisclosure.thought(itemID: "thought-1")
-        // An untouched thought follows its streaming default.
-        #expect(fold.isExpanded(thought, default: true))
-        #expect(!fold.isExpanded(thought, default: false))
-
-        fold.setExpanded(thought, true)
-        fold.setExpanded(.activityGroup(id: "group-tool-1"), true)
-        fold.setExpanded(.activityItem(itemID: "tool-1"), true)
-        // A recreated row reads the same choice, and an explicit choice
-        // survives the thought completing.
-        #expect(fold.isExpanded(thought, default: false))
-        #expect(fold.isExpanded(.activityGroup(id: "group-tool-1")))
-        #expect(fold.isExpanded(.activityItem(itemID: "tool-1")))
-
-        // Collapsing a group keeps the nested step's own choice for reopening.
-        fold.setExpanded(.activityGroup(id: "group-tool-1"), false)
-        #expect(!fold.isExpanded(.activityGroup(id: "group-tool-1")))
-        #expect(fold.isExpanded(.activityItem(itemID: "tool-1")))
-
-        fold.setExpanded(thought, false)
-        #expect(!fold.isExpanded(thought, default: true))
-        #expect(!fold.isExpanded(.activityItem(itemID: "tool-2")))
-    }
-
     #if os(macOS)
         @Test @MainActor
         func macResolvedProseRunKeepsSelectionContentAndSemantics() async {
@@ -112,110 +82,40 @@ struct ChatTimelineLayoutTests {
         }
     #endif
 
+    /// Follow intent after sequences of native scroll, visibility and
+    /// expansion signals.
     @Test
-    func jumpToBottomRestoresStreamingFollowIntent() {
-        let scrollState = ChatScrollState()
-        scrollState.noteUserScrollActivity(isActive: true)
-
-        #expect(!scrollState.shouldFollowBottom)
-
-        scrollState.requestScrollToBottom(animated: true)
-
-        #expect(scrollState.shouldFollowBottom)
-        #expect(scrollState.bottomScrollRequest.animated)
-    }
-
-    @Test
-    func userScrollAwayKeepsBottomFollowingDisabledAfterGestureEnds() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteUserScrollActivity(isActive: true)
-        scrollState.noteEndVisibility(false)
-        scrollState.noteUserScrollActivity(isActive: false)
-
-        #expect(!scrollState.isUserScrolling)
-        #expect(!scrollState.isNearBottom)
-        #expect(!scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func endingAUserScrollAtTheBottomResumesFollowing() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteUserScrollActivity(isActive: true)
-        scrollState.noteEndVisibility(true)
-        scrollState.noteUserScrollActivity(isActive: false)
-        scrollState.noteScrollReturnedToEnd()
-
-        #expect(!scrollState.isUserScrolling)
-        #expect(scrollState.isNearBottom)
-        #expect(scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func transientEndVisibilityDoesNotUndoAUserScrollAway() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteUserScrollActivity(isActive: true)
-        scrollState.noteEndVisibility(false)
-        scrollState.noteEndVisibility(true)
-        scrollState.noteUserScrollActivity(isActive: false)
-
-        #expect(!scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func keyboardScrollTowardEndResumesOnlyAfterReachingIt() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteScrollAwayFromEnd()
-        scrollState.noteScrollTowardEnd()
-
-        #expect(!scrollState.shouldFollowBottom)
-
-        scrollState.noteEndVisibility(true)
-
-        #expect(scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func transientContentGrowthDoesNotFlashTheJumpButtonWhileFollowing() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteEndVisibility(false)
-
-        #expect(scrollState.isNearBottom)
-        #expect(scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func contentExpansionStopsFollowingUntilTheEndBecomesVisibleAgain() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteContentExpansion()
-
-        #expect(!scrollState.shouldFollowBottom)
-
-        scrollState.noteEndVisibility(false)
-        #expect(!scrollState.isNearBottom)
-
-        scrollState.noteEndVisibility(true)
-        #expect(scrollState.isNearBottom)
-        #expect(scrollState.shouldFollowBottom)
-    }
-
-    @Test
-    func layoutVisibilityDoesNotOverrideExplicitScrollAwayIntent() {
-        let scrollState = ChatScrollState()
-
-        scrollState.noteScrollAwayFromEnd()
-        scrollState.noteEndVisibility(true)
-
-        #expect(scrollState.isNearBottom)
-        #expect(!scrollState.shouldFollowBottom)
-
-        scrollState.noteScrollReturnedToEnd()
-        #expect(scrollState.shouldFollowBottom)
+    func scrollIntentFollowsOnlyWhenTheReaderIsAtTheEnd() {
+        typealias Step = (ChatScrollState) -> Void
+        let userScroll: (Bool) -> Step = { active in { $0.noteUserScrollActivity(isActive: active) } }
+        let endVisible: (Bool) -> Step = { visible in { $0.noteEndVisibility(visible) } }
+        let away: Step = { $0.noteScrollAwayFromEnd() }
+        let towardEnd: Step = { $0.noteScrollTowardEnd() }
+        let returned: Step = { $0.noteScrollReturnedToEnd() }
+        let expansion: Step = { $0.noteContentExpansion() }
+        let cases: [(name: String, steps: [Step], follows: Bool, nearBottom: Bool)] = [
+            ("jump to bottom during a gesture", [userScroll(true), { $0.requestScrollToBottom(animated: true) }], true, true),
+            ("scroll away and release", [userScroll(true), endVisible(false), userScroll(false)], false, false),
+            ("scroll ending at the end", [userScroll(true), endVisible(true), userScroll(false), returned], true, true),
+            ("transient end visibility mid-gesture", [userScroll(true), endVisible(false), endVisible(true), userScroll(false)], false, true),
+            ("keyboard toward end before reaching it", [away, towardEnd], false, false),
+            ("keyboard toward end then reaching it", [away, towardEnd, endVisible(true)], true, true),
+            ("content growth while following", [endVisible(false)], true, true),
+            ("expansion", [expansion], false, true),
+            ("expansion pushing the end away", [expansion, endVisible(false)], false, false),
+            ("expansion with the end visible again", [expansion, endVisible(false), endVisible(true)], true, true),
+            ("layout visibility after explicit scroll away", [away, endVisible(true)], false, true),
+            ("explicit return after scroll away", [away, endVisible(true), returned], true, true),
+        ]
+        for testCase in cases {
+            let state = ChatScrollState()
+            testCase.steps.forEach { $0(state) }
+            #expect(state.shouldFollowBottom == testCase.follows, "\(testCase.name)")
+            #expect(state.isNearBottom == testCase.nearBottom, "\(testCase.name)")
+        }
+        let jump = ChatScrollState()
+        jump.requestScrollToBottom(animated: true)
+        #expect(jump.bottomScrollRequest.animated)
     }
 
     @Test
@@ -247,302 +147,110 @@ struct ChatTimelineLayoutTests {
         #expect(secondPage.map(\.id) == sections.map(\.id))
     }
 
-    // MARK: Grouping
+    // MARK: Grouping and folding
 
     @Test
-    func groupsConsecutiveActivityItemsIntoOneRow() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: "turn-1"),
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
-                itemEntry(id: "i3", kind: .toolCall, turnID: "turn-1"),
-                assistantMessageEntry(id: "m2", turnID: "turn-1"),
-            ],
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == ["message", "turnActivity", "group", "message"])
-        #expect(activityGroup(rows[2])?.items.map(\.id) == ["i1", "i2", "i3"])
-    }
-
-    /// Reasoning is prose, not a step: it renders as its own text row and
-    /// never joins tool-call groups.
-    @Test
-    func reasoningRendersAsThoughtRowOutsideGroups() {
-        let timeline = [
-            userMessageEntry(id: "m1", turnID: "turn-1"),
-            itemEntry(id: "i1", kind: .reasoning, turnID: "turn-1"),
-            itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-            itemEntry(id: "i3", kind: .commandExecution, turnID: "turn-1"),
-            assistantMessageEntry(id: "m2", turnID: "turn-1"),
+    func rowsGroupFoldAndKeepAttentionItemsVisible() {
+        let cases: [(name: String, timeline: [TimelineEntry], streaming: String?, expanded: Set<String>, kinds: [String])] = [
+            ("consecutive activity groups",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
+              itemEntry(id: "i3", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1")],
+             "turn-1", [], ["message", "turnActivity", "group", "message"]),
+            ("reasoning stays outside groups while running",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .reasoning, turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1")],
+             "turn-1", [], ["message", "turnActivity", "thought", "group", "message"]),
+            ("reasoning folds once finished",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .reasoning, turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1")],
+             nil, [], ["message", "turnActivity", "message"]),
+            ("assistant message splits groups",
+             [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
+             "turn-1", [], ["turnActivity", "group", "message", "group"]),
+            ("expanded finished turn shows intermediate segments",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
+              assistantMessageEntry(id: "m3", turnID: "turn-1")],
+             nil, ["turn-1"], ["message", "turnActivity", "group", "message", "group", "message"]),
+            ("empty streamed segment produces no row",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              messageEntry(id: "m2", role: .assistant, turnID: "turn-1", text: ""),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1")],
+             "turn-1", [], ["message", "turnActivity", "group"]),
+            ("previous turn folds while the next runs",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1"),
+              userMessageEntry(id: "m3", turnID: "turn-2"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2")],
+             "turn-2", [], ["message", "turnActivity", "message", "message", "turnActivity", "group"]),
+            ("steering prompt stays inside its turn",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              userMessageEntry(id: "m2", turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
+             "turn-1", [], ["message", "turnActivity", "group", "message", "group"]),
+            // Restored history has no turn ids; user messages split sections.
+            ("history without turn ids",
+             [userMessageEntry(id: "m1", turnID: nil),
+              itemEntry(id: "i1", kind: .toolCall, turnID: nil),
+              assistantMessageEntry(id: "m2", turnID: nil),
+              userMessageEntry(id: "m3", turnID: nil),
+              itemEntry(id: "i2", kind: .toolCall, turnID: nil),
+              assistantMessageEntry(id: "m4", turnID: nil)],
+             nil, ["local-m3"], ["message", "turnActivity", "message", "message", "turnActivity", "group", "message"]),
+            ("warnings and errors never fold",
+             [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              itemEntry(id: "i2", kind: .warning, turnID: "turn-1"),
+              itemEntry(id: "i3", kind: .error, turnID: "turn-1")],
+             nil, [], ["turnActivity", "notice", "notice"]),
+            ("pending approval stays visible",
+             [approvalEntry(requestID: "r1", status: .pending, turnID: "turn-1")],
+             nil, [], ["approval"]),
+            ("resolved approval folds",
+             [approvalEntry(requestID: "r1", status: .resolved, turnID: "turn-1")],
+             nil, [], ["turnActivity"]),
         ]
-
-        let running = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-        #expect(running.map(kindLabel) == [
-            "message", "turnActivity", "thought", "group", "message",
-        ])
-        #expect(activityGroup(running[3])?.items.map(\.id) == ["i2", "i3"])
-
-        let folded = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-        #expect(folded.map(kindLabel) == ["message", "turnActivity", "message"])
-    }
-
-    @Test
-    func assistantMessageSplitsActivityGroups() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                assistantMessageEntry(id: "m1", turnID: "turn-1"),
-                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-            ],
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == ["turnActivity", "group", "message", "group"])
-        #expect(activityGroup(rows[1])?.items.map(\.id) == ["i1"])
-        #expect(activityGroup(rows[3])?.items.map(\.id) == ["i2"])
-    }
-
-    // MARK: Folding
-
-    @Test
-    func finishedTurnFoldsActivityBehindHeader() {
-        let timeline = [
-            userMessageEntry(id: "m1", turnID: "turn-1"),
-            itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-            itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
-            assistantMessageEntry(id: "m2", turnID: "turn-1"),
-        ]
-
-        let folded = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-        #expect(folded.map(kindLabel) == ["message", "turnActivity", "message"])
-
-        let expanded = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: ["turn-1"]
-        )
-        #expect(expanded.map(kindLabel) == ["message", "turnActivity", "group", "message"])
-    }
-
-    /// Once a turn finishes, only its final assistant message stays visible;
-    /// intermediate segments fold along with the activity.
-    @Test
-    func foldedTurnKeepsOnlyFinalAssistantMessage() {
-        let timeline = [
-            userMessageEntry(id: "m1", turnID: "turn-1"),
-            itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-            assistantMessageEntry(id: "m2", turnID: "turn-1"),
-            itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
-            assistantMessageEntry(id: "m3", turnID: "turn-1"),
-        ]
-
-        let folded = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
+        for testCase in cases {
+            let result = rows(testCase.timeline, streaming: testCase.streaming, expanded: testCase.expanded)
+            #expect(result.map(kindLabel) == testCase.kinds, "\(testCase.name)")
+        }
+        let grouped = rows(cases[0].timeline, streaming: "turn-1")
+        #expect(activityGroup(grouped[2])?.items.map(\.id) == ["i1", "i2", "i3"])
+        let folded = rows(cases[4].timeline, streaming: nil)
         #expect(folded.map(kindLabel) == ["message", "turnActivity", "message"])
         #expect(folded.last?.id == "message-m3")
-
-        let expanded = ChatTimelineLayout.rows(
-            timeline: timeline,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: ["turn-1"]
-        )
-        #expect(expanded.map(kindLabel) == [
-            "message", "turnActivity", "group", "message", "group", "message",
-        ])
-    }
-
-    /// A running turn shows a live header (the working timer) with all of
-    /// its activity visible — nothing folds until the turn finishes.
-    @Test
-    func runningTurnShowsLiveHeaderAndUnfoldedActivity() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: "turn-1"),
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-            ],
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == ["message", "turnActivity", "group"])
-        #expect(turnActivity(rows[1])?.isRunning == true)
+        let previous = rows(cases[6].timeline, streaming: "turn-2")
+        #expect(turnActivity(previous[1])?.isRunning == false)
+        #expect(turnActivity(previous[4])?.isRunning == true)
     }
 
     /// The header appears as soon as the turn starts, before any activity.
     @Test
     func runningTurnShowsHeaderBeforeFirstActivity() {
         let startedAt = Date(timeIntervalSince1970: 2_000)
-        let rows = ChatTimelineLayout.rows(
-            timeline: [userMessageEntry(id: "m1", turnID: "turn-1")],
-            streamingTurnID: "turn-1",
+        let result = rows(
+            [userMessageEntry(id: "m1", turnID: "turn-1")],
+            streaming: "turn-1",
             latestTurn: Turn(
-                completedAt: nil,
-                error: nil,
-                interruptRequested: nil,
-                requestedAt: startedAt,
-                startedAt: startedAt,
-                state: MaidTurnState.running.rawValue,
-                stopReason: nil,
-                turnID: "turn-1"
-            ),
-            expandedSectionIDs: []
+                completedAt: nil, error: nil, interruptRequested: nil, requestedAt: startedAt,
+                startedAt: startedAt, state: MaidTurnState.running.rawValue, stopReason: nil,
+                turnID: "turn-1")
         )
-
-        #expect(rows.map(kindLabel) == ["message", "turnActivity"])
-        #expect(turnActivity(rows[1])?.isRunning == true)
-        #expect(turnActivity(rows[1])?.startedAt == startedAt)
-    }
-
-    /// Empty streamed segments must not become blank padded rows.
-    @Test
-    func emptyMessagesProduceNoRows() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: "turn-1"),
-                messageEntry(id: "m2", role: .assistant, turnID: "turn-1", text: ""),
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-            ],
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == ["message", "turnActivity", "group"])
-    }
-
-    @Test
-    func previousTurnFoldsWhileNextTurnRuns() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: "turn-1"),
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                assistantMessageEntry(id: "m2", turnID: "turn-1"),
-                userMessageEntry(id: "m3", turnID: "turn-2"),
-                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2"),
-            ],
-            streamingTurnID: "turn-2",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == [
-            "message", "turnActivity", "message",
-            "message", "turnActivity", "group",
-        ])
-        #expect(turnActivity(rows[1])?.isRunning == false)
-        #expect(turnActivity(rows[4])?.isRunning == true)
-    }
-
-    /// A steering prompt is stamped with the running turn's id; it must not
-    /// split the section or fold the activity that follows it.
-    @Test
-    func steeringMessageStaysInsideItsTurn() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: "turn-1"),
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                userMessageEntry(id: "m2", turnID: "turn-1"),
-                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-            ],
-            streamingTurnID: "turn-1",
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == [
-            "message", "turnActivity", "group", "message", "group",
-        ])
-    }
-
-    /// Restored history replays without turn ids; sections then split on user
-    /// messages so each prompt/response pair still folds independently.
-    @Test
-    func historyWithoutTurnIDsSplitsOnUserMessages() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                userMessageEntry(id: "m1", turnID: nil),
-                itemEntry(id: "i1", kind: .toolCall, turnID: nil),
-                assistantMessageEntry(id: "m2", turnID: nil),
-                userMessageEntry(id: "m3", turnID: nil),
-                itemEntry(id: "i2", kind: .toolCall, turnID: nil),
-                assistantMessageEntry(id: "m4", turnID: nil),
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: ["local-m3"]
-        )
-
-        #expect(rows.map(kindLabel) == [
-            "message", "turnActivity", "message",
-            "message", "turnActivity", "group", "message",
-        ])
-    }
-
-    @Test
-    func warningsAndErrorsNeverFold() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-                itemEntry(id: "i2", kind: .warning, turnID: "turn-1"),
-                itemEntry(id: "i3", kind: .error, turnID: "turn-1"),
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(rows.map(kindLabel) == ["turnActivity", "notice", "notice"])
-    }
-
-    @Test
-    func pendingApprovalStaysVisibleAndResolvedApprovalFolds() {
-        let pending = ChatTimelineLayout.rows(
-            timeline: [
-                approvalEntry(requestID: "r1", status: .pending, turnID: "turn-1")
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-        #expect(pending.map(kindLabel) == ["approval"])
-
-        let resolved = ChatTimelineLayout.rows(
-            timeline: [
-                approvalEntry(requestID: "r1", status: .resolved, turnID: "turn-1")
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-        #expect(resolved.map(kindLabel) == ["turnActivity"])
+        #expect(result.map(kindLabel) == ["message", "turnActivity"])
+        #expect(turnActivity(result[1])?.isRunning == true)
+        #expect(turnActivity(result[1])?.startedAt == startedAt)
     }
 
     // MARK: Turn header
@@ -574,22 +282,17 @@ struct ChatTimelineLayoutTests {
              nil, "Stopped"),
         ]
         for testCase in cases {
-            let rows = ChatTimelineLayout.rows(
-                timeline: testCase.timeline,
-                streamingTurnID: nil,
-                latestTurn: testCase.latestTurn,
-                expandedSectionIDs: []
-            )
-            #expect(turnActivity(rows[0])?.title == testCase.title)
-            #expect(turnActivity(rows[0])?.stepCount == testCase.timeline.count)
+            let result = rows(testCase.timeline, streaming: nil, latestTurn: testCase.latestTurn)
+            #expect(turnActivity(result[0])?.title == testCase.title)
+            #expect(turnActivity(result[0])?.stepCount == testCase.timeline.count)
         }
     }
 
     @Test
     func stoppedOlderTurnKeepsItsOutcomeAfterLateToolCompletion() {
         let startedAt = Date(timeIntervalSince1970: 3_000)
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
+        let result = rows(
+            [
                 // The provider finished the command after the stop.
                 itemEntry(
                     id: "i1", kind: .commandExecution, turnID: "turn-1",
@@ -597,7 +300,7 @@ struct ChatTimelineLayoutTests {
                 ),
                 itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2"),
             ],
-            streamingTurnID: nil,
+            streaming: nil,
             latestTurn: Turn(
                 completedAt: nil, error: nil, interruptRequested: nil,
                 requestedAt: startedAt.addingTimeInterval(60), startedAt: startedAt.addingTimeInterval(60),
@@ -609,80 +312,57 @@ struct ChatTimelineLayoutTests {
                     requestedAt: startedAt, startedAt: startedAt,
                     state: MaidTurnState.interrupted.rawValue, stopReason: nil, turnID: "turn-1"
                 )
-            ],
-            expandedSectionIDs: []
+            ]
         )
 
-        #expect(turnActivity(rows[0])?.title == "Stopped after 9s")
-    }
-
-    @Test
-    func interruptedStepInOlderTurnAlsoReadsStopped() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        )
-
-        #expect(turnActivity(rows[0])?.title == "Stopped")
+        #expect(turnActivity(result[0])?.title == "Stopped after 9s")
     }
 
     @Test
     func headerFlagsFailedSteps() {
-        let rows = ChatTimelineLayout.rows(
-            timeline: [
-                itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .failed)
-            ],
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
+        let result = rows(
+            [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .failed)],
+            streaming: nil
         )
-
-        #expect(turnActivity(rows[0])?.hasFailure == true)
+        #expect(turnActivity(result[0])?.hasFailure == true)
     }
 
     // MARK: Summaries
 
     @Test
-    func summarizesGroupedActivityByVerb() {
-        let group = ChatActivityGroup(items: [
-            makeItem(id: "i1", kind: .toolCall, action: .read),
-            makeItem(id: "i2", kind: .toolCall, action: .read),
-            makeItem(id: "i3", kind: .commandExecution),
-        ])
-
-        #expect(group.summary == "Read 2 files, ran a command")
-    }
-
-    @Test
-    func summarizesEditsAndSearches() {
-        let group = ChatActivityGroup(items: [
-            makeItem(id: "i1", kind: .fileChange),
-            makeItem(id: "i2", kind: .fileChange),
-            makeItem(id: "i3", kind: .toolCall, action: .search),
-        ])
-
-        #expect(group.summary == "Edited 2 files, searched")
-    }
-
-    @Test
-    func summarizesSingleNamedTool() {
-        let group = ChatActivityGroup(items: [
-            makeItem(id: "i1", kind: .mcpToolCall, action: .other, toolName: "list_issues")
-        ])
-
-        #expect(group.summary == "Used list_issues")
-    }
-
-    @Test
-    func durationFormatting() {
+    func summarizesGroupedActivity() {
+        let cases: [(items: [Item], summary: String)] = [
+            ([makeItem(id: "i1", kind: .toolCall, action: .read),
+              makeItem(id: "i2", kind: .toolCall, action: .read),
+              makeItem(id: "i3", kind: .commandExecution)], "Read 2 files, ran a command"),
+            ([makeItem(id: "i1", kind: .fileChange),
+              makeItem(id: "i2", kind: .fileChange),
+              makeItem(id: "i3", kind: .toolCall, action: .search)], "Edited 2 files, searched"),
+            ([makeItem(id: "i1", kind: .mcpToolCall, action: .other, toolName: "list_issues")], "Used list_issues"),
+        ]
+        for testCase in cases {
+            #expect(ChatActivityGroup(items: testCase.items).summary == testCase.summary)
+        }
         #expect(ChatTurnActivity.formatted(.seconds(3)) == "3s")
         #expect(ChatTurnActivity.formatted(.seconds(60)) == "1m")
         #expect(ChatTurnActivity.formatted(.seconds(125)) == "2m 5s")
     }
+}
+
+private func rows(
+    _ timeline: [TimelineEntry],
+    streaming: String?,
+    expanded: Set<String> = [],
+    latestTurn: Turn? = nil,
+    previousTurns: [Turn] = []
+) -> [ChatTimelineRowModel] {
+    ChatTimelineLayout.rows(
+        sections: ChatTimelineLayout.sections(timeline: timeline),
+        streamingTurnID: streaming,
+        latestTurn: latestTurn,
+        previousTurns: previousTurns,
+        expandedSectionIDs: expanded
+    )
 }
 
 // MARK: - Fixtures
@@ -716,7 +396,7 @@ private func assistantMessageEntry(id: String, turnID: String?) -> TimelineEntry
     messageEntry(id: id, role: .assistant, turnID: turnID)
 }
 
-private func messageEntry(
+func messageEntry(
     id: String,
     role: MaidMessageRole,
     turnID: String?,
@@ -738,7 +418,7 @@ private func messageEntry(
     )
 }
 
-private func itemEntry(
+func itemEntry(
     id: String,
     kind: MaidItemKind,
     turnID: String?,

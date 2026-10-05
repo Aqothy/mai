@@ -18,22 +18,6 @@ import Foundation
 /// - The running turn's content is always visible.
 /// - Warnings, errors, and pending approvals never fold.
 nonisolated enum ChatTimelineLayout {
-    static func rows(
-        timeline: [TimelineEntry],
-        streamingTurnID: String?,
-        latestTurn: Turn?,
-        previousTurns: [Turn] = [],
-        expandedSectionIDs: Set<String>
-    ) -> [ChatTimelineRowModel] {
-        rows(
-            sections: sections(timeline: timeline),
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
-            previousTurns: previousTurns,
-            expandedSectionIDs: expandedSectionIDs
-        )
-    }
-
     /// Emits rows from an already projected timeline. Keeping these sections
     /// as the List input prevents a live view from retaining the generated
     /// model's large `TimelineEntry` array while the store appends text to its

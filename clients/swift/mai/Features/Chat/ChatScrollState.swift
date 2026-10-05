@@ -96,13 +96,7 @@ final class ChatScrollState {
     }
 
     func reset() {
-        resumesWhenEndBecomesVisible = true
-        if !isNearBottom {
-            isNearBottom = true
-        }
-        if !shouldFollowBottom {
-            shouldFollowBottom = true
-        }
+        noteScrollReturnedToEnd()
         if isUserScrolling {
             isUserScrolling = false
         }
