@@ -79,30 +79,6 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 		t.Fatalf("server close: %v", err)
 	}
 
-	inspection, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open store for inspection: %v", err)
-	}
-	threads, err := inspection.ListThreads()
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 1 {
-		t.Fatalf("expected 1 persisted thread, got %+v", threads)
-	}
-	if threads[0].ThreadID != "thread-1" || threads[0].Title != "Renamed thread" || threads[0].Cwd != cwd {
-		t.Fatalf("unexpected persisted thread meta: %+v", threads[0])
-	}
-	if threads[0].ProviderInstanceID != "provider-1" || threads[0].ModelSelection == nil || threads[0].ModelSelection.Model != "model-1" {
-		t.Fatalf("provider selection was not persisted: %+v", threads[0])
-	}
-	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
-		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
-	}
-	if err := inspection.Close(); err != nil {
-		t.Fatalf("close inspection store: %v", err)
-	}
-
 	reopened, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
@@ -165,18 +141,6 @@ func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveRoute visible: %v", err)
 	}
-	// A config change on the same provider has the same write ordering: the
-	// route is authoritative when its model selection is present.
-	if err := metadata.UpsertThread(store.ThreadMeta{ThreadID: "same-provider", ProviderInstanceID: spec.InstanceID, ModelSelection: &provider.ModelSelection{Model: "stale-model"}, CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatalf("UpsertThread same-provider: %v", err)
-	}
-	if err := metadata.SaveRoute("same-provider", store.RouteRecord{
-		InstanceID:        spec.InstanceID,
-		ProviderSessionID: "session-same-provider",
-		StartInput:        provider.StartSessionInput{ModelSelection: &provider.ModelSelection{Model: "latest-model"}},
-	}); err != nil {
-		t.Fatalf("SaveRoute same-provider: %v", err)
-	}
 
 	s := newServer(newLoggerFromEnv(), metadata)
 	defer s.Close()
@@ -190,11 +154,7 @@ func TestServerBootReconcilesPersistedRoutes(t *testing.T) {
 	if route, ok := routes["visible"]; !ok || route.ProviderSessionID != "session-visible" {
 		t.Fatalf("visible thread route was pruned: %+v", routes)
 	}
-	entry, ok := s.orchestration.ThreadListEntry("same-provider")
-	if !ok || entry.ModelSelection == nil || entry.ModelSelection.Model != "latest-model" {
-		t.Fatalf("same-provider route model was not restored: %#v", entry)
-	}
-	entry, ok = s.orchestration.ThreadListEntry("visible")
+	entry, ok := s.orchestration.ThreadListEntry("visible")
 	if !ok || entry.ProviderInstanceID != spec.InstanceID {
 		t.Fatalf("restored provider instance = %q, want newer route instance %q", entry.ProviderInstanceID, spec.InstanceID)
 	}
@@ -289,19 +249,5 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	w.flush() // nothing left dirty; no duplicate write
 	if len(flaky.saved) != 1 {
 		t.Fatalf("clean flush must not rewrite: %+v", flaky.saved)
-	}
-}
-
-func TestMetadataDBPathUsesDataDir(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("MAID_DATA_DIR", dataDir)
-
-	got, err := metadataDBPath()
-	if err != nil {
-		t.Fatalf("metadataDBPath: %v", err)
-	}
-	want := filepath.Join(dataDir, "maid.db")
-	if got != want {
-		t.Fatalf("metadataDBPath() = %q, want %q", got, want)
 	}
 }

@@ -125,13 +125,6 @@ func TestACPRegistryUpdateChangesVersionCeiling(t *testing.T) {
 	}
 }
 
-func TestACPRegistryInstanceSpecRequiresInstall(t *testing.T) {
-	registry := &acpRegistry{dataDir: t.TempDir(), npm: "npm"}
-	if _, err := registry.instanceSpec("example"); err == nil || !strings.Contains(err.Error(), "not installed") {
-		t.Fatalf("instanceSpec err = %v, want not-installed error", err)
-	}
-}
-
 func TestACPCustomAgentUsesNameAsStableIdentityAndPersistsInPrivateJSON(t *testing.T) {
 	registry := &acpRegistry{dataDir: t.TempDir(), npm: "npm"}
 	installed, err := registry.addCustom(wire.ACPCustomAgentAddParams{

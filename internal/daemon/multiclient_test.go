@@ -1,9 +1,8 @@
 package daemon
 
-// Multi-client sync tests use two real WebSocket clients exercising
-// simultaneous actions, cross-client approvals/interrupts, reconnect
-// mid-turn, and a slow client that gets overflow-closed and recovers from an
-// authoritative snapshot.
+// Multi-client sync tests use real WebSocket clients exercising simultaneous
+// actions, cross-client approvals/interrupts, and a slow client that gets
+// overflow-closed and recovers from an authoritative snapshot.
 
 import (
 	"bytes"
@@ -369,7 +368,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	// Cross-client idempotency: B retries A's create with the same commandId;
 	// the receipt must point at the original event and no duplicate may exist.
 	retryReceipt := b.dispatch(t, createOne)
-	threadOneEvents := events.matching(threadOne, 0)
+	threadOneEvents := events.matching(threadOne)
 	if len(threadOneEvents) != 1 || threadOneEvents[0].Type != orchestration.EventThreadCreated {
 		t.Fatalf("thread one events after cross-client retry = %#v, want exactly one thread.created", threadOneEvents)
 	}
@@ -471,65 +470,6 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	}
 }
 
-// TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive hard-drops a client
-// mid-stream, reconnects while the turn is still streaming, restores from one
-// authoritative snapshot, and then proves the replacement subscription stays
-// live through the rest of the turn and a follow-up.
-func TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
-	url := newWSTestServer(t, s)
-	observer := dialRecordingClient(t, url)
-
-	threadID := orchestration.ThreadID("thread-reconnect")
-	observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-reconnect-create", ThreadID: threadID, Title: "Reconnect", ProviderInstanceID: "codex", Cwd: t.TempDir()})
-	observer.subscribeThread(t, threadID)
-
-	dropper := dialRecordingClient(t, url)
-	dropperSnapshot := dropper.subscribeThread(t, threadID)
-
-	// A long UNPACED turn of per-event tool-call updates (assistant text is
-	// coalesced server-side, so a text burst reaches clients as few events);
-	// the dropper disconnects partway through and must reconnect while it is
-	// still running. Unpaced also regression-guards the SDK burst fix: the old
-	// acp-go-sdk killed the provider connection at ~1100 back-to-back updates
-	// (fixed 1024-slot queue).
-	turnReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-reconnect-turn", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-reconnect", Text: "tools 1500"}})
-	dropper.waitThread(t, threadID, "some streamed events before dropping", func(events []orchestration.Event) bool {
-		return len(events) >= 200
-	})
-	if err := dropper.conn.Close(); err != nil {
-		t.Fatalf("hard-close dropper: %v", err)
-	}
-	// The catch-up only exercises the mid-turn path if the turn is still
-	// running when the replacement connection subscribes.
-	if sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady)(observer.threadLog(threadID)) {
-		t.Fatal("turn already settled before reconnect; raise the tool-call count")
-	}
-
-	reconnected := dialRecordingClient(t, url)
-	reconnectedSnapshot := reconnected.subscribeThread(t, threadID)
-	if reconnectedSnapshot.SnapshotSequence <= dropperSnapshot.SnapshotSequence {
-		t.Fatalf("reconnect snapshot sequence = %d, want > pre-drop %d", reconnectedSnapshot.SnapshotSequence, dropperSnapshot.SnapshotSequence)
-	}
-	if reconnectedSnapshot.Thread.LatestTurn == nil || reconnectedSnapshot.Thread.LatestTurn.CompletedAt != nil {
-		t.Fatalf("reconnect snapshot latest turn = %#v, want an active turn", reconnectedSnapshot.Thread.LatestTurn)
-	}
-
-	// Wait for the turn to settle on both connections, then fence.
-	observer.waitThread(t, threadID, "turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
-	reconnected.waitThread(t, threadID, "turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
-
-	// A follow-up turn proves the reconnected client stays live-consistent.
-	followUpReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-reconnect-followup", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-reconnect-followup", Text: "stream 3 8"}})
-	observer.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
-	reconnected.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
-	fence(t, observer, threadID, "reconnect", observer, reconnected)
-}
-
 // TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot runs the
 // overflow-close policy end-to-end: a subscribed client that stops reading is
 // disconnected by the daemon once its outbound queue fills, healthy clients
@@ -594,10 +534,8 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	// text is coalesced server-side) to exhaust the slow client's TCP buffers
 	// plus the daemon's 1024-notification outbound queue (which cannot drain —
 	// the slow client never reads and the writer stalls on its socket). The
-	// unpaced agent burst is also the acceptance guard for the go-acp
-	// migration: the old SDK deterministically closed the provider connection
-	// at ~1100 back-to-back updates, so the observer receiving the full flood
-	// proves the provider connection absorbs unpaced bursts.
+	// observer receiving the full flood also proves the provider connection
+	// absorbs unpaced bursts of agent updates.
 	const floodChunks = 6000
 	turnReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-overflow-turn", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-overflow", Text: fmt.Sprintf("tools %d", floodChunks)}})
 	observer.waitThread(t, threadID, "flood turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))

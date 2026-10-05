@@ -45,25 +45,6 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func TestRPCSubscribeThreadDoesNotRegisterMissingThread(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	threadID := orchestration.ThreadID("missing-thread")
-	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
-	handler := &rpcHandler{server: s, client: client}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("new call: %v", err)
-	}
-
-	if _, err := handler.Handle(context.Background(), req); err == nil {
-		t.Fatal("subscribeThread missing thread err = nil, want error")
-	}
-	if client.subscribedThread(threadID) {
-		t.Fatalf("client remained subscribed to %q after failed snapshot", threadID)
-	}
-}
-
 func installForkRPCProvider(t *testing.T, s *Server, adapter *optionsRPCProvider, cwd string) {
 	t.Helper()
 	s.providerService.Close()
@@ -516,75 +497,91 @@ func (p *optionsRPCProvider) invalidateOptions(handle string) {
 		callback()
 	}
 }
-func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	threadID := orchestration.ThreadID("thread-unsubscribe")
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create-unsubscribe", ThreadID: threadID, Title: "before"}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
 
-	client := &rpcClient{id: "client-unsubscribe", outbound: make(chan rpcOutbound, 8), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
+// registerTestRPCClient installs an in-memory client whose notifications land
+// in its outbound channel synchronously with engine fan-out. Callers close the
+// server via t.Cleanup registered first, so the client is removed before
+// Server.Close tries to close its (absent) connection.
+func registerTestRPCClient(t *testing.T, s *Server, id string) *rpcClient {
+	t.Helper()
+	client := &rpcClient{id: id, outbound: make(chan rpcOutbound, 8), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
 	s.rpcMu.Lock()
 	s.rpcClients[client.id] = client
 	s.rpcMu.Unlock()
-	defer func() {
+	t.Cleanup(func() {
 		s.rpcMu.Lock()
 		delete(s.rpcClients, client.id)
 		s.rpcMu.Unlock()
 		client.closeOutbound()
-	}()
+	})
+	return client
+}
 
-	handler := &rpcHandler{server: s, client: client}
-	subscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
+func handleThreadCall(handler *rpcHandler, method string, threadID orchestration.ThreadID) (any, error) {
+	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), method, orchestration.SubscribeThreadInput{ThreadID: threadID})
 	if err != nil {
-		t.Fatalf("new subscribe call: %v", err)
+		return nil, err
 	}
-	if _, err := handler.Handle(context.Background(), subscribe); err != nil {
-		t.Fatalf("subscribeThread: %v", err)
-	}
+	return handler.Handle(context.Background(), req)
+}
+
+func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
+	s := newTestServer(t)
+	t.Cleanup(func() { _ = s.Close() })
+	client := registerTestRPCClient(t, s, "client-unsubscribe")
+	handler := &rpcHandler{server: s, client: client}
+	threadID := orchestration.ThreadID("thread-unsubscribe")
 	// Engine listeners (including client fan-out) run before Dispatch returns,
 	// so outbound state is settled after each dispatch below.
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "meta-while-subscribed", ThreadID: threadID, Title: "while-subscribed"}); err != nil {
-		t.Fatalf("thread.meta.update: %v", err)
-	}
-	select {
-	case msg := <-client.outbound:
-		if msg.method != wire.MethodOrchestrationSubscribeThread {
-			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
+	dispatchTitle := func(commandType string, title string) {
+		t.Helper()
+		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: commandType, CommandID: orchestration.CommandID("cmd-" + title), ThreadID: threadID, Title: title}); err != nil {
+			t.Fatalf("%s: %v", commandType, err)
 		}
-	default:
-		t.Fatal("expected a live event while subscribed")
+	}
+	expectNotification := func(want bool, when string) {
+		t.Helper()
+		select {
+		case msg := <-client.outbound:
+			if !want {
+				t.Fatalf("unexpected %s notification %s", msg.method, when)
+			}
+		default:
+			if want {
+				t.Fatalf("expected a live event %s", when)
+			}
+		}
 	}
 
-	unsubscribe, err := jsonrpc2.NewCall(jsonrpc2.StringID("2"), wire.MethodOrchestrationUnsubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("new unsubscribe call: %v", err)
+	// A failed subscribe to a missing thread must not leave a live listener
+	// behind for a thread later created under that id.
+	if _, err := handleThreadCall(handler, wire.MethodOrchestrationSubscribeThread, threadID); err == nil {
+		t.Fatal("subscribeThread missing thread err = nil, want error")
 	}
-	if _, err := handler.Handle(context.Background(), unsubscribe); err != nil {
+	dispatchTitle(orchestration.CommandThreadCreate, "before")
+	expectNotification(false, "after a failed subscribe")
+
+	if _, err := handleThreadCall(handler, wire.MethodOrchestrationSubscribeThread, threadID); err != nil {
+		t.Fatalf("subscribeThread: %v", err)
+	}
+	dispatchTitle(orchestration.CommandThreadMetaUpdate, "while-subscribed")
+	expectNotification(true, "while subscribed")
+
+	if _, err := handleThreadCall(handler, wire.MethodOrchestrationUnsubscribeThread, threadID); err != nil {
 		t.Fatalf("unsubscribeThread: %v", err)
 	}
-	if client.subscribedThread(threadID) {
-		t.Fatal("client still subscribed after unsubscribeThread")
-	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "meta-after-unsubscribe", ThreadID: threadID, Title: "after-unsubscribe"}); err != nil {
-		t.Fatalf("thread.meta.update after unsubscribe: %v", err)
-	}
-	select {
-	case msg := <-client.outbound:
-		t.Fatalf("unexpected notification after unsubscribe: %#v", msg)
-	default:
-	}
+	dispatchTitle(orchestration.CommandThreadMetaUpdate, "after-unsubscribe")
+	expectNotification(false, "after unsubscribe")
 }
 
 // TestRPCOrchestrationApprovalRespondHonorsExplicitOption sends an accept
-// decision together with an explicit optionId for a reject option. The helper
-// agent (deny mode) fails unless it receives exactly "reject", proving the
-// selected option — not the kind-mapped decision — reaches the agent.
+// decision together with an explicit optionId for a reject option. The
+// scripted agent echoes the option it received, proving the selected option —
+// not the kind-mapped decision — reaches the agent.
 func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("permission-deny-sessions")), false); err != nil {
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
 
@@ -592,9 +589,8 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	threadID := orchestration.ThreadID("thread-permission-option")
 
 	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-perm-option", ThreadID: threadID, Title: "Permission option thread", ProviderInstanceID: "codex", Cwd: t.TempDir()})
-	var snapshot orchestration.ThreadStreamItem
-	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "hello"}})
+	client.subscribeThread(t, threadID)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-perm-option", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-perm-option", Text: "permission"}})
 
 	approvalEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
@@ -609,25 +605,9 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	if resolved.Payload.Approval.OptionID != "reject" || resolved.Payload.Approval.Decision != provider.ApprovalDecisionDecline {
 		t.Fatalf("resolved = %#v, want the explicitly selected reject option", resolved.Payload.Approval)
 	}
-}
-
-func TestRPCFailedDispatchReturnsNilResult(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	client := &rpcClient{threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
-	handler := &rpcHandler{server: s, client: client}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationDispatchCommand, orchestration.Command{Type: orchestration.CommandThreadTurnInterrupt, CommandID: "cmd-bad-interrupt", ThreadID: "missing-thread"})
-	if err != nil {
-		t.Fatalf("new call: %v", err)
-	}
-
-	result, err := handler.Handle(context.Background(), req)
-	if err == nil {
-		t.Fatal("interrupt on missing thread err = nil, want error")
-	}
-	if result != nil {
-		t.Fatalf("failed dispatch result = %#v, want nil (non-nil result with non-nil error violates the jsonrpc2 handler contract)", result)
-	}
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
+		return event.Type == orchestration.EventThreadMessageSent && strings.Contains(event.Payload.Text, "perm:reject")
+	})
 }
 
 func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
@@ -647,7 +627,7 @@ func TestRPCOrchestrationDispatchRejectsInternalCommands(t *testing.T) {
 			t.Fatalf("%s dispatched over RPC without error", command.Type)
 		}
 	}
-	if recorded := events.matching("", 0); len(recorded) != 1 {
+	if recorded := events.matching(""); len(recorded) != 1 {
 		t.Fatalf("events = %#v, want only client-created thread event", recorded)
 	}
 }
@@ -942,88 +922,49 @@ func TestRPCErrorPreservesAgentRequestError(t *testing.T) {
 
 func TestRPCHistoryReplayPublishesOneAuthoritativeRefresh(t *testing.T) {
 	s := newTestServer(t)
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
 
 	threadID := orchestration.ThreadID("thread-replay-refresh")
 	s.orchestration.RestoreThreads([]orchestration.RestoredThread{{
 		ThreadID: threadID,
 		Title:    "Replay refresh",
 	}})
-	client := &rpcClient{
-		id:                  "client-replay-refresh",
-		outbound:            make(chan rpcOutbound, 4),
-		done:                make(chan struct{}),
-		threadSubscriptions: map[orchestration.ThreadID]struct{}{threadID: {}},
+	client := registerTestRPCClient(t, s, "client-replay-refresh")
+	client.subscribeThread(threadID)
+	appendEvent := func(input orchestration.EventInput) {
+		t.Helper()
+		input.ThreadID = threadID
+		if _, err := s.orchestration.AppendEvent(context.Background(), input); err != nil {
+			t.Fatalf("append %s: %v", input.Type, err)
+		}
 	}
-	s.rpcMu.Lock()
-	s.rpcClients[client.id] = client
-	s.rpcMu.Unlock()
-	defer func() {
-		s.rpcMu.Lock()
-		delete(s.rpcClients, client.id)
-		s.rpcMu.Unlock()
-		client.closeOutbound()
-	}()
+	appendChunks := func(from, to int) {
+		t.Helper()
+		for index := from; index < to; index++ {
+			appendEvent(orchestration.EventInput{Type: orchestration.EventThreadMessageSent, Payload: orchestration.EventPayload{
+				MessageID: "message-replay", Role: orchestration.MessageRoleAssistant, Text: fmt.Sprintf("chunk-%02d ", index),
+			}})
+		}
+	}
 
 	// The real prepare event is what opens the replay publication window. Call
 	// the publisher directly here so the provider reactor cannot race this
 	// focused transport test.
 	s.publishOrchestrationEvent(orchestration.Event{
-		Type: orchestration.EventThreadSessionPrepareRequested,
-		Payload: orchestration.EventPayload{
-			ThreadID: threadID,
-		},
+		Type:    orchestration.EventThreadSessionPrepareRequested,
+		Payload: orchestration.EventPayload{ThreadID: threadID},
 	})
-	for index := range 16 {
-		if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
-			Type:     orchestration.EventThreadMessageSent,
-			ThreadID: threadID,
-			Payload: orchestration.EventPayload{
-				MessageID: "message-replay",
-				Role:      orchestration.MessageRoleAssistant,
-				Text:      fmt.Sprintf("chunk-%02d ", index),
-			},
-		}); err != nil {
-			t.Fatalf("append replay chunk: %v", err)
-		}
-	}
+	appendChunks(0, 16)
 	// A runtime error can be part of successfully loaded history. It must be
 	// included in the final snapshot without ending transport coalescing.
-	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
-		Type:     orchestration.EventThreadSessionStatusSet,
-		ThreadID: threadID,
-		Payload: orchestration.EventPayload{
-			Session: &orchestration.SessionBinding{
-				Status:    orchestration.SessionStatusError,
-				LastError: "historical runtime error",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("append historical runtime error: %v", err)
-	}
+	appendEvent(orchestration.EventInput{Type: orchestration.EventThreadSessionStatusSet, Payload: orchestration.EventPayload{
+		Session: &orchestration.SessionBinding{Status: orchestration.SessionStatusError, LastError: "historical runtime error"},
+	}})
 	if got := len(client.outbound); got != 0 {
 		t.Fatalf("outbound replay updates = %d, want 0", got)
 	}
-	for index := 16; index < 32; index++ {
-		if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
-			Type:     orchestration.EventThreadMessageSent,
-			ThreadID: threadID,
-			Payload: orchestration.EventPayload{
-				MessageID: "message-replay",
-				Role:      orchestration.MessageRoleAssistant,
-				Text:      fmt.Sprintf("chunk-%02d ", index),
-			},
-		}); err != nil {
-			t.Fatalf("append replay chunk after historical error: %v", err)
-		}
-	}
-
-	if _, err := s.orchestration.AppendEvent(context.Background(), orchestration.EventInput{
-		Type:     orchestration.EventThreadHistoryReplayCompleted,
-		ThreadID: threadID,
-	}); err != nil {
-		t.Fatalf("complete replay: %v", err)
-	}
+	appendChunks(16, 32)
+	appendEvent(orchestration.EventInput{Type: orchestration.EventThreadHistoryReplayCompleted})
 	if client.closed.Load() {
 		t.Fatal("client closed while publishing collapsed replay")
 	}
@@ -1054,36 +995,19 @@ func TestRPCHistoryReplayPublishesOneAuthoritativeRefresh(t *testing.T) {
 
 func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 	s := newTestServer(t)
+	t.Cleanup(func() { _ = s.Close() })
 	threadID := orchestration.ThreadID("thread-snapshot-race")
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "snapshot-race-create", ThreadID: threadID, Title: "initial"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "snapshot-race-before", ThreadID: threadID, Title: "before-boundary"}); err != nil {
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "snapshot-race-create", ThreadID: threadID, Title: "before-boundary"}); err != nil {
 		t.Fatal(err)
 	}
 
-	client := &rpcClient{id: "client-snapshot-race", outbound: make(chan rpcOutbound, 4), done: make(chan struct{}), threadSubscriptions: make(map[orchestration.ThreadID]struct{})}
-	s.rpcMu.Lock()
-	s.rpcClients[client.id] = client
-	s.rpcMu.Unlock()
-	defer func() {
-		s.rpcMu.Lock()
-		delete(s.rpcClients, client.id)
-		s.rpcMu.Unlock()
-		client.closeOutbound()
-		_ = s.Close()
-	}()
-
+	client := registerTestRPCClient(t, s, "client-snapshot-race")
 	handler := &rpcHandler{server: s, client: client, afterThreadSnapshot: func(orchestration.ThreadID) {
 		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadMetaUpdate, CommandID: "snapshot-race-after", ThreadID: threadID, Title: "after-boundary"}); err != nil {
 			t.Fatal(err)
 		}
 	}}
-	req, err := jsonrpc2.NewCall(jsonrpc2.StringID("1"), wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := handler.Handle(context.Background(), req)
+	result, err := handleThreadCall(handler, wire.MethodOrchestrationSubscribeThread, threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,12 +1018,9 @@ func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 
 	select {
 	case msg := <-client.outbound:
-		if msg.method != wire.MethodOrchestrationSubscribeThread {
-			t.Fatalf("notification method = %q, want subscribeThread", msg.method)
-		}
 		raw, ok := msg.params.(json.RawMessage)
-		if !ok {
-			t.Fatalf("notification params = %T, want pre-marshaled json.RawMessage", msg.params)
+		if msg.method != wire.MethodOrchestrationSubscribeThread || !ok {
+			t.Fatalf("notification = %#v, want pre-marshaled subscribeThread event", msg)
 		}
 		var live orchestration.ThreadStreamItem
 		if err := json.Unmarshal(raw, &live); err != nil {

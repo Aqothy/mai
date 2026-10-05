@@ -152,53 +152,6 @@ func waitForHelperFile(path string) {
 	}
 }
 
-func assertPermissionResponse(reader *bufio.Reader, expectedOption string) {
-	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "perm_1",
-		"method":  "session/request_permission",
-		"params": map[string]any{
-			"sessionId": "sess_new",
-			"toolCall":  map[string]any{"toolCallId": "tool_1", "title": "Edit file"},
-			"options": []any{
-				map[string]any{"kind": "allow_once", "name": "Allow", "optionId": "allow"},
-				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
-			},
-		},
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(request); err != nil {
-		fmt.Fprintf(os.Stderr, "write permission request: %v", err)
-		os.Exit(1)
-	}
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read permission response: %v", err)
-		os.Exit(1)
-	}
-	var resp struct {
-		ID     string          `json:"id"`
-		Error  json.RawMessage `json:"error"`
-		Result struct {
-			Outcome struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
-			} `json:"outcome"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(line, &resp); err != nil {
-		fmt.Fprintf(os.Stderr, "decode permission response: %v", err)
-		os.Exit(1)
-	}
-	if len(resp.Error) > 0 {
-		fmt.Fprintf(os.Stderr, "permission response error: %s", resp.Error)
-		os.Exit(1)
-	}
-	if resp.ID != "perm_1" || resp.Result.Outcome.Outcome != "selected" || resp.Result.Outcome.OptionID != expectedOption {
-		fmt.Fprintf(os.Stderr, "permission response = %s, want selected %s", line, expectedOption)
-		os.Exit(1)
-	}
-}
-
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("MAID_DAEMON_ACP_HELPER") != "1" {
 		return
@@ -290,7 +243,7 @@ func TestHelperProcess(t *testing.T) {
 
 func isSessionMode(mode string) bool {
 	switch mode {
-	case "sessions", "blocked-sessions", "permission-deny-sessions", "lingering-sessions",
+	case "sessions", "blocked-sessions", "lingering-sessions",
 		"rich-sessions", "scripted-sessions", "list-only-sessions":
 		return true
 	}
@@ -316,10 +269,6 @@ func fakeSessionConfigOptions(modeValue string, modelValue string) []any {
 func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath string, releasePath string) {
 	linger := mode == "lingering-sessions"
 	rich := mode == "rich-sessions"
-	expectedPermissionOption := ""
-	if mode == "permission-deny-sessions" {
-		expectedPermissionOption = "reject"
-	}
 
 	cwdBySession := map[string]string{}
 	modeValue := "ask"
@@ -403,9 +352,6 @@ func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath str
 				os.Exit(1)
 			}
 		case "session/prompt":
-			if expectedPermissionOption != "" {
-				assertPermissionResponse(reader, expectedPermissionOption)
-			}
 			if readyPath != "" {
 				if err := os.WriteFile(readyPath, []byte("ready"), 0o644); err != nil {
 					fmt.Fprintf(os.Stderr, "write prompt ready marker: %v", err)
