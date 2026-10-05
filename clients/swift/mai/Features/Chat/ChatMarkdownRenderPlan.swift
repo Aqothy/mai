@@ -86,14 +86,8 @@ nonisolated struct ChatMarkdownProseRun: Equatable, Sendable {
 }
 
 nonisolated struct ChatMarkdownCodeBlock: Equatable, Sendable {
-    enum Kind: Equatable, Sendable {
-        case fenced
-        case html
-    }
-
     let code: String
     let language: String?
-    let kind: Kind
 
     var displayLanguage: String {
         guard let language = language?.trimmingCharacters(

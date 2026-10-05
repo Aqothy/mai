@@ -84,9 +84,6 @@
         let layoutID: String
         let block: ChatMarkdownCodeBlock
         let theme: ChatCodeHighlightTheme
-        /// Streaming tails change per chunk; they skip highlighting and the
-        /// preparation round trip.
-        let isStreaming: Bool
         let layoutStore: ChatTextLayoutStore
 
         func makeNSView(context: Context) -> ChatMacCodeBlockHostView {
@@ -102,7 +99,6 @@
                 layoutID: layoutID,
                 block: block,
                 theme: theme,
-                isStreaming: isStreaming,
                 layoutStore: layoutStore
             )
         }
@@ -140,7 +136,6 @@
         private var layoutID: String?
         private var block: ChatMarkdownCodeBlock?
         private var theme: ChatCodeHighlightTheme?
-        private var isStreaming = false
         private weak var layoutStore: ChatTextLayoutStore?
         private var presentedLayout: ChatTextLayout?
         private var highlightTask: Task<Void, Never>?
@@ -170,17 +165,14 @@
             layoutID: String,
             block: ChatMarkdownCodeBlock,
             theme: ChatCodeHighlightTheme,
-            isStreaming: Bool,
             layoutStore: ChatTextLayoutStore
         ) {
             guard self.layoutID != layoutID || self.block != block
-                || self.theme != theme || self.isStreaming != isStreaming
-                || self.layoutStore !== layoutStore
+                || self.theme != theme || self.layoutStore !== layoutStore
             else { return }
             self.layoutID = layoutID
             self.block = block
             self.theme = theme
-            self.isStreaming = isStreaming
             self.layoutStore = layoutStore
             highlightTask?.cancel()
             highlightTask = nil
@@ -209,7 +201,7 @@
                 }
                 // A row realized before its page was prepared shows plain
                 // text now and receives colors when the highlighter finishes.
-                if !isHighlighted, !isStreaming, highlightTask == nil {
+                if !isHighlighted, highlightTask == nil {
                     let request = ChatCodeLayoutRequest(
                         id: layoutID,
                         block: block,

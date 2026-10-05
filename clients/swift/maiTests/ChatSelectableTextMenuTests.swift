@@ -11,7 +11,6 @@
         @Test
         func commentIsOfferedThroughSupportedSingleRangeCallback() throws {
             let coordinator = ChatSelectableText.Coordinator()
-            coordinator.layoutID = "message-1"
             coordinator.annotationContext = ChatAnnotationContext(
                 messageID: "message-1",
                 role: "assistant",

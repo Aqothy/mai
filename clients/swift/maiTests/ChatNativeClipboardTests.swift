@@ -55,7 +55,7 @@ struct ChatNativeClipboardTests {
         let oldMenu = try #require(menu.items.last)
 
         let firstCode = "let first = \"café 👩🏽‍💻\"\n" + String(repeating: "// long line αβ ", count: 30)
-        render(.code(.init(code: firstCode, language: "swift", kind: .fenced)), id: "code-first")
+        render(.code(.init(code: firstCode, language: "swift")), id: "code-first")
         _ = try copyButton("Copy code", expecting: firstCode)
         let code = try #require(host.subviews.compactMap { $0 as? ChatMacCodeBlockHostView }.first)
         let codeText = try #require(code.documentView as? ChatAnnotationTextView)
@@ -77,7 +77,7 @@ struct ChatNativeClipboardTests {
         try await Task.sleep(for: .milliseconds(1700))
         try #require(tableCopy.accessibilityLabel() == "Copy table", "Old feedback task overwrote reused button")
 
-        let secondCode = ChatMarkdownCodeBlock(code: "let second = 42 // 保持", language: "swift", kind: .fenced)
+        let secondCode = ChatMarkdownCodeBlock(code: "let second = 42 // 保持", language: "swift")
         for theme in [ChatCodeHighlightTheme.dark, .light] {
             await layouts.prepareCodeBlocks(requests: [.init(id: "code-second", block: secondCode, theme: theme)])
             render(.code(secondCode), id: "code-second", theme: theme)

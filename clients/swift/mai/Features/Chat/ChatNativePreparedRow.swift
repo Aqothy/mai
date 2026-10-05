@@ -79,7 +79,7 @@
             switch descriptor.content {
             case .prose(let source):
                 bodyHeight = store.layout(
-                    id: descriptor.id, source: source, style: .markdownProse, width: width).height
+                    id: descriptor.id, source: source, width: width).height
             case .resolvedProse(let prose):
                 bodyHeight = store.resolvedLayout(
                     id: descriptor.id, prose: prose, width: width).height
@@ -153,9 +153,7 @@
                 let prose = proseView
                 setBody(prose)
                 prose.annotationContext = annotationContext
-                prose.update(
-                    layoutID: descriptor.id, source: source, style: .markdownProse,
-                    layoutStore: store)
+                prose.update(layoutID: descriptor.id, source: source, layoutStore: store)
             case .resolvedProse(let text):
                 let prose = proseView
                 setBody(prose)
@@ -167,8 +165,7 @@
                 (codeView.documentView as? ChatAnnotationTextView)?.annotationContext = annotationContext
                 codeView.contentView.scroll(to: .zero)
                 codeView.update(
-                    layoutID: descriptor.id, block: code, theme: theme, isStreaming: false,
-                    layoutStore: store)
+                    layoutID: descriptor.id, block: code, theme: theme, layoutStore: store)
                 codeHeight =
                     store.codeLayout(id: descriptor.id, block: code, theme: theme).layout.height
                     + ChatMacCodeStyle.bottomInset

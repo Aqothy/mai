@@ -1831,7 +1831,6 @@ struct ChatTimeline: View {
                         ChatTextLayoutRequest(
                             id: id,
                             source: prose.source,
-                            style: .markdownProse,
                             width: ChatTimelineMetrics.proseTextWidth(
                                 role: role,
                                 in: rowWidth
@@ -1851,7 +1850,6 @@ struct ChatTimeline: View {
                     ChatTextLayoutRequest(
                         id: segment.rowID,
                         source: segment.source,
-                        style: .markdownProse,
                         width: ChatTimelineMetrics.proseTextWidth(
                             role: segment.role,
                             in: rowWidth
@@ -1901,8 +1899,6 @@ struct ChatTimeline: View {
                 )
             }
         #else
-            _ = rows
-            _ = rowWidth
             return []
         #endif
     }
@@ -1995,7 +1991,6 @@ struct ChatTimelineRenderRowView: View {
                     ChatSelectableText(
                         layoutID: segment.rowID,
                         source: segment.source,
-                        style: .markdownProse,
                         layoutStore: textLayoutStore
                     )
                 }

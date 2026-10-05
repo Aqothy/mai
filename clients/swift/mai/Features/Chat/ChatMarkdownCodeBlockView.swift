@@ -7,6 +7,7 @@ struct ChatMarkdownCodeBlockView: View {
     let layoutID: String
     let textLayoutStore: ChatTextLayoutStore
 
+    // Explicit because the private state below would make the memberwise init private.
     init(block: ChatMarkdownCodeBlock, isStreaming: Bool, layoutID: String, textLayoutStore: ChatTextLayoutStore) {
         self.block = block
         self.isStreaming = isStreaming
@@ -57,7 +58,6 @@ struct ChatMarkdownCodeBlockView: View {
                         layoutID: layoutID,
                         block: block,
                         theme: colorScheme == .dark ? .dark : .light,
-                        isStreaming: isStreaming,
                         layoutStore: textLayoutStore
                     )
                 }

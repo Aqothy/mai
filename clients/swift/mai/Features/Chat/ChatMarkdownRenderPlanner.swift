@@ -92,8 +92,7 @@ nonisolated enum ChatMarkdownRenderPlanner {
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: codeBlock.code),
-                    language: codeBlock.language,
-                    kind: .fenced
+                    language: codeBlock.language
                 )
             )
 
@@ -101,8 +100,7 @@ nonisolated enum ChatMarkdownRenderPlanner {
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: htmlBlock.rawHTML),
-                    language: "html",
-                    kind: .html
+                    language: "html"
                 )
             )
 

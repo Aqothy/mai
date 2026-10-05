@@ -9,7 +9,7 @@
             let descriptor = ChatNativePreparedRow.Descriptor(
                 id: "code",
                 content:
-                    .code(.init(code: "let value = 1", language: "swift", kind: .fenced)), top: 8,
+                    .code(.init(code: "let value = 1", language: "swift")), top: 8,
                 bottom: 8)
             #expect(
                 ChatNativePreparedRow.preparedHeight(

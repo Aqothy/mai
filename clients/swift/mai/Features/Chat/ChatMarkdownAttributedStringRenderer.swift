@@ -6,23 +6,9 @@ import SwiftUI
 /// plan. The main iOS settled-prose path uses TextKit for continuous range
 /// selection.
 nonisolated enum ChatMarkdownAttributedStringRenderer {
-    static func attributedString(from source: String) -> AttributedString {
-        guard !source.isEmpty else { return AttributedString() }
-
-        let builder = ChatMarkdownAttributedStringBuilder()
-        let result = builder.render(
-            document: Markdown.Document(chatSource: source)
-        )
-
-        // Reference definitions and other non-rendering nodes can produce an
-        // empty document. Never make non-empty message source disappear.
-        return result.characters.isEmpty ? AttributedString(source) : result
-    }
-
     /// Renders an already-parsed root block without parsing its source again.
     static func attributedString(from block: Markup) -> AttributedString {
-        let builder = ChatMarkdownAttributedStringBuilder()
-        let result = builder.render(block: block)
+        let result = ChatMarkdownAttributedStringBuilder().render(block: block, listDepth: 0)
         return result.characters.isEmpty
             ? AttributedString(block.format())
             : result
@@ -33,44 +19,25 @@ nonisolated enum ChatMarkdownAttributedStringRenderer {
     static func attributedString(
         fromQuoteContents quote: BlockQuote
     ) -> AttributedString {
-        let builder = ChatMarkdownAttributedStringBuilder()
-        return builder.renderQuoteContents(quote, listDepth: 0)
+        ChatMarkdownAttributedStringBuilder().renderQuoteContents(quote, listDepth: 0)
     }
 
     /// Table cells contain inline children rather than standalone documents.
     static func attributedString(
         fromInlineChildren children: MarkupChildren
     ) -> AttributedString {
-        let builder = ChatMarkdownAttributedStringBuilder()
-        return builder.renderInlineChildren(children)
+        ChatMarkdownAttributedStringBuilder().renderInline(children)
     }
 }
 
 private nonisolated struct ChatMarkdownAttributedStringBuilder {
-    private struct InlineEnvironment {
+    struct InlineEnvironment {
         var presentationIntent: InlinePresentationIntent = []
         var font: Font?
         var link: URL?
     }
 
-    func render(document: Markdown.Document) -> AttributedString {
-        joined(
-            document.children.map { render(block: $0, listDepth: 0) },
-            separator: "\n\n"
-        )
-    }
-
-    func render(block: Markup) -> AttributedString {
-        render(block: block, listDepth: 0)
-    }
-
-    func renderInlineChildren(
-        _ children: MarkupChildren
-    ) -> AttributedString {
-        renderInline(children)
-    }
-
-    private func render(
+    func render(
         block: Markup,
         listDepth: Int
     ) -> AttributedString {
@@ -226,7 +193,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         return joined(renderedCells, separator: separator)
     }
 
-    private func renderInline(
+    func renderInline(
         _ nodes: MarkupChildren,
         environment: InlineEnvironment = InlineEnvironment()
     ) -> AttributedString {

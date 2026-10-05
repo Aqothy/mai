@@ -919,7 +919,6 @@ private struct MockChatTimeline: View {
                             ChatTextLayoutRequest(
                                 id: "mock-\(messageID)-\(index)-prose",
                                 source: segment.source,
-                                style: .markdownProse,
                                 width: textWidth
                             )
                         )
@@ -954,7 +953,6 @@ private struct MockChatTimeline: View {
                     ChatTextLayoutRequest(
                         id: "\(request.messageID)-block-\(index)",
                         source: prose.source,
-                        style: .markdownProse,
                         width: width
                     )
                 )
@@ -993,7 +991,6 @@ private struct MockChatTimeline: View {
                     return ChatTextLayoutRequest(
                         id: "mock-\(message.id.uuidString)-\(index)-prose",
                         source: segments[index].source,
-                        style: .markdownProse,
                         width: textWidth
                     )
                 }
@@ -1410,7 +1407,6 @@ private struct MockChatOptimizedText: View {
                     ChatSelectableText(
                         layoutID: "mock-\(message.id.uuidString)-\(index)-prose",
                         source: segment.source,
-                        style: .markdownProse,
                         layoutStore: textLayoutStore
                     )
                 } else {

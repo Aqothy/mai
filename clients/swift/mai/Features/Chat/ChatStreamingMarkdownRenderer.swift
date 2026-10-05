@@ -56,8 +56,7 @@ nonisolated enum ChatStreamingMarkdownRepairer {
                 ? ChatMarkdownCodeBlock(
                     code: code.hasSuffix("\n")
                         ? String(code.dropLast()) : code,
-                    language: fence.language,
-                    kind: .fenced
+                    language: fence.language
                 )
                 : nil
             return ChatStreamingMarkdownRepair(

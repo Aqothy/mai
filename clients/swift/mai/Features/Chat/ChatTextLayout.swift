@@ -1,14 +1,8 @@
 import SwiftUI
 
-nonisolated enum ChatTextLayoutStyle: Hashable, Sendable {
-    case markdownProse
-    case plain
-}
-
 nonisolated struct ChatTextLayoutRequest: Sendable {
     let id: String
     let source: String
-    let style: ChatTextLayoutStyle
     let width: CGFloat
 }
 
@@ -33,12 +27,6 @@ nonisolated struct ChatTableLayoutRequest: Sendable {
     let table: ChatMarkdownTable
 }
 
-struct ChatTextSelection: Equatable, Sendable {
-    let layoutID: String
-    let range: NSRange
-    let text: String
-}
-
 // The macOS implementation of these same types lives in ChatMacTextLayout.swift.
 #if os(iOS)
 
@@ -59,27 +47,23 @@ import UIKit
 
         static func synchronousLayoutMiss(
             id: String,
-            style: ChatTextLayoutStyle,
             byteCount: Int,
             durationMilliseconds: Double
         ) {
-            let styleName = String(describing: style)
             logger.notice(
-                "cache miss id=\(id, privacy: .public) style=\(styleName, privacy: .public) bytes=\(byteCount) ms=\(durationMilliseconds)"
+                "cache miss id=\(id, privacy: .public) bytes=\(byteCount) ms=\(durationMilliseconds)"
             )
         }
 
         static func slowAttachment(
             id: String,
-            style: ChatTextLayoutStyle,
             byteCount: Int,
             durationMilliseconds: Double,
             reusedTextView: Bool
         ) {
             guard durationMilliseconds >= 8 else { return }
-            let styleName = String(describing: style)
             logger.notice(
-                "slow attach id=\(id, privacy: .public) style=\(styleName, privacy: .public) bytes=\(byteCount) ms=\(durationMilliseconds) reused=\(reusedTextView)"
+                "slow attach id=\(id, privacy: .public) bytes=\(byteCount) ms=\(durationMilliseconds) reused=\(reusedTextView)"
             )
         }
 
@@ -107,18 +91,8 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
     let attributedString: NSAttributedString
     let hasMarkdownDecorations: Bool
 
-    init(
-        source: String,
-        style: ChatTextLayoutStyle,
-        width: CGFloat
-    ) {
-        let attributedString =
-            switch style {
-            case .markdownProse:
-                ChatProseMarkdownRenderer.attributedString(from: source)
-            case .plain:
-                Self.plainAttributedString(from: source)
-            }
+    init(source: String, width: CGFloat) {
+        let attributedString = ChatProseMarkdownRenderer.attributedString(from: source)
         let storage = NSTextStorage(attributedString: attributedString)
         let manager = NSLayoutManager()
         let container = NSTextContainer(
@@ -158,21 +132,6 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
         self.attributedString = attributedString
         self.hasMarkdownDecorations = hasMarkdownDecorations
     }
-
-    private static func plainAttributedString(
-        from source: String
-    ) -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 2
-        return NSAttributedString(
-            string: source,
-            attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: paragraph,
-            ]
-        )
-    }
 }
 
 /// Thread-owned cache for completed and in-flight layouts, plus a
@@ -190,7 +149,6 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
 
     private struct Entry {
         let source: String
-        let style: ChatTextLayoutStyle
         let layout: ChatTextLayout
     }
 
@@ -231,14 +189,10 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
     func layout(
         id: String,
         source: String,
-        style: ChatTextLayoutStyle,
         width: CGFloat
     ) -> ChatTextLayout {
         let key = Key(id: id, width: width)
-        if let entry = entries[key],
-            entry.source == source,
-            entry.style == style
-        {
+        if let entry = entries[key], entry.source == source {
             return entry.layout
         }
 
@@ -251,20 +205,15 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
         #if DEBUG
             let layoutStart = CACurrentMediaTime()
         #endif
-        let layout = ChatTextLayout(
-            source: source,
-            style: style,
-            width: width
-        )
+        let layout = ChatTextLayout(source: source, width: width)
         #if DEBUG
             ChatTextLayoutDiagnostics.synchronousLayoutMiss(
                 id: id,
-                style: style,
                 byteCount: source.utf8.count,
                 durationMilliseconds: (CACurrentMediaTime() - layoutStart) * 1_000
             )
         #endif
-        entries[key] = Entry(source: source, style: style, layout: layout)
+        entries[key] = Entry(source: source, layout: layout)
         return layout
     }
 
@@ -287,7 +236,6 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
             remaining = remaining.filter { request in
                 let key = Key(id: request.id, width: request.width)
                 return entries[key]?.source != request.source
-                    || entries[key]?.style != request.style
             }
             if remaining.isEmpty || Task.isCancelled { break }
             if pending.isEmpty {
@@ -307,11 +255,7 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
             for item in pending {
                 guard !Task.isCancelled else { break }
                 layouts.append(
-                    ChatTextLayout(
-                        source: item.request.source,
-                        style: item.request.style,
-                        width: item.request.width
-                    )
+                    ChatTextLayout(source: item.request.source, width: item.request.width)
                 )
             }
             return layouts
@@ -323,14 +267,8 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
         }
         for (item, layout) in zip(pending, layouts) {
             inFlightKeys.remove(item.key)
-            if entries[item.key]?.source != item.request.source
-                || entries[item.key]?.style != item.request.style
-            {
-                entries[item.key] = Entry(
-                    source: item.request.source,
-                    style: item.request.style,
-                    layout: layout
-                )
+            if entries[item.key]?.source != item.request.source {
+                entries[item.key] = Entry(source: item.request.source, layout: layout)
             }
         }
         // Unbuilt claims must not block future preparation for these rows.
@@ -351,8 +289,7 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
         for request in requests.reversed() {
             let key = Key(id: request.id, width: request.width)
             guard seen.insert(key).inserted,
-                entries[key]?.source != request.source
-                    || entries[key]?.style != request.style,
+                entries[key]?.source != request.source,
                 !inFlightKeys.contains(key)
             else { continue }
             inFlightKeys.insert(key)
@@ -425,18 +362,14 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
 
 /// Selectable prose whose attributed content and measured height can be
 /// prepared before its `List` row becomes visible and whose native view
-/// can be reused if List later realizes that row again.
-///
-/// The optional callback is the narrow extension point for selection-based
-/// actions and annotations; normal rows pay no delegate-callback cost.
+/// can be reused if List later realizes that row again. Rows without an
+/// annotation context pay no delegate-callback cost.
 struct ChatSelectableText: UIViewRepresentable {
     @Environment(\.chatAnnotationContext) private var annotationContext
 
     let layoutID: String
     let source: String
-    let style: ChatTextLayoutStyle
     let layoutStore: ChatTextLayoutStore
-    var onSelectionChange: ((ChatTextSelection?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -447,19 +380,9 @@ struct ChatSelectableText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ChatSelectableTextHostView, context: Context) {
-        context.coordinator.layoutID = layoutID
-        context.coordinator.onSelectionChange = onSelectionChange
         context.coordinator.annotationContext = annotationContext
-        uiView.selectionDelegate =
-            onSelectionChange == nil && annotationContext == nil
-            ? nil
-            : context.coordinator
-        uiView.update(
-            layoutID: layoutID,
-            source: source,
-            style: style,
-            layoutStore: layoutStore
-        )
+        uiView.selectionDelegate = annotationContext == nil ? nil : context.coordinator
+        uiView.update(layoutID: layoutID, source: source, layoutStore: layoutStore)
     }
 
     static func dismantleUIView(
@@ -473,29 +396,7 @@ struct ChatSelectableText: UIViewRepresentable {
         // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
         nonisolated deinit {}
 
-        var layoutID = ""
-        var onSelectionChange: ((ChatTextSelection?) -> Void)?
         var annotationContext: ChatAnnotationContext?
-
-        func textViewDidChangeSelection(_ textView: UITextView) {
-            guard let onSelectionChange else { return }
-            let range = textView.selectedRange
-            guard range.length > 0,
-                NSMaxRange(range) <= textView.attributedText.length
-            else {
-                onSelectionChange(nil)
-                return
-            }
-            onSelectionChange(
-                ChatTextSelection(
-                    layoutID: layoutID,
-                    range: range,
-                    text: textView.attributedText.attributedSubstring(
-                        from: range
-                    ).string
-                )
-            )
-        }
 
         /// The single-range callback is the one available on every supported
         /// iOS version; iOS 26 calls it with the selection's union range when
@@ -505,39 +406,23 @@ struct ChatSelectableText: UIViewRepresentable {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard let annotationContext,
-                let selection = selection(in: textView, range: range)
+            guard let annotationContext, range.length > 0,
+                NSMaxRange(range) <= textView.attributedText.length
             else {
                 return UIMenu(children: suggestedActions)
             }
-
+            let quote = textView.attributedText.attributedSubstring(from: range).string
             let comment = UIAction(
                 title: "Comment…",
                 image: UIImage(systemName: "text.bubble")
             ) { _ in
                 annotationContext.model.beginComment(
-                    quote: selection.text,
+                    quote: quote,
                     messageID: annotationContext.messageID,
                     role: annotationContext.role
                 )
             }
             return UIMenu(children: suggestedActions + [comment])
-        }
-
-        private func selection(
-            in textView: UITextView,
-            range: NSRange
-        ) -> ChatTextSelection? {
-            guard range.length > 0,
-                NSMaxRange(range) <= textView.attributedText.length
-            else { return nil }
-            return ChatTextSelection(
-                layoutID: layoutID,
-                range: range,
-                text: textView.attributedText.attributedSubstring(
-                    from: range
-                ).string
-            )
         }
     }
 
@@ -547,12 +432,7 @@ struct ChatSelectableText: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
-        let layout = layoutStore.layout(
-            id: layoutID,
-            source: source,
-            style: style,
-            width: width
-        )
+        let layout = layoutStore.layout(id: layoutID, source: source, width: width)
         return CGSize(width: width, height: layout.height)
     }
 }
@@ -657,7 +537,6 @@ final class ChatSelectableTextHostView: UIView {
 
     private var layoutID: String?
     private var source: String?
-    private var style: ChatTextLayoutStyle?
     private weak var layoutStore: ChatTextLayoutStore?
     private var decorationView: MarkdownDecorationView?
     private var textView: UITextView?
@@ -667,34 +546,31 @@ final class ChatSelectableTextHostView: UIView {
     func update(
         layoutID: String,
         source: String,
-        style: ChatTextLayoutStyle,
         layoutStore: ChatTextLayoutStore
     ) {
         guard
             self.layoutID != layoutID || self.source != source
-                || self.style != style || self.layoutStore !== layoutStore
+                || self.layoutStore !== layoutStore
         else { return }
         self.layoutID = layoutID
         self.source = source
-        self.style = style
         self.layoutStore = layoutStore
         setNeedsLayout()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard let layoutID, let source, let style, let layoutStore,
+        guard let layoutID, let source, let layoutStore,
             bounds.width > 0
         else { return }
 
         let layout = layoutStore.layout(
             id: layoutID,
             source: source,
-            style: style,
             width: bounds.width
         )
         if presentedLayout !== layout {
-            present(layout, source: source, style: style)
+            present(layout, source: source)
         }
         decorationView?.frame = bounds
         textView?.frame = bounds
@@ -704,14 +580,12 @@ final class ChatSelectableTextHostView: UIView {
         releasePresentedTextView()
         layoutID = nil
         source = nil
-        style = nil
         layoutStore = nil
     }
 
     private func present(
         _ layout: ChatTextLayout,
-        source: String,
-        style: ChatTextLayoutStyle
+        source: String
     ) {
         #if DEBUG
             let attachmentStart = CACurrentMediaTime()
@@ -766,7 +640,6 @@ final class ChatSelectableTextHostView: UIView {
         #if DEBUG
             ChatTextLayoutDiagnostics.slowAttachment(
                 id: layoutID ?? "unknown",
-                style: style,
                 byteCount: source.utf8.count,
                 durationMilliseconds: (CACurrentMediaTime() - attachmentStart) * 1_000,
                 reusedTextView: reuse != nil

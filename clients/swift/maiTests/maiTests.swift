@@ -222,7 +222,7 @@ struct ThreadStoreTests {
             originalSegments = segments
             originalLayouts = layouts
             preparedLayout = layouts.layout(
-                id: "reply", source: "A retained **rich** reply.", style: .markdownProse, width: 320)
+                id: "reply", source: "A retained **rich** reply.", width: 320)
             _ = segments.segments(messageID: "reply", source: "A retained **rich** reply.")
         }
         #expect(originalSegments?.entryCount == 1)

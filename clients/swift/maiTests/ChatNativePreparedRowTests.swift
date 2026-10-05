@@ -18,7 +18,7 @@
             let text = try #require(prose.subviews.compactMap { $0 as? NSTextView }.first)
             text.setSelectedRange(NSRange(location: 0, length: 5))
             render(
-                .code(.init(code: "let first = 1", language: "swift", kind: .fenced)), id: "code-a")
+                .code(.init(code: "let first = 1", language: "swift")), id: "code-a")
             let code = try #require(
                 host.subviews.compactMap { $0 as? ChatMacCodeBlockHostView }.first)
             let children = try #require(host.accessibilityChildren())
@@ -45,7 +45,7 @@
                 })
             #expect(text.selectedRange().length == 0)
             render(
-                .code(.init(code: "let second = 2", language: "swift", kind: .fenced)), id: "code-b"
+                .code(.init(code: "let second = 2", language: "swift")), id: "code-b"
             )
             #expect(host.subviews.contains { $0 === code })
             let codeText = try #require(code.documentView as? NSTextView)

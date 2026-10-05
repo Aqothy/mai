@@ -18,19 +18,11 @@
         let thematicBreakRects: [NSRect]
         let hasMarkdownDecorations: Bool
 
-        convenience init(
-            source: String,
-            style: ChatTextLayoutStyle,
-            width: CGFloat
-        ) {
-            let attributedString =
-                switch style {
-                case .markdownProse:
-                    ChatProseMarkdownRenderer.attributedString(from: source)
-                case .plain:
-                    Self.plainAttributedString(from: source)
-                }
-            self.init(attributedString: attributedString, width: width)
+        convenience init(source: String, width: CGFloat) {
+            self.init(
+                attributedString: ChatProseMarkdownRenderer.attributedString(from: source),
+                width: width
+            )
         }
 
         convenience init(
@@ -333,21 +325,6 @@
                 )
             )
         }
-
-        private static func plainAttributedString(
-            from source: String
-        ) -> NSAttributedString {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = 2
-            return NSAttributedString(
-                string: source,
-                attributes: [
-                    .font: NSFont.preferredFont(forTextStyle: .body),
-                    .foregroundColor: NSColor.labelColor,
-                    .paragraphStyle: paragraph,
-                ]
-            )
-        }
     }
 
     /// Thread-owned cache for completed and in-flight layouts. Native view
@@ -365,7 +342,6 @@
 
         private struct Entry {
             let source: String
-            let style: ChatTextLayoutStyle
             let layout: ChatTextLayout
         }
 
@@ -411,14 +387,10 @@
         func layout(
             id: String,
             source: String,
-            style: ChatTextLayoutStyle,
             width: CGFloat
         ) -> ChatTextLayout {
             let key = Key(id: id, width: width)
-            if let entry = entries[key],
-                entry.source == source,
-                entry.style == style
-            {
+            if let entry = entries[key], entry.source == source {
                 return entry.layout
             }
 
@@ -428,12 +400,8 @@
             ChatBenchmarkAutoRun.trace(
                 "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
             )
-            let layout = ChatTextLayout(
-                source: source,
-                style: style,
-                width: width
-            )
-            entries[key] = Entry(source: source, style: style, layout: layout)
+            let layout = ChatTextLayout(source: source, width: width)
+            entries[key] = Entry(source: source, layout: layout)
             return layout
         }
 
@@ -449,7 +417,6 @@
                 remaining = remaining.filter { request in
                     let key = Key(id: request.id, width: request.width)
                     return entries[key]?.source != request.source
-                        || entries[key]?.style != request.style
                 }
                 if remaining.isEmpty || Task.isCancelled { break }
                 if pending.isEmpty {
@@ -692,11 +659,7 @@
                 for item in pending {
                     guard !Task.isCancelled else { break }
                     layouts.append(
-                        ChatTextLayout(
-                            source: item.request.source,
-                            style: item.request.style,
-                            width: item.request.width
-                        )
+                        ChatTextLayout(source: item.request.source, width: item.request.width)
                     )
                 }
                 return layouts
@@ -708,14 +671,8 @@
             }
             for (item, layout) in zip(pending, layouts) {
                 inFlightKeys.remove(item.key)
-                if entries[item.key]?.source != item.request.source
-                    || entries[item.key]?.style != item.request.style
-                {
-                    entries[item.key] = Entry(
-                        source: item.request.source,
-                        style: item.request.style,
-                        layout: layout
-                    )
+                if entries[item.key]?.source != item.request.source {
+                    entries[item.key] = Entry(source: item.request.source, layout: layout)
                 }
             }
             // Unbuilt claims must not block future preparation for these rows.
@@ -735,8 +692,7 @@
             for request in requests.reversed() {
                 let key = Key(id: request.id, width: request.width)
                 guard seen.insert(key).inserted,
-                    entries[key]?.source != request.source
-                        || entries[key]?.style != request.style,
+                    entries[key]?.source != request.source,
                     !inFlightKeys.contains(key)
                 else { continue }
                 inFlightKeys.insert(key)
@@ -747,19 +703,12 @@
 
     }
 
-    /// Native macOS range selection for settled prose. The optional callback
-    /// is the extension point for selection-driven annotations and menus.
+    /// Native macOS range selection for settled prose.
     struct ChatSelectableText: NSViewRepresentable {
         @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
         let source: String
-        let style: ChatTextLayoutStyle
         let layoutStore: ChatTextLayoutStore
-        var onSelectionChange: ((ChatTextSelection?) -> Void)? = nil
-
-        func makeCoordinator() -> Coordinator {
-            Coordinator()
-        }
 
         func makeNSView(context: Context) -> ChatSelectableTextHostView {
             ChatSelectableTextHostView()
@@ -769,24 +718,13 @@
             _ nsView: ChatSelectableTextHostView,
             context: Context
         ) {
-            context.coordinator.layoutID = layoutID
-            context.coordinator.onSelectionChange = onSelectionChange
-            nsView.selectionDelegate =
-                onSelectionChange == nil
-                ? nil
-                : context.coordinator
             nsView.annotationContext = annotationContext
-            nsView.update(
-                layoutID: layoutID,
-                source: source,
-                style: style,
-                layoutStore: layoutStore
-            )
+            nsView.update(layoutID: layoutID, source: source, layoutStore: layoutStore)
         }
 
         static func dismantleNSView(
             _ nsView: ChatSelectableTextHostView,
-            coordinator: Coordinator
+            coordinator: Void
         ) {
             nsView.dismantle()
         }
@@ -797,42 +735,8 @@
             context: Context
         ) -> CGSize? {
             guard let width = proposal.width, width > 0 else { return nil }
-            let layout = layoutStore.layout(
-                id: layoutID,
-                source: source,
-                style: style,
-                width: width
-            )
+            let layout = layoutStore.layout(id: layoutID, source: source, width: width)
             return CGSize(width: width, height: layout.height)
-        }
-
-        final class Coordinator: NSObject, NSTextViewDelegate {
-            // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
-            nonisolated deinit {}
-
-            var layoutID = ""
-            var onSelectionChange: ((ChatTextSelection?) -> Void)?
-
-            func textViewDidChangeSelection(_ notification: Notification) {
-                guard let textView = notification.object as? NSTextView,
-                    let onSelectionChange
-                else { return }
-                let range = textView.selectedRange()
-                guard range.length > 0,
-                    let textStorage = textView.textStorage,
-                    NSMaxRange(range) <= textStorage.length
-                else {
-                    onSelectionChange(nil)
-                    return
-                }
-                onSelectionChange(
-                    ChatTextSelection(
-                        layoutID: layoutID,
-                        range: range,
-                        text: textStorage.attributedSubstring(from: range).string
-                    )
-                )
-            }
         }
     }
 
@@ -885,7 +789,7 @@
         nonisolated deinit {}
 
         private enum Content: Equatable {
-            case source(String, ChatTextLayoutStyle)
+            case source(String)
             case resolvedProse(ChatMarkdownProseRun)
         }
 
@@ -915,10 +819,6 @@
                     NSBezierPath(rect: rect).fill()
                 }
             }
-        }
-
-        weak var selectionDelegate: NSTextViewDelegate? {
-            didSet { textView.delegate = selectionDelegate }
         }
 
         var annotationContext: ChatAnnotationContext? {
@@ -953,12 +853,11 @@
         func update(
             layoutID: String,
             source: String,
-            style: ChatTextLayoutStyle,
             layoutStore: ChatTextLayoutStore
         ) {
             update(
                 layoutID: layoutID,
-                content: .source(source, style),
+                content: .source(source),
                 layoutStore: layoutStore
             )
         }
@@ -996,13 +895,8 @@
             else { return }
 
             let layout = switch content {
-            case .source(let source, let style):
-                layoutStore.layout(
-                    id: layoutID,
-                    source: source,
-                    style: style,
-                    width: bounds.width
-                )
+            case .source(let source):
+                layoutStore.layout(id: layoutID, source: source, width: bounds.width)
             case .resolvedProse(let prose):
                 layoutStore.resolvedLayout(
                     id: layoutID,
@@ -1019,7 +913,6 @@
 
         func dismantle() {
             annotationContext = nil
-            textView.delegate = nil
             decorationView?.removeFromSuperview()
             decorationView = nil
             presentedLayout = nil
@@ -1043,7 +936,6 @@
             } else {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
             }
-            textView.delegate = selectionDelegate
 
             decorationView?.removeFromSuperview()
             decorationView = nil

@@ -262,8 +262,6 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                     range: range
                 )
             }
-        #else
-            _ = accessibilityHeadingLevel
         #endif
         output.addAttribute(
             .paragraphStyle,

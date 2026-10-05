@@ -8,18 +8,6 @@ struct ChatMarkdownRichContentView: View {
     let streamingStableBlockCount: Int?
     let textLayoutStore: ChatTextLayoutStore
 
-    init(
-        layoutIDPrefix: String,
-        plan: ChatMarkdownRenderPlan,
-        streamingStableBlockCount: Int?,
-        textLayoutStore: ChatTextLayoutStore
-    ) {
-        self.layoutIDPrefix = layoutIDPrefix
-        self.plan = plan
-        self.streamingStableBlockCount = streamingStableBlockCount
-        self.textLayoutStore = textLayoutStore
-    }
-
     var body: some View {
         VStack(
             alignment: .leading,
@@ -158,7 +146,6 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
         ChatSelectableText(
             layoutID: layoutID,
             source: prose.source,
-            style: .markdownProse,
             layoutStore: textLayoutStore
         )
     }

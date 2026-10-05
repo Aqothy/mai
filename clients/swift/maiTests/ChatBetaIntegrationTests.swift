@@ -207,19 +207,25 @@ struct ChatBetaIntegrationTests {
         #expect(TextSelection(insertionPoint: "".startIndex).isValid(in: ""))
     }
 
+    /// Prose renders as written: no smart punctuation, and single newlines
+    /// stay line breaks, in both the rich-block plan and the native TextKit path.
     @Test
-    func prosePunctuationMatchesTheSource() {
-        let source = #"Run git push --force with "quoted" and 'single' args... then `code "x"`"#
-        let shown = #"Run git push --force with "quoted" and 'single' args... then code "x""#
-        #expect(String(ChatMarkdownAttributedStringRenderer.attributedString(from: source).characters) == shown)
-        #expect(ChatProseMarkdownRenderer.attributedString(from: source).string == shown)
-    }
-
-    @Test
-    func singleNewlinesStayLineBreaks() {
-        let source = "First line\nsecond line\n\nNext paragraph"
-        #expect(String(ChatMarkdownAttributedStringRenderer.attributedString(from: source).characters).hasPrefix("First line\nsecond line"))
-        #expect(ChatProseMarkdownRenderer.attributedString(from: source).string.hasPrefix("First line\nsecond line"))
+    func proseKeepsSourcePunctuationAndLineBreaks() throws {
+        let cases = [
+            (#"Run git push --force with "quoted" and 'single' args... then `code "x"`"#,
+             #"Run git push --force with "quoted" and 'single' args... then code "x""#),
+            ("First line\nsecond line\n\nNext paragraph", "First line\nsecond line"),
+        ]
+        for (source, shown) in cases {
+            guard case .prose(let prose) = try #require(ChatMarkdownRenderPlanner.plan(from: source).blocks.first),
+                case .text(let text) = try #require(prose.pieces.first)
+            else {
+                Issue.record("Expected a prose text block for \(source)")
+                continue
+            }
+            #expect(String(text.characters) == shown)
+            #expect(ChatProseMarkdownRenderer.attributedString(from: source).string.hasPrefix(shown))
+        }
     }
 
     @Test @MainActor
