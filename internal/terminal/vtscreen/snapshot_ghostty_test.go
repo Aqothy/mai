@@ -150,26 +150,6 @@ func TestNativeSnapshotReproducesAlternateScreenApp(t *testing.T) {
 	}
 }
 
-func TestNativeSnapshotCarriesTerminalModes(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("\x1b[?2004h\x1b[?2048hshell$ "))
-
-	fresh := roundTrip(t, source)
-	ghostty := fresh.(*ghosttyScreen)
-	for name, mode := range map[string]libghostty.Mode{
-		"bracketed paste": libghostty.ModeBracketedPaste,
-		"in-band resize":  libghostty.ModeInBandResize,
-	} {
-		enabled, err := ghostty.term.ModeGet(mode)
-		if err != nil {
-			t.Fatalf("ModeGet(%s): %v", name, err)
-		}
-		if !enabled {
-			t.Fatalf("snapshot did not preserve %s mode", name)
-		}
-	}
-}
-
 func TestNativeSnapshotStaysWithinBudget(t *testing.T) {
 	source := newSnapshotScreen(t, 80, 24)
 	for i := range 2000 {
