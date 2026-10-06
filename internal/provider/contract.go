@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 )
 
 type InstanceID string
@@ -574,8 +573,7 @@ var toolNameActions = []struct {
 	{ToolActionRead, []string{"read", "list", "stat"}},
 	{ToolActionExecute, []string{"exec", "shell", "command", "terminal", "bash"}},
 	{ToolActionFetch, []string{"fetch", "http", "download"}},
-	{ToolActionThink, []string{"think"}},
-	{ToolActionDelegate, []string{"spawn", "delegate", "agent", "task", "sendinput"}},
+	{ToolActionDelegate, []string{"spawn", "delegate", "agent", "sendinput"}},
 	{ToolActionView, []string{"view", "image"}},
 }
 
@@ -591,43 +589,6 @@ func ToolActionFromName(name string) ToolAction {
 		}
 	}
 	return ToolActionOther
-}
-
-// identifierWords overrides how individual identifier words are displayed.
-var identifierWords = map[string]string{
-	"api": "API", "gpt": "GPT", "id": "ID", "mcp": "MCP", "url": "URL",
-	"xhigh": "extra high", "xlow": "extra low",
-}
-
-// HumanizeIdentifier turns a native identifier (snake_case, kebab-case,
-// camelCase, dotted or slashed) into a sentence-case label such as
-// "Get MCP status" for item titles and choice labels without a native one.
-func HumanizeIdentifier(value string) string {
-	var spaced []rune
-	var previous rune
-	for _, current := range strings.TrimSpace(value) {
-		switch {
-		case current == '_' || current == '-' || current == '.' || current == '/':
-			current = ' '
-		case unicode.IsUpper(current) && (unicode.IsLower(previous) || unicode.IsDigit(previous)):
-			spaced = append(spaced, ' ')
-		}
-		spaced = append(spaced, current)
-		previous = current
-	}
-	words := strings.Fields(string(spaced))
-	for index, word := range words {
-		word = strings.ToLower(word)
-		if override, ok := identifierWords[word]; ok {
-			word = override
-		}
-		words[index] = word
-	}
-	label := []rune(strings.Join(words, " "))
-	if len(label) > 0 {
-		label[0] = unicode.ToUpper(label[0])
-	}
-	return string(label)
 }
 
 type ToolLocation struct {

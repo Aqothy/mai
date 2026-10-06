@@ -383,7 +383,7 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 	case "collabAgentToolCall":
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, collabToolCall(item), collabTitle(item.Tool))
 	case "subAgentActivity":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, subagentToolCall(item), "Agent "+provider.HumanizeIdentifier(item.Kind))
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, subagentToolCall(item), "Agent "+item.Kind)
 	case "webSearch":
 		event.Payload = toolPayload(item, provider.ItemKindWebSearch, status, webSearchToolCall(item), webSearchTitle(item))
 	case "imageView":
@@ -393,17 +393,17 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 	case "contextCompaction":
 		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: status, Title: "Compacted context"}
 	case "enteredReviewMode", "exitedReviewMode":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), provider.HumanizeIdentifier(item.Type))
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), item.Type)
 	case "sleep":
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, sleepToolCall(item), "Waited")
 	default:
 		event.Payload = provider.RuntimeEventPayload{
 			ItemType:   provider.ItemKindToolCall,
 			ItemStatus: status,
-			Title:      provider.HumanizeIdentifier(item.Type),
+			Title:      item.Type,
 			ToolCall: &provider.ToolCall{
 				Action:       provider.ToolActionOther,
-				Name:         provider.HumanizeIdentifier(item.Type),
+				Name:         item.Type,
 				ProviderKind: item.Type,
 			},
 		}
@@ -626,7 +626,7 @@ func collabToolCall(item appItem) *provider.ToolCall {
 func subagentToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
 		Action:       provider.ToolActionDelegate,
-		Name:         provider.HumanizeIdentifier(item.Kind),
+		Name:         item.Kind,
 		Namespace:    "collaboration",
 		ProviderKind: item.Type,
 		Output:       strings.TrimSpace(item.AgentThreadID),
@@ -698,7 +698,7 @@ func imageGenerationToolCall(item appItem) *provider.ToolCall {
 func reviewModeToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
 		Action:       provider.ToolActionSwitchMode,
-		Name:         provider.HumanizeIdentifier(item.Type),
+		Name:         item.Type,
 		ProviderKind: item.Type,
 		Output:       boundedAppOutput(item.Review),
 	}
@@ -714,7 +714,7 @@ func sleepToolCall(item appItem) *provider.ToolCall {
 }
 
 func collabTitle(tool string) string {
-	title := provider.HumanizeIdentifier(tool)
+	title := strings.TrimSpace(tool)
 	if title == "" {
 		return "Agent collaboration"
 	}
@@ -950,11 +950,7 @@ func configOptionsFromModels(models []appModel, selectedModel, selectedEffort, s
 				continue
 			}
 			validTiers[value] = struct{}{}
-			label := strings.TrimSpace(tier.Name)
-			if label == "" {
-				label = provider.HumanizeIdentifier(value)
-			}
-			tierChoices = append(tierChoices, provider.ConfigChoice{Value: value, Label: label, Description: strings.TrimSpace(tier.Description)})
+			tierChoices = append(tierChoices, provider.ConfigChoice{Value: value, Label: strings.TrimSpace(tier.Name), Description: strings.TrimSpace(tier.Description)})
 		}
 		tier := strings.TrimSpace(selectedTier)
 		if _, valid := validTiers[tier]; !valid {
@@ -981,7 +977,6 @@ func configOptionsFromModels(models []appModel, selectedModel, selectedEffort, s
 		validEffort[value] = struct{}{}
 		effortChoices = append(effortChoices, provider.ConfigChoice{
 			Value:       value,
-			Label:       provider.HumanizeIdentifier(value),
 			Description: strings.TrimSpace(effort.Description),
 		})
 	}

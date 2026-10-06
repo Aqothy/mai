@@ -304,7 +304,8 @@ func TestConfigOptionsFromModelsUsesSelectedCatalogCapabilities(t *testing.T) {
 	if options[2].ID != "reasoning_effort" || options[2].Category != provider.ConfigOptionCategoryThoughtLevel || options[2].CurrentValue != "xhigh" || len(options[2].Choices) != 2 {
 		t.Fatalf("effort option = %#v", options[2])
 	}
-	if options[2].Choices[1].Description != "Most deliberate" {
+	// Unnamed choices carry no label, so clients display the raw value.
+	if options[1].Choices[1].Label != "Fast" || options[2].Choices[1].Label != "" || options[2].Choices[1].Description != "Most deliberate" {
 		t.Fatalf("effort choice metadata = %#v", options[2].Choices[1])
 	}
 

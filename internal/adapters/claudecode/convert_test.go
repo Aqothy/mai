@@ -24,7 +24,7 @@ func TestNewToolState(t *testing.T) {
 			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == provider.FileChangeAdd && state.call.Changes[0].NewText == "data"
 		}},
 		{"mcp", "mcp__github__list_issues", ``, func(state toolState) bool {
-			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues"
+			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues"
 		}},
 		{"todo write is plan only", "TodoWrite", `{"todos":[]}`, func(state toolState) bool { return state.itemKind == "" }},
 	} {
@@ -68,7 +68,7 @@ func TestToolResultContent(t *testing.T) {
 func TestTurnStateFromResult(t *testing.T) {
 	// Success and aborted (interrupted) results are covered by the fake-CLI turns.
 	state, _, message := turnStateFromResult(resultMessage{Subtype: "error_max_turns", IsError: true})
-	if state != provider.RuntimeTurnFailed || message == "" {
+	if state != provider.RuntimeTurnFailed || message != "max_turns" {
 		t.Fatalf("max turns state = %q message = %q", state, message)
 	}
 	// Internal diagnostics must never surface as the error banner.

@@ -41,7 +41,7 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	}
 	state := &toolState{itemKind: provider.ItemKindToolCall}
 	call := provider.ToolCall{Name: name, ProviderKind: name, Action: provider.ToolActionFromName(name)}
-	title := provider.HumanizeIdentifier(name)
+	title := name
 
 	if server, tool, ok := splitMCPToolName(name); ok {
 		call.Name = tool
@@ -49,7 +49,7 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		call.Action = provider.ToolActionFromName(tool)
 		state.itemKind = provider.ItemKindMCPToolCall
 		state.call = call
-		state.title = strings.Trim(server+" · "+provider.HumanizeIdentifier(tool), " ·")
+		state.title = strings.Trim(server+" · "+tool, " ·")
 		return state
 	}
 
@@ -215,7 +215,7 @@ func turnStateFromResult(result resultMessage) (provider.RuntimeTurnState, strin
 		return provider.RuntimeTurnCompleted, stopReason, ""
 	}
 	if message == "" && strings.HasPrefix(result.Subtype, "error_") {
-		message = provider.HumanizeIdentifier(strings.TrimPrefix(result.Subtype, "error_"))
+		message = strings.TrimPrefix(result.Subtype, "error_")
 	}
 	return provider.RuntimeTurnFailed, stopReason, message
 }

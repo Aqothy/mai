@@ -133,7 +133,7 @@ func (h *Instance) configOptionsLocked(selectedModel, selectedEffort, selectedMo
 					continue
 				}
 				validEffort[level] = struct{}{}
-				effortChoices = append(effortChoices, provider.ConfigChoice{Value: level, Label: provider.HumanizeIdentifier(level)})
+				effortChoices = append(effortChoices, provider.ConfigChoice{Value: level})
 			}
 			effort := strings.TrimSpace(selectedEffort)
 			if _, ok := validEffort[effort]; !ok {
