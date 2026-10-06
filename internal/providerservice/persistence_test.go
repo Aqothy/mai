@@ -23,26 +23,16 @@ func openRouteStore(t *testing.T) *store.SQLite {
 	return st
 }
 
+// Routes are written through as sessions bind, without the one-shot replay
+// intent, and stopping a session deletes its durable route. What is stored is
+// read back by the restored-route tests below.
 func TestRouteWriteThroughPersistence(t *testing.T) {
 	st := openRouteStore(t)
 	adapter := &fakeAdapter{configure: resumableSessions}
 	s := New(adapter.StartInstance, WithRouteStore(st))
 	defer s.Close()
-
-	spec := fakeSpec("codex")
-	mustStartInstance(t, s, spec, false)
-	specs, err := st.LoadInstances()
-	if err != nil {
-		t.Fatalf("LoadInstances: %v", err)
-	}
-	if len(specs) != 1 || specs[0].InstanceID != "codex" || specs[0].Driver != "fake" || string(specs[0].Config) != string(spec.Config) {
-		t.Fatalf("instance spec not persisted: %+v", specs)
-	}
-
-	input := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "gpt"}, ReplayHistory: true}
-	if _, err := s.StartSession(context.Background(), "thread-1", input); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	mustStartInstance(t, s, fakeSpec("codex"), false)
+	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true})
 	if started := adapter.instance(0).lastStartInput(); !started.ReplayHistory {
 		t.Fatalf("adapter start input = %#v, want one-shot replay intent", started)
 	}
@@ -50,32 +40,15 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRoutes: %v", err)
 	}
-	route, ok := routes["thread-1"]
-	if !ok {
-		t.Fatalf("route not persisted: %+v", routes)
-	}
-	if route.InstanceID != "codex" || route.ProviderSessionID != "sess-1" {
-		t.Fatalf("unexpected route: %+v", route)
-	}
-	if string(route.ResumeCursor) != `{"sessionId":"sess-1"}` {
-		t.Fatalf("resume cursor not persisted: %s", route.ResumeCursor)
-	}
-	if route.StartInput.ModelSelection == nil || route.StartInput.ModelSelection.Model != "gpt" {
-		t.Fatalf("start input not persisted: %+v", route.StartInput)
-	}
-	if route.StartInput.ReplayHistory {
-		t.Fatalf("one-shot replay intent persisted in route: %+v", route.StartInput)
+	if route, ok := routes["thread-1"]; !ok || route.ProviderSessionID != "sess-1" || route.StartInput.ReplayHistory {
+		t.Fatalf("persisted route = %+v, want sess-1 without the replay intent", route)
 	}
 
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	routes, err = st.LoadRoutes()
-	if err != nil {
-		t.Fatalf("LoadRoutes after stop: %v", err)
-	}
-	if len(routes) != 0 {
-		t.Fatalf("stop must delete the durable route: %+v", routes)
+	if routes, err := st.LoadRoutes(); err != nil || len(routes) != 0 {
+		t.Fatalf("routes after stop = %+v (%v), want the durable route deleted", routes, err)
 	}
 }
 
@@ -137,8 +110,8 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 		t.Fatalf("StartSession after restart: %v", err)
 	}
 	instance := second.instance(0)
-	if instance == nil {
-		t.Fatal("persisted instance was not respawned on first use")
+	if instance == nil || second.launchConfigs()[0] != string(spec.Config) {
+		t.Fatalf("respawned launch configs = %v, want the persisted spec respawned on first use", second.launchConfigs())
 	}
 	input := instance.lastStartInput()
 	if cursor := string(input.ResumeCursor); cursor != `{"sessionId":"sess-1"}` || input.ProviderSessionID != "sess-1" {

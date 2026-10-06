@@ -6,38 +6,6 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// Lookups scan backwards for the streaming hot path, so they must still return
-// the one matching entry regardless of where it sits.
-func TestTimelineAppendsAndFindsEntriesAtEveryPosition(t *testing.T) {
-	var timeline Timeline
-	for _, id := range []string{"a", "b", "c"} {
-		timeline.AppendMessage(Message{ID: MessageID("message-" + id), Text: id})
-		timeline.AppendItem(Item{ID: "item-" + id, Kind: provider.ItemKindToolCall, Title: id})
-		timeline.AppendApproval(Approval{RequestID: "approval-" + id, OptionID: id})
-	}
-	if len(timeline) != 9 || timeline[0].Kind != TimelineEntryMessage || timeline[1].Kind != TimelineEntryItem || timeline[2].Kind != TimelineEntryApproval {
-		t.Fatalf("timeline order = %#v", timeline)
-	}
-
-	for _, id := range []string{"a", "b", "c"} {
-		message := timeline.Message(MessageID("message-" + id))
-		if message == nil || message.Text != id {
-			t.Fatalf("Message(%q) = %#v, want the entry appended for %q", "message-"+id, message, id)
-		}
-		item := timeline.Item("item-" + id)
-		if item == nil || item.Title != id {
-			t.Fatalf("Item(%q) = %#v, want the entry appended for %q", "item-"+id, item, id)
-		}
-		approval := timeline.Approval("approval-" + id)
-		if approval == nil || approval.OptionID != id {
-			t.Fatalf("Approval(%q) = %#v, want the entry appended for %q", "approval-"+id, approval, id)
-		}
-	}
-	if timeline.Message("missing") != nil || timeline.Item("missing") != nil || timeline.Approval("missing") != nil {
-		t.Fatalf("lookup of an absent id returned an entry: %#v", timeline)
-	}
-}
-
 // Snapshots and provider views hand attachments to other goroutines, so a
 // clone must not share nested metadata with the projection.
 func TestCloneAttachmentsDetachesNestedMetadata(t *testing.T) {

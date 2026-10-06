@@ -197,119 +197,66 @@ func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
 	tests := []struct {
 		name       string
 		decision   provider.ApprovalDecision
-		resolution json.RawMessage
+		resolution string
 		want       provider.ApprovalDecision
 		wantOption string
 	}{
-		{name: "accept", decision: provider.ApprovalDecisionAccept, resolution: json.RawMessage(`{"optionId":"allow"}`), want: provider.ApprovalDecisionAccept, wantOption: "allow"},
-		{name: "accept for session", decision: provider.ApprovalDecisionAcceptForSession, resolution: json.RawMessage(`{"optionId":"session"}`), want: provider.ApprovalDecisionAcceptForSession, wantOption: "session"},
-		{name: "decline", decision: provider.ApprovalDecisionDecline, resolution: json.RawMessage(`{"optionId":"reject"}`), want: provider.ApprovalDecisionDecline, wantOption: "reject"},
-		{name: "empty defaults to cancel", want: provider.ApprovalDecisionCancel},
-		{name: "unknown defaults to cancel", decision: provider.ApprovalDecision("unknown"), resolution: json.RawMessage(`not-json`), want: provider.ApprovalDecisionCancel},
+		{"accept", provider.ApprovalDecisionAccept, `{"optionId":"allow"}`, provider.ApprovalDecisionAccept, "allow"},
+		{"accept for session", provider.ApprovalDecisionAcceptForSession, `{"optionId":"session"}`, provider.ApprovalDecisionAcceptForSession, "session"},
+		{"decline", provider.ApprovalDecisionDecline, `{"optionId":"reject"}`, provider.ApprovalDecisionDecline, "reject"},
+		{"empty defaults to cancel", "", "", provider.ApprovalDecisionCancel, ""},
+		{"unknown defaults to cancel", "unknown", `not-json`, provider.ApprovalDecisionCancel, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			engine := NewEngine()
 			defer engine.Close()
 			ingestion := NewProviderRuntimeIngestion(engine)
-			threadID := ThreadID("thread-resolved-" + strings.ReplaceAll(tt.name, " ", "-"))
+			threadID := ThreadID("thread-approval-resolution")
 			newThreadWithSession(t, engine, threadID)
-
-			ingestion.Ingest(provider.RuntimeEvent{
-				EventID:   "approval-opened",
-				Type:      provider.RuntimeEventRequestOpened,
-				ThreadID:  string(threadID),
-				TurnID:    "turn-1",
-				RequestID: "approval-1",
-				Payload: provider.RuntimeEventPayload{
-					RequestType: provider.RuntimeRequestCommandExecution,
-					Options:     []provider.ApprovalOption{{ID: "allow"}, {ID: "session"}, {ID: "reject"}},
-				},
-			})
-			thread, _ := engine.Thread(threadID)
-			if len(thread.Timeline) != 1 || thread.Timeline[0].Approval == nil {
-				t.Fatalf("timeline after open = %#v, want one approval", thread.Timeline)
+			request := func(eventType provider.RuntimeEventType, payload provider.RuntimeEventPayload) *Approval {
+				t.Helper()
+				payload.RequestType = provider.RuntimeRequestCommandExecution
+				ingestion.Ingest(provider.RuntimeEvent{Type: eventType, ThreadID: string(threadID), TurnID: "turn-1", RequestID: "approval-1", Payload: payload})
+				thread, _ := engine.Thread(threadID)
+				if len(thread.Timeline) != 1 || thread.Timeline[0].Approval == nil {
+					t.Fatalf("timeline after %s = %#v, want one approval entry", eventType, thread.Timeline)
+				}
+				return thread.Timeline[0].Approval
 			}
-			createdAt := thread.Timeline[0].Approval.CreatedAt
-
-			ingestion.Ingest(provider.RuntimeEvent{
-				EventID:   "approval-resolved",
-				Type:      provider.RuntimeEventRequestResolved,
-				ThreadID:  string(threadID),
-				TurnID:    "turn-1",
-				RequestID: "approval-1",
-				Payload: provider.RuntimeEventPayload{
-					RequestType: provider.RuntimeRequestCommandExecution,
-					Decision:    tt.decision,
-					Resolution:  tt.resolution,
-				},
-			})
-
-			thread, _ = engine.Thread(threadID)
-			if len(thread.Timeline) != 1 || thread.Timeline[0].Approval == nil {
-				t.Fatalf("timeline after resolve = %#v, want the original approval in place", thread.Timeline)
-			}
-			approval := thread.Timeline[0].Approval
-			if approval.Status != ApprovalStatusResolved || approval.Decision != tt.want || approval.OptionID != tt.wantOption {
-				t.Fatalf("resolved approval = %#v, want decision=%q option=%q", approval, tt.want, tt.wantOption)
-			}
-			if !approval.CreatedAt.Equal(createdAt) {
-				t.Fatalf("resolved approval moved/recreated: createdAt=%v, want %v", approval.CreatedAt, createdAt)
+			opened := request(provider.RuntimeEventRequestOpened, provider.RuntimeEventPayload{Options: []provider.ApprovalOption{{ID: "allow"}, {ID: "session"}, {ID: "reject"}}})
+			resolved := request(provider.RuntimeEventRequestResolved, provider.RuntimeEventPayload{Decision: tt.decision, Resolution: json.RawMessage(tt.resolution)})
+			if resolved.Status != ApprovalStatusResolved || resolved.Decision != tt.want || resolved.OptionID != tt.wantOption || !resolved.CreatedAt.Equal(opened.CreatedAt) {
+				t.Fatalf("resolved approval = %#v, want decision=%q option=%q resolved in place", resolved, tt.want, tt.wantOption)
 			}
 		})
 	}
 }
 
+// Replayed history must not move a restored thread's sidebar recency; once the
+// replay completes, live user messages do.
 func TestIngestionPreservesRestoredThreadRecencyDuringReplay(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	ingestion := NewProviderRuntimeIngestion(engine)
 	threadID := ThreadID("thread-replayed-recency")
 	restoredAt := time.Now().Add(-24 * time.Hour).UTC()
-	replayedAt := restoredAt.Add(2 * time.Hour)
 	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: restoredAt, UpdatedAt: restoredAt}})
-
-	ingestion.Ingest(provider.RuntimeEvent{
-		EventID:   "replayed-user",
-		Type:      provider.RuntimeEventItemCompleted,
-		ThreadID:  string(threadID),
-		ItemID:    "replayed-user",
-		CreatedAt: replayedAt,
-		Payload: provider.RuntimeEventPayload{
-			ItemType: provider.ItemKindUserMessage,
-			Detail:   "old question",
-		},
-	})
-
-	thread, _ := engine.Thread(threadID)
-	if !thread.UpdatedAt.Equal(restoredAt) {
-		t.Fatalf("replay changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
+	assertUpdatedAt := func(step string, want time.Time) {
+		t.Helper()
+		if thread, _ := engine.Thread(threadID); !thread.UpdatedAt.Equal(want) {
+			t.Fatalf("%s: recency = %v, want %v", step, thread.UpdatedAt, want)
+		}
 	}
 
+	ingestion.Ingest(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: string(threadID), ItemID: "replayed-user", CreatedAt: restoredAt.Add(2 * time.Hour), Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "old question"}})
+	assertUpdatedAt("replayed user message", restoredAt)
 	ingestion.completeHistoryReplay(string(threadID), nil)
-	thread, _ = engine.Thread(threadID)
-	if !thread.UpdatedAt.Equal(restoredAt) {
-		t.Fatalf("replay completion changed restored recency to %v, want %v", thread.UpdatedAt, restoredAt)
-	}
+	assertUpdatedAt("replay completion", restoredAt)
 
-	liveAt := replayedAt.Add(2 * time.Minute)
-	if _, err := engine.AppendEvent(context.Background(), EventInput{
-		Type:       EventThreadMessageSent,
-		ThreadID:   threadID,
-		Actor:      ActorKindClient,
-		OccurredAt: liveAt,
-		Payload: EventPayload{
-			MessageID: "live-user",
-			Role:      MessageRoleUser,
-			Text:      "new question",
-		},
-	}); err != nil {
-		t.Fatalf("append live user message: %v", err)
-	}
-	thread, _ = engine.Thread(threadID)
-	if !thread.UpdatedAt.Equal(liveAt) {
-		t.Fatalf("live message left recency at %v, want %v", thread.UpdatedAt, liveAt)
-	}
+	liveAt := restoredAt.Add(3 * time.Hour)
+	mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Actor: ActorKindClient, OccurredAt: liveAt, Payload: EventPayload{MessageID: "live-user", Role: MessageRoleUser, Text: "new question"}})
+	assertUpdatedAt("live user message", liveAt)
 }
 
 func TestIngestionDropsRuntimeEventsFromStaleProviderInstance(t *testing.T) {
