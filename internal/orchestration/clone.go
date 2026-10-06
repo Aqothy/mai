@@ -93,34 +93,6 @@ func cloneItem(value Item) Item {
 	return clone
 }
 
-func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
-	for index := range clone.Locations {
-		clone.Locations[index].Line = clonePtr(value.Locations[index].Line)
-	}
-	clone.Changes = append([]FileChangeSummary(nil), value.Changes...)
-	clone.Attachments = append([]ToolAttachmentSummary(nil), value.Attachments...)
-	clone.ExitCode = clonePtr(value.ExitCode)
-	clone.DurationMilliseconds = clonePtr(value.DurationMilliseconds)
-	return &clone
-}
-
-func cloneThread(thread Thread) Thread {
-	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
-	thread.AdditionalDirectories = append([]string(nil), thread.AdditionalDirectories...)
-	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
-	thread.Session = cloneSessionPtr(thread.Session)
-	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
-	thread.PreviousTurns = cloneTurns(thread.PreviousTurns)
-	thread.Timeline = thread.Timeline.Clone()
-	thread.Plan = clonePlanPtr(thread.Plan)
-	return thread
-}
-
 func clonePlanPtr(value *Plan) *Plan {
 	if value == nil {
 		return nil

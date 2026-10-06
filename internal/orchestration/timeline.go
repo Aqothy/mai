@@ -1,7 +1,5 @@
 package orchestration
 
-import "github.com/Aqothy/maiD/internal/provider"
-
 // Timeline is the canonical ordered conversation projection. Entries never
 // move: new identities append and lifecycle updates mutate the matching entry.
 type Timeline []TimelineEntry
@@ -57,31 +55,4 @@ func (t Timeline) Messages() []Message {
 		}
 	}
 	return messages
-}
-
-func (t Timeline) Clone() Timeline {
-	clone := make(Timeline, len(t))
-	for i, entry := range t {
-		clone[i].Kind = entry.Kind
-		if entry.Message != nil {
-			message := *entry.Message
-			message.Attachments = cloneAttachments(entry.Message.Attachments)
-			message.Annotations = append([]provider.PromptAnnotation(nil), entry.Message.Annotations...)
-			clone[i].Message = &message
-		}
-		if entry.Item != nil {
-			item := *entry.Item
-			item.Payload = cloneRawMessage(entry.Item.Payload)
-			item.ToolCall = cloneToolCall(entry.Item.ToolCall)
-			item.ToolCallSummary = cloneToolCallSummary(entry.Item.ToolCallSummary)
-			clone[i].Item = &item
-		}
-		if entry.Approval != nil {
-			approval := *entry.Approval
-			approval.Args = cloneRawMessage(entry.Approval.Args)
-			approval.Options = append([]provider.ApprovalOption(nil), entry.Approval.Options...)
-			clone[i].Approval = &approval
-		}
-	}
-	return clone
 }

@@ -449,14 +449,6 @@ func (e *Engine) ThreadHistoryRestorePending(threadID ThreadID) bool {
 	return thread != nil && thread.ReplayHistoryPending
 }
 
-// Thread returns a detached complete thread snapshot for diagnostics and tests.
-// Client and runtime paths should use bounded projections/views instead.
-func (e *Engine) Thread(threadID ThreadID) (Thread, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.projection.Thread(threadID)
-}
-
 // ThreadSessionView is the cheap read for per-runtime-event consumers
 // (ingestion): session binding, latest turn, and resolved provider routing —
 // WITHOUT cloning the thread's messages/items/approvals. Thread() clones all of

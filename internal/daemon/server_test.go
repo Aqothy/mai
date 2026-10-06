@@ -66,13 +66,13 @@ func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		thread, ok := s.orchestration.Thread(threadID)
+		thread, ok := s.orchestration.ThreadListEntry(threadID)
 		if ok && thread.LatestTurn != nil && thread.LatestTurn.State == orchestration.TurnStateError && thread.Session != nil && thread.Session.ActiveTurnID == "" {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	thread, _ := s.orchestration.Thread(threadID)
+	thread, _ := s.orchestration.ThreadListEntry(threadID)
 	t.Fatalf("thread after restart = %#v, want replaced provider turn settled as error", thread)
 }
 

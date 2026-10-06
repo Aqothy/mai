@@ -87,14 +87,6 @@ func (p *Projection) applyThreadSkillsUpdated(event Event) {
 	session.UpdatedAt = event.OccurredAt
 }
 
-func (p *Projection) Thread(id ThreadID) (Thread, bool) {
-	thread := p.threads[id]
-	if thread == nil {
-		return Thread{}, false
-	}
-	return cloneThread(*thread), true
-}
-
 func (p *Projection) ThreadListEntry(id ThreadID) (ThreadListEntry, bool) {
 	thread := p.threads[id]
 	if thread == nil {

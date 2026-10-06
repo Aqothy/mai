@@ -137,7 +137,14 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if info.PID != firstPID {
 		t.Fatal("update replaced the running provider")
 	}
-	thread, _ := s.orchestration.Thread(id)
+	threadSnapshot := func() orchestration.Thread {
+		item, err := s.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item.Snapshot.Thread
+	}
+	thread := threadSnapshot()
 	if thread.LatestTurn == nil || thread.LatestTurn.State != orchestration.TurnStateRunning {
 		t.Fatalf("active turn interrupted: %#v", thread.LatestTurn)
 	}
@@ -150,7 +157,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		thread, _ = s.orchestration.Thread(id)
+		thread = threadSnapshot()
 		if thread.LatestTurn != nil && thread.LatestTurn.State == orchestration.TurnStateCompleted {
 			break
 		}

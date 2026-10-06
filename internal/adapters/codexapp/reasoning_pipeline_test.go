@@ -121,8 +121,8 @@ func newReasoningPipeline(t *testing.T, id string) *reasoningPipeline {
 }
 
 func (p *reasoningPipeline) snapshot() orchestration.Thread {
-	thread, _ := p.engine.Thread(p.threadID)
-	return thread
+	item, _ := p.engine.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: p.threadID})
+	return item.Snapshot.Thread
 }
 
 func (p *reasoningPipeline) values(t *testing.T) []reasoningTimelineValue {
