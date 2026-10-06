@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 )
 
 type InstanceID string
@@ -561,60 +560,6 @@ const (
 	ToolActionView       ToolAction = "view"
 	ToolActionOther      ToolAction = "other"
 )
-
-// toolNameActions classifies tool names by whole words (or word sequences);
-// the first matching rule wins.
-var toolNameActions = []struct {
-	action ToolAction
-	words  []string
-}{
-	{ToolActionDelete, []string{"delete", "remove", "unlink"}},
-	{ToolActionMove, []string{"move", "rename"}},
-	{ToolActionEdit, []string{"edit", "write", "patch", "apply"}},
-	{ToolActionSearch, []string{"search", "find", "grep", "glob"}},
-	{ToolActionRead, []string{"read", "list", "stat"}},
-	{ToolActionExecute, []string{"exec", "execute", "shell", "command", "terminal", "bash"}},
-	{ToolActionFetch, []string{"fetch", "http", "download"}},
-	{ToolActionDelegate, []string{"spawn", "delegate", "agent", "send input"}},
-	{ToolActionView, []string{"view", "image"}},
-}
-
-// ToolActionFromName infers the semantic action of a tool known only by its
-// name (MCP and other dynamic tools), defaulting to ToolActionOther. Names are
-// split into words so "reddit_search" is a search, not an edit.
-func ToolActionFromName(name string) ToolAction {
-	words := " " + strings.Join(toolNameWords(name), " ") + " "
-	for _, rule := range toolNameActions {
-		for _, word := range rule.words {
-			if strings.Contains(words, " "+word+" ") {
-				return rule.action
-			}
-		}
-	}
-	return ToolActionOther
-}
-
-// toolNameWords splits snake_case, kebab-case, camelCase/PascalCase (including
-// acronym runs like "HTTPRequest"), dotted and slashed names into lowercase words.
-func toolNameWords(name string) []string {
-	var spaced strings.Builder
-	runes := []rune(name)
-	for i, r := range runes {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			spaced.WriteByte(' ')
-			continue
-		}
-		if i > 0 && unicode.IsUpper(r) {
-			previous := runes[i-1]
-			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
-			if unicode.IsLower(previous) || unicode.IsDigit(previous) || (unicode.IsUpper(previous) && nextLower) {
-				spaced.WriteByte(' ')
-			}
-		}
-		spaced.WriteRune(unicode.ToLower(r))
-	}
-	return strings.Fields(spaced.String())
-}
 
 type ToolLocation struct {
 	Path string  `json:"path"`

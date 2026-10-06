@@ -40,13 +40,12 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		_ = json.Unmarshal(rawInput, &input)
 	}
 	state := &toolState{itemKind: provider.ItemKindToolCall}
-	call := provider.ToolCall{Name: name, ProviderKind: name, Action: provider.ToolActionFromName(name)}
+	call := provider.ToolCall{Name: name, ProviderKind: name, Action: provider.ToolActionOther}
 	title := name
 
 	if server, tool, ok := splitMCPToolName(name); ok {
 		call.Name = tool
 		call.Namespace = server
-		call.Action = provider.ToolActionFromName(tool)
 		state.itemKind = provider.ItemKindMCPToolCall
 		state.call = call
 		state.title = strings.Trim(server+" · "+tool, " ·")
@@ -54,6 +53,12 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	}
 
 	switch name {
+	case "PowerShell":
+		call.Action = provider.ToolActionExecute
+	case "ToolSearch":
+		call.Action = provider.ToolActionSearch
+	case "ReadMcpResourceTool":
+		call.Action = provider.ToolActionRead
 	case "Bash", "BashOutput", "KillShell":
 		state.itemKind = provider.ItemKindCommandExecution
 		call.Action = provider.ToolActionExecute

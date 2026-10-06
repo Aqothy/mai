@@ -142,7 +142,6 @@ type appItem struct {
 	Server       string             `json:"server,omitempty"`
 	Tool         string             `json:"tool,omitempty"`
 	Namespace    *string            `json:"namespace,omitempty"`
-	ReadOnlyHint *bool              `json:"readOnlyHint,omitempty"`
 	Result       json.RawMessage    `json:"result,omitempty"`
 	Error        *appMCPError       `json:"error,omitempty"`
 	ContentItems []appOutputContent `json:"contentItems,omitempty"`

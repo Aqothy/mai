@@ -24,7 +24,7 @@ func TestNewToolState(t *testing.T) {
 			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == provider.FileChangeAdd && state.call.Changes[0].NewText == "data"
 		}},
 		{"mcp", "mcp__github__list_issues", ``, func(state toolState) bool {
-			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues"
+			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues" && state.call.Action == provider.ToolActionOther
 		}},
 		{"todo write is plan only", "TodoWrite", `{"todos":[]}`, func(state toolState) bool { return state.itemKind == "" }},
 	} {
@@ -34,6 +34,30 @@ func TestNewToolState(t *testing.T) {
 		}
 		if state := newToolState(tc.tool, input); !tc.check(*state) {
 			t.Errorf("%s: newToolState(%q) = %#v", tc.name, tc.tool, state)
+		}
+	}
+}
+
+// Only exact built-in names carry a semantic action; anything else (MCP,
+// unknown or newer tools) is summarized by name as other.
+func TestNewToolStateActions(t *testing.T) {
+	for tool, want := range map[string]provider.ToolAction{
+		"Bash":                     provider.ToolActionExecute,
+		"PowerShell":               provider.ToolActionExecute,
+		"Edit":                     provider.ToolActionEdit,
+		"Read":                     provider.ToolActionRead,
+		"ReadMcpResourceTool":      provider.ToolActionRead,
+		"Grep":                     provider.ToolActionSearch,
+		"ToolSearch":               provider.ToolActionSearch,
+		"WebFetch":                 provider.ToolActionFetch,
+		"Agent":                    provider.ToolActionDelegate,
+		"ExitPlanMode":             provider.ToolActionSwitchMode,
+		"TaskList":                 provider.ToolActionOther,
+		"CronDelete":               provider.ToolActionOther,
+		"mcp__github__list_issues": provider.ToolActionOther,
+	} {
+		if got := newToolState(tool, nil).call.Action; got != want {
+			t.Errorf("newToolState(%q) action = %q, want %q", tool, got, want)
 		}
 	}
 }

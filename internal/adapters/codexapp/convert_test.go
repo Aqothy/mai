@@ -180,16 +180,16 @@ func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
 
 func TestRuntimeEventFromItemNormalizesMCPResult(t *testing.T) {
 	result := json.RawMessage(`{"content":[{"type":"text","text":"done"},{"type":"image","data":"aW1n","mimeType":"image/png"},{"type":"resource_link","uri":"https://example.test/spec","name":"spec","title":"Protocol","description":"Reference","mimeType":"text/html","size":42,"annotations":{"audience":["assistant"],"priority":0.8,"lastModified":"2026-08-20T00:00:00Z","_meta":{"hint":"read"}},"_meta":{"source":"mcp"}}],"structuredContent":null}`)
-	readOnly := true
 	item := appItem{
-		Type: "mcpToolCall", ID: "mcp-1", Status: "completed", Server: "docs", Tool: "lookup", ReadOnlyHint: &readOnly, Result: result,
+		Type: "mcpToolCall", ID: "mcp-1", Status: "completed", Server: "docs", Tool: "lookup", Result: result,
 	}
 	event, ok := runtimeEventFromItem("thread", "turn", item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
 	if !ok || event.Payload.ToolCall == nil {
 		t.Fatalf("MCP event = %#v, ok = %v", event, ok)
 	}
 	call := event.Payload.ToolCall
-	if call.Action != provider.ToolActionRead || call.Namespace != "docs" || call.Name != "lookup" || call.Output != "done" {
+	// MCP tools state no semantics, so clients summarize them by name.
+	if call.Action != provider.ToolActionOther || call.Namespace != "docs" || call.Name != "lookup" || call.Output != "done" {
 		t.Fatalf("MCP call = %#v", call)
 	}
 	if len(call.Attachments) != 2 || call.Attachments[0].Kind != "image" || call.Attachments[0].Data != "aW1n" {

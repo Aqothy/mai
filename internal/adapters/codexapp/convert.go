@@ -504,14 +504,11 @@ func fileChangeToolCall(item appItem) *provider.ToolCall {
 
 func mcpToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               provider.ToolActionFromName(item.Tool),
+		Action:               provider.ToolActionOther,
 		Name:                 item.Tool,
 		Namespace:            item.Server,
 		ProviderKind:         item.Type,
 		DurationMilliseconds: item.DurationMS,
-	}
-	if item.ReadOnlyHint != nil && *item.ReadOnlyHint && call.Action == provider.ToolActionOther {
-		call.Action = provider.ToolActionRead
 	}
 	var result appMCPResult
 	if len(item.Result) > 0 && string(item.Result) != "null" && json.Unmarshal(item.Result, &result) == nil {
@@ -577,7 +574,7 @@ func mcpResultContent(result appMCPResult) (string, []provider.Attachment) {
 
 func dynamicToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               provider.ToolActionFromName(item.Tool),
+		Action:               provider.ToolActionOther,
 		Name:                 item.Tool,
 		Namespace:            stringValue(item.Namespace),
 		ProviderKind:         item.Type,
