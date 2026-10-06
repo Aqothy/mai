@@ -33,7 +33,6 @@ def main():
     parser.add_argument("--plan", choices=["scroll", "stream", "streamScroll", "open", "lifecycle", "scrub", "sessions", "sessionsResize"], default="scroll")
     parser.add_argument("--turns", type=int, default=300)
     parser.add_argument("--timeout", type=float, default=300)
-    parser.add_argument("--container", choices=["list", "custom"], default="custom")
     parser.add_argument("--scrub-period", type=float, default=0)
     parser.add_argument("--paginated", action="store_true")
     parser.add_argument("--float-window", action="store_true", help="Float only the launched app window in AeroSpace for resize testing.")
@@ -67,7 +66,7 @@ def main():
         "macOS": platform.mac_ver()[0],
         "machine": subprocess.check_output(["sysctl", "-n", "hw.model"], text=True).strip(),
         "plan": args.plan,
-        "container": args.container, "scrubPeriodSeconds": args.scrub_period,
+        "scrubPeriodSeconds": args.scrub_period,
         "syntheticTurns": args.turns,
         "measurement": ("prepared aligned viewport" if args.plan == "open" else
                         "session checkpoints, sampled RSS and final/peak physical footprint"
@@ -85,8 +84,7 @@ def main():
                    "-ChatAutoBenchmark", args.plan,
                    "-ChatBenchmarkAnchorRow", "4800",
                    "-ChatBenchmarkPaginatedHistory", "YES" if args.paginated else "NO",
-                   "-ChatBenchmarkScrubPeriod", str(args.scrub_period),
-                   "-ChatBenchmarkUseList", "YES" if args.container == "list" else "NO"]
+                   "-ChatBenchmarkScrubPeriod", str(args.scrub_period)]
         if args.turns > 0:
             command += ["-ChatBenchmarkSyntheticTurns", str(args.turns)]
         subprocess.run(command, check=True)

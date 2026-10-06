@@ -191,10 +191,8 @@
             var isApplyingHeights = false
             private var geometryCommitHandler: (() -> Void)?
 
-            @discardableResult
-            func setGeometryCommitHandler(_ handler: (() -> Void)?) -> Bool {
+            func setGeometryCommitHandler(_ handler: (() -> Void)?) {
                 geometryCommitHandler = handler
-                return true
             }
             var content: ((Int) -> Content)?
             var hosts: [Int: NSView] = [:]

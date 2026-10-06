@@ -261,18 +261,7 @@ final class ChatBenchmarkModel {
             let anchorRow = UserDefaults.standard.integer(forKey: "ChatBenchmarkAnchorRow")
             if anchorRow > 0 {
                 let horizontalOrigin = scrollView.contentView.bounds.minX
-                if let table = scrollView.documentView as? NSTableView,
-                    anchorRow < table.numberOfRows
-                {
-                    Self.note(
-                        "anchor table auto=\(table.usesAutomaticRowHeights) spacing=\(table.intercellSpacing) delegate=\(String(describing: table.delegate))"
-                    )
-                    table.scrollRowToVisible(anchorRow)
-                    table.layoutSubtreeIfNeeded()
-                    // SwiftUI's List may use a nonzero horizontal clip origin
-                    // for sidebar/content margins. This is a vertical jump.
-                    Self.setContentOffsetY(table.rect(ofRow: anchorRow).minY, on: scrollView)
-                } else if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
+                if let document = scrollView.documentView as? ChatBenchmarkAnchoredDocument {
                     document.scrollToBenchmarkRow(anchorRow)
                 }
                 scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -650,18 +639,19 @@ nonisolated enum ChatBenchmarkAutoRun {
     @MainActor static func awaitTranscriptWarm(
         timeoutSeconds: TimeInterval
     ) async {
+        func isWarm() -> Bool {
+            #if os(macOS)
+                // The native transcript must also have installed its row geometry.
+                isTranscriptWarm && isNativeGeometryWarm
+            #else
+                isTranscriptWarm
+            #endif
+        }
         let deadline = ContinuousClock.now + .seconds(timeoutSeconds)
-        while (!isTranscriptWarm
-            || (threadTitleQuery != nil && ChatTranscriptConfiguration.usesNativeMacTranscript
-                && !isNativeGeometryWarm)),
-            ContinuousClock.now < deadline
-        {
+        while !isWarm(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(250))
         }
-        if !isTranscriptWarm
-            || (threadTitleQuery != nil && ChatTranscriptConfiguration.usesNativeMacTranscript
-                && !isNativeGeometryWarm)
-        {
+        if !isWarm() {
             trace("transcript warm timed out")
         }
     }

@@ -1,6 +1,6 @@
 # Chat benchmarks
 
-macOS renders chat with a custom AppKit transcript (an `NSScrollView` with a virtualized document, native prepared rows and SwiftUI interactive/live rows). iOS uses SwiftUI `List`. Debug macOS builds can switch to the original `List` with `-ChatBenchmarkUseList YES` as a comparison baseline; Release always uses the native transcript.
+macOS renders chat with a custom AppKit transcript (an `NSScrollView` with a virtualized document, native prepared rows and SwiftUI interactive/live rows). iOS uses SwiftUI `List`.
 
 The benchmark fixtures and auto-run plans exist only in Debug builds. Build a signed Debug app in Xcode, then pass its product path (Products → mai.app → Show in Finder) to the scripts. Results are only comparable between builds with the same optimization settings.
 
@@ -25,7 +25,6 @@ python3 clients/swift/scripts/benchmark-containers.py path/to/mai.app /tmp/chat-
 
 | Flag | Meaning |
 |---|---|
-| `--container custom` / `list` | Native AppKit transcript or SwiftUI `List`. Default `custom`. |
 | `--turns N` | Synthetic turn count, default 300. `0` runs the mock chat lab instead of the production transcript. |
 | `--runs N` | Fresh app launches, default 3. |
 | `--paginated` | Load the normal recent page initially instead of the whole fixture. |
@@ -45,7 +44,7 @@ Supports `scroll`, `stream` and `streamScroll` with `--runs`, `--turns`, `--time
 
 ## Screen recording: `record-chat-stream.py`
 
-Records the `stream` plan cropped to the app window for frame-by-frame inspection (requires `ffmpeg`). Flags: `--container custom|list`, `--rate`, `--activity`. This is for visual inspection, not timing.
+Records the `stream` plan cropped to the app window for frame-by-frame inspection (requires `ffmpeg`). Flags: `--rate`, `--activity`. This is for visual inspection, not timing.
 
 ## Manual launches
 
@@ -57,7 +56,6 @@ The same launch arguments work from Xcode (Edit Scheme → Run → Arguments):
 | `-ChatBenchmarkSyntheticTurns N` | Seed an offline synthetic transcript with `N` turns. |
 | `-ChatBenchmarkThread "<title substring>"` | Benchmark a real thread from the connected daemon instead. |
 | `-ChatBenchmarkPaginatedHistory YES/NO` | Normal recent-page loading vs. the whole fixture up front. |
-| `-ChatBenchmarkUseList YES/NO` | macOS `List` vs. native transcript. |
 | `-ChatBenchmarkAnchorRow N` | Start sweeps at row `N` (the script uses 4800 for the 300-turn fixture). |
 | `-ChatBenchmarkScrubPeriod N` | Seconds per one-way traversal for `scrub`. |
 | `-ChatBenchmarkStreamActivity YES/NO` | Include thought/tool activity in the `stream` plan. |

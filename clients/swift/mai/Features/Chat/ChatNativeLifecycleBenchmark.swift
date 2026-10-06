@@ -122,10 +122,7 @@
                 let state = CGRect(
                     x: scroll.contentView.bounds.minY, y: document.bounds.height,
                     width: scroll.contentSize.width, height: CGFloat(document.numberOfRows))
-                if state != previous
-                    || (ChatTranscriptConfiguration.usesNativeMacTranscript
-                        && !ChatBenchmarkAutoRun.isNativeGeometryWarm)
-                {
+                if state != previous || !ChatBenchmarkAutoRun.isNativeGeometryWarm {
                     previous = state
                     stableSince = .now
                 } else if stableSince.duration(to: .now) >= .milliseconds(500) {

@@ -299,7 +299,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             // Window restoration can race the first SwiftUI task. AppKit can
             // report the requested frame before WindowServer presents it, so
             // verify both sides before a recorder consumes the ready marker.
-            // A cold full-history List can occupy the main actor during its
+            // A cold full-history transcript can occupy the main actor during its
             // first mount. Keep setup separate from measured scrolling and
             // allow it to settle before applying the same viewport checks.
             let deadline = ContinuousClock.now + .seconds(15)

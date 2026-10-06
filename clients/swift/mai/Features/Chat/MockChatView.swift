@@ -796,56 +796,62 @@ private struct MockChatTimeline: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            List {
-                ForEach(messages) { message in
-                    MockChatListRow(
-                        message: message,
-                        showsDiagnostics: showsMessageDiagnostics,
-                        showsRawMarkdown: showsRawMarkdown,
-                        segmentCache: segmentCache,
-                        textLayoutStore: textLayoutStore
-                    )
-                }
-
-                ChatEndMarker()
-                    .id(Self.bottomID)
-                    .listRowInsets(.init())
-                    .listRowSeparator(.hidden)
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 0)
-            .background {
+            Group {
                 #if os(macOS)
-                    MacListTableViewIntrospector { tableView in
-                        scrollPositionPreserver.configure(
-                            isBottomFollowingEnabled: {
-                                scrollState.shouldFollowBottom
-                            },
-                            noteUserScrollActivity: { isActive in
-                                scrollState.noteUserScrollActivity(
-                                    isActive: isActive
-                                )
-                            },
-                            noteUserReachedEnd: {
-                                scrollState.noteScrollReturnedToEnd()
-                            },
-                            noteKeyboardScrollIntent: { towardEnd in
-                                if towardEnd {
-                                    scrollState.noteScrollTowardEnd()
-                                } else {
-                                    scrollState.noteScrollAwayFromEnd()
-                                }
+                    // The lab measures the production macOS container: the
+                    // native transcript with SwiftUI-hosted rows.
+                    ChatNativeTranscript(
+                        ids: messages.map(\.id.uuidString) + [Self.bottomID],
+                        width: textWarmRowWidth,
+                        onGeometryChange: { _, geometry in
+                            scrollState.noteEndVisibility(geometry.isNearBottom)
+                            if scrollState.shouldFollowBottom, !geometry.isNearBottom {
+                                scrollPositionPreserver.pinToBottom()
                             }
-                        )
-                        scrollPositionPreserver.attach(to: tableView)
+                        },
+                        onAttach: attachScrollPositionPreserver
+                    ) { index in
+                        if messages.indices.contains(index) {
+                            MockChatListRow(
+                                message: messages[index],
+                                showsDiagnostics: showsMessageDiagnostics,
+                                showsRawMarkdown: showsRawMarkdown,
+                                segmentCache: segmentCache,
+                                textLayoutStore: textLayoutStore
+                            )
+                            .id(messages[index].id)
+                            .frame(width: textWarmRowWidth)
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            ChatEndMarker()
+                        }
                     }
-                    .allowsHitTesting(false)
                 #else
-                    ChatListCollectionViewIntrospector { collectionView in
-                        bottomFollower.attach(to: collectionView)
+                    List {
+                        ForEach(messages) { message in
+                            MockChatListRow(
+                                message: message,
+                                showsDiagnostics: showsMessageDiagnostics,
+                                showsRawMarkdown: showsRawMarkdown,
+                                segmentCache: segmentCache,
+                                textLayoutStore: textLayoutStore
+                            )
+                        }
+
+                        ChatEndMarker()
+                            .id(Self.bottomID)
+                            .listRowInsets(.init())
+                            .listRowSeparator(.hidden)
                     }
-                    .allowsHitTesting(false)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .environment(\.defaultMinListRowHeight, 0)
+                    .background {
+                        ChatListCollectionViewIntrospector { collectionView in
+                            bottomFollower.attach(to: collectionView)
+                        }
+                        .allowsHitTesting(false)
+                    }
                 #endif
             }
             .onGeometryChange(for: CGFloat.self) { geometry in
@@ -897,6 +903,30 @@ private struct MockChatTimeline: View {
             }
         }
     }
+
+    #if os(macOS)
+        private func attachScrollPositionPreserver(_ document: any ChatMacScrollDocument) {
+            scrollPositionPreserver.configure(
+                isBottomFollowingEnabled: {
+                    scrollState.shouldFollowBottom
+                },
+                noteUserScrollActivity: { isActive in
+                    scrollState.noteUserScrollActivity(isActive: isActive)
+                },
+                noteUserReachedEnd: {
+                    scrollState.noteScrollReturnedToEnd()
+                },
+                noteKeyboardScrollIntent: { towardEnd in
+                    if towardEnd {
+                        scrollState.noteScrollTowardEnd()
+                    } else {
+                        scrollState.noteScrollAwayFromEnd()
+                    }
+                }
+            )
+            scrollPositionPreserver.attach(to: document)
+        }
+    #endif
 
     /// Primes segmentation, render plans, and text layouts for every message,
     /// mirroring what production pagination does per page before insertion.
@@ -1099,7 +1129,6 @@ private struct MockChatListScrollBehaviorModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .dismissesKeyboardInteractively()
             .modifier(
                 ChatBottomScrollRequestModifier(
                     scrollState: scrollState,
@@ -1108,7 +1137,9 @@ private struct MockChatListScrollBehaviorModifier: ViewModifier {
                     pinToBottom: pinToBottom
                 )
             )
-            .onScrollGeometryChange(for: MockChatScrollGeometry.self) {
+            #if !os(macOS)
+                .dismissesKeyboardInteractively()
+                .onScrollGeometryChange(for: MockChatScrollGeometry.self) {
                     geometry in
                     MockChatScrollGeometry(
                         isNearBottom: geometry.contentSize.height
@@ -1123,53 +1154,31 @@ private struct MockChatListScrollBehaviorModifier: ViewModifier {
                     )
                 } action: { oldGeometry, newGeometry in
                     scrollState.noteEndVisibility(newGeometry.isNearBottom)
-                    #if os(macOS)
-                        if scrollState.shouldFollowBottom,
-                            !newGeometry.isNearBottom,
-                            !pinToBottom(false)
-                        {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    #else
-                        let viewportShrank =
-                            newGeometry.bottomInset
-                                > oldGeometry.bottomInset
-                            || newGeometry.containerHeight
-                                < oldGeometry.containerHeight
-                        let contentGrew =
-                            newGeometry.contentHeight
-                                > oldGeometry.contentHeight
-                        if !viewportShrank, !contentGrew,
-                            newGeometry.contentOffsetY
-                                < oldGeometry.contentOffsetY
-                                    - Self.scrollMovementTolerance
-                        {
-                            scrollState.noteScrollAwayFromEnd()
-                        }
-                    #endif
-
-                    #if !os(macOS)
-                        let shouldPin = viewportShrank || contentGrew
-                        if shouldPin, scrollState.shouldFollowBottom,
-                            !pinToBottom(false)
-                        {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    #endif
+                    let viewportShrank =
+                        newGeometry.bottomInset > oldGeometry.bottomInset
+                        || newGeometry.containerHeight < oldGeometry.containerHeight
+                    let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
+                    if !viewportShrank, !contentGrew,
+                        newGeometry.contentOffsetY
+                            < oldGeometry.contentOffsetY - Self.scrollMovementTolerance
+                    {
+                        scrollState.noteScrollAwayFromEnd()
+                    }
+                    if viewportShrank || contentGrew, scrollState.shouldFollowBottom,
+                        !pinToBottom(false)
+                    {
+                        proxy.scrollTo(bottomID, anchor: .bottom)
+                    }
                 }
-            #if !os(macOS)
                 .onScrollPhaseChange { _, newPhase in
-                        let isUserDriven =
-                            switch newPhase {
-                            case .tracking, .interacting, .decelerating:
-                                true
-                            case .idle, .animating:
-                                false
-                            }
-
-                        scrollState.noteUserScrollActivity(
-                            isActive: isUserDriven
-                        )
+                    let isUserDriven =
+                        switch newPhase {
+                        case .tracking, .interacting, .decelerating:
+                            true
+                        case .idle, .animating:
+                            false
+                        }
+                    scrollState.noteUserScrollActivity(isActive: isUserDriven)
                 }
             #endif
     }
@@ -1676,7 +1685,7 @@ struct MockChatMessage: Identifiable, Equatable {
         }
 
     /// Creates the data once when the sandbox action runs. The height
-    /// pattern is deterministic and deliberately uneven so List exercises
+    /// pattern is deterministic and deliberately uneven so the transcript exercises
     /// platform virtualization across substantially different row sizes.
     static func variableHeightStressConversation(count: Int) -> [MockChatMessage] {
         let messageCount = max(0, count)
@@ -1703,7 +1712,7 @@ struct MockChatMessage: Identifiable, Equatable {
                 sections.append(
                     "- Stable identity: `\(index)`\n"
                         + "- Paragraphs: `\(paragraphCount)`\n"
-                        + "- Renderer: List"
+                        + "- Renderer: transcript"
                 )
             }
 
@@ -1728,7 +1737,7 @@ struct MockChatMessage: Identifiable, Equatable {
 
     /// A transcript shaped like real "write me an essay" threads: a
     /// handful of enormous single messages rather than many small rows.
-    /// List virtualizes per row, so each essay is laid out in full the
+    /// The transcript virtualizes per row, so each essay is laid out in full the
     /// moment its row enters the viewport — the hitch profile this
     /// fixture exists to reproduce. Compare with the raw-markdown toggle
     /// on and off.

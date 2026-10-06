@@ -3,9 +3,8 @@
 
     /// Preserves the visible native row while chat history is prepended or reflowed.
     ///
-    /// `List` initially estimates offscreen automatic row heights. Keep a
-    /// visible anchor stable as those estimates are replaced, while allowing
-    /// trackpad scrolling to continue between layout updates.
+    /// Keeps a visible anchor stable as rows above it change height, while
+    /// allowing trackpad scrolling to continue between layout updates.
     @MainActor
     final class ChatMacScrollPositionPreserver: NSObject {
         /// Ignore subpixel frame noise while still correcting a one-pixel
@@ -58,19 +57,10 @@
             isMonitoringScrollWheel = false
             self.document = document
             scrollView = document.enclosingScrollView
-            let commitsGeometry = document.setGeometryCommitHandler { [weak self] in
+            document.setGeometryCommitHandler { [weak self] in
                 // Virtual geometry is final at this boundary. Correct the clip
                 // origin in the same transaction as row frames, without yielding.
                 self?.processPendingUpdate(completesInitialAlignment: false)
-            }
-            if !commitsGeometry {
-                document.postsFrameChangedNotifications = true
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(documentFrameDidChange(_:)),
-                    name: NSView.frameDidChangeNotification,
-                    object: document
-                )
             }
             if let scrollView {
                 let clipView = scrollView.contentView
@@ -101,8 +91,7 @@
             }
         }
 
-        /// Arms an initial and subsequent-layout bottom alignment without
-        /// resolving a SwiftUI row identifier through the full List.
+        /// Arms an initial and subsequent-layout bottom alignment.
         func beginInitialBottomAlignment(
             completion: @escaping () -> Void
         ) {
@@ -111,8 +100,8 @@
             scheduleUpdate()
         }
 
-        /// Performs a constant-time native offset write. The SwiftUI proxy is
-        /// retained only as a fallback during the short attach window.
+        /// Performs a constant-time native offset write. Returns false until a
+        /// document is attached.
         @discardableResult
         func pinToBottom() -> Bool {
             guard let scrollView, let document else { return false }
@@ -154,30 +143,22 @@
         }
 
         /// Captures a visible row just before the model mutation that prepends
-        /// `leadingRowCount` native table rows.
+        /// `leadingRowCount` rows.
         func captureBeforePrepend(leadingRowCount: Int) {
             guard leadingRowCount > 0 else { return }
             captureVisibleAnchor(
-                rowOffsetAfterMutation: leadingRowCount,
                 minimumRowCountAfterMutation: (document?.numberOfRows ?? 0)
                     + leadingRowCount
             )
         }
 
         /// Captures the first substantive visible row before a disclosure
-        /// changes height. The disclosure is at or below that anchor, so its
-        /// native table index remains stable while the row expands or folds.
+        /// changes height. The disclosure is at or below that anchor.
         func captureBeforeContentExpansion() {
-            captureVisibleAnchor(
-                rowOffsetAfterMutation: 0,
-                minimumRowCountAfterMutation: 0
-            )
+            captureVisibleAnchor(minimumRowCountAfterMutation: 0)
         }
 
-        private func captureVisibleAnchor(
-            rowOffsetAfterMutation: Int,
-            minimumRowCountAfterMutation: Int
-        ) {
+        private func captureVisibleAnchor(minimumRowCountAfterMutation: Int) {
             snapshot = nil
             preservedAnchor = nil
             shouldRebaseAnchor = false
@@ -191,7 +172,8 @@
                 let anchorRow = anchorRow(
                     in: visibleRows,
                     document: document
-                )
+                ),
+                let stableID = document.stableIdentity(forRow: anchorRow)
             else { return }
 
             let anchorRect = document.rect(ofRow: anchorRow)
@@ -199,22 +181,10 @@
 
             snapshot = AnchorSnapshot(
                 expectedRowCount: minimumRowCountAfterMutation,
-                anchorRowAfterMutation: anchorRow + rowOffsetAfterMutation,
-                stableID: document.stableIdentity(forRow: anchorRow),
+                stableID: stableID,
                 anchorYBeforePrepend: anchorRect.minY,
                 visibleYBeforePrepend: visibleRect.minY
             )
-        }
-
-        @objc
-        private func documentFrameDidChange(_ notification: Notification) {
-            guard notification.object as? any ChatMacScrollDocument === document else {
-                return
-            }
-            guard snapshot != nil || preservedAnchor != nil
-                || isAligningInitialBottom || isBottomFollowingEnabled()
-            else { return }
-            scheduleUpdate()
         }
 
         @objc
@@ -241,7 +211,7 @@
 
             // AppKit may move the clip origin when its viewport is resized.
             // That movement is layout, not reader intent. Keep the previous
-            // top position; the document-height observer then applies reflow
+            // top position; the geometry commit handler then applies reflow
             // deltas relative to the same message anchor.
             if let previousBounds, previousBounds.size != clipView.bounds.size,
                 let scrollView
@@ -407,9 +377,9 @@
                 - clipView.documentVisibleRect.maxY <= distance
         }
 
-        /// Native documents post frame notifications during layout. Deferring
-        /// rect reads and offset writes avoids reentrant layout and coalesces
-        /// a burst of changes into one run-loop turn.
+        /// Clip bounds change during layout and input. Deferring rect reads and
+        /// offset writes avoids reentrant layout and coalesces a burst of
+        /// changes into one run-loop turn.
         private func scheduleUpdate() {
             guard !isUpdateScheduled else { return }
             isUpdateScheduled = true
@@ -455,7 +425,7 @@
             let validRows = rowRange.filter { $0 < document.numberOfRows }
             guard let firstRow = validRows.first else { return nil }
 
-            // The pagination marker is a one-point transparent List row. A
+            // The pagination marker is a one-point transparent row. A
             // substantive row is a more reliable anchor, but retain a fallback
             // for unusually small content.
             return validRows.first(where: {
@@ -464,21 +434,13 @@
             }) ?? firstRow
         }
 
-        private func resolveAnchorRow(
-            id: String?, fallback: Int, in document: any ChatMacScrollDocument
-        ) -> Int? {
-            if let id { return document.row(forStableIdentity: id) }
-            return fallback >= 0 && fallback < document.numberOfRows ? fallback : nil
-        }
-
         private func restoreCapturedPositionIfPossible() {
             guard let snapshot, let document,
                 let scrollView = document.enclosingScrollView
             else { return }
 
             guard document.numberOfRows >= snapshot.expectedRowCount,
-                let row = resolveAnchorRow(
-                    id: snapshot.stableID, fallback: snapshot.anchorRowAfterMutation, in: document),
+                let row = document.row(forStableIdentity: snapshot.stableID),
                 row < document.numberOfRows
             else { return }
 
@@ -491,7 +453,6 @@
                 + anchorRect.minY - snapshot.anchorYBeforePrepend
             let target = clipView.constrainBoundsRect(proposedBounds).origin
             preservedAnchor = PreservedAnchor(
-                row: row,
                 stableID: snapshot.stableID,
                 lastAnchorY: anchorRect.minY,
                 lastVisibleY: target.y
@@ -511,8 +472,7 @@
             else { return }
 
             guard
-                let row = resolveAnchorRow(
-                    id: preservedAnchor.stableID, fallback: preservedAnchor.row, in: document),
+                let row = document.row(forStableIdentity: preservedAnchor.stableID),
                 row < document.numberOfRows
             else {
                 self.preservedAnchor = nil
@@ -539,13 +499,13 @@
             guard let document else { return }
             let visibleRows = document.rows(in: visibleRect)
             guard visibleRows.location != NSNotFound, visibleRows.length > 0,
-                let row = anchorRow(in: visibleRows, document: document)
+                let row = anchorRow(in: visibleRows, document: document),
+                let stableID = document.stableIdentity(forRow: row)
             else { return }
             let rect = document.rect(ofRow: row)
             guard !rect.isEmpty else { return }
             preservedAnchor = PreservedAnchor(
-                row: row,
-                stableID: document.stableIdentity(forRow: row),
+                stableID: stableID,
                 lastAnchorY: rect.minY,
                 lastVisibleY: visibleRect.minY
             )
@@ -564,15 +524,13 @@
 
         private struct AnchorSnapshot {
             let expectedRowCount: Int
-            let anchorRowAfterMutation: Int
-            let stableID: String?
+            let stableID: String
             let anchorYBeforePrepend: CGFloat
             let visibleYBeforePrepend: CGFloat
         }
 
         private struct PreservedAnchor {
-            let row: Int
-            let stableID: String?
+            let stableID: String
             var lastAnchorY: CGFloat
             var lastVisibleY: CGFloat
         }

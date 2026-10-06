@@ -41,7 +41,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--container", choices=["custom", "list"], default="custom")
     parser.add_argument("--rate", type=int, default=120)
     parser.add_argument("--activity", action="store_true",
                         help="Stream two thoughts and tool updates before the final reply")
@@ -61,7 +60,7 @@ def main():
     if not image.is_file():
         parser.error("The recording scenario requires a Debug app build.")
     metadata = {"app": str(app), "codeImageSHA256": hashlib.sha256(image.read_bytes()).hexdigest(),
-                "requestedCaptureHz": args.rate, "container": args.container, "activity": args.activity,
+                "requestedCaptureHz": args.rate, "activity": args.activity,
                 "scope": "captured frame inspection; capture overhead invalidates FPS comparisons"}
     capture = None
     metadata["completed"] = False
@@ -69,7 +68,6 @@ def main():
         subprocess.run(["open", "-n", "-a", str(app), "--stdout", str(log),
                         "--stderr", str(out / "app.stderr"), "--args",
                         "-ChatBenchmarkSyntheticTurns", "20", "-ChatAutoBenchmark", "stream",
-                        "-ChatBenchmarkUseList", "YES" if args.container == "list" else "NO",
                         "-ChatBenchmarkStreamActivity", "YES" if args.activity else "NO",
                         "-ChatBenchmarkPaginatedHistory", "YES"], check=True)
         deadline = time.monotonic() + 90
