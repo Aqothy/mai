@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class SessionImportModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     enum Phase: Equatable {
         case loading
         case loaded
@@ -11,7 +14,10 @@ final class SessionImportModel {
 
     private(set) var phase: Phase = .loading
     private(set) var entries: [SessionImportEntry] = []
+    private(set) var capabilities: SessionImportCapabilities = .unavailable
     private(set) var importingSessionIDs: Set<String> = []
+    private(set) var maintenanceBySessionID: [String: SessionMaintenanceAction] = [:]
+    private(set) var closedSessionIDs: Set<String> = []
     private(set) var errorMessage: String?
     var selectedAgentID: String?
 
@@ -28,6 +34,11 @@ final class SessionImportModel {
     init(store: ThreadStore, previewSessions: [SessionSummary]) {
         self.store = store
         entries = previewSessions.map(SessionImportEntry.init)
+        capabilities = SessionImportCapabilities(
+            canImport: true,
+            canClose: true,
+            canDelete: true
+        )
         phase = .loaded
         loadedAgentID = store.availableProviders.first?.id
     }
@@ -58,18 +69,28 @@ final class SessionImportModel {
     func load() async {
         guard let agentID = effectiveAgentID else {
             entries = []
+            capabilities = .unavailable
+            closedSessionIDs = []
             loadedAgentID = nil
             phase = .loaded
             return
         }
         if agentID != loadedAgentID {
             entries = []
+            capabilities = .unavailable
+            closedSessionIDs = []
         }
         phase = .loading
         do {
             let listed = try await store.fetchProviderSessions(agentID: agentID)
             guard effectiveAgentID == agentID else { return }
             entries = listed.map(SessionImportEntry.init)
+            capabilities = SessionImportCapabilities(
+                canImport: store.providerSupportsSessionImport(agentID),
+                canClose: store.providerSupportsSessionClose(agentID),
+                canDelete: store.providerSupportsSessionDelete(agentID)
+            )
+            closedSessionIDs = []
             loadedAgentID = agentID
             phase = .loaded
         } catch is CancellationError {
@@ -92,6 +113,7 @@ final class SessionImportModel {
     /// import fails; failures are surfaced through `errorMessage`.
     func importSession(_ entry: SessionImportEntry) async -> String? {
         guard let agentID = effectiveAgentID,
+              capabilities.canImport,
               !importingSessionIDs.contains(entry.id) else { return nil }
         importingSessionIDs.insert(entry.id)
         defer { importingSessionIDs.remove(entry.id) }
@@ -102,6 +124,47 @@ final class SessionImportModel {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    func closeSession(_ entry: SessionImportEntry) async {
+        guard capabilities.canClose, !closedSessionIDs.contains(entry.id) else { return }
+        await maintainSession(entry, action: .close)
+    }
+
+    func deleteSession(_ entry: SessionImportEntry) async {
+        guard capabilities.canDelete else { return }
+        await maintainSession(entry, action: .delete)
+    }
+
+    private func maintainSession(
+        _ entry: SessionImportEntry,
+        action: SessionMaintenanceAction
+    ) async {
+        guard let agentID = effectiveAgentID,
+              maintenanceBySessionID[entry.id] == nil,
+              !importingSessionIDs.contains(entry.id)
+        else { return }
+
+        maintenanceBySessionID[entry.id] = action
+        defer { maintenanceBySessionID[entry.id] = nil }
+        do {
+            switch action {
+            case .close:
+                try await store.closeProviderSession(agentID: agentID, sessionID: entry.id)
+                guard effectiveAgentID == agentID else { return }
+                closedSessionIDs.insert(entry.id)
+            case .delete:
+                try await store.deleteProviderSession(agentID: agentID, sessionID: entry.id)
+                guard effectiveAgentID == agentID else { return }
+                entries.removeAll { $0.id == entry.id }
+                closedSessionIDs.remove(entry.id)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard effectiveAgentID == agentID else { return }
+            errorMessage = error.localizedDescription
         }
     }
 }

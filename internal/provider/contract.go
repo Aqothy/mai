@@ -9,6 +9,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -89,11 +90,22 @@ type MCPCapabilities struct {
 type Capabilities struct {
 	// SessionList reports whether the provider can enumerate existing sessions.
 	SessionList bool `json:"sessionList,omitempty"`
+	// SessionDelete and SessionClose are advertised independently because ACP
+	// agents may support one lifecycle operation without the other.
+	SessionDelete bool `json:"sessionDelete,omitempty"`
+	SessionClose  bool `json:"sessionClose,omitempty"`
 	// LoadReplay reports whether the provider can rebuild display history for a stored session.
 	LoadReplay bool `json:"loadReplay,omitempty"`
 	// Resume reports whether the provider can restore agent context without
 	// replaying display history.
-	Resume        bool                      `json:"resume,omitempty"`
+	Resume bool `json:"resume,omitempty"`
+	// AdditionalDirectories allows a session to expose more workspace roots in
+	// addition to its primary cwd.
+	AdditionalDirectories bool `json:"additionalDirectories,omitempty"`
+	// Fork is intentionally provider-specific. Stable Codex app-server exposes
+	// it; ACP's similarly named operation remains experimental and is not used.
+	Fork          bool                      `json:"fork,omitempty"`
+	Skills        bool                      `json:"skills,omitempty"`
 	Auth          bool                      `json:"auth,omitempty"`
 	Logout        bool                      `json:"logout,omitempty"`
 	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
@@ -111,9 +123,32 @@ const (
 )
 
 type AuthMethod struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	RequiresSecret bool   `json:"requiresSecret,omitempty"`
+}
+
+type AuthenticateInput struct {
+	MethodID string `json:"methodId"`
+	Secret   string `json:"secret,omitempty"`
+}
+
+// AuthChallenge describes a browser or device-code login that continues after
+// provider.authenticate returns. Credentials are accepted in requests but are
+// never echoed through this value or persisted by the daemon.
+type AuthChallenge struct {
+	Kind            string `json:"kind,omitempty"`
+	LoginID         string `json:"loginId,omitempty"`
+	URL             string `json:"url,omitempty"`
+	UserCode        string `json:"userCode,omitempty"`
+	VerificationURL string `json:"verificationUrl,omitempty"`
+}
+
+type AuthenticationResult struct {
+	Instance  InstanceInfo   `json:"instance"`
+	Challenge *AuthChallenge `json:"challenge,omitempty"`
 }
 
 // Auth is the provider-neutral auth state surfaced to clients (for a provider
@@ -145,6 +180,18 @@ type SlashCommand struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	HasInput    bool   `json:"hasInput,omitempty"`
+	InputHint   string `json:"inputHint,omitempty"`
+}
+
+// Skill is a provider-advertised, cwd-scoped prompt capability. A selected
+// skill is sent as structured input by adapters that support it.
+type Skill struct {
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ShortDescription string `json:"shortDescription,omitempty"`
+	Path             string `json:"path,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	Enabled          bool   `json:"enabled"`
 }
 
 type TokenUsage struct {
@@ -155,10 +202,21 @@ type TokenUsage struct {
 }
 
 type SessionSummary struct {
-	SessionID string `json:"sessionId"`
-	Title     string `json:"title,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	SessionID             string   `json:"sessionId"`
+	Title                 string   `json:"title,omitempty"`
+	Cwd                   string   `json:"cwd,omitempty"`
+	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+	UpdatedAt             string   `json:"updatedAt,omitempty"`
+}
+
+// PromptPreviewTitle is the session-list title derived from a session's first
+// prompt when the provider has none: whitespace collapsed, at most 120 runes.
+func PromptPreviewTitle(prompt string) string {
+	title := strings.Join(strings.Fields(prompt), " ")
+	if runes := []rune(title); len(runes) > 120 {
+		return string(runes[:120])
+	}
+	return title
 }
 
 // ModelSelection is WHAT a provider instance runs (model + provider-shaped
@@ -184,8 +242,11 @@ const (
 )
 
 type ConfigChoice struct {
-	Value string `json:"value"`
-	Label string `json:"label,omitempty"`
+	Value       string `json:"value"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Group       string `json:"group,omitempty"`
+	GroupLabel  string `json:"groupLabel,omitempty"`
 }
 
 type ConfigOptionType string
@@ -208,6 +269,17 @@ type ConfigOption struct {
 	CurrentValue any                  `json:"currentValue,omitempty"`
 }
 
+// CurrentConfigString returns the current value of the select option optionID.
+func CurrentConfigString(options []ConfigOption, optionID string) (string, bool) {
+	for _, option := range options {
+		if option.ID == optionID {
+			value, ok := option.CurrentValue.(string)
+			return value, ok
+		}
+	}
+	return "", false
+}
+
 // Session is the provider-neutral session projection returned by a provider
 // instance. It is thread-scoped: adapters own any native session identifiers and
 // expose only a generic resume cursor when useful. It carries only fields the
@@ -222,14 +294,16 @@ type Session struct {
 	// ProviderSessionID identifies this session to the optional provider session-
 	// management API. It is retained server-side for binding safety and is never
 	// exposed in the thread/session projection.
-	ProviderSessionID string          `json:"-"`
-	ProviderName      string          `json:"providerName,omitempty"`
-	Cwd               string          `json:"cwd,omitempty"`
-	ThreadID          string          `json:"threadId"`
-	ResumeCursor      json.RawMessage `json:"resumeCursor,omitempty"`
+	ProviderSessionID     string          `json:"-"`
+	ProviderName          string          `json:"providerName,omitempty"`
+	Cwd                   string          `json:"cwd,omitempty"`
+	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
+	ThreadID              string          `json:"threadId"`
+	ResumeCursor          json.RawMessage `json:"resumeCursor,omitempty"`
 	// ConfigOptions uses omitzero, not omitempty: provider session snapshots can
 	// intentionally report an empty set of provider metadata.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
+	Skills        []Skill        `json:"skills,omitzero"`
 }
 
 type ConfigOptionSelection struct {
@@ -243,6 +317,7 @@ type ConfigOptionSelection struct {
 type OptionsSession struct {
 	Handle        string
 	ConfigOptions []ConfigOption
+	Skills        []Skill
 }
 
 type OptionsSessionCallbacks struct {
@@ -256,11 +331,12 @@ type StartSessionInput struct {
 	ProviderInstanceID InstanceID `json:"providerInstanceId,omitempty"`
 	// ProviderSessionID is supplied internally when an external session was
 	// imported. It is adapter-owned routing data and is never exposed to clients.
-	ProviderSessionID string                  `json:"-"`
-	Cwd               string                  `json:"cwd,omitempty"`
-	ModelSelection    *ModelSelection         `json:"modelSelection,omitempty"`
-	ConfigSelections  []ConfigOptionSelection `json:"configSelections,omitempty"`
-	ResumeCursor      json.RawMessage         `json:"resumeCursor,omitempty"`
+	ProviderSessionID     string                  `json:"-"`
+	Cwd                   string                  `json:"cwd,omitempty"`
+	AdditionalDirectories []string                `json:"additionalDirectories,omitempty"`
+	ModelSelection        *ModelSelection         `json:"modelSelection,omitempty"`
+	ConfigSelections      []ConfigOptionSelection `json:"configSelections,omitempty"`
+	ResumeCursor          json.RawMessage         `json:"resumeCursor,omitempty"`
 	// ReplayHistory asks the provider to rebuild display history while restoring
 	// the session. On success, StartSessionResult.Replay contains the complete
 	// ordered replay batch. A failed start must not expose partial replay events.
@@ -281,20 +357,61 @@ type StartSessionResult struct {
 }
 
 type Attachment struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name,omitempty"`
-	MimeType string `json:"mimeType,omitempty"`
-	Data     string `json:"data,omitempty"`
-	URI      string `json:"uri,omitempty"`
+	Kind             string              `json:"kind"`
+	Name             string              `json:"name,omitempty"`
+	Title            string              `json:"title,omitempty"`
+	Description      string              `json:"description,omitempty"`
+	MimeType         string              `json:"mimeType,omitempty"`
+	Data             string              `json:"data,omitempty"`
+	URI              string              `json:"uri,omitempty"`
+	Size             int64               `json:"size,omitempty"`
+	Annotations      *ContentAnnotations `json:"annotations,omitempty"`
+	Metadata         map[string]any      `json:"_meta,omitempty"`
+	ResourceMetadata map[string]any      `json:"resourceMeta,omitempty"`
+}
+
+// ContentAnnotations are ACP/MCP display hints attached to provider content.
+// They are deliberately distinct from PromptAnnotation, which is authored by
+// a user to quote and comment on transcript text.
+type ContentAnnotations struct {
+	Audience     []string       `json:"audience,omitempty"`
+	Priority     *float64       `json:"priority,omitempty"`
+	LastModified string         `json:"lastModified,omitempty"`
+	Metadata     map[string]any `json:"_meta,omitempty"`
+}
+
+// PromptAnnotation is quoted conversation context selected by the user. It is
+// kept separate from the visible draft so clients can render and persist
+// annotation cards without injecting hidden markup.
+type PromptAnnotation struct {
+	ID        string `json:"id"`
+	MessageID string `json:"messageId,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Quote     string `json:"quote"`
+	Note      string `json:"note,omitempty"`
 }
 
 type SendTurnInput struct {
-	ThreadID       string          `json:"threadId"`
-	TurnID         string          `json:"turnId,omitempty"`
-	Input          string          `json:"input,omitempty"`
-	Attachments    []Attachment    `json:"attachments,omitempty"`
-	ModelSelection *ModelSelection `json:"modelSelection,omitempty"`
-	Options        json.RawMessage `json:"options,omitempty"`
+	ThreadID       string             `json:"threadId"`
+	TurnID         string             `json:"turnId,omitempty"`
+	Input          string             `json:"input,omitempty"`
+	Attachments    []Attachment       `json:"attachments,omitempty"`
+	Annotations    []PromptAnnotation `json:"annotations,omitempty"`
+	ModelSelection *ModelSelection    `json:"modelSelection,omitempty"`
+	Options        json.RawMessage    `json:"options,omitempty"`
+	// Presentation and ClientMessageID are local replay bookkeeping, never
+	// provider-visible prompt text or client API fields.
+	Presentation    *PromptPresentation `json:"-"`
+	ClientMessageID string              `json:"-"`
+}
+
+// PromptPresentation retains client-owned identity and annotation cards. Text
+// is present only when annotations changed the provider-facing prompt; ordinary
+// conversation content remains provider-owned.
+type PromptPresentation struct {
+	MessageID   string             `json:"messageId"`
+	Text        *string            `json:"text,omitempty"`
+	Annotations []PromptAnnotation `json:"annotations,omitempty"`
 }
 
 type InterruptTurnInput struct {
@@ -304,6 +421,21 @@ type InterruptTurnInput struct {
 
 type StopSessionInput struct {
 	ThreadID string `json:"threadId"`
+}
+
+// ForkSessionInput forks the whole native session. Codex app-server also
+// accepts a last-turn boundary; it is deliberately not exposed until a client
+// surface exists to choose one.
+type ForkSessionInput struct {
+	ProviderSessionID string `json:"-"`
+	// ModelSelection and ConfigSelections are the source session's settings.
+	// Providers that keep a fork loaded apply them when creating it.
+	ModelSelection   *ModelSelection         `json:"-"`
+	ConfigSelections []ConfigOptionSelection `json:"-"`
+}
+
+type ForkSessionResult struct {
+	Summary SessionSummary `json:"summary"`
 }
 
 type SetConfigOptionInput struct {
@@ -325,6 +457,8 @@ const (
 type ApprovalOption struct {
 	ID   string `json:"optionId"`
 	Name string `json:"name"`
+	// Kind uses ACP's permission option kinds for every provider: allow_once,
+	// allow_always, reject_once or reject_always.
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -392,35 +526,37 @@ const (
 type ItemKind string
 
 const (
-	ItemKindUserMessage      ItemKind = "user_message"
-	ItemKindAssistantMessage ItemKind = "assistant_message"
-	ItemKindReasoning        ItemKind = "reasoning"
-	ItemKindCommandExecution ItemKind = "command_execution"
-	ItemKindFileChange       ItemKind = "file_change"
-	ItemKindMCPToolCall      ItemKind = "mcp_tool_call"
-	ItemKindToolCall         ItemKind = "tool_call"
-	ItemKindWarning          ItemKind = "warning"
-	ItemKindError            ItemKind = "error"
+	ItemKindUserMessage       ItemKind = "user_message"
+	ItemKindAssistantMessage  ItemKind = "assistant_message"
+	ItemKindReasoning         ItemKind = "reasoning"
+	ItemKindCommandExecution  ItemKind = "command_execution"
+	ItemKindFileChange        ItemKind = "file_change"
+	ItemKindMCPToolCall       ItemKind = "mcp_tool_call"
+	ItemKindToolCall          ItemKind = "tool_call"
+	ItemKindWarning           ItemKind = "warning"
+	ItemKindError             ItemKind = "error"
+	ItemKindWebSearch         ItemKind = "web_search"
+	ItemKindImageView         ItemKind = "image_view"
+	ItemKindImageGeneration   ItemKind = "image_generation"
+	ItemKindContextCompaction ItemKind = "context_compaction"
 )
 
-// ToolAction is the provider-neutral semantic action performed by a tool.
-// Provider-native names and kinds are retained separately on ToolCall so
-// clients can render a stable action without branching on an adapter.
+// ToolAction is a semantic action a provider explicitly states for a tool
+// call. The empty value means the provider stated none, which is the normal
+// case: clients then identify the call by its raw Name.
+//
+// Adapters set it ONLY from what the provider itself states: its protocol's
+// tool kind (ACP "read"/"search"), its own parsed command actions (Codex
+// commandActions), or the identity of one of its own built-in tools (Claude
+// Code's Read, Grep, Glob). Never infer it from a tool or command name, and
+// leave it empty for MCP, dynamic, and unknown tools.
 type ToolAction string
 
 const (
-	ToolActionRead       ToolAction = "read"
-	ToolActionEdit       ToolAction = "edit"
-	ToolActionDelete     ToolAction = "delete"
-	ToolActionMove       ToolAction = "move"
-	ToolActionSearch     ToolAction = "search"
-	ToolActionExecute    ToolAction = "execute"
-	ToolActionThink      ToolAction = "think"
-	ToolActionFetch      ToolAction = "fetch"
-	ToolActionSwitchMode ToolAction = "switch_mode"
-	ToolActionDelegate   ToolAction = "delegate"
-	ToolActionView       ToolAction = "view"
-	ToolActionOther      ToolAction = "other"
+	// ToolActionRead reads files or lists their contents.
+	ToolActionRead ToolAction = "read"
+	// ToolActionSearch searches files or file contents.
+	ToolActionSearch ToolAction = "search"
 )
 
 type ToolLocation struct {
@@ -453,7 +589,8 @@ type FileChange struct {
 // snapshot as immutable. Provider-native input and output blobs stay private to
 // adapters and must be normalized into these client-facing fields.
 type ToolCall struct {
-	Action               ToolAction     `json:"action"`
+	// Action is empty unless the provider stated one; see ToolAction.
+	Action               ToolAction     `json:"action,omitempty"`
 	Name                 string         `json:"name,omitempty"`
 	Namespace            string         `json:"namespace,omitempty"`
 	ProviderKind         string         `json:"providerKind,omitempty"`
@@ -505,31 +642,36 @@ type PlanEntry struct {
 
 // RuntimeEventPayload is a provider-neutral tagged payload. Structured fields
 // cover orchestration and client-visible facts. Args carries opaque approval
-// arguments; Data is retained only for adapter diagnostics and non-tool native
-// details, and must not be projected into client-visible tool items.
+// arguments.
 type RuntimeEventPayload struct {
-	TurnState   RuntimeTurnState         `json:"turnState,omitempty"`
-	StopReason  string                   `json:"stopReason,omitempty"`
-	StreamKind  RuntimeContentStreamKind `json:"streamKind,omitempty"`
-	Delta       string                   `json:"delta,omitempty"`
-	Attachments []Attachment             `json:"attachments,omitempty"`
-	ItemType    ItemKind                 `json:"itemType,omitempty"`
-	ItemStatus  ItemStatus               `json:"status,omitempty"`
-	RequestType RuntimeRequestType       `json:"requestType,omitempty"`
-	Decision    ApprovalDecision         `json:"decision,omitempty"`
-	Detail      string                   `json:"detail,omitempty"`
-	Message     string                   `json:"message,omitempty"`
-	Title       string                   `json:"title,omitempty"`
-	Options     []ApprovalOption         `json:"options,omitempty"`
-	Cancelled   bool                     `json:"cancelled,omitempty"`
-	Args        json.RawMessage          `json:"args,omitempty"`
-	Resolution  json.RawMessage          `json:"resolution,omitempty"`
-	Data        json.RawMessage          `json:"data,omitempty"`
-	ToolCall    *ToolCall                `json:"toolCall,omitempty"`
+	// Internal replay metadata, resolved by the service from exact client IDs.
+	ClientMessageID string                   `json:"-"`
+	Presentation    *PromptPresentation      `json:"-"`
+	TurnState       RuntimeTurnState         `json:"turnState,omitempty"`
+	StopReason      string                   `json:"stopReason,omitempty"`
+	StreamKind      RuntimeContentStreamKind `json:"streamKind,omitempty"`
+	Delta           string                   `json:"delta,omitempty"`
+	Attachments     []Attachment             `json:"attachments,omitempty"`
+	ItemType        ItemKind                 `json:"itemType,omitempty"`
+	ItemStatus      ItemStatus               `json:"status,omitempty"`
+	RequestType     RuntimeRequestType       `json:"requestType,omitempty"`
+	Decision        ApprovalDecision         `json:"decision,omitempty"`
+	// Detail is free-form context for the event. On an ItemCompleted event for
+	// a reasoning item it carries the provider's full reasoning text, which
+	// ingestion treats as authoritative over the streamed deltas.
+	Detail     string           `json:"detail,omitempty"`
+	Message    string           `json:"message,omitempty"`
+	Title      string           `json:"title,omitempty"`
+	Options    []ApprovalOption `json:"options,omitempty"`
+	Cancelled  bool             `json:"cancelled,omitempty"`
+	Args       json.RawMessage  `json:"args,omitempty"`
+	Resolution json.RawMessage  `json:"resolution,omitempty"`
+	ToolCall   *ToolCall        `json:"toolCall,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
 	SlashCommands []SlashCommand `json:"slashCommands,omitzero"`
+	Skills        []Skill        `json:"skills,omitzero"`
 	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
 	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
 }

@@ -30,6 +30,7 @@ const (
 	EventThreadApprovalResolved          EventType = "thread.approval-resolved"
 	EventThreadConfigOptionsUpdated      EventType = "thread.config-options-updated"
 	EventThreadSlashCommandsUpdated      EventType = "thread.slash-commands-updated"
+	EventThreadSkillsUpdated             EventType = "thread.skills-updated"
 	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
 	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
 )
@@ -71,13 +72,17 @@ type EventPayload struct {
 	ProviderInstanceID provider.InstanceID      `json:"providerInstanceId,omitempty"`
 	ModelSelection     *provider.ModelSelection `json:"modelSelection,omitempty"`
 	Cwd                string                   `json:"cwd,omitempty"`
-	Session            *SessionBinding          `json:"session,omitempty"`
-	SessionCleared     bool                     `json:"sessionCleared,omitempty"`
-	MessageID          MessageID                `json:"messageId,omitempty"`
-	Role               MessageRole              `json:"role,omitempty"`
-	Text               string                   `json:"text,omitempty"`
-	Attachments        []provider.Attachment    `json:"attachments,omitempty"`
-	TurnID             TurnID                   `json:"turnId,omitempty"`
+	// AdditionalDirectories is a patch field: a non-nil empty slice explicitly
+	// clears the roots and must survive event serialization.
+	AdditionalDirectories []string                    `json:"additionalDirectories,omitzero"`
+	Session               *SessionBinding             `json:"session,omitempty"`
+	SessionCleared        bool                        `json:"sessionCleared,omitempty"`
+	MessageID             MessageID                   `json:"messageId,omitempty"`
+	Role                  MessageRole                 `json:"role,omitempty"`
+	Text                  string                      `json:"text,omitempty"`
+	Attachments           []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations           []provider.PromptAnnotation `json:"annotations,omitempty"`
+	TurnID                TurnID                      `json:"turnId,omitempty"`
 	// StopReason is the provider's reason a turn settled (end_turn, max_tokens,
 	// refusal, ...), carried on session-status-set settle events so clients can
 	// surface latestTurn.stopReason.
@@ -99,7 +104,11 @@ type EventPayload struct {
 	ConfigOptions    []provider.ConfigOption          `json:"configOptions,omitzero"`
 	ConfigSelections []provider.ConfigOptionSelection `json:"-"`
 	SlashCommands    []provider.SlashCommand          `json:"slashCommands,omitzero"`
+	Skills           []provider.Skill                 `json:"skills,omitzero"`
 	TokenUsage       *provider.TokenUsage             `json:"tokenUsage,omitempty"`
+	// ReplayedTurns are the settled turns restored by a history replay. Clients
+	// receive them through the snapshot that replaces the coalesced replay.
+	ReplayedTurns []Turn `json:"-"`
 }
 
 // ThreadID names the thread an event belongs to. Every event constructor

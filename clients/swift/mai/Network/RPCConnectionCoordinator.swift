@@ -13,6 +13,9 @@ protocol RPCTransportClient: AnyObject {
 /// coordinator provides the shared timeout, retry, and disconnect behavior.
 @Observable
 final class RPCConnectionCoordinator {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     static let maximumReconnectAttempts = 5
     static let connectAttemptTimeout: Duration = .seconds(15)
 
@@ -20,13 +23,6 @@ final class RPCConnectionCoordinator {
         case disconnected
         case connecting
         case connected
-    }
-
-    struct Timing {
-        fileprivate let fixedReconnectDelay: TimeInterval?
-
-        static let standard = Timing(fixedReconnectDelay: nil)
-        static let immediate = Timing(fixedReconnectDelay: 0)
     }
 
     private struct Participant {
@@ -47,18 +43,15 @@ final class RPCConnectionCoordinator {
     }
 
     private let rpc: any RPCTransportClient
-    private let timing: Timing
     private var participants: [Participant] = []
     private var reconnectTask: Task<Void, Never>?
     private var attemptID: UUID?
 
     init(
         rpc: any RPCTransportClient,
-        timing: Timing = .standard,
         initiallyConnected: Bool = false
     ) {
         self.rpc = rpc
-        self.timing = timing
         state = initiallyConnected ? .connected : .disconnected
 
         rpc.onDisconnect = { [weak self] error in
@@ -108,11 +101,7 @@ final class RPCConnectionCoordinator {
             }
             guard let self, attemptID == id else { return }
             failConnection(
-                RPCError(
-                    code: nil,
-                    message: "Connection attempt timed out",
-                    data: nil
-                ),
+                RPCError("Connection attempt timed out"),
                 attemptID: id,
                 disconnectTransport: true
             )
@@ -185,23 +174,16 @@ final class RPCConnectionCoordinator {
         }
 
         let attempt = reconnectAttempt + 1
-        let delay: TimeInterval
-        if let fixedReconnectDelay = timing.fixedReconnectDelay {
-            delay = fixedReconnectDelay
-        } else {
-            let baseDelay = min(pow(2, Double(reconnectAttempt)), 30)
-            delay = min(baseDelay * Double.random(in: 0.8...1.2), 30)
-        }
+        let baseDelay = min(pow(2, Double(reconnectAttempt)), 30)
+        let delay = min(baseDelay * Double.random(in: 0.8...1.2), 30)
         nextReconnectAt = Date().addingTimeInterval(delay)
 
         reconnectTask = Task { [weak self] in
             guard let self else { return }
-            if delay > 0 {
-                do {
-                    try await Task.sleep(for: .seconds(delay))
-                } catch {
-                    return
-                }
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
             }
             reconnectTask = nil
             reconnectAttempt = attempt

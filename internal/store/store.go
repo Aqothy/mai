@@ -1,5 +1,6 @@
 // Package store persists thread and provider-session metadata.
-// Conversation history remains provider-owned.
+// Conversation history remains provider-owned; client annotation presentation
+// is stored separately and only applied to exact native replay identities.
 package store
 
 import (
@@ -32,28 +33,38 @@ type RouteStore interface {
 	LoadInstances() ([]provider.InstanceSpec, error)
 }
 
+type PromptRecord struct {
+	ClientMessageID string
+	InputHash       string
+	Presentation    provider.PromptPresentation
+}
+
+// PromptStore stores only client-owned message identity and annotation cards.
+// Records never create history rows; the owning provider must replay the same
+// client ID and input hash before presentation metadata can be applied.
+type PromptStore interface {
+	SavePrompt(instanceID provider.InstanceID, sessionID string, record PromptRecord) error
+	LoadPrompts(instanceID provider.InstanceID, sessionID string) (map[string]PromptRecord, error)
+	ForkPrompts(instanceID provider.InstanceID, sourceSessionID, destinationSessionID string) error
+	DeletePrompts(instanceID provider.InstanceID, sessionID string) error
+}
+
 // ThreadMeta contains durable thread-list metadata.
 type ThreadMeta struct {
-	ThreadID           string
-	Title              string
-	Cwd                string
-	ProviderInstanceID provider.InstanceID
-	ModelSelection     *provider.ModelSelection
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ThreadID              string
+	Title                 string
+	Cwd                   string
+	AdditionalDirectories []string
+	ProviderInstanceID    provider.InstanceID
+	ModelSelection        *provider.ModelSelection
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // ThreadStore persists thread-list metadata.
 type ThreadStore interface {
 	UpsertThread(meta ThreadMeta) error
 	ListThreads() ([]ThreadMeta, error)
-}
-
-// ImportStore atomically persists one externally owned provider session as a
-// maiD thread. If the provider session was already imported, ImportThread
-// returns its existing thread id and imported=false.
-type ImportStore interface {
-	ImportThread(meta ThreadMeta, route RouteRecord) (threadID string, imported bool, err error)
 }
 
 // TerminalMeta contains the only durable terminal-thread values. Process

@@ -82,7 +82,7 @@ struct FolderPickerView: View {
                 }
             }
             .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(
@@ -102,7 +102,7 @@ struct FolderPickerView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                ToolbarItemGroup(placement: .confirmationAction) {
+                ToolbarItem(placement: .secondaryAction) {
                     Menu(
                         "Pinned Locations",
                         systemImage: model.currentFolderIsRemembered ? "pin.fill" : "pin"
@@ -140,7 +140,9 @@ struct FolderPickerView: View {
                         }
                     }
                     .labelStyle(.iconOnly)
+                }
 
+                ToolbarItem(placement: .confirmationAction) {
                     Button(confirmationTitle, systemImage: "checkmark") {
                         guard let currentPath = model.currentPath else { return }
                         onSelect(currentPath, model.parentPath)
@@ -156,5 +158,8 @@ struct FolderPickerView: View {
         }
         .tint(.accentColor)
         .foregroundStyle(.primary)
+        #if os(macOS)
+            .frame(minWidth: 440, minHeight: 360)
+        #endif
     }
 }

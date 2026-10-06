@@ -65,11 +65,35 @@ private struct ChatStreamingMarkdownContentView: View {
     let textLayoutStore: ChatTextLayoutStore
 
     @State private var worker = ChatStreamingMarkdownRenderWorker()
-    @State private var snapshot = ChatStreamingMarkdownSnapshot(
-        plan: ChatMarkdownRenderPlan(blocks: []),
-        appliedRepairKinds: [],
-        stableBlockCount: 0
-    )
+    @State private var snapshot: ChatStreamingMarkdownSnapshot
+
+    init(
+        messageID: String,
+        source: String,
+        updateID: Int,
+        sourceIsAppendOnly: Bool,
+        presentation: ChatMarkdownPresentation,
+        textLayoutStore: ChatTextLayoutStore
+    ) {
+        self.messageID = messageID
+        self.source = source
+        self.updateID = updateID
+        self.sourceIsAppendOnly = sourceIsAppendOnly
+        self.presentation = presentation
+        self.textLayoutStore = textLayoutStore
+        // A recreated streaming view starts from the message's last rendered
+        // snapshot so the text never collapses while the worker re-parses.
+        _snapshot = State(
+            initialValue: ChatStreamingSnapshotCache.shared.snapshot(
+                for: messageID
+            )
+                ?? ChatStreamingMarkdownSnapshot(
+                    plan: ChatMarkdownRenderPlan(blocks: []),
+                    appliedRepairKinds: [],
+                    stableBlockCount: 0
+                )
+        )
+    }
 
     var body: some View {
         ChatMarkdownRichContentView(
@@ -81,13 +105,18 @@ private struct ChatStreamingMarkdownContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(ChatMarkdownContentStyle())
         .task(id: updateID) {
-            guard let newSnapshot = await worker.render(
-                source: source,
-                sourceIsAppendOnly: sourceIsAppendOnly
-            ),
+            guard
+                let newSnapshot = await worker.render(
+                    source: source,
+                    sourceIsAppendOnly: sourceIsAppendOnly
+                ),
                 !Task.isCancelled
             else { return }
 
+            ChatStreamingSnapshotCache.shared.store(
+                newSnapshot,
+                for: messageID
+            )
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
@@ -97,8 +126,9 @@ private struct ChatStreamingMarkdownContentView: View {
         #if DEBUG
             .overlay(alignment: .topTrailing) {
                 if presentation.showsDiagnostics {
-                    let repairSummary = ChatStreamingMarkdownRepair
-                        .diagnosticSummary(for: snapshot.appliedRepairKinds)
+                    let repairSummary =
+                        ChatStreamingMarkdownRepair
+                    .diagnosticSummary(for: snapshot.appliedRepairKinds)
                     Text(
                         repairSummary.isEmpty
                             ? "stream rich · \(snapshot.stableBlockCount) stable · \(source.utf8.count.formatted()) bytes"

@@ -90,11 +90,6 @@ func (rt *terminalRuntime) persist(entry *terminalEntry, logger *slog.Logger) {
 	}
 }
 
-// close terminates every live shell and waits for process-group cleanup.
-func (rt *terminalRuntime) close() {
-	rt.service.Close()
-}
-
 // lockEntry starts an operation on the current identity for terminalID. The
 // identity check after locking prevents an operation that raced deletion from
 // acting on a detached entry pointer.
@@ -119,9 +114,6 @@ func (rt *terminalRuntime) lockEntry(terminalID string) (*terminalEntry, bool) {
 
 func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreateParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	cwd, err := terminal.ResolveCwd(params.Cwd)
 	if err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
@@ -149,11 +141,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		Cwd:     cwd,
 		Columns: params.Columns,
 		Rows:    params.Rows,
-	}, terminal.Events{
-		Output: s.publishTerminalOutput,
-		Exit:   s.publishTerminalExit,
-		Agent:  s.publishTerminalAgentReport,
-	})
+	}, s.terminalEvents())
 	if err != nil {
 		if errors.Is(err, terminal.ErrInvalidDimensions) {
 			// Nothing useful was created; a dimension bug should not leave a
@@ -181,7 +169,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		client.unsubscribeTerminal(terminalID)
 		session.SetAttached(false)
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
+		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
@@ -197,9 +185,6 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 // client without loss. The latest resize wins, matching ordinary PTY behavior.
 func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
@@ -253,9 +238,6 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 // persisted cwd and attaches the calling client to the new run.
 func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal service is unavailable")
-	}
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
@@ -268,11 +250,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		Cwd:     entry.cwd,
 		Columns: params.Columns,
 		Rows:    params.Rows,
-	}, terminal.Events{
-		Output: s.publishTerminalOutput,
-		Exit:   s.publishTerminalExit,
-		Agent:  s.publishTerminalAgentReport,
-	})
+	}, s.terminalEvents())
 	if err != nil {
 		if addedSubscription {
 			client.unsubscribeTerminal(params.TerminalID)
@@ -307,7 +285,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		}
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(params.TerminalID, entry))
+		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
@@ -322,9 +300,6 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 // no-op so it cannot remove a newer attachment on the same connection.
 func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachParams) {
 	rt := s.terminals
-	if rt == nil {
-		return
-	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return
@@ -376,9 +351,6 @@ func (s *Server) terminalMetaSummary(entry *terminalEntry) wire.TerminalSummary 
 
 func (s *Server) terminateTerminal(terminalID string) error {
 	rt := s.terminals
-	if rt == nil {
-		return fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -398,9 +370,6 @@ func (s *Server) terminateTerminal(terminalID string) error {
 // and bumps updatedAt.
 func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.TerminalSummary, error) {
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalSummary{}, fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return wire.TerminalSummary{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -412,7 +381,7 @@ func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.Terminal
 	rt.mu.Unlock()
 	rt.persist(entry, s.logger)
 
-	summary := s.terminalListSummary(params.TerminalID, entry)
+	summary := s.terminalListSummary(entry)
 	s.publishTerminalListUpsert(summary)
 	return summary, nil
 }
@@ -420,9 +389,6 @@ func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.Terminal
 // deleteTerminal terminates any live run and removes the terminal's identity.
 func (s *Server) deleteTerminal(terminalID string) error {
 	rt := s.terminals
-	if rt == nil {
-		return fmt.Errorf("terminal service is unavailable")
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -451,9 +417,6 @@ func (s *Server) deleteTerminal(terminalID string) error {
 func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStreamItem {
 	client.subscribeTerminalList()
 	rt := s.terminals
-	if rt == nil {
-		return wire.TerminalListStreamItem{Kind: wire.TerminalListItemSnapshot, Terminals: []wire.TerminalSummary{}}
-	}
 	rt.mu.Lock()
 	entries := make([]*terminalEntry, 0, len(rt.entries))
 	for _, entry := range rt.entries {
@@ -463,7 +426,7 @@ func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStrea
 
 	summaries := make([]wire.TerminalSummary, 0, len(entries))
 	for _, entry := range entries {
-		summaries = append(summaries, s.terminalListSummary(entry.terminalID, entry))
+		summaries = append(summaries, s.terminalListSummary(entry))
 	}
 	slices.SortFunc(summaries, func(a, b wire.TerminalSummary) int {
 		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
@@ -476,9 +439,9 @@ func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStrea
 
 // terminalListSummary overlays live-run state (without replay bytes) on the
 // persisted identity for list rows.
-func (s *Server) terminalListSummary(terminalID string, entry *terminalEntry) wire.TerminalSummary {
+func (s *Server) terminalListSummary(entry *terminalEntry) wire.TerminalSummary {
 	summary := s.terminalMetaSummary(entry)
-	if session, err := s.terminals.service.Get(terminalID); err == nil {
+	if session, err := s.terminals.service.Get(entry.terminalID); err == nil {
 		summary.Status = session.Status()
 		if code, ok := session.ExitCode(); ok {
 			summary.ExitCode = &code
@@ -507,9 +470,6 @@ func applyAgentReport(summary *wire.TerminalSummary, report terminal.AgentReport
 // free locks are taken so the detector may publish from any context.
 func (s *Server) publishTerminalAgentReport(terminalID, runID string, report terminal.AgentReport) {
 	rt := s.terminals
-	if rt == nil {
-		return
-	}
 	rt.mu.Lock()
 	entry, ok := rt.entries[terminalID]
 	rt.mu.Unlock()
@@ -522,7 +482,7 @@ func (s *Server) publishTerminalAgentReport(terminalID, runID string, report ter
 	}
 	s.logger.Debug("terminal agent activity", "terminal", terminalID, "run", runID,
 		"agent", report.Kind, "activity", report.Activity)
-	s.publishTerminalListUpsert(s.terminalListSummary(terminalID, entry))
+	s.publishTerminalListUpsert(s.terminalListSummary(entry))
 }
 
 // publishTerminalListUpsert fans one changed summary out to list subscribers.
@@ -554,12 +514,12 @@ func (s *Server) publishTerminalListItem(item wire.TerminalListStreamItem) {
 	if len(subscribers) == 0 {
 		return
 	}
-	params, ok := s.marshalNotification(item, RPCMethodTerminalSubscribeList)
+	params, ok := s.marshalNotification(item, wire.MethodTerminalSubscribeList)
 	if !ok {
 		return
 	}
 	for _, client := range subscribers {
-		client.notify(RPCMethodTerminalSubscribeList, params)
+		client.notify(wire.MethodTerminalSubscribeList, params)
 	}
 }
 
@@ -590,12 +550,12 @@ func (s *Server) publishTerminalStreamItem(terminalID string, item wire.Terminal
 	if len(subscribers) == 0 {
 		return
 	}
-	params, ok := s.marshalNotification(item, RPCMethodTerminalSubscribe)
+	params, ok := s.marshalNotification(item, wire.MethodTerminalSubscribe)
 	if !ok {
 		return
 	}
 	for _, client := range subscribers {
-		client.notify(RPCMethodTerminalSubscribe, params)
+		client.notify(wire.MethodTerminalSubscribe, params)
 	}
 }
 
@@ -635,9 +595,6 @@ func (s *Server) resizeTerminal(client *rpcClient, params wire.TerminalResizePar
 // have attached to the terminal on this connection.
 func (s *Server) terminalSessionForSubscriber(client *rpcClient, terminalID, runID string) (*terminal.Session, *terminalEntry, bool) {
 	rt := s.terminals
-	if rt == nil {
-		return nil, nil, false
-	}
 	entry, ok := rt.lockEntry(terminalID)
 	if !ok {
 		return nil, nil, false
@@ -652,6 +609,10 @@ func (s *Server) terminalSessionForSubscriber(client *rpcClient, terminalID, run
 		return nil, nil, false
 	}
 	return session, entry, true
+}
+
+func (s *Server) terminalEvents() terminal.Events {
+	return terminal.Events{Output: s.publishTerminalOutput, Exit: s.publishTerminalExit, Agent: s.publishTerminalAgentReport}
 }
 
 func (s *Server) publishTerminalOutput(terminalID, runID string, seq uint64, data []byte) {
@@ -677,7 +638,7 @@ func (s *Server) publishTerminalExit(terminalID, runID string, seq uint64, statu
 		entry.operations.Unlock()
 		return
 	}
-	summary := s.terminalListSummary(terminalID, entry)
+	summary := s.terminalListSummary(entry)
 	// Enqueue the run's final list state before releasing the terminal fence,
 	// so a later relaunch/delete update cannot be overtaken by this exit.
 	s.publishTerminalListUpsert(summary)

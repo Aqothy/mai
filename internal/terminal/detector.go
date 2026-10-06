@@ -75,7 +75,6 @@ type detectorConfig struct {
 	// it.
 	screen vtscreen.Screen
 
-	now               func() time.Time
 	recheckInterval   time.Duration // foreground recheck while an agent is known
 	settleInterval    time.Duration // recheck while a working→idle candidate settles
 	idleStabilization time.Duration // stable evidence required before working→idle
@@ -92,9 +91,6 @@ const (
 )
 
 func newDetector(cfg detectorConfig) *Detector {
-	if cfg.now == nil {
-		cfg.now = time.Now
-	}
 	if cfg.recheckInterval <= 0 {
 		cfg.recheckInterval = defaultRecheckInterval
 	}
@@ -126,7 +122,7 @@ func newDetector(cfg detectorConfig) *Detector {
 // its state follows the stream exactly; formatting waits for the debounce.
 func (d *Detector) ObserveOutput(data []byte) {
 	d.mu.Lock()
-	now := d.cfg.now()
+	now := time.Now()
 	// Probe before scanning: a foreground change resets retained OSC evidence,
 	// and evidence arriving in this same chunk belongs to the new job. The
 	// potentially slow process-table inspection runs on the detector worker.
@@ -189,7 +185,7 @@ func (d *Detector) SetAttached(attached bool) {
 		// The attach acknowledged the finished run; recompute from current
 		// evidence instead of holding done.
 		d.activity = d.freshActivityLocked()
-		d.updatedAt = d.cfg.now()
+		d.updatedAt = time.Now()
 	}
 	report, changed := d.evaluateLocked()
 	d.mu.Unlock()
@@ -200,9 +196,6 @@ func (d *Detector) SetAttached(attached bool) {
 
 // Report returns the last published semantic state.
 func (d *Detector) Report() AgentReport {
-	if d == nil {
-		return AgentReport{Activity: AgentActivityNone}
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.hasPublished {
@@ -214,9 +207,6 @@ func (d *Detector) Report() AgentReport {
 // Stop ends the recheck goroutine, releases the VT screen, and clears the
 // run's transient agent report.
 func (d *Detector) Stop() {
-	if d == nil {
-		return
-	}
 	d.stopOnce.Do(func() {
 		close(d.stop)
 		d.mu.Lock()
@@ -289,7 +279,7 @@ func (d *Detector) refreshScreenLocked() {
 		return
 	}
 	d.cachedScreen = text
-	d.lastScanAt = d.cfg.now()
+	d.lastScanAt = time.Now()
 }
 
 // freshActivityLocked classifies current evidence with no transition rules.
@@ -306,7 +296,7 @@ func (d *Detector) freshActivityLocked() AgentActivityState {
 // evidence and composes the next report. It returns the report and whether
 // it changed; the caller publishes outside the lock.
 func (d *Detector) evaluateLocked() (AgentReport, bool) {
-	now := d.cfg.now()
+	now := time.Now()
 	target := d.freshActivityLocked()
 
 	if d.kind != AgentNone {
@@ -476,7 +466,7 @@ func (d *Detector) recheck() {
 		d.mu.Unlock()
 		return
 	}
-	now := d.cfg.now()
+	now := time.Now()
 	// The debounced screen scan: format after output settles, or at the
 	// bounded forced interval while output stays continuous.
 	if d.dirty &&

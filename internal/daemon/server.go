@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/adapters/acp"
+	"github.com/Aqothy/maiD/internal/adapters/claudecode"
+	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
@@ -25,6 +27,10 @@ func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit 
 	switch spec.Driver {
 	case acp.DriverKind:
 		return acp.OpenInstance(ctx, spec, emit)
+	case codexapp.DriverKind:
+		return codexapp.OpenInstance(ctx, spec, emit)
+	case claudecode.DriverKind:
+		return claudecode.OpenInstance(ctx, spec, emit)
 	default:
 		return nil, fmt.Errorf("unsupported provider driver %q", spec.Driver)
 	}
@@ -42,8 +48,6 @@ type Server struct {
 	providerService *providerservice.Service
 	acpRegistry     *acpRegistry
 	orchestration   *orchestration.Engine
-	ingestion       *orchestration.ProviderRuntimeIngestion
-	reactor         *orchestration.ProviderEventReactor
 
 	metadataStore    *store.SQLite
 	threadMetaWriter *threadMetaWriter
@@ -55,8 +59,8 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
-	rpcMu                  sync.Mutex
-	rpcClients             map[string]*rpcClient
+	rpcMu                   sync.Mutex
+	rpcClients              map[string]*rpcClient
 	historyReplayCoalescing map[orchestration.ThreadID]struct{}
 
 	closeOnce sync.Once
@@ -98,13 +102,28 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			logger.Info("restored persisted threads", "count", count)
 		}
 	}
-	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
+	ingestion := orchestration.NewProviderRuntimeIngestion(s.orchestration)
 	var providerOptions []providerservice.Option
 	if metadata != nil {
 		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
+		providerOptions = append(providerOptions, providerservice.WithPromptStore(metadata))
 		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
 	}
 	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
+	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
+		InstanceID: "codex-app-server",
+		Name:       "Codex",
+		Driver:     codexapp.DriverKind,
+	}); err != nil {
+		logger.Warn("register Codex app-server provider", "error", err)
+	}
+	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
+		InstanceID: "claude-code",
+		Name:       "Claude Code",
+		Driver:     claudecode.DriverKind,
+	}); err != nil {
+		logger.Warn("register Claude Code provider", "error", err)
+	}
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
 	} else {
@@ -114,8 +133,9 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			}
 		}
 	}
-	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
-	go s.ingestion.Run(ctx, s.providerService.Events())
+	// The reactor registers itself as an engine listener.
+	orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, ingestion)
+	go ingestion.Run(ctx, s.providerService.Events())
 	s.orchestration.OnEvent(func(event orchestration.Event) {
 		s.logEvent(event)
 		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
@@ -222,9 +242,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) doClose() error {
-	if s.ctxCancel != nil {
-		s.ctxCancel()
-	}
+	s.ctxCancel()
 
 	s.mu.Lock()
 	httpServer := s.httpServer
@@ -234,20 +252,12 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	if s.orchestration != nil {
-		s.orchestration.Close()
-	}
-	if s.providerService != nil {
-		s.providerService.Close()
-	}
+	s.orchestration.Close()
+	s.providerService.Close()
 	// Terminal shells never survive daemon shutdown; wait for every process
 	// group to be cleaned up before releasing clients and the store.
-	if s.terminals != nil {
-		s.terminals.close()
-	}
-	if s.workspaceSearch != nil {
-		s.workspaceSearch.Close()
-	}
+	s.terminals.service.Close()
+	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()
 	clients := make([]*rpcClient, 0, len(s.rpcClients))
@@ -275,7 +285,9 @@ func (s *Server) doClose() error {
 // ImportProviderSession persists an explicitly selected provider session and
 // installs its empty, replay-pending thread stub in the live engine. Import is
 // serialized so duplicate requests always observe the first completed stub.
-func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
+// settings' model, config selections and options become the route's resume
+// preferences.
+func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary, settings provider.StartSessionInput) (orchestration.ThreadID, bool, error) {
 	if s.metadataStore == nil {
 		return "", false, fmt.Errorf("provider session import requires metadata persistence")
 	}
@@ -289,6 +301,9 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
 		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
 	}
+	if len(summary.AdditionalDirectories) > 0 && !info.Capabilities.AdditionalDirectories {
+		return "", false, fmt.Errorf("provider does not support additional directories")
+	}
 
 	s.importMu.Lock()
 	defer s.importMu.Unlock()
@@ -298,6 +313,11 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 		return "", false, err
 	}
 	summary.Cwd = cwd
+	additionalDirectories, err := s.orchestration.ResolveAdditionalDirectories(summary.AdditionalDirectories, cwd)
+	if err != nil {
+		return "", false, err
+	}
+	summary.AdditionalDirectories = additionalDirectories
 
 	now := time.Now()
 	updatedAt := now
@@ -308,17 +328,23 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	}
 	threadID := orchestration.NewThreadID()
 	startInput := provider.StartSessionInput{
-		ThreadID:           string(threadID),
-		ProviderInstanceID: instanceID,
-		Cwd:                summary.Cwd,
+		ThreadID:              string(threadID),
+		ProviderInstanceID:    instanceID,
+		Cwd:                   summary.Cwd,
+		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
+		ModelSelection:        settings.ModelSelection,
+		ConfigSelections:      settings.ConfigSelections,
+		Options:               settings.Options,
 	}
 	meta := store.ThreadMeta{
-		ThreadID:           string(threadID),
-		Title:              summary.Title,
-		Cwd:                summary.Cwd,
-		ProviderInstanceID: instanceID,
-		CreatedAt:          updatedAt,
-		UpdatedAt:          updatedAt,
+		ThreadID:              string(threadID),
+		Title:                 summary.Title,
+		Cwd:                   summary.Cwd,
+		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
+		ProviderInstanceID:    instanceID,
+		ModelSelection:        settings.ModelSelection,
+		CreatedAt:             updatedAt,
+		UpdatedAt:             updatedAt,
 	}
 	route := store.RouteRecord{
 		InstanceID:        instanceID,
@@ -362,23 +388,69 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	// client disconnects. A canceled RPC must not leave the durable import
 	// invisible until the next daemon restart.
 	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
-		ThreadID:           threadID,
-		Title:              meta.Title,
-		Cwd:                meta.Cwd,
-		ProviderInstanceID: meta.ProviderInstanceID,
-		ModelSelection:     meta.ModelSelection,
-		CreatedAt:          meta.CreatedAt,
-		UpdatedAt:          meta.UpdatedAt,
+		ThreadID:              threadID,
+		Title:                 meta.Title,
+		Cwd:                   meta.Cwd,
+		AdditionalDirectories: append([]string(nil), meta.AdditionalDirectories...),
+		ProviderInstanceID:    meta.ProviderInstanceID,
+		ModelSelection:        meta.ModelSelection,
+		CreatedAt:             meta.CreatedAt,
+		UpdatedAt:             meta.UpdatedAt,
 	}); err != nil {
 		return "", false, err
 	}
 	return threadID, imported, nil
 }
 
-func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
-	if s.acpRegistry == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
+// ForkProviderThread asks the owning provider to fork its native conversation,
+// then commits the returned native session through the ordinary import path.
+// This keeps fork identity, persistence, and duplicate protection identical to
+// provider-discovered sessions.
+func (s *Server) ForkProviderThread(ctx context.Context, sourceThreadID orchestration.ThreadID) (orchestration.ThreadID, bool, error) {
+	if s.metadataStore == nil {
+		return "", false, fmt.Errorf("provider session fork requires metadata persistence")
 	}
+	source, ok := s.orchestration.ThreadListEntry(sourceThreadID)
+	if !ok {
+		return "", false, fmt.Errorf("thread %q not found", sourceThreadID)
+	}
+	if source.LatestTurn != nil && source.LatestTurn.State == orchestration.TurnStateRunning {
+		return "", false, fmt.Errorf("cannot fork thread %q while its turn is running", sourceThreadID)
+	}
+	fork, err := s.providerService.ForkSession(ctx, string(sourceThreadID))
+	if err != nil {
+		return "", false, err
+	}
+	if fork.Summary.Title == "" {
+		fork.Summary.Title = source.Title + " (fork)"
+	}
+	threadID, imported, err := s.ImportProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
+	if err != nil {
+		s.cleanupUnpersistedProviderFork(ctx, fork.InstanceID, fork.Summary.SessionID)
+		return "", false, err
+	}
+	return threadID, imported, nil
+}
+
+func (s *Server) cleanupUnpersistedProviderFork(ctx context.Context, instanceID provider.InstanceID, sessionID string) {
+	routes, err := s.metadataStore.LoadRoutes()
+	if err != nil {
+		s.logger.Warn("inspect failed provider fork import", "provider", instanceID, "session", sessionID, "error", err)
+		return
+	}
+	for _, route := range routes {
+		if route.InstanceID == instanceID && route.ProviderSessionID == sessionID {
+			return
+		}
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := s.providerService.DeleteSession(cleanupCtx, instanceID, sessionID); err != nil {
+		s.logger.Warn("delete unpersisted provider fork", "provider", instanceID, "session", sessionID, "error", err)
+	}
+}
+
+func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
@@ -388,9 +460,7 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
-	}
+	s.logProviderStarted(spec, restart, started, err)
 	return info, err
 }
 
@@ -398,19 +468,19 @@ func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, 
 	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
 		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
 	}
-	return s.startProvider(ctx, spec, restart, 30*time.Second)
-}
-
-func (s *Server) startProvider(ctx context.Context, spec provider.InstanceSpec, restart bool, timeout time.Duration) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartInstance(ctx, spec, restart)
+	s.logProviderStarted(spec, restart, started, err)
+	return info, err
+}
+
+func (s *Server) logProviderStarted(spec provider.InstanceSpec, restart bool, started time.Time, err error) {
 	if err == nil {
 		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
 	}
-	return info, err
 }

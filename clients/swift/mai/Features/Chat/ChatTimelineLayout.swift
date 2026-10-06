@@ -18,20 +18,6 @@ import Foundation
 /// - The running turn's content is always visible.
 /// - Warnings, errors, and pending approvals never fold.
 nonisolated enum ChatTimelineLayout {
-    static func rows(
-        timeline: [TimelineEntry],
-        streamingTurnID: String?,
-        latestTurn: Turn?,
-        expandedSectionIDs: Set<String>
-    ) -> [ChatTimelineRowModel] {
-        rows(
-            sections: sections(timeline: timeline),
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
-            expandedSectionIDs: expandedSectionIDs
-        )
-    }
-
     /// Emits rows from an already projected timeline. Keeping these sections
     /// as the List input prevents a live view from retaining the generated
     /// model's large `TimelineEntry` array while the store appends text to its
@@ -40,15 +26,25 @@ nonisolated enum ChatTimelineLayout {
         sections: [Section],
         streamingTurnID: String?,
         latestTurn: Turn?,
+        previousTurns: [Turn] = [],
         expandedSectionIDs: Set<String>
     ) -> [ChatTimelineRowModel] {
+        // Each section renders its own turn's outcome and timing, not only
+        // the latest turn's.
+        var turnsByID = Dictionary(
+            previousTurns.map { ($0.turnID, $0) },
+            uniquingKeysWith: { _, later in later }
+        )
+        if let latestTurn {
+            turnsByID[latestTurn.turnID] = latestTurn
+        }
         var rows: [ChatTimelineRowModel] = []
         for section in sections {
             appendRows(
                 for: section,
                 into: &rows,
                 streamingTurnID: streamingTurnID,
-                latestTurn: latestTurn,
+                turn: section.turnID.flatMap { turnsByID[$0] },
                 isExpanded: expandedSectionIDs.contains(section.id)
             )
         }
@@ -64,6 +60,46 @@ nonisolated enum ChatTimelineLayout {
         var blocks: [Block] = []
         var earliest: Date?
         var latest: Date?
+        /// Entries projected into this section, so incremental projection
+        /// (`ChatTimelineProjection`) knows where each section begins.
+        var entryCount = 0
+    }
+
+    /// Folds one entry into the section list, opening a new section when the
+    /// entry starts a new turn. Shared by full projection and by
+    /// `ChatTimelineProjection`'s suffix reprojection, so both produce
+    /// identical sections.
+    static func project(_ entry: TimelineEntry, into sections: inout [Section]) {
+        let turnID = entryTurnID(entry)
+        let isUserMessage =
+            entry.message?.role == MaidMessageRole.user.rawValue
+
+        var startsNewSection = sections.isEmpty
+        if let current = sections.last {
+            if isUserMessage {
+                // A user message starts the next turn unless it was
+                // steering the turn this section already covers.
+                startsNewSection = turnID == nil || turnID != current.turnID
+            } else if let turnID, let currentTurnID = current.turnID {
+                startsNewSection = turnID != currentTurnID
+            }
+        }
+
+        if startsNewSection {
+            sections.append(
+                Section(
+                    id: turnID ?? "local-\(entryIdentity(entry))",
+                    turnID: turnID
+                )
+            )
+        }
+
+        var section = sections.removeLast()
+        if section.turnID == nil {
+            section.turnID = turnID
+        }
+        append(entry, to: &section)
+        sections.append(section)
     }
 
     /// A section entry tagged with whether it can hide behind the turn fold.
@@ -74,40 +110,10 @@ nonisolated enum ChatTimelineLayout {
 
     static func sections(timeline: [TimelineEntry]) -> [Section] {
         var sections: [Section] = []
-
+        sections.reserveCapacity(timeline.count / 4 + 1)
         for entry in timeline {
-            let turnID = entryTurnID(entry)
-            let isUserMessage =
-                entry.message?.role == MaidMessageRole.user.rawValue
-
-            var startsNewSection = sections.isEmpty
-            if let current = sections.last, !startsNewSection {
-                if isUserMessage {
-                    // A user message starts the next turn unless it was
-                    // steering the turn this section already covers.
-                    startsNewSection = turnID == nil || turnID != current.turnID
-                } else if let turnID, let currentTurnID = current.turnID {
-                    startsNewSection = turnID != currentTurnID
-                }
-            }
-
-            if startsNewSection {
-                sections.append(
-                    Section(
-                        id: turnID ?? "local-\(entryIdentity(entry))",
-                        turnID: turnID
-                    )
-                )
-            }
-
-            var section = sections.removeLast()
-            if section.turnID == nil {
-                section.turnID = turnID
-            }
-            append(entry, to: &section)
-            sections.append(section)
+            project(entry, into: &sections)
         }
-
         return sections
     }
 
@@ -144,6 +150,7 @@ nonisolated enum ChatTimelineLayout {
     }
 
     private static func append(_ entry: TimelineEntry, to section: inout Section) {
+        section.entryCount += 1
         switch entry.entryKind {
         case .message:
             guard let message = entry.message else { return }
@@ -203,7 +210,7 @@ nonisolated enum ChatTimelineLayout {
         for section: Section,
         into rows: inout [ChatTimelineRowModel],
         streamingTurnID: String?,
-        latestTurn: Turn?,
+        turn: Turn?,
         isExpanded: Bool
     ) {
         let isRunning = streamingTurnID != nil && section.turnID == streamingTurnID
@@ -216,7 +223,7 @@ nonisolated enum ChatTimelineLayout {
         let header = ChatTimelineRowModel.turnActivity(
             turnActivity(
                 for: section,
-                latestTurn: latestTurn,
+                turn: turn,
                 isRunning: isRunning,
                 isExpanded: isExpanded
             )
@@ -245,7 +252,7 @@ nonisolated enum ChatTimelineLayout {
 
     private static func turnActivity(
         for section: Section,
-        latestTurn: Turn?,
+        turn: Turn?,
         isRunning: Bool,
         isExpanded: Bool
     ) -> ChatTurnActivity {
@@ -265,41 +272,31 @@ nonisolated enum ChatTimelineLayout {
                 break
             }
         }
-        if latestTurn?.turnID == section.turnID,
-            latestTurn?.turnState == .interrupted
-        {
+        if turn?.turnState == .interrupted {
             wasInterrupted = true
         }
         return ChatTurnActivity(
             sectionID: section.id,
             stepCount: stepCount,
-            duration: isRunning ? nil : sectionDuration(section, latestTurn: latestTurn),
+            duration: isRunning ? nil : sectionDuration(section, turn: turn),
             isRunning: isRunning,
-            startedAt: isRunning && latestTurn?.turnID == section.turnID
-                ? latestTurn?.startedAt ?? latestTurn?.requestedAt
-                : nil,
+            startedAt: isRunning ? turn?.startedAt ?? turn?.requestedAt : nil,
             isExpanded: isExpanded,
             hasFailure: hasFailure,
             wasInterrupted: wasInterrupted
         )
     }
 
-    /// The latest turn keeps authoritative timestamps; older turns are gone
-    /// from the wire model, so their span is derived from entry timestamps.
-    /// Restored history re-stamps entries at replay time, so those turns
-    /// genuinely have no duration to show.
+    /// A turn's authoritative timestamps give its duration. Without them,
+    /// such as restored history re-stamped at replay time, the span falls
+    /// back to entry timestamps, which genuinely may have no duration to show.
     private static func sectionDuration(
         _ section: Section,
-        latestTurn: Turn?
+        turn: Turn?
     ) -> Duration? {
         var interval: TimeInterval?
-        if let latestTurn,
-            latestTurn.turnID == section.turnID,
-            let completedAt = latestTurn.completedAt
-        {
-            interval = completedAt.timeIntervalSince(
-                latestTurn.startedAt ?? latestTurn.requestedAt
-            )
+        if let turn, let completedAt = turn.completedAt {
+            interval = completedAt.timeIntervalSince(turn.startedAt ?? turn.requestedAt)
         } else if let earliest = section.earliest, let latest = section.latest {
             interval = latest.timeIntervalSince(earliest)
         }
@@ -404,19 +401,15 @@ nonisolated struct ChatActivityGroup: Identifiable {
         items.contains { $0.itemStatus == .failed }
     }
 
-    var isInProgress: Bool {
-        items.contains { $0.itemStatus == .inProgress }
-    }
+    /// At most this many distinct tool names appear before "+N more".
+    static let maxToolNames = 3
 
-    /// A Codex-style phrase such as "Read 2 files, ran a command".
+    /// A phrase built only from what providers stated, such as
+    /// "Read files, ran a command, WebFetch, github · list_issues".
     var summary: String {
         var counts: [(verb: ChatActivityVerb, count: Int)] = []
-        var toolName: String?
         for item in items {
             let verb = ChatActivityVerb(item: item)
-            if verb == .tool, toolName == nil {
-                toolName = item.toolCallSummary?.name ?? item.title
-            }
             if let index = counts.firstIndex(where: { $0.verb == verb }) {
                 counts[index].count += 1
             } else {
@@ -424,70 +417,86 @@ nonisolated struct ChatActivityGroup: Identifiable {
             }
         }
 
-        let phrases = counts.map { verb, count in
-            verb.phrase(count: count, toolName: toolName)
+        var phrases: [String] = []
+        var toolNameCount = 0
+        for (verb, count) in counts {
+            if case .tool = verb {
+                toolNameCount += 1
+                guard toolNameCount <= Self.maxToolNames else { continue }
+            }
+            phrases.append(verb.phrase(count: count, leading: phrases.isEmpty))
         }
-        guard let first = phrases.first else { return "" }
-        return ([first.capitalizedFirst] + phrases.dropFirst())
-            .joined(separator: ", ")
+        if toolNameCount > Self.maxToolNames {
+            phrases.append("+\(toolNameCount - Self.maxToolNames) more")
+        }
+        return phrases.joined(separator: ", ")
     }
 }
 
-/// Provider-neutral verb bucket used to summarize grouped activity.
+/// What a provider stated about one activity item, used to summarize groups.
+/// Only stated facts count: the item kind, or a read/search action the
+/// provider declared. Any other tool is identified by its raw name.
 nonisolated enum ChatActivityVerb: Equatable {
     case thought
     case read
     case searched
     case edited
     case ranCommand
-    case fetched
-    case tool
+    /// A tool with no stated action, by its raw (namespaced) name.
+    case tool(String)
 
     init(item: Item) {
-        switch item.itemKind {
-        case .reasoning:
-            self = .thought
-            return
-        case .commandExecution:
-            self = .ranCommand
-            return
-        case .fileChange:
-            self = .edited
-            return
-        default:
-            break
-        }
-        switch item.toolCallSummary.flatMap({ MaidToolAction(rawValue: $0.action) }) {
-        case .read, .view: self = .read
-        case .search: self = .searched
-        case .edit, .delete, .move: self = .edited
-        case .execute: self = .ranCommand
-        case .think: self = .thought
-        case .fetch: self = .fetched
-        default: self = .tool
+        let summary = item.toolCallSummary
+        switch summary?.action.flatMap(MaidToolAction.init(rawValue:)) {
+        case .read:
+            self = .read
+        case .search:
+            self = .searched
+        case nil:
+            switch item.itemKind {
+            case .reasoning: self = .thought
+            case .commandExecution: self = .ranCommand
+            case .fileChange: self = .edited
+            default: self = .tool(Self.toolName(summary: summary, item: item))
+            }
         }
     }
 
-    func phrase(count: Int, toolName: String?) -> String {
+    /// The provider's own tool name, qualified by its namespace (an MCP
+    /// server, for example), falling back to the item title and kind.
+    private static func toolName(summary: ToolCallSummary?, item: Item) -> String {
+        if let name = summary?.name, !name.isEmpty {
+            if let namespace = summary?.namespace, !namespace.isEmpty {
+                return "\(namespace) · \(name)"
+            }
+            return name
+        }
+        if let title = item.title, !title.isEmpty {
+            return title
+        }
+        return item.kind
+    }
+
+    /// The phrase for one or more such items, without counts. `leading`
+    /// capitalizes a verb that starts a sentence; raw tool names are never
+    /// reformatted.
+    func phrase(count: Int, leading: Bool = false) -> String {
+        let text: String
         switch self {
         case .thought:
-            return "thought"
+            text = "thought"
         case .read:
-            return count == 1 ? "read a file" : "read \(count) files"
+            text = count == 1 ? "read a file" : "read files"
         case .searched:
-            return count == 1 ? "searched" : "ran \(count) searches"
+            text = "searched"
         case .edited:
-            return count == 1 ? "edited a file" : "edited \(count) files"
+            text = count == 1 ? "edited a file" : "edited files"
         case .ranCommand:
-            return count == 1 ? "ran a command" : "ran \(count) commands"
-        case .fetched:
-            return count == 1 ? "fetched a page" : "fetched \(count) pages"
-        case .tool:
-            if count == 1, let toolName, !toolName.isEmpty {
-                return "used \(toolName)"
-            }
-            return count == 1 ? "used a tool" : "used \(count) tools"
+            text = count == 1 ? "ran a command" : "ran commands"
+        case .tool(let name):
+            return name
         }
+        return leading ? text.prefix(1).uppercased() + text.dropFirst() : text
     }
 }
 
@@ -495,12 +504,5 @@ extension ChatTimelineLayout.Block {
     fileprivate nonisolated var activityGroup: ChatActivityGroup? {
         if case .activityGroup(let group) = row { return group }
         return nil
-    }
-}
-
-extension String {
-    nonisolated var capitalizedFirst: String {
-        guard let first = first else { return self }
-        return first.uppercased() + dropFirst()
     }
 }

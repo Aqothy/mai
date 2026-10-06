@@ -12,3 +12,10 @@ struct RPCError: LocalizedError {
         return message
     }
 }
+
+extension RPCError {
+    /// A client-side failure with no daemon error code or data.
+    init(_ message: String) {
+        self.init(code: nil, message: message, data: nil)
+    }
+}

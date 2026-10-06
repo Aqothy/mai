@@ -82,7 +82,7 @@ struct ComposerOptionsSheet: View {
             }
             .formStyle(.grouped)
             .navigationTitle("Advanced")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -176,7 +176,7 @@ private struct DraftConfigOptionView: View {
         } else if let choices = option.choices, !choices.isEmpty {
             Picker(selection: stringValue) {
                 ForEach(choices, id: \.value) { choice in
-                    Text(choice.label ?? choice.value).tag(choice.value)
+                    Text(choice.pickerLabel).tag(choice.value)
                 }
             } label: {
                 ConfigOptionLabel(option: option)
@@ -218,8 +218,16 @@ private struct ConfigOptionLabel: View {
 
     var body: some View {
         Label {
-            Text(option.label ?? option.id)
-                .lineLimit(1)
+            VStack(alignment: .leading) {
+                Text(option.label ?? option.id)
+                    .lineLimit(1)
+                if let description = option.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
         } icon: {
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
@@ -234,6 +242,20 @@ private struct ConfigOptionLabel: View {
         case .modelConfig: "dial.medium"
         default: "gearshape"
         }
+    }
+}
+
+extension ConfigChoice {
+    fileprivate var pickerLabel: String {
+        let label = label ?? value
+        let groupedLabel: String
+        if let groupLabel, !groupLabel.isEmpty {
+            groupedLabel = "\(groupLabel): \(label)"
+        } else {
+            groupedLabel = label
+        }
+        guard let description, !description.isEmpty else { return groupedLabel }
+        return "\(groupedLabel) — \(description)"
     }
 }
 

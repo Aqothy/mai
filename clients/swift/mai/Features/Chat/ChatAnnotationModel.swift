@@ -1,0 +1,272 @@
+import Foundation
+import Observation
+import SwiftUI
+
+nonisolated struct ChatPendingAnnotation: Identifiable, Equatable, Codable, Sendable {
+    let id: String
+    let messageID: String?
+    let quote: String
+    let role: String?
+    let note: String?
+
+    @MainActor var promptAnnotation: PromptAnnotation {
+        PromptAnnotation(
+            id: id,
+            messageID: messageID,
+            note: note,
+            quote: quote,
+            role: role
+        )
+    }
+}
+
+nonisolated struct ChatAnnotationDraft: Identifiable, Equatable, Sendable {
+    let id: String
+    let messageID: String?
+    let quote: String
+    let role: String?
+    var note: String
+}
+
+nonisolated enum ChatAnnotationFormatting {
+    static func normalizedNote(_ note: String) -> String? {
+        let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return note.isEmpty ? nil : note
+    }
+
+    static func summary(for annotation: ChatPendingAnnotation) -> String {
+        let quote = annotation.quote
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        let maximumLength = 72
+        guard quote.count > maximumLength else { return quote }
+        return String(quote.prefix(maximumLength)) + "…"
+    }
+}
+
+@Observable
+final class ChatAnnotationModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
+    /// The chat whose unsent annotations are shown. Each chat's pending
+    /// annotations live in its draft store, so switching chats neither loses
+    /// them nor carries them into another chat.
+    private var owner: (threadID: String, draftStore: ThreadDraftStore)?
+    /// Annotations of a model shown without a chat, such as in previews.
+    private var ownerlessAnnotations: [ChatPendingAnnotation] = []
+    var editorDraft: ChatAnnotationDraft?
+
+    private(set) var annotations: [ChatPendingAnnotation] {
+        get {
+            owner.map { $0.draftStore.annotations(for: $0.threadID) } ?? ownerlessAnnotations
+        }
+        set {
+            if let owner {
+                owner.draftStore.setAnnotations(newValue, for: owner.threadID)
+            } else {
+                ownerlessAnnotations = newValue
+            }
+        }
+    }
+
+    /// Shows the selected chat's unsent annotations. An open editor is
+    /// dismissed.
+    func show(threadID: String?, draftStore: ThreadDraftStore) {
+        editorDraft = nil
+        ownerlessAnnotations = []
+        owner = threadID.map { ($0, draftStore) }
+    }
+
+    func beginComment(
+        quote: String,
+        messageID: String?,
+        role: String?
+    ) {
+        let quote = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !quote.isEmpty else { return }
+        editorDraft = ChatAnnotationDraft(
+            id: UUID().uuidString,
+            messageID: messageID,
+            quote: quote,
+            role: role,
+            note: ""
+        )
+    }
+
+    func addEditorDraft() {
+        guard let editorDraft else { return }
+        annotations.append(
+            ChatPendingAnnotation(
+                id: editorDraft.id,
+                messageID: editorDraft.messageID,
+                quote: editorDraft.quote,
+                role: editorDraft.role,
+                note: ChatAnnotationFormatting.normalizedNote(
+                    editorDraft.note
+                )
+            )
+        )
+        self.editorDraft = nil
+    }
+
+    func cancelEditor() {
+        editorDraft = nil
+    }
+
+    func remove(id: String) {
+        annotations.removeAll { $0.id == id }
+    }
+}
+
+struct ChatAnnotationContext {
+    let messageID: String
+    let role: String
+    let model: ChatAnnotationModel
+}
+
+extension EnvironmentValues {
+    @Entry var chatAnnotationContext: ChatAnnotationContext?
+}
+
+struct ChatAnnotationEditor: View {
+    @Bindable var model: ChatAnnotationModel
+    @FocusState private var isNoteFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading) {
+                if let draft = model.editorDraft {
+                    VStack(alignment: .leading) {
+                        Label("Selected text", systemImage: "quote.opening")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(draft.quote)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .padding()
+                    .background(
+                        .secondary.opacity(0.08),
+                        in: .rect(cornerRadius: 14)
+                    )
+
+                    TextEditor(
+                        text: Binding(
+                            get: { model.editorDraft?.note ?? "" },
+                            set: { model.editorDraft?.note = $0 }
+                        )
+                    )
+                    .focused($isNoteFocused)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityLabel("Comment")
+                    .overlay(alignment: .topLeading) {
+                        if draft.note.isEmpty {
+                            Text("Add a comment for your next message")
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+            }
+            .padding()
+            .navigationTitle("Comment on Selection")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) {
+                        model.cancelEditor()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        model.addEditorDraft()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .onAppear {
+            isNoteFocused = true
+        }
+    }
+}
+
+struct ChatComposerAnnotationStrip: View {
+    let annotations: [ChatPendingAnnotation]
+    let remove: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack {
+                ForEach(annotations) { annotation in
+                    HStack {
+                        Label(
+                            ChatAnnotationFormatting.summary(for: annotation),
+                            systemImage: "text.quote"
+                        )
+                        .lineLimit(1)
+
+                        Button("Remove annotation", systemImage: "xmark") {
+                            remove(annotation.id)
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        .secondary.opacity(0.12),
+                        in: .rect(cornerRadius: 12)
+                    )
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(
+                        "Annotation: \(ChatAnnotationFormatting.summary(for: annotation))"
+                    )
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityLabel("Pending annotations")
+    }
+}
+
+struct ChatMessageAnnotationsView: View {
+    let annotations: [PromptAnnotation]
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            ForEach(annotations, id: \.id) { annotation in
+                VStack(alignment: .leading) {
+                    Label("Quoted context", systemImage: "text.quote")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(annotation.quote)
+                        .font(.callout)
+                        .lineLimit(4)
+
+                    if let note = annotation.note, !note.isEmpty {
+                        Text(note)
+                            .font(.callout)
+                            .bold()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(
+                    .secondary.opacity(0.1),
+                    in: .rect(cornerRadius: 12)
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Message annotations")
+    }
+}

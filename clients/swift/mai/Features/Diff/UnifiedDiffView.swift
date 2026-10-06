@@ -35,6 +35,9 @@ nonisolated enum UnifiedDiffSource: Hashable, Sendable {
 
 @Observable
 private final class UnifiedDiffLoader {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var document = UnifiedDiffDocument.empty
     private(set) var isLoading = true
 
@@ -356,26 +359,6 @@ private struct UnifiedDiffLineView: View {
         let old = line.oldLineNumber.map { "old line \($0)" } ?? ""
         let new = line.newLineNumber.map { "new line \($0)" } ?? ""
         return [kind, old, new, line.content].filter { !$0.isEmpty }.joined(separator: ", ")
-    }
-}
-
-struct UnifiedDiffLauncherView: View {
-    let changes: [FileChange]
-
-    @State private var isPresented = false
-
-    var body: some View {
-        Button(
-            "View \(changes.count.formatted()) file "
-                + (changes.count == 1 ? "change" : "changes"),
-            systemImage: "doc.text.magnifyingglass"
-        ) {
-            isPresented = true
-        }
-        .sheet(isPresented: $isPresented) {
-            UnifiedDiffView(changes: changes)
-                .presentationDragIndicator(.visible)
-        }
     }
 }
 

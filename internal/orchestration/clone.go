@@ -2,20 +2,68 @@ package orchestration
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
 func cloneRawMessage(value json.RawMessage) json.RawMessage {
-	if len(value) == 0 {
-		return nil
-	}
 	return append(json.RawMessage(nil), value...)
 }
 
 func cloneAttachments(values []provider.Attachment) []provider.Attachment {
-	return append([]provider.Attachment(nil), values...)
+	if values == nil {
+		return nil
+	}
+	cloned := make([]provider.Attachment, len(values))
+	for index, value := range values {
+		cloned[index] = value
+		cloned[index].Annotations = cloneContentAnnotations(value.Annotations)
+		cloned[index].Metadata = cloneMetadata(value.Metadata)
+		cloned[index].ResourceMetadata = cloneMetadata(value.ResourceMetadata)
+	}
+	return cloned
+}
+
+func cloneContentAnnotations(value *provider.ContentAnnotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Audience = append([]string(nil), value.Audience...)
+	cloned.Metadata = cloneMetadata(value.Metadata)
+	return &cloned
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = cloneMetadataValue(entry)
+	}
+	return cloned
+}
+
+func cloneMetadataValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMetadata(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, entry := range typed {
+			cloned[index] = cloneMetadataValue(entry)
+		}
+		return cloned
+	case json.RawMessage:
+		return cloneRawMessage(typed)
+	case []byte:
+		return append([]byte(nil), typed...)
+	default:
+		return value
+	}
 }
 
 // cloneToolCall isolates a public thread snapshot from projection-owned state.
@@ -27,21 +75,12 @@ func cloneToolCall(value *provider.ToolCall) *provider.ToolCall {
 	clone := *value
 	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
 	for index := range clone.Locations {
-		if value.Locations[index].Line != nil {
-			line := *value.Locations[index].Line
-			clone.Locations[index].Line = &line
-		}
+		clone.Locations[index].Line = clonePtr(value.Locations[index].Line)
 	}
 	clone.Changes = append([]provider.FileChange(nil), value.Changes...)
 	clone.Attachments = cloneAttachments(value.Attachments)
-	if value.ExitCode != nil {
-		exitCode := *value.ExitCode
-		clone.ExitCode = &exitCode
-	}
-	if value.DurationMilliseconds != nil {
-		duration := *value.DurationMilliseconds
-		clone.DurationMilliseconds = &duration
-	}
+	clone.ExitCode = clonePtr(value.ExitCode)
+	clone.DurationMilliseconds = clonePtr(value.DurationMilliseconds)
 	return &clone
 }
 
@@ -52,32 +91,6 @@ func cloneItem(value Item) Item {
 	clone.ToolCallSummary = nil
 	clone.DetailAvailable = false
 	return clone
-}
-
-func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
-	for index := range clone.Locations {
-		clone.Locations[index].Line = cloneUint32Ptr(value.Locations[index].Line)
-	}
-	clone.Changes = append([]FileChangeSummary(nil), value.Changes...)
-	clone.Attachments = append([]ToolAttachmentSummary(nil), value.Attachments...)
-	clone.ExitCode = cloneIntPtr(value.ExitCode)
-	clone.DurationMilliseconds = cloneInt64Ptr(value.DurationMilliseconds)
-	return &clone
-}
-
-func cloneThread(thread Thread) Thread {
-	thread.ModelSelection = cloneModelSelection(thread.ModelSelection)
-	thread.ConfigSelections = append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...)
-	thread.Session = cloneSessionPtr(thread.Session)
-	thread.LatestTurn = cloneTurnPtr(thread.LatestTurn)
-	thread.Timeline = thread.Timeline.Clone()
-	thread.Plan = clonePlanPtr(thread.Plan)
-	return thread
 }
 
 func clonePlanPtr(value *Plan) *Plan {
@@ -98,31 +111,16 @@ func cloneModelSelection(value *provider.ModelSelection) *provider.ModelSelectio
 	return &clone
 }
 
-func cloneConfigOptions(options []provider.ConfigOption) []provider.ConfigOption {
-	if options == nil {
-		return nil
-	}
-	return append([]provider.ConfigOption{}, options...)
-}
-
-func cloneSlashCommands(commands []provider.SlashCommand) []provider.SlashCommand {
-	if commands == nil {
-		return nil
-	}
-	return append([]provider.SlashCommand{}, commands...)
-}
-
 func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	if value == nil {
 		return nil
 	}
 	clone := *value
-	clone.ConfigOptions = cloneConfigOptions(value.ConfigOptions)
-	clone.SlashCommands = cloneSlashCommands(value.SlashCommands)
-	if value.TokenUsage != nil {
-		usage := *value.TokenUsage
-		clone.TokenUsage = &usage
-	}
+	clone.AdditionalDirectories = append([]string(nil), value.AdditionalDirectories...)
+	clone.ConfigOptions = slices.Clone(value.ConfigOptions)
+	clone.SlashCommands = slices.Clone(value.SlashCommands)
+	clone.Skills = slices.Clone(value.Skills)
+	clone.TokenUsage = clonePtr(value.TokenUsage)
 	return &clone
 }
 
@@ -131,36 +129,24 @@ func cloneTurnPtr(value *Turn) *Turn {
 		return nil
 	}
 	clone := *value
-	clone.StartedAt = cloneTimePtr(value.StartedAt)
-	clone.CompletedAt = cloneTimePtr(value.CompletedAt)
+	clone.StartedAt = clonePtr(value.StartedAt)
+	clone.CompletedAt = clonePtr(value.CompletedAt)
 	return &clone
 }
 
-func cloneTimePtr(value *time.Time) *time.Time {
-	if value == nil {
+func cloneTurns(turns []Turn) []Turn {
+	if turns == nil {
 		return nil
 	}
-	clone := *value
-	return &clone
-}
-
-func cloneIntPtr(value *int) *int {
-	if value == nil {
-		return nil
+	cloned := make([]Turn, len(turns))
+	for index := range turns {
+		cloned[index] = *cloneTurnPtr(&turns[index])
 	}
-	clone := *value
-	return &clone
+	return cloned
 }
 
-func cloneInt64Ptr(value *int64) *int64 {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	return &clone
-}
-
-func cloneUint32Ptr(value *uint32) *uint32 {
+// clonePtr copies the pointed-to value so the clone shares no mutable state.
+func clonePtr[T any](value *T) *T {
 	if value == nil {
 		return nil
 	}

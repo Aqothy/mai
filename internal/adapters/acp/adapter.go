@@ -1,3 +1,11 @@
+// Package acp adapts ACP agents to maiD's provider contract.
+//
+// Reasoning replay assumption: session/load replays agent thoughts as one
+// agent_thought_chunk per thought with no separators, while live streams
+// carry their own paragraph breaks. Replay therefore appends a paragraph
+// break after every thought chunk (separateReplayReasoningBlocks). An agent
+// that replays a single thought as several sub-newline chunks would gain
+// spurious breaks; no supported agent (gemini-cli, claude-code-acp) does.
 package acp
 
 import (
@@ -17,6 +25,7 @@ import (
 
 	acp "github.com/Aqothy/go-acp"
 	"github.com/Aqothy/go-acp/schema"
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -57,7 +66,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
-	configureProcessGroup(cmd)
+	procgroup.Configure(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -82,7 +91,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	if err := h.connectClient(acp.Combine(stdout, stdin), logger); err != nil {
 		h.cancel()
 		_ = h.closeIO()
-		killProcessTree(cmd)
+		procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
@@ -92,7 +101,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		h.cancel()
 		_ = h.conn.Close()
 		_ = h.closeIO()
-		killProcessTree(cmd)
+		procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
@@ -140,7 +149,7 @@ type Instance struct {
 	// after the reap.
 	reaped bool
 	// killedTree coordinates Close and wait so at most one of them runs
-	// killProcessTree. Guarded by mu.
+	// procgroup.Kill. Guarded by mu.
 	killedTree bool
 	once       sync.Once
 	closeErr   error
@@ -181,22 +190,13 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 	return nil
 }
 
-func (h *Instance) agent() *acp.AgentPeer { return h.agentPeer }
-
 func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
 	title := "Mai Daemon"
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
-		ClientCapabilities: &schema.ClientCapabilities{
-			Session: &schema.ClientSessionCapabilities{
-				ConfigOptions: &schema.SessionConfigOptionsCapabilities{
-					Boolean: &schema.BooleanConfigOptionCapabilities{},
-				},
-			},
-		},
-		ClientInfo: &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
+		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
 	}
-	initResp, err := h.agent().Initialize(ctx, initReq)
+	initResp, err := h.agentPeer.Initialize(ctx, initReq)
 	if err != nil {
 		return schema.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", acpRequestError(err))
 	}
@@ -229,7 +229,7 @@ func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	_, err = h.agent().Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
+	_, err = h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
@@ -244,7 +244,7 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	if !h.Info().Capabilities.Logout {
 		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
 	}
-	_, err := h.agent().Logout(ctx, schema.LogoutRequest{})
+	_, err := h.agentPeer.Logout(ctx, schema.LogoutRequest{})
 	if err != nil {
 		return provider.InstanceInfo{}, acpRequestError(err)
 	}
@@ -271,7 +271,7 @@ func (h *Instance) Close() error {
 		h.mu.Lock()
 		if !h.reaped && !h.killedTree {
 			h.killedTree = true
-			killProcessTree(h.cmd)
+			procgroup.Kill(h.cmd)
 		}
 		h.mu.Unlock()
 	})
@@ -282,7 +282,7 @@ func (h *Instance) wait() {
 	_ = h.cmd.Wait()
 	// The leader is reaped: record that (and claim the kill) BEFORE any
 	// signalling, so Close never signals a recycled pid/pgid and at most one
-	// killProcessTree runs.
+	// procgroup.Kill runs.
 	h.mu.Lock()
 	h.reaped = true
 	h.info.Status = provider.InstanceStatusExited
@@ -293,7 +293,7 @@ func (h *Instance) wait() {
 		// Wrappers may background the real agent and exit first. Terminate the
 		// process group immediately after reaping the leader, while its
 		// descendants still make the group identity unambiguous.
-		killProcessTree(h.cmd)
+		procgroup.Kill(h.cmd)
 	}
 	_ = h.closeIO()
 }
@@ -317,9 +317,13 @@ func (h *Instance) resolveAuthMethodID(methodID string) (string, error) {
 	methods := append([]schema.AuthMethod(nil), h.initialize.AuthMethods...)
 	h.mu.Unlock()
 	for _, method := range methods {
-		if authMethodID(method) == methodID {
-			return methodID, nil
+		if string(method.ID) != methodID {
+			continue
 		}
+		if !isStableAuthMethod(method) {
+			return "", fmt.Errorf("ACP auth method %q is an unstable client-driven %q method", methodID, stringValue(method.Type))
+		}
+		return methodID, nil
 	}
 	return "", fmt.Errorf("ACP auth method %q was not advertised as a supported agent auth method", methodID)
 }

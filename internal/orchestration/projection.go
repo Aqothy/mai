@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -69,17 +70,21 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadConfigOptionsUpdated(event)
 	case EventThreadSlashCommandsUpdated:
 		p.applyThreadSlashCommandsUpdated(event)
+	case EventThreadSkillsUpdated:
+		p.applyThreadSkillsUpdated(event)
 	case EventThreadTokenUsageUpdated:
 		p.applyThreadTokenUsageUpdated(event)
 	}
 }
 
-func (p *Projection) Thread(id ThreadID) (Thread, bool) {
-	thread := p.threads[id]
+func (p *Projection) applyThreadSkillsUpdated(event Event) {
+	thread := p.ensureThread(event)
 	if thread == nil {
-		return Thread{}, false
+		return
 	}
-	return cloneThread(*thread), true
+	session := ensureSessionBinding(thread, event)
+	session.Skills = slices.Clone(event.Payload.Skills)
+	session.UpdatedAt = event.OccurredAt
 }
 
 func (p *Projection) ThreadListEntry(id ThreadID) (ThreadListEntry, bool) {
@@ -121,10 +126,6 @@ func (p *Projection) ThreadSnapshot(id ThreadID) (ThreadDetailSnapshot, error) {
 // clone-free reads on the engine's hot paths.
 func (p *Projection) liveThread(id ThreadID) *Thread { return p.threads[id] }
 
-func (p *Projection) createSequence(id ThreadID) uint64 { return p.createSequences[id] }
-
-func (p *Projection) appliedSequence() uint64 { return p.sequence }
-
 func (p *Projection) applyThreadCreated(event Event) {
 	payload := event.Payload
 	threadID := payload.ThreadID
@@ -138,22 +139,18 @@ func (p *Projection) applyThreadCreated(event Event) {
 	if title == "" {
 		title = "Untitled thread"
 	}
-	if p.createSequences == nil {
-		p.createSequences = make(map[ThreadID]uint64)
-	}
-	if _, ok := p.createSequences[threadID]; !ok {
-		p.createSequences[threadID] = event.Sequence
-	}
+	p.createSequences[threadID] = event.Sequence
 	p.threads[threadID] = &Thread{
-		ID:                 threadID,
-		Title:              title,
-		ProviderInstanceID: payload.ProviderInstanceID,
-		ModelSelection:     cloneModelSelection(payload.ModelSelection),
-		ConfigSelections:   append([]provider.ConfigOptionSelection(nil), payload.ConfigSelections...),
-		Cwd:                payload.Cwd,
-		Timeline:           Timeline{},
-		CreatedAt:          event.OccurredAt,
-		UpdatedAt:          event.OccurredAt,
+		ID:                    threadID,
+		Title:                 title,
+		ProviderInstanceID:    payload.ProviderInstanceID,
+		ModelSelection:        cloneModelSelection(payload.ModelSelection),
+		ConfigSelections:      append([]provider.ConfigOptionSelection(nil), payload.ConfigSelections...),
+		Cwd:                   payload.Cwd,
+		AdditionalDirectories: append([]string(nil), payload.AdditionalDirectories...),
+		Timeline:              Timeline{},
+		CreatedAt:             event.OccurredAt,
+		UpdatedAt:             event.OccurredAt,
 	}
 }
 
@@ -168,13 +165,14 @@ func (p *Projection) applyThreadImported(event Event) {
 		updatedAt = createdAt
 	}
 	p.restoreThread(RestoredThread{
-		ThreadID:           payload.ThreadID,
-		Title:              payload.Title,
-		Cwd:                payload.Cwd,
-		ProviderInstanceID: payload.ProviderInstanceID,
-		ModelSelection:     payload.ModelSelection,
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
+		ThreadID:              payload.ThreadID,
+		Title:                 payload.Title,
+		Cwd:                   payload.Cwd,
+		AdditionalDirectories: append([]string(nil), payload.AdditionalDirectories...),
+		ProviderInstanceID:    payload.ProviderInstanceID,
+		ModelSelection:        payload.ModelSelection,
+		CreatedAt:             createdAt,
+		UpdatedAt:             updatedAt,
 	})
 	if p.threads[payload.ThreadID] != nil {
 		p.createSequences[payload.ThreadID] = event.Sequence
@@ -193,6 +191,9 @@ func (p *Projection) applyThreadMetaUpdated(event Event) {
 	applyThreadProviderSelectionPatch(thread, payload.ProviderInstanceID, payload.ModelSelection, payload.SessionCleared)
 	if payload.Cwd != "" {
 		thread.Cwd = payload.Cwd
+	}
+	if payload.AdditionalDirectories != nil {
+		thread.AdditionalDirectories = append([]string(nil), payload.AdditionalDirectories...)
 	}
 }
 
@@ -218,8 +219,28 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 }
 
 func (p *Projection) applyThreadHistoryReplayCompleted(event Event) {
-	if thread := p.threads[event.ThreadID()]; thread != nil {
-		thread.ReplayHistoryPending = false
+	thread := p.threads[event.ThreadID()]
+	if thread == nil {
+		return
+	}
+	thread.ReplayHistoryPending = false
+	// Replay restores the whole provider history. During replay the engine can
+	// only adopt the first replayed turn (later ones conflict with it), so the
+	// last settled turn becomes the latest unless a turn is still running.
+	previous := append([]Turn(nil), event.Payload.ReplayedTurns...)
+	if len(previous) > 0 && (thread.LatestTurn == nil || thread.LatestTurn.CompletedAt != nil) {
+		latest := previous[len(previous)-1]
+		thread.LatestTurn = &latest
+		previous = previous[:len(previous)-1]
+	}
+	thread.PreviousTurns = previous[:0]
+	for _, turn := range previous {
+		if thread.LatestTurn == nil || turn.ID != thread.LatestTurn.ID {
+			thread.PreviousTurns = append(thread.PreviousTurns, turn)
+		}
+	}
+	if len(thread.PreviousTurns) == 0 {
+		thread.PreviousTurns = nil
 	}
 }
 
@@ -232,12 +253,15 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 	if thread.Cwd == "" {
 		thread.Cwd = session.Cwd
 	}
+	if thread.AdditionalDirectories == nil && session.AdditionalDirectories != nil {
+		thread.AdditionalDirectories = append([]string(nil), session.AdditionalDirectories...)
+	}
 }
 
 func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason string, occurredAt time.Time) {
 	if session.ActiveTurnID != "" {
 		if thread.LatestTurn == nil || thread.LatestTurn.ID != session.ActiveTurnID {
-			thread.LatestTurn = &Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt}
+			replaceLatestTurn(thread, Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt})
 			return
 		}
 		thread.LatestTurn.State = TurnStateRunning
@@ -266,10 +290,11 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 	if thread == nil || event.Payload.MessageID == "" {
 		return
 	}
-	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
+	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, Annotations: event.Payload.Annotations, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
 	if existing := thread.Timeline.Message(message.ID); existing != nil {
 		existing.Text += message.Text
 		existing.Attachments = append(existing.Attachments, message.Attachments...)
+		existing.Annotations = append(existing.Annotations, message.Annotations...)
 		if message.TurnID != "" {
 			existing.TurnID = message.TurnID
 		}
@@ -296,7 +321,7 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 	// A turn.start for the already-running turn is steering: the same logical
 	// turn keeps going, so its RequestedAt/StartedAt must survive.
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != turnID {
-		thread.LatestTurn = &Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now}
+		replaceLatestTurn(thread, Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now})
 	}
 	// A server-requeued start moves an already-recorded steering message onto a
 	// fresh turn after the old turn won the completion race.
@@ -310,6 +335,15 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 		thread.Session.ActiveTurnID = turnID
 		thread.Session.UpdatedAt = event.OccurredAt
 	}
+}
+
+// replaceLatestTurn starts a new latest turn. The replaced turn has settled,
+// so it keeps its own outcome and timing in PreviousTurns.
+func replaceLatestTurn(thread *Thread, turn Turn) {
+	if thread.LatestTurn != nil {
+		thread.PreviousTurns = append(thread.PreviousTurns, *thread.LatestTurn)
+	}
+	thread.LatestTurn = &turn
 }
 
 func (p *Projection) applyThreadTurnInterruptRequested(event Event) {
@@ -468,7 +502,7 @@ func (p *Projection) applyThreadConfigOptionsUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	session.ConfigOptions = cloneConfigOptions(event.Payload.ConfigOptions)
+	session.ConfigOptions = slices.Clone(event.Payload.ConfigOptions)
 	if event.Payload.ModelSelection != nil {
 		thread.ModelSelection = cloneModelSelection(event.Payload.ModelSelection)
 	}
@@ -481,7 +515,7 @@ func (p *Projection) applyThreadSlashCommandsUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	session.SlashCommands = cloneSlashCommands(event.Payload.SlashCommands)
+	session.SlashCommands = slices.Clone(event.Payload.SlashCommands)
 	session.UpdatedAt = event.OccurredAt
 }
 
@@ -491,12 +525,7 @@ func (p *Projection) applyThreadTokenUsageUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	if event.Payload.TokenUsage != nil {
-		usage := *event.Payload.TokenUsage
-		session.TokenUsage = &usage
-	} else {
-		session.TokenUsage = nil
-	}
+	session.TokenUsage = clonePtr(event.Payload.TokenUsage)
 	session.UpdatedAt = event.OccurredAt
 }
 
@@ -533,7 +562,7 @@ func ensureSessionBinding(thread *Thread, event Event) *SessionBinding {
 	if providerInstanceID == "" {
 		providerInstanceID = thread.ProviderInstanceID
 	}
-	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
+	thread.Session = &SessionBinding{ThreadID: thread.ID, ProviderInstanceID: providerInstanceID, Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), Status: SessionStatusStarting, UpdatedAt: event.OccurredAt}
 	return thread.Session
 }
 
@@ -544,8 +573,7 @@ func interruptTargetsActiveTurn(thread *Thread, turnID TurnID) bool {
 	return activeTurnID(*thread) == turnID
 }
 
-// applyItemPayload implements the two item-payload rules clients must mirror
-// (CLIENT_API §5):
+// applyItemPayload implements the two item-payload rules clients must mirror:
 //   - textDelta (coalesced reasoning chunk): append it to the payload's
 //     "text" — events stay O(chunk) instead of re-sending accumulated text;
 //   - otherwise a non-empty payload REPLACES the previous one, and an absent
@@ -649,5 +677,5 @@ func threadListEntryFromThread(thread Thread) ThreadListEntry {
 			break
 		}
 	}
-	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
 }

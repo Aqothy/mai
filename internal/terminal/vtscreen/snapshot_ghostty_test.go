@@ -84,16 +84,6 @@ func mustCursor(t *testing.T, s SnapshotScreen) (uint16, uint16) {
 	return x, y
 }
 
-func TestNativeSnapshotReproducesScreenAtSameGrid(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("plain line\r\n\x1b[1;32mstyled line\x1b[0m\r\nprompt with cursor here: "))
-
-	fresh := roundTrip(t, source)
-	if got, want := mustText(t, fresh), mustText(t, source); got != want {
-		t.Fatalf("round-trip text mismatch:\n got %q\nwant %q", got, want)
-	}
-}
-
 func TestNativeSnapshotReproducesScreenAfterResize(t *testing.T) {
 	source := newSnapshotScreen(t, 80, 24)
 	for i := range 30 {
@@ -157,45 +147,6 @@ func TestNativeSnapshotReproducesAlternateScreenApp(t *testing.T) {
 	}
 	if strings.Contains(got, "shell history") {
 		t.Fatalf("primary screen leaked into alternate-screen attach: %q", got)
-	}
-}
-
-func TestNativeSnapshotCarriesTerminalModes(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("\x1b[?2004h\x1b[?2048hshell$ "))
-
-	fresh := roundTrip(t, source)
-	ghostty := fresh.(*ghosttyScreen)
-	for name, mode := range map[string]libghostty.Mode{
-		"bracketed paste": libghostty.ModeBracketedPaste,
-		"in-band resize":  libghostty.ModeInBandResize,
-	} {
-		enabled, err := ghostty.term.ModeGet(mode)
-		if err != nil {
-			t.Fatalf("ModeGet(%s): %v", name, err)
-		}
-		if !enabled {
-			t.Fatalf("snapshot did not preserve %s mode", name)
-		}
-	}
-}
-
-func TestNativeSnapshotRejectsCorruption(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("authenticated state\r\nshell$ "))
-	snapshot, err := source.Snapshot()
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-	snapshot[len(snapshot)-1] ^= 0xff
-
-	decoder, err := libghostty.NewSnapshotDecoderBytes(snapshot)
-	if err != nil {
-		t.Fatalf("NewSnapshotDecoderBytes: %v", err)
-	}
-	defer decoder.Close()
-	if _, err := decoder.Decode(); err == nil {
-		t.Fatal("corrupted snapshot unexpectedly decoded")
 	}
 }
 

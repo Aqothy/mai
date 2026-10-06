@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSThreadListView: View {
@@ -27,7 +28,7 @@ struct IOSThreadListView: View {
     var body: some View {
         // Hoisted so the filter/merge runs once per body evaluation; the
         // overlay below reads it as well.
-        let items = self.filteredItems
+        let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
         List {
             switch displayMode {
             case .recent:
@@ -166,15 +167,6 @@ struct IOSThreadListView: View {
         )
     }
 
-    private var filteredItems: [WorkspaceListItem] {
-        WorkspaceListItem.merged(
-            threads: filter.apply(
-                to: store.threads,
-                providerID: store.providerID(for:)
-            ),
-            terminals: filter.apply(toTerminals: terminalStore.terminals)
-        )
-    }
 }
 
 /// A tappable project header carrying the fold chevron.
@@ -248,4 +240,6 @@ private struct IOSProjectSectionHeader: View {
             )
         }
     }
+#endif
+
 #endif

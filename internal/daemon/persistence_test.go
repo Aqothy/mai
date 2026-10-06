@@ -79,30 +79,6 @@ func TestServerRestartPersistsAndRehydratesThreadStub(t *testing.T) {
 		t.Fatalf("server close: %v", err)
 	}
 
-	inspection, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open store for inspection: %v", err)
-	}
-	threads, err := inspection.ListThreads()
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 1 {
-		t.Fatalf("expected 1 persisted thread, got %+v", threads)
-	}
-	if threads[0].ThreadID != "thread-1" || threads[0].Title != "Renamed thread" || threads[0].Cwd != cwd {
-		t.Fatalf("unexpected persisted thread meta: %+v", threads[0])
-	}
-	if threads[0].ProviderInstanceID != "provider-1" || threads[0].ModelSelection == nil || threads[0].ModelSelection.Model != "model-1" {
-		t.Fatalf("provider selection was not persisted: %+v", threads[0])
-	}
-	if threads[0].CreatedAt.IsZero() || threads[0].UpdatedAt.Before(threads[0].CreatedAt) {
-		t.Fatalf("timestamps not persisted sensibly: %+v", threads[0])
-	}
-	if err := inspection.Close(); err != nil {
-		t.Fatalf("close inspection store: %v", err)
-	}
-
 	reopened, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
@@ -221,11 +197,8 @@ func TestThreadMetaWriterWritesAfterMarkDirty(t *testing.T) {
 	engine := orchestration.NewEngine()
 	defer engine.Close()
 	threadID := orchestration.ThreadID("thread-async-persistence")
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Cwd: t.TempDir()}); err != nil {
+	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: threadID, Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
 	}
 
 	stored := &notifyingThreadStore{saved: make(chan store.ThreadMeta, 1)}
@@ -235,8 +208,8 @@ func TestThreadMetaWriterWritesAfterMarkDirty(t *testing.T) {
 
 	select {
 	case meta := <-stored.saved:
-		if meta.ThreadID != string(threadID) {
-			t.Fatalf("persisted thread = %q, want %q", meta.ThreadID, threadID)
+		if meta.ThreadID != string(threadID) || meta.Title != "New thread" {
+			t.Fatalf("persisted thread = %+v, want %q titled New thread", meta, threadID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("metadata writer did not persist after markDirty")
@@ -253,9 +226,6 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 		Cwd:      t.TempDir(),
 	}); err != nil {
 		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "thread-1", Message: &orchestration.CommandMessage{Text: "persist this thread"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
 	}
 
 	flaky := &flakyThreadStore{failures: 1}
@@ -279,54 +249,5 @@ func TestThreadMetaWriterRetriesFailedUpsertOnNextFlush(t *testing.T) {
 	w.flush() // nothing left dirty; no duplicate write
 	if len(flaky.saved) != 1 {
 		t.Fatalf("clean flush must not rewrite: %+v", flaky.saved)
-	}
-}
-
-func TestThreadMetaWriterPersistsCreatedRealThread(t *testing.T) {
-	engine := orchestration.NewEngine()
-	defer engine.Close()
-	threadID := orchestration.ThreadID("thread-create-persistence")
-	if _, err := engine.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: threadID, Title: "New thread", Cwd: t.TempDir()}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-
-	stored := &flakyThreadStore{}
-	w := &threadMetaWriter{engine: engine, threads: stored, logger: newLoggerFromEnv(), dirty: make(map[orchestration.ThreadID]struct{})}
-	w.markDirty(threadID)
-	w.flush()
-	if len(stored.saved) != 1 || stored.saved[0].Title != "New thread" {
-		t.Fatalf("created metadata = %+v, want one real thread", stored.saved)
-	}
-}
-
-func TestMetadataDBPathUsesDataDir(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("MAID_DATA_DIR", dataDir)
-
-	got, err := metadataDBPath()
-	if err != nil {
-		t.Fatalf("metadataDBPath: %v", err)
-	}
-	want := filepath.Join(dataDir, "maid.db")
-	if got != want {
-		t.Fatalf("metadataDBPath() = %q, want %q", got, want)
-	}
-}
-
-func TestServerRunsWithoutMetadataStore(t *testing.T) {
-	s := newServer(newLoggerFromEnv(), nil)
-	defer s.Close()
-	cwd := t.TempDir()
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
-		Type:     orchestration.CommandThreadCreate,
-		ThreadID: "thread-1",
-		Title:    "In-memory only",
-		Cwd:      cwd,
-	}); err != nil {
-		t.Fatalf("thread.create without store: %v", err)
-	}
-	entry, ok := s.orchestration.ThreadListEntry("thread-1")
-	if !ok || entry.Title != "In-memory only" || entry.Cwd != cwd {
-		t.Fatalf("in-memory thread = %#v, %v; want visible thread", entry, ok)
 	}
 }

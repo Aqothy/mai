@@ -69,6 +69,41 @@ swiftSource = swiftSource.replace(
   "final class JSONCodingKey: CodingKey {",
 );
 
+// Default MainActor isolation synthesizes an isolated destructor for these
+// helpers. Older supported OS runtimes crash when it runs in a synchronous
+// task-local scope (swiftlang/swift#88036). Generate the compatibility fix
+// here so regeneration cannot reintroduce that path.
+for (const declaration of [
+  "public class JSONNull: Codable, Hashable {",
+  "public class JSONAny: Codable {",
+]) {
+  if (swiftSource.split(declaration).length !== 2) {
+    throw new Error(`Expected exactly one quicktype helper: ${declaration}`);
+  }
+  swiftSource = swiftSource.replace(
+    declaration,
+    `${declaration}
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}`,
+  );
+}
+
+// Keep generated convenience initializers on the same wire-date policy as
+// RPC responses and notifications, including on older supported OS runtimes.
+const defaultDecoder = `func newJSONDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    if #available(iOS 10.0, OSX 10.12, tvOS 10.0, watchOS 3.0, *) {
+        decoder.dateDecodingStrategy = .iso8601
+    }
+    return decoder
+}`;
+if (swiftSource.split(defaultDecoder).length !== 2) {
+  throw new Error("Expected exactly one quicktype JSON decoder helper");
+}
+swiftSource = swiftSource.replace(defaultDecoder, `func newJSONDecoder() -> JSONDecoder {
+    WireJSON.makeDecoder()
+}`);
+
 await writeFile(swiftModelsPath, swiftSource);
 
 const registry = JSON.parse(await readFile(methodsPath, "utf8"));

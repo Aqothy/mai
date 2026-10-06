@@ -24,6 +24,7 @@
         "thread.approval-resolved",
         "thread.config-options-updated",
         "thread.slash-commands-updated",
+        "thread.skills-updated",
         "thread.token-usage-updated",
         "thread.history-replay-completed"
       ]
@@ -141,7 +142,11 @@
         "mcp_tool_call",
         "tool_call",
         "warning",
-        "error"
+        "error",
+        "web_search",
+        "image_view",
+        "image_generation",
+        "context_compaction"
       ]
     },
     {
@@ -157,20 +162,10 @@
     },
     {
       "name": "ToolAction",
-      "description": "Provider-neutral semantic action performed by a tool call.",
+      "description": "Action a provider explicitly stated for a tool call; absent when it stated none.",
       "values": [
         "read",
-        "edit",
-        "delete",
-        "move",
-        "search",
-        "execute",
-        "think",
-        "fetch",
-        "switch_mode",
-        "delegate",
-        "view",
-        "other"
+        "search"
       ]
     },
     {

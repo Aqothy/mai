@@ -62,7 +62,7 @@ struct CustomACPAgentForm: View {
         }
         .onSubmit { isTextFieldFocused = false }
         .navigationTitle("Add Custom Agent")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .interactiveDismissDisabled(model.isSaving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -99,6 +99,9 @@ struct CustomACPAgentForm: View {
 
 @Observable
 private final class CustomACPAgentFormModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     var name = ""
     var command = ""
     var argumentText = ""
@@ -237,15 +240,12 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
 
 @Observable
 private final class CustomACPEnvironmentVariable: Identifiable {
-    let id: UUID
-    var key: String
-    var value: String
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
 
-    init(id: UUID = UUID(), key: String = "", value: String = "") {
-        self.id = id
-        self.key = key
-        self.value = value
-    }
+    let id = UUID()
+    var key = ""
+    var value = ""
 }
 
 private struct CustomACPEnvironmentVariableRow: View {

@@ -39,11 +39,14 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		mcp = *capabilities.MCPCapabilities
 	}
 	return provider.Capabilities{
-		SessionList: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
-		LoadReplay:  boolValue(capabilities.LoadSession),
-		Resume:      sessionResumeSupported(capabilities),
-		Auth:        hasStableAuthMethod(initResp.AuthMethods),
-		Logout:      capabilities.Auth != nil && capabilities.Auth.Logout != nil,
+		SessionList:           capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
+		SessionDelete:         capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Delete != nil,
+		SessionClose:          capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Close != nil,
+		LoadReplay:            boolValue(capabilities.LoadSession),
+		Resume:                sessionResumeSupported(capabilities),
+		AdditionalDirectories: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.AdditionalDirectories != nil,
+		Auth:                  hasStableAuthMethod(initResp.AuthMethods),
+		Logout:                capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
 			Audio:           boolValue(prompt.Audio),
@@ -84,19 +87,21 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 		blocks = append(blocks, schema.TextBlock(input.Input))
 	}
 	for _, attachment := range input.Attachments {
+		var block schema.ContentBlock
 		switch attachment.Kind {
 		case "", "text":
-			blocks = append(blocks, schema.TextBlock(attachment.Data))
+			block = schema.TextBlock(attachment.Data)
 		case "image":
 			if !caps.Image {
 				return nil, fmt.Errorf("ACP agent does not accept image content")
 			}
-			blocks = append(blocks, schema.ImageBlock(attachment.Data, attachment.MimeType))
+			block = schema.ImageBlock(attachment.Data, attachment.MimeType)
+			block.URI = stringPtr(attachment.URI)
 		case "audio":
 			if !caps.Audio {
 				return nil, fmt.Errorf("ACP agent does not accept audio content")
 			}
-			blocks = append(blocks, schema.AudioBlock(attachment.Data, attachment.MimeType))
+			block = schema.AudioBlock(attachment.Data, attachment.MimeType)
 		case "resource", "embedded_context", "embeddedContext":
 			if !caps.EmbeddedContext {
 				return nil, fmt.Errorf("ACP agent does not accept embedded resource content")
@@ -104,24 +109,32 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 			if attachment.URI == "" {
 				return nil, fmt.Errorf("ACP embedded resource requires a URI")
 			}
-			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType)}
+			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType), Meta: cloneMetadata(attachment.ResourceMetadata)}
 			if strings.HasPrefix(attachment.MimeType, "text/") || attachment.MimeType == "application/json" || attachment.MimeType == "" {
 				resource.Text = stringPtr(attachment.Data)
 			} else {
 				resource.Blob = stringPtr(attachment.Data)
 			}
-			blocks = append(blocks, schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource})
+			block = schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource}
 		case "resource_link", "resourceLink":
 			name := attachment.Name
 			if name == "" {
 				name = attachment.URI
 			}
-			block := schema.ResourceLinkBlock(name, attachment.URI)
+			block = schema.ResourceLinkBlock(name, attachment.URI)
 			block.MimeType = stringPtr(attachment.MimeType)
-			blocks = append(blocks, block)
+			block.Title = stringPtr(attachment.Title)
+			block.Description = stringPtr(attachment.Description)
+			if attachment.Size != 0 {
+				size := attachment.Size
+				block.Size = &size
+			}
 		default:
 			return nil, fmt.Errorf("unsupported generic attachment kind %q for ACP", attachment.Kind)
 		}
+		block.Annotations = annotationsToACP(attachment.Annotations)
+		block.Meta = cloneMetadata(attachment.Metadata)
+		blocks = append(blocks, block)
 	}
 	if len(blocks) == 0 {
 		return []schema.ContentBlock{schema.TextBlock("")}, nil
@@ -273,19 +286,19 @@ func sessionRuntimeEvent(notification schema.SessionNotification) provider.Runti
 		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
 	case schema.SessionUpdatePlan:
 		update.Type = provider.RuntimeEventTurnPlanUpdated
-		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries), Data: marshalRaw(schema.Plan{Entries: u.Entries})}
+		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries)}
 	case schema.SessionUpdateAvailableCommandsUpdate:
 		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands), Data: marshalRaw(schema.AvailableCommandsUpdate{AvailableCommands: u.AvailableCommands})}
+		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands)}
 	case schema.SessionUpdateSessionInfoUpdate:
 		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title), Data: marshalRaw(schema.SessionInfoUpdate{Title: u.Title, UpdatedAt: u.UpdatedAt})}
+		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title)}
 	case schema.SessionUpdateUsageUpdate:
 		update.Type = provider.RuntimeEventThreadTokenUsage
-		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u), Data: marshalRaw(usageUpdateFromACP(u))}
+		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u)}
 	default:
 		update.Type = provider.RuntimeEventRuntimeWarning
-		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update", Data: marshalRaw(notification.Update)}
+		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update"}
 	}
 	return update
 }
@@ -303,7 +316,22 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 }
 
 func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, bool) {
-	attachment := provider.Attachment{}
+	attachment := provider.Attachment{
+		Annotations: annotationsFromACP(block.Annotations),
+		Metadata:    cloneMetadata(block.Meta),
+	}
+	if block.Title != nil {
+		attachment.Title = *block.Title
+	}
+	if block.Description != nil {
+		attachment.Description = *block.Description
+	}
+	if block.Size != nil {
+		attachment.Size = *block.Size
+	}
+	if block.URI != nil {
+		attachment.URI = *block.URI
+	}
 	switch block.Type {
 	case schema.ContentBlockTypeImage, schema.ContentBlockTypeAudio:
 		attachment.Kind = block.Type
@@ -318,9 +346,6 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		if block.Name != nil {
 			attachment.Name = *block.Name
 		}
-		if block.URI != nil {
-			attachment.URI = *block.URI
-		}
 		if block.MimeType != nil {
 			attachment.MimeType = *block.MimeType
 		}
@@ -330,6 +355,7 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		}
 		attachment.Kind = "resource"
 		attachment.URI = block.Resource.URI
+		attachment.ResourceMetadata = cloneMetadata(block.Resource.Meta)
 		if block.Resource.MimeType != nil {
 			attachment.MimeType = *block.Resource.MimeType
 		}
@@ -342,6 +368,52 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		return provider.Attachment{}, false
 	}
 	return attachment, true
+}
+
+func annotationsFromACP(value *schema.Annotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]string, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, string(role))
+	}
+	annotations := &provider.ContentAnnotations{
+		Audience: audience,
+		Priority: value.Priority,
+		Metadata: cloneMetadata(value.Meta),
+	}
+	if value.LastModified != nil {
+		annotations.LastModified = *value.LastModified
+	}
+	return annotations
+}
+
+func annotationsToACP(value *provider.ContentAnnotations) *schema.Annotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]schema.Role, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, schema.Role(role))
+	}
+	return &schema.Annotations{
+		Audience:     audience,
+		Priority:     value.Priority,
+		LastModified: stringPtr(value.LastModified),
+		Meta:         cloneMetadata(value.Metadata),
+	}
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = entry
+	}
+	return cloned
 }
 
 func itemKindFromToolKind(kind string) provider.ItemKind {
@@ -483,12 +555,11 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 		return nil
 	}
 	providerKind := strings.ToLower(strings.TrimSpace(toolKindString(s.kind)))
-	action := toolActionFromACP(providerKind)
 	call := &provider.ToolCall{
-		Action:       action,
+		Action:       toolActionFromACP(providerKind),
 		ProviderKind: providerKind,
 		Locations:    toolLocationsFromACP(s.locations),
-		Changes:      toolChangesFromACP(s.content, action),
+		Changes:      toolChangesFromACP(s.content, providerKind),
 		Attachments:  toolAttachmentsFromACP(s.content),
 		Output:       toolTextFromACP(s.content),
 	}
@@ -549,30 +620,16 @@ func rawOutputText(raw any) string {
 	return ""
 }
 
+// toolActionFromACP keeps only the actions ACP's tool kind states; every
+// other kind leaves the action empty.
 func toolActionFromACP(kind string) provider.ToolAction {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
+	switch kind {
 	case "read":
 		return provider.ToolActionRead
-	case "edit", "patch", "file_change", "write", "create":
-		return provider.ToolActionEdit
-	case "delete":
-		return provider.ToolActionDelete
-	case "move":
-		return provider.ToolActionMove
 	case "search":
 		return provider.ToolActionSearch
-	case "execute", "terminal", "command", "shell":
-		return provider.ToolActionExecute
-	case "think":
-		return provider.ToolActionThink
-	case "fetch":
-		return provider.ToolActionFetch
-	case "switch_mode":
-		return provider.ToolActionSwitchMode
-	case "":
-		return provider.ToolActionOther
 	default:
-		return provider.ToolActionOther
+		return ""
 	}
 }
 
@@ -617,7 +674,7 @@ func toolTextFromACP(content []schema.ToolCallContent) string {
 	return strings.Join(parts, "\n")
 }
 
-func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAction) []provider.FileChange {
+func toolChangesFromACP(content []schema.ToolCallContent, kind string) []provider.FileChange {
 	if content == nil {
 		return nil
 	}
@@ -626,7 +683,7 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 		if entry.Type != schema.ToolCallContentTypeDiff {
 			continue
 		}
-		change := provider.FileChange{Kind: fileChangeKindFromAction(action)}
+		change := provider.FileChange{Kind: fileChangeKindFromACP(kind)}
 		if entry.Path != nil {
 			change.Path = *entry.Path
 		}
@@ -641,11 +698,11 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 	return changes
 }
 
-func fileChangeKindFromAction(action provider.ToolAction) provider.FileChangeKind {
-	switch action {
-	case provider.ToolActionDelete:
+func fileChangeKindFromACP(kind string) provider.FileChangeKind {
+	switch kind {
+	case "delete":
 		return provider.FileChangeDelete
-	case provider.ToolActionMove:
+	case "move":
 		return provider.FileChangeMove
 	default:
 		return provider.FileChangeUpdate
@@ -799,12 +856,6 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 			}
 			convertedOption.CurrentValue = current
 			convertedOption.Choices = configChoices(option.Options)
-		case schema.SessionConfigOptionTypeBoolean:
-			current, ok := option.CurrentValue.(bool)
-			if !ok {
-				continue
-			}
-			convertedOption.CurrentValue = current
 		default:
 			continue
 		}
@@ -819,13 +870,13 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 func slashCommandsFromACP(commands []schema.AvailableCommand) []provider.SlashCommand {
 	converted := make([]provider.SlashCommand, 0, len(commands))
 	for _, command := range commands {
-		converted = append(converted, provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil})
+		convertedCommand := provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil}
+		if command.Input != nil {
+			convertedCommand.InputHint = command.Input.Hint
+		}
+		converted = append(converted, convertedCommand)
 	}
 	return converted
-}
-
-func usageUpdateFromACP(u schema.SessionUpdate) schema.UsageUpdate {
-	return schema.UsageUpdate{Used: uint64Value(u.Used), Size: uint64Value(u.Size), Cost: u.Cost}
 }
 
 func tokenUsageFromACP(u schema.SessionUpdate) *provider.TokenUsage {
@@ -860,13 +911,6 @@ func hasStableAuthMethod(methods []schema.AuthMethod) bool {
 	return false
 }
 
-func authMethodID(method schema.AuthMethod) string {
-	if !isStableAuthMethod(method) {
-		return ""
-	}
-	return string(method.ID)
-}
-
 func authMethodsFromACP(methods []schema.AuthMethod) []provider.AuthMethod {
 	converted := make([]provider.AuthMethod, 0, len(methods))
 	for _, method := range methods {
@@ -889,10 +933,11 @@ func sessionSummariesFromACP(sessions []schema.SessionInfo) []provider.SessionSu
 	converted := make([]provider.SessionSummary, 0, len(sessions))
 	for _, session := range sessions {
 		converted = append(converted, provider.SessionSummary{
-			SessionID: string(session.SessionID),
-			Title:     stringValue(session.Title),
-			Cwd:       session.CWD,
-			UpdatedAt: stringValue(session.UpdatedAt),
+			SessionID:             string(session.SessionID),
+			Title:                 stringValue(session.Title),
+			Cwd:                   session.CWD,
+			AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...),
+			UpdatedAt:             stringValue(session.UpdatedAt),
 		})
 	}
 	return converted
@@ -936,17 +981,17 @@ func configChoices(options schema.SessionConfigSelectOptions) []provider.ConfigC
 	}
 	var grouped []schema.SessionConfigSelectGroup
 	if err := json.Unmarshal(raw, &grouped); err == nil && hasGroupedOptions(grouped) {
-		var flattened []schema.SessionConfigSelectOption
+		var choices []provider.ConfigChoice
 		for _, group := range grouped {
-			flattened = append(flattened, group.Options...)
+			choices = append(choices, configChoicesFromOptions(group.Options, string(group.Group), group.Name)...)
 		}
-		return configChoicesFromOptions(flattened)
+		return choices
 	}
 	var ungrouped []schema.SessionConfigSelectOption
 	if err := json.Unmarshal(raw, &ungrouped); err != nil {
 		return nil
 	}
-	return configChoicesFromOptions(ungrouped)
+	return configChoicesFromOptions(ungrouped, "", "")
 }
 
 func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
@@ -958,13 +1003,17 @@ func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
 	return false
 }
 
-func configChoicesFromOptions(options []schema.SessionConfigSelectOption) []provider.ConfigChoice {
+func configChoicesFromOptions(options []schema.SessionConfigSelectOption, group, groupLabel string) []provider.ConfigChoice {
 	if len(options) == 0 {
 		return nil
 	}
 	choices := make([]provider.ConfigChoice, 0, len(options))
 	for _, option := range options {
-		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name})
+		description := ""
+		if option.Description != nil {
+			description = *option.Description
+		}
+		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name, Description: description, Group: group, GroupLabel: groupLabel})
 	}
 	return choices
 }

@@ -41,6 +41,14 @@ type Authenticator interface {
 	Logout(ctx context.Context) (provider.InstanceInfo, error)
 }
 
+// LoginProvider is the richer authentication facet used by providers with
+// browser/device-code flows or secret-bearing methods. Authenticator remains
+// supported for ACP's stable agent-handled authentication surface.
+type LoginProvider interface {
+	AuthenticateWithInput(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error)
+	Logout(ctx context.Context) (provider.InstanceInfo, error)
+}
+
 // SessionManager is an optional capability for adapters whose providers support
 // session management (ACP session/list, /delete, /close). The Service
 // type-asserts it; providers that don't implement it report "not supported".
@@ -48,6 +56,19 @@ type SessionManager interface {
 	ListSessions(ctx context.Context, cwd string) ([]provider.SessionSummary, error)
 	DeleteSession(ctx context.Context, sessionID string) error
 	CloseSession(ctx context.Context, sessionID string) error
+}
+
+// SessionForker is optional and is capability-gated. The service supplies the
+// provider-native session id from its private thread route; clients never see
+// that identifier.
+type SessionForker interface {
+	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
+}
+
+// ClientMessageIdentityProvider can return the exact dispatch identity in
+// native history. Providers without it retain their ordinary text replay.
+type ClientMessageIdentityProvider interface {
+	ReplaysClientMessageIDs() bool
 }
 
 // OptionsSessionProvider is optional. Providers with a static catalog can
@@ -88,17 +109,20 @@ type Service struct {
 	// instanceSpecs includes persisted and manifest-owned specs for instances
 	// that are still cold.
 	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
-	// manifestInstanceIDs identifies specs owned by a backend JSON manifest.
-	// Their executable configuration must never enter the route database.
-	manifestInstanceIDs map[provider.InstanceID]struct{}
-	threadRoutes        map[string]threadRoute
-	startLocks          map[provider.InstanceID]*sync.RWMutex
-	openInstance        InstanceFactory
+	// Manifest configuration never enters the route database. Updates to a
+	// running instance wait for its next launch; cold defaults must not override
+	// an explicit custom executable chosen when the instance first starts.
+	manifestInstanceIDs  map[provider.InstanceID]struct{}
+	pendingManifestSpecs map[provider.InstanceID]provider.InstanceSpec
+	threadRoutes         map[string]threadRoute
+	startLocks           map[provider.InstanceID]*sync.RWMutex
+	openInstance         InstanceFactory
 
 	activeEventGenerations map[provider.InstanceID]uint64
 	nextEventGeneration    uint64
 
 	routeStore     store.RouteStore
+	promptStore    store.PromptStore
 	storeMu        sync.Mutex
 	routeBindMu    sync.Mutex
 	dirtyInstances map[provider.InstanceID]struct{}
@@ -125,11 +149,16 @@ func WithRouteStore(routeStore store.RouteStore) Option {
 	return func(s *Service) { s.routeStore = routeStore }
 }
 
+func WithPromptStore(promptStore store.PromptStore) Option {
+	return func(s *Service) { s.promptStore = promptStore }
+}
+
 func New(openInstance InstanceFactory, opts ...Option) *Service {
 	s := &Service{
 		instances:              make(map[provider.InstanceID]ProviderInstance),
 		instanceSpecs:          make(map[provider.InstanceID]provider.InstanceSpec),
 		manifestInstanceIDs:    make(map[provider.InstanceID]struct{}),
+		pendingManifestSpecs:   make(map[provider.InstanceID]provider.InstanceSpec),
 		threadRoutes:           make(map[string]threadRoute),
 		startLocks:             make(map[provider.InstanceID]*sync.RWMutex),
 		openInstance:           openInstance,
@@ -201,6 +230,9 @@ func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider
 	s.mu.Lock()
 	instance := s.instances[instanceID]
 	spec, restorable := s.instanceSpecs[instanceID]
+	if manifest, ok := s.pendingManifestSpecs[instanceID]; ok {
+		spec, restorable = manifest, true
+	}
 	s.mu.Unlock()
 
 	needsStart := instance == nil
@@ -229,12 +261,20 @@ func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
 	}
 	spec = cloneInstanceSpec(spec)
 
+	// Serialize registration with launch so an in-flight factory cannot
+	// overwrite a newer definition before a process has been installed.
+	lock := s.startLock(spec.InstanceID)
+	lock.Lock()
+	defer lock.Unlock()
 	s.mu.Lock()
 	s.manifestInstanceIDs[spec.InstanceID] = struct{}{}
 	// Preserve the spec of a running process until an explicit restart swaps it;
 	// cold definitions can immediately adopt updated manifest configuration.
 	if instance := s.instances[spec.InstanceID]; instance == nil || instance.Info().Status == provider.InstanceStatusExited {
 		s.instanceSpecs[spec.InstanceID] = spec
+		delete(s.pendingManifestSpecs, spec.InstanceID)
+	} else {
+		s.pendingManifestSpecs[spec.InstanceID] = spec
 	}
 	s.mu.Unlock()
 
@@ -375,6 +415,7 @@ func (s *Service) Close() {
 		}
 		s.instances = make(map[provider.InstanceID]ProviderInstance)
 		s.instanceSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
+		s.pendingManifestSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
 		s.threadRoutes = make(map[string]threadRoute)
 		s.activeEventGenerations = make(map[provider.InstanceID]uint64)
 		s.mu.Unlock()
@@ -481,6 +522,9 @@ func (s *Service) StartManifestInstance(ctx context.Context, spec provider.Insta
 	if err := s.RegisterManifestInstance(spec); err != nil {
 		return provider.InstanceInfo{}, err
 	}
+	if !restart {
+		return s.StartConfiguredInstance(ctx, spec.InstanceID)
+	}
 	return s.StartInstance(ctx, spec, restart)
 }
 
@@ -497,9 +541,6 @@ func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec,
 	}
 	if spec.Driver == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("%s requires a provider driver", action)
-	}
-	if s.openInstance == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("%s: no adapter factory configured", action)
 	}
 	spec = cloneInstanceSpec(spec)
 
@@ -568,6 +609,9 @@ func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec,
 	current := s.instances[spec.InstanceID]
 	s.instances[spec.InstanceID] = instance
 	s.instanceSpecs[spec.InstanceID] = cloneInstanceSpec(spec)
+	if pending, ok := s.pendingManifestSpecs[spec.InstanceID]; ok && instanceSpecsEqual(pending, spec) {
+		delete(s.pendingManifestSpecs, spec.InstanceID)
+	}
 	s.activeEventGenerations[spec.InstanceID] = generation
 	s.mu.Unlock()
 	if current != nil && current != instance {
@@ -597,31 +641,44 @@ func jsonValuesEqual(a json.RawMessage, b json.RawMessage) bool {
 	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
 		return bytes.Equal(a, b)
 	}
-	return objectsEqual(av, bv)
+	// Values decoded from JSON can always be encoded again.
+	aJSON, _ := json.Marshal(av)
+	bJSON, _ := json.Marshal(bv)
+	return bytes.Equal(aJSON, bJSON)
 }
 
-func objectsEqual(a any, b any) bool {
-	aJSON, aErr := json.Marshal(a)
-	bJSON, bErr := json.Marshal(b)
-	return aErr == nil && bErr == nil && bytes.Equal(aJSON, bJSON)
-}
-
-func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, methodID string) (provider.InstanceInfo, error) {
+func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
-		return provider.InstanceInfo{}, err
+		return provider.AuthenticationResult{}, err
+	}
+	if !instance.Info().Capabilities.Auth {
+		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
+	}
+	if loginProvider, ok := instance.(LoginProvider); ok {
+		return loginProvider.AuthenticateWithInput(ctx, input)
 	}
 	authenticator, supportsAuth := instance.(Authenticator)
 	if !supportsAuth {
-		return provider.InstanceInfo{}, fmt.Errorf("provider does not support authentication")
+		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
 	}
-	return authenticator.Authenticate(ctx, methodID)
+	if input.Secret != "" {
+		return provider.AuthenticationResult{}, fmt.Errorf("provider authentication method does not accept a secret")
+	}
+	info, err := authenticator.Authenticate(ctx, input.MethodID)
+	return provider.AuthenticationResult{Instance: info}, err
 }
 
 func (s *Service) Logout(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
+	}
+	if !instance.Info().Capabilities.Logout {
+		return provider.InstanceInfo{}, fmt.Errorf("provider does not support logout")
+	}
+	if loginProvider, ok := instance.(LoginProvider); ok {
+		return loginProvider.Logout(ctx)
 	}
 	authenticator, supportsAuth := instance.(Authenticator)
 	if !supportsAuth {
@@ -639,10 +696,12 @@ func (s *Service) Info(instanceID provider.InstanceID) (provider.InstanceInfo, e
 }
 
 func (s *Service) ListSessions(ctx context.Context, instanceID provider.InstanceID, cwd string) ([]provider.SessionSummary, error) {
-	manager, err := s.sessionManager(instanceID)
+	manager, err := s.sessionManager(instanceID, "list")
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	defer cancel()
 	return manager.ListSessions(ctx, cwd)
 }
 
@@ -657,8 +716,7 @@ func (s *Service) RegisterImportedSession(threadID string, instanceID provider.I
 	defer s.routeBindMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	generation, ok := s.activeEventGenerations[instanceID]
-	if !ok || s.instances[instanceID] == nil {
+	if _, ok := s.activeEventGenerations[instanceID]; !ok || s.instances[instanceID] == nil {
 		return fmt.Errorf("provider instance %q is not initialized", instanceID)
 	}
 	if existing, ok := s.threadRoutes[threadID]; ok {
@@ -672,9 +730,12 @@ func (s *Service) RegisterImportedSession(threadID string, instanceID provider.I
 			return fmt.Errorf("provider session %q is already bound to thread %q", sessionID, existingThreadID)
 		}
 	}
+	// No live session exists yet. Like a boot-restored route, use a generation
+	// no instance owns so the first start restores the stored preferences.
+	s.nextEventGeneration++
 	s.threadRoutes[threadID] = threadRoute{
 		InstanceID:        instanceID,
-		Generation:        generation,
+		Generation:        s.nextEventGeneration,
 		ProviderSessionID: sessionID,
 		StartInput:        persistentStartSessionInput(startInput),
 	}
@@ -686,7 +747,13 @@ const sessionManageRPCTimeout = 60 * time.Second
 
 func (s *Service) DeleteSession(ctx context.Context, instanceID provider.InstanceID, sessionID string) error {
 	return s.manageSession(ctx, instanceID, sessionID, "delete", func(ctx context.Context, manager SessionManager) error {
-		return manager.DeleteSession(ctx, sessionID)
+		if err := manager.DeleteSession(ctx, sessionID); err != nil {
+			return err
+		}
+		if s.promptStore != nil {
+			return s.promptStore.DeletePrompts(instanceID, sessionID)
+		}
+		return nil
 	})
 }
 
@@ -696,6 +763,86 @@ func (s *Service) CloseSession(ctx context.Context, instanceID provider.Instance
 	})
 }
 
+// ForkedSession is a new native fork ready for the import path. Settings
+// carries the source route's model and config preferences so the fork resumes
+// with the source's settings rather than provider defaults.
+type ForkedSession struct {
+	InstanceID provider.InstanceID
+	Summary    provider.SessionSummary
+	Settings   provider.StartSessionInput
+}
+
+// ForkSession forks the provider-owned session bound to sourceThreadID. The
+// returned summary can be committed through the same atomic import path used
+// for sessions discovered by provider.listSessions.
+func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (ForkedSession, error) {
+	if sourceThreadID == "" {
+		return ForkedSession{}, fmt.Errorf("provider session fork requires sourceThreadId")
+	}
+	route := s.routeForThread(sourceThreadID)
+	if route.InstanceID == "" || route.ProviderSessionID == "" {
+		return ForkedSession{}, fmt.Errorf("thread %q has no forkable provider session", sourceThreadID)
+	}
+	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
+		return ForkedSession{}, err
+	}
+	instance, err := s.instance(route.InstanceID)
+	if err != nil {
+		return ForkedSession{}, err
+	}
+	if !instance.Info().Capabilities.Fork {
+		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
+	}
+	forker, ok := instance.(SessionForker)
+	if !ok {
+		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
+	}
+	source := route.StartInput // routeForThread returned a detached copy.
+	settings := provider.StartSessionInput{
+		ModelSelection:   source.ModelSelection,
+		ConfigSelections: canonicalModelConfigSelections(source.ModelSelection, source.ConfigSelections),
+		Options:          source.Options,
+	}
+	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	defer cancel()
+	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{
+		ProviderSessionID: route.ProviderSessionID,
+		ModelSelection:    settings.ModelSelection,
+		ConfigSelections:  settings.ConfigSelections,
+	})
+	if err != nil {
+		return ForkedSession{}, err
+	}
+	if result.Summary.SessionID == "" {
+		return ForkedSession{}, fmt.Errorf("provider fork returned an empty session id")
+	}
+	if result.Summary.SessionID == route.ProviderSessionID {
+		return ForkedSession{}, fmt.Errorf("provider fork returned the source session id")
+	}
+	if s.promptStore != nil {
+		if err := s.promptStore.ForkPrompts(route.InstanceID, route.ProviderSessionID, result.Summary.SessionID); err != nil {
+			// The caller cannot import a fork with silently missing cards. Undo
+			// only this newly created native fork when metadata cannot be copied.
+			if manager, ok := instance.(SessionManager); ok {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionManageRPCTimeout)
+				cleanupErr := manager.DeleteSession(cleanupCtx, result.Summary.SessionID)
+				cancel()
+				if cleanupErr != nil {
+					return ForkedSession{}, fmt.Errorf("copy fork annotations: %w; clean up native fork %q: %v", err, result.Summary.SessionID, cleanupErr)
+				}
+			}
+			return ForkedSession{}, fmt.Errorf("copy fork annotations: %w", err)
+		}
+	}
+	if result.Summary.Cwd == "" {
+		result.Summary.Cwd = route.StartInput.Cwd
+	}
+	if result.Summary.AdditionalDirectories == nil {
+		result.Summary.AdditionalDirectories = append([]string(nil), route.StartInput.AdditionalDirectories...)
+	}
+	return ForkedSession{InstanceID: route.InstanceID, Summary: result.Summary, Settings: settings}, nil
+}
+
 // The bound-session guard is best-effort against a concurrent bind. The adapter
 // call deliberately runs outside instance locks, with a deadline, so a hung
 // maintenance RPC cannot block thread work on that instance.
@@ -703,7 +850,7 @@ func (s *Service) manageSession(ctx context.Context, instanceID provider.Instanc
 	if sessionID == "" {
 		return fmt.Errorf("provider session %s requires sessionId", action)
 	}
-	manager, err := s.sessionManager(instanceID)
+	manager, err := s.sessionManager(instanceID, action)
 	if err != nil {
 		return err
 	}
@@ -726,10 +873,23 @@ func (s *Service) boundThreadForProviderSession(instanceID provider.InstanceID, 
 	return ""
 }
 
-func (s *Service) sessionManager(instanceID provider.InstanceID) (SessionManager, error) {
+func (s *Service) sessionManager(instanceID provider.InstanceID, operation string) (SessionManager, error) {
 	instance, err := s.instance(instanceID)
 	if err != nil {
 		return nil, err
+	}
+	capabilities := instance.Info().Capabilities
+	supported := false
+	switch operation {
+	case "list":
+		supported = capabilities.SessionList
+	case "delete":
+		supported = capabilities.SessionDelete
+	case "close":
+		supported = capabilities.SessionClose
+	}
+	if !supported {
+		return nil, fmt.Errorf("provider does not support session %s", operation)
 	}
 	manager, ok := instance.(SessionManager)
 	if !ok {
@@ -822,9 +982,6 @@ func (s *Service) releaseThreadRouteForSwitch(ctx context.Context, threadID stri
 // provider session. Provider switches call this as soon as the canonical
 // thread projection clears the binding, rather than waiting for another turn.
 func (s *Service) ReleaseSession(ctx context.Context, input provider.StopSessionInput) error {
-	if input.ThreadID == "" {
-		return nil
-	}
 	route := s.routeForThread(input.ThreadID)
 	if route.InstanceID == "" {
 		return nil
@@ -837,6 +994,9 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 	instance, generation, err := s.instanceWithGeneration(input.ProviderInstanceID)
 	if err != nil {
 		return provider.StartSessionResult{}, nil, 0, err
+	}
+	if len(input.AdditionalDirectories) > 0 && !instance.Info().Capabilities.AdditionalDirectories {
+		return provider.StartSessionResult{}, nil, 0, fmt.Errorf("provider does not support additional directories")
 	}
 	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
 		if input.ProviderSessionID == "" {
@@ -860,11 +1020,25 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
 		}
 	}
+	input.ConfigSelections = canonicalModelConfigSelections(input.ModelSelection, input.ConfigSelections)
+	// Read before starting replay: a storage error must not consume the
+	// adapter's one-shot history response and silently drop annotation cards.
+	var prompts map[string]store.PromptRecord
+	if s.promptStore != nil && input.ReplayHistory && input.ProviderSessionID != "" {
+		var err error
+		prompts, err = s.promptStore.LoadPrompts(input.ProviderInstanceID, input.ProviderSessionID)
+		if err != nil {
+			return provider.StartSessionResult{}, nil, 0, err
+		}
+	}
 	result, err := instance.StartSession(ctx, input)
 	if err != nil {
 		return provider.StartSessionResult{}, nil, 0, err
 	}
 	info := instance.Info()
+	if result.Session.ProviderSessionID == input.ProviderSessionID {
+		restorePromptPresentations(result.Replay, prompts)
+	}
 	for index := range result.Replay {
 		result.Replay[index].Provider = info.Driver
 		result.Replay[index].ProviderInstanceID = input.ProviderInstanceID
@@ -889,10 +1063,12 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 }
 
 func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
-	if input.ThreadID == "" {
-		return fmt.Errorf("provider turn route requires threadId")
-	}
 	return s.withThreadInstance(ctx, input.ThreadID, true, "send", func(instance ProviderInstance) error {
+		var err error
+		input, err = s.preparePromptPresentation(instance, input)
+		if err != nil {
+			return err
+		}
 		return instance.SendTurn(ctx, input)
 	})
 }
@@ -988,6 +1164,7 @@ func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigO
 					start.ModelSelection = &provider.ModelSelection{}
 				}
 				start.ModelSelection.Model = model
+				start.ConfigSelections = canonicalModelConfigSelections(start.ModelSelection, start.ConfigSelections)
 				return
 			}
 
@@ -1081,9 +1258,6 @@ func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondTo
 }
 
 func (s *Service) bindThreadSession(threadID string, instanceID provider.InstanceID, generation uint64, providerSessionID string, resumeCursor json.RawMessage, startInput provider.StartSessionInput) error {
-	if threadID == "" || instanceID == "" {
-		return nil
-	}
 	route := threadRoute{
 		InstanceID:        instanceID,
 		Generation:        generation,
@@ -1171,6 +1345,7 @@ func (s *Service) instanceWithGeneration(instanceID provider.InstanceID) (Provid
 
 func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
 	cloned := input
+	cloned.AdditionalDirectories = append([]string(nil), input.AdditionalDirectories...)
 	cloned.ResumeCursor = append(json.RawMessage(nil), input.ResumeCursor...)
 	cloned.Options = append(json.RawMessage(nil), input.Options...)
 	cloned.ConfigSelections = append([]provider.ConfigOptionSelection(nil), input.ConfigSelections...)
@@ -1180,6 +1355,24 @@ func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSess
 		cloned.ModelSelection = &model
 	}
 	return cloned
+}
+
+// canonicalModelConfigSelections makes string model-category selections agree
+// with ModelSelection, which is the canonical model. A draft sends its model
+// both ways, but later model changes update only ModelSelection; adapters let
+// config selections win, so a stale draft entry would otherwise revert the
+// model on the next session start or resume.
+func canonicalModelConfigSelections(model *provider.ModelSelection, selections []provider.ConfigOptionSelection) []provider.ConfigOptionSelection {
+	if model == nil || model.Model == "" {
+		return selections
+	}
+	canonical := append([]provider.ConfigOptionSelection(nil), selections...)
+	for index, selection := range canonical {
+		if _, isString := selection.Value.(string); isString && selection.Category == provider.ConfigOptionCategoryModel {
+			canonical[index].Value = model.Model
+		}
+	}
+	return canonical
 }
 
 func persistentStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {

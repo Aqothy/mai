@@ -25,13 +25,6 @@ type FileMatch struct {
 	DisplayName string
 }
 
-// ScanProgress reports the state of the index's initial scan and watcher.
-type ScanProgress struct {
-	ScannedFiles uint64
-	Scanning     bool
-	WatcherReady bool
-}
-
 // Finder is one warm FFF index rooted at a single workspace directory.
 // Implementations are safe for concurrent use; Close is idempotent and
 // serializes against in-flight calls.
@@ -43,6 +36,5 @@ type Finder interface {
 	// SearchFiles runs one fuzzy path query and returns at most limit
 	// matches in rank order. An empty query yields FFF's default ordering.
 	SearchFiles(query string, limit int) ([]FileMatch, error)
-	ScanProgress() (ScanProgress, error)
 	Close() error
 }

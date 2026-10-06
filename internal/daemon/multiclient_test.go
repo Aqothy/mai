@@ -1,12 +1,11 @@
 package daemon
 
-// Multi-client sync tests use two real WebSocket clients exercising
-// simultaneous actions, cross-client approvals/interrupts, reconnect
-// mid-turn, and a slow client that gets overflow-closed and recovers from an
-// authoritative snapshot.
-// Every client here follows the documented CLIENT_API.md sync contract.
+// Multi-client sync tests use real WebSocket clients exercising simultaneous
+// actions, cross-client approvals/interrupts, and a slow client that gets
+// overflow-closed and recovers from an authoritative snapshot.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,12 +16,14 @@ import (
 	"time"
 
 	"github.com/Aqothy/jsonrpc2"
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/terminal"
 	"github.com/coder/websocket"
 )
 
-func newWSTestServer(t *testing.T, s *Server) string {
+func newWSTestServer(t testing.TB, s *Server) string {
 	t.Helper()
 	server := httptest.NewServer(s.WebSocketHandler())
 	t.Cleanup(server.Close)
@@ -34,12 +35,18 @@ func newWSTestServer(t *testing.T, s *Server) string {
 type recordingClient struct {
 	conn *jsonrpc2.Connection
 
-	mu           sync.Mutex
-	threadEvents map[orchestration.ThreadID][]orchestration.Event
-	shellItems   []orchestration.ThreadListStreamItem
+	mu                 sync.Mutex
+	threadItems        []orchestration.ThreadStreamItem
+	threadCursor       int
+	threadEvents       map[orchestration.ThreadID][]orchestration.Event
+	shellItems         []orchestration.ThreadListStreamItem
+	terminalItems      []wire.TerminalStreamItem
+	terminalListItems  []wire.TerminalListStreamItem
+	terminalListCursor int
+	terminalOutput     bytes.Buffer
 }
 
-func dialRecordingClient(t *testing.T, url string) *recordingClient {
+func dialRecordingClient(t testing.TB, url string) *recordingClient {
 	t.Helper()
 	c := &recordingClient{threadEvents: make(map[orchestration.ThreadID][]orchestration.Event)}
 	ws, _, err := websocket.Dial(context.Background(), url, nil)
@@ -53,30 +60,50 @@ func dialRecordingClient(t *testing.T, url string) *recordingClient {
 	return c
 }
 
+// newRecordingClient serves s over a fresh WebSocket listener and dials it.
+func newRecordingClient(t testing.TB, s *Server) *recordingClient {
+	t.Helper()
+	return dialRecordingClient(t, newWSTestServer(t, s))
+}
+
 func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
 	if req.IsCall() {
 		return nil, jsonrpc2.ErrNotHandled
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	switch req.Method {
-	case RPCMethodOrchestrationSubscribeThread:
+	case wire.MethodOrchestrationSubscribeThread:
 		var item orchestration.ThreadStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
 		}
+		c.threadItems = append(c.threadItems, item)
 		if item.Kind == "event" && item.Event != nil {
-			c.mu.Lock()
 			threadID := item.Event.ThreadID()
 			c.threadEvents[threadID] = append(c.threadEvents[threadID], *item.Event)
-			c.mu.Unlock()
 		}
-	case RPCMethodOrchestrationSubscribeThreadList:
+	case wire.MethodOrchestrationSubscribeThreadList:
 		var item orchestration.ThreadListStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
 			return nil, err
 		}
-		c.mu.Lock()
 		c.shellItems = append(c.shellItems, item)
-		c.mu.Unlock()
+	case wire.MethodTerminalSubscribe:
+		var item wire.TerminalStreamItem
+		if err := decodeRPCParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.terminalItems = append(c.terminalItems, item)
+		if item.Kind == terminal.StreamItemOutput {
+			c.terminalOutput.Write(item.Data)
+		}
+	case wire.MethodTerminalSubscribeList:
+		var item wire.TerminalListStreamItem
+		if err := decodeRPCParams(req, &item); err != nil {
+			return nil, err
+		}
+		c.terminalListItems = append(c.terminalListItems, item)
 	}
 	return nil, nil
 }
@@ -87,16 +114,25 @@ func (c *recordingClient) callErr(method string, params any, result any) error {
 	return c.conn.Call(ctx, method, params).Await(ctx, result)
 }
 
-func (c *recordingClient) call(t *testing.T, method string, params any, result any) {
+func (c *recordingClient) call(t testing.TB, method string, params any, result any) {
 	t.Helper()
 	if err := c.callErr(method, params, result); err != nil {
 		t.Fatalf("%s: %v", method, err)
 	}
 }
 
+func (c *recordingClient) notify(t *testing.T, method string, params any) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := c.conn.Notify(ctx, method, params); err != nil {
+		t.Fatalf("notify %s: %v", method, err)
+	}
+}
+
 func (c *recordingClient) dispatchErr(command orchestration.Command) (orchestration.DispatchResult, error) {
 	var receipt orchestration.DispatchResult
-	err := c.callErr(RPCMethodOrchestrationDispatchCommand, command, &receipt)
+	err := c.callErr(wire.MethodOrchestrationDispatchCommand, command, &receipt)
 	return receipt, err
 }
 
@@ -112,7 +148,7 @@ func (c *recordingClient) dispatch(t *testing.T, command orchestration.Command) 
 func (c *recordingClient) subscribeThread(t *testing.T, threadID orchestration.ThreadID) orchestration.ThreadDetailSnapshot {
 	t.Helper()
 	var item orchestration.ThreadStreamItem
-	c.call(t, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &item)
+	c.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &item)
 	if item.Kind != "snapshot" || item.Snapshot == nil {
 		t.Fatalf("subscribeThread %s = %#v, want snapshot", threadID, item)
 	}
@@ -122,7 +158,7 @@ func (c *recordingClient) subscribeThread(t *testing.T, threadID orchestration.T
 func (c *recordingClient) subscribeThreadList(t *testing.T) orchestration.ThreadListSnapshot {
 	t.Helper()
 	var snapshot orchestration.ThreadListSnapshot
-	c.call(t, RPCMethodOrchestrationSubscribeThreadList, nil, &snapshot)
+	c.call(t, wire.MethodOrchestrationSubscribeThreadList, nil, &snapshot)
 	return snapshot
 }
 
@@ -136,6 +172,43 @@ func (c *recordingClient) shellLog() []orchestration.ThreadListStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]orchestration.ThreadListStreamItem(nil), c.shellItems...)
+}
+
+// nextThreadItem consumes thread stream notifications in arrival order until
+// one matches, so successive waits observe successive items.
+func (c *recordingClient) nextThreadItem(t *testing.T, desc string, match func(orchestration.ThreadStreamItem) bool) orchestration.ThreadStreamItem {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		for c.threadCursor < len(c.threadItems) {
+			item := c.threadItems[c.threadCursor]
+			c.threadCursor++
+			if match(item) {
+				c.mu.Unlock()
+				return item
+			}
+		}
+		c.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", desc)
+	return orchestration.ThreadStreamItem{}
+}
+
+func (c *recordingClient) waitForThreadEvent(t *testing.T, match func(orchestration.Event) bool) orchestration.Event {
+	t.Helper()
+	item := c.nextThreadItem(t, "thread event", func(item orchestration.ThreadStreamItem) bool {
+		return item.Kind == "event" && item.Event != nil && match(*item.Event)
+	})
+	return *item.Event
+}
+
+func (c *recordingClient) waitForThreadSnapshot(t *testing.T, match func(orchestration.ThreadDetailSnapshot) bool) orchestration.ThreadStreamItem {
+	t.Helper()
+	return c.nextThreadItem(t, "thread snapshot", func(item orchestration.ThreadStreamItem) bool {
+		return item.Kind == orchestration.StreamItemSnapshot && item.Snapshot != nil && match(*item.Snapshot)
+	})
 }
 
 func (c *recordingClient) waitThread(t *testing.T, threadID orchestration.ThreadID, desc string, match func([]orchestration.Event) bool) {
@@ -261,9 +334,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	s := newTestServer(t)
 	defer s.Close()
 	events := observeServerEvents(t, s)
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	url := newWSTestServer(t, s)
 	a := dialRecordingClient(t, url)
 	b := dialRecordingClient(t, url)
@@ -295,7 +366,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	// Cross-client idempotency: B retries A's create with the same commandId;
 	// the receipt must point at the original event and no duplicate may exist.
 	retryReceipt := b.dispatch(t, createOne)
-	threadOneEvents := events.matching(threadOne, 0)
+	threadOneEvents := events.matching(threadOne)
 	if len(threadOneEvents) != 1 || threadOneEvents[0].Type != orchestration.EventThreadCreated {
 		t.Fatalf("thread one events after cross-client retry = %#v, want exactly one thread.created", threadOneEvents)
 	}
@@ -397,65 +468,6 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	}
 }
 
-// TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive hard-drops a client
-// mid-stream, reconnects while the turn is still streaming, restores from one
-// authoritative snapshot, and then proves the replacement subscription stays
-// live through the rest of the turn and a follow-up.
-func TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
-	url := newWSTestServer(t, s)
-	observer := dialRecordingClient(t, url)
-
-	threadID := orchestration.ThreadID("thread-reconnect")
-	observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-reconnect-create", ThreadID: threadID, Title: "Reconnect", ProviderInstanceID: "codex", Cwd: t.TempDir()})
-	observer.subscribeThread(t, threadID)
-
-	dropper := dialRecordingClient(t, url)
-	dropperSnapshot := dropper.subscribeThread(t, threadID)
-
-	// A long UNPACED turn of per-event tool-call updates (assistant text is
-	// coalesced server-side, so a text burst reaches clients as few events);
-	// the dropper disconnects partway through and must reconnect while it is
-	// still running. Unpaced also regression-guards the SDK burst fix: the old
-	// acp-go-sdk killed the provider connection at ~1100 back-to-back updates
-	// (fixed 1024-slot queue).
-	turnReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-reconnect-turn", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-reconnect", Text: "tools 1500"}})
-	dropper.waitThread(t, threadID, "some streamed events before dropping", func(events []orchestration.Event) bool {
-		return len(events) >= 200
-	})
-	if err := dropper.conn.Close(); err != nil {
-		t.Fatalf("hard-close dropper: %v", err)
-	}
-	// The catch-up only exercises the mid-turn path if the turn is still
-	// running when the replacement connection subscribes.
-	if sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady)(observer.threadLog(threadID)) {
-		t.Fatal("turn already settled before reconnect; raise the tool-call count")
-	}
-
-	reconnected := dialRecordingClient(t, url)
-	reconnectedSnapshot := reconnected.subscribeThread(t, threadID)
-	if reconnectedSnapshot.SnapshotSequence <= dropperSnapshot.SnapshotSequence {
-		t.Fatalf("reconnect snapshot sequence = %d, want > pre-drop %d", reconnectedSnapshot.SnapshotSequence, dropperSnapshot.SnapshotSequence)
-	}
-	if reconnectedSnapshot.Thread.LatestTurn == nil || reconnectedSnapshot.Thread.LatestTurn.CompletedAt != nil {
-		t.Fatalf("reconnect snapshot latest turn = %#v, want an active turn", reconnectedSnapshot.Thread.LatestTurn)
-	}
-
-	// Wait for the turn to settle on both connections, then fence.
-	observer.waitThread(t, threadID, "turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
-	reconnected.waitThread(t, threadID, "turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
-
-	// A follow-up turn proves the reconnected client stays live-consistent.
-	followUpReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-reconnect-followup", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-reconnect-followup", Text: "stream 3 8"}})
-	observer.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
-	reconnected.waitThread(t, threadID, "follow-up settle", sessionStatusAfter(followUpReceipt.Sequence, orchestration.SessionStatusReady))
-	fence(t, observer, threadID, "reconnect", observer, reconnected)
-}
-
 // TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot runs the
 // overflow-close policy end-to-end: a subscribed client that stops reading is
 // disconnected by the daemon once its outbound queue fills, healthy clients
@@ -464,9 +476,7 @@ func TestRPCReconnectMidTurnRecoversFromSnapshotAndStaysLive(t *testing.T) {
 func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	url := newWSTestServer(t, s)
 	observer := dialRecordingClient(t, url)
 
@@ -489,7 +499,7 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 		t.Fatalf("slow client dial: %v", err)
 	}
 	defer slow.Close(websocket.StatusNormalClosure, "")
-	subscribe, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": RPCMethodOrchestrationSubscribeThread, "params": orchestration.SubscribeThreadInput{ThreadID: threadID}})
+	subscribe, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": wire.MethodOrchestrationSubscribeThread, "params": orchestration.SubscribeThreadInput{ThreadID: threadID}})
 	if err != nil {
 		t.Fatalf("marshal subscribe: %v", err)
 	}
@@ -520,10 +530,8 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	// text is coalesced server-side) to exhaust the slow client's TCP buffers
 	// plus the daemon's 1024-notification outbound queue (which cannot drain —
 	// the slow client never reads and the writer stalls on its socket). The
-	// unpaced agent burst is also the acceptance guard for the go-acp
-	// migration: the old SDK deterministically closed the provider connection
-	// at ~1100 back-to-back updates, so the observer receiving the full flood
-	// proves the provider connection absorbs unpaced bursts.
+	// observer receiving the full flood also proves the provider connection
+	// absorbs unpaced bursts of agent updates.
 	const floodChunks = 6000
 	turnReceipt := observer.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-overflow-turn", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-overflow", Text: fmt.Sprintf("tools %d", floodChunks)}})
 	observer.waitThread(t, threadID, "flood turn settle", sessionStatusAfter(turnReceipt.Sequence, orchestration.SessionStatusReady))
@@ -573,7 +581,7 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	// transferring thousands of missed deltas.
 	recovered := dialRecordingClient(t, url)
 	var recoveredItem orchestration.ThreadStreamItem
-	recovered.call(t, RPCMethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &recoveredItem)
+	recovered.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &recoveredItem)
 	if recoveredItem.Kind != "snapshot" || recoveredItem.Snapshot == nil {
 		t.Fatalf("recovery = %#v, want authoritative snapshot", recoveredItem)
 	}

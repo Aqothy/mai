@@ -1,6 +1,6 @@
 package daemon
 
-// Increment 8 tests: semantic agent activity flows to terminal-list
+// Agent activity tests: semantic agent activity flows to terminal-list
 // subscribers while raw evidence stays out of the wire. The foreground job
 // here is an unrecognized `sh` script, which exercises the generic
 // spinner-title path; recognized-agent classification is covered by the
@@ -18,31 +18,34 @@ import (
 // cannot miss the job regardless of chunk timing, then exits back to zsh.
 const spinnerTitleScript = "sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do printf \"\\033]0;⠋ agent task\\007\"; sleep 0.2; done'\n"
 
-func waitForAgentActivity(t *testing.T, c *terminalTestClient, terminalID string, activity wire.TerminalAgentActivity) wire.TerminalSummary {
+func waitForAgentActivity(t *testing.T, c *recordingClient, terminalID string, activity wire.TerminalAgentActivity) wire.TerminalSummary {
 	t.Helper()
 	return waitForListUpsert(t, c, func(s wire.TerminalSummary) bool {
 		return s.TerminalID == terminalID && s.AgentActivity == activity
 	})
 }
 
-func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
+// startSpinnerJob runs spinnerTitleScript in a terminal created by controller
+// while observer watches the terminal list.
+func startSpinnerJob(t *testing.T) (observer, controller *recordingClient, created wire.TerminalAttachSnapshot) {
+	t.Helper()
 	useQuietTestShell(t)
 	s := newTestServer(t)
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
 	url := newWSTestServer(t, s)
 
-	observer := dialTerminalClient(t, url)
+	observer = dialRecordingClient(t, url)
 	subscribeTerminalListSnapshot(t, observer)
 
-	controller := dialTerminalClient(t, url)
-	created := createTestTerminal(t, controller)
-	terminalID := created.Terminal.TerminalID
+	controller = dialRecordingClient(t, url)
+	created = createTestTerminal(t, controller)
+	controller.writeTerminal(t, created.Terminal.TerminalID, created.RunID, spinnerTitleScript)
+	return observer, controller, created
+}
 
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-		Data:       []byte(spinnerTitleScript),
-	})
+func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
+	observer, _, created := startSpinnerJob(t)
+	terminalID := created.Terminal.TerminalID
 
 	working := waitForAgentActivity(t, observer, terminalID, terminal.AgentActivityWorking)
 	if working.AgentKind != terminal.AgentUnknown {
@@ -69,8 +72,8 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 			sum.AgentActivity == terminal.AgentActivityNone &&
 			sum.AgentKind == terminal.AgentNone
 	})
-	if cleared.Status != terminal.StatusRunning {
-		t.Fatalf("cleared upsert status = %s", cleared.Status)
+	if cleared.Status != terminal.StatusRunning || cleared.ObservedTitle != "" {
+		t.Fatalf("cleared upsert = status %s, observed title %q; want running with no title", cleared.Status, cleared.ObservedTitle)
 	}
 	if !cleared.UpdatedAt.Equal(working.UpdatedAt) {
 		t.Fatal("agent activity change bumped updatedAt; rows must not reorder on activity")
@@ -78,31 +81,13 @@ func TestTerminalAgentActivityPublishesSemanticUpserts(t *testing.T) {
 }
 
 func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-
-	observer := dialTerminalClient(t, url)
-	subscribeTerminalListSnapshot(t, observer)
-
-	controller := dialTerminalClient(t, url)
-	created := createTestTerminal(t, controller)
+	observer, controller, created := startSpinnerJob(t)
 	terminalID := created.Terminal.TerminalID
-
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-		Data:       []byte(spinnerTitleScript),
-	})
 	waitForAgentActivity(t, observer, terminalID, terminal.AgentActivityWorking)
 
 	// Navigate away: the shell keeps running with no attached client, and
 	// activity keeps updating server-side.
-	controller.notify(t, RPCMethodTerminalDetach, wire.TerminalDetachParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-	})
+	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID, RunID: created.RunID})
 
 	// The job finishes while detached: the working run reports done and
 	// holds it.
@@ -112,13 +97,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 	}
 
 	// Reattaching acknowledges done and returns the row to no activity.
-	var attach wire.TerminalAttachSnapshot
-	controller.call(t, RPCMethodTerminalAttach, wire.TerminalAttachParams{
-		TerminalID: terminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &attach)
-	if attach.Terminal.AgentActivity == terminal.AgentActivityDone {
+	if attach := controller.mustAttachTerminal(t, terminalID, 80, 24); attach.Terminal.AgentActivity == terminal.AgentActivityDone {
 		t.Fatal("attach snapshot still reports done after acknowledgment")
 	}
 	waitForListUpsert(t, observer, func(sum wire.TerminalSummary) bool {

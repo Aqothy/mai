@@ -16,6 +16,7 @@ func projectThreadForClient(thread Thread) Thread {
 	projected.ConfigSelections = nil
 	projected.Session = cloneSessionPtr(thread.Session)
 	projected.LatestTurn = cloneTurnPtr(thread.LatestTurn)
+	projected.PreviousTurns = cloneTurns(thread.PreviousTurns)
 	projected.Plan = clonePlanPtr(thread.Plan)
 	projected.Timeline = make(Timeline, len(thread.Timeline))
 
@@ -95,61 +96,26 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 		LocationCount:        len(call.Locations),
 		ChangeCount:          len(call.Changes),
 		AttachmentCount:      len(call.Attachments),
-		ExitCode:             cloneIntPtr(call.ExitCode),
-		DurationMilliseconds: cloneInt64Ptr(call.DurationMilliseconds),
+		ExitCode:             clonePtr(call.ExitCode),
+		DurationMilliseconds: clonePtr(call.DurationMilliseconds),
 	}
-	summary.Name, summary.Truncated = boundedPreview(
-		call.Name,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.Namespace, summary.Truncated = boundedPreview(
-		call.Namespace,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.ProviderKind, summary.Truncated = boundedPreview(
-		call.ProviderKind,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.Cwd, summary.Truncated = boundedPreview(
-		call.Cwd,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.CommandPreview, summary.Truncated = boundedPreview(
-		call.Command,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.QueryPreview, summary.Truncated = boundedPreview(
-		call.Query,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
-	summary.OutputPreview, summary.Truncated = boundedPreview(
-		call.Output,
-		maxToolSummaryOutputRunes,
-		summary.Truncated,
-	)
-	summary.ErrorPreview, summary.Truncated = boundedPreview(
-		call.Error,
-		maxToolSummaryFieldRunes,
-		summary.Truncated,
-	)
+	summary.Name, summary.Truncated = boundedPreview(call.Name, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.Namespace, summary.Truncated = boundedPreview(call.Namespace, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.ProviderKind, summary.Truncated = boundedPreview(call.ProviderKind, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.Cwd, summary.Truncated = boundedPreview(call.Cwd, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.CommandPreview, summary.Truncated = boundedPreview(call.Command, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.QueryPreview, summary.Truncated = boundedPreview(call.Query, maxToolSummaryFieldRunes, summary.Truncated)
+	summary.OutputPreview, summary.Truncated = boundedPreview(call.Output, maxToolSummaryOutputRunes, summary.Truncated)
+	summary.ErrorPreview, summary.Truncated = boundedPreview(call.Error, maxToolSummaryFieldRunes, summary.Truncated)
 
 	locationLimit := min(len(call.Locations), maxToolSummaryEntries)
 	summary.Locations = make([]provider.ToolLocation, locationLimit)
 	for index := range locationLimit {
 		summary.Locations[index] = call.Locations[index]
 		var truncated bool
-		summary.Locations[index].Path, truncated = truncateRunes(
-			call.Locations[index].Path,
-			maxToolSummaryFieldRunes,
-		)
+		summary.Locations[index].Path, truncated = truncateRunes(call.Locations[index].Path, maxToolSummaryFieldRunes)
 		summary.Truncated = summary.Truncated || truncated
-		summary.Locations[index].Line = cloneUint32Ptr(call.Locations[index].Line)
+		summary.Locations[index].Line = clonePtr(call.Locations[index].Line)
 	}
 	summary.Truncated = summary.Truncated || locationLimit < len(call.Locations)
 
@@ -159,11 +125,7 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 		change := call.Changes[index]
 		path, pathTruncated := truncateRunes(change.Path, maxToolSummaryFieldRunes)
 		movePath, movePathTruncated := truncateRunes(change.MovePath, maxToolSummaryFieldRunes)
-		summary.Changes[index] = FileChangeSummary{
-			Path:     path,
-			Kind:     change.Kind,
-			MovePath: movePath,
-		}
+		summary.Changes[index] = FileChangeSummary{Path: path, Kind: change.Kind, MovePath: movePath}
 		summary.Truncated = summary.Truncated || pathTruncated || movePathTruncated
 	}
 	summary.Truncated = summary.Truncated || changeLimit < len(call.Changes)
@@ -174,22 +136,10 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 		attachment := call.Attachments[index]
 		kind, kindTruncated := truncateRunes(attachment.Kind, maxToolSummaryFieldRunes)
 		name, nameTruncated := truncateRunes(attachment.Name, maxToolSummaryFieldRunes)
-		mimeType, mimeTypeTruncated := truncateRunes(
-			attachment.MimeType,
-			maxToolSummaryFieldRunes,
-		)
-		uri, truncated := truncateRunes(attachment.URI, maxToolSummaryFieldRunes)
-		summary.Attachments[index] = ToolAttachmentSummary{
-			Kind:     kind,
-			Name:     name,
-			MimeType: mimeType,
-			URI:      uri,
-		}
-		summary.Truncated = summary.Truncated ||
-			kindTruncated ||
-			nameTruncated ||
-			mimeTypeTruncated ||
-			truncated
+		mimeType, mimeTypeTruncated := truncateRunes(attachment.MimeType, maxToolSummaryFieldRunes)
+		uri, uriTruncated := truncateRunes(attachment.URI, maxToolSummaryFieldRunes)
+		summary.Attachments[index] = ToolAttachmentSummary{Kind: kind, Name: name, MimeType: mimeType, URI: uri}
+		summary.Truncated = summary.Truncated || kindTruncated || nameTruncated || mimeTypeTruncated || uriTruncated
 	}
 	summary.Truncated = summary.Truncated || attachmentLimit < len(call.Attachments)
 	return summary

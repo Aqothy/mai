@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSChatDestinationView: View {
@@ -5,6 +6,7 @@ struct IOSChatDestinationView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
     let projectFolders: ProjectFolderStore
+    let openThread: (String) -> Void
 
     var body: some View {
         Group {
@@ -14,14 +16,16 @@ struct IOSChatDestinationView: View {
                     store: store,
                     draftStore: draftStore,
                     projectFolders: projectFolders,
-                    initialWorkingDirectory: workingDirectory
+                    initialWorkingDirectory: workingDirectory,
+                    openThread: openThread
                 )
             case .thread(let threadID):
                 if store.selectedThreadID == threadID {
                     ChatView(
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        projectFolders: projectFolders,
+                        openThread: openThread
                     )
                 } else {
                     ProgressView("Opening Chat…")
@@ -39,7 +43,7 @@ struct IOSChatDestinationView: View {
         .task(id: route) {
             switch route {
             case .newChat:
-                store.startNewDraft()
+                store.selectThread(nil)
             case .thread(let threadID):
                 guard store.selectedThreadID != threadID else { return }
                 store.selectThread(threadID)
@@ -49,3 +53,5 @@ struct IOSChatDestinationView: View {
         }
     }
 }
+
+#endif

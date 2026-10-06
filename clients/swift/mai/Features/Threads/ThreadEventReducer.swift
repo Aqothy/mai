@@ -6,7 +6,10 @@ extension Thread {
     /// `timeline` is copy-on-write, so call this through your own storage
     /// (`sessionsByID[id]?.thread?.apply(event)`) rather than a temporary copy —
     /// a second reference forces a full array copy per streamed chunk.
-    mutating func apply(_ event: Event) {
+    /// Returns the lowest timeline index the event changed, so presentation
+    /// can reproject incrementally; nil when the timeline was untouched.
+    @discardableResult
+    mutating func apply(_ event: Event) -> Int? {
         ThreadEventReducer.apply(event, to: &self)
     }
 }
@@ -15,27 +18,46 @@ extension Thread {
 /// daemon streams events, not snapshots, so every branch below must match the
 /// Go projection.
 enum ThreadEventReducer {
-    static func apply(_ event: Event, to thread: inout Thread) {
-        guard event.payload.threadID == thread.id else { return }
+    /// Applies `event` and returns the lowest timeline index it changed
+    /// (appends report the index the new entry occupies). Callers feed this
+    /// to `ChatTimelineProjection` as its invalidation watermark.
+    static func apply(_ event: Event, to thread: inout Thread) -> Int? {
+        guard event.payload.threadID == thread.id else { return nil }
         let payload = event.payload
         let occurredAt = event.occurredAt
+        var firstChangedIndex: Int?
+        // Nested so every branch records without unwinding control flow.
+        func note(_ index: Int?) {
+            guard let index else { return }
+            firstChangedIndex = min(firstChangedIndex ?? index, index)
+        }
 
         switch event.eventType {
         case .threadMetaUpdated:
             applyProviderSelection(payload, to: &thread)
             if let cwd = nonEmpty(payload.cwd) { thread.cwd = cwd }
+            if payload.additionalDirectories != nil {
+                thread.additionalDirectories = payload.additionalDirectories
+            }
             if let title = nonEmpty(payload.title) { thread.title = title }
 
         case .threadMessageSent:
             guard let id = payload.messageID, let role = payload.role else { break }
             if let index = thread.timeline.lastIndex(where: { $0.message?.id == id }),
                thread.timeline[index].message != nil {
+                note(index)
                 // Mutate through the storage subscript: a local `var message`
                 // copy gives the accumulated text a second reference, forcing
                 // a full copy of the whole message per streamed chunk.
                 if let attachments = payload.attachments, !attachments.isEmpty {
                     let merged = (thread.timeline[index].message?.attachments ?? []) + attachments
                     thread.timeline[index].message?.attachments = merged
+                }
+                if let annotations = payload.annotations, !annotations.isEmpty {
+                    let existing = thread.timeline[index].message?.annotations ?? []
+                    let existingIDs = Set(existing.map(\.id))
+                    thread.timeline[index].message?.annotations = existing
+                        + annotations.filter { !existingIDs.contains($0.id) }
                 }
                 if let text = payload.text, !text.isEmpty {
                     thread.timeline[index].message?.text += text
@@ -45,7 +67,9 @@ enum ThreadEventReducer {
                 }
                 thread.timeline[index].message?.updatedAt = occurredAt
             } else {
+                note(thread.timeline.count)
                 let message = Message(
+                    annotations: payload.annotations,
                     attachments: payload.attachments,
                     createdAt: payload.createdAt ?? occurredAt,
                     id: id,
@@ -62,12 +86,13 @@ enum ThreadEventReducer {
             let turnID = nonEmpty(payload.turnID) ?? event.eventID
             if let messageID = payload.messageID,
                let index = thread.timeline.lastIndex(where: { $0.message?.id == messageID }) {
+                note(index)
                 thread.timeline[index].message?.turnID = turnID
             }
             // A turn.start for the already-running turn is steering: the same
             // logical turn continues, so its timestamps must survive.
             if thread.latestTurn?.turnID != turnID {
-                thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID)
+                replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID))
             }
             if thread.session != nil {
                 thread.session?.activeTurnID = turnID
@@ -116,7 +141,7 @@ enum ThreadEventReducer {
 
             if let active = session.activeTurnID, !active.isEmpty {
                 if thread.latestTurn?.turnID != active {
-                    thread.latestTurn = Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: active)
+                    replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: active))
                 } else {
                     thread.latestTurn?.state = MaidTurnState.running.rawValue
                 }
@@ -134,6 +159,10 @@ enum ThreadEventReducer {
             }
 
             if thread.cwd == nil, let cwd = session.cwd { thread.cwd = cwd }
+            if thread.additionalDirectories == nil,
+               session.additionalDirectories != nil {
+                thread.additionalDirectories = session.additionalDirectories
+            }
             if thread.providerInstanceID == nil { thread.providerInstanceID = session.providerInstanceID }
             thread.session = session
 
@@ -143,6 +172,7 @@ enum ThreadEventReducer {
             guard var item = payload.item else { break }
             if let index = thread.timeline.lastIndex(where: { $0.item?.id == item.id }),
                let old = thread.timeline[index].item {
+                note(index)
                 item.payload = mergedItemPayload(old: old, incoming: item)
                 item.createdAt = old.createdAt
                 if nonEmpty(item.kind) == nil { item.kind = old.kind }
@@ -157,6 +187,7 @@ enum ThreadEventReducer {
                 item.updatedAt = occurredAt
                 thread.timeline[index].item = item
             } else {
+                note(thread.timeline.count)
                 item.payload = mergedItemPayload(old: nil, incoming: item)
                 if nonEmpty(item.status) == nil { item.status = MaidItemStatus.inProgress.rawValue }
                 item.textDelta = nil
@@ -176,6 +207,7 @@ enum ThreadEventReducer {
             let status = resolved ? MaidApprovalStatus.resolved : .pending
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == update.requestID }),
                var approval = thread.timeline[index].approval {
+                note(index)
                 // Reopening restores the request's arguments and options; a
                 // resolution leaves them as they were.
                 if !resolved {
@@ -189,6 +221,7 @@ enum ThreadEventReducer {
                 approval.updatedAt = occurredAt
                 thread.timeline[index].approval = approval
             } else {
+                note(thread.timeline.count)
                 let approval = Approval(args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt)
                 thread.timeline.append(TimelineEntry(approval: approval, item: nil, kind: MaidTimelineEntryKind.approval.rawValue, message: nil))
             }
@@ -196,6 +229,7 @@ enum ThreadEventReducer {
         case .threadApprovalResponseRequested:
             guard let requestID = payload.requestID else { break }
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == requestID }) {
+                note(index)
                 thread.timeline[index].approval?.decision = payload.decision
                 thread.timeline[index].approval?.optionID = payload.optionID
                 thread.timeline[index].approval?.updatedAt = occurredAt
@@ -214,6 +248,12 @@ enum ThreadEventReducer {
             session.updatedAt = occurredAt
             thread.session = session
 
+        case .threadSkillsUpdated:
+            var session = ensureSession(thread, event)
+            session.skills = payload.skills ?? []
+            session.updatedAt = occurredAt
+            thread.session = session
+
         case .threadTokenUsageUpdated:
             var session = ensureSession(thread, event)
             session.tokenUsage = payload.tokenUsage
@@ -225,6 +265,16 @@ enum ThreadEventReducer {
         default:
             break
         }
+        return firstChangedIndex
+    }
+
+    /// Mirrors the daemon: the replaced turn has settled, so it keeps its own
+    /// outcome and timing in `previousTurns`.
+    private static func replaceLatestTurn(of thread: inout Thread, with turn: Turn) {
+        if let latest = thread.latestTurn {
+            thread.previousTurns = (thread.previousTurns ?? []) + [latest]
+        }
+        thread.latestTurn = turn
     }
 
     private static func applyProviderSelection(_ payload: EventPayload, to thread: inout Thread) {
@@ -247,7 +297,24 @@ enum ThreadEventReducer {
 
     private static func ensureSession(_ thread: Thread, _ event: Event) -> SessionBinding {
         if let session = thread.session { return session }
-        return SessionBinding(activeTurnID: nil, configOptions: nil, cwd: thread.cwd, driver: nil, lastError: nil, providerInstanceID: event.payload.providerInstanceID ?? thread.providerInstanceID ?? "", providerName: nil, slashCommands: nil, status: MaidSessionStatus.starting.rawValue, stopRequested: false, threadID: thread.id, tokenUsage: nil, updatedAt: event.occurredAt)
+        return SessionBinding(
+            activeTurnID: nil,
+            additionalDirectories: thread.additionalDirectories,
+            configOptions: nil,
+            cwd: thread.cwd,
+            driver: nil,
+            lastError: nil,
+            providerInstanceID: event.payload.providerInstanceID
+                ?? thread.providerInstanceID ?? "",
+            providerName: nil,
+            skills: nil,
+            slashCommands: nil,
+            status: MaidSessionStatus.starting.rawValue,
+            stopRequested: false,
+            threadID: thread.id,
+            tokenUsage: nil,
+            updatedAt: event.occurredAt
+        )
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

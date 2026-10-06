@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class SearchableSelectionModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     let choices: [SearchableSelectionChoice]
     var searchText = ""
 

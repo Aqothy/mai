@@ -46,7 +46,7 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 	h := newWireTestHandle(t, &fakeWireAgent{})
 	stream := &sessionStream{
 		sessionID: "old",
-		session:   h.agent().AttachSession("old"),
+		session:   h.agentPeer.AttachSession("old"),
 		barriers:  make(map[string]*sessionBarrier),
 	}
 	h.bindSession("thread-old", "old")
@@ -79,13 +79,9 @@ func TestAbandonSessionStreamReleasesBarrierWithoutDrain(t *testing.T) {
 
 	cause := errors.New("session stream died")
 	h.abandonSessionStream(stream, cause)
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, cause) {
-			t.Fatalf("awaitSessionBarrier err = %v, want %v", err, cause)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for abandoned barrier to release")
+	err := waitFor(t, errCh, "timed out waiting for abandoned barrier to release")
+	if !errors.Is(err, cause) {
+		t.Fatalf("awaitSessionBarrier err = %v, want %v", err, cause)
 	}
 	select {
 	case <-drained:
@@ -120,18 +116,10 @@ func TestResumeSessionBarrierTimeoutUnbindsSession(t *testing.T) {
 		_, err := h.StartSession(ctx, provider.StartSessionInput{ThreadID: "thread-1", ResumeCursor: marshalRaw(map[string]string{"sessionId": "old"})})
 		errCh <- err
 	}()
-	select {
-	case <-entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for resume update to block the barrier")
-	}
-	select {
-	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "context deadline") {
-			t.Fatalf("StartSession err = %v, want barrier context deadline", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for StartSession to fail on resume barrier deadline")
+	waitFor(t, entered, "timed out waiting for resume update to block the barrier")
+	err := waitFor(t, errCh, "timed out waiting for StartSession to fail on resume barrier deadline")
+	if err == nil || !strings.Contains(err.Error(), "context deadline") {
+		t.Fatalf("StartSession err = %v, want barrier context deadline", err)
 	}
 	if got := h.sessionIDForThread("thread-1"); got != "" {
 		t.Fatalf("thread remains bound to %q after resume barrier timeout", got)

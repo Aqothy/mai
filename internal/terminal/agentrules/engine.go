@@ -258,35 +258,6 @@ func compileGate(g gate) (compiledGate, error) {
 	return out, nil
 }
 
-// Known reports whether a manifest exists for the agent label or alias.
-func Known(label string) bool {
-	_, ok := manifestsByLabel[label]
-	return ok
-}
-
-// Labels returns the canonical manifest ids in sorted order.
-func Labels() []string {
-	seen := make(map[string]struct{})
-	var labels []string
-	for _, m := range manifestsByLabel {
-		if _, dup := seen[m.label]; dup {
-			continue
-		}
-		seen[m.label] = struct{}{}
-		labels = append(labels, m.label)
-	}
-	sortStrings(labels)
-	return labels
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
-}
-
 // Detect evaluates the labeled agent's rules over the input. The highest
 // priority matching rule wins. When no manifest rule matches — including for
 // agents without a manifest — generic OSC conventions (spinner-frame titles,

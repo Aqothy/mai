@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -30,14 +31,17 @@ func sessionPreparing(thread Thread) bool {
 	return thread.Session != nil && thread.Session.Status == SessionStatusStarting && thread.Session.ActiveTurnID == ""
 }
 
-func validateMetaCwdChange(thread Thread, cwd string) error {
-	if cwd == "" || cwd == thread.Cwd {
-		return nil
-	}
+func validateMetaDirectoriesChange(thread Thread, cwd string, additionalDirectories []string, changesAdditionalDirectories bool) error {
 	if !providerSessionActive(thread.Session) {
 		return nil
 	}
-	return fmt.Errorf("cannot change cwd while provider session is active; stop the session first")
+	if cwd != "" && cwd != thread.Cwd {
+		return fmt.Errorf("cannot change cwd while provider session is active; stop the session first")
+	}
+	if !changesAdditionalDirectories || slices.Equal(thread.AdditionalDirectories, additionalDirectories) {
+		return nil
+	}
+	return fmt.Errorf("cannot change additional directories while provider session is active; stop the session first")
 }
 
 func validateTurnStartBoundary(command Command) error {

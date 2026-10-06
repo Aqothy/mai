@@ -23,6 +23,9 @@ struct ThreadSession {
     /// discarded when subscription maintenance evicts this session.
     var markdownSegmentCache = ChatMarkdownSegmentCache()
     var textLayoutStore = ChatTextLayoutStore()
+    /// Incremental section projection for the chat timeline. Every timeline
+    /// mutation below invalidates it; the chat projects lazily in `body`.
+    var timelineProjection = ChatTimelineProjection()
     var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
@@ -82,7 +85,9 @@ struct ThreadSession {
         // not per streamed message/item chunk.
         let tracksProtection = Self.canChangeProtection(event.eventType)
         let wasProtected = tracksProtection && isProtected
-        thread?.apply(event)
+        if let changedIndex = thread?.apply(event) {
+            timelineProjection.invalidate(from: changedIndex)
+        }
         lastSequence = event.sequence
         if event.eventType == .threadHistoryReplayCompleted {
             historyRestorePending = false

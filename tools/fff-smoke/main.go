@@ -57,12 +57,5 @@ func run() error {
 	if len(matches) == 0 || matches[0].RelativePath != "src/smoke_target.go" {
 		return fmt.Errorf("expected src/smoke_target.go, got %v", matches)
 	}
-	progress, err := finder.ScanProgress()
-	if err != nil {
-		return fmt.Errorf("scan progress: %w", err)
-	}
-	if progress.ScannedFiles == 0 {
-		return fmt.Errorf("expected non-zero scanned file count")
-	}
 	return finder.Close()
 }

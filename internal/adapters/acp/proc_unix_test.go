@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 )
 
 // TestAgentExitKillsRemainingProcessGroup guards wrappers that background the
@@ -18,7 +20,7 @@ import (
 func TestAgentExitKillsRemainingProcessGroup(t *testing.T) {
 	h := newInstance(nil)
 	cmd := exec.Command("/bin/sh", "-c", "sleep 60 >/dev/null 2>&1 & echo $!")
-	configureProcessGroup(cmd)
+	procgroup.Configure(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)

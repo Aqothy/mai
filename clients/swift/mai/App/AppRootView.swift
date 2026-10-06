@@ -7,11 +7,20 @@ struct AppRootView: View {
     let terminalStore: TerminalStore
 
     var body: some View {
-        IOSAppContainer(
-            store: store,
-            draftStore: draftStore,
-            projectFolders: projectFolders,
-            terminalStore: terminalStore
-        )
+        #if os(macOS)
+            DesktopAppContainer(
+                store: store,
+                draftStore: draftStore,
+                projectFolders: projectFolders,
+                terminalStore: terminalStore
+            )
+        #else
+            IOSAppContainer(
+                store: store,
+                draftStore: draftStore,
+                projectFolders: projectFolders,
+                terminalStore: terminalStore
+            )
+        #endif
     }
 }

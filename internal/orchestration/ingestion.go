@@ -92,10 +92,12 @@ type assistantFlush struct {
 	attachments []provider.Attachment
 }
 
-// textFlushInterval is the cadence of the single ingestion-owned flush ticker.
-// Semantic boundaries still flush immediately. A shared tick keeps concurrent
-// providers bounded without per-stream goroutines or timers.
-var textFlushInterval = 200 * time.Millisecond
+// textFlushInterval is the transport/persistence coalescing cadence, not the
+// UI render cadence. Fifty milliseconds keeps first paint and incremental
+// layout responsive while bounding projection, persistence, and multi-client
+// fan-out to 20 text events per second per active ingestion loop. Semantic
+// boundaries still flush immediately.
+var textFlushInterval = 50 * time.Millisecond
 
 func (t *turnState) streamByKey(key string) *assistantStream {
 	for _, stream := range t.assistants {
@@ -264,7 +266,7 @@ func (i *ProviderRuntimeIngestion) RestoreHistory(
 		gate.mu.Lock()
 		queued := gate.queued
 		if len(queued) == 0 {
-			i.completeHistoryReplay(threadID)
+			i.completeHistoryReplay(threadID, replayedTurns(result.Replay))
 			ready(result.Session)
 			gate.closed = true
 			gate.mu.Unlock()
@@ -282,7 +284,7 @@ func (i *ProviderRuntimeIngestion) RestoreHistory(
 	return nil
 }
 
-func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string) {
+func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string, turns []Turn) {
 	createdAt := time.Now()
 	i.completeThreadText(threadID, createdAt)
 	i.clearThreadBuffers(threadID)
@@ -290,7 +292,41 @@ func (i *ProviderRuntimeIngestion) completeHistoryReplay(threadID string) {
 		Type:       EventThreadHistoryReplayCompleted,
 		ThreadID:   ThreadID(threadID),
 		OccurredAt: createdAt,
+		Payload:    EventPayload{ReplayedTurns: turns},
 	})
+}
+
+// replayedTurns derives each settled history turn's outcome and timing from the
+// replay's turn boundary events. Live turn events apply only to a bound session,
+// which a restored thread gets after its replay, so the engine drops these.
+func replayedTurns(events []provider.RuntimeEvent) []Turn {
+	startedAt := make(map[string]time.Time)
+	var turns []Turn
+	for _, event := range events {
+		if event.TurnID == "" || event.CreatedAt.IsZero() {
+			continue
+		}
+		switch event.Type {
+		case provider.RuntimeEventTurnStarted:
+			startedAt[event.TurnID] = event.CreatedAt
+		case provider.RuntimeEventTurnCompleted:
+			started, ok := startedAt[event.TurnID]
+			if !ok {
+				continue
+			}
+			completed := event.CreatedAt
+			turn := Turn{ID: TurnID(event.TurnID), State: TurnStateCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &completed, StopReason: event.Payload.StopReason}
+			switch event.Payload.TurnState {
+			case provider.RuntimeTurnFailed:
+				turn.State = TurnStateError
+				turn.Error = firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Turn failed")
+			case provider.RuntimeTurnInterrupted, provider.RuntimeTurnCancelled:
+				turn.State = TurnStateInterrupted
+			}
+			turns = append(turns, turn)
+		}
+	}
+	return turns
 }
 
 func (i *ProviderRuntimeIngestion) ingestContentDelta(event provider.RuntimeEvent, createdAt time.Time) {
@@ -298,7 +334,7 @@ func (i *ProviderRuntimeIngestion) ingestContentDelta(event provider.RuntimeEven
 	case provider.RuntimeContentAssistantText:
 		// Reasoning->text switch (interleaved thinking): settle the segment so
 		// reasoning that resumes later starts a new entry after this message.
-		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt, "")
 		i.bufferAssistantDelta(event, createdAt)
 	case provider.RuntimeContentReasoningText:
 		i.ingestReasoningDelta(event, createdAt)
@@ -314,7 +350,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 	}
 	ts.reasoning = append(ts.reasoning, event.Payload.Delta...)
 	ts.reasoningPending = append(ts.reasoningPending, event.Payload.Delta...)
-	ts.reasoningAttachments = append(ts.reasoningAttachments, event.Payload.Attachments...)
+	ts.reasoningAttachments = append(ts.reasoningAttachments, cloneAttachments(event.Payload.Attachments)...)
 	ts.reasoningActive = true
 	itemID := reasoningItemID(event, ts.reasoningSegment)
 	var full *reasoningPayload
@@ -322,7 +358,7 @@ func (i *ProviderRuntimeIngestion) ingestReasoningDelta(event provider.RuntimeEv
 		// Non-text content (ACP thought chunks are full ContentBlocks) flushes
 		// immediately as the COMPLETE replacement payload, so an attachment is
 		// never hidden until the settle checkpoint.
-		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: append([]provider.Attachment(nil), ts.reasoningAttachments...)}
+		full = &reasoningPayload{Text: string(ts.reasoning), Attachments: cloneAttachments(ts.reasoningAttachments)}
 		ts.reasoningPending = ts.reasoningPending[:0]
 	}
 	i.mu.Unlock()
@@ -351,14 +387,22 @@ type reasoningPayload struct {
 	Attachments []provider.Attachment `json:"attachments,omitempty"`
 }
 
-func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time) {
+// settleReasoning closes the active reasoning segment. A non-empty snapshot is
+// the provider's authoritative text for the completed item and replaces the
+// accumulated deltas: a provider may join its parts differently from its live
+// stream, and the settled item must match what it will replay.
+func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time, snapshot string) {
 	i.mu.Lock()
 	ts := i.turns[turnKeyOf(event)]
 	var checkpoint reasoningPayload
 	active := ts != nil && ts.reasoningActive
 	var itemID string
 	if active {
-		checkpoint = reasoningPayload{Text: string(ts.reasoning), Attachments: ts.reasoningAttachments}
+		text := string(ts.reasoning)
+		if snapshot != "" {
+			text = snapshot
+		}
+		checkpoint = reasoningPayload{Text: text, Attachments: ts.reasoningAttachments}
 		itemID = reasoningItemID(event, ts.reasoningSegment)
 		ts.reasoning = nil
 		ts.reasoningPending = nil
@@ -390,6 +434,12 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 		i.ingestAssistantMessageStatus(event, createdAt, status)
 		return
 	}
+	if event.Payload.ItemType == provider.ItemKindReasoning {
+		if status != "" && status != provider.ItemStatusInProgress {
+			i.settleReasoning(event, status, createdAt, event.Payload.Detail)
+		}
+		return
+	}
 	kind := event.Payload.ItemType
 	if kind == "" {
 		return
@@ -405,7 +455,7 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	i.trackOpenItem(event, itemID, status)
 	// ToolCall is a complete neutral replacement snapshot when present;
 	// status-only updates leave it absent so projection preserves the previous
-	// one. Provider-shaped Data must never cross this boundary for tool items.
+	// one.
 	item := &Item{ID: itemID, Kind: kind, Title: firstNonEmpty(event.Payload.Title, event.Payload.Detail), Status: status, ToolCall: event.Payload.ToolCall, TurnID: TurnID(event.TurnID)}
 	i.recordItem(event, item, createdAt)
 }
@@ -465,7 +515,17 @@ func (i *ProviderRuntimeIngestion) ingestUserMessage(event provider.RuntimeEvent
 	i.completeThreadText(event.ThreadID, createdAt)
 	messageID := i.userMessageID(event)
 	text := firstNonEmpty(event.Payload.Detail, event.Payload.Message, event.Payload.Delta)
-	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
+	var annotations []provider.PromptAnnotation
+	if presentation := event.Payload.Presentation; presentation != nil {
+		if presentation.MessageID != "" {
+			messageID = MessageID(presentation.MessageID)
+		}
+		if presentation.Text != nil {
+			text = *presentation.Text
+		}
+		annotations = append([]provider.PromptAnnotation(nil), presentation.Annotations...)
+	}
+	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, Annotations: annotations, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
 }
 
 func (i *ProviderRuntimeIngestion) userMessageID(event provider.RuntimeEvent) MessageID {
@@ -526,6 +586,9 @@ func (i *ProviderRuntimeIngestion) ingestThreadMetadata(event provider.RuntimeEv
 	if event.Payload.SlashCommands != nil {
 		i.record(EventInput{Type: EventThreadSlashCommandsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{SlashCommands: event.Payload.SlashCommands}})
 	}
+	if event.Payload.Skills != nil {
+		i.record(EventInput{Type: EventThreadSkillsUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Skills: event.Payload.Skills}})
+	}
 	if event.Payload.Title != "" {
 		i.record(EventInput{Type: EventThreadMetaUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Title: event.Payload.Title}})
 	}
@@ -552,8 +615,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 	i.settleTurn(event, reasoningStatusFromTurnState(event.Payload.TurnState), createdAt)
 	if event.Payload.TurnState == provider.RuntimeTurnFailed {
 		failureMessage := firstNonEmpty(event.Payload.Message, event.Payload.Detail, event.Payload.StopReason, "Turn failed")
-		item := &Item{ID: firstNonEmpty(string(event.EventID), newID("error")), Kind: provider.ItemKindError, Title: failureMessage, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": failureMessage}), TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}
-		i.recordItem(event, item, createdAt)
+		i.recordItem(event, errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), failureMessage), createdAt)
 	}
 	update := sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: TurnID(event.TurnID), TurnState: event.Payload.TurnState, StopReason: event.Payload.StopReason, Error: firstNonEmpty(event.Payload.Message, event.Payload.Detail)}
 	if i.recordSessionUpdate(event.ThreadID, update, createdAt) {
@@ -570,7 +632,7 @@ func (i *ProviderRuntimeIngestion) ingestRuntimeWarning(event provider.RuntimeEv
 
 func (i *ProviderRuntimeIngestion) ingestRuntimeError(event provider.RuntimeEvent, createdAt time.Time) {
 	message := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Runtime error")
-	item := &Item{ID: firstNonEmpty(string(event.EventID), newID("error")), Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: TurnID(event.TurnID)}
+	item := errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), message)
 	// A turn-less error settles the streams of the thread's active turn. This
 	// read only steers local buffer cleanup — the authoritative staleness
 	// decision for the session status happens in the engine below.
@@ -669,7 +731,7 @@ func (i *ProviderRuntimeIngestion) completeThreadText(threadID string, createdAt
 // boundary. Content that resumes after the boundary receives new timeline
 // identities instead of mutating entries anchored before it.
 func (i *ProviderRuntimeIngestion) completeTurnText(event provider.RuntimeEvent, createdAt time.Time) {
-	i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+	i.settleReasoning(event, provider.ItemStatusCompleted, createdAt, "")
 	i.completeOpenAssistantMessages(event, createdAt)
 }
 
@@ -683,7 +745,7 @@ func (i *ProviderRuntimeIngestion) settleTurn(event provider.RuntimeEvent, statu
 	for _, flush := range i.takeAssistantMessages(event) {
 		i.recordAssistantMessage(event, flush, createdAt)
 	}
-	i.settleReasoning(event, status, createdAt)
+	i.settleReasoning(event, status, createdAt, "")
 	i.settleOpenItems(event, status, createdAt)
 	i.clearTurnBuffers(event)
 }
@@ -895,6 +957,11 @@ func (i *ProviderRuntimeIngestion) recordSessionUpdate(threadID string, update s
 		return false
 	}
 	return result.Sequence != 0
+}
+
+// errorItem is the failed timeline item that tells clients why work failed.
+func errorItem(id string, turnID TurnID, message string) *Item {
+	return &Item{ID: id, Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: turnID}
 }
 
 func reasoningStatusFromTurnState(state provider.RuntimeTurnState) provider.ItemStatus {

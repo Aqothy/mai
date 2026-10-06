@@ -27,6 +27,7 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadApprovalResolved = "thread.approval-resolved"
     case threadConfigOptionsUpdated = "thread.config-options-updated"
     case threadSlashCommandsUpdated = "thread.slash-commands-updated"
+    case threadSkillsUpdated = "thread.skills-updated"
     case threadTokenUsageUpdated = "thread.token-usage-updated"
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
 }
@@ -123,6 +124,10 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case toolCall = "tool_call"
     case warning = "warning"
     case error = "error"
+    case webSearch = "web_search"
+    case imageView = "image_view"
+    case imageGeneration = "image_generation"
+    case contextCompaction = "context_compaction"
 }
 
 /// Lifecycle status of a timeline item.
@@ -134,20 +139,10 @@ public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case declined = "declined"
 }
 
-/// Provider-neutral semantic action performed by a tool call.
+/// Action a provider explicitly stated for a tool call; absent when it stated none.
 public enum MaidToolAction: String, Codable, Sendable, CaseIterable {
     case read = "read"
-    case edit = "edit"
-    case delete = "delete"
-    case move = "move"
     case search = "search"
-    case execute = "execute"
-    case think = "think"
-    case fetch = "fetch"
-    case switchMode = "switch_mode"
-    case delegate = "delegate"
-    case view = "view"
-    case other = "other"
 }
 
 /// Kind of a normalized file mutation produced by a tool.

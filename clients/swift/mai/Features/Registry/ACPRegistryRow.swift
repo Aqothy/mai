@@ -49,9 +49,10 @@ private struct ACPRegistryIcon: View {
     var body: some View {
         Group {
             if let iconURL {
-                ACPRegistryIconContent(iconURL: iconURL)
+                ACPRegistrySVGIcon(iconURL: iconURL)
             } else {
-                fallbackGlyph
+                Image(systemName: "puzzlepiece.extension")
+                    .imageScale(.large)
             }
         }
         .frame(width: 28, height: 28)
@@ -60,45 +61,68 @@ private struct ACPRegistryIcon: View {
     }
 }
 
-private var fallbackGlyph: some View {
-    Image(systemName: "puzzlepiece.extension")
-        .imageScale(.large)
-}
+#if os(macOS)
+    private struct ACPRegistrySVGIcon: NSViewRepresentable {
+        let iconURL: URL
 
-private struct ACPRegistryIconContent: View {
-    let iconURL: URL
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
 
-    var body: some View {
-        ACPRegistrySVGIcon(iconURL: iconURL)
+        func makeNSView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            // AppKit WKWebView has no isOpaque/backgroundColor surface;
+            // this documented key is the supported transparency switch.
+            webView.setValue(false, forKey: "drawsBackground")
+            return webView
+        }
+
+        func updateNSView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
     }
-}
+#else
+    private struct ACPRegistrySVGIcon: UIViewRepresentable {
+        let iconURL: URL
 
-private struct ACPRegistrySVGIcon: UIViewRepresentable {
-    let iconURL: URL
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+        func makeUIView(context: Context) -> WKWebView {
+            let webView = WKWebView(
+                frame: .zero,
+                configuration: Self.configuration()
+            )
+            webView.isOpaque = false
+            webView.backgroundColor = .clear
+            webView.scrollView.backgroundColor = .clear
+            webView.scrollView.isScrollEnabled = false
+            webView.isUserInteractionEnabled = false
+            return webView
+        }
+
+        func updateUIView(_ webView: WKWebView, context: Context) {
+            context.coordinator.load(iconURL, in: webView)
+        }
     }
+#endif
 
-    func makeUIView(context: Context) -> WKWebView {
+extension ACPRegistrySVGIcon {
+    fileprivate static func configuration() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.isUserInteractionEnabled = false
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.load(iconURL, in: webView)
+        return configuration
     }
 
     @MainActor
     final class Coordinator {
+        // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+        nonisolated deinit {}
+
         private var currentURL: URL?
         private var loadTask: Task<Void, Never>?
 

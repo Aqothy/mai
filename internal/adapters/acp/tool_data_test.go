@@ -22,25 +22,6 @@ func decodeSessionUpdate(t *testing.T, raw string) schema.SessionUpdate {
 	return update
 }
 
-func TestToolCallPatchNormalizesRawInputAndRawOutput(t *testing.T) {
-	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
-		"sessionUpdate":"tool_call_update",
-		"toolCallId":"tool-1",
-		"rawInput":{"command":"go test ./..."},
-		"rawOutput":{"stdout":"ok  \tmaiD\t0.3s"}
-	}`))
-	if patch == nil || patch.rawInput == nil {
-		t.Fatal("adapter-private rawInput missing; command normalization needs it")
-	}
-	call := patch.toolCall()
-	if call == nil || call.Command != "go test ./..." {
-		t.Fatalf("tool call = %#v, want normalized command", call)
-	}
-	if call.Output != "ok  \tmaiD\t0.3s" {
-		t.Fatalf("output = %q, want rawOutput stdout backfilled", call.Output)
-	}
-}
-
 // Textual content blocks are the canonical output; rawOutput only backfills
 // when the agent sent none (e.g. command output without terminal support).
 func TestToolCallOutputPrefersContentOverRawOutput(t *testing.T) {
@@ -73,11 +54,6 @@ func TestRawOutputTextRecognizesCommonShapes(t *testing.T) {
 			raw:  map[string]any{"stdout": "  indented\n", "stderr": "warning\n"},
 			want: "  indented\nwarning\n",
 		},
-		{
-			name: "adds separator only when needed",
-			raw:  map[string]any{"stdout": "output", "stderr": "warning"},
-			want: "output\nwarning",
-		},
 		{name: "stderr only", raw: map[string]any{"stderr": "boom"}, want: "boom"},
 		{name: "text field", raw: map[string]any{"text": "t"}, want: "t"},
 		{name: "unrecognized", raw: map[string]any{"blob": 42}, want: ""},
@@ -90,20 +66,10 @@ func TestRawOutputTextRecognizesCommonShapes(t *testing.T) {
 	}
 }
 
-func TestBoundedOutputTextTruncatesOnRuneBoundary(t *testing.T) {
-	long := strings.Repeat("é", toolOutputCharacterLimit)
-	got := boundedOutputText(long)
-	if len(got) > toolOutputCharacterLimit {
-		t.Fatalf("retained %d bytes, want at most %d", len(got), toolOutputCharacterLimit)
-	}
-	if !utf8.ValidString(got) {
-		t.Fatal("truncation split a rune")
-	}
-}
-
-// Output is bounded no matter which source it came from.
-func TestToolCallOutputFromContentIsBounded(t *testing.T) {
-	oversized := strings.Repeat("x", toolOutputCharacterLimit+100)
+// Output is bounded no matter which source it came from, and truncation never
+// splits a rune.
+func TestToolCallOutputIsBoundedOnRuneBoundary(t *testing.T) {
+	oversized := strings.Repeat("é", toolOutputCharacterLimit)
 	patch := &toolCallPatch{
 		content: []schema.ToolCallContent{{
 			Type: schema.ToolCallContentTypeContent,
@@ -113,48 +79,54 @@ func TestToolCallOutputFromContentIsBounded(t *testing.T) {
 			},
 		}},
 	}
-	if call := patch.toolCall(); len(call.Output) != toolOutputCharacterLimit {
-		t.Fatalf("output length = %d, want bounded to %d", len(call.Output), toolOutputCharacterLimit)
+	output := patch.toolCall().Output
+	if len(output) > toolOutputCharacterLimit || len(output) < toolOutputCharacterLimit-1 {
+		t.Fatalf("output length = %d, want bounded to %d", len(output), toolOutputCharacterLimit)
+	}
+	if !utf8.ValidString(output) {
+		t.Fatal("truncation split a rune")
 	}
 }
 
-// Every item event must carry the COMPLETE neutral tool-call snapshot, so
-// sparse ACP tool_call_updates are accumulated adapter-side.
+// ACP tool_call_updates are sparse with per-field replacement semantics:
+// absent fields keep the accumulated value, while a present-but-empty
+// collection clears it. Every item event must still carry the COMPLETE
+// neutral snapshot.
 func TestToolCallPatchOverlayAccumulatesSparseUpdates(t *testing.T) {
 	start := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
 		"sessionUpdate":"tool_call",
 		"toolCallId":"tool-1",
 		"title":"run tests",
+		"kind":"edit",
 		"status":"pending",
+		"content":[{"type":"diff","path":"main.go","oldText":"old","newText":"new"}],
+		"locations":[{"path":"main.go"}],
 		"rawInput":{"command":"go test"}
 	}`))
+	if call := start.toolCall(); len(call.Changes) != 1 || len(call.Locations) != 1 {
+		t.Fatalf("start tool call = %#v, want one change and location", call)
+	}
 	update := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
 		"sessionUpdate":"tool_call_update",
 		"toolCallId":"tool-1",
 		"status":"completed",
-		"content":[]
+		"content":[],
+		"locations":[]
 	}`))
 
 	merged := start.overlay(update)
 	if merged.status == nil || *merged.status != schema.ToolCallStatusCompleted {
 		t.Fatalf("merged status = %#v, want update fields applied", merged.status)
 	}
-	if merged.content == nil || len(merged.content) != 0 {
-		t.Fatalf("merged content = %#v, want explicit empty replacement", merged.content)
-	}
 	if merged.title == nil || *merged.title != "run tests" {
 		t.Fatalf("merged title = %#v, want fields from earlier updates preserved", merged.title)
 	}
 	call := merged.toolCall()
-	if call == nil || call.Command != "go test" {
-		t.Fatalf("tool call = %#v, want rawInput from earlier updates preserved", call)
+	if call.ProviderKind != "edit" || call.Command != "go test" {
+		t.Fatalf("tool call = %#v, want kind and rawInput from earlier updates preserved", call)
 	}
-
-	if out := (*toolCallPatch)(nil).overlay(update); out != update {
-		t.Fatalf("overlay with no base = %#v, want the update itself", out)
-	}
-	if out := start.overlay(nil); out != start {
-		t.Fatalf("overlay with no patch = %#v, want the base kept", out)
+	if len(call.Changes) != 0 || len(call.Locations) != 0 {
+		t.Fatalf("tool call = %#v, want explicit empty content/locations to clear accumulated values", call)
 	}
 }
 
@@ -177,7 +149,7 @@ func TestToolCallPatchNormalizesDisplayFields(t *testing.T) {
 	if call == nil {
 		t.Fatal("tool call is nil")
 	}
-	if call.Action != provider.ToolActionExecute || call.ProviderKind != "execute" || call.Command != "go test ./..." || call.Cwd != "/repo" {
+	if call.ProviderKind != "execute" || call.Command != "go test ./..." || call.Cwd != "/repo" {
 		t.Fatalf("identity/input = %#v", call)
 	}
 	if len(call.Locations) != 1 || call.Locations[0].Path != "main.go" || call.Locations[0].Line == nil || *call.Locations[0].Line != 12 {
@@ -202,33 +174,24 @@ func TestToolCallPatchNormalizesQuery(t *testing.T) {
 		"rawInput":{"query":"needle"}
 	}`))
 	call := patch.toolCall()
-	if call == nil || call.Action != provider.ToolActionSearch || call.Query != "needle" {
+	if call == nil || call.Query != "needle" {
 		t.Fatalf("tool call = %#v", call)
 	}
 }
 
-func TestToolCallPatchPreservesExplicitEmptyCollections(t *testing.T) {
-	patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{
-		"sessionUpdate":"tool_call_update",
-		"toolCallId":"tool-1",
-		"content":[],
-		"locations":[]
-	}`))
-	call := patch.toolCall()
-	if call == nil {
-		t.Fatal("tool call is nil")
-	}
-	if call.Action != provider.ToolActionOther {
-		t.Fatalf("action = %q, want %q", call.Action, provider.ToolActionOther)
-	}
-	if call.Attachments == nil || len(call.Attachments) != 0 {
-		t.Fatalf("attachments = %#v, want explicit empty", call.Attachments)
-	}
-	if call.Changes == nil || len(call.Changes) != 0 {
-		t.Fatalf("changes = %#v, want explicit empty", call.Changes)
-	}
-	if call.Locations == nil || len(call.Locations) != 0 {
-		t.Fatalf("locations = %#v, want explicit empty", call.Locations)
+// Only ACP's read and search tool kinds state an action; every other kind,
+// including ones this adapter does not know, leaves it empty.
+func TestToolCallPatchActionFromKind(t *testing.T) {
+	for kind, want := range map[string]provider.ToolAction{
+		"read":        provider.ToolActionRead,
+		"search":      provider.ToolActionSearch,
+		"execute":     "",
+		"future_kind": "",
+	} {
+		patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"tool-1","kind":"`+kind+`"}`))
+		if got := patch.toolCall().Action; got != want {
+			t.Errorf("kind %q action = %q, want %q", kind, got, want)
+		}
 	}
 }
 

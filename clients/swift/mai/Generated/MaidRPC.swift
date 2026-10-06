@@ -19,6 +19,7 @@ nonisolated public enum MaidRPCMethod {
     public static let providerImportSession = "provider.importSession"
     public static let providerDeleteSession = "provider.deleteSession"
     public static let providerCloseSession = "provider.closeSession"
+    public static let providerForkThread = "provider.forkThread"
     public static let providerOptionsGet = "provider.options.get"
     public static let providerOptionsSet = "provider.options.set"
     public static let terminalCreate = "terminal.create"

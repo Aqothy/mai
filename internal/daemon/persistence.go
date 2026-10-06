@@ -58,13 +58,14 @@ func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadS
 	for _, meta := range metas {
 		threadIndexes[meta.ThreadID] = len(restored)
 		restored = append(restored, orchestration.RestoredThread{
-			ThreadID:           orchestration.ThreadID(meta.ThreadID),
-			Title:              meta.Title,
-			Cwd:                meta.Cwd,
-			ProviderInstanceID: meta.ProviderInstanceID,
-			ModelSelection:     meta.ModelSelection,
-			CreatedAt:          meta.CreatedAt,
-			UpdatedAt:          meta.UpdatedAt,
+			ThreadID:              orchestration.ThreadID(meta.ThreadID),
+			Title:                 meta.Title,
+			Cwd:                   meta.Cwd,
+			AdditionalDirectories: append([]string(nil), meta.AdditionalDirectories...),
+			ProviderInstanceID:    meta.ProviderInstanceID,
+			ModelSelection:        meta.ModelSelection,
+			CreatedAt:             meta.CreatedAt,
+			UpdatedAt:             meta.UpdatedAt,
 		})
 	}
 
@@ -75,8 +76,8 @@ func restorePersistedThreads(engine *orchestration.Engine, threads store.ThreadS
 		for threadID, route := range persistedRoutes {
 			index, ok := threadIndexes[threadID]
 			if ok {
-				if restored[index].ProviderInstanceID != route.InstanceID {
-					restored[index].ProviderInstanceID = route.InstanceID
+				restored[index].ProviderInstanceID = route.InstanceID
+				if route.StartInput.ModelSelection != nil {
 					restored[index].ModelSelection = route.StartInput.ModelSelection
 				}
 				continue
@@ -163,13 +164,14 @@ func (w *threadMetaWriter) flush() {
 			continue
 		}
 		meta := store.ThreadMeta{
-			ThreadID:           string(entry.ID),
-			Title:              entry.Title,
-			Cwd:                entry.Cwd,
-			ProviderInstanceID: entry.ProviderInstanceID,
-			ModelSelection:     entry.ModelSelection,
-			CreatedAt:          entry.CreatedAt,
-			UpdatedAt:          entry.UpdatedAt,
+			ThreadID:              string(entry.ID),
+			Title:                 entry.Title,
+			Cwd:                   entry.Cwd,
+			AdditionalDirectories: append([]string(nil), entry.AdditionalDirectories...),
+			ProviderInstanceID:    entry.ProviderInstanceID,
+			ModelSelection:        entry.ModelSelection,
+			CreatedAt:             entry.CreatedAt,
+			UpdatedAt:             entry.UpdatedAt,
 		}
 		if err := w.threads.UpsertThread(meta); err != nil {
 			w.logger.Warn("persist thread metadata; will retry on a later flush", "thread", threadID, "error", err)

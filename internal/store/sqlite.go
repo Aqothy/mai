@@ -15,21 +15,22 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// SQLite implements RouteStore and ThreadStore in one database file.
+// SQLite implements every metadata store interface in one database file.
 type SQLite struct {
 	db *sql.DB
 }
 
 var _ RouteStore = (*SQLite)(nil)
 var _ ThreadStore = (*SQLite)(nil)
-var _ ImportStore = (*SQLite)(nil)
 var _ TerminalStore = (*SQLite)(nil)
+var _ PromptStore = (*SQLite)(nil)
 
 const schema = `
 CREATE TABLE IF NOT EXISTS threads (
 	thread_id            TEXT PRIMARY KEY,
 	title                TEXT NOT NULL DEFAULT '',
 	cwd                  TEXT NOT NULL DEFAULT '',
+	additional_directories TEXT,
 	provider_instance_id TEXT NOT NULL DEFAULT '',
 	model_selection      TEXT,
 	created_at           TEXT NOT NULL,
@@ -69,6 +70,15 @@ CREATE TABLE IF NOT EXISTS terminal_threads (
 	created_at  TEXT NOT NULL,
 	updated_at  TEXT NOT NULL
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS prompt_presentations (
+	instance_id TEXT NOT NULL,
+	provider_session_id TEXT NOT NULL,
+	client_message_id TEXT NOT NULL,
+	input_hash TEXT NOT NULL,
+	presentation TEXT NOT NULL,
+	PRIMARY KEY (instance_id, provider_session_id, client_message_id)
+) STRICT;
 `
 
 // Open opens or creates the metadata database at path.
@@ -102,24 +112,21 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 	if meta.ThreadID == "" {
 		return fmt.Errorf("store: upsert thread requires a thread id")
 	}
-	var modelSelection any
-	if meta.ModelSelection != nil {
-		encoded, err := json.Marshal(meta.ModelSelection)
-		if err != nil {
-			return fmt.Errorf("store: encode thread %q model selection: %w", meta.ThreadID, err)
-		}
-		modelSelection = string(encoded)
+	additionalDirectories, modelSelection, err := encodeThreadJSONColumns(meta)
+	if err != nil {
+		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err = s.db.Exec(`INSERT INTO threads (thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (thread_id) DO UPDATE SET
 			title = excluded.title,
 			cwd = excluded.cwd,
+			additional_directories = excluded.additional_directories,
 			provider_instance_id = excluded.provider_instance_id,
 			model_selection = excluded.model_selection,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at`,
-		meta.ThreadID, meta.Title, meta.Cwd, string(meta.ProviderInstanceID), modelSelection,
+		meta.ThreadID, meta.Title, meta.Cwd, additionalDirectories, string(meta.ProviderInstanceID), modelSelection,
 		timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: upsert thread %q: %w", meta.ThreadID, err)
@@ -127,8 +134,27 @@ func (s *SQLite) UpsertThread(meta ThreadMeta) error {
 	return nil
 }
 
+// encodeThreadJSONColumns encodes the nullable JSON columns of a threads row.
+func encodeThreadJSONColumns(meta ThreadMeta) (additionalDirectories, modelSelection any, err error) {
+	if len(meta.AdditionalDirectories) > 0 {
+		encoded, err := json.Marshal(meta.AdditionalDirectories)
+		if err != nil {
+			return nil, nil, fmt.Errorf("store: encode thread %q additional directories: %w", meta.ThreadID, err)
+		}
+		additionalDirectories = string(encoded)
+	}
+	if meta.ModelSelection != nil {
+		encoded, err := json.Marshal(meta.ModelSelection)
+		if err != nil {
+			return nil, nil, fmt.Errorf("store: encode thread %q model selection: %w", meta.ThreadID, err)
+		}
+		modelSelection = string(encoded)
+	}
+	return additionalDirectories, modelSelection, nil
+}
+
 func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
-	rows, err := s.db.Query(`SELECT thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at
+	rows, err := s.db.Query(`SELECT thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at
 		FROM threads ORDER BY updated_at DESC, thread_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list threads: %w", err)
@@ -138,12 +164,18 @@ func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
 	for rows.Next() {
 		var meta ThreadMeta
 		var instanceID string
+		var additionalDirectories sql.NullString
 		var modelSelection sql.NullString
 		var createdAt, updatedAt string
-		if err := rows.Scan(&meta.ThreadID, &meta.Title, &meta.Cwd, &instanceID, &modelSelection, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&meta.ThreadID, &meta.Title, &meta.Cwd, &additionalDirectories, &instanceID, &modelSelection, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan thread: %w", err)
 		}
 		meta.ProviderInstanceID = provider.InstanceID(instanceID)
+		if additionalDirectories.Valid && additionalDirectories.String != "" {
+			if err := json.Unmarshal([]byte(additionalDirectories.String), &meta.AdditionalDirectories); err != nil {
+				return nil, fmt.Errorf("store: decode thread %q additional directories: %w", meta.ThreadID, err)
+			}
+		}
 		if modelSelection.Valid && modelSelection.String != "" {
 			selection := &provider.ModelSelection{}
 			if err := json.Unmarshal([]byte(modelSelection.String), selection); err != nil {
@@ -161,7 +193,10 @@ func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
 	return threads, nil
 }
 
-// ImportThread writes the sidebar row and provider route in one transaction.
+// ImportThread atomically persists one externally owned provider session as a
+// maiD thread: the sidebar row and provider route are written in one transaction.
+// If the provider session was already imported, it returns the existing thread
+// id and imported=false.
 // The transaction is immediate (configured in Open), and the database uses one
 // connection, so concurrent imports cannot create two maiD threads for the
 // same provider session.
@@ -176,13 +211,9 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		return "", false, fmt.Errorf("store: import thread %q has conflicting provider instance ids", meta.ThreadID)
 	}
 	meta.ProviderInstanceID = route.InstanceID
-	var modelSelection any
-	if meta.ModelSelection != nil {
-		encoded, err := json.Marshal(meta.ModelSelection)
-		if err != nil {
-			return "", false, fmt.Errorf("store: encode imported thread %q model selection: %w", meta.ThreadID, err)
-		}
-		modelSelection = string(encoded)
+	additionalDirectories, modelSelection, err := encodeThreadJSONColumns(meta)
+	if err != nil {
+		return "", false, err
 	}
 
 	tx, err := s.db.Begin()
@@ -206,16 +237,8 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		if currentErr != nil && !errors.Is(currentErr, sql.ErrNoRows) {
 			return "", false, fmt.Errorf("store: inspect imported thread %q route: %w", existing, currentErr)
 		}
-		route.StartInput.ThreadID = existing
-		startInput, err := json.Marshal(route.StartInput)
-		if err != nil {
-			return "", false, fmt.Errorf("store: encode imported thread %q start input: %w", existing, err)
-		}
 		if currentErr != nil {
-			if _, err := tx.Exec(`INSERT INTO thread_routes
-				(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
-				VALUES (?, ?, ?, ?, ?)`, existing, string(route.InstanceID), route.ProviderSessionID,
-				nullableText(string(route.ResumeCursor)), string(startInput)); err != nil {
+			if err := insertImportedRoute(tx, existing, route); err != nil {
 				return "", false, fmt.Errorf("store: restore imported route for thread %q: %w", existing, err)
 			}
 		}
@@ -236,9 +259,9 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 	switch {
 	case err == nil:
 		if _, err := tx.Exec(`INSERT INTO threads
-			(thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (thread_id) DO NOTHING`,
-			existing, meta.Title, meta.Cwd, string(meta.ProviderInstanceID), modelSelection,
+			(thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (thread_id) DO NOTHING`,
+			existing, meta.Title, meta.Cwd, additionalDirectories, string(meta.ProviderInstanceID), modelSelection,
 			timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt)); err != nil {
 			return "", false, fmt.Errorf("store: ensure imported thread %q metadata: %w", existing, err)
 		}
@@ -256,8 +279,8 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 	}
 
 	if _, err := tx.Exec(`INSERT INTO threads
-		(thread_id, title, cwd, provider_instance_id, model_selection, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, meta.ThreadID, meta.Title, meta.Cwd,
+		(thread_id, title, cwd, additional_directories, provider_instance_id, model_selection, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, meta.ThreadID, meta.Title, meta.Cwd, additionalDirectories,
 		string(meta.ProviderInstanceID), modelSelection, timestamp(meta.CreatedAt), timestamp(meta.UpdatedAt)); err != nil {
 		return "", false, fmt.Errorf("store: insert imported thread %q: %w", meta.ThreadID, err)
 	}
@@ -266,21 +289,28 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		string(route.InstanceID), route.ProviderSessionID, meta.ThreadID); err != nil {
 		return "", false, fmt.Errorf("store: record imported provider session for thread %q: %w", meta.ThreadID, err)
 	}
-	route.StartInput.ThreadID = meta.ThreadID
-	startInput, err := json.Marshal(route.StartInput)
-	if err != nil {
-		return "", false, fmt.Errorf("store: encode imported thread %q start input: %w", meta.ThreadID, err)
-	}
-	if _, err := tx.Exec(`INSERT INTO thread_routes
-		(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
-		VALUES (?, ?, ?, ?, ?)`, meta.ThreadID, string(route.InstanceID), route.ProviderSessionID,
-		nullableText(string(route.ResumeCursor)), string(startInput)); err != nil {
+	if err := insertImportedRoute(tx, meta.ThreadID, route); err != nil {
 		return "", false, fmt.Errorf("store: insert imported route for thread %q: %w", meta.ThreadID, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, fmt.Errorf("store: commit imported thread %q: %w", meta.ThreadID, err)
 	}
 	return meta.ThreadID, true, nil
+}
+
+// insertImportedRoute writes the route of an imported thread, addressing its
+// start input to that thread.
+func insertImportedRoute(tx *sql.Tx, threadID string, route RouteRecord) error {
+	route.StartInput.ThreadID = threadID
+	startInput, err := json.Marshal(route.StartInput)
+	if err != nil {
+		return fmt.Errorf("encode start input: %w", err)
+	}
+	_, err = tx.Exec(`INSERT INTO thread_routes
+		(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
+		VALUES (?, ?, ?, ?, ?)`, threadID, string(route.InstanceID), route.ProviderSessionID,
+		nullableText(string(route.ResumeCursor)), string(startInput))
+	return err
 }
 
 func (s *SQLite) SaveRoute(threadID string, record RouteRecord) error {

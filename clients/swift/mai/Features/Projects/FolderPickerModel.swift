@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class FolderPickerModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private struct DirectorySnapshot {
         let path: String
         let parentPath: String?

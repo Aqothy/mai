@@ -10,20 +10,14 @@ import (
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
 
-// searchWorkspaceFiles serves the composer `@file` picker. All validation
-// happens before the workspace-search service is touched, so an invalid
-// request can never create an index. Query text is never logged.
+// searchWorkspaceFiles serves the composer `@file` picker. The search service
+// validates the root and query before creating any index. Query text is never
+// logged.
 func (s *Server) searchWorkspaceFiles(ctx context.Context, params wire.WorkspaceSearchFilesParams) (wire.WorkspaceSearchFilesResult, error) {
-	if s.workspaceSearch == nil {
-		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("workspace search is unavailable")
-	}
 	hasThread := params.ThreadID != ""
 	hasCwd := params.Cwd != ""
 	if hasThread == hasCwd {
 		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: workspace.searchFiles requires exactly one of threadId or cwd", jsonrpc2.ErrInvalidParams)
-	}
-	if len(params.Query) > workspacesearch.MaxQueryBytes {
-		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: query exceeds %d bytes", jsonrpc2.ErrInvalidParams, workspacesearch.MaxQueryBytes)
 	}
 
 	root := params.Cwd

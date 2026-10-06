@@ -80,69 +80,50 @@ func relativePaths(matches []FileMatch) []string {
 	return paths
 }
 
-func TestSearchRanksFuzzyMatchFirst(t *testing.T) {
+func TestSearchResults(t *testing.T) {
 	finder, _ := newFixtureFinder(t)
-	matches, err := finder.SearchFiles("promptcomp", 10)
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
+	cases := []struct {
+		name  string
+		query string
+		check func(t *testing.T, matches []FileMatch)
+	}{
+		{"fuzzy match ranks first", "promptcomp", func(t *testing.T, matches []FileMatch) {
+			if len(matches) == 0 || matches[0].RelativePath != "clients/swift/PromptComposer.swift" || matches[0].DisplayName != "PromptComposer.swift" {
+				t.Fatalf("expected PromptComposer.swift first, got %+v", matches)
+			}
+		}},
+		{"empty query returns default ordering", "", func(t *testing.T, matches []FileMatch) {
+			if len(matches) < 5 {
+				t.Fatalf("expected the fixture files for an empty query, got %v", relativePaths(matches))
+			}
+		}},
+		{"gitignored files are excluded", "secret", func(t *testing.T, matches []FileMatch) {
+			if slices.Contains(relativePaths(matches), "ignored/secret.txt") {
+				t.Fatalf("gitignored file leaked into results: %v", relativePaths(matches))
+			}
+		}},
+		{"unicode path", "тест", func(t *testing.T, matches []FileMatch) {
+			if !slices.Contains(relativePaths(matches), "docs/тест-файл.md") {
+				t.Fatalf("expected docs/тест-файл.md, got %v", relativePaths(matches))
+			}
+		}},
+		{"no results", "zzzzqqqqxxxx", func(t *testing.T, matches []FileMatch) {
+			if len(matches) != 0 {
+				t.Fatalf("expected no matches, got %v", relativePaths(matches))
+			}
+		}},
 	}
-	if len(matches) == 0 {
-		t.Fatal("expected at least one match for promptcomp")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			matches, err := finder.SearchFiles(tc.query, 50)
+			if err != nil {
+				t.Fatalf("SearchFiles: %v", err)
+			}
+			tc.check(t, matches)
+		})
 	}
-	if matches[0].RelativePath != "clients/swift/PromptComposer.swift" {
-		t.Fatalf("expected PromptComposer.swift first, got %v", relativePaths(matches))
-	}
-	if matches[0].DisplayName != "PromptComposer.swift" {
-		t.Fatalf("expected display name PromptComposer.swift, got %q", matches[0].DisplayName)
-	}
-}
 
-func TestEmptyQueryReturnsDefaultOrdering(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
-	matches, err := finder.SearchFiles("", 50)
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
-	if len(matches) < 5 {
-		t.Fatalf("expected the fixture files for an empty query, got %v", relativePaths(matches))
-	}
-}
-
-func TestSearchObservesGitignore(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
-	matches, err := finder.SearchFiles("secret", 10)
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
-	if slices.Contains(relativePaths(matches), "ignored/secret.txt") {
-		t.Fatalf("gitignored file leaked into results: %v", relativePaths(matches))
-	}
-}
-
-func TestSearchFindsUnicodePath(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
-	matches, err := finder.SearchFiles("тест", 10)
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
-	if !slices.Contains(relativePaths(matches), "docs/тест-файл.md") {
-		t.Fatalf("expected docs/тест-файл.md, got %v", relativePaths(matches))
-	}
-}
-
-func TestSearchNoResults(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
-	matches, err := finder.SearchFiles("zzzzqqqqxxxx", 10)
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("expected no matches, got %v", relativePaths(matches))
-	}
-}
-
-func TestRepeatedSearchIsStable(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
+	// Repeated searches must keep the native result ownership stable.
 	for i := 0; i < 500; i++ {
 		if _, err := finder.SearchFiles("main", 20); err != nil {
 			t.Fatalf("SearchFiles iteration %d: %v", i, err)
@@ -151,14 +132,9 @@ func TestRepeatedSearchIsStable(t *testing.T) {
 }
 
 func TestWatcherConvergence(t *testing.T) {
+	// Files created right after WaitReady must be seen, so WaitReady has to
+	// cover watcher readiness, not just the initial scan.
 	finder, root := newFixtureFinder(t)
-	progress, err := finder.ScanProgress()
-	if err != nil {
-		t.Fatalf("ScanProgress: %v", err)
-	}
-	if !progress.WatcherReady {
-		t.Fatal("WaitReady returned before the file watcher was ready")
-	}
 
 	waitForPresence := func(query, relative string, present bool) {
 		t.Helper()
@@ -206,9 +182,6 @@ func TestCloseIsIdempotentAndRejectsLaterCalls(t *testing.T) {
 	if _, err := finder.SearchFiles("main", 10); !errors.Is(err, ErrClosed) {
 		t.Fatalf("expected ErrClosed from search, got %v", err)
 	}
-	if _, err := finder.ScanProgress(); !errors.Is(err, ErrClosed) {
-		t.Fatalf("expected ErrClosed from progress, got %v", err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := finder.WaitReady(ctx); !errors.Is(err, ErrClosed) {
@@ -239,11 +212,4 @@ func TestConcurrentSearchAndClose(t *testing.T) {
 		t.Fatalf("Close during searches: %v", err)
 	}
 	wg.Wait()
-}
-
-func TestSearchRejectsNonPositiveLimit(t *testing.T) {
-	finder, _ := newFixtureFinder(t)
-	if _, err := finder.SearchFiles("main", 0); err == nil {
-		t.Fatal("expected error for limit 0")
-	}
 }

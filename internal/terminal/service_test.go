@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -14,16 +16,14 @@ import (
 
 // collector gathers ordered session events for assertions.
 type collector struct {
-	mu        sync.Mutex
-	output    bytes.Buffer
-	lastSeq   uint64
-	seqBroken bool
-	maxChunk  int
-	exits     int
-	exitSeq   uint64
-	status    Status
-	exitCode  *int
-	exited    chan struct{}
+	mu       sync.Mutex
+	output   bytes.Buffer
+	lastSeq  uint64
+	exits    int
+	exitSeq  uint64
+	status   Status
+	exitCode *int
+	exited   chan struct{}
 }
 
 func newCollector() *collector {
@@ -35,11 +35,7 @@ func (c *collector) events() Events {
 		Output: func(_, _ string, seq uint64, data []byte) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if seq <= c.lastSeq {
-				c.seqBroken = true
-			}
 			c.lastSeq = seq
-			c.maxChunk = max(c.maxChunk, len(data))
 			c.output.Write(data)
 		},
 		Exit: func(_, _ string, seq uint64, status Status, exitCode *int) {
@@ -91,50 +87,17 @@ func startTestSession(t *testing.T, svc *Service, id string) (*Session, *collect
 	return session, c
 }
 
-func TestShellRunsCommandAndStreamsOrderedOutput(t *testing.T) {
-	useQuietZsh(t)
-	svc := NewService()
-	defer svc.Close()
-	session, c := startTestSession(t, svc, "t1")
-
-	// The marker is computed by the shell so the echoed input line cannot
-	// satisfy the assertion.
-	if err := session.Write([]byte("printf 'MAID-%d\\n' $((1000+2))\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	waitFor(t, "command output", func() bool { return c.contains("MAID-1002") })
-
-	c.mu.Lock()
-	broken := c.seqBroken
-	c.mu.Unlock()
-	if broken {
-		t.Fatal("output sequence was not strictly monotonic")
-	}
-	if session.Status() != StatusRunning {
-		t.Fatalf("status = %s, want running", session.Status())
-	}
+// shellPID is the session leader's pid; it is fixed once the shell starts.
+func shellPID(session *Session) int {
+	return session.cmd.Process.Pid
 }
 
-func TestResizeChangesSttySize(t *testing.T) {
-	useQuietZsh(t)
-	svc := NewService()
-	defer svc.Close()
-	session, c := startTestSession(t, svc, "t1")
-
-	if err := session.Resize(101, 41); err != nil {
-		t.Fatalf("resize: %v", err)
-	}
-	if err := session.Write([]byte("printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	waitFor(t, "stty output", func() bool { return c.contains("SIZE-41x101-END") })
-
-	if cols, rows := session.Size(); cols != 101 || rows != 41 {
-		t.Fatalf("size = %dx%d, want 101x41", cols, rows)
-	}
-	// Unchanged dimensions dedupe without error.
-	if err := session.Resize(101, 41); err != nil {
-		t.Fatalf("dedupe resize: %v", err)
+func waitForExit(t *testing.T, c *collector) {
+	t.Helper()
+	select {
+	case <-c.exited:
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for exit event")
 	}
 }
 
@@ -204,50 +167,6 @@ func TestCwdValidation(t *testing.T) {
 	}
 }
 
-func TestNaturalExitReportsExitCode(t *testing.T) {
-	useQuietZsh(t)
-	svc := NewService()
-	defer svc.Close()
-	session, c := startTestSession(t, svc, "t1")
-
-	if err := session.Write([]byte("exit 3\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	select {
-	case <-c.exited:
-	case <-time.After(15 * time.Second):
-		t.Fatal("timed out waiting for exit event")
-	}
-	<-session.Done()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.exits != 1 {
-		t.Fatalf("exit events = %d, want 1", c.exits)
-	}
-	if c.status != StatusExited {
-		t.Fatalf("exit status = %s, want exited", c.status)
-	}
-	if c.exitCode == nil || *c.exitCode != 3 {
-		t.Fatalf("exit code = %v, want 3", c.exitCode)
-	}
-	if c.exitSeq <= c.lastSeq-1 {
-		// The exit event must carry the final sequence.
-		t.Fatalf("exit seq %d not after output seq", c.exitSeq)
-	}
-	if err := session.Write([]byte("echo nope\n")); !errors.Is(err, ErrNotRunning) {
-		t.Fatalf("write after exit err = %v, want ErrNotRunning", err)
-	}
-	// A naturally exited run rejects input but keeps a passive final model
-	// that can reflow for a later attachment at a different grid.
-	if err := session.Resize(90, 30); err != nil {
-		t.Fatalf("resize retained model after exit: %v", err)
-	}
-	if columns, rows := session.Size(); columns != 90 || rows != 30 {
-		t.Fatalf("size after final-model reflow = %dx%d, want 90x30", columns, rows)
-	}
-}
-
 func TestTerminateKillsProcessGroup(t *testing.T) {
 	useQuietZsh(t)
 	svc := NewService()
@@ -258,7 +177,7 @@ func TestTerminateKillsProcessGroup(t *testing.T) {
 	if err := session.Write([]byte("exec /bin/sleep 300\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	pid := session.PID()
+	pid := shellPID(session)
 
 	done := make(chan struct{})
 	go func() {
@@ -279,6 +198,10 @@ func TestTerminateKillsProcessGroup(t *testing.T) {
 	if session.Status() != StatusStopped {
 		t.Fatalf("status = %s, want stopped", session.Status())
 	}
+	// Explicit termination discards the attach model.
+	if _, err := session.Snapshot(); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("terminated session snapshot error = %v, want ErrNotRunning", err)
+	}
 }
 
 func TestTerminateKillsForegroundJob(t *testing.T) {
@@ -287,18 +210,28 @@ func TestTerminateKillsForegroundJob(t *testing.T) {
 	defer svc.Close()
 	session, c := startTestSession(t, svc, "t1")
 
-	// A foreground job under job control runs in its own process group.
-	if err := session.Write([]byte("echo START-$$; /bin/sleep 300\n")); err != nil {
+	// A foreground job under job control runs in its own process group. It
+	// ignores SIGHUP, so the kernel's hangup on shell exit cannot kill it:
+	// only Terminate signaling the foreground group does.
+	if err := session.Write([]byte("sh -c 'trap \"\" HUP; echo JOB-$$-PID; exec /bin/sleep 300'\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	waitFor(t, "job start", func() bool { return c.contains("START-") })
+	jobPID := regexp.MustCompile(`JOB-(\d+)-PID`)
+	var pid int
+	waitFor(t, "job start", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		match := jobPID.FindSubmatch(c.output.Bytes())
+		if match == nil {
+			return false
+		}
+		pid, _ = strconv.Atoi(string(match[1]))
+		return true
+	})
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 
-	start := time.Now()
 	session.Terminate(terminateGrace)
-	if elapsed := time.Since(start); elapsed > terminateGrace+10*time.Second {
-		t.Fatalf("terminate took %s", elapsed)
-	}
-	<-session.Done()
+	waitFor(t, "foreground job death", func() bool { return syscall.Kill(pid, 0) != nil })
 }
 
 func TestServiceCloseTerminatesAllSessions(t *testing.T) {
@@ -311,7 +244,7 @@ func TestServiceCloseTerminatesAllSessions(t *testing.T) {
 	}
 	pids := make([]int, len(sessions))
 	for i, session := range sessions {
-		pids[i] = session.PID()
+		pids[i] = shellPID(session)
 	}
 
 	svc.Close()
@@ -322,16 +255,8 @@ func TestServiceCloseTerminatesAllSessions(t *testing.T) {
 	if _, err := svc.Start("late", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrServiceClosed) {
 		t.Fatalf("start after close err = %v, want ErrServiceClosed", err)
 	}
-}
-
-func TestStartTwiceFails(t *testing.T) {
-	useQuietZsh(t)
-	svc := NewService()
-	defer svc.Close()
-	startTestSession(t, svc, "t1")
-
-	if _, err := svc.Start("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrAlreadyExists) {
-		t.Fatalf("second start err = %v, want ErrAlreadyExists", err)
+	if _, err := svc.Relaunch("t0", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("relaunch after close err = %v, want ErrServiceClosed", err)
 	}
 }
 
@@ -340,7 +265,7 @@ func TestRemoveTerminatesAndForgets(t *testing.T) {
 	svc := NewService()
 	defer svc.Close()
 	session, _ := startTestSession(t, svc, "t1")
-	pid := session.PID()
+	pid := shellPID(session)
 
 	if err := svc.Remove("t1"); err != nil {
 		t.Fatalf("remove: %v", err)

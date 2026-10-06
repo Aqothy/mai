@@ -13,8 +13,15 @@ protocol ThreadRPCClient: RPCTransportClient {
     func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws
+        -> ProviderImportSessionResult
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws
+    func closeProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
     func browseWorkspaceDirectories(
@@ -22,60 +29,6 @@ protocol ThreadRPCClient: RPCTransportClient {
     ) async throws -> WorkspaceBrowseDirectoriesResult
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
-}
-
-extension ThreadRPCClient {
-    func listProviders() async throws -> [InstanceInfo] { [] }
-    func listRegistryAgents() async throws -> [ACPRegistryAgent] { [] }
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
-
-    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
-        throw RPCError(code: nil, message: "Agent installation is unavailable", data: nil)
-    }
-
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
-        throw RPCError(code: nil, message: "Adding custom agents is unavailable", data: nil)
-    }
-
-    func startProvider(_ instanceID: String) async throws -> InstanceInfo {
-        throw RPCError(code: nil, message: "Provider startup is unavailable", data: nil)
-    }
-
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
-        throw RPCError(code: nil, message: "Agent startup is unavailable", data: nil)
-    }
-
-    func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
-
-    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
-        throw RPCError(code: nil, message: "Session import is unavailable", data: nil)
-    }
-
-    func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
-        throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
-    }
-
-    func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
-        throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
-    }
-
-    func browseWorkspaceDirectories(
-        _ input: WorkspaceBrowseDirectoriesParams
-    ) async throws -> WorkspaceBrowseDirectoriesResult {
-        throw RPCError(code: nil, message: "Workspace folder browsing is unavailable", data: nil)
-    }
-
-    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
-        throw RPCError(code: nil, message: "Workspace file search is unavailable", data: nil)
-    }
-
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult {
-        throw RPCError(code: nil, message: "Command dispatch is unavailable", data: nil)
-    }
-
-    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
-        throw RPCError(code: nil, message: "Item details are unavailable", data: nil)
-    }
 }
 
 extension RPCClient: ThreadRPCClient {
@@ -150,12 +103,36 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    {
+        try await call(MaidRPCMethod.providerAuthenticate, params: input)
+    }
+
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo {
+        try await call(MaidRPCMethod.providerLogout, params: input)
+    }
+
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] {
         try await call(MaidRPCMethod.providerListSessions, params: input)
     }
 
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
         try await call(MaidRPCMethod.providerImportSession, params: input)
+    }
+
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws
+        -> ProviderImportSessionResult
+    {
+        try await call(MaidRPCMethod.providerForkThread, params: input)
+    }
+
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws {
+        try await callVoid(MaidRPCMethod.providerDeleteSession, params: input)
+    }
+
+    func closeProviderSession(_ input: ProviderSessionParams) async throws {
+        try await callVoid(MaidRPCMethod.providerCloseSession, params: input)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {

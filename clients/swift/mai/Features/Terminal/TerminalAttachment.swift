@@ -13,6 +13,9 @@ import Foundation
 /// straight to the controller and never enter observation.
 @Observable
 final class TerminalAttachment {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// How the attachment obtains its run.
     enum Mode: Equatable {
         /// Create a new terminal in the given working directory.
@@ -55,7 +58,6 @@ final class TerminalAttachment {
     @ObservationIgnored private var mode: Mode
     @ObservationIgnored private weak var store: TerminalStore?
     @ObservationIgnored private let backend: TerminalAttachmentBackend
-    @ObservationIgnored private let snapshotRestorer: TerminalStore.SnapshotRestorer
 
     @ObservationIgnored private var lastAppliedSequence = 0
     @ObservationIgnored private var awaitingSnapshot = true
@@ -70,13 +72,11 @@ final class TerminalAttachment {
     init(
         store: TerminalStore,
         origin: TerminalOpenRequest,
-        mode: Mode,
-        snapshotRestorer: @escaping TerminalStore.SnapshotRestorer
+        mode: Mode
     ) {
         self.store = store
         self.origin = origin
         self.mode = mode
-        self.snapshotRestorer = snapshotRestorer
         let backend = TerminalAttachmentBackend()
         self.backend = backend
         controller = TerminalSessionController(
@@ -144,18 +144,6 @@ final class TerminalAttachment {
         // Without an identity the original create never completed; retry it
         // unchanged on the fresh connection.
         prepareForNewRunRequest()
-    }
-
-    /// Starts a fresh shell for this terminal after exit/stop/failure.
-    func relaunch() {
-        guard !isClosed, let terminalID else { return }
-        switch phase {
-        case .exited, .stopped, .failed:
-            mode = .relaunch(terminalID: terminalID)
-            prepareForNewRunRequest()
-        case .attaching, .running, .disconnected:
-            return
-        }
     }
 
     /// Best-effort detach; the shell keeps running on the daemon.
@@ -305,7 +293,7 @@ final class TerminalAttachment {
         }
 
         do {
-            try await snapshotRestorer(controller, data)
+            try await controller.restore(snapshot: data)
         } catch {
             guard !isClosed else { return }
             // A layout change can race the native install after the earlier
@@ -405,8 +393,12 @@ final class TerminalAttachment {
             phase = .exited(item.exitCode)
             controller.processDidEnd(exitCode: item.exitCode)
         case .stopped:
+            // An intentional stop is not a process exit Ghostty can explain:
+            // its generic exit report treats a zero runtime as a launch
+            // failure. Match the restored-snapshot path and let the app's
+            // stopped overlay present the state.
             phase = .stopped
-            controller.processDidEnd(exitCode: item.exitCode)
+            controller.setInputEnabled(false)
         case .error:
             phase = .failed(item.message ?? String(localized: "The terminal failed"))
             controller.setInputEnabled(false)
@@ -429,13 +421,6 @@ final class TerminalAttachment {
     // MARK: - Resize
 
     private func scheduleResize() {
-        guard !isClosed, phase == .running, runID != nil,
-            pendingGrid != lastSentGrid
-        else { return }
-        sendPendingResize()
-    }
-
-    private func sendPendingResize() {
         guard !isClosed, phase == .running,
             let terminalID, let runID,
             let grid = pendingGrid, grid != lastSentGrid

@@ -24,18 +24,14 @@ func observeServerEvents(t *testing.T, server *Server) *serverEventRecorder {
 	return recorder
 }
 
-func (r *serverEventRecorder) matching(threadID orchestration.ThreadID, minimumSequence uint64) []orchestration.Event {
+func (r *serverEventRecorder) matching(threadID orchestration.ThreadID) []orchestration.Event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	events := make([]orchestration.Event, 0, len(r.events))
 	for _, event := range r.events {
-		if event.Sequence <= minimumSequence {
-			continue
+		if threadID == "" || event.ThreadID() == threadID {
+			events = append(events, event)
 		}
-		if threadID != "" && event.ThreadID() != threadID {
-			continue
-		}
-		events = append(events, event)
 	}
 	return events
 }

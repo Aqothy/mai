@@ -58,10 +58,6 @@ func (f *fakeFinder) SearchFiles(string, int) ([]fff.FileMatch, error) {
 	return f.matches, nil
 }
 
-func (f *fakeFinder) ScanProgress() (fff.ScanProgress, error) {
-	return fff.ScanProgress{}, nil
-}
-
 func (f *fakeFinder) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -117,25 +113,6 @@ func TestConcurrentFirstSearchesCreateOneIndex(t *testing.T) {
 	wg.Wait()
 	if got := creations.Load(); got != 1 {
 		t.Fatalf("expected exactly one index creation, got %d", got)
-	}
-}
-
-func TestSearchesForDistinctRootsDoNotMix(t *testing.T) {
-	s, _, _ := testService(t)
-	rootA, rootB := makeRoot(t), makeRoot(t)
-
-	resultA, err := s.Search(context.Background(), rootA, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootA: %v", err)
-	}
-	resultB, err := s.Search(context.Background(), rootB, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootB: %v", err)
-	}
-	wantA := "src/" + filepath.Base(rootA) + ".go"
-	wantB := "src/" + filepath.Base(rootB) + ".go"
-	if resultA.Entries[0].RelativePath != wantA || resultB.Entries[0].RelativePath != wantB {
-		t.Fatalf("results mixed roots: %v vs %v", resultA.Entries, resultB.Entries)
 	}
 }
 

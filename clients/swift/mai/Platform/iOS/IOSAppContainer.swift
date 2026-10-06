@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSAppContainer: View {
@@ -52,19 +53,12 @@ struct IOSAppContainer: View {
                         route: route,
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
-                    )
-                }
-            }
-            .toolbar {
-                if ChatPerformanceLab.isEnabled {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            MockChatView()
-                        } label: {
-                            Label("Mock Chat", systemImage: "ladybug")
+                        projectFolders: projectFolders,
+                        openThread: { threadID in
+                            store.selectThread(threadID)
+                            path.append(.thread(threadID))
                         }
-                    }
+                    )
                 }
             }
         }
@@ -77,6 +71,17 @@ struct IOSAppContainer: View {
             }
             terminalStore.closeActiveTerminal()
         }
+        #if DEBUG
+            .modifier(
+                ChatBenchmarkHarness(
+                    store: store,
+                    selectThread: { threadID in
+                        store.selectThread(threadID)
+                        path = [.thread(threadID)]
+                    }
+                )
+            )
+        #endif
     }
 }
 
@@ -89,4 +94,6 @@ struct IOSAppContainer: View {
             terminalStore: TerminalStore()
         )
     }
+#endif
+
 #endif

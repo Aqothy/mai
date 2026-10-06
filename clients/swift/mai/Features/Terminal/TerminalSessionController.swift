@@ -10,6 +10,9 @@ import GhosttyTerminal
 /// touches observation or SwiftUI `body`.
 @Observable
 final class TerminalSessionController {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// Package integration object. It is an `ObservableObject` by package
     /// design; that is acceptable only inside this wrapper.
     @ObservationIgnored let viewState: TerminalViewState
@@ -19,7 +22,6 @@ final class TerminalSessionController {
     @ObservationIgnored let session: InMemoryTerminalSession
 
     @ObservationIgnored private let pipeline: TerminalOutputPipeline
-    @ObservationIgnored private let backend: any TerminalHostBackend
     /// Last grid the surface reported. Updated only when rows/columns change.
     private(set) var grid: TerminalOutputPipeline.Grid?
 
@@ -33,7 +35,6 @@ final class TerminalSessionController {
         backend: any TerminalHostBackend,
         fontSize: Float = TerminalSettings.defaultFontSize
     ) {
-        self.backend = backend
         viewState = TerminalViewState(
             theme: MaidTerminalAppearance.theme,
             terminalConfiguration: MaidTerminalAppearance.terminalConfiguration

@@ -1,13 +1,11 @@
 import SwiftUI
 
 struct SessionImportView: View {
-    let store: ThreadStore
     let openThread: (String) -> Void
 
     @State private var model: SessionImportModel
 
     init(store: ThreadStore, openThread: @escaping (String) -> Void) {
-        self.store = store
         self.openThread = openThread
         _model = State(initialValue: SessionImportModel(store: store))
     }
@@ -15,7 +13,6 @@ struct SessionImportView: View {
     #if DEBUG
         init(store: ThreadStore, model: SessionImportModel, openThread: @escaping (String) -> Void)
         {
-            self.store = store
             self.openThread = openThread
             _model = State(initialValue: model)
         }
@@ -27,13 +24,22 @@ struct SessionImportView: View {
             ForEach(model.entries) { entry in
                 SessionImportRow(
                     entry: entry,
+                    capabilities: model.capabilities,
                     isImporting: model.importingSessionIDs.contains(entry.id),
+                    maintenanceAction: model.maintenanceBySessionID[entry.id],
+                    isClosed: model.closedSessionIDs.contains(entry.id),
                     importSession: {
                         Task {
                             if let threadID = await model.importSession(entry) {
                                 openThread(threadID)
                             }
                         }
+                    },
+                    closeSession: {
+                        Task { await model.closeSession(entry) }
+                    },
+                    deleteSession: {
+                        Task { await model.deleteSession(entry) }
                     }
                 )
             }
@@ -49,7 +55,7 @@ struct SessionImportView: View {
             SessionImportStatusView(model: model)
         }
         .navigationTitle("Import Session")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Refresh", systemImage: "arrow.clockwise") {
@@ -79,7 +85,7 @@ struct SessionImportProviderPicker: View {
             Spacer()
             Picker("Provider", selection: $selection) {
                 ForEach(choices) { choice in
-                    Text(choice.name).tag(Optional(choice.id))
+                    Text(choice.title).tag(Optional(choice.id))
                 }
             }
             .labelsHidden()
@@ -154,12 +160,14 @@ struct SessionImportStatusView: View {
                     store: store,
                     previewSessions: [
                         SessionSummary(
+                            additionalDirectories: nil,
                             cwd: "/Users/me/Code/maiD",
                             sessionID: "sess-1",
                             title: "Fix reconnect loop",
                             updatedAt: "2026-08-01T10:15:30Z"
                         ),
                         SessionSummary(
+                            additionalDirectories: nil,
                             cwd: "/Users/me/Code/side-project",
                             sessionID: "sess-2",
                             title: nil,

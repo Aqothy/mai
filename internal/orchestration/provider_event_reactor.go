@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,24 +47,17 @@ type ProviderEventReactor struct {
 // is the reactor's base context (typically the daemon server's lifecycle
 // context); cancelling it cancels all in-flight provider RPCs.
 func NewProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime, ingestion *ProviderRuntimeIngestion) *ProviderEventReactor {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	r := &ProviderEventReactor{engine: engine, provider: providerRuntime, ingestion: ingestion, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
+	r := newProviderEventReactor(ctx, engine, providerRuntime, ingestion)
 	engine.OnEvent(r.handle)
 	return r
 }
 
+func newProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime, ingestion *ProviderRuntimeIngestion) *ProviderEventReactor {
+	return &ProviderEventReactor{engine: engine, provider: providerRuntime, ingestion: ingestion, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
+}
+
 func (r *ProviderEventReactor) providerRPCContext() (context.Context, context.CancelFunc) {
-	timeout := r.providerRPCTimeout
-	if timeout <= 0 {
-		timeout = defaultProviderRPCTimeout
-	}
-	base := r.baseCtx
-	if base == nil {
-		base = context.Background()
-	}
-	return context.WithTimeout(base, timeout)
+	return context.WithTimeout(r.baseCtx, r.providerRPCTimeout)
 }
 
 func (r *ProviderEventReactor) handle(event Event) {
@@ -101,9 +96,6 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 		return
 	}
 	r.mu.Lock()
-	if r.threadTails == nil {
-		r.threadTails = make(map[ThreadID]chan struct{})
-	}
 	prev := r.threadTails[threadID]
 	done := make(chan struct{})
 	r.threadTails[threadID] = done
@@ -134,11 +126,12 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 
 func startSessionInputFromProviderView(view ThreadProviderView) provider.StartSessionInput {
 	return provider.StartSessionInput{
-		ThreadID:           string(view.ID),
-		ProviderInstanceID: view.ProviderInstanceID,
-		Cwd:                view.Cwd,
-		ModelSelection:     cloneModelSelection(view.ModelSelection),
-		ConfigSelections:   configSelectionsFromProviderView(view),
+		ThreadID:              string(view.ID),
+		ProviderInstanceID:    view.ProviderInstanceID,
+		Cwd:                   view.Cwd,
+		AdditionalDirectories: append([]string(nil), view.AdditionalDirectories...),
+		ModelSelection:        cloneModelSelection(view.ModelSelection),
+		ConfigSelections:      configSelectionsFromProviderView(view),
 	}
 }
 
@@ -221,7 +214,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	if !ok {
 		return
 	}
-	if !providerTurnStillRunning(view, turnID) {
+	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
 		if r.requeueSettledTurnStart(event, view) {
 			return
 		}
@@ -274,9 +267,50 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: view.Message.Text, Attachments: view.Message.Attachments, ModelSelection: cloneModelSelection(view.ModelSelection)}); err != nil {
+	presentation := &provider.PromptPresentation{MessageID: string(view.Message.ID)}
+	if len(view.Message.Annotations) > 0 {
+		text := view.Message.Text
+		presentation.Text = &text
+		presentation.Annotations = append([]provider.PromptAnnotation(nil), view.Message.Annotations...)
+	}
+	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: promptTextWithAnnotations(view.Message.Text, view.Message.Annotations), Attachments: view.Message.Attachments, Annotations: view.Message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
+}
+
+func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotation) string {
+	if len(annotations) == 0 {
+		return text
+	}
+	var prompt strings.Builder
+	quote := func(text string) {
+		for _, line := range strings.Split(text, "\n") {
+			prompt.WriteString("> ")
+			prompt.WriteString(line)
+			prompt.WriteByte('\n')
+		}
+	}
+	prompt.WriteString("The user selected these passages from earlier in the chat as context:\n")
+	for index, annotation := range annotations {
+		if strings.TrimSpace(annotation.Quote) == "" {
+			continue
+		}
+		fmt.Fprintf(&prompt, "\nSelection %d", index+1)
+		if annotation.Role != "" {
+			fmt.Fprintf(&prompt, " (%s)", annotation.Role)
+		}
+		prompt.WriteString(":\n")
+		quote(annotation.Quote)
+		if note := strings.TrimSpace(annotation.Note); note != "" {
+			prompt.WriteString("Comment:\n")
+			quote(note)
+		}
+	}
+	if strings.TrimSpace(text) != "" {
+		prompt.WriteString("\nUser message:\n")
+		prompt.WriteString(text)
+	}
+	return prompt.String()
 }
 
 // requeueSettledTurnStart closes the narrow steering race where the command was
@@ -317,7 +351,7 @@ func bindingFromProviderSession(providerInstanceID provider.InstanceID, session 
 	if providerInstanceID == "" {
 		providerInstanceID = session.ProviderInstanceID
 	}
-	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, ConfigOptions: cloneConfigOptions(session.ConfigOptions)}
+	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...), ConfigOptions: slices.Clone(session.ConfigOptions), Skills: slices.Clone(session.Skills)}
 }
 
 func (r *ProviderEventReactor) dispatchProviderSessionMetadata(threadID ThreadID, session provider.Session, createdAt time.Time) {
@@ -402,9 +436,6 @@ func (r *ProviderEventReactor) handleConfigOption(event Event) {
 }
 
 func configOptionCategory(session *SessionBinding, optionID string) provider.ConfigOptionCategory {
-	if session == nil {
-		return ""
-	}
 	for _, option := range session.ConfigOptions {
 		if option.ID == optionID {
 			return option.Category
@@ -415,12 +446,10 @@ func configOptionCategory(session *SessionBinding, optionID string) provider.Con
 
 func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	threadID := event.ThreadID()
+	// The decider only appends responses to known approvals, and timeline
+	// entries are never removed; a missing session means the provider moved on.
 	view, ok := r.engine.ApprovalView(threadID, event.Payload.RequestID)
-	if !ok || view.Session == nil {
-		return
-	}
-	if view.Approval == nil {
-		r.appendErrorItem(threadID, event.Payload.TurnID, fmt.Sprintf("unknown approval request %s", event.Payload.RequestID))
+	if !ok || view.Session == nil || view.Approval == nil {
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
@@ -429,7 +458,6 @@ func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	// the event was appended, so it passes through as-is.
 	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID}); err != nil {
 		r.appendErrorItem(threadID, view.Approval.TurnID, err.Error())
-		return
 	}
 }
 
@@ -442,9 +470,7 @@ func (r *ProviderEventReactor) failThread(threadID ThreadID, turnID TurnID, mess
 }
 
 func (r *ProviderEventReactor) appendErrorItem(threadID ThreadID, turnID TurnID, message string) {
-	now := time.Now()
-	item := &Item{ID: newID("error"), Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: turnID, CreatedAt: now, UpdatedAt: now}
-	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: now, Payload: EventPayload{Item: item}})
+	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: errorItem(newID("error"), turnID, message)}})
 }
 
 func (r *ProviderEventReactor) record(input EventInput) {
@@ -475,14 +501,4 @@ func interruptEventTargetsCancellableTurn(view ThreadSessionView, turnID TurnID)
 		}
 	}
 	return true
-}
-
-func providerTurnStillRunning(view ThreadProviderView, turnID TurnID) bool {
-	if turnID == "" {
-		return true
-	}
-	if view.LatestTurn != nil && view.LatestTurn.ID == turnID {
-		return view.LatestTurn.State == TurnStateRunning && !view.LatestTurn.InterruptRequested
-	}
-	return view.Session != nil && view.Session.ActiveTurnID == turnID && view.Session.Status == SessionStatusRunning
 }

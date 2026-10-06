@@ -6,7 +6,7 @@
 //
 // The package links a static libghostty-vt through cgo; `make ghostty-vt`
 // builds the pinned library and `make build`/`make test` point pkg-config
-// at it (see docs/TERMINAL_AGENT_DETECTION.md).
+// at it.
 //
 // A screen is deliberately passive: it never answers PTY queries or renders.
 // The caller serializes all access.

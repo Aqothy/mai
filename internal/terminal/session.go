@@ -461,16 +461,6 @@ func (s *Session) AgentReport() AgentReport { return s.detector.Report() }
 // Attaching acknowledges a pending done state.
 func (s *Session) SetAttached(attached bool) { s.detector.SetAttached(attached) }
 
-// PID exposes the shell leader's pid for tests.
-func (s *Session) PID() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cmd.Process == nil {
-		return 0
-	}
-	return s.cmd.Process.Pid
-}
-
 // ResolveCwd normalizes and validates a working directory. An empty value
 // resolves to the user's home directory. Invalid paths return ErrInvalidCwd
 // rather than silently falling back.
@@ -543,11 +533,7 @@ func NewID() string {
 
 func newRunID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail on supported platforms; keep IDs unique
-		// enough for one process if it ever does.
-		return fmt.Sprintf("run-%d", time.Now().UnixNano())
-	}
+	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
 
