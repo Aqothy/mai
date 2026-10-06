@@ -468,44 +468,33 @@ func TestIngestionEmptyListUpdatesMarshalExplicitArrays(t *testing.T) {
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-empty-config", Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-empty-slash", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{}}})
 
-	var configJSON, slashJSON json.RawMessage
-	for _, event := range events.matching("", 0) {
-		raw, err := json.Marshal(event.Payload)
+	jsonField := func(value any, name string) string {
+		t.Helper()
+		raw, err := json.Marshal(value)
 		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
+			t.Fatalf("marshal: %v", err)
 		}
-		var payload map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("unmarshal payload: %v", err)
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatalf("unmarshal: %v", err)
 		}
+		return string(fields[name])
+	}
+	var configJSON, slashJSON string
+	for _, event := range events.matching("", 0) {
 		switch event.Type {
 		case EventThreadConfigOptionsUpdated:
-			configJSON = append(configJSON[:0], payload["configOptions"]...)
+			configJSON = jsonField(event.Payload, "configOptions")
 		case EventThreadSlashCommandsUpdated:
-			slashJSON = append(slashJSON[:0], payload["slashCommands"]...)
+			slashJSON = jsonField(event.Payload, "slashCommands")
 		}
 	}
-	if string(configJSON) != "[]" || string(slashJSON) != "[]" {
+	if configJSON != "[]" || slashJSON != "[]" {
 		t.Fatalf("last list payloads = config:%s slash:%s, want explicit empty arrays", configJSON, slashJSON)
 	}
-
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread session = %#v, want session", thread.Session)
-	}
-	raw, err := json.Marshal(thread.Session)
-	if err != nil {
-		t.Fatalf("marshal session: %v", err)
-	}
-	var session map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &session); err != nil {
-		t.Fatalf("unmarshal session: %v", err)
-	}
-	if string(session["configOptions"]) != "[]" {
-		t.Fatalf("session JSON = %s, want configOptions:[] after clear", raw)
-	}
-	if string(session["slashCommands"]) != "[]" {
-		t.Fatalf("session JSON = %s, want slashCommands:[] after clear", raw)
+	thread, _ := engine.Thread(threadID)
+	if config, slash := jsonField(thread.Session, "configOptions"), jsonField(thread.Session, "slashCommands"); config != "[]" || slash != "[]" {
+		t.Fatalf("session lists = config:%s slash:%s, want explicit empty arrays after clear", config, slash)
 	}
 }
 
