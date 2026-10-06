@@ -1,3 +1,4 @@
+#if DEBUG
 /// Deterministic Markdown content used by `MockChatView` to exercise the
 /// production renderer without coupling fixture construction to view code.
 enum MockChatMarkdownFixtures {
@@ -817,3 +818,4 @@ enum MockChatMarkdownStream {
     }
 
 }
+#endif

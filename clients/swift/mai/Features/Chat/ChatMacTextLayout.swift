@@ -397,9 +397,11 @@
             // A visible row can beat background preparation. Build
             // synchronously so the transcript never flashes a placeholder or
             // temporarily reports the wrong height.
-            ChatBenchmarkAutoRun.trace(
-                "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
-            )
+            #if DEBUG
+                ChatBenchmarkAutoRun.trace(
+                    "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
+                )
+            #endif
             let layout = ChatTextLayout(source: source, width: width)
             entries[key] = Entry(source: source, layout: layout)
             return layout
@@ -434,9 +436,11 @@
             if let entry = resolvedEntries[key], entry.prose == prose {
                 return entry.layout
             }
-            ChatBenchmarkAutoRun.trace(
-                "resolved layout miss id=\(id) width=\(width) bytes=\(prose.source.utf8.count)"
-            )
+            #if DEBUG
+                ChatBenchmarkAutoRun.trace(
+                    "resolved layout miss id=\(id) width=\(width) bytes=\(prose.source.utf8.count)"
+                )
+            #endif
             let layout = ChatTextLayout(
                 resolvedProse: prose,
                 width: width
@@ -514,9 +518,11 @@
             {
                 return (entry.layout, entry.isHighlighted)
             }
-            ChatBenchmarkAutoRun.trace(
-                "code layout miss id=\(id) bytes=\(block.code.utf8.count)"
-            )
+            #if DEBUG
+                ChatBenchmarkAutoRun.trace(
+                    "code layout miss id=\(id) bytes=\(block.code.utf8.count)"
+                )
+            #endif
             let layout = ChatTextLayout(
                 code: ChatMacCodeStyle.attributedString(code: block.code)
             )
@@ -599,9 +605,11 @@
             if let entry = tableEntries[id], entry.table == table {
                 return entry.layout
             }
-            ChatBenchmarkAutoRun.trace(
-                "table layout miss id=\(id) rows=\(table.rows.count)"
-            )
+            #if DEBUG
+                ChatBenchmarkAutoRun.trace(
+                    "table layout miss id=\(id) rows=\(table.rows.count)"
+                )
+            #endif
             let layout = ChatTableLayout(table: table)
             tableEntries[id] = TableEntry(table: table, layout: layout)
             return layout

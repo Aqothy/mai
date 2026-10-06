@@ -10,31 +10,8 @@ struct DesktopAppContainer: View {
     /// The open terminal, if any. Chat selection lives in ThreadStore; only
     /// presentation merges the two domains.
     @State private var terminalRoute: TerminalOpenRequest?
-    @State private var isPerformanceLabPresented = false
 
     var body: some View {
-        if ChatBenchmarkAutoRun.plan != nil,
-            ChatBenchmarkAutoRun.threadTitleQuery == nil
-        {
-            // Headless benchmarking must reach the lab without navigating
-            // through (or connecting to) the real thread list.
-            NavigationStack {
-                MockChatView()
-            }
-        } else {
-            container
-                .modifier(
-                    ChatRealThreadBenchmarkRunner(
-                        store: store,
-                        selectThread: { threadID in
-                            store.selectThread(threadID)
-                        }
-                    )
-                )
-        }
-    }
-
-    private var container: some View {
         NavigationSplitView {
             DesktopSidebarView(
                 store: store,
@@ -67,28 +44,6 @@ struct DesktopAppContainer: View {
             }
         }
         .toolbar(removing: .title)
-        .toolbar {
-            if ChatPerformanceLab.isEnabled {
-                ToolbarItem(placement: .automatic) {
-                    Button("Mock Chat", systemImage: "ladybug") {
-                        isPerformanceLabPresented = true
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $isPerformanceLabPresented) {
-            NavigationStack {
-                MockChatView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") {
-                                isPerformanceLabPresented = false
-                            }
-                        }
-                    }
-            }
-            .frame(minWidth: 900, minHeight: 700)
-        }
         .onChange(of: terminalRoute) { _, route in
             // Detach is navigation-driven: leaving the terminal detail
             // releases control without terminating the shell.
@@ -96,6 +51,12 @@ struct DesktopAppContainer: View {
                 terminalStore.closeActiveTerminal()
             }
         }
+        #if DEBUG
+            .modifier(
+                ChatBenchmarkHarness(
+                    store: store, selectThread: { store.selectThread($0) }, showsLabButton: true)
+            )
+        #endif
     }
 }
 

@@ -1,3 +1,4 @@
+#if DEBUG
 import OSLog
 import SwiftUI
 
@@ -71,7 +72,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
                 return
             }
         #endif
-        #if os(macOS) && DEBUG
+        #if os(macOS)
             if ["sessions", "sessionsResize"].contains(ChatBenchmarkAutoRun.plan ?? "") {
                 await runSessionMemoryBenchmark()
                 finish("CHAT_BENCHMARK_COMPLETE")
@@ -84,7 +85,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         try? await Task.sleep(for: .seconds(3))
         await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
 
-        #if os(macOS) && DEBUG
+        #if os(macOS)
             if ChatBenchmarkAutoRun.plan == "lifecycle" {
                 await benchmark.runNativeLifecycleBenchmark()
                 finish("CHAT_BENCHMARK_COMPLETE")
@@ -92,33 +93,31 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
             }
         #endif
 
-        #if DEBUG
-            if ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil,
-                let plan = ChatBenchmarkAutoRun.plan, plan == "stream" || plan == "streamScroll"
-            {
-                let driver = ChatSyntheticStreamingBenchmark(
-                    store: store,
-                    includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"))
-                driver.prepare()
-                try? await Task.sleep(for: .milliseconds(500))
-                await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
-                let stream = Task { await driver.run() }
-                if plan == "streamScroll" {
-                    _ = await benchmark.runScrollBenchmark(
-                        pointsPerSecond: 3_000, maximumSweepSeconds: 10,
-                        label: "production-stream-scroll-3000pps")
-                } else {
-                    _ = await benchmark.runStreamingBenchmark(
-                        label: "production-stream-20000chars",
-                        maximumSeconds: 60, isDone: { driver.isFinished })
-                }
-                await stream.value
-                ChatBenchmarkAutoRun.trace(
-                    "stream sourceMatches=\(driver.sourceMatches) completed=\(driver.isFinished)")
-                finish("CHAT_BENCHMARK_COMPLETE")
-                return
+        if ChatBenchmarkAutoRun.syntheticThreadTurnCount != nil,
+            let plan = ChatBenchmarkAutoRun.plan, plan == "stream" || plan == "streamScroll"
+        {
+            let driver = ChatSyntheticStreamingBenchmark(
+                store: store,
+                includesActivity: UserDefaults.standard.bool(forKey: "ChatBenchmarkStreamActivity"))
+            driver.prepare()
+            try? await Task.sleep(for: .milliseconds(500))
+            await ChatBenchmarkAutoRun.awaitTranscriptWarm(timeoutSeconds: 180)
+            let stream = Task { await driver.run() }
+            if plan == "streamScroll" {
+                _ = await benchmark.runScrollBenchmark(
+                    pointsPerSecond: 3_000, maximumSweepSeconds: 10,
+                    label: "production-stream-scroll-3000pps")
+            } else {
+                _ = await benchmark.runStreamingBenchmark(
+                    label: "production-stream-20000chars",
+                    maximumSeconds: 60, isDone: { driver.isFinished })
             }
-        #endif
+            await stream.value
+            ChatBenchmarkAutoRun.trace(
+                "stream sourceMatches=\(driver.sourceMatches) completed=\(driver.isFinished)")
+            finish("CHAT_BENCHMARK_COMPLETE")
+            return
+        }
 
         if ChatBenchmarkAutoRun.plan == "scrub" {
             _ = await benchmark.runScrollBenchmark(
@@ -148,7 +147,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         finish("CHAT_BENCHMARK_COMPLETE")
     }
 
-    #if os(macOS) && DEBUG
+    #if os(macOS)
         private func runSessionMemoryBenchmark() async {
             guard let turns = ChatBenchmarkAutoRun.syntheticThreadTurnCount,
                 let window = ChatBenchmarkModel.appWindow()
@@ -347,3 +346,4 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
         #endif
     }
 }
+#endif

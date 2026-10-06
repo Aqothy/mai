@@ -1,3 +1,4 @@
+#if DEBUG
 import OSLog
 import QuartzCore
 import SwiftUI
@@ -603,8 +604,7 @@ nonisolated enum ChatBenchmarkAutoRun {
     )
 
     static var plan: String? {
-        guard ChatPerformanceLab.isEnabled else { return nil }
-        return UserDefaults.standard.string(forKey: "ChatAutoBenchmark")
+        UserDefaults.standard.string(forKey: "ChatAutoBenchmark")
     }
 
     /// `-ChatBenchmarkThread <title substring>` benchmarks a real thread from
@@ -613,31 +613,19 @@ nonisolated enum ChatBenchmarkAutoRun {
     static var threadTitleQuery: String? {
         if let value = UserDefaults.standard.string(
             forKey: "ChatBenchmarkThread"
-        )?.trimmingCharacters(in: .whitespaces), ChatPerformanceLab.isEnabled,
-            !value.isEmpty
-        {
+        )?.trimmingCharacters(in: .whitespaces), !value.isEmpty {
             return value
         }
-        #if DEBUG
-            if syntheticThreadTurnCount != nil {
-                return ChatSyntheticBenchmarkThread.title
-            }
-        #endif
-        return nil
+        return syntheticThreadTurnCount != nil ? ChatSyntheticBenchmarkThread.title : nil
     }
 
-    #if DEBUG
-        /// `-ChatBenchmarkSyntheticTurns <n>` seeds the store with a generated
-        /// `n`-turn transcript and benchmarks the production timeline without
-        /// a daemon. Zero or a missing value leaves the real store in place.
-        static var syntheticThreadTurnCount: Int? {
-            guard ChatPerformanceLab.isEnabled else { return nil }
-            let turns = UserDefaults.standard.integer(
-                forKey: "ChatBenchmarkSyntheticTurns"
-            )
-            return turns > 0 ? turns : nil
-        }
-    #endif
+    /// `-ChatBenchmarkSyntheticTurns <n>` seeds the store with a generated
+    /// `n`-turn transcript and benchmarks the production timeline without
+    /// a daemon. Zero or a missing value leaves the real store in place.
+    static var syntheticThreadTurnCount: Int? {
+        let turns = UserDefaults.standard.integer(forKey: "ChatBenchmarkSyntheticTurns")
+        return turns > 0 ? turns : nil
+    }
 
     /// Whether the lab has finished priming caches and layouts for the whole
     /// loaded transcript. The scroll benchmark waits for this so it measures
@@ -709,7 +697,15 @@ nonisolated enum ChatBenchmarkAutoRun {
         var benchmarkStatistics: String { get }
     }
 
-    extension ChatBenchmarkAnchoredDocument {
-        var benchmarkStatistics: String { "No native statistics" }
+    extension ChatNativeTranscript.VirtualDocument: ChatBenchmarkAnchoredDocument {
+        func scrollToBenchmarkRow(_ index: Int) {
+            guard index >= 0, index < offsets.count - 1, let scroll = enclosingScrollView else { return }
+            ChatBenchmarkModel.setContentOffsetY(offsets[index], on: scroll)
+        }
+
+        var benchmarkStatistics: String {
+            "nativeMounts=\(nativeMounts) hostingMounts=\(hostingMounts) resident=\(hosts.count) pooled=\(reusable.count)"
+        }
     }
+#endif
 #endif

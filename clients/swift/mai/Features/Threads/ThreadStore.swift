@@ -1554,7 +1554,7 @@ final class ThreadStore {
 
     #if DEBUG
         func insertSyntheticBenchmarkThread(_ thread: Thread) {
-            guard ChatPerformanceLab.isEnabled, thread.id.hasPrefix("synthetic-benchmark-") else { return }
+            guard thread.id.hasPrefix("synthetic-benchmark-") else { return }
             var session = ThreadSession(thread: thread)
             session.subscriptionState = .inactive
             session.inactiveSince = now()
@@ -1564,8 +1564,7 @@ final class ThreadStore {
         }
 
         func applySyntheticBenchmarkEvent(_ event: Event) {
-            guard ChatPerformanceLab.isEnabled,
-                selectedThreadID == ChatSyntheticBenchmarkThread.threadID,
+            guard selectedThreadID == ChatSyntheticBenchmarkThread.threadID,
                 event.payload.threadID == ChatSyntheticBenchmarkThread.threadID
             else { return }
             applyThreadEvent(event)

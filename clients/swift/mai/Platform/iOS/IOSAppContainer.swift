@@ -10,29 +10,6 @@ struct IOSAppContainer: View {
     @State private var path: [IOSNavigationRoute] = []
 
     var body: some View {
-        if ChatBenchmarkAutoRun.plan != nil,
-            ChatBenchmarkAutoRun.threadTitleQuery == nil
-        {
-            // Headless benchmarking must reach the lab without navigating
-            // through (or connecting to) the real thread list.
-            NavigationStack {
-                MockChatView()
-            }
-        } else {
-            container
-                .modifier(
-                    ChatRealThreadBenchmarkRunner(
-                        store: store,
-                        selectThread: { threadID in
-                            store.selectThread(threadID)
-                            path = [.thread(threadID)]
-                        }
-                    )
-                )
-        }
-    }
-
-    private var container: some View {
         NavigationStack(path: $path) {
             IOSThreadListView(
                 store: store,
@@ -94,6 +71,17 @@ struct IOSAppContainer: View {
             }
             terminalStore.closeActiveTerminal()
         }
+        #if DEBUG
+            .modifier(
+                ChatBenchmarkHarness(
+                    store: store,
+                    selectThread: { threadID in
+                        store.selectThread(threadID)
+                        path = [.thread(threadID)]
+                    }
+                )
+            )
+        #endif
     }
 }
 

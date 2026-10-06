@@ -33,7 +33,9 @@
         func updateNSView(_ scroll: NSScrollView, context: Context) {
             guard isPrepared else {
                 context.coordinator.task?.cancel()
-                ChatBenchmarkAutoRun.isNativeGeometryWarm = false
+                #if DEBUG
+                    ChatBenchmarkAutoRun.isNativeGeometryWarm = false
+                #endif
                 return
             }
             context.coordinator.virtualDocument.historyLoadDistance = historyLoadDistance
@@ -85,10 +87,14 @@
                     return
                 }
                 task?.cancel()
-                ChatBenchmarkAutoRun.isNativeGeometryWarm = false
+                #if DEBUG
+                    ChatBenchmarkAutoRun.isNativeGeometryWarm = false
+                #endif
                 task = Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let started = ContinuousClock.now
+                    #if DEBUG
+                        let started = ContinuousClock.now
+                    #endif
                     let measure = NSHostingController(rootView: content(0))
                     var result: [CGFloat] = []
                     var updatedMeasurements: [String: Measurement] = [:]
@@ -135,16 +141,18 @@
                         heights: result, width: width, ids: ids, changedIDs: changedIDs,
                         heightInvalidatedIDs: heightInvalidatedIDs, content: content)
                     onAttach?(self.virtualDocument)
-                    ChatBenchmarkAutoRun.trace(
-                        "native geometry rows=\(result.count) measured=\(self.lastMeasuredRowCount) width=\(width) totalHeight=\(result.reduce(0,+)) elapsed=\(started.duration(to: .now))"
-                    )
-                    ChatBenchmarkAutoRun.isNativeGeometryWarm = true
+                    #if DEBUG
+                        ChatBenchmarkAutoRun.trace(
+                            "native geometry rows=\(result.count) measured=\(self.lastMeasuredRowCount) width=\(width) totalHeight=\(result.reduce(0,+)) elapsed=\(started.duration(to: .now))"
+                        )
+                        ChatBenchmarkAutoRun.isNativeGeometryWarm = true
+                    #endif
                 }
             }
 
         }
 
-        final class VirtualDocument: NSView, ChatBenchmarkAnchoredDocument, ChatMacScrollDocument {
+        final class VirtualDocument: NSView, ChatMacScrollDocument {
             // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
             nonisolated deinit {}
 
@@ -168,11 +176,6 @@
                 return NSRange(location: first, length: max(0, last - first + 1))
             }
 
-            func scrollToBenchmarkRow(_ index: Int) {
-                guard index >= 0, index < offsets.count - 1 else { return }
-                guard let scroll = enclosingScrollView else { return }
-                ChatBenchmarkModel.setContentOffsetY(offsets[index], on: scroll)
-            }
             override var isFlipped: Bool { true }
             var geometry = ChatVirtualTranscriptGeometry()
             var offsets: [CGFloat] { geometry.offsets }
@@ -196,11 +199,10 @@
             var content: ((Int) -> Content)?
             var hosts: [Int: NSView] = [:]
             var nativeRowFactory: ((Int, NSView?) -> NSView?)?
-            var nativeMounts = 0
-            var hostingMounts = 0
-            var benchmarkStatistics: String {
-                "nativeMounts=\(nativeMounts) hostingMounts=\(hostingMounts) resident=\(hosts.count) pooled=\(reusable.count)"
-            }
+            #if DEBUG
+                var nativeMounts = 0
+                var hostingMounts = 0
+            #endif
             var reusable: [NSView] = []
             var preparationTask: Task<Void, Never>?
             var preparedRange: ClosedRange<Int>?
@@ -414,7 +416,9 @@
                 -> NSView
             {
                 if let native = nativeRowFactory?(index, reused) {
-                    nativeMounts += 1
+                    #if DEBUG
+                        nativeMounts += 1
+                    #endif
                     return native
                 } else {
                     let id = geometry.ids[index]
@@ -428,7 +432,9 @@
                         ?? NSHostingView(rootView: measured)
                     hosting.sizingOptions = []
                     hosting.rootView = measured
-                    hostingMounts += 1
+                    #if DEBUG
+                        hostingMounts += 1
+                    #endif
                     return hosting
                 }
             }

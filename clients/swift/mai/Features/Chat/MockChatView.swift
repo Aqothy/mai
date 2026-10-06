@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 import OSLog
 import Observation
@@ -9,15 +10,51 @@ import SwiftUI
     import UIKit
 #endif
 
-/// Profiling fixtures are available in Debug builds only.
-nonisolated enum ChatPerformanceLab {
-    static let isEnabled: Bool = {
-        #if DEBUG
-            true
-        #else
-            false
-        #endif
-    }()
+/// Debug entry points into the chat performance lab. A headless
+/// `-ChatAutoBenchmark` launch without a benchmark thread opens the lab
+/// directly; otherwise the app runs normally with the real-thread runner
+/// attached and, where requested, a toolbar button that opens the lab.
+struct ChatBenchmarkHarness: ViewModifier {
+    let store: ThreadStore
+    let selectThread: (String) -> Void
+    var showsLabButton = false
+
+    @State private var isLabPresented = false
+
+    func body(content: Content) -> some View {
+        if ChatBenchmarkAutoRun.plan != nil, ChatBenchmarkAutoRun.threadTitleQuery == nil {
+            // Headless benchmarking must reach the lab without navigating
+            // through (or connecting to) the real thread list.
+            NavigationStack {
+                MockChatView()
+            }
+        } else {
+            content
+                .modifier(ChatRealThreadBenchmarkRunner(store: store, selectThread: selectThread))
+                .toolbar {
+                    if showsLabButton {
+                        ToolbarItem(placement: .automatic) {
+                            Button("Mock Chat", systemImage: "ladybug") {
+                                isLabPresented = true
+                            }
+                        }
+                    }
+                }
+                .sheet(isPresented: $isLabPresented) {
+                    NavigationStack {
+                        MockChatView()
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") {
+                                        isLabPresented = false
+                                    }
+                                }
+                            }
+                    }
+                    .frame(minWidth: 900, minHeight: 700)
+                }
+        }
+    }
 }
 
 private enum MockChatStressTranscriptSize: Int, CaseIterable, Hashable, Identifiable {
@@ -2004,3 +2041,4 @@ private enum MockChatDiffFixtures {
         )
     }
 }
+#endif

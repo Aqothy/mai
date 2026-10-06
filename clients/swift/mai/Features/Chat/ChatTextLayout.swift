@@ -199,10 +199,10 @@ nonisolated final class ChatTextLayout: @unchecked Sendable {
         // A visible row can beat background preparation, especially during the first
         // bounded mount. Build synchronously so the transcript never
         // flashes a placeholder or temporarily reports the wrong height.
-        ChatBenchmarkAutoRun.trace(
-            "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
-        )
         #if DEBUG
+            ChatBenchmarkAutoRun.trace(
+                "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
+            )
             let layoutStart = CACurrentMediaTime()
         #endif
         let layout = ChatTextLayout(source: source, width: width)

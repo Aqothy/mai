@@ -970,14 +970,16 @@ struct ChatTimeline: View {
                 id: preparationKey
             ) {
                 guard rowWidth > 0 else { return }
-                // A real-thread benchmark waits for this preparation pass so
-                // sweeps measure the production steady state.
-                let signalsBenchmarkWarm =
-                    ChatBenchmarkAutoRun.plan != nil
-                    && ChatBenchmarkAutoRun.threadTitleQuery != nil
-                if signalsBenchmarkWarm {
-                    ChatBenchmarkAutoRun.noteTranscriptWarmStarted()
-                }
+                #if DEBUG
+                    // A real-thread benchmark waits for this preparation pass so
+                    // sweeps measure the production steady state.
+                    let signalsBenchmarkWarm =
+                        ChatBenchmarkAutoRun.plan != nil
+                        && ChatBenchmarkAutoRun.threadTitleQuery != nil
+                    if signalsBenchmarkWarm {
+                        ChatBenchmarkAutoRun.noteTranscriptWarmStarted()
+                    }
+                #endif
                 // While a finished turn lingers in its streaming presentation,
                 // prepare the settled rows it is about to swap to.
                 let preparationRows = settlingTurnID == nil
@@ -997,9 +999,11 @@ struct ChatTimeline: View {
                     rowWidth: rowWidth,
                     codeTheme: codeTheme
                 )
-                if signalsBenchmarkWarm, !Task.isCancelled {
-                    ChatBenchmarkAutoRun.noteTranscriptWarm()
-                }
+                #if DEBUG
+                    if signalsBenchmarkWarm, !Task.isCancelled {
+                        ChatBenchmarkAutoRun.noteTranscriptWarm()
+                    }
+                #endif
                 #if os(macOS)
                     if !Task.isCancelled, ChatTranscriptConfiguration.usesNativeMacTranscript {
                         nativePreparedKey = preparationKey
@@ -1023,14 +1027,17 @@ struct ChatTimeline: View {
                     }
                 #endif
                 if oldestLoadedSectionID == nil {
-                    // A real-thread benchmark sweeps the whole transcript;
-                    // mounting it fully up front keeps history pagination
-                    // from re-anchoring the viewport mid-measurement.
-                    oldestLoadedSectionID =
-                        ChatBenchmarkAutoRun.threadTitleQuery != nil
-                            && !UserDefaults.standard.bool(forKey: "ChatBenchmarkPaginatedHistory")
-                        ? sections.first?.id
-                        : loadedSections.first?.id
+                    oldestLoadedSectionID = loadedSections.first?.id
+                    #if DEBUG
+                        // A real-thread benchmark sweeps the whole transcript;
+                        // mounting it fully up front keeps history pagination
+                        // from re-anchoring the viewport mid-measurement.
+                        if ChatBenchmarkAutoRun.threadTitleQuery != nil,
+                            !UserDefaults.standard.bool(forKey: "ChatBenchmarkPaginatedHistory")
+                        {
+                            oldestLoadedSectionID = sections.first?.id
+                        }
+                    #endif
                 }
                 isAwaitingInitialBottom = true
                 #if os(macOS)
@@ -1524,11 +1531,11 @@ struct ChatTimeline: View {
             streamingTurnID: streamingTurnID,
             codeTheme: codeTheme
         )
-        if ChatBenchmarkAutoRun.plan != nil {
+        #if DEBUG
             ChatBenchmarkAutoRun.trace(
                 "prepare rows=\(renderedRows.count) requests=\(layoutRequests.count) code=\(richBlocks.code.count) tables=\(richBlocks.tables.count)"
             )
-        }
+        #endif
         await textLayoutStore.prepare(requests: layoutRequests)
         await textLayoutStore.prepareResolvedProse(
             requests: Self.resolvedProseLayoutRequests(
