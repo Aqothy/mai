@@ -122,8 +122,7 @@ private nonisolated struct ChatMarkdownAttributedStringBuilder {
         let renderedItems = items.enumerated().map { offset, item in
             let marker: String
             if item.checkbox != nil {
-                // Match the ChatGPT prose treatment. Interactive task state can
-                // become a dedicated rich block later.
+                // Task-list checkboxes render as plain bullets.
                 marker = bullet(for: listDepth)
             } else if let firstOrdinal {
                 marker = "\(firstOrdinal + offset)."

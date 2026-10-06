@@ -2,17 +2,10 @@
     import AppKit
     import SwiftUI
 
-    // Native macOS rendering for settled rich Markdown blocks.
-    //
-    // A List row on macOS is already an `NSHostingView`; nesting another
-    // hosting view per code block or table (the previous
-    // `ChatMacHorizontalScrollView`) made every realized row run a second
-    // SwiftUI graph, Auto Layout constraint pass, and `fittingSize` query on
-    // the main thread. Profiling a 3,000 pt/s sweep put that at roughly a
-    // fifth of the main thread's busy time. These views instead present a
-    // layout measured off the main actor by `ChatTextLayoutStore`, so row
-    // realization is a frame assignment and the row's height is known before
-    // the row exists.
+    // Native macOS rendering for settled rich Markdown blocks. These views
+    // present a layout measured off the main actor by `ChatTextLayoutStore`
+    // instead of nesting another hosting view per block, so realizing a row
+    // is a frame assignment and its height is known before it exists.
 
     // MARK: - Code blocks
 

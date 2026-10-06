@@ -463,9 +463,8 @@ nonisolated struct ChatStreamingMarkdownSnapshot: Equatable, Sendable {
     let stableBlockCount: Int
 }
 
-/// Keeps completed root blocks and reparses only the last unstable block.
-/// This keeps the useful stable-prefix idea from the earlier experiment and
-/// adds a repaired display tail before parsing.
+/// Keeps completed root blocks and reparses only the last unstable block,
+/// after repairing that display tail so partial syntax renders sensibly.
 nonisolated struct ChatIncrementalMarkdownRenderPlanner {
     private var stableUTF8Count = 0
     private var stableBlocks: [ChatMarkdownRenderPlan.Block] = []

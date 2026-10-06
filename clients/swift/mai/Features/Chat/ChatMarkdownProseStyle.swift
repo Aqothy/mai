@@ -10,12 +10,8 @@ import SwiftUI
     typealias ChatPlatformTextStyle = UIFont.TextStyle
 #endif
 
-/// The typography and spacing for native chat prose.
-///
-/// Keeping the scale in one place makes the renderer themeable without
-/// coupling parsing to either SwiftUI or TextKit. The hierarchy intentionally
-/// stays compact at chat widths, similar to the system typography used by the
-/// ChatGPT iOS app.
+/// The typography and spacing for chat prose, shared by the SwiftUI and
+/// TextKit renderers. The heading scale stays compact at chat widths.
 nonisolated enum ChatMarkdownProseStyle {
     static let blockSpacing: CGFloat = 16
     static let lineSpacing: CGFloat = 2
