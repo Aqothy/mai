@@ -62,7 +62,7 @@ The same launch arguments work from Xcode (Edit Scheme → Run → Arguments):
 | `-ChatBenchmarkScrubPeriod N` | Seconds per one-way traversal for `scrub`. |
 | `-ChatBenchmarkStreamActivity YES/NO` | Include thought/tool activity in the `stream` plan. |
 
-Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resizing and selection without any automation; it does not connect to the daemon. Debug builds also show a "Mock Chat" toolbar button that opens the mock chat lab.
+Omit `-ChatAutoBenchmark` to open the synthetic chat for manual scrolling, resizing and selection without any automation; it does not connect to the daemon. macOS Debug builds also show a "Mock Chat" toolbar button that opens the mock chat lab.
 
 ## Reading results
 
