@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -41,16 +40,16 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		_ = json.Unmarshal(rawInput, &input)
 	}
 	state := &toolState{itemKind: provider.ItemKindToolCall}
-	call := provider.ToolCall{Name: name, ProviderKind: name, Action: semanticToolAction(name)}
-	title := humanizeIdentifier(name)
+	call := provider.ToolCall{Name: name, ProviderKind: name, Action: provider.ToolActionFromName(name)}
+	title := provider.HumanizeIdentifier(name)
 
 	if server, tool, ok := splitMCPToolName(name); ok {
 		call.Name = tool
 		call.Namespace = server
-		call.Action = semanticToolAction(tool)
+		call.Action = provider.ToolActionFromName(tool)
 		state.itemKind = provider.ItemKindMCPToolCall
 		state.call = call
-		state.title = strings.Trim(server+" · "+humanizeIdentifier(tool), " ·")
+		state.title = strings.Trim(server+" · "+provider.HumanizeIdentifier(tool), " ·")
 		return state
 	}
 
@@ -216,7 +215,7 @@ func turnStateFromResult(result resultMessage) (provider.RuntimeTurnState, strin
 		return provider.RuntimeTurnCompleted, stopReason, ""
 	}
 	if message == "" && strings.HasPrefix(result.Subtype, "error_") {
-		message = humanizeIdentifier(strings.TrimPrefix(result.Subtype, "error_"))
+		message = provider.HumanizeIdentifier(strings.TrimPrefix(result.Subtype, "error_"))
 	}
 	return provider.RuntimeTurnFailed, stopReason, message
 }
@@ -405,43 +404,6 @@ func sessionScopedPermissions(pending *pendingApproval) []map[string]any {
 	return updates
 }
 
-func semanticToolAction(name string) provider.ToolAction {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case containsAny(normalized, "delete", "remove", "unlink"):
-		return provider.ToolActionDelete
-	case containsAny(normalized, "move", "rename"):
-		return provider.ToolActionMove
-	case containsAny(normalized, "edit", "write", "patch", "apply"):
-		return provider.ToolActionEdit
-	case containsAny(normalized, "search", "find", "grep", "glob"):
-		return provider.ToolActionSearch
-	case containsAny(normalized, "read", "list", "stat"):
-		return provider.ToolActionRead
-	case containsAny(normalized, "exec", "shell", "command", "terminal", "bash"):
-		return provider.ToolActionExecute
-	case containsAny(normalized, "fetch", "http", "download"):
-		return provider.ToolActionFetch
-	case containsAny(normalized, "think"):
-		return provider.ToolActionThink
-	case containsAny(normalized, "spawn", "delegate", "agent", "task"):
-		return provider.ToolActionDelegate
-	case containsAny(normalized, "view", "image"):
-		return provider.ToolActionView
-	default:
-		return provider.ToolActionOther
-	}
-}
-
-func containsAny(value string, fragments ...string) bool {
-	for _, fragment := range fragments {
-		if strings.Contains(value, fragment) {
-			return true
-		}
-	}
-	return false
-}
-
 func boundedOutput(value string) string {
 	if len(value) <= toolOutputLimit {
 		return value
@@ -471,38 +433,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func humanizeIdentifier(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	var result []rune
-	var previous rune
-	for index, current := range []rune(value) {
-		if current == '_' || current == '-' || current == '.' || current == '/' {
-			if len(result) > 0 && result[len(result)-1] != ' ' {
-				result = append(result, ' ')
-			}
-			previous = current
-			continue
-		}
-		if index > 0 && unicode.IsUpper(current) && (unicode.IsLower(previous) || unicode.IsDigit(previous)) && len(result) > 0 && result[len(result)-1] != ' ' {
-			result = append(result, ' ')
-		}
-		result = append(result, current)
-		previous = current
-	}
-	words := strings.Fields(string(result))
-	for index, word := range words {
-		if index == 0 {
-			runes := []rune(word)
-			runes[0] = unicode.ToUpper(runes[0])
-			words[index] = string(runes)
-			continue
-		}
-		words[index] = strings.ToLower(word)
-	}
-	return strings.Join(words, " ")
 }

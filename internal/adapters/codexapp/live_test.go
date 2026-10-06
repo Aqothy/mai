@@ -60,7 +60,7 @@ func TestLiveSmoke(t *testing.T) {
 	checkEffort := func(session provider.Session) {
 		t.Helper()
 		if selectedEffort != "" {
-			if got, ok := currentConfigString(session.ConfigOptions, "reasoning_effort"); !ok || got != selectedEffort {
+			if got, ok := provider.CurrentConfigString(session.ConfigOptions, "reasoning_effort"); !ok || got != selectedEffort {
 				t.Fatalf("session reasoning effort = %q, %v; want %q", got, ok, selectedEffort)
 			}
 			t.Logf("effective reasoning effort: %s", selectedEffort)

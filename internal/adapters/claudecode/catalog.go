@@ -133,7 +133,7 @@ func (h *Instance) configOptionsLocked(selectedModel, selectedEffort, selectedMo
 					continue
 				}
 				validEffort[level] = struct{}{}
-				effortChoices = append(effortChoices, provider.ConfigChoice{Value: level, Label: humanizeIdentifier(level)})
+				effortChoices = append(effortChoices, provider.ConfigChoice{Value: level, Label: provider.HumanizeIdentifier(level)})
 			}
 			effort := strings.TrimSpace(selectedEffort)
 			if _, ok := validEffort[effort]; !ok {
@@ -197,17 +197,6 @@ func modelValueValid(models []sdkModel, value string) bool {
 		}
 	}
 	return false
-}
-
-func currentConfigString(options []provider.ConfigOption, optionID string) (string, bool) {
-	for _, option := range options {
-		if option.ID != optionID {
-			continue
-		}
-		value, ok := option.CurrentValue.(string)
-		return value, ok
-	}
-	return "", false
 }
 
 // scanSkills discovers skills on disk. The initialize handshake surfaces
@@ -311,7 +300,7 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	options := h.configOptionsLocked("", "", "")
-	selectedModel, _ := currentConfigString(options, "model")
+	selectedModel, _ := provider.CurrentConfigString(options, "model")
 	handle := fmt.Sprintf("claude-options-%d", time.Now().UnixNano())
 	h.options[handle] = &optionsState{selectedModel: selectedModel, selectedMode: "default", options: options, callbacks: callbacks}
 	return provider.OptionsSession{
@@ -348,14 +337,14 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 		return nil, fmt.Errorf("Claude Code option %q is not supported", optionID)
 	}
 	options := h.configOptionsLocked(selectedModel, selectedEffort, selectedMode)
-	current, present := currentConfigString(options, optionID)
+	current, present := provider.CurrentConfigString(options, optionID)
 	if !present || current != text {
 		h.mu.Unlock()
 		return nil, fmt.Errorf("Claude Code option %q does not accept value %q", optionID, text)
 	}
-	state.selectedModel, _ = currentConfigString(options, "model")
-	state.selectedEffort, _ = currentConfigString(options, "effort")
-	state.selectedMode, _ = currentConfigString(options, "permission_mode")
+	state.selectedModel, _ = provider.CurrentConfigString(options, "model")
+	state.selectedEffort, _ = provider.CurrentConfigString(options, "effort")
+	state.selectedMode, _ = provider.CurrentConfigString(options, "permission_mode")
 	state.options = options
 	snapshot := append([]provider.ConfigOption(nil), state.options...)
 	callback := state.callbacks.Updated

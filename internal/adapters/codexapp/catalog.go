@@ -105,14 +105,14 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 		return nil, fmt.Errorf("Codex option %q is not supported", optionID)
 	}
 	options := configOptionsFromModels(h.models, selectedModel, selectedEffort, selectedTier)
-	current, present := currentConfigString(options, optionID)
+	current, present := provider.CurrentConfigString(options, optionID)
 	if !present || current != text {
 		h.mu.Unlock()
 		return nil, fmt.Errorf("Codex option %q does not accept value %q", optionID, text)
 	}
-	state.selectedModel, _ = currentConfigString(options, "model")
-	state.selectedEffort, _ = currentConfigString(options, "reasoning_effort")
-	state.selectedTier, _ = currentConfigString(options, "service_tier")
+	state.selectedModel, _ = provider.CurrentConfigString(options, "model")
+	state.selectedEffort, _ = provider.CurrentConfigString(options, "reasoning_effort")
+	state.selectedTier, _ = provider.CurrentConfigString(options, "service_tier")
 	optionsSnapshot := append([]provider.ConfigOption(nil), options...)
 	callback := state.callbacks.Updated
 	h.mu.Unlock()

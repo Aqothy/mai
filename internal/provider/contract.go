@@ -9,7 +9,9 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 type InstanceID string
@@ -208,6 +210,16 @@ type SessionSummary struct {
 	UpdatedAt             string   `json:"updatedAt,omitempty"`
 }
 
+// PromptPreviewTitle is the session-list title derived from a session's first
+// prompt when the provider has none: whitespace collapsed, at most 120 runes.
+func PromptPreviewTitle(prompt string) string {
+	title := strings.Join(strings.Fields(prompt), " ")
+	if runes := []rune(title); len(runes) > 120 {
+		return string(runes[:120])
+	}
+	return title
+}
+
 // ModelSelection is WHAT a provider instance runs (model + provider-shaped
 // options). WHO runs it — the provider instance — is always the separate
 // providerInstanceId field wherever a selection travels; the two are never
@@ -256,6 +268,17 @@ type ConfigOption struct {
 	Description  string               `json:"description,omitempty"`
 	Choices      []ConfigChoice       `json:"choices,omitempty"`
 	CurrentValue any                  `json:"currentValue,omitempty"`
+}
+
+// CurrentConfigString returns the current value of the select option optionID.
+func CurrentConfigString(options []ConfigOption, optionID string) (string, bool) {
+	for _, option := range options {
+		if option.ID == optionID {
+			value, ok := option.CurrentValue.(string)
+			return value, ok
+		}
+	}
+	return "", false
 }
 
 // Session is the provider-neutral session projection returned by a provider
@@ -538,6 +561,74 @@ const (
 	ToolActionView       ToolAction = "view"
 	ToolActionOther      ToolAction = "other"
 )
+
+// toolNameActions classifies tool names by fragment; the first match wins.
+var toolNameActions = []struct {
+	action    ToolAction
+	fragments []string
+}{
+	{ToolActionDelete, []string{"delete", "remove", "unlink"}},
+	{ToolActionMove, []string{"move", "rename"}},
+	{ToolActionEdit, []string{"edit", "write", "patch", "apply"}},
+	{ToolActionSearch, []string{"search", "find", "grep", "glob"}},
+	{ToolActionRead, []string{"read", "list", "stat"}},
+	{ToolActionExecute, []string{"exec", "shell", "command", "terminal", "bash"}},
+	{ToolActionFetch, []string{"fetch", "http", "download"}},
+	{ToolActionThink, []string{"think"}},
+	{ToolActionDelegate, []string{"spawn", "delegate", "agent", "task", "sendinput"}},
+	{ToolActionView, []string{"view", "image"}},
+}
+
+// ToolActionFromName infers the semantic action of a tool known only by its
+// name (MCP and other dynamic tools), defaulting to ToolActionOther.
+func ToolActionFromName(name string) ToolAction {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	for _, rule := range toolNameActions {
+		for _, fragment := range rule.fragments {
+			if strings.Contains(normalized, fragment) {
+				return rule.action
+			}
+		}
+	}
+	return ToolActionOther
+}
+
+// identifierWords overrides how individual identifier words are displayed.
+var identifierWords = map[string]string{
+	"api": "API", "gpt": "GPT", "id": "ID", "mcp": "MCP", "url": "URL",
+	"xhigh": "extra high", "xlow": "extra low",
+}
+
+// HumanizeIdentifier turns a native identifier (snake_case, kebab-case,
+// camelCase, dotted or slashed) into a sentence-case label such as
+// "Get MCP status" for item titles and choice labels without a native one.
+func HumanizeIdentifier(value string) string {
+	var spaced []rune
+	var previous rune
+	for _, current := range strings.TrimSpace(value) {
+		switch {
+		case current == '_' || current == '-' || current == '.' || current == '/':
+			current = ' '
+		case unicode.IsUpper(current) && (unicode.IsLower(previous) || unicode.IsDigit(previous)):
+			spaced = append(spaced, ' ')
+		}
+		spaced = append(spaced, current)
+		previous = current
+	}
+	words := strings.Fields(string(spaced))
+	for index, word := range words {
+		word = strings.ToLower(word)
+		if override, ok := identifierWords[word]; ok {
+			word = override
+		}
+		words[index] = word
+	}
+	label := []rune(strings.Join(words, " "))
+	if len(label) > 0 {
+		label[0] = unicode.ToUpper(label[0])
+	}
+	return string(label)
+}
 
 type ToolLocation struct {
 	Path string  `json:"path"`

@@ -214,10 +214,10 @@ func TestTurnLifecycleWithApproval(t *testing.T) {
 	if result.Session.ProviderSessionID == "" || result.Session.ThreadID != "thread-1" {
 		t.Fatalf("session = %#v", result.Session)
 	}
-	if model, ok := currentConfigString(result.Session.ConfigOptions, "model"); !ok || model != "default" {
+	if model, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "model"); !ok || model != "default" {
 		t.Fatalf("model option = %q %v", model, ok)
 	}
-	if mode, ok := currentConfigString(result.Session.ConfigOptions, "permission_mode"); !ok || mode != "default" {
+	if mode, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "permission_mode"); !ok || mode != "default" {
 		t.Fatalf("mode option = %q %v", mode, ok)
 	}
 	metadata := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {

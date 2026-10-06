@@ -343,7 +343,7 @@ func transcriptSummary(path string) (title, cwd string) {
 						}
 					}
 				}
-				firstPrompt = strings.Join(strings.Fields(text), " ")
+				firstPrompt = provider.PromptPreviewTitle(text)
 			}
 		}
 		if title != "" && cwd != "" && firstPrompt != "" {
@@ -351,7 +351,7 @@ func transcriptSummary(path string) (title, cwd string) {
 		}
 	}
 	if title == "" {
-		title = boundedRunes(firstPrompt, 120)
+		title = firstPrompt
 	}
 	return title, cwd
 }

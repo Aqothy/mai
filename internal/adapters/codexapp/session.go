@@ -98,7 +98,7 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	skills, _ := h.listSkills(ctx, []string{input.Cwd})
 	h.mu.Lock()
 	options := configOptionsFromModels(h.models, model, effort, serviceTier)
-	serviceTier, _ = currentConfigString(options, "service_tier")
+	serviceTier, _ = provider.CurrentConfigString(options, "service_tier")
 	session := provisional
 	if session == nil {
 		session = newSessionState(input.ThreadID, response.Thread.ID, input.Cwd)
@@ -326,14 +326,14 @@ func (h *Instance) SetConfigOption(_ context.Context, input provider.SetConfigOp
 		return fmt.Errorf("Codex config option %q is not supported", input.OptionID)
 	}
 	options := configOptionsFromModels(h.models, model, effort, serviceTier)
-	current, present := currentConfigString(options, input.OptionID)
+	current, present := provider.CurrentConfigString(options, input.OptionID)
 	if !present || current != value {
 		h.mu.Unlock()
 		return fmt.Errorf("Codex config option %q does not accept value %q", input.OptionID, value)
 	}
-	model, _ = currentConfigString(options, "model")
-	effort, _ = currentConfigString(options, "reasoning_effort")
-	serviceTier, _ = currentConfigString(options, "service_tier")
+	model, _ = provider.CurrentConfigString(options, "model")
+	effort, _ = provider.CurrentConfigString(options, "reasoning_effort")
+	serviceTier, _ = provider.CurrentConfigString(options, "service_tier")
 	session.model = model
 	session.effort = effort
 	session.serviceTier = serviceTier

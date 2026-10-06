@@ -407,7 +407,7 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 	case "effort":
 		h.mu.Lock()
 		options := h.configOptionsLocked(session.model, value, session.permissionMode)
-		current, present := currentConfigString(options, "effort")
+		current, present := provider.CurrentConfigString(options, "effort")
 		if !present || current != value {
 			h.mu.Unlock()
 			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)

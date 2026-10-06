@@ -383,7 +383,7 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 	case "collabAgentToolCall":
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, collabToolCall(item), collabTitle(item.Tool))
 	case "subAgentActivity":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, subagentToolCall(item), "Agent "+humanizeIdentifier(item.Kind))
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, subagentToolCall(item), "Agent "+provider.HumanizeIdentifier(item.Kind))
 	case "webSearch":
 		event.Payload = toolPayload(item, provider.ItemKindWebSearch, status, webSearchToolCall(item), webSearchTitle(item))
 	case "imageView":
@@ -393,17 +393,17 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 	case "contextCompaction":
 		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: status, Title: "Compacted context"}
 	case "enteredReviewMode", "exitedReviewMode":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), humanizeIdentifier(item.Type))
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), provider.HumanizeIdentifier(item.Type))
 	case "sleep":
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, sleepToolCall(item), "Waited")
 	default:
 		event.Payload = provider.RuntimeEventPayload{
 			ItemType:   provider.ItemKindToolCall,
 			ItemStatus: status,
-			Title:      humanizeIdentifier(item.Type),
+			Title:      provider.HumanizeIdentifier(item.Type),
 			ToolCall: &provider.ToolCall{
 				Action:       provider.ToolActionOther,
-				Name:         humanizeIdentifier(item.Type),
+				Name:         provider.HumanizeIdentifier(item.Type),
 				ProviderKind: item.Type,
 			},
 		}
@@ -504,7 +504,7 @@ func fileChangeToolCall(item appItem) *provider.ToolCall {
 
 func mcpToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               semanticToolAction(item.Tool),
+		Action:               provider.ToolActionFromName(item.Tool),
 		Name:                 item.Tool,
 		Namespace:            item.Server,
 		ProviderKind:         item.Type,
@@ -577,7 +577,7 @@ func mcpResultContent(result appMCPResult) (string, []provider.Attachment) {
 
 func dynamicToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               semanticToolAction(item.Tool),
+		Action:               provider.ToolActionFromName(item.Tool),
 		Name:                 item.Tool,
 		Namespace:            stringValue(item.Namespace),
 		ProviderKind:         item.Type,
@@ -626,7 +626,7 @@ func collabToolCall(item appItem) *provider.ToolCall {
 func subagentToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
 		Action:       provider.ToolActionDelegate,
-		Name:         humanizeIdentifier(item.Kind),
+		Name:         provider.HumanizeIdentifier(item.Kind),
 		Namespace:    "collaboration",
 		ProviderKind: item.Type,
 		Output:       strings.TrimSpace(item.AgentThreadID),
@@ -698,7 +698,7 @@ func imageGenerationToolCall(item appItem) *provider.ToolCall {
 func reviewModeToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
 		Action:       provider.ToolActionSwitchMode,
-		Name:         humanizeIdentifier(item.Type),
+		Name:         provider.HumanizeIdentifier(item.Type),
 		ProviderKind: item.Type,
 		Output:       boundedAppOutput(item.Review),
 	}
@@ -713,43 +713,8 @@ func sleepToolCall(item appItem) *provider.ToolCall {
 	}
 }
 
-func semanticToolAction(name string) provider.ToolAction {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case containsAny(normalized, "delete", "remove", "unlink"):
-		return provider.ToolActionDelete
-	case containsAny(normalized, "move", "rename"):
-		return provider.ToolActionMove
-	case containsAny(normalized, "edit", "write", "patch", "apply"):
-		return provider.ToolActionEdit
-	case containsAny(normalized, "search", "find", "grep", "glob"):
-		return provider.ToolActionSearch
-	case containsAny(normalized, "read", "list", "stat"):
-		return provider.ToolActionRead
-	case containsAny(normalized, "exec", "shell", "command", "terminal", "bash"):
-		return provider.ToolActionExecute
-	case containsAny(normalized, "fetch", "http", "download"):
-		return provider.ToolActionFetch
-	case containsAny(normalized, "spawn", "delegate", "agent", "sendinput"):
-		return provider.ToolActionDelegate
-	case containsAny(normalized, "view", "image"):
-		return provider.ToolActionView
-	default:
-		return provider.ToolActionOther
-	}
-}
-
-func containsAny(value string, fragments ...string) bool {
-	for _, fragment := range fragments {
-		if strings.Contains(value, fragment) {
-			return true
-		}
-	}
-	return false
-}
-
 func collabTitle(tool string) string {
-	title := humanizeIdentifier(tool)
+	title := provider.HumanizeIdentifier(tool)
 	if title == "" {
 		return "Agent collaboration"
 	}
@@ -911,7 +876,7 @@ func threadTitle(thread appThread) string {
 	if thread.Name != nil && strings.TrimSpace(*thread.Name) != "" {
 		return strings.TrimSpace(*thread.Name)
 	}
-	return boundedRunes(strings.Join(strings.Fields(thread.Preview), " "), 120)
+	return provider.PromptPreviewTitle(thread.Preview)
 }
 
 func formatOptionalTimestamp(value time.Time) string {
@@ -987,7 +952,7 @@ func configOptionsFromModels(models []appModel, selectedModel, selectedEffort, s
 			validTiers[value] = struct{}{}
 			label := strings.TrimSpace(tier.Name)
 			if label == "" {
-				label = humanizeIdentifier(value)
+				label = provider.HumanizeIdentifier(value)
 			}
 			tierChoices = append(tierChoices, provider.ConfigChoice{Value: value, Label: label, Description: strings.TrimSpace(tier.Description)})
 		}
@@ -1016,7 +981,7 @@ func configOptionsFromModels(models []appModel, selectedModel, selectedEffort, s
 		validEffort[value] = struct{}{}
 		effortChoices = append(effortChoices, provider.ConfigChoice{
 			Value:       value,
-			Label:       humanizeIdentifier(value),
+			Label:       provider.HumanizeIdentifier(value),
 			Description: strings.TrimSpace(effort.Description),
 		})
 	}
@@ -1040,17 +1005,6 @@ func configOptionsFromModels(models []appModel, selectedModel, selectedEffort, s
 		CurrentValue: effort,
 	})
 	return options
-}
-
-func currentConfigString(options []provider.ConfigOption, optionID string) (string, bool) {
-	for _, option := range options {
-		if option.ID != optionID {
-			continue
-		}
-		value, ok := option.CurrentValue.(string)
-		return value, ok
-	}
-	return "", false
 }
 
 func modelSlug(model appModel) string {
@@ -1144,17 +1098,6 @@ func boundedAppOutput(value string) string {
 	return value[:cut]
 }
 
-func boundedRunes(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit])
-}
-
 func compactRawJSON(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -1168,44 +1111,6 @@ func compactRawJSON(raw json.RawMessage) string {
 		return ""
 	}
 	return boundedAppOutput(string(encoded))
-}
-
-func humanizeIdentifier(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	var result []rune
-	var previous rune
-	for index, current := range []rune(value) {
-		if current == '_' || current == '-' || current == '.' || current == '/' {
-			if len(result) > 0 && result[len(result)-1] != ' ' {
-				result = append(result, ' ')
-			}
-			previous = current
-			continue
-		}
-		if index > 0 && unicode.IsUpper(current) && (unicode.IsLower(previous) || unicode.IsDigit(previous)) && len(result) > 0 && result[len(result)-1] != ' ' {
-			result = append(result, ' ')
-		}
-		result = append(result, current)
-		previous = current
-	}
-	words := strings.Fields(string(result))
-	for index, word := range words {
-		lower := strings.ToLower(word)
-		switch lower {
-		case "gpt", "mcp", "api", "url", "id", "xhigh", "xlow":
-			words[index] = strings.ToUpper(lower)
-		default:
-			runes := []rune(lower)
-			if len(runes) > 0 {
-				runes[0] = unicode.ToUpper(runes[0])
-			}
-			words[index] = string(runes)
-		}
-	}
-	return strings.Join(words, " ")
 }
 
 func stringValue(value *string) string {

@@ -56,7 +56,7 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	if result.Session.ProviderSessionID != "native-thread" {
 		t.Fatalf("provider session id = %q", result.Session.ProviderSessionID)
 	}
-	if tier, ok := currentConfigString(result.Session.ConfigOptions, "service_tier"); !ok || tier != defaultServiceTier {
+	if tier, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "service_tier"); !ok || tier != defaultServiceTier {
 		t.Fatalf("default service tier = %q, %v; options = %#v", tier, ok, result.Session.ConfigOptions)
 	}
 	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello"}); err != nil {
@@ -184,7 +184,7 @@ func TestServiceTierFlowsThroughSessionAndTurnRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start tiered session: %v", err)
 	}
-	tier, ok := currentConfigString(result.Session.ConfigOptions, "service_tier")
+	tier, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "service_tier")
 	if !ok || tier != "priority" {
 		t.Fatalf("session service tier = %q, %v; options = %#v", tier, ok, result.Session.ConfigOptions)
 	}
@@ -208,7 +208,7 @@ func TestReasoningEffortFlowsThroughNewAndResumedSessions(t *testing.T) {
 				if err != nil {
 					t.Fatalf("start session: %v", err)
 				}
-				if got, ok := currentConfigString(result.Session.ConfigOptions, "reasoning_effort"); !ok || got != want {
+				if got, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "reasoning_effort"); !ok || got != want {
 					t.Fatalf("session effort = %q, %v; want %q", got, ok, want)
 				}
 				if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello"}); err != nil {
@@ -227,7 +227,7 @@ func TestAuthoritativeNullServiceTierRemainsStandard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume session: %v", err)
 	}
-	tier, ok := currentConfigString(result.Session.ConfigOptions, "service_tier")
+	tier, ok := provider.CurrentConfigString(result.Session.ConfigOptions, "service_tier")
 	if !ok || tier != defaultServiceTier {
 		t.Fatalf("authoritative null tier = %q, %v; options = %#v", tier, ok, result.Session.ConfigOptions)
 	}
