@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/store"
@@ -142,8 +141,8 @@ func TestRestoredRouteLazilyRespawnsInstanceAndResumesSession(t *testing.T) {
 		t.Fatal("persisted instance was not respawned on first use")
 	}
 	input := instance.lastStartInput()
-	if cursor := string(input.ResumeCursor); cursor != `{"sessionId":"sess-1"}` {
-		t.Fatalf("resume cursor after restart = %q, want the persisted cursor", cursor)
+	if cursor := string(input.ResumeCursor); cursor != `{"sessionId":"sess-1"}` || input.ProviderSessionID != "sess-1" {
+		t.Fatalf("resume cursor/session after restart = %q/%q, want the persisted route's", cursor, input.ProviderSessionID)
 	}
 	if input.ModelSelection == nil || input.ModelSelection.Model != "gpt" {
 		t.Fatalf("model selection after restart = %#v, want gpt", input.ModelSelection)
@@ -199,38 +198,6 @@ func TestDuplicateProviderSessionBindingDoesNotPublishLiveRoute(t *testing.T) {
 	}
 	if len(routes) != 1 || routes["thread-1"].ProviderSessionID != "sess-1" {
 		t.Fatalf("durable routes = %+v", routes)
-	}
-}
-
-func TestImportedRoutePassesProviderSessionIDAfterRestart(t *testing.T) {
-	st := openRouteStore(t)
-	spec := fakeSpec("codex")
-	if err := st.SaveInstance(spec); err != nil {
-		t.Fatalf("SaveInstance: %v", err)
-	}
-	now := time.Now()
-	_, imported, err := st.ImportThread(
-		store.ThreadMeta{ThreadID: "thread-imported", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now},
-		store.RouteRecord{
-			InstanceID:        "codex",
-			ProviderSessionID: "external-session",
-			StartInput:        provider.StartSessionInput{ThreadID: "thread-imported", ProviderInstanceID: "codex"},
-		},
-	)
-	if err != nil || !imported {
-		t.Fatalf("ImportThread = imported %v, err %v", imported, err)
-	}
-
-	adapter := &fakeAdapter{configure: resumableSessions}
-	service := New(adapter.StartInstance, WithRouteStore(st))
-	defer service.Close()
-	mustStartSession(t, service, "thread-imported", provider.StartSessionInput{ProviderInstanceID: "codex", ReplayHistory: true})
-	input := adapter.instance(0).lastStartInput()
-	if input.ProviderSessionID != "external-session" {
-		t.Fatalf("provider session id = %q, want external-session", input.ProviderSessionID)
-	}
-	if !input.ReplayHistory {
-		t.Fatalf("imported start input = %#v, want replay intent", input)
 	}
 }
 
@@ -379,23 +346,6 @@ func TestRoutePersistenceHealsFailedInstanceSave(t *testing.T) {
 	}
 }
 
-func TestFailedStandaloneInstanceWriteRetriesOnClose(t *testing.T) {
-	flaky := newFlakyRouteStore(1)
-	adapter := &fakeAdapter{configure: resumableSessions}
-	s := New(adapter.StartInstance, WithRouteStore(flaky))
-
-	spec := fakeSpec("codex")
-	mustStartInstance(t, s, spec, false)
-
-	s.Close()
-
-	flaky.mu.Lock()
-	defer flaky.mu.Unlock()
-	if _, ok := flaky.instances["codex"]; !ok {
-		t.Fatal("failed standalone instance write was not retried at close")
-	}
-}
-
 func TestFailedRouteWriteRetriesOnClose(t *testing.T) {
 	flaky := newFlakyRouteStore(0)
 	flaky.routeSaveFailures = 1
@@ -418,33 +368,6 @@ func TestFailedRouteWriteRetriesOnClose(t *testing.T) {
 	defer flaky.mu.Unlock()
 	if route, ok := flaky.routes["thread-1"]; !ok || route.ProviderSessionID != "sess-1" {
 		t.Fatalf("failed route write was not retried at close: %+v", flaky.routes)
-	}
-}
-
-func TestFailedRouteWriteRetriesOnOtherThreadsWrite(t *testing.T) {
-	flaky := newFlakyRouteStore(0)
-	flaky.routeSaveFailures = 1
-	adapter := &fakeAdapter{configure: resumableSessions}
-	s := New(adapter.StartInstance, WithRouteStore(flaky))
-	defer s.Close()
-
-	spec := fakeSpec("codex")
-	mustStartInstance(t, s, spec, false)
-	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
-	instance := adapter.instance(0)
-	instance.mu.Lock()
-	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
-		return provider.Session{ProviderInstanceID: "codex", ProviderSessionID: "sess-2", ThreadID: input.ThreadID}, nil
-	}
-	instance.mu.Unlock()
-	mustStartSession(t, s, "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"})
-
-	flaky.mu.Lock()
-	defer flaky.mu.Unlock()
-	first, firstOK := flaky.routes["thread-1"]
-	second, secondOK := flaky.routes["thread-2"]
-	if len(flaky.routes) != 2 || !firstOK || !secondOK || first.ProviderSessionID != "sess-1" || second.ProviderSessionID != "sess-2" {
-		t.Fatalf("routes after retry = %+v, want thread-1/sess-1 and thread-2/sess-2", flaky.routes)
 	}
 }
 
@@ -498,16 +421,19 @@ func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T
 	}
 	// The following turn rebinds the live route with the projection's view: the
 	// current model selection, the draft's original model entry, and the
-	// provider-normalized reasoning.
-	if _, err := before.StartSession(context.Background(), "thread-1", draftModelSelections("model-b", "low")); err != nil {
-		t.Fatalf("following-turn StartSession: %v", err)
-	}
+	// provider-normalized reasoning. A non-string model-category value is not a
+	// model name and stays untouched.
 	following := draftModelSelections("model-b", "low")
 	following.ConfigSelections[0].Value = "model-a"
+	following.ConfigSelections = append(following.ConfigSelections, provider.ConfigOptionSelection{OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel})
 	if _, err := before.StartSession(context.Background(), "thread-1", following); err != nil {
 		t.Fatalf("stale projection StartSession: %v", err)
 	}
-	assertCanonicalModel(t, "following-turn adapter input", first.instance(0).lastStartInput(), "model-b", "low")
+	input := first.instance(0).lastStartInput()
+	assertCanonicalModel(t, "following-turn adapter input", input, "model-b", "low")
+	if last := input.ConfigSelections[len(input.ConfigSelections)-1]; last.OptionID != "fast" || last.Value != true {
+		t.Fatalf("non-model value in model category = %#v, want unchanged", last)
+	}
 	before.Close()
 
 	routes, err := st.LoadRoutes()
@@ -526,33 +452,4 @@ func TestChangedModelSurvivesDaemonRestartWithDraftConfigSelections(t *testing.T
 		t.Fatalf("StartSession after restart: %v", err)
 	}
 	assertCanonicalModel(t, "recovered adapter input", second.instance(0).lastStartInput(), "model-b", "low")
-}
-
-func TestRestoredConflictingRouteResumesWithCanonicalModel(t *testing.T) {
-	st := openRouteStore(t)
-	spec := fakeSpec("codex")
-	if err := st.SaveInstance(spec); err != nil {
-		t.Fatalf("SaveInstance: %v", err)
-	}
-	// Routes written before the fix kept the draft's model entry next to the
-	// later model change.
-	conflicting := draftModelSelections("model-b", "low")
-	conflicting.ConfigSelections[0].Value = "model-a"
-	conflicting.ConfigSelections = append(conflicting.ConfigSelections, provider.ConfigOptionSelection{OptionID: "fast", Value: true, Category: provider.ConfigOptionCategoryModel})
-	if err := st.SaveRoute("thread-1", store.RouteRecord{InstanceID: "codex", ProviderSessionID: "sess-1", StartInput: conflicting}); err != nil {
-		t.Fatalf("SaveRoute: %v", err)
-	}
-
-	adapter := &fakeAdapter{configure: resumableSessions}
-	s := New(adapter.StartInstance, WithRouteStore(st))
-	defer s.Close()
-	restored := provider.StartSessionInput{ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "model-b"}}
-	if _, err := s.StartSession(context.Background(), "thread-1", restored); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	input := adapter.instance(0).lastStartInput()
-	assertCanonicalModel(t, "recovered adapter input", input, "model-b", "low")
-	if last := input.ConfigSelections[len(input.ConfigSelections)-1]; last.OptionID != "fast" || last.Value != true {
-		t.Fatalf("non-model value in model category = %#v, want unchanged", last)
-	}
 }

@@ -542,9 +542,6 @@ func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec,
 	if spec.Driver == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("%s requires a provider driver", action)
 	}
-	if s.openInstance == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("%s: no adapter factory configured", action)
-	}
 	spec = cloneInstanceSpec(spec)
 
 	lock := s.startLock(spec.InstanceID)
@@ -985,9 +982,6 @@ func (s *Service) releaseThreadRouteForSwitch(ctx context.Context, threadID stri
 // provider session. Provider switches call this as soon as the canonical
 // thread projection clears the binding, rather than waiting for another turn.
 func (s *Service) ReleaseSession(ctx context.Context, input provider.StopSessionInput) error {
-	if input.ThreadID == "" {
-		return nil
-	}
 	route := s.routeForThread(input.ThreadID)
 	if route.InstanceID == "" {
 		return nil
@@ -1069,9 +1063,6 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 }
 
 func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
-	if input.ThreadID == "" {
-		return fmt.Errorf("provider turn route requires threadId")
-	}
 	return s.withThreadInstance(ctx, input.ThreadID, true, "send", func(instance ProviderInstance) error {
 		var err error
 		input, err = s.preparePromptPresentation(instance, input)
@@ -1267,9 +1258,6 @@ func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondTo
 }
 
 func (s *Service) bindThreadSession(threadID string, instanceID provider.InstanceID, generation uint64, providerSessionID string, resumeCursor json.RawMessage, startInput provider.StartSessionInput) error {
-	if threadID == "" || instanceID == "" {
-		return nil
-	}
 	route := threadRoute{
 		InstanceID:        instanceID,
 		Generation:        generation,

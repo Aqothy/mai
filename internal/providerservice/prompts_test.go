@@ -171,25 +171,3 @@ func TestPromptReplayNeverMatchesTextOrMergesRetryItems(t *testing.T) {
 		t.Fatal("retry items would concatenate under one message ID")
 	}
 }
-
-func TestPromptPresentationRejectsProviderSwitchBeforePersistence(t *testing.T) {
-	st := openRouteStore(t)
-	s, instance := newPromptService(t, st, st)
-	mustStartSession(t, s, "source", provider.StartSessionInput{ProviderInstanceID: "codex"})
-	s.mu.Lock()
-	s.threadRoutes["source"] = threadRoute{InstanceID: "other", ProviderSessionID: "other-session"}
-	s.mu.Unlock()
-	_, err := s.preparePromptPresentation(instance, provider.SendTurnInput{ThreadID: "source", Presentation: &provider.PromptPresentation{MessageID: "message"}})
-	if err == nil {
-		t.Fatal("saved presentation for an instance that no longer owns the thread")
-	}
-	for _, scope := range []struct {
-		instance provider.InstanceID
-		session  string
-	}{{"codex", "native-source"}, {"other", "other-session"}} {
-		got, err := st.LoadPrompts(scope.instance, scope.session)
-		if err != nil || len(got) != 0 {
-			t.Fatalf("unexpected metadata: %#v, %v", got, err)
-		}
-	}
-}

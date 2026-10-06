@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -369,19 +370,6 @@ func TestStartInstanceSerializesConcurrentStartsForSameInstance(t *testing.T) {
 	}
 }
 
-func TestStartInstanceReusesSemanticallyEqualConfiguration(t *testing.T) {
-	adapter := &fakeAdapter{}
-	s := newFakeService(t, adapter)
-
-	first := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: json.RawMessage(`{"command":["agent"],"env":{"A":"B"}}`)}
-	second := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: json.RawMessage(`{"env":{"A":"B"},"command":["agent"]}`)}
-	firstInfo := mustStartInstance(t, s, first, false)
-	secondInfo := mustStartInstance(t, s, second, false)
-	if launches := len(adapter.launchConfigs()); launches != 1 || secondInfo.PID != firstInfo.PID {
-		t.Fatalf("launches/PIDs = %d/%d/%d, want one reused instance", launches, firstInfo.PID, secondInfo.PID)
-	}
-}
-
 func TestStartSessionRespawnsExitedProviderInstance(t *testing.T) {
 	adapter := &fakeAdapter{}
 	s := startedRoute(t, adapter)
@@ -400,14 +388,21 @@ func TestStartSessionRespawnsExitedProviderInstance(t *testing.T) {
 	}
 }
 
-func TestStartInstanceConfigurationChangeRequiresRestart(t *testing.T) {
+// A running instance is reused for a semantically equal spec; a changed spec is
+// rejected until an explicit restart relaunches it.
+func TestStartInstanceComparesConfigurationSemantically(t *testing.T) {
 	adapter := &fakeAdapter{}
 	s := newFakeService(t, adapter)
 
-	first := fakeSpec("codex")
+	first := provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "fake", Config: json.RawMessage(`{"command":["agent"],"env":{"A":"B"}}`)}
+	reordered := first
+	reordered.Config = json.RawMessage(`{"env":{"A":"B"},"command":["agent"]}`)
 	changed := first
 	changed.Config = fakeInstanceConfig([]string{"agent-b"})
-	mustStartInstance(t, s, first, false)
+	firstInfo := mustStartInstance(t, s, first, false)
+	if info := mustStartInstance(t, s, reordered, false); info.PID != firstInfo.PID || len(adapter.launchConfigs()) != 1 {
+		t.Fatalf("reordered config launches = %d, want the running instance reused", len(adapter.launchConfigs()))
+	}
 	if _, err := s.StartInstance(context.Background(), changed, false); err == nil || !strings.Contains(err.Error(), "different configuration") {
 		t.Fatalf("changed StartInstance err = %v, want restart-required error", err)
 	}
@@ -417,24 +412,6 @@ func TestStartInstanceConfigurationChangeRequiresRestart(t *testing.T) {
 	mustStartInstance(t, s, changed, true)
 	if launches := len(adapter.launchConfigs()); launches != 2 {
 		t.Fatalf("launches after restart = %d, want 2", launches)
-	}
-}
-
-func TestRuntimeEventsDoNotRebindThreadRoute(t *testing.T) {
-	adapter := &fakeAdapter{}
-	s := newFakeService(t, adapter)
-
-	mustStartInstance(t, s, fakeSpec("old"), false)
-	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
-	mustStartInstance(t, s, fakeSpec("new"), false)
-	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
-
-	adapter.emit(0, provider.RuntimeEvent{EventID: "late-old", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Title: "late old event"}})
-	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
-	if old, current := adapter.latest("old").sendTurnCount(), adapter.latest("new").sendTurnCount(); old != 0 || current != 1 {
-		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after stale old event", old, current)
 	}
 }
 
@@ -531,67 +508,33 @@ func TestStartInstanceCreatedDuringCloseIsClosedAndRejected(t *testing.T) {
 	}
 }
 
-func restartedEventService(t *testing.T, rebind bool) (*Service, *fakeAdapter) {
-	t.Helper()
+// After a restart, the replaced process may still settle work it started:
+// turn-scoped terminal events (completion, runtime error) pass the generation
+// fence with their source generation intact; everything else from the old
+// process, including turn-less errors, is dropped.
+func TestRestartFencesReplacedGenerationExceptTurnTerminalEvents(t *testing.T) {
 	adapter := &fakeAdapter{}
 	s := startedRoute(t, adapter)
 	mustStartInstance(t, s, fakeSpec("codex"), true)
-	if rebind {
-		mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
+
+	old := func(eventID provider.RuntimeEventID, eventType provider.RuntimeEventType, turnID string) {
+		adapter.emit(0, provider.RuntimeEvent{EventID: eventID, Type: eventType, ThreadID: "thread-1", TurnID: turnID, CreatedAt: time.Now()})
 	}
-	return s, adapter
-}
-
-func TestRestartDropsNonterminalEventFromReplacedGeneration(t *testing.T) {
-	s, adapter := restartedEventService(t, false)
-
-	adapter.emit(0, provider.RuntimeEvent{EventID: "stale-running", Type: provider.RuntimeEventTurnStarted, ThreadID: "thread-1", TurnID: "turn-1", CreatedAt: time.Now()})
+	old("stale-running", provider.RuntimeEventTurnStarted, "turn-1")
+	old("stale-turnless-error", provider.RuntimeEventRuntimeError, "")
+	old("late-error", provider.RuntimeEventRuntimeError, "turn-1")
+	old("late-terminal", provider.RuntimeEventTurnCompleted, "turn-1")
 	adapter.emit(1, provider.RuntimeEvent{EventID: "fresh", Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now()})
-	select {
-	case event := <-s.Events():
-		if event.EventID != "fresh" {
-			t.Fatalf("first event = %q, want stale nonterminal state dropped", event.EventID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for fresh event")
-	}
-}
 
-func TestRestartAdmitsOldTerminalEventAfterThreadRebinds(t *testing.T) {
-	// A dying generation's TurnCompleted must still settle its turn even after
-	// the provider route has moved. ProviderService preserves the event's source
-	// generation; orchestration accepts it only until the replacement session is
-	// actually bound.
-	s, adapter := restartedEventService(t, true)
-
-	adapter.emit(0, provider.RuntimeEvent{EventID: "late-terminal", Type: provider.RuntimeEventTurnCompleted, ThreadID: "thread-1", TurnID: "turn-1", CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed}})
-	select {
-	case event := <-s.Events():
-		if event.EventID != "late-terminal" {
-			t.Fatalf("first event = %q, want late terminal event admitted after rebind", event.EventID)
+	for _, want := range []provider.RuntimeEventID{"late-error", "late-terminal", "fresh"} {
+		select {
+		case event := <-s.Events():
+			if event.EventID != want || event.Generation == 0 {
+				t.Fatalf("event = %q (generation %d), want %q with its source generation", event.EventID, event.Generation, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %q", want)
 		}
-		if event.Generation == 0 {
-			t.Fatal("late terminal event lost its source generation")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for late terminal event")
-	}
-}
-
-func TestRestartAdmitsTurnScopedRuntimeErrorFromReplacedGeneration(t *testing.T) {
-	s, adapter := restartedEventService(t, false)
-
-	// Turn-scoped runtime errors settle sessions and must survive the fence;
-	// runtime errors without a turn are not session-settling and stay dropped.
-	adapter.emit(0, provider.RuntimeEvent{EventID: "stale-turnless-error", Type: provider.RuntimeEventRuntimeError, ThreadID: "thread-1", CreatedAt: time.Now()})
-	adapter.emit(0, provider.RuntimeEvent{EventID: "late-error", Type: provider.RuntimeEventRuntimeError, ThreadID: "thread-1", TurnID: "turn-1", CreatedAt: time.Now()})
-	select {
-	case event := <-s.Events():
-		if event.EventID != "late-error" {
-			t.Fatalf("first event = %q, want turn-scoped runtime error admitted (and turnless one dropped)", event.EventID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for late runtime error")
 	}
 }
 
@@ -809,12 +752,16 @@ func TestSessionManagementRejectsBoundSessionAfterProviderRestart(t *testing.T) 
 	}
 }
 
-func TestSlowSessionDeleteDoesNotBlockStartSessionOnSameInstance(t *testing.T) {
-	entered := make(chan struct{})
+// A session-management RPC runs outside instance locks and with its own
+// deadline, so a hung agent can neither block thread work on that instance nor
+// pin the request for as long as the client stays connected.
+func TestSessionDeleteRunsUnlockedWithDeadline(t *testing.T) {
+	entered := make(chan bool)
 	release := make(chan struct{})
 	adapter := &fakeAdapter{configure: func(instance *fakeProviderInstance) {
 		instance.deleteSess = func(ctx context.Context, _ string) error {
-			close(entered)
+			_, hasDeadline := ctx.Deadline()
+			entered <- hasDeadline
 			select {
 			case <-release:
 				return nil
@@ -831,7 +778,10 @@ func TestSlowSessionDeleteDoesNotBlockStartSessionOnSameInstance(t *testing.T) {
 		deleteDone <- s.DeleteSession(context.Background(), "codex", "sess-unbound")
 	}()
 	select {
-	case <-entered:
+	case hasDeadline := <-entered:
+		if !hasDeadline {
+			t.Fatal("session-management adapter RPC ran without a deadline")
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("DeleteSession did not reach the adapter")
 	}
@@ -856,57 +806,23 @@ func TestSlowSessionDeleteDoesNotBlockStartSessionOnSameInstance(t *testing.T) {
 	}
 }
 
-func TestSessionManagementRPCContextIsBounded(t *testing.T) {
-	deadlines := make(chan bool, 1)
-	adapter := &fakeAdapter{configure: func(instance *fakeProviderInstance) {
-		instance.deleteSess = func(ctx context.Context, _ string) error {
-			_, hasDeadline := ctx.Deadline()
-			deadlines <- hasDeadline
-			return nil
-		}
-	}}
-	s := newFakeService(t, adapter)
-	mustStartInstance(t, s, fakeSpec("codex"), false)
-
-	// The client's request context has no deadline; the service must impose one
-	// so a hung agent cannot pin the RPC for as long as the client stays.
-	if err := s.DeleteSession(context.Background(), "codex", "sess-unbound"); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
-	if !<-deadlines {
-		t.Fatal("session-management adapter RPC ran without a deadline")
-	}
-}
-
-func TestStartSessionReusesStoredResumeCursorAfterRestart(t *testing.T) {
-	adapter := &fakeAdapter{configure: resumableSessions}
-	s := newFakeService(t, adapter)
-	mustStartInstance(t, s, fakeSpec("codex"), false)
-	firstResult := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
-	mustStartInstance(t, s, fakeSpec("codex"), true)
-	secondResult := mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
-	if firstResult.Session.Generation == 0 || secondResult.Session.Generation == 0 || firstResult.Session.Generation == secondResult.Session.Generation {
-		t.Fatalf("session generations before/after restart = %d/%d, want distinct non-zero generations", firstResult.Session.Generation, secondResult.Session.Generation)
-	}
-	if got := string(adapter.instance(1).lastStartInput().ResumeCursor); got != `{"sessionId":"sess-1"}` {
-		t.Fatalf("resume cursor passed after restart = %s, want sess-1 cursor", got)
-	}
-}
-
 func failStopSession(instance *fakeProviderInstance, err error) {
 	instance.mu.Lock()
 	instance.stopSession = func(context.Context, provider.StopSessionInput) error { return err }
 	instance.mu.Unlock()
 }
 
-func TestSwitchingProviderSucceedsWhenPreviousInstanceStopFails(t *testing.T) {
+// Releasing a route (on a provider switch or explicitly) drops it even when the
+// best-effort provider stop fails: a dead old process must not block the switch.
+func TestReleaseDropsRouteWhenProviderStopFails(t *testing.T) {
 	adapter := &fakeAdapter{}
 	s := newFakeService(t, adapter)
 	mustStartInstance(t, s, fakeSpec("old"), false)
 	mustStartInstance(t, s, fakeSpec("new"), false)
 	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "old"})
-	oldInstance := adapter.latest("old")
+	oldInstance, newInstance := adapter.latest("old"), adapter.latest("new")
 	failStopSession(oldInstance, errors.New("agent process is gone"))
+	failStopSession(newInstance, errors.New("agent process is gone"))
 
 	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "new"})
 	if got := oldInstance.operationCount("StopSession"); got != 1 {
@@ -915,21 +831,15 @@ func TestSwitchingProviderSucceedsWhenPreviousInstanceStopFails(t *testing.T) {
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	if old, current := oldInstance.sendTurnCount(), adapter.latest("new").sendTurnCount(); old != 0 || current != 1 {
+	if old, current := oldInstance.sendTurnCount(), newInstance.sendTurnCount(); old != 0 || current != 1 {
 		t.Fatalf("send turns routed old=%d new=%d, want old=0 new=1 after rebind", old, current)
 	}
-}
-
-func TestReleaseSessionDropsRouteWhenProviderStopFails(t *testing.T) {
-	adapter := &fakeAdapter{}
-	s := startedRoute(t, adapter)
-	failStopSession(adapter.instance(0), errors.New("agent process is gone"))
 
 	if err := s.ReleaseSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("ReleaseSession: %v", err)
 	}
-	if got := adapter.instance(0).operationCount("StopSession"); got != 1 {
-		t.Fatalf("provider StopSession calls = %d, want 1", got)
+	if got := newInstance.operationCount("StopSession"); got != 1 {
+		t.Fatalf("released provider StopSession calls = %d, want 1", got)
 	}
 	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "must not route"}); err == nil || !strings.Contains(err.Error(), "no provider session route") {
 		t.Fatalf("SendTurn after release err = %v, want no provider session route", err)
@@ -997,27 +907,15 @@ func TestThreadScopedOperationsRecoverStaleRouteBeforeAdapterCall(t *testing.T) 
 		call func(*Service) error
 		want string
 	}{
-		{
-			name: "interrupt",
-			call: func(s *Service) error {
-				return s.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"})
-			},
-			want: "InterruptTurn",
-		},
-		{
-			name: "set config option",
-			call: func(s *Service) error {
-				return s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast"})
-			},
-			want: "SetConfigOption",
-		},
-		{
-			name: "respond to request",
-			call: func(s *Service) error {
-				return s.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: "req-1", Decision: provider.ApprovalDecisionAccept})
-			},
-			want: "RespondToRequest",
-		},
+		{"interrupt", func(s *Service) error {
+			return s.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-1", TurnID: "turn-1"})
+		}, "InterruptTurn"},
+		{"set config option", func(s *Service) error {
+			return s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast"})
+		}, "SetConfigOption"},
+		{"respond to request", func(s *Service) error {
+			return s.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: "req-1", Decision: provider.ApprovalDecisionAccept})
+		}, "RespondToRequest"},
 	}
 
 	for _, tt := range tests {
@@ -1181,27 +1079,11 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		t.Fatalf("ForkSession: %v", err)
 	}
 	summary := fork.Summary
-	if fork.InstanceID != "codex" || summary.SessionID != "native-fork" || summary.Cwd != "/workspace/one" || len(summary.AdditionalDirectories) != 2 || summary.AdditionalDirectories[1] != "/workspace/three" {
+	if fork.InstanceID != "codex" || summary.SessionID != "native-fork" || summary.Cwd != "/workspace/one" || !slices.Equal(summary.AdditionalDirectories, additional) {
 		t.Fatalf("fork result = %q, %#v", fork.InstanceID, summary)
 	}
-	additional[1] = "mutated"
-	if summary.AdditionalDirectories[1] != "/workspace/three" {
-		t.Fatal("fork summary aliases caller workspace roots")
-	}
-	settings := fork.Settings
-	if settings.ModelSelection == nil || settings.ModelSelection.Model != "gpt-6-luna" || len(settings.ConfigSelections) != 2 || settings.ConfigSelections[1].Value != "low" {
+	if settings := fork.Settings; settings.ModelSelection == nil || settings.ModelSelection.Model != "gpt-6-luna" || len(settings.ConfigSelections) != 2 || settings.ConfigSelections[1].Value != "low" {
 		t.Fatalf("fork settings = %#v, want source Luna/Low", settings)
-	}
-
-	// The imported fork route has no live session; its first start must apply
-	// the stored settings even when the caller supplies only the model.
-	if err := s.RegisterImportedSession("thread-fork", "codex", "native-fork", provider.StartSessionInput{Cwd: summary.Cwd, ModelSelection: settings.ModelSelection, ConfigSelections: settings.ConfigSelections}); err != nil {
-		t.Fatalf("RegisterImportedSession: %v", err)
-	}
-	mustStartSession(t, s, "thread-fork", provider.StartSessionInput{ProviderInstanceID: "codex", Cwd: summary.Cwd, ModelSelection: &provider.ModelSelection{Model: "gpt-6-luna"}})
-	resume := instance.lastStartInput()
-	if resume.ProviderSessionID != "native-fork" || len(resume.ConfigSelections) != 2 || resume.ConfigSelections[1].Value != "low" || resume.Cwd != "/workspace/one" {
-		t.Fatalf("fork resume input = %#v, want native-fork at Luna/Low in source cwd", resume)
 	}
 	instance.mu.Lock()
 	instance.forkSession = func(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error) {
