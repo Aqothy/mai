@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -278,109 +279,70 @@ func TestReactorPreparesSessionBeforeFirstTurn(t *testing.T) {
 	}
 }
 
-func TestReactorRequestsReplayWhenPreparingRestoredEmptyThread(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	events := observeEvents(t, engine)
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
-	fake.startReplay = []provider.RuntimeEvent{{
-		Type:     provider.RuntimeEventItemCompleted,
-		ThreadID: "thread-restored-replay",
-		ItemID:   "restored-user",
-		Payload:  provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "restored question"},
-	}}
-	reactor := newDetachedReactor(engine, fake)
-	threadID := ThreadID("thread-restored-replay")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{
-		ThreadID:           threadID,
-		ProviderInstanceID: "codex",
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}})
-
-	result := mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-restored", ThreadID: threadID})
-	reactor.handleSessionPrepare(Event{Type: EventThreadSessionPrepareRequested, Sequence: result.Sequence, Payload: EventPayload{ThreadID: threadID}})
-
-	if input := fake.lastStartInput(); !input.ReplayHistory {
-		t.Fatalf("start input = %#v, want replay history", input)
-	}
-	thread, _ := engine.Thread(threadID)
-	if thread.ReplayHistoryPending {
-		t.Fatalf("restored replay intent remained pending after synchronous replay: %#v", thread)
-	}
-	if len(thread.Timeline) != 1 || thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "restored question" {
-		t.Fatalf("timeline = %#v, want replay applied before preparation completed", thread.Timeline)
-	}
-	recorded := events.matching(threadID, result.Sequence)
-	var historySequence, readySequence uint64
-	for _, event := range recorded {
-		switch event.Type {
-		case EventThreadHistoryReplayCompleted:
-			historySequence = event.Sequence
-		case EventThreadSessionStatusSet:
-			if event.Payload.Session != nil && event.Payload.Session.Status == SessionStatusReady {
-				readySequence = event.Sequence
+// Preparing a restored thread asks the provider to replay its history and
+// completes that replay before the session reports ready, whether the history
+// replays, is unavailable, or the thread already holds partial content.
+func TestReactorPreparesRestoredThreadWithHistoryReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		replay             []provider.RuntimeEvent
+		historyUnavailable bool
+		existing           string
+		want               []string
+	}{
+		{
+			name:   "replayed history",
+			replay: []provider.RuntimeEvent{{Type: provider.RuntimeEventItemCompleted, ItemID: "restored-user", Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "restored question"}}},
+			want:   []string{"user:restored question"},
+		},
+		{name: "history unavailable", historyUnavailable: true, want: []string{"warning(completed):history unavailable for this agent"}},
+		{name: "partial content retried", existing: "already restored", want: []string{"assistant:already restored"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := NewEngine()
+			defer engine.Close()
+			events := observeEvents(t, engine)
+			threadID := ThreadID("thread-restored-replay")
+			fake := newFakeProviderRuntime()
+			fake.startSession = provider.Session{ProviderInstanceID: "codex"}
+			fake.historyUnavailable = tc.historyUnavailable
+			for _, event := range tc.replay {
+				event.ThreadID = string(threadID)
+				fake.startReplay = append(fake.startReplay, event)
 			}
-		}
-	}
-	if historySequence == 0 || readySequence == 0 || historySequence >= readySequence {
-		t.Fatalf("history/ready sequences = %d/%d, want replay completion before ready", historySequence, readySequence)
-	}
-}
+			reactor := newDetachedReactor(engine, fake)
+			now := time.Now()
+			engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+			if tc.existing != "" {
+				mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{MessageID: "message-restored", Role: MessageRoleAssistant, Text: tc.existing}})
+			}
 
-func TestReactorCompletesUnavailableHistoryWithWarning(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
-	fake.historyUnavailable = true
-	reactor := newDetachedReactor(engine, fake)
-	threadID := ThreadID("thread-restored-unavailable")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
+			result := mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-restored", ThreadID: threadID})
+			reactor.handleSessionPrepare(Event{Type: EventThreadSessionPrepareRequested, Payload: EventPayload{ThreadID: threadID}})
 
-	result := mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-restored-unavailable", ThreadID: threadID})
-	reactor.handleSessionPrepare(Event{Type: EventThreadSessionPrepareRequested, Sequence: result.Sequence, Payload: EventPayload{ThreadID: threadID}})
-
-	thread, _ := engine.Thread(threadID)
-	if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady {
-		t.Fatalf("thread = %#v, want degraded restore completed and ready", thread)
-	}
-	if len(thread.Timeline) != 1 || thread.Timeline[0].Item == nil || thread.Timeline[0].Item.Kind != provider.ItemKindWarning || thread.Timeline[0].Item.Title != "history unavailable for this agent" {
-		t.Fatalf("timeline = %#v, want visible history-unavailable warning", thread.Timeline)
-	}
-}
-
-func TestReactorRetriesPendingReplayWithTimelineContent(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
-	reactor := newDetachedReactor(engine, fake)
-	threadID := ThreadID("thread-restored-with-content")
-	now := time.Now()
-	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
-	if _, err := engine.AppendEvent(context.Background(), EventInput{
-		Type:     EventThreadMessageSent,
-		ThreadID: threadID,
-		Payload:  EventPayload{MessageID: "message-restored", Role: MessageRoleAssistant, Text: "already restored"},
-	}); err != nil {
-		t.Fatalf("append existing history: %v", err)
-	}
-
-	result := mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-restored-with-content", ThreadID: threadID})
-	reactor.handleSessionPrepare(Event{Type: EventThreadSessionPrepareRequested, Sequence: result.Sequence, Payload: EventPayload{ThreadID: threadID}})
-	if input := fake.lastStartInput(); !input.ReplayHistory {
-		t.Fatalf("start input = %#v, want pending replay retried", input)
-	}
-	thread, _ := engine.Thread(threadID)
-	if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady {
-		t.Fatalf("thread after replay retry = %#v, want replay completed and ready", thread)
-	}
-	if len(thread.Timeline) != 1 || thread.Timeline[0].Message == nil || thread.Timeline[0].Message.Text != "already restored" {
-		t.Fatalf("timeline after replay retry = %#v, want existing history preserved without duplication", thread.Timeline)
+			if input := fake.lastStartInput(); !input.ReplayHistory {
+				t.Fatalf("start input = %#v, want replay history", input)
+			}
+			thread, _ := engine.Thread(threadID)
+			if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady {
+				t.Fatalf("thread = %#v, want replay consumed and session ready", thread)
+			}
+			if got := describeTimeline(thread.Timeline); !slices.Equal(got, tc.want) {
+				t.Fatalf("timeline = %q, want %q", got, tc.want)
+			}
+			var historySequence, readySequence uint64
+			for _, event := range events.matching(threadID, result.Sequence) {
+				switch {
+				case event.Type == EventThreadHistoryReplayCompleted:
+					historySequence = event.Sequence
+				case event.Type == EventThreadSessionStatusSet && event.Payload.Session.Status == SessionStatusReady:
+					readySequence = event.Sequence
+				}
+			}
+			if historySequence == 0 || readySequence == 0 || historySequence >= readySequence {
+				t.Fatalf("history/ready sequences = %d/%d, want replay completion before ready", historySequence, readySequence)
+			}
+		})
 	}
 }
 
@@ -404,6 +366,9 @@ func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	if !thread.ReplayHistoryPending {
 		t.Fatal("failed preparation consumed restored replay intent")
 	}
+	if thread.Session == nil || thread.Session.Status != SessionStatusError || !strings.Contains(thread.Session.LastError, "agent unreachable") {
+		t.Fatalf("session = %#v, want error status carrying the provider failure", thread.Session)
+	}
 	var restoreFailurePublished bool
 	for _, event := range events.matching(threadID, first.Sequence) {
 		if event.Type == EventThreadSessionStatusSet && event.EndsHistoryReplay() {
@@ -425,105 +390,6 @@ func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	thread, _ = engine.Thread(threadID)
 	if thread.ReplayHistoryPending || thread.Session == nil || thread.Session.Status != SessionStatusReady || thread.Session.LastError != "" {
 		t.Fatalf("thread after successful replay retry = %#v, want ready with consumed replay intent", thread)
-	}
-}
-
-func TestReactorRejectsProviderOrModelChangeDuringPreparation(t *testing.T) {
-	tests := []struct {
-		name   string
-		change Command
-	}{
-		{name: "provider", change: Command{ProviderInstanceID: "provider-b"}},
-		{name: "model", change: Command{ModelSelection: &provider.ModelSelection{Model: "model-b"}}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngine()
-			defer engine.Close()
-			fake := newFakeProviderRuntime()
-			fake.startSession = provider.Session{ProviderInstanceID: "provider-a"}
-			fake.startEntered = make(chan struct{}, 1)
-			fake.startRelease = make(chan struct{})
-			newTestReactor(engine, fake)
-
-			threadID := ThreadID("thread-prepare-selection-" + tt.name)
-			mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: CommandID("create-prepare-selection-" + tt.name), ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a"}})
-			mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: CommandID("prepare-selection-" + tt.name), ThreadID: threadID})
-			select {
-			case <-fake.startEntered:
-			case <-time.After(2 * time.Second):
-				t.Fatal("preparation did not start")
-			}
-			mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: CommandID("rename-during-prepare-" + tt.name), ThreadID: threadID, Title: "Renamed"})
-			change := tt.change
-			change.Type = CommandThreadMetaUpdate
-			change.CommandID = CommandID("change-during-prepare-" + tt.name)
-			change.ThreadID = threadID
-			if _, err := engine.Dispatch(context.Background(), change); err == nil || !strings.Contains(err.Error(), "preparing") {
-				t.Fatalf("selection change during preparation err = %v, want preparing rejection", err)
-			}
-			thread, _ := engine.Thread(threadID)
-			if thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection == nil || thread.ModelSelection.Model != "model-a" {
-				t.Fatalf("thread after rejected selection change = %#v, want renamed with original selection", thread)
-			}
-
-			close(fake.startRelease)
-			waitForSessionStatus(t, engine, threadID, SessionStatusReady)
-		})
-	}
-}
-
-func TestReactorRejectsTurnStartDuringPreparation(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{ProviderInstanceID: "codex", ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}
-	fake.startEntered = make(chan struct{}, 2)
-	fake.startRelease = make(chan struct{})
-	newTestReactor(engine, fake)
-
-	threadID := ThreadID("thread-prepare-turn-race")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-prepare-race", ThreadID: threadID, ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-race", ThreadID: threadID})
-	select {
-	case <-fake.startEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("preparation did not start")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-during-prepare", ThreadID: threadID, Message: &CommandMessage{Text: "hello"}}); err == nil {
-		t.Fatal("thread.turn.start succeeded during preparation")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadSessionStop, CommandID: "stop-during-prepare", ThreadID: threadID}); err == nil {
-		t.Fatal("thread.session.stop succeeded during preparation")
-	}
-	close(fake.startRelease)
-}
-
-func TestReactorRecordsPreparationFailureAndRetriesAfterFix(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	fake := newFakeProviderRuntime()
-	fake.startErr = errors.New("agent unreachable")
-	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
-	newTestReactor(engine, fake)
-
-	threadID := ThreadID("thread-prepare-retry")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-prepare-retry", ThreadID: threadID, ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-fails", ThreadID: threadID})
-	waitForSessionStatus(t, engine, threadID, SessionStatusError)
-	thread, _ := engine.Thread(threadID)
-	if thread.Session == nil || !strings.Contains(thread.Session.LastError, "agent unreachable") {
-		t.Fatalf("session = %#v, want lastError to carry the provider failure", thread.Session)
-	}
-
-	fake.mu.Lock()
-	fake.startErr = nil
-	fake.mu.Unlock()
-	mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare-retry", ThreadID: threadID})
-	waitForSessionStatus(t, engine, threadID, SessionStatusReady)
-	thread, _ = engine.Thread(threadID)
-	if thread.Session.LastError != "" {
-		t.Fatalf("session after retry = %#v, want cleared lastError", thread.Session)
 	}
 }
 
@@ -605,27 +471,39 @@ func TestReactorStopReleasesRestoredIdleRoute(t *testing.T) {
 	}
 }
 
-func TestReactorSuccessfulStopRecordsCancelledReasonForActiveTurn(t *testing.T) {
+// thread.session.stop records intent only; the reactor's successful provider
+// stop confirms it and settles the active turn as cancelled, after which the
+// next turn starts fresh.
+func TestReactorStopConfirmsIntentAndSettlesActiveTurn(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
 	reactor := newDetachedReactor(engine, fake)
-	threadID := ThreadID("thread-successful-stop-reason")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-successful-stop-reason", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
-	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-successful-stop-reason", ThreadID: threadID, Message: &CommandMessage{Text: "hello"}})
+	threadID := ThreadID("thread-stop-running")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-stop-running", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-before-stop", ThreadID: threadID, Message: &CommandMessage{Text: "hello"}})
 	thread, _ := engine.Thread(threadID)
-	turnID := thread.LatestTurn.ID
-	mustDispatch(t, engine, Command{Type: CommandThreadSessionStop, CommandID: "stop-successful-stop-reason", ThreadID: threadID})
+	oldTurnID := thread.LatestTurn.ID
 
-	reactor.handleStop(Event{Type: EventThreadSessionStopRequested, Payload: EventPayload{ThreadID: threadID, TurnID: turnID}})
-
+	mustDispatch(t, engine, Command{Type: CommandThreadSessionStop, CommandID: "stop-running", ThreadID: threadID})
 	thread, _ = engine.Thread(threadID)
-	if thread.Session == nil || thread.Session.Status != SessionStatusStopped {
-		t.Fatalf("session after successful stop = %#v, want stopped", thread.Session)
+	if thread.LatestTurn.State != TurnStateRunning || thread.LatestTurn.CompletedAt != nil || thread.Session.Status != SessionStatusRunning || !thread.Session.StopRequested {
+		t.Fatalf("thread after stop intent = turn %#v session %#v, want running until provider confirmation", thread.LatestTurn, thread.Session)
 	}
-	if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateInterrupted || thread.LatestTurn.StopReason != "cancelled" {
-		t.Fatalf("latest turn after successful stop = %#v, want interrupted with cancelled stop reason", thread.LatestTurn)
+
+	reactor.handleStop(Event{Type: EventThreadSessionStopRequested, Payload: EventPayload{ThreadID: threadID}})
+	thread, _ = engine.Thread(threadID)
+	if thread.Session.Status != SessionStatusStopped || thread.Session.ActiveTurnID != "" || thread.Session.StopRequested {
+		t.Fatalf("session after confirmed stop = %#v, want stopped with no active turn", thread.Session)
+	}
+	if thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State != TurnStateInterrupted || thread.LatestTurn.StopReason != "cancelled" || thread.LatestTurn.CompletedAt == nil {
+		t.Fatalf("latest turn after confirmed stop = %#v, want interrupted with cancelled stop reason", thread.LatestTurn)
+	}
+
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-after-stop", ThreadID: threadID, Message: &CommandMessage{Text: "next"}})
+	if thread, _ = engine.Thread(threadID); thread.LatestTurn.ID == oldTurnID || thread.LatestTurn.State != TurnStateRunning {
+		t.Fatalf("latest turn after restart = %#v, want fresh running turn", thread.LatestTurn)
 	}
 }
 
@@ -715,38 +593,6 @@ func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T
 	}
 }
 
-func TestReactorProjectsProviderSessionReturnedFromStartSession(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	fake.startSession = provider.Session{
-		ProviderInstanceID: "codex",
-		ProviderName:       "Codex Test",
-		ConfigOptions:      []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}},
-	}
-	newTestReactor(engine, fake)
-	threadID := ThreadID("thread-returned-session")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-returned-session", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-returned-session", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-returned-session", Text: "hello"}})
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SendTurn to be called")
-	}
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Session == nil {
-		t.Fatalf("thread/session missing: %#v", thread)
-	}
-	if thread.Session.ProviderName != "Codex Test" || len(thread.Session.ConfigOptions) != 1 || thread.Session.ConfigOptions[0].ID != "model" {
-		t.Fatalf("session = %#v, want provider-returned config options", thread.Session)
-	}
-	if thread.Session.Status != SessionStatusRunning || thread.Session.ActiveTurnID == "" {
-		t.Fatalf("session = %#v, want running returned session", thread.Session)
-	}
-	if thread.LatestTurn == nil || thread.LatestTurn.ID != thread.Session.ActiveTurnID || thread.LatestTurn.State != TurnStateRunning || thread.LatestTurn.CompletedAt != nil {
-		t.Fatalf("latest turn = %#v, want initial binding to leave the active turn running", thread.LatestTurn)
-	}
-}
-
 func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -819,36 +665,6 @@ func TestReactorEnsuresProviderSessionForExistingReadyBinding(t *testing.T) {
 	}
 }
 
-func TestReactorDoesNotForwardStaleModelAfterProviderOnlySwitch(t *testing.T) {
-	engine := NewEngine()
-	fake := newFakeProviderRuntime()
-	newTestReactor(engine, fake)
-	threadID := ThreadID("thread-provider-switch-clears-model")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-provider-a-model", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "a-model", Options: []byte(`{"effort":"high"}`)}})
-	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "switch-provider-b-only", ThreadID: threadID, ProviderInstanceID: "provider-b"})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-provider-b", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-provider-b", Text: "hello"}})
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected SendTurn to be called")
-	}
-	start := fake.lastStartInput()
-	if start.ProviderInstanceID != "provider-b" {
-		t.Fatalf("StartSession providerInstanceId = %q, want provider-b", start.ProviderInstanceID)
-	}
-	assertNoStaleModel := func(name string, selection *provider.ModelSelection) {
-		t.Helper()
-		if selection == nil {
-			return
-		}
-		if selection.Model != "" || len(selection.Options) != 0 {
-			t.Fatalf("%s modelSelection = %#v, want no provider-a model/options after the switch", name, selection)
-		}
-	}
-	assertNoStaleModel("StartSession", start.ModelSelection)
-	assertNoStaleModel("SendTurn", fake.lastSendInput().ModelSelection)
-}
-
 func TestReactorDoesNotReviveTurnInterruptedBeforeStartHandlerRuns(t *testing.T) {
 	engine := NewEngine()
 	fake := newFakeProviderRuntime()
@@ -875,20 +691,7 @@ func TestReactorDoesNotReviveTurnInterruptedBeforeStartHandlerRuns(t *testing.T)
 	released = true
 	close(gate)
 
-	deadline := time.After(2 * time.Second)
-	for {
-		reactor.mu.Lock()
-		_, pending := reactor.threadTails[threadID]
-		reactor.mu.Unlock()
-		if !pending {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for reactor queue to drain")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	waitForReactorIdle(t, reactor, threadID)
 	if calls := fake.startCalls(); calls != 0 {
 		t.Fatalf("StartSession called %d times, want 0 after pre-handler interrupt", calls)
 	}

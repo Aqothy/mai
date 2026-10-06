@@ -433,37 +433,31 @@ func TestEngineRejectsStaleTurnInterrupt(t *testing.T) {
 	}
 }
 
-func TestEngineSessionStopWaitsForProviderConfirmation(t *testing.T) {
+// Until the provider session binds, preparation blocks every command that
+// would race the provider start; a rename still applies.
+func TestEngineRejectsSessionChangesWhilePreparing(t *testing.T) {
 	engine := NewEngine()
-	threadID := ThreadID("thread-stop-running")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-stop-running", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
-	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-before-stop", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-before-stop", Text: "hello"}, CreatedAt: time.Now()})
+	defer engine.Close()
+	threadID := ThreadID("thread-preparing")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-preparing", ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare", ThreadID: threadID})
+
+	for name, command := range map[string]Command{
+		"provider switch": {Type: CommandThreadMetaUpdate, ProviderInstanceID: "provider-b"},
+		"model switch":    {Type: CommandThreadMetaUpdate, ModelSelection: &provider.ModelSelection{Model: "model-b"}},
+		"turn start":      {Type: CommandThreadTurnStart, Message: &CommandMessage{Text: "hello"}},
+		"session stop":    {Type: CommandThreadSessionStop},
+		"second prepare":  {Type: CommandThreadSessionPrepare},
+	} {
+		command.CommandID, command.ThreadID = CommandID("during-prepare-"+name), threadID
+		if _, err := engine.Dispatch(context.Background(), command); err == nil || !strings.Contains(err.Error(), "prepar") {
+			t.Fatalf("%s during preparation err = %v, want preparing rejection", name, err)
+		}
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "rename-during-prepare", ThreadID: threadID, Title: "Renamed"})
 	thread, _ := engine.Thread(threadID)
-	oldTurnID := thread.LatestTurn.ID
-	if oldTurnID == "" || thread.Session == nil || thread.Session.ActiveTurnID != oldTurnID {
-		t.Fatalf("thread before stop = %#v, want active running turn", thread)
-	}
-	mustDispatch(t, engine, Command{Type: CommandThreadSessionStop, CommandID: "cmd-stop-running", ThreadID: threadID, CreatedAt: time.Now()})
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State != TurnStateRunning || thread.LatestTurn.CompletedAt != nil {
-		t.Fatalf("latest turn after stop intent = %#v, want it running until provider confirmation", thread.LatestTurn)
-	}
-	if thread.Session == nil || thread.Session.Status != SessionStatusRunning || thread.Session.ActiveTurnID != oldTurnID {
-		t.Fatalf("session after stop intent = %#v, want running session unchanged", thread.Session)
-	}
-	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusStopped, UpdatedAt: time.Now()}}})
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State == TurnStateRunning || thread.LatestTurn.CompletedAt == nil {
-		t.Fatalf("latest turn after confirmed stop = %#v, want completed non-running turn", thread.LatestTurn)
-	}
-	if thread.Session == nil || thread.Session.Status != SessionStatusStopped || thread.Session.ActiveTurnID != "" {
-		t.Fatalf("session after confirmed stop = %#v, want stopped with no active turn", thread.Session)
-	}
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-after-stop", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-after-stop", Text: "next"}, CreatedAt: time.Now()})
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.ID == oldTurnID || thread.LatestTurn.State != TurnStateRunning {
-		t.Fatalf("latest turn after restart = %#v, want fresh running turn", thread.LatestTurn)
+	if thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection.Model != "model-a" || thread.LatestTurn != nil || len(thread.Timeline) != 0 {
+		t.Fatalf("thread after preparation guards = %#v, want renamed with the original selection and no turn", thread)
 	}
 }
 
