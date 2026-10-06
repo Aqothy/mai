@@ -14,9 +14,9 @@
             var planner = ChatIncrementalMarkdownRenderPlanner()
             func stream(_ source: String) throws -> NSTextView {
                 let snapshot = planner.snapshot(source: source, sourceIsAppendOnly: true)
-                guard case .prose(let live) = try #require(snapshot.plan.blocks.last) else {
-                    throw CancellationError()
-                }
+                let prose: ChatMarkdownProseRun? =
+                    if case .prose(let live)? = snapshot.plan.blocks.last { live } else { nil }
+                let live = try #require(prose, "Live tail is not prose")
                 host.update(layoutID: "live", content: .rendered(live.text), layoutStore: layouts)
                 host.layoutSubtreeIfNeeded()
                 return try #require(host.subviews.compactMap { $0 as? NSTextView }.first)

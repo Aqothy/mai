@@ -78,60 +78,6 @@ struct ChatMarkdownRichContentView: View {
     .preferredColorScheme(.dark)
 }
 
-#if DEBUG
-    private let chatMarkdownParitySource = #"""
-        ## Heading two
-        ### Heading three
-        Paragraph with *italic*, **bold**, ~~strike~~, `inline code` and a [link](https://example.com).
-
-        - Bullet one
-        - Bullet two
-          - Nested bullet
-            1. Nested ordered
-
-        1. First
-        2. Second
-
-        > Quote with **bold** and `code`.
-        >
-        > > Nested quote
-
-        ---
-
-        | Name | Value |
-        | :--- | ---: |
-        | **Bold** | `code` |
-        | [Link](https://example.com) | ~~old~~ *new* |
-        """#
-
-    /// Settled and live presentations of the same plan must look identical.
-    #Preview("Markdown parity – settled") {
-        ScrollView {
-            ChatMarkdownRichContentView(
-                layoutIDPrefix: "parity-settled",
-                plan: ChatMarkdownRenderPlanner.plan(from: chatMarkdownParitySource),
-                streamingStableBlockCount: nil,
-                textLayoutStore: ChatTextLayoutStore()
-            )
-            .padding()
-        }
-        .frame(width: 420, height: 760)
-    }
-
-    #Preview("Markdown parity – streaming") {
-        ScrollView {
-            ChatMarkdownRichContentView(
-                layoutIDPrefix: "parity-streaming",
-                plan: ChatMarkdownRenderPlanner.plan(from: chatMarkdownParitySource),
-                streamingStableBlockCount: 0,
-                textLayoutStore: ChatTextLayoutStore()
-            )
-            .padding()
-        }
-        .frame(width: 420, height: 760)
-    }
-#endif
-
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
     let isStreaming: Bool

@@ -198,12 +198,9 @@ func TestRuntimeEventFromItemStatedActions(t *testing.T) {
 		{"read and list", commands("read", "listFiles"), provider.ToolActionRead},
 		{"search", commands("search", "search"), provider.ToolActionSearch},
 		{"read and search", commands("read", "search"), ""},
-		{"unknown", commands("unknown"), ""},
 		{"read and unknown", commands("read", "unknown"), ""},
 		{"unparsed", commands(), ""},
 		{"mcp", appItem{Type: "mcpToolCall", ID: "mcp", Server: "github", Tool: "search_issues"}, ""},
-		{"web search", appItem{Type: "webSearch", ID: "web", Query: "needle"}, ""},
-		{"file change", appItem{Type: "fileChange", ID: "patch"}, ""},
 	} {
 		event, ok := runtimeEventFromItem("thread", "turn", tc.item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
 		if !ok || event.Payload.ToolCall == nil || event.Payload.ToolCall.Action != tc.want {

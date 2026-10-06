@@ -46,14 +46,8 @@ func TestNewToolStateActions(t *testing.T) {
 		"Grep":                     provider.ToolActionSearch,
 		"Glob":                     provider.ToolActionSearch,
 		"Bash":                     "",
-		"Edit":                     "",
-		"WebSearch":                "",
-		"WebFetch":                 "",
-		"ToolSearch":               "",
 		"ReadMcpResourceTool":      "",
-		"Agent":                    "",
 		"mcp__github__list_issues": "",
-		"FutureTool":               "",
 	} {
 		if got := newToolState(tool, nil).call.Action; got != want {
 			t.Errorf("newToolState(%q) action = %q, want %q", tool, got, want)

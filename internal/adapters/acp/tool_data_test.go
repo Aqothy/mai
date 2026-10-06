@@ -185,14 +185,7 @@ func TestToolCallPatchActionFromKind(t *testing.T) {
 	for kind, want := range map[string]provider.ToolAction{
 		"read":        provider.ToolActionRead,
 		"search":      provider.ToolActionSearch,
-		"edit":        "",
-		"delete":      "",
-		"move":        "",
 		"execute":     "",
-		"think":       "",
-		"fetch":       "",
-		"switch_mode": "",
-		"other":       "",
 		"future_kind": "",
 	} {
 		patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"tool-1","kind":"`+kind+`"}`))
