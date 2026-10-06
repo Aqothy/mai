@@ -134,10 +134,6 @@ func (p *Projection) ThreadSnapshot(id ThreadID) (ThreadDetailSnapshot, error) {
 // clone-free reads on the engine's hot paths.
 func (p *Projection) liveThread(id ThreadID) *Thread { return p.threads[id] }
 
-func (p *Projection) createSequence(id ThreadID) uint64 { return p.createSequences[id] }
-
-func (p *Projection) appliedSequence() uint64 { return p.sequence }
-
 func (p *Projection) applyThreadCreated(event Event) {
 	payload := event.Payload
 	threadID := payload.ThreadID
@@ -151,12 +147,7 @@ func (p *Projection) applyThreadCreated(event Event) {
 	if title == "" {
 		title = "Untitled thread"
 	}
-	if p.createSequences == nil {
-		p.createSequences = make(map[ThreadID]uint64)
-	}
-	if _, ok := p.createSequences[threadID]; !ok {
-		p.createSequences[threadID] = event.Sequence
-	}
+	p.createSequences[threadID] = event.Sequence
 	p.threads[threadID] = &Thread{
 		ID:                    threadID,
 		Title:                 title,

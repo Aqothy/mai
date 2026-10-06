@@ -334,7 +334,7 @@ func (i *ProviderRuntimeIngestion) ingestContentDelta(event provider.RuntimeEven
 	case provider.RuntimeContentAssistantText:
 		// Reasoning->text switch (interleaved thinking): settle the segment so
 		// reasoning that resumes later starts a new entry after this message.
-		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+		i.settleReasoning(event, provider.ItemStatusCompleted, createdAt, "")
 		i.bufferAssistantDelta(event, createdAt)
 	case provider.RuntimeContentReasoningText:
 		i.ingestReasoningDelta(event, createdAt)
@@ -387,15 +387,11 @@ type reasoningPayload struct {
 	Attachments []provider.Attachment `json:"attachments,omitempty"`
 }
 
-func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time) {
-	i.settleReasoningWith(event, status, createdAt, "")
-}
-
-// settleReasoningWith closes the active reasoning segment. A non-empty
-// snapshot is the provider's authoritative text for the completed item and
-// replaces the accumulated deltas: a provider may join its parts differently
-// from its live stream, and the settled item must match what it will replay.
-func (i *ProviderRuntimeIngestion) settleReasoningWith(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time, snapshot string) {
+// settleReasoning closes the active reasoning segment. A non-empty snapshot is
+// the provider's authoritative text for the completed item and replaces the
+// accumulated deltas: a provider may join its parts differently from its live
+// stream, and the settled item must match what it will replay.
+func (i *ProviderRuntimeIngestion) settleReasoning(event provider.RuntimeEvent, status provider.ItemStatus, createdAt time.Time, snapshot string) {
 	i.mu.Lock()
 	ts := i.turns[turnKeyOf(event)]
 	var checkpoint reasoningPayload
@@ -440,7 +436,7 @@ func (i *ProviderRuntimeIngestion) ingestItem(event provider.RuntimeEvent, creat
 	}
 	if event.Payload.ItemType == provider.ItemKindReasoning {
 		if status != "" && status != provider.ItemStatusInProgress {
-			i.settleReasoningWith(event, status, createdAt, event.Payload.Detail)
+			i.settleReasoning(event, status, createdAt, event.Payload.Detail)
 		}
 		return
 	}
@@ -736,7 +732,7 @@ func (i *ProviderRuntimeIngestion) completeThreadText(threadID string, createdAt
 // boundary. Content that resumes after the boundary receives new timeline
 // identities instead of mutating entries anchored before it.
 func (i *ProviderRuntimeIngestion) completeTurnText(event provider.RuntimeEvent, createdAt time.Time) {
-	i.settleReasoning(event, provider.ItemStatusCompleted, createdAt)
+	i.settleReasoning(event, provider.ItemStatusCompleted, createdAt, "")
 	i.completeOpenAssistantMessages(event, createdAt)
 }
 
@@ -750,7 +746,7 @@ func (i *ProviderRuntimeIngestion) settleTurn(event provider.RuntimeEvent, statu
 	for _, flush := range i.takeAssistantMessages(event) {
 		i.recordAssistantMessage(event, flush, createdAt)
 	}
-	i.settleReasoning(event, status, createdAt)
+	i.settleReasoning(event, status, createdAt, "")
 	i.settleOpenItems(event, status, createdAt)
 	i.clearTurnBuffers(event)
 }

@@ -572,10 +572,10 @@ func (e *Engine) existingThreadSequence(threadID ThreadID) (uint64, bool) {
 	if e.projection.liveThread(threadID) == nil {
 		return 0, false
 	}
-	if sequence := e.projection.createSequence(threadID); sequence != 0 {
+	if sequence := e.projection.createSequences[threadID]; sequence != 0 {
 		return sequence, true
 	}
-	return e.projection.appliedSequence(), true
+	return e.projection.sequence, true
 }
 
 // ResolveThreadCwd applies the engine's cwd default and validation policy to
