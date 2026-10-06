@@ -565,14 +565,12 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 
 // TestRPCOrchestrationApprovalRespondHonorsExplicitOption sends an accept
 // decision together with an explicit optionId for a reject option. The
-// scripted agent echoes the option it received, proving the selected option —
+// fake agent echoes the option it received, proving the selected option —
 // not the kind-mapped decision — reaches the agent.
 func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 
 	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-permission-option")
@@ -631,7 +629,7 @@ func TestRPCProviderStartAndList(t *testing.T) {
 		"instanceId": "codex",
 		"name":       "codex",
 		"driver":     "acp",
-		"config":     map[string]any{"command": helperCommand("sessions")},
+		"config":     map[string]any{"command": fakeACPAgentCommand()},
 	}, &started)
 	if started.InstanceID != "codex" || started.Driver != "acp" {
 		t.Fatalf("started = %#v, want codex/acp", started)
@@ -663,7 +661,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	client := newRecordingClient(t, s)
 
 	var started provider.InstanceInfo
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", helperCommand("rich-sessions"))}, &started)
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", fakeACPAgentCommand())}, &started)
 	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 1 || started.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("auth state = %#v, want unknown status with the advertised agent-login method", started.Auth)
 	}
@@ -689,9 +687,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	client := newRecordingClient(t, s)
 	importCwd := t.TempDir()
 	summary := provider.SessionSummary{SessionID: "external-session", Title: "Imported session", Cwd: importCwd, UpdatedAt: "2026-07-15T12:00:00Z"}
@@ -737,9 +733,7 @@ func TestRPCImportProviderSessionDeduplicatesAndReplays(t *testing.T) {
 func TestRPCImportProviderSessionRejectsProviderWithoutRestore(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("list-only", "list-only", helperCommand("list-only-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "list-only", "-list-only")
 	client := newRecordingClient(t, s)
 	var result wire.ProviderImportSessionResult
 	err := client.callErr(wire.MethodProviderImportSession, wire.ProviderImportSessionParams{
@@ -757,9 +751,7 @@ func TestRPCImportProviderSessionRejectsProviderWithoutRestore(t *testing.T) {
 func TestRPCProviderSessionManagement(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-session-mgmt")
 	cwd := t.TempDir()
@@ -774,7 +766,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 
 	var sessions []provider.SessionSummary
 	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "codex"}, &sessions)
-	if len(sessions) != 1 || sessions[0].SessionID != "sess_new" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" {
+	if len(sessions) != 1 || sessions[0].SessionID != "sess-1" || sessions[0].Cwd != cwd || sessions[0].Title != "Test session" {
 		t.Fatalf("provider.listSessions = %#v, want the agent session created for the thread", sessions)
 	}
 
@@ -784,7 +776,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 		t.Fatalf("provider.deleteSession err = %v, want capability-gated session-delete error", err)
 	}
 
-	err = client.callErr(wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}, &ignored)
+	err = client.callErr(wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess-1"}, &ignored)
 	if err == nil || !strings.Contains(err.Error(), "bound to thread") {
 		t.Fatalf("provider.closeSession bound session err = %v, want rejection", err)
 	}
@@ -792,7 +784,7 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadSessionStatusSet && event.Payload.Session != nil && event.Payload.Session.Status == orchestration.SessionStatusStopped
 	})
-	client.call(t, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess_new"}, &ignored)
+	client.call(t, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess-1"}, &ignored)
 }
 
 // TestRPCSessionMetadataProjectionsReachClient locks in the projections real
@@ -802,16 +794,14 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 func TestRPCSessionMetadataProjectionsReachClient(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("rich-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	client := newRecordingClient(t, s)
 	threadID := orchestration.ThreadID("thread-metadata")
 
 	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-metadata", ThreadID: threadID, Title: "Metadata thread", ProviderInstanceID: "codex", Cwd: t.TempDir()})
 	var snapshot orchestration.ThreadStreamItem
 	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "hello"}})
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-metadata", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-metadata", Text: "metadata"}})
 
 	// Session materialization publishes the agent's config options first.
 	configEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {

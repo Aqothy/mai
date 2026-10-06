@@ -334,9 +334,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	s := newTestServer(t)
 	defer s.Close()
 	events := observeServerEvents(t, s)
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	url := newWSTestServer(t, s)
 	a := dialRecordingClient(t, url)
 	b := dialRecordingClient(t, url)
@@ -478,9 +476,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("scripted-sessions")), false); err != nil {
-		t.Fatalf("provider start: %v", err)
-	}
+	startFakeACPAgent(t, s, "codex")
 	url := newWSTestServer(t, s)
 	observer := dialRecordingClient(t, url)
 

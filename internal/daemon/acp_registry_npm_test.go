@@ -42,7 +42,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	}
 	t.Logf("npm=%s version=%s", npm, strings.TrimSpace(string(version)))
 	dir := t.TempDir()
-	launchLog, ready, release := filepath.Join(dir, "launches"), filepath.Join(dir, "ready"), filepath.Join(dir, "release")
+	launchLog := filepath.Join(dir, "launches")
 	config := filepath.Join(dir, "empty-npmrc")
 	globalConfig := filepath.Join(dir, "empty-global-npmrc")
 	if err := os.WriteFile(config, nil, 0600); err != nil {
@@ -71,7 +71,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 				"distribution": map[string]any{"npx": map[string]any{"package": "maid-qa-agent@" + v, "env": map[string]string{
 					"npm_config_registry": registryURL, "npm_config_userconfig": config, "npm_config_globalconfig": globalConfig,
 					"npm_config_audit": "false", "npm_config_fund": "false",
-					"MAID_DAEMON_ACP_HELPER": "1", "QA_HELPER": os.Args[0], "QA_LAUNCH_LOG": launchLog, "QA_READY": ready, "QA_RELEASE": release,
+					"MAID_DAEMON_ACP_HELPER": "1", "QA_HELPER": os.Args[0], "QA_LAUNCH_LOG": launchLog,
 				}}},
 			}}})
 		case "/maid-qa-agent":
@@ -123,8 +123,8 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	firstPID := info.PID
 	id := orchestration.ThreadID("registry-update-qa")
 	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: id, Title: "Registry QA", Cwd: dir, ProviderInstanceID: info.InstanceID})
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: id, Message: &orchestration.CommandMessage{MessageID: "qa-prompt", Text: "finish after update"}})
-	waitForFile(t, ready)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: id, Message: &orchestration.CommandMessage{MessageID: "qa-prompt", Text: "block " + dir}})
+	waitForFile(t, filepath.Join(dir, "ready"))
 	mu.Lock()
 	ceiling = "2.0.0"
 	mu.Unlock()
@@ -152,7 +152,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if err != nil || string(launches) != "1.0.0\n" {
 		t.Fatalf("active launch log=%q error=%v", launches, err)
 	}
-	if err := os.WriteFile(release, []byte("finish"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "release"), []byte("finish"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -171,7 +171,7 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 		if entry.Message == nil {
 			continue
 		}
-		if entry.Message.Role == "user" && entry.Message.Text == "finish after update" {
+		if entry.Message.Role == "user" && entry.Message.Text == "block "+dir {
 			users++
 		}
 		if entry.Message.Role == "assistant" && entry.Message.Text == "hi" {
@@ -224,7 +224,7 @@ func registryQAPackage(t *testing.T, version string) []byte {
 const fs=require('node:fs');
 const {spawn}=require('node:child_process');
 fs.appendFileSync(process.env.QA_LAUNCH_LOG,require('./package.json').version+'\n');
-const child=spawn(process.env.QA_HELPER,['-test.run=TestHelperProcess','--','blocked-sessions',process.env.QA_READY,process.env.QA_RELEASE],{stdio:'inherit'});
+const child=spawn(process.env.QA_HELPER,['-test.run=TestHelperProcess'],{stdio:'inherit'});
 child.on('exit',code=>process.exit(code??1));
 `
 	for name, data := range map[string]string{"package/package.json": manifest, "package/agent.js": script} {
