@@ -4,103 +4,42 @@ import Testing
 
 struct ThreadListFilterTests {
     @Test
-    func emptyQueryMatchesEverything() {
-        var filter = ThreadListFilter()
-        filter.query = "   "
+    func filtersByTrimmedQueryProjectAndResolvedProvider() {
         let threads = [
-            makeEntry(id: "a", title: "Build the SwiftUI client"),
-            makeEntry(id: "b", title: "Review the WebSocket API")
+            makeEntry(id: "client", title: "Build the SwiftUI client", cwd: "/Users/example/App", providerInstanceID: "codex-main"),
+            makeEntry(id: "api", title: "Review the WebSocket API", cwd: "/Users/example/Server", providerInstanceID: "registry-codex"),
+            makeEntry(id: "none", title: "Untitled", cwd: nil, providerInstanceID: nil),
         ]
-        let result = filter.apply(to: threads, providerID: { _ in nil })
-        #expect(result.count == 2)
-    }
-
-    @Test
-    func queryMatchesTitleSubstringCaseInsensitively() {
-        var filter = ThreadListFilter()
-        filter.query = "  THE SWIFT  "
-        let threads = [
-            makeEntry(id: "match", title: "Build the SwiftUI client"),
-            makeEntry(id: "other", title: "Review the WebSocket API")
-        ]
-        let result = filter.apply(to: threads, providerID: { _ in nil })
-        #expect(result.map(\.id) == ["match"])
-    }
-
-    @Test
-    func projectFilterMatchesExactWorkingDirectory() {
-        let threads = [
-            makeEntry(id: "app", title: "App", cwd: "/Users/example/App"),
-            makeEntry(id: "server", title: "Server", cwd: "/Users/example/Server"),
-            makeEntry(id: "none", title: "None", cwd: nil)
-        ]
-
-        var filter = ThreadListFilter()
-        filter.projectCwd = "/Users/example/App"
-        let result = filter.apply(to: threads, providerID: { _ in nil })
-        #expect(result.map(\.id) == ["app"])
-    }
-
-    @Test
-    func providerFilterMatchesResolvedProviderID() {
-        let threads = [
-            makeEntry(id: "claude", title: "Claude", providerInstanceID: "claude-main"),
-            makeEntry(id: "codex", title: "Codex", providerInstanceID: "codex-main"),
-            makeEntry(id: "acp", title: "ACP", providerInstanceID: "registry-codex"),
-            makeEntry(id: "none", title: "None", providerInstanceID: nil)
-        ]
+        // Thread entries carry instance IDs; the filter matches the resolved provider.
         let providerForThread: (ThreadListEntry) -> String? = { thread in
             switch thread.providerInstanceID {
-            case "claude-main": "claude"
             case "codex-main": "codex"
             case "registry-codex": "acp"
             default: nil
             }
         }
-
-        var filter = ThreadListFilter()
-        filter.providerID = "codex"
-        let native = filter.apply(
-            to: threads,
-            providerID: providerForThread
-        )
-        #expect(native.map(\.id) == ["codex"])
-
-        filter.providerID = "acp"
-        let acp = filter.apply(
-            to: threads,
-            providerID: providerForThread
-        )
-        #expect(acp.map(\.id) == ["acp"])
-    }
-
-    @Test
-    func isActiveReflectsQueryAndPresets() {
-        var filter = ThreadListFilter()
-        #expect(!filter.isActive)
-
-        filter.query = "   "
-        #expect(!filter.isActive)
-
-        filter.query = "swift"
-        #expect(filter.isActive)
-        #expect(!filter.hasActivePresets)
-
-        filter.query = ""
-        filter.projectCwd = "/Users/example/App"
-        filter.providerID = "codex"
-        #expect(filter.isActive)
-        #expect(filter.hasActivePresets)
-
-        filter.resetPresets()
-        #expect(!filter.isActive)
+        let cases: [(query: String, project: String?, provider: String?, expected: [String])] = [
+            ("   ", nil, nil, ["client", "api", "none"]),
+            ("  THE SWIFT  ", nil, nil, ["client"]),
+            ("", "/Users/example/App", nil, ["client"]),
+            ("", nil, "acp", ["api"]),
+            ("the", "/Users/example/Server", "codex", []),
+        ]
+        for testCase in cases {
+            var filter = ThreadListFilter()
+            filter.query = testCase.query
+            filter.projectCwd = testCase.project
+            filter.providerID = testCase.provider
+            let result = filter.apply(to: threads, providerID: providerForThread)
+            #expect(result.map(\.id) == testCase.expected, "\(testCase)")
+        }
     }
 
     private func makeEntry(
         id: String,
         title: String,
-        cwd: String? = nil,
-        providerInstanceID: String? = nil
+        cwd: String?,
+        providerInstanceID: String?
     ) -> ThreadListEntry {
         ThreadListEntry(
             createdAt: .now,

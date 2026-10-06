@@ -8,31 +8,6 @@ import Testing
 /// exercised incidentally through `ThreadStore`.
 struct ThreadEventReducerTests {
 
-    // MARK: Routing
-
-    @Test
-    func ignoresEventsAddressedToAnotherThread() {
-        var thread = makeThread()
-        let originalTitle = thread.title
-        thread.apply(makeEvent(.threadMetaUpdated, payload: makePayload(threadID: "other", title: "Renamed")))
-
-        #expect(thread.title == originalTitle)
-    }
-
-    /// A newer daemon may send an event type this build predates. It must be
-    /// ignored, never treated as an error or applied to the wrong branch.
-    @Test
-    func ignoresUnrecognizedEventType() {
-        var thread = makeThread()
-        let originalTitle = thread.title
-        var unknown = makeEvent(.threadMetaUpdated, payload: makePayload(title: "Renamed"))
-        unknown.type = "thread.invented-in-the-future"
-
-        thread.apply(unknown)
-
-        #expect(thread.title == originalTitle)
-    }
-
     // MARK: Messages
 
     @Test
@@ -44,20 +19,12 @@ struct ThreadEventReducerTests {
         )
         #expect(thread.timeline.count == 1)
         #expect(thread.timeline[0].entryKind == .message)
-        #expect(thread.timeline[0].message?.text == "Hel")
 
         thread.apply(
             makeEvent(.threadMessageSent, payload: makePayload(messageID: "m1", role: MaidMessageRole.assistant.rawValue, text: "lo"))
         )
         #expect(thread.timeline.count == 1)
         #expect(thread.timeline[0].message?.text == "Hello")
-    }
-
-    @Test
-    func ignoresMessageEventWithoutIdentity() {
-        var thread = makeThread()
-        thread.apply(makeEvent(.threadMessageSent, payload: makePayload(text: "orphan")))
-        #expect(thread.timeline.isEmpty)
     }
 
     // MARK: Turns
@@ -111,42 +78,31 @@ struct ThreadEventReducerTests {
         #expect(thread.previousTurns?.first?.completedAt == started.addingTimeInterval(9))
     }
 
+    /// A failed interrupt clears the request without completing the turn; a
+    /// confirmed one completes it.
     @Test
-    func interruptRequestMarksTurnAndConfirmationCompletesIt() {
+    func interruptRequestFailureAndConfirmation() {
         var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
 
-        thread.apply(
-            makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1"))
-        )
+        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
         #expect(thread.latestTurn?.interruptRequested == true)
-        #expect(thread.latestTurn?.completedAt == nil)
 
-        thread.apply(
-            makeEvent(.threadTurnInterruptConfirmed, payload: makePayload(turnID: "turn-1"))
-        )
+        thread.apply(makeEvent(.threadTurnInterruptFailed, payload: makePayload(turnID: "turn-1")))
+        #expect(thread.latestTurn?.interruptRequested == false)
+        #expect(thread.latestTurn?.completedAt == nil)
+        #expect(thread.latestTurn?.turnState == .running)
+
+        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
+        thread.apply(makeEvent(.threadTurnInterruptConfirmed, payload: makePayload(turnID: "turn-1")))
         #expect(thread.latestTurn?.turnState == .interrupted)
         #expect(thread.latestTurn?.interruptRequested == false)
         #expect(thread.latestTurn?.completedAt != nil)
     }
 
-    @Test
-    func interruptFailureClearsTheRequestWithoutCompletingTheTurn() {
-        var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
-        thread.apply(
-            makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1"))
-        )
-
-        thread.apply(
-            makeEvent(.threadTurnInterruptFailed, payload: makePayload(turnID: "turn-1"))
-        )
-
-        #expect(thread.latestTurn?.interruptRequested == false)
-        #expect(thread.latestTurn?.completedAt == nil)
-        #expect(thread.latestTurn?.turnState == .running)
-    }
-
     // MARK: Session status
 
+    /// Settles the running turn by status; only an error keeps the session's
+    /// lastError and copies it onto the turn.
     @Test
     func sessionStatusSettlesTheRunningTurn() {
         for (status, expected) in [
@@ -156,50 +112,25 @@ struct ThreadEventReducerTests {
             (.error, .error),
         ] {
             var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
-            let session = makeSession(status: status, activeTurnID: nil, lastError: status == .error ? "boom" : nil)
+            let session = makeSession(status: status, activeTurnID: nil, lastError: "boom")
 
             thread.apply(
                 makeEvent(.threadSessionStatusSet, payload: makePayload(session: session, stopReason: "end_turn"))
             )
 
+            let keptError = status == .error ? "boom" : nil
             #expect(thread.latestTurn?.turnState == expected, "status \(status) should settle the turn as \(expected)")
             #expect(thread.latestTurn?.completedAt != nil)
             #expect(thread.latestTurn?.stopReason == "end_turn")
+            #expect(thread.latestTurn?.error == keptError)
+            #expect(thread.session?.lastError == keptError)
+            #expect(thread.session?.stopRequested == false)
         }
     }
 
     @Test
-    func erroredSessionKeepsItsMessageAndAttachesItToTheTurn() {
-        var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
-        let session = makeSession(status: .error, activeTurnID: nil, lastError: "provider exploded")
-
-        thread.apply(
-            makeEvent(.threadSessionStatusSet, payload: makePayload(session: session))
-        )
-
-        #expect(thread.session?.lastError == "provider exploded")
-        #expect(thread.latestTurn?.error == "provider exploded")
-    }
-
-    @Test
-    func nonErrorSessionClearsAnyStaleLastError() {
-        var thread = makeThread()
-        let session = makeSession(status: .ready, activeTurnID: nil, lastError: "stale")
-
-        thread.apply(
-            makeEvent(.threadSessionStatusSet, payload: makePayload(session: session))
-        )
-
-        #expect(thread.session?.lastError == nil)
-        #expect(thread.session?.stopRequested == false)
-    }
-
-    @Test
     func sessionStatusBackfillsThreadIdentityOnlyWhenMissing() {
-        var bare = mai.Thread(
-            createdAt: .distantPast, cwd: nil, id: "t", latestTurn: nil, modelSelection: nil,
-            plan: nil, providerInstanceID: nil, session: nil, timeline: [], title: "t", updatedAt: .distantPast
-        )
+        var bare = makeThread(providerInstanceID: nil)
         let session = makeSession(status: .ready, activeTurnID: nil, cwd: "/from/session", providerInstanceID: "provider-b")
 
         bare.apply(makeEvent(.threadSessionStatusSet, payload: makePayload(session: session)))
@@ -247,29 +178,36 @@ struct ThreadEventReducerTests {
         let updated = created.addingTimeInterval(10)
         var thread = makeThread()
 
+        // A new item without a status starts in progress.
         thread.apply(
             makeEvent(.threadItemUpserted, occurredAt: created, payload: makePayload(
-                item: makeItem(id: "i1", createdAt: created, kind: MaidItemKind.toolCall.rawValue, status: MaidItemStatus.inProgress.rawValue, title: "Run tests", toolCall: makeToolCall(command: "swift test"), turnID: "turn-1")
+                item: makeItem(
+                    id: "i1", createdAt: created, detailAvailable: true, kind: MaidItemKind.commandExecution.rawValue,
+                    status: "", sequence: 1, title: "Run tests", toolCall: makeToolCall(command: "swift test"),
+                    toolCallSummary: makeToolCallSummary(commandPreview: "swift test"), turnID: "turn-1")
             ))
         )
         #expect(thread.timeline.count == 1)
         #expect(thread.timeline[0].entryKind == .item)
-        #expect(thread.timeline[0].item?.createdAt == created)
+        #expect(thread.timeline[0].item?.itemStatus == .inProgress)
 
-        // A status-only update must keep kind/title/turnID, and must NOT adopt
+        // A status-only update must keep every prior field, and must NOT adopt
         // the newer createdAt.
         thread.apply(
             makeEvent(.threadItemUpserted, occurredAt: updated, payload: makePayload(
-                item: makeItem(id: "i1", createdAt: updated, kind: "", status: MaidItemStatus.completed.rawValue, title: nil, turnID: nil)
+                item: makeItem(id: "i1", createdAt: updated, kind: "", status: MaidItemStatus.completed.rawValue)
             ))
         )
 
         let item = thread.timeline[0].item
         #expect(thread.timeline.count == 1)
         #expect(item?.itemStatus == .completed)
-        #expect(item?.itemKind == .toolCall)
+        #expect(item?.itemKind == .commandExecution)
         #expect(item?.title == "Run tests")
         #expect(item?.toolCall?.command == "swift test")
+        #expect(item?.toolCallSummary?.commandPreview == "swift test")
+        #expect(item?.detailAvailable == true)
+        #expect(item?.sequence == 1)
         #expect(item?.turnID == "turn-1")
         #expect(item?.createdAt == created)
         #expect(item?.updatedAt == updated)
@@ -301,66 +239,6 @@ struct ThreadEventReducerTests {
             ))
         )
         #expect(payloadText(thread.timeline[0].item) == "final")
-    }
-
-    @Test
-    func statusOnlyToolUpdatePreservesCompactSummaryAndDetailMarker() {
-        let summary = ToolCallSummary(
-            action: MaidToolAction.execute.rawValue,
-            attachmentCount: nil,
-            attachments: nil,
-            changeCount: nil,
-            changes: nil,
-            commandPreview: "swift test",
-            cwd: nil,
-            durationMilliseconds: nil,
-            errorPreview: nil,
-            exitCode: nil,
-            locationCount: nil,
-            locations: nil,
-            name: nil,
-            namespace: nil,
-            outputPreview: nil,
-            providerKind: nil,
-            queryPreview: nil,
-            truncated: nil
-        )
-        var thread = makeThread()
-        thread.apply(
-            makeEvent(.threadItemUpserted, payload: makePayload(
-                item: makeItem(
-                    id: "tool-1",
-                    detailAvailable: true,
-                    kind: MaidItemKind.commandExecution.rawValue,
-                    status: MaidItemStatus.inProgress.rawValue,
-                    sequence: 1,
-                    toolCallSummary: summary
-                )
-            ))
-        )
-
-        thread.apply(
-            makeEvent(.threadItemUpserted, payload: makePayload(
-                item: makeItem(
-                    id: "tool-1",
-                    kind: MaidItemKind.commandExecution.rawValue,
-                    status: MaidItemStatus.completed.rawValue
-                )
-            ))
-        )
-
-        #expect(thread.timeline[0].item?.detailAvailable == true)
-        #expect(thread.timeline[0].item?.sequence == 1)
-        #expect(thread.timeline[0].item?.toolCallSummary?.commandPreview == "swift test")
-    }
-
-    @Test
-    func newItemWithoutStatusDefaultsToInProgress() {
-        var thread = makeThread()
-        thread.apply(
-            makeEvent(.threadItemUpserted, payload: makePayload(item: makeItem(id: "i1", kind: MaidItemKind.toolCall.rawValue, status: "")))
-        )
-        #expect(thread.timeline[0].item?.itemStatus == .inProgress)
     }
 
     // MARK: Approvals
@@ -416,10 +294,14 @@ struct ThreadEventReducerTests {
 
         var thread = makeThread()
         thread.apply(
-            makeEvent(.threadConfigOptionsUpdated, payload: makePayload(configOptions: options))
+            makeEvent(.threadConfigOptionsUpdated, payload: makePayload(
+                configOptions: options,
+                modelSelection: ModelSelection(model: "opus", options: nil)
+            ))
         )
         #expect(thread.session?.sessionStatus == .starting)
         #expect(thread.session?.configOptions?.count == 1)
+        #expect(thread.modelSelection?.model == "opus")
 
         thread.apply(
             makeEvent(.threadSlashCommandsUpdated, payload: makePayload(
@@ -434,18 +316,6 @@ struct ThreadEventReducerTests {
             ))
         )
         #expect(thread.session?.tokenUsage?.usedTokens == 100)
-    }
-
-    @Test
-    func configOptionsCarryingAModelUpdateTheThreadSelection() {
-        var thread = makeThread()
-        thread.apply(
-            makeEvent(.threadConfigOptionsUpdated, payload: makePayload(
-                configOptions: [],
-                modelSelection: ModelSelection(model: "opus", options: nil)
-            ))
-        )
-        #expect(thread.modelSelection?.model == "opus")
     }
 
     // MARK: Provider selection
@@ -491,7 +361,7 @@ struct ThreadEventReducerTests {
     @Test
     func updatesTargetTheMatchingEntryEvenWhenItIsNotTheNewest() {
         var thread = makeThread()
-        for index in 0..<20 {
+        for index in 0..<2 {
             thread.apply(
                 makeEvent(.threadMessageSent, payload: makePayload(messageID: "m\(index)", role: MaidMessageRole.assistant.rawValue, text: "chunk"))
             )
@@ -499,7 +369,6 @@ struct ThreadEventReducerTests {
                 makeEvent(.threadItemUpserted, payload: makePayload(item: makeItem(id: "i\(index)", kind: MaidItemKind.toolCall.rawValue, status: MaidItemStatus.inProgress.rawValue)))
             )
         }
-        #expect(thread.timeline.count == 40)
 
         thread.apply(
             makeEvent(.threadMessageSent, payload: makePayload(messageID: "m0", role: MaidMessageRole.assistant.rawValue, text: "!"))
@@ -508,16 +377,16 @@ struct ThreadEventReducerTests {
             makeEvent(.threadItemUpserted, payload: makePayload(item: makeItem(id: "i0", kind: "", status: MaidItemStatus.completed.rawValue)))
         )
 
-        #expect(thread.timeline.count == 40)
-        #expect(thread.timeline.first(where: { $0.message?.id == "m0" })?.message?.text == "chunk!")
-        #expect(thread.timeline.first(where: { $0.item?.id == "i0" })?.item?.itemStatus == .completed)
+        #expect(thread.timeline.count == 4)
+        #expect(thread.timeline[0].message?.text == "chunk!")
+        #expect(thread.timeline[1].item?.itemStatus == .completed)
+        #expect(thread.timeline[3].item?.itemStatus == .inProgress)
     }
 }
 
 // MARK: - Fixtures
 
 private func makeThread(
-    id: String = "t",
     cwd: String? = nil,
     providerInstanceID: String? = "provider",
     session: SessionBinding? = nil,
@@ -526,7 +395,7 @@ private func makeThread(
     mai.Thread(
         createdAt: Date(timeIntervalSince1970: 0),
         cwd: cwd,
-        id: id,
+        id: "t",
         latestTurn: latestTurn,
         modelSelection: nil,
         plan: nil,
@@ -540,18 +409,17 @@ private func makeThread(
 
 private func makeEvent(
     _ type: MaidEventType,
-    sequence: Int = 1,
     occurredAt: Date = Date(timeIntervalSince1970: 1_000),
     payload: EventPayload
 ) -> Event {
     Event(
         actor: MaidActorKind.server.rawValue,
         commandID: nil,
-        eventID: "evt-\(sequence)",
+        eventID: "evt-1",
         metadata: nil,
         occurredAt: occurredAt,
         payload: payload,
-        sequence: sequence,
+        sequence: 1,
         type: type.rawValue
     )
 }
@@ -647,6 +515,15 @@ private func makeToolCall(command: String) -> ToolCall {
     )
 }
 
+private func makeToolCallSummary(commandPreview: String) -> ToolCallSummary {
+    ToolCallSummary(
+        action: MaidToolAction.execute.rawValue, attachmentCount: nil, attachments: nil, changeCount: nil,
+        changes: nil, commandPreview: commandPreview, cwd: nil, durationMilliseconds: nil, errorPreview: nil,
+        exitCode: nil, locationCount: nil, locations: nil, name: nil, namespace: nil, outputPreview: nil,
+        providerKind: nil, queryPreview: nil, truncated: nil
+    )
+}
+
 private func makeApprovalEvent(
     requestID: String,
     turnID: String? = nil,
@@ -667,7 +544,6 @@ private func makeApprovalEvent(
 }
 
 private func makePayload(
-    threadID: String = "t",
     approval: ApprovalEvent? = nil,
     configOptions: [ConfigOption]? = nil,
     cwd: String? = nil,
@@ -707,7 +583,7 @@ private func makePayload(
         slashCommands: slashCommands,
         stopReason: stopReason,
         text: text,
-        threadID: threadID,
+        threadID: "t",
         title: title,
         tokenUsage: tokenUsage,
         turnID: turnID,

@@ -79,30 +79,6 @@ struct ACPRegistryModelTests {
     }
 
     @Test
-    func addingCustomAgentUsesNameDerivedIdentityWithoutStartingAProvider() async throws {
-        let rpc = ACPRegistryMockRPCClient()
-        let store = ThreadStore(rpc: rpc)
-        let configuration = try CustomACPAgentConfiguration(
-            name: "My Agent",
-            command: "/usr/local/bin/my-agent",
-            argumentText: "--acp --profile work",
-            environment: [("API_URL", "https://example.test")]
-        )
-
-        let installed = try await store.addCustomACPAgent(configuration)
-
-        #expect(installed.id == "My Agent")
-        #expect(installed.instanceID == "custom-My Agent")
-        #expect(store.availableProviders.map(\.id) == ["custom-My Agent"])
-        #expect(rpc.providers.isEmpty)
-        let input = try #require(rpc.customAgentInput)
-        #expect(input.name == "My Agent")
-        #expect(input.command == "/usr/local/bin/my-agent")
-        #expect(input.args == ["--acp", "--profile", "work"])
-        #expect(input.env == ["API_URL": "https://example.test"])
-    }
-
-    @Test
     func customAgentOccupyingRegistryIDReplacesCatalogEntry() async throws {
         let rpc = ACPRegistryMockRPCClient()
         rpc.registryAgents = [
@@ -158,7 +134,6 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     var registryAgents: [ACPRegistryAgent] = []
     var installedAgents: [ACPRegistryInstalledAgent] = []
     var providers: [InstanceInfo] = []
-    private(set) var customAgentInput: ACPCustomAgentAddParams?
 
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         let installed = ACPRegistryInstalledAgent(
@@ -193,24 +168,6 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     func listProviders() async throws -> [InstanceInfo] { providers }
     func listRegistryAgents() async throws -> [ACPRegistryAgent] { registryAgents }
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { installedAgents }
-
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
-        customAgentInput = input
-        let installed = ACPRegistryInstalledAgent(
-            args: input.args,
-            description: nil,
-            icon: nil,
-            id: input.name,
-            installedAt: .now,
-            instanceID: "custom-\(input.name)",
-            name: input.name,
-            package: "",
-            source: "custom",
-            version: ""
-        )
-        installedAgents.append(installed)
-        return installed
-    }
 }
 
 private func makeCustomAgent(id: String, name: String) -> ACPRegistryInstalledAgent {

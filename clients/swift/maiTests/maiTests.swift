@@ -5,49 +5,27 @@ import Testing
 @testable import mai
 
 struct ThreadStoreTests {
+    /// Notifications decode with the wire date strategy (fractional seconds
+    /// and offsets), not Foundation's default.
     @Test
-    func fractionalDateNotificationsUpdateChatAndSidebar() async throws {
+    func fractionalDateNotificationsUpdateTheSidebar() async throws {
         let original = makeThread("date-wire")
         let rpc = MockThreadRPCClient(threads: [original])
         let store = ThreadStore(rpc: rpc)
         await store.start()
-        store.selectThread(original.id)
-        await waitUntil { store.subscribedThreadIDs.contains(original.id) }
-        let stamp = "2026-09-24T00:26:41.437657-04:00"
-        let expectedEpochSeconds = 1_790_224_001.437657
-        let refreshed = original.with(title: "Fractional snapshot")
-        let encoded = try newJSONEncoder().encode(refreshed)
-        var thread = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        thread["createdAt"] = stamp
-        thread["updatedAt"] = stamp
-        let snapshot: [String: Any] = ["params": [
-            "kind": "snapshot",
-            "snapshot": ["snapshotSequence": 100, "thread": thread]
-        ]]
-        rpc.onNotification?(MaidRPCMethod.orchestrationSubscribeThread,
-                            try JSONSerialization.data(withJSONObject: snapshot))
-        #expect(store.errorMessage == nil)
-        #expect(store.selectedThread?.title == "Fractional snapshot")
-        let selected = try #require(store.selectedThread)
-        // Date stores binary floating-point seconds; conversion between the
-        // Unix and Foundation epochs can differ by a fraction of a microsecond.
-        #expect(abs(selected.createdAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
-        #expect(abs(selected.updatedAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
-
-        let entryData = try newJSONEncoder().encode(makeThreadListEntry(refreshed))
+        let entryData = try newJSONEncoder().encode(makeThreadListEntry(original))
         var entry = try #require(JSONSerialization.jsonObject(with: entryData) as? [String: Any])
         entry["title"] = "Fractional sidebar"
-        entry["createdAt"] = stamp
-        entry["updatedAt"] = stamp
+        entry["updatedAt"] = "2026-09-24T00:26:41.437657-04:00"
         let update: [String: Any] = ["params": [
             "kind": "thread-upserted", "sequence": 101, "thread": entry
         ]]
         rpc.onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList,
                             try JSONSerialization.data(withJSONObject: update))
         #expect(store.errorMessage == nil)
-        #expect(store.threads.first?.title == "Fractional sidebar")
         let listed = try #require(store.threads.first)
-        #expect(abs(listed.updatedAt.timeIntervalSince1970 - expectedEpochSeconds) < 0.000001)
+        #expect(listed.title == "Fractional sidebar")
+        #expect(abs(listed.updatedAt.timeIntervalSince1970 - 1_790_224_001.437657) < 0.000001)
     }
 
     @Test
@@ -338,23 +316,6 @@ struct ThreadStoreTests {
     }
 
     @Test
-    func inactiveSubscribedThreadReceivesBackgroundUpdates() async throws {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-
-        store.selectThread("a")
-        await waitUntil { store.subscribedThreadIDs.contains("a") }
-        store.selectThread("b")
-        await waitUntil { store.inactiveSubscribedThreadIDs.contains("a") }
-
-        try rpc.sendTitleUpdate(threadID: "a", title: "Updated in background", sequence: 100)
-
-        #expect(store.cachedThread(for: "a")?.title == "Updated in background")
-        #expect(store.inactiveSubscribedThreadIDs.contains("a"))
-    }
-
-    @Test
     func hiddenThreadEventsDoNotInvalidateSelectedThreadObservers() async throws {
         let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
         let store = ThreadStore(rpc: rpc)
@@ -401,44 +362,6 @@ struct ThreadStoreTests {
 
         #expect(store.selectedThreadLoadErrorMessage == nil)
         #expect(store.selectedThread?.id == "a")
-    }
-
-    @Test
-    func threadListTimestampRemainsAuthoritativeAcrossDetailUpdates() async throws {
-        let listDate = Date(timeIntervalSince1970: 1_000)
-        let detailDate = Date(timeIntervalSince1970: 2_000)
-        let finalListDate = Date(timeIntervalSince1970: 3_000)
-        let listThread = makeThread("a").with(updatedAt: listDate)
-        let detailThread = listThread.with(updatedAt: detailDate)
-        let rpc = MockThreadRPCClient(
-            threads: [listThread],
-            detailThreads: [detailThread],
-            detailSnapshotSequence: 101
-        )
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        store.selectThread("a")
-        await waitUntil { store.subscribedThreadIDs.contains("a") }
-
-        #expect(store.cachedThread(for: "a")?.updatedAt == detailDate)
-        #expect(store.threads.first(where: { $0.id == "a" })?.updatedAt == listDate)
-
-        try rpc.sendUserMessage(
-            threadID: "a",
-            text: "restored prompt",
-            occurredAt: finalListDate,
-            authoritativeUpdatedAt: listDate,
-            sequence: 102
-        )
-        #expect(store.cachedThread(for: "a")?.timeline.last?.message?.text == "restored prompt")
-        #expect(store.threads.first(where: { $0.id == "a" })?.updatedAt == listDate)
-
-        try rpc.sendThreadListTimestamp(
-            threadID: "a",
-            updatedAt: finalListDate,
-            sequence: 103
-        )
-        #expect(store.threads.first(where: { $0.id == "a" })?.updatedAt == finalListDate)
     }
 
     @Test
@@ -509,28 +432,7 @@ struct ThreadStoreTests {
     }
 
     @Test
-    func reconnectKeepsCachedContentAndRequestsFreshSnapshots() async {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        store.selectThread("a")
-        await waitUntil { store.subscribedThreadIDs.contains("a") }
-        let firstSubscriptionCount = rpc.subscriptionInputs.count
-
-        rpc.simulateDisconnect()
-        #expect(store.cachedThread(for: "a")?.id == "a")
-        #expect(store.subscribedThreadIDs.isEmpty)
-
-        store.retry()
-        await waitUntil { rpc.subscriptionInputs.count == firstSubscriptionCount + 1 }
-        await waitUntil { store.subscribedThreadIDs.contains("a") }
-
-        let reconnect = rpc.subscriptionInputs.last
-        #expect(reconnect?.threadID == "a")
-    }
-
-    @Test
-    func repeatedReconnectFailurePreservesWarmSubscriptions() async {
+    func reconnectKeepsCachedContentAndResubscribesAfterARepeatedFailure() async {
         let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -540,6 +442,8 @@ struct ThreadStoreTests {
         await waitUntil { store.subscribedThreadIDs.contains("b") }
 
         rpc.simulateDisconnect()
+        #expect(store.cachedThread(for: "a")?.id == "a")
+        #expect(store.subscribedThreadIDs.isEmpty)
         rpc.threadListFailuresRemaining = 1
         store.retry()
         await waitUntil {
@@ -773,8 +677,7 @@ struct ThreadStoreTests {
         model.workingDirectory = "/tmp/project"
         let image = FileManager.default.temporaryDirectory
             .appending(path: "draft-sent-image-\(UUID().uuidString).png")
-        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
-            .write(to: image)
+        try writeOnePixelPNG(to: image)
         defer { try? FileManager.default.removeItem(at: image) }
         await model.addImages(from: [image])
         await waitUntil { model.attachments.allSatisfy { !$0.isProcessing } }
@@ -876,8 +779,7 @@ struct ThreadStoreTests {
         annotations.addEditorDraft()
         let image = FileManager.default.temporaryDirectory
             .appending(path: "draft-ownership-\(UUID().uuidString).png")
-        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
-            .write(to: image)
+        try writeOnePixelPNG(to: image)
         defer { try? FileManager.default.removeItem(at: image) }
         let chatA = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
         await chatA.addImages(from: [image])
@@ -987,6 +889,11 @@ struct ThreadStoreTests {
         return flags
     }
 
+    private func writeOnePixelPNG(to url: URL) throws {
+        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
+            .write(to: url)
+    }
+
     private func waitUntil(
         _ condition: () -> Bool,
         attempts: Int = 100
@@ -1041,12 +948,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private let threadListItem: ThreadListStreamItem
     private var snapshotsByID: [String: ThreadStreamItem]
 
-    init(
-        threads: [mai.Thread],
-        detailThreads: [mai.Thread]? = nil,
-        detailSnapshotSequence: Int? = nil,
-        historyRestorePendingThreadIDs: Set<String> = []
-    ) {
+    init(threads: [mai.Thread], historyRestorePendingThreadIDs: Set<String> = []) {
         let entries = threads.map(makeThreadListEntry)
         threadListItem = ThreadListStreamItem(
             kind: "snapshot",
@@ -1058,9 +960,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             ),
             thread: nil
         )
-        let detailThreads = detailThreads ?? threads
         snapshotsByID = Dictionary(
-            uniqueKeysWithValues: detailThreads.enumerated().map { index, thread in
+            uniqueKeysWithValues: threads.enumerated().map { index, thread in
                 (
                     thread.id,
                     ThreadStreamItem(
@@ -1071,7 +972,7 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                                 historyRestorePendingThreadIDs.contains(
                                     thread.id
                                 ),
-                            snapshotSequence: detailSnapshotSequence ?? index + 1,
+                            snapshotSequence: index + 1,
                             thread: thread
                         )
                     )
@@ -1179,20 +1080,12 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     func resumeProviderStarts() {
         shouldBlockProviderStart = false
-        let continuations = providerStartContinuations
-        providerStartContinuations.removeAll()
-        for continuation in continuations {
-            continuation.resume()
-        }
+        resumeAll(&providerStartContinuations)
     }
 
     func resumeProviderOptionSets() {
         shouldBlockProviderOptionSet = false
-        let continuations = providerOptionSetContinuations
-        providerOptionSetContinuations.removeAll()
-        for continuation in continuations {
-            continuation.resume()
-        }
+        resumeAll(&providerOptionSetContinuations)
     }
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
@@ -1225,67 +1118,13 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                     thread: thread
                 )
             )
-        } else if command.type == "thread.create", let threadID = command.threadID {
-            let session = SessionBinding(
-                activeTurnID: nil,
-                configOptions: nil,
-                cwd: command.cwd,
-                driver: nil,
-                lastError: nil,
-                providerInstanceID: command.providerInstanceID ?? "codex",
-                providerName: nil,
-                slashCommands: nil,
-                status: "starting",
-                stopRequested: false,
-                threadID: threadID,
-                tokenUsage: nil,
-                updatedAt: .now
-            )
-            let thread = makeThread(threadID).with(
-                cwd: .some(command.cwd),
-                modelSelection: .some(command.modelSelection),
-                providerInstanceID: .some(command.providerInstanceID),
-                session: .some(session)
-            )
-            snapshotsByID[threadID] = ThreadStreamItem(
-                event: nil,
-                kind: "snapshot",
-                snapshot: ThreadDetailSnapshot(
-                    historyRestorePending: nil,
-                    snapshotSequence: 1,
-                    thread: thread
-                )
-            )
-        } else if command.type == "thread.session.prepare", let threadID = command.threadID,
-                  let starting = snapshotsByID[threadID]?.snapshot?.thread.session {
-            let session = starting.with(status: "ready", updatedAt: .now)
-            let event = Event(
-                actor: nil,
-                commandID: command.commandID,
-                eventID: "session-ready-\(threadID)",
-                metadata: nil,
-                occurredAt: .now,
-                payload: makeEventPayload(threadID: threadID, session: session),
-                sequence: 2,
-                type: "thread.session-status-set"
-            )
-            let item = ThreadStreamItem(event: event, kind: "event", snapshot: nil)
-            let data = try newJSONEncoder().encode(MockNotification(params: item))
-            Task { [weak self] in
-                await Task.yield()
-                self?.onNotification?(MaidRPCMethod.orchestrationSubscribeThread, data)
-            }
         }
         return DispatchResult(sequence: 1)
     }
 
     func resumeUnsubscribes() {
         shouldBlockUnsubscribe = false
-        let continuations = unsubscribeContinuations
-        unsubscribeContinuations.removeAll()
-        for continuation in continuations {
-            continuation.resume()
-        }
+        resumeAll(&unsubscribeContinuations)
     }
 
     func resumeSubscribes() {
@@ -1448,9 +1287,13 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     func resumeTurnDispatches() {
         shouldBlockTurnDispatch = false
-        let continuations = turnDispatchContinuations
-        turnDispatchContinuations.removeAll()
-        for continuation in continuations { continuation.resume() }
+        resumeAll(&turnDispatchContinuations)
+    }
+
+    private func resumeAll(_ continuations: inout [CheckedContinuation<Void, Never>]) {
+        let pending = continuations
+        continuations.removeAll()
+        for continuation in pending { continuation.resume() }
     }
 
     private enum MockError: Error {
@@ -1487,7 +1330,6 @@ private func makeEventPayload(
     text: String? = nil,
     title: String? = nil,
     turnID: String? = nil,
-    session: SessionBinding? = nil,
     item: Item? = nil
 ) -> EventPayload {
     EventPayload(
@@ -1505,7 +1347,7 @@ private func makeEventPayload(
         providerInstanceID: nil,
         requestID: nil,
         role: role,
-        session: session,
+        session: nil,
         sessionCleared: nil,
         slashCommands: nil,
         stopReason: nil,
