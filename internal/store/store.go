@@ -67,13 +67,6 @@ type ThreadStore interface {
 	ListThreads() ([]ThreadMeta, error)
 }
 
-// ImportStore atomically persists one externally owned provider session as a
-// maiD thread. If the provider session was already imported, ImportThread
-// returns its existing thread id and imported=false.
-type ImportStore interface {
-	ImportThread(meta ThreadMeta, route RouteRecord) (threadID string, imported bool, err error)
-}
-
 // TerminalMeta contains the only durable terminal-thread values. Process
 // state, dimensions, output, and run identity are deliberately absent: a
 // daemon restart reconstructs these rows as stopped terminals.

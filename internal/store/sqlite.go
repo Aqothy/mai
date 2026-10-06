@@ -15,14 +15,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// SQLite implements RouteStore and ThreadStore in one database file.
+// SQLite implements every metadata store interface in one database file.
 type SQLite struct {
 	db *sql.DB
 }
 
 var _ RouteStore = (*SQLite)(nil)
 var _ ThreadStore = (*SQLite)(nil)
-var _ ImportStore = (*SQLite)(nil)
 var _ TerminalStore = (*SQLite)(nil)
 var _ PromptStore = (*SQLite)(nil)
 
@@ -229,7 +228,10 @@ func (s *SQLite) ListThreads() ([]ThreadMeta, error) {
 	return threads, nil
 }
 
-// ImportThread writes the sidebar row and provider route in one transaction.
+// ImportThread atomically persists one externally owned provider session as a
+// maiD thread: the sidebar row and provider route are written in one transaction.
+// If the provider session was already imported, it returns the existing thread
+// id and imported=false.
 // The transaction is immediate (configured in Open), and the database uses one
 // connection, so concurrent imports cannot create two maiD threads for the
 // same provider session.
@@ -270,16 +272,8 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		if currentErr != nil && !errors.Is(currentErr, sql.ErrNoRows) {
 			return "", false, fmt.Errorf("store: inspect imported thread %q route: %w", existing, currentErr)
 		}
-		route.StartInput.ThreadID = existing
-		startInput, err := json.Marshal(route.StartInput)
-		if err != nil {
-			return "", false, fmt.Errorf("store: encode imported thread %q start input: %w", existing, err)
-		}
 		if currentErr != nil {
-			if _, err := tx.Exec(`INSERT INTO thread_routes
-				(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
-				VALUES (?, ?, ?, ?, ?)`, existing, string(route.InstanceID), route.ProviderSessionID,
-				nullableText(string(route.ResumeCursor)), string(startInput)); err != nil {
+			if err := insertImportedRoute(tx, existing, route); err != nil {
 				return "", false, fmt.Errorf("store: restore imported route for thread %q: %w", existing, err)
 			}
 		}
@@ -330,21 +324,28 @@ func (s *SQLite) ImportThread(meta ThreadMeta, route RouteRecord) (string, bool,
 		string(route.InstanceID), route.ProviderSessionID, meta.ThreadID); err != nil {
 		return "", false, fmt.Errorf("store: record imported provider session for thread %q: %w", meta.ThreadID, err)
 	}
-	route.StartInput.ThreadID = meta.ThreadID
-	startInput, err := json.Marshal(route.StartInput)
-	if err != nil {
-		return "", false, fmt.Errorf("store: encode imported thread %q start input: %w", meta.ThreadID, err)
-	}
-	if _, err := tx.Exec(`INSERT INTO thread_routes
-		(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
-		VALUES (?, ?, ?, ?, ?)`, meta.ThreadID, string(route.InstanceID), route.ProviderSessionID,
-		nullableText(string(route.ResumeCursor)), string(startInput)); err != nil {
+	if err := insertImportedRoute(tx, meta.ThreadID, route); err != nil {
 		return "", false, fmt.Errorf("store: insert imported route for thread %q: %w", meta.ThreadID, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, fmt.Errorf("store: commit imported thread %q: %w", meta.ThreadID, err)
 	}
 	return meta.ThreadID, true, nil
+}
+
+// insertImportedRoute writes the route of an imported thread, addressing its
+// start input to that thread.
+func insertImportedRoute(tx *sql.Tx, threadID string, route RouteRecord) error {
+	route.StartInput.ThreadID = threadID
+	startInput, err := json.Marshal(route.StartInput)
+	if err != nil {
+		return fmt.Errorf("encode start input: %w", err)
+	}
+	_, err = tx.Exec(`INSERT INTO thread_routes
+		(thread_id, instance_id, provider_session_id, resume_cursor, start_input)
+		VALUES (?, ?, ?, ?, ?)`, threadID, string(route.InstanceID), route.ProviderSessionID,
+		nullableText(string(route.ResumeCursor)), string(startInput))
+	return err
 }
 
 func (s *SQLite) SaveRoute(threadID string, record RouteRecord) error {

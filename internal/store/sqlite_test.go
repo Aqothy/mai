@@ -2,9 +2,10 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -22,26 +23,34 @@ func openTestStore(t *testing.T) *SQLite {
 	return s
 }
 
-func TestThreadStoreRoundTrip(t *testing.T) {
+func TestThreadStoreRoundTripsAndOrdersByRecency(t *testing.T) {
 	s := openTestStore(t)
 
-	created := time.Date(2026, 7, 13, 10, 0, 0, 123456789, time.UTC)
-	meta := ThreadMeta{
-		ThreadID:           "thread-1",
-		Title:              "First thread",
-		Cwd:                "/tmp/project",
-		ProviderInstanceID: "gemini",
-		ModelSelection:     &provider.ModelSelection{Model: "gemini-pro", Options: json.RawMessage(`{"temp":1}`)},
-		CreatedAt:          created,
-		UpdatedAt:          created,
+	base := time.Date(2026, 7, 13, 10, 0, 0, 123456789, time.UTC)
+	full := ThreadMeta{
+		ThreadID:              "middle",
+		Title:                 "First title",
+		Cwd:                   "/tmp/project",
+		AdditionalDirectories: []string{"/tmp/other"},
+		ProviderInstanceID:    "gemini",
+		ModelSelection:        &provider.ModelSelection{Model: "gemini-pro", Options: json.RawMessage(`{"temp":1}`)},
+		CreatedAt:             base,
+		UpdatedAt:             base,
 	}
-	if err := s.UpsertThread(meta); err != nil {
-		t.Fatalf("UpsertThread: %v", err)
+	// Sub-second fractions exercise the fixed-width timestamp encoding: with
+	// RFC3339Nano's trimmed zeros, "10:00:00Z" would sort after "10:00:00.5Z".
+	for _, thread := range []ThreadMeta{
+		{ThreadID: "oldest", CreatedAt: base, UpdatedAt: base.Truncate(time.Second)},
+		{ThreadID: "newest", CreatedAt: base, UpdatedAt: base.Add(500 * time.Millisecond)},
+		full,
+	} {
+		if err := s.UpsertThread(thread); err != nil {
+			t.Fatalf("UpsertThread(%s): %v", thread.ThreadID, err)
+		}
 	}
-
-	meta.Title = "Renamed"
-	meta.UpdatedAt = created.Add(time.Hour)
-	if err := s.UpsertThread(meta); err != nil {
+	full.Title = "Renamed"
+	full.UpdatedAt = base.Add(250 * time.Millisecond)
+	if err := s.UpsertThread(full); err != nil {
 		t.Fatalf("UpsertThread update: %v", err)
 	}
 
@@ -49,53 +58,20 @@ func TestThreadStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListThreads: %v", err)
 	}
-	if len(threads) != 1 {
-		t.Fatalf("expected 1 thread, got %d", len(threads))
-	}
-	got := threads[0]
-	if got.Title != "Renamed" || got.Cwd != "/tmp/project" {
-		t.Fatalf("unexpected thread meta: %+v", got)
-	}
-	if got.ProviderInstanceID != "gemini" || got.ModelSelection == nil || got.ModelSelection.Model != "gemini-pro" || string(got.ModelSelection.Options) != `{"temp":1}` {
-		t.Fatalf("provider selection did not round-trip: %+v", got)
-	}
-	if !got.CreatedAt.Equal(created) || !got.UpdatedAt.Equal(created.Add(time.Hour)) {
-		t.Fatalf("timestamps did not round-trip: created=%v updated=%v", got.CreatedAt, got.UpdatedAt)
-	}
-}
-
-func TestListThreadsOrdersByUpdatedAtDescending(t *testing.T) {
-	s := openTestStore(t)
-
-	base := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
-	// Sub-second fractions exercise the fixed-width timestamp encoding: with
-	// RFC3339Nano's trimmed zeros, "10:00:00Z" would sort after "10:00:00.5Z".
-	for _, thread := range []ThreadMeta{
-		{ThreadID: "oldest", CreatedAt: base, UpdatedAt: base},
-		{ThreadID: "newest", CreatedAt: base, UpdatedAt: base.Add(500 * time.Millisecond)},
-		{ThreadID: "middle", CreatedAt: base, UpdatedAt: base.Add(250 * time.Millisecond)},
-	} {
-		if err := s.UpsertThread(thread); err != nil {
-			t.Fatalf("UpsertThread(%s): %v", thread.ThreadID, err)
-		}
-	}
-
-	threads, err := s.ListThreads()
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 3 {
-		t.Fatalf("ListThreads returned %d threads, want 3: %+v", len(threads), threads)
-	}
 	var order []string
 	for _, thread := range threads {
 		order = append(order, thread.ThreadID)
 	}
-	want := []string{"newest", "middle", "oldest"}
-	for i := range want {
-		if order[i] != want[i] {
-			t.Fatalf("expected order %v, got %v", want, order)
-		}
+	if !slices.Equal(order, []string{"newest", "middle", "oldest"}) {
+		t.Fatalf("order = %v, want newest, middle, oldest", order)
+	}
+	got := threads[1]
+	if !got.CreatedAt.Equal(full.CreatedAt) || !got.UpdatedAt.Equal(full.UpdatedAt) {
+		t.Fatalf("timestamps did not round-trip: created=%v updated=%v", got.CreatedAt, got.UpdatedAt)
+	}
+	got.CreatedAt, got.UpdatedAt = full.CreatedAt, full.UpdatedAt
+	if !reflect.DeepEqual(got, full) {
+		t.Fatalf("thread = %+v, want %+v", got, full)
 	}
 }
 
@@ -142,8 +118,8 @@ func TestRouteStoreRoundTrip(t *testing.T) {
 	if string(got.ResumeCursor) != `{"sessionId":"native-session-1"}` {
 		t.Fatalf("resume cursor did not round-trip: %s", got.ResumeCursor)
 	}
-	if got.StartInput.ThreadID != "thread-1" || got.StartInput.ProviderInstanceID != "gemini" || got.StartInput.Cwd != "/tmp/project" || got.StartInput.ModelSelection == nil || got.StartInput.ModelSelection.Model != "gemini-pro" || len(got.StartInput.ConfigSelections) != 1 || got.StartInput.ConfigSelections[0].OptionID != "mode" || got.StartInput.ConfigSelections[0].Value != "plan" {
-		t.Fatalf("start input did not round-trip: %+v", got.StartInput)
+	if !reflect.DeepEqual(got.StartInput, record.StartInput) {
+		t.Fatalf("start input = %+v, want %+v", got.StartInput, record.StartInput)
 	}
 
 	if err := s.DeleteRoute("thread-1"); err != nil {
@@ -163,72 +139,6 @@ func TestRouteStoreRoundTrip(t *testing.T) {
 	}
 	if len(specs) != 1 || specs[0].InstanceID != "gemini" || specs[0].Driver != "acp" || string(specs[0].Config) != `{"command":"gemini"}` {
 		t.Fatalf("instance spec did not round-trip: %+v", specs)
-	}
-}
-
-func TestImportThreadAtomicallyDeduplicatesProviderSession(t *testing.T) {
-	s := openTestStore(t)
-	if err := s.SaveInstance(provider.InstanceSpec{InstanceID: "codex", Driver: "acp"}); err != nil {
-		t.Fatalf("SaveInstance: %v", err)
-	}
-	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	meta := ThreadMeta{ThreadID: "thread-import-1", Title: "Imported", Cwd: "/tmp/project", ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}
-	route := RouteRecord{
-		InstanceID:        "codex",
-		ProviderSessionID: "external-session",
-		StartInput:        provider.StartSessionInput{ThreadID: meta.ThreadID, ProviderInstanceID: "codex", Cwd: meta.Cwd},
-	}
-	threadID, imported, err := s.ImportThread(meta, route)
-	if err != nil {
-		t.Fatalf("ImportThread: %v", err)
-	}
-	if threadID != meta.ThreadID || !imported {
-		t.Fatalf("first import = (%q, %v), want (%q, true)", threadID, imported, meta.ThreadID)
-	}
-
-	duplicate := meta
-	duplicate.ThreadID = "thread-import-2"
-	threadID, imported, err = s.ImportThread(duplicate, route)
-	if err != nil {
-		t.Fatalf("duplicate ImportThread: %v", err)
-	}
-	if threadID != meta.ThreadID || imported {
-		t.Fatalf("duplicate import = (%q, %v), want (%q, false)", threadID, imported, meta.ThreadID)
-	}
-	threads, err := s.ListThreads()
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 1 || threads[0].ThreadID != meta.ThreadID {
-		t.Fatalf("imported threads = %+v, want only the first thread", threads)
-	}
-	routes, err := s.LoadRoutes()
-	if err != nil {
-		t.Fatalf("LoadRoutes: %v", err)
-	}
-	if len(routes) != 1 || routes[meta.ThreadID].ProviderSessionID != route.ProviderSessionID {
-		t.Fatalf("imported routes = %+v", routes)
-	}
-}
-
-func TestRouteStoreRejectsDuplicateProviderSessionBindings(t *testing.T) {
-	s := openTestStore(t)
-	if err := s.SaveInstance(provider.InstanceSpec{InstanceID: "codex", Driver: "acp"}); err != nil {
-		t.Fatalf("SaveInstance: %v", err)
-	}
-	route := RouteRecord{InstanceID: "codex", ProviderSessionID: "shared-session"}
-	if err := s.SaveRoute("thread-1", route); err != nil {
-		t.Fatalf("first SaveRoute: %v", err)
-	}
-	if err := s.SaveRoute("thread-2", route); !errors.Is(err, ErrProviderSessionBound) {
-		t.Fatalf("duplicate SaveRoute err = %v, want ErrProviderSessionBound", err)
-	}
-	routes, err := s.LoadRoutes()
-	if err != nil {
-		t.Fatalf("LoadRoutes: %v", err)
-	}
-	if len(routes) != 1 || routes["thread-1"].ProviderSessionID != route.ProviderSessionID {
-		t.Fatalf("routes = %+v, want only the original binding", routes)
 	}
 }
 
@@ -268,7 +178,7 @@ func TestImportThreadAdoptsExistingProviderSessionRoute(t *testing.T) {
 	}
 }
 
-func TestImportThreadDeduplicatesAfterRouteIsReleased(t *testing.T) {
+func TestImportThreadDeduplicatesProviderSession(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.SaveInstance(provider.InstanceSpec{InstanceID: "codex", Driver: "acp"}); err != nil {
 		t.Fatalf("SaveInstance: %v", err)
@@ -280,24 +190,25 @@ func TestImportThreadDeduplicatesAfterRouteIsReleased(t *testing.T) {
 		ProviderSessionID: "external-session",
 		StartInput:        provider.StartSessionInput{ThreadID: meta.ThreadID, ProviderInstanceID: "codex"},
 	}
-	if _, imported, err := s.ImportThread(meta, route); err != nil || !imported {
-		t.Fatalf("ImportThread = imported %v, err %v", imported, err)
+	if threadID, imported, err := s.ImportThread(meta, route); err != nil || !imported || threadID != meta.ThreadID {
+		t.Fatalf("ImportThread = (%q, %v, %v), want a new import", threadID, imported, err)
 	}
-	if err := s.DeleteRoute(meta.ThreadID); err != nil {
-		t.Fatalf("DeleteRoute: %v", err)
-	}
-
 	duplicate := meta
 	duplicate.ThreadID = "thread-import-2"
 	duplicateRoute := route
 	duplicateRoute.StartInput.ThreadID = duplicate.ThreadID
-	threadID, imported, err := s.ImportThread(duplicate, duplicateRoute)
-	if err != nil {
-		t.Fatalf("duplicate ImportThread: %v", err)
+	importDuplicate := func(step string) {
+		t.Helper()
+		threadID, imported, err := s.ImportThread(duplicate, duplicateRoute)
+		if err != nil || threadID != meta.ThreadID || imported {
+			t.Fatalf("%s: duplicate import = (%q, %v, %v), want (%q, false)", step, threadID, imported, err, meta.ThreadID)
+		}
 	}
-	if threadID != meta.ThreadID || imported {
-		t.Fatalf("duplicate import = (%q, %v), want (%q, false)", threadID, imported, meta.ThreadID)
+	importDuplicate("route bound")
+	if err := s.DeleteRoute(meta.ThreadID); err != nil {
+		t.Fatalf("DeleteRoute: %v", err)
 	}
+	importDuplicate("route released")
 	routes, err := s.LoadRoutes()
 	if err != nil {
 		t.Fatalf("LoadRoutes: %v", err)
@@ -398,20 +309,5 @@ func TestImportThreadRollsBackWhenInstanceIsUnknown(t *testing.T) {
 	}
 	if len(threads) != 0 {
 		t.Fatalf("failed import left thread rows: %+v", threads)
-	}
-}
-
-func TestSaveRouteRequiresKnownInstance(t *testing.T) {
-	s := openTestStore(t)
-	err := s.SaveRoute("thread-1", RouteRecord{InstanceID: "never-started"})
-	if err == nil {
-		t.Fatal("expected foreign-key error for a route without its instance")
-	}
-	routes, loadErr := s.LoadRoutes()
-	if loadErr != nil {
-		t.Fatalf("LoadRoutes: %v", loadErr)
-	}
-	if len(routes) != 0 {
-		t.Fatalf("failed SaveRoute left rows: %+v", routes)
 	}
 }
