@@ -78,7 +78,10 @@ struct ChatNativeClipboardTests {
         tableHost.contentView.scroll(to: NSPoint(x: 90, y: 0))
         try #require(tableHost.contentView.bounds.minX > 0, "Wide table did not scroll horizontally")
         try #require(host.accessibilityValue() as? String == table.tabSeparatedText, "Table accessibility content differs")
-        try await Task.sleep(for: .milliseconds(1700))
+        let feedbackDeadline = ContinuousClock.now + .seconds(5)
+        while tableCopy.accessibilityLabel() != "Copy table", ContinuousClock.now < feedbackDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         try #require(tableCopy.accessibilityLabel() == "Copy table", "Old feedback task overwrote reused button")
 
         let secondCode = ChatMarkdownCodeBlock(code: "let second = 42 // 保持", language: "swift")
