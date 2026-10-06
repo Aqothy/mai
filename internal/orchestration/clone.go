@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -74,21 +75,12 @@ func cloneToolCall(value *provider.ToolCall) *provider.ToolCall {
 	clone := *value
 	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
 	for index := range clone.Locations {
-		if value.Locations[index].Line != nil {
-			line := *value.Locations[index].Line
-			clone.Locations[index].Line = &line
-		}
+		clone.Locations[index].Line = clonePtr(value.Locations[index].Line)
 	}
 	clone.Changes = append([]provider.FileChange(nil), value.Changes...)
 	clone.Attachments = cloneAttachments(value.Attachments)
-	if value.ExitCode != nil {
-		exitCode := *value.ExitCode
-		clone.ExitCode = &exitCode
-	}
-	if value.DurationMilliseconds != nil {
-		duration := *value.DurationMilliseconds
-		clone.DurationMilliseconds = &duration
-	}
+	clone.ExitCode = clonePtr(value.ExitCode)
+	clone.DurationMilliseconds = clonePtr(value.DurationMilliseconds)
 	return &clone
 }
 
@@ -108,12 +100,12 @@ func cloneToolCallSummary(value *ToolCallSummary) *ToolCallSummary {
 	clone := *value
 	clone.Locations = append([]provider.ToolLocation(nil), value.Locations...)
 	for index := range clone.Locations {
-		clone.Locations[index].Line = cloneUint32Ptr(value.Locations[index].Line)
+		clone.Locations[index].Line = clonePtr(value.Locations[index].Line)
 	}
 	clone.Changes = append([]FileChangeSummary(nil), value.Changes...)
 	clone.Attachments = append([]ToolAttachmentSummary(nil), value.Attachments...)
-	clone.ExitCode = cloneIntPtr(value.ExitCode)
-	clone.DurationMilliseconds = cloneInt64Ptr(value.DurationMilliseconds)
+	clone.ExitCode = clonePtr(value.ExitCode)
+	clone.DurationMilliseconds = clonePtr(value.DurationMilliseconds)
 	return &clone
 }
 
@@ -147,40 +139,16 @@ func cloneModelSelection(value *provider.ModelSelection) *provider.ModelSelectio
 	return &clone
 }
 
-func cloneConfigOptions(options []provider.ConfigOption) []provider.ConfigOption {
-	if options == nil {
-		return nil
-	}
-	return append([]provider.ConfigOption{}, options...)
-}
-
-func cloneSlashCommands(commands []provider.SlashCommand) []provider.SlashCommand {
-	if commands == nil {
-		return nil
-	}
-	return append([]provider.SlashCommand{}, commands...)
-}
-
-func cloneSkills(skills []provider.Skill) []provider.Skill {
-	if skills == nil {
-		return nil
-	}
-	return append([]provider.Skill{}, skills...)
-}
-
 func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	if value == nil {
 		return nil
 	}
 	clone := *value
 	clone.AdditionalDirectories = append([]string(nil), value.AdditionalDirectories...)
-	clone.ConfigOptions = cloneConfigOptions(value.ConfigOptions)
-	clone.SlashCommands = cloneSlashCommands(value.SlashCommands)
-	clone.Skills = cloneSkills(value.Skills)
-	if value.TokenUsage != nil {
-		usage := *value.TokenUsage
-		clone.TokenUsage = &usage
-	}
+	clone.ConfigOptions = slices.Clone(value.ConfigOptions)
+	clone.SlashCommands = slices.Clone(value.SlashCommands)
+	clone.Skills = slices.Clone(value.Skills)
+	clone.TokenUsage = clonePtr(value.TokenUsage)
 	return &clone
 }
 
@@ -189,8 +157,8 @@ func cloneTurnPtr(value *Turn) *Turn {
 		return nil
 	}
 	clone := *value
-	clone.StartedAt = cloneTimePtr(value.StartedAt)
-	clone.CompletedAt = cloneTimePtr(value.CompletedAt)
+	clone.StartedAt = clonePtr(value.StartedAt)
+	clone.CompletedAt = clonePtr(value.CompletedAt)
 	return &clone
 }
 
@@ -205,31 +173,8 @@ func cloneTurns(turns []Turn) []Turn {
 	return cloned
 }
 
-func cloneTimePtr(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	return &clone
-}
-
-func cloneIntPtr(value *int) *int {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	return &clone
-}
-
-func cloneInt64Ptr(value *int64) *int64 {
-	if value == nil {
-		return nil
-	}
-	clone := *value
-	return &clone
-}
-
-func cloneUint32Ptr(value *uint32) *uint32 {
+// clonePtr copies the pointed-to value so the clone shares no mutable state.
+func clonePtr[T any](value *T) *T {
 	if value == nil {
 		return nil
 	}

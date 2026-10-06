@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -82,7 +83,7 @@ func (p *Projection) applyThreadSkillsUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	session.Skills = cloneSkills(event.Payload.Skills)
+	session.Skills = slices.Clone(event.Payload.Skills)
 	session.UpdatedAt = event.OccurredAt
 }
 
@@ -518,7 +519,7 @@ func (p *Projection) applyThreadConfigOptionsUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	session.ConfigOptions = cloneConfigOptions(event.Payload.ConfigOptions)
+	session.ConfigOptions = slices.Clone(event.Payload.ConfigOptions)
 	if event.Payload.ModelSelection != nil {
 		thread.ModelSelection = cloneModelSelection(event.Payload.ModelSelection)
 	}
@@ -531,7 +532,7 @@ func (p *Projection) applyThreadSlashCommandsUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	session.SlashCommands = cloneSlashCommands(event.Payload.SlashCommands)
+	session.SlashCommands = slices.Clone(event.Payload.SlashCommands)
 	session.UpdatedAt = event.OccurredAt
 }
 
@@ -541,12 +542,7 @@ func (p *Projection) applyThreadTokenUsageUpdated(event Event) {
 		return
 	}
 	session := ensureSessionBinding(thread, event)
-	if event.Payload.TokenUsage != nil {
-		usage := *event.Payload.TokenUsage
-		session.TokenUsage = &usage
-	} else {
-		session.TokenUsage = nil
-	}
+	session.TokenUsage = clonePtr(event.Payload.TokenUsage)
 	session.UpdatedAt = event.OccurredAt
 }
 

@@ -45,6 +45,12 @@ func newTestReactor(engine *Engine, runtime ProviderRuntime) *ProviderEventReact
 	return NewProviderEventReactor(context.Background(), engine, runtime, NewProviderRuntimeIngestion(engine))
 }
 
+// newDetachedReactor is not registered as an engine listener: tests call its
+// handlers directly and synchronously.
+func newDetachedReactor(engine *Engine, runtime ProviderRuntime) *ProviderEventReactor {
+	return newProviderEventReactor(context.Background(), engine, runtime, NewProviderRuntimeIngestion(engine))
+}
+
 func (f *fakeProviderRuntime) StartSession(ctx context.Context, _ string, input provider.StartSessionInput) (provider.StartSessionResult, error) {
 	f.mu.Lock()
 	f.startInputs = append(f.startInputs, input)
@@ -251,7 +257,7 @@ func TestReactorPreparesSessionBeforeFirstTurn(t *testing.T) {
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
 	fake.startSession = provider.Session{ProviderInstanceID: "codex", ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-prepare")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-prepare", ThreadID: threadID, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "fast"}})
 	result := mustDispatch(t, engine, Command{Type: CommandThreadSessionPrepare, CommandID: "prepare", ThreadID: threadID})
@@ -284,7 +290,7 @@ func TestReactorRequestsReplayWhenPreparingRestoredEmptyThread(t *testing.T) {
 		ItemID:   "restored-user",
 		Payload:  provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, Detail: "restored question"},
 	}}
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-restored-replay")
 	now := time.Now()
 	engine.RestoreThreads([]RestoredThread{{
@@ -330,7 +336,7 @@ func TestReactorCompletesUnavailableHistoryWithWarning(t *testing.T) {
 	fake := newFakeProviderRuntime()
 	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
 	fake.historyUnavailable = true
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-restored-unavailable")
 	now := time.Now()
 	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
@@ -352,7 +358,7 @@ func TestReactorRetriesPendingReplayWithTimelineContent(t *testing.T) {
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
 	fake.startSession = provider.Session{ProviderInstanceID: "codex"}
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-restored-with-content")
 	now := time.Now()
 	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
@@ -384,7 +390,7 @@ func TestReactorRetriesRestoredReplayAfterPreparationFailure(t *testing.T) {
 	events := observeEvents(t, engine)
 	fake := newFakeProviderRuntime()
 	fake.startErr = errors.New("agent unreachable")
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-restored-replay-retry")
 	now := time.Now()
 	engine.RestoreThreads([]RestoredThread{{ThreadID: threadID, ProviderInstanceID: "codex", CreatedAt: now, UpdatedAt: now}})
@@ -543,7 +549,7 @@ func TestReactorClearsPendingIntentWhenProviderRejectsInterruptOrStop(t *testing
 	fake := newFakeProviderRuntime()
 	fake.interruptErr = errors.New("interrupt rejected")
 	fake.stopErr = errors.New("stop rejected")
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-rejected-lifecycle-intent")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-rejected-lifecycle", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}})
@@ -603,7 +609,7 @@ func TestReactorSuccessfulStopRecordsCancelledReasonForActiveTurn(t *testing.T) 
 	engine := NewEngine()
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-successful-stop-reason")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-successful-stop-reason", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady, UpdatedAt: time.Now()}}})
@@ -627,7 +633,7 @@ func TestReactorRestoresConfirmedConfigOptionsAfterSessionStop(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
-	reactor := &ProviderEventReactor{engine: engine, provider: fake, ingestion: NewProviderRuntimeIngestion(engine), providerRPCTimeout: time.Second}
+	reactor := newDetachedReactor(engine, fake)
 	threadID := ThreadID("thread-config-after-stop")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-config-after-stop", ThreadID: threadID, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "fast"}})
 	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}})

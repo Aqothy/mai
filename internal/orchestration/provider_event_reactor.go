@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,24 +47,17 @@ type ProviderEventReactor struct {
 // is the reactor's base context (typically the daemon server's lifecycle
 // context); cancelling it cancels all in-flight provider RPCs.
 func NewProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime, ingestion *ProviderRuntimeIngestion) *ProviderEventReactor {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	r := &ProviderEventReactor{engine: engine, provider: providerRuntime, ingestion: ingestion, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
+	r := newProviderEventReactor(ctx, engine, providerRuntime, ingestion)
 	engine.OnEvent(r.handle)
 	return r
 }
 
+func newProviderEventReactor(ctx context.Context, engine *Engine, providerRuntime ProviderRuntime, ingestion *ProviderRuntimeIngestion) *ProviderEventReactor {
+	return &ProviderEventReactor{engine: engine, provider: providerRuntime, ingestion: ingestion, baseCtx: ctx, providerRPCTimeout: defaultProviderRPCTimeout, threadTails: make(map[ThreadID]chan struct{})}
+}
+
 func (r *ProviderEventReactor) providerRPCContext() (context.Context, context.CancelFunc) {
-	timeout := r.providerRPCTimeout
-	if timeout <= 0 {
-		timeout = defaultProviderRPCTimeout
-	}
-	base := r.baseCtx
-	if base == nil {
-		base = context.Background()
-	}
-	return context.WithTimeout(base, timeout)
+	return context.WithTimeout(r.baseCtx, r.providerRPCTimeout)
 }
 
 func (r *ProviderEventReactor) handle(event Event) {
@@ -102,9 +96,6 @@ func (r *ProviderEventReactor) enqueueThread(event Event, fn func()) {
 		return
 	}
 	r.mu.Lock()
-	if r.threadTails == nil {
-		r.threadTails = make(map[ThreadID]chan struct{})
-	}
 	prev := r.threadTails[threadID]
 	done := make(chan struct{})
 	r.threadTails[threadID] = done
@@ -223,7 +214,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	if !ok {
 		return
 	}
-	if !providerTurnStillRunning(view, turnID) {
+	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
 		if r.requeueSettledTurnStart(event, view) {
 			return
 		}
@@ -361,7 +352,7 @@ func bindingFromProviderSession(providerInstanceID provider.InstanceID, session 
 	if providerInstanceID == "" {
 		providerInstanceID = session.ProviderInstanceID
 	}
-	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...), ConfigOptions: cloneConfigOptions(session.ConfigOptions), Skills: cloneSkills(session.Skills)}
+	return SessionBinding{ProviderInstanceID: providerInstanceID, ProviderGeneration: session.Generation, ProviderName: session.ProviderName, Driver: session.Provider, Cwd: session.Cwd, AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...), ConfigOptions: slices.Clone(session.ConfigOptions), Skills: slices.Clone(session.Skills)}
 }
 
 func (r *ProviderEventReactor) dispatchProviderSessionMetadata(threadID ThreadID, session provider.Session, createdAt time.Time) {
@@ -446,9 +437,6 @@ func (r *ProviderEventReactor) handleConfigOption(event Event) {
 }
 
 func configOptionCategory(session *SessionBinding, optionID string) provider.ConfigOptionCategory {
-	if session == nil {
-		return ""
-	}
 	for _, option := range session.ConfigOptions {
 		if option.ID == optionID {
 			return option.Category
@@ -471,7 +459,6 @@ func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	// the event was appended, so it passes through as-is.
 	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID}); err != nil {
 		r.appendErrorItem(threadID, view.Approval.TurnID, err.Error())
-		return
 	}
 }
 
@@ -517,14 +504,4 @@ func interruptEventTargetsCancellableTurn(view ThreadSessionView, turnID TurnID)
 		}
 	}
 	return true
-}
-
-func providerTurnStillRunning(view ThreadProviderView, turnID TurnID) bool {
-	if turnID == "" {
-		return true
-	}
-	if view.LatestTurn != nil && view.LatestTurn.ID == turnID {
-		return view.LatestTurn.State == TurnStateRunning && !view.LatestTurn.InterruptRequested
-	}
-	return view.Session != nil && view.Session.ActiveTurnID == turnID && view.Session.Status == SessionStatusRunning
 }

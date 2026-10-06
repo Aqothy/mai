@@ -749,9 +749,7 @@ func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, erro
 	if command.AdditionalDirectories != nil {
 		cwd := command.Cwd
 		if cwd == "" {
-			if thread, ok := e.Thread(command.ThreadID); ok {
-				cwd = thread.Cwd
-			}
+			cwd, _ = e.ThreadCwd(command.ThreadID)
 		}
 		var err error
 		additionalDirectories, err = e.resolveAdditionalDirectories(command.Type, command.AdditionalDirectories, cwd)

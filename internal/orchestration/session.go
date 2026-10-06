@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -106,7 +107,7 @@ func deriveSessionStatus(thread *Thread, update sessionUpdate, occurredAt time.T
 }
 
 func deriveSessionBound(thread *Thread, update sessionUpdate, occurredAt time.Time) (*SessionBinding, bool) {
-	if update.TurnID != "" && !turnStillRunning(*thread, update.TurnID) {
+	if !turnStillRunningOf(thread.Session, thread.LatestTurn, update.TurnID) {
 		return nil, false
 	}
 	if update.Binding == nil && update.TurnID == "" && thread.Session == nil {
@@ -246,17 +247,16 @@ func overlaySessionIdentity(session *SessionBinding, binding *SessionBinding) {
 		session.AdditionalDirectories = append([]string(nil), binding.AdditionalDirectories...)
 	}
 	if binding.ConfigOptions != nil {
-		session.ConfigOptions = cloneConfigOptions(binding.ConfigOptions)
+		session.ConfigOptions = slices.Clone(binding.ConfigOptions)
 	}
 	if binding.SlashCommands != nil {
-		session.SlashCommands = cloneSlashCommands(binding.SlashCommands)
+		session.SlashCommands = slices.Clone(binding.SlashCommands)
 	}
 	if binding.Skills != nil {
-		session.Skills = cloneSkills(binding.Skills)
+		session.Skills = slices.Clone(binding.Skills)
 	}
 	if binding.TokenUsage != nil {
-		usage := *binding.TokenUsage
-		session.TokenUsage = &usage
+		session.TokenUsage = clonePtr(binding.TokenUsage)
 	}
 }
 
@@ -276,12 +276,14 @@ func sessionTurnConflicts(thread *Thread, turnID TurnID) bool {
 	return false
 }
 
-func turnStillRunning(thread Thread, turnID TurnID) bool {
+// turnStillRunningOf reports whether turnID is still the running,
+// un-interrupted turn (an empty turnID is not turn-scoped).
+func turnStillRunningOf(session *SessionBinding, latestTurn *Turn, turnID TurnID) bool {
 	if turnID == "" {
 		return true
 	}
-	if thread.LatestTurn != nil && thread.LatestTurn.ID == turnID {
-		return thread.LatestTurn.State == TurnStateRunning && !thread.LatestTurn.InterruptRequested
+	if latestTurn != nil && latestTurn.ID == turnID {
+		return latestTurn.State == TurnStateRunning && !latestTurn.InterruptRequested
 	}
-	return thread.Session != nil && thread.Session.ActiveTurnID == turnID && thread.Session.Status == SessionStatusRunning
+	return session != nil && session.ActiveTurnID == turnID && session.Status == SessionStatusRunning
 }

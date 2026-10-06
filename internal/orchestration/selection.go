@@ -109,19 +109,16 @@ func selectionEqual(a, b *provider.ModelSelection) bool {
 // absent modelSelection means "none" — a provider-only switch cleared the old
 // instance's model); a payload with only modelSelection (a empty thread with
 // no instance, or a config-derived model update) replaces just the model
-// choice.
+// choice. The decider already resolved whether the switch strands the bound
+// session (ClearsSession), so sessionCleared is applied as recorded.
 func applyThreadProviderSelectionPatch(thread *Thread, providerInstanceID provider.InstanceID, selection *provider.ModelSelection, sessionCleared bool) {
-	if thread == nil {
-		return
-	}
 	if providerInstanceID != "" {
 		thread.ProviderInstanceID = providerInstanceID
 		thread.ModelSelection = cloneModelSelection(selection)
 	} else if selection != nil {
 		thread.ModelSelection = cloneModelSelection(selection)
 	}
-	selectionSpecified := providerInstanceID != "" || selection != nil
-	if sessionCleared || (selectionSpecified && sessionBindingStaleFor(thread.ProviderInstanceID, thread.Session)) {
+	if sessionCleared {
 		thread.Session = nil
 	}
 }
