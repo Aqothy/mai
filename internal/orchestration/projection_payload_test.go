@@ -33,7 +33,7 @@ func TestAppendPayloadTextMatchesDecodeEncodeSemantics(t *testing.T) {
 		"unicode…✓ and emoji 🚀",
 		`already \" escaped-looking`,
 		"<html> & entities",
-		"control  char",
+		"control \x01 char",
 		`trailing backslash \`,
 		`ends with quote "`,
 	}
