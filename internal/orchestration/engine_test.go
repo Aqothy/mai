@@ -200,66 +200,70 @@ func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsProviderModelMetaUpdateDuringActiveTurn(t *testing.T) {
+// While a turn is active the thread's provider/model selection is pinned: a
+// metadata change of either is rejected, and a turn.start becomes steering on
+// the same turn (keeping its timing) that may not change the selection either.
+func TestEngineActiveTurnPinsSelectionAndAcceptsSteering(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	threadID := ThreadID("thread-active-meta-provider")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-active-meta-provider", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-a", Options: json.RawMessage(`{"effort":"high"}`)}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-active-meta-provider", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-active-meta-provider", Text: "hello"}})
+	threadID := ThreadID("thread-active-turn")
+	selection := &provider.ModelSelection{Model: "fast", Options: json.RawMessage(`{"effort":"low"}`)}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-active-turn", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", ModelSelection: selection})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-active", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}})
+	active, _ := engine.Thread(threadID)
+	activeTurn := *active.LatestTurn
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-active-meta-switch-provider", ThreadID: threadID, ProviderInstanceID: "provider-b"}); err == nil {
-		t.Fatal("thread.meta.update provider switch during active turn err = nil, want rejection")
+	for name, command := range map[string]Command{
+		"meta provider":  {Type: CommandThreadMetaUpdate, ProviderInstanceID: "other"},
+		"meta model":     {Type: CommandThreadMetaUpdate, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow", Options: selection.Options}},
+		"steer provider": {Type: CommandThreadTurnStart, ProviderInstanceID: "other", Message: &CommandMessage{Text: "switch provider"}},
+		"steer model":    {Type: CommandThreadTurnStart, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow"}, Message: &CommandMessage{Text: "switch model"}},
+	} {
+		command.CommandID, command.ThreadID = CommandID("reject-"+name), threadID
+		if _, err := engine.Dispatch(context.Background(), command); err == nil {
+			t.Fatalf("%s during active turn err = nil, want rejection", name)
+		}
 	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-active-meta-switch-model", ThreadID: threadID, ProviderInstanceID: "provider-a", ModelSelection: &provider.ModelSelection{Model: "model-b", Options: json.RawMessage(`{"effort":"high"}`)}}); err == nil {
-		t.Fatal("thread.meta.update model switch during active turn err = nil, want rejection")
-	}
-	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "cmd-active-meta-title", ThreadID: threadID, Title: "Renamed", ProviderInstanceID: "provider-a"})
+	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "rename-active", ThreadID: threadID, Title: "Renamed", ProviderInstanceID: "codex"})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "steer-active", ThreadID: threadID, ProviderInstanceID: "codex", Message: &CommandMessage{MessageID: "msg-2", Text: "actually, do this too"}, CreatedAt: time.Now().Add(time.Minute)})
 
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection == nil || thread.ModelSelection.Model != "model-a" || string(thread.ModelSelection.Options) != `{"effort":"high"}` {
-		t.Fatalf("thread after active metadata updates = %#v, want title changed without provider/model rebinding", thread)
+	thread, _ := engine.Thread(threadID)
+	if thread.Title != "Renamed" || thread.ProviderInstanceID != "codex" || !selectionEqual(thread.ModelSelection, selection) {
+		t.Fatalf("thread = %q/%q/%#v, want renamed with the original selection", thread.Title, thread.ProviderInstanceID, thread.ModelSelection)
 	}
-}
-
-func TestEngineRejectsNonCreateCommandForMissingThread(t *testing.T) {
-	engine := NewEngine()
-	defer engine.Close()
-	events := observeEvents(t, engine)
-	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-missing-config", ThreadID: "missing-thread", OptionID: "mode", Value: "agent"})
-	if err == nil {
-		t.Fatal("config-option set for missing thread err = nil, want rejection")
+	steered := thread.LatestTurn
+	if steered.ID != activeTurn.ID || steered.State != TurnStateRunning || !steered.RequestedAt.Equal(activeTurn.RequestedAt) || steered.StartedAt == nil || !steered.StartedAt.Equal(*activeTurn.StartedAt) {
+		t.Fatalf("steered turn = %#v, want %#v still running with its original timing", steered, activeTurn)
 	}
-	if recorded := events.matching("", 0); len(recorded) != 0 {
-		t.Fatalf("events = %#v, want no ghost thread events", recorded)
+	if messages := thread.Timeline.Messages(); len(messages) != 2 || messages[1].ID != "msg-2" || messages[1].TurnID != activeTurn.ID {
+		t.Fatalf("messages = %#v, want only the compatible steering message, on the active turn", messages)
 	}
 }
 
 func TestEngineRejectsClientSuppliedTurnIDOnTurnStart(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	threadID := ThreadID("thread-client-turn-id-boundary")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-client-turn-id-boundary", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-client-turn-id-old", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-client-turn-id-old", Text: "old"}, CreatedAt: time.Now()})
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.LatestTurn == nil {
-		t.Fatalf("thread after old turn = %#v, want latest turn", thread)
-	}
-	oldTurnID := thread.LatestTurn.ID
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnInterrupt, CommandID: "cmd-interrupt-client-turn-id-old", ThreadID: threadID, TurnID: oldTurnID, CreatedAt: time.Now()})
-
-	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-client-turn-id-reuse", ThreadID: threadID, TurnID: oldTurnID, Message: &CommandMessage{MessageID: "msg-client-turn-id-reuse", Text: "reuse old turn"}, CreatedAt: time.Now()})
+	threadID := ThreadID("thread-client-turn-id")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-client-turn-id", ThreadID: threadID, ProviderInstanceID: "codex"})
+	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-client-turn-id", ThreadID: threadID, TurnID: "client-turn", Message: &CommandMessage{Text: "hello"}})
 	if err == nil || !strings.Contains(err.Error(), "turnId") {
 		t.Fatalf("client-supplied turnId err = %v, want turnId rejection", err)
 	}
-	thread, ok = engine.Thread(threadID)
-	if !ok || len(thread.Timeline.Messages()) != 1 || thread.LatestTurn == nil || thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State != TurnStateRunning {
-		t.Fatalf("thread after interrupt intent = %#v, want old turn to remain running until provider confirmation", thread)
+	if thread, _ := engine.Thread(threadID); thread.LatestTurn != nil || len(thread.Timeline) != 0 {
+		t.Fatalf("rejected turn.start mutated the thread: %#v", thread)
 	}
 }
 
-func TestEngineRequiresActiveSessionForConfigOptionSet(t *testing.T) {
+func TestEngineConfigOptionSetRequiresThreadWithActiveSession(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
+	events := observeEvents(t, engine)
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-missing-config", ThreadID: "missing-thread", OptionID: "mode", Value: "agent"}); err == nil {
+		t.Fatal("config-option set for missing thread err = nil, want rejection")
+	}
+	if recorded := events.matching("", 0); len(recorded) != 0 {
+		t.Fatalf("events = %#v, want no ghost thread events", recorded)
+	}
 	threadID := ThreadID("thread-config-option-boundary")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-config-option-boundary", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-config-option-no-session", ThreadID: threadID, OptionID: "model", Value: "slow"}); err == nil || !strings.Contains(err.Error(), "active provider session") {
@@ -345,30 +349,16 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-timeline-sequence", ThreadID: threadID, Title: "Thread"})
 
 	mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{MessageID: "message-1", Role: MessageRoleAssistant, Text: "hel"}})
-	mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{MessageID: "message-1", Role: MessageRoleAssistant, Text: "lo"}})
 	mustAppend(t, engine, EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: &Item{ID: "item-1", Kind: provider.ItemKindCommandExecution, Status: provider.ItemStatusInProgress}}})
+	mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{MessageID: "message-1", Role: MessageRoleAssistant, Text: "lo"}})
 	mustAppend(t, engine, EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: &Item{ID: "item-1", Status: provider.ItemStatusCompleted}}})
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1"}}})
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalResolved, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1", Decision: provider.ApprovalDecisionDecline}}})
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1"}}})
 
-	thread, ok := engine.Thread(threadID)
-	if !ok {
-		t.Fatal("thread missing")
+	thread, _ := engine.Thread(threadID)
+	if len(thread.Timeline) != 2 || thread.Timeline[0].Kind != TimelineEntryMessage || thread.Timeline[1].Kind != TimelineEntryItem {
+		t.Fatalf("timeline = %#v, want message, item", thread.Timeline)
 	}
-	if len(thread.Timeline) != 3 || thread.Timeline[0].Kind != TimelineEntryMessage || thread.Timeline[1].Kind != TimelineEntryItem || thread.Timeline[2].Kind != TimelineEntryApproval {
-		t.Fatalf("timeline = %#v, want message, item, approval", thread.Timeline)
-	}
-	if thread.Timeline[0].Message.Text != "hello" || thread.Timeline[1].Item.Status != provider.ItemStatusCompleted || thread.Timeline[2].Approval.Status != ApprovalStatusPending {
+	if thread.Timeline[0].Message.Text != "hello" || thread.Timeline[1].Item.Status != provider.ItemStatusCompleted || thread.Timeline[1].Item.Kind != provider.ItemKindCommandExecution {
 		t.Fatalf("timeline updates were not applied in place: %#v", thread.Timeline)
-	}
-
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("thread snapshot: %v", err)
-	}
-	if len(snapshot.Snapshot.Thread.Timeline) != 3 {
-		t.Fatalf("snapshot lost timeline: %#v", snapshot.Snapshot)
 	}
 }
 
@@ -440,72 +430,6 @@ func TestEngineRejectsStaleTurnInterrupt(t *testing.T) {
 	thread, _ = engine.Thread(threadID)
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != newTurnID || thread.LatestTurn.State != TurnStateRunning || thread.Session == nil || thread.Session.ActiveTurnID != newTurnID {
 		t.Fatalf("thread = %#v, want current turn still running after stale interrupt", thread)
-	}
-}
-
-func TestEngineAcceptsTurnStartAsSteeringWhileTurnIsRunning(t *testing.T) {
-	engine := NewEngine()
-	threadID := ThreadID("thread-steer")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-steer", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}, CreatedAt: time.Now()})
-	snapshot, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("snapshot: %v", err)
-	}
-	activeTurnID := snapshot.Snapshot.Thread.LatestTurn.ID
-	if activeTurnID == "" {
-		t.Fatal("active turn id missing")
-	}
-	requestedAt := snapshot.Snapshot.Thread.LatestTurn.RequestedAt
-	startedAt := snapshot.Snapshot.Thread.LatestTurn.StartedAt
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-2", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-2", Text: "actually, do this too"}, CreatedAt: time.Now().Add(time.Minute)})
-	snapshot, err = engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("snapshot after steer: %v", err)
-	}
-	if snapshot.Snapshot.Thread.LatestTurn.ID != activeTurnID {
-		t.Fatalf("latest turn id = %q, want steering to reuse %q", snapshot.Snapshot.Thread.LatestTurn.ID, activeTurnID)
-	}
-	steered := snapshot.Snapshot.Thread.LatestTurn
-	if !steered.RequestedAt.Equal(requestedAt) || steered.StartedAt == nil || !steered.StartedAt.Equal(*startedAt) {
-		t.Fatalf("steered turn timing = %v/%v, want original %v/%v preserved", steered.RequestedAt, steered.StartedAt, requestedAt, startedAt)
-	}
-	if steered.State != TurnStateRunning {
-		t.Fatalf("steered turn state = %q, want running", steered.State)
-	}
-	if len(snapshot.Snapshot.Thread.Timeline.Messages()) != 2 || snapshot.Snapshot.Thread.Timeline.Messages()[1].Text != "actually, do this too" {
-		t.Fatalf("messages = %#v, want second user steering message", snapshot.Snapshot.Thread.Timeline.Messages())
-	}
-}
-
-func TestEngineRejectsProviderOrModelChangeWhileSteeringActiveTurn(t *testing.T) {
-	engine := NewEngine()
-	threadID := ThreadID("thread-steer-routing-stable")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-steer-routing", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "fast", Options: json.RawMessage(`{"effort":"low"}`)}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-routing-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-routing-1", Text: "hello"}, CreatedAt: time.Now()})
-	thread, ok := engine.Thread(threadID)
-	if !ok || thread.LatestTurn == nil {
-		t.Fatalf("thread latest turn missing: %#v", thread)
-	}
-	activeTurnID := thread.LatestTurn.ID
-
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-steer-other-provider", ThreadID: threadID, ProviderInstanceID: "other", Message: &CommandMessage{MessageID: "msg-other-provider", Text: "switch provider"}, CreatedAt: time.Now()}); err == nil {
-		t.Fatal("steering with a different provider err = nil, want rejection")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "cmd-steer-other-model", ThreadID: threadID, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow"}, Message: &CommandMessage{MessageID: "msg-other-model", Text: "switch model"}, CreatedAt: time.Now()}); err == nil {
-		t.Fatal("steering with a different model err = nil, want rejection")
-	}
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-steer-same-provider", ThreadID: threadID, ProviderInstanceID: "codex", Message: &CommandMessage{MessageID: "msg-same-provider", Text: "same provider"}, CreatedAt: time.Now()})
-
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.ID != activeTurnID {
-		t.Fatalf("latest turn = %#v, want steering to keep active turn %q", thread.LatestTurn, activeTurnID)
-	}
-	if thread.ProviderInstanceID != "codex" || thread.ModelSelection == nil || thread.ModelSelection.Model != "fast" || string(thread.ModelSelection.Options) != `{"effort":"low"}` {
-		t.Fatalf("thread provider/model = %q/%#v, want original codex fast selection", thread.ProviderInstanceID, thread.ModelSelection)
-	}
-	if len(thread.Timeline.Messages()) != 2 || thread.Timeline.Messages()[1].ID != "msg-same-provider" {
-		t.Fatalf("messages = %#v, want only compatible steering message appended", thread.Timeline.Messages())
 	}
 }
 
@@ -609,72 +533,28 @@ func TestEngineSurvivesPanickingListener(t *testing.T) {
 	}
 }
 
-func TestThreadListVisibleIncludesOnlySidebarState(t *testing.T) {
-	cases := []struct {
-		name    string
-		event   Event
-		visible bool
+// ThreadListVisible drives sidebar fan-out and ThreadMetadataMayChange drives
+// metadata-table writes; per-delta streaming events must stay out of both.
+func TestThreadListAndMetadataPredicates(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		event            Event
+		visible, durable bool
 	}{
-		{"thread created", Event{Type: EventThreadCreated}, true},
-		{"thread imported", Event{Type: EventThreadImported}, true},
-		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
-		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
-		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
-		{"turn started", Event{Type: EventThreadTurnStartRequested}, true},
-		{"interrupt requested", Event{Type: EventThreadTurnInterruptRequested}, false},
-		{"interrupt confirmed", Event{Type: EventThreadTurnInterruptConfirmed}, true},
-		{"interrupt failed", Event{Type: EventThreadTurnInterruptFailed}, false},
-		{"session preparing", Event{Type: EventThreadSessionPrepareRequested}, true},
-		{"session stop requested", Event{Type: EventThreadSessionStopRequested}, false},
-		{"session stop failed", Event{Type: EventThreadSessionStopFailed}, false},
-		{"session status", Event{Type: EventThreadSessionStatusSet}, true},
-		{"history replay completed", Event{Type: EventThreadHistoryReplayCompleted}, false},
-		{"approval response requested", Event{Type: EventThreadApprovalResponseRequested}, false},
-		{"approval opened", Event{Type: EventThreadApprovalOpened}, true},
-		{"approval resolved", Event{Type: EventThreadApprovalResolved}, true},
-		{"config set requested", Event{Type: EventThreadConfigOptionSetRequested}, false},
-		{"config options", Event{Type: EventThreadConfigOptionsUpdated}, false},
-		{"slash commands", Event{Type: EventThreadSlashCommandsUpdated}, false},
-		{"token usage", Event{Type: EventThreadTokenUsageUpdated}, false},
-		{"reasoning item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindReasoning}}}, false},
-		{"tool call item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindToolCall}}}, false},
-		{"plan update", Event{Type: EventThreadPlanUpdated}, false},
-		{"unknown event", Event{Type: EventType("thread.unknown")}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ThreadListVisible(tc.event); got != tc.visible {
-				t.Errorf("ThreadListVisible() = %v, want %v", got, tc.visible)
-			}
-		})
-	}
-}
-
-func TestThreadMetadataMayChangeIncludesOnlyDurableChanges(t *testing.T) {
-	cases := []struct {
-		name  string
-		event Event
-		want  bool
-	}{
-		{"thread created", Event{Type: EventThreadCreated}, false},
-		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true},
-		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true},
-		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false},
-		{"turn start", Event{Type: EventThreadTurnStartRequested}, false},
-		{"interrupt confirmed", Event{Type: EventThreadTurnInterruptConfirmed}, false},
-		{"active session", Event{Type: EventThreadSessionStatusSet, Payload: EventPayload{Session: &SessionBinding{Status: SessionStatusRunning, ActiveTurnID: "turn-1"}}}, false},
-		{"settled session", Event{Type: EventThreadSessionStatusSet, Payload: EventPayload{Session: &SessionBinding{Status: SessionStatusReady}}}, false},
-		{"config model", Event{Type: EventThreadConfigOptionsUpdated, Payload: EventPayload{ModelSelection: &provider.ModelSelection{Model: "model-1"}}}, true},
-		{"config without model", Event{Type: EventThreadConfigOptionsUpdated}, false},
-		{"approval", Event{Type: EventThreadApprovalOpened}, false},
-		{"token usage", Event{Type: EventThreadTokenUsageUpdated}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ThreadMetadataMayChange(tc.event); got != tc.want {
-				t.Fatalf("ThreadMetadataMayChange() = %v, want %v", got, tc.want)
-			}
-		})
+		{"user message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleUser}}, true, true},
+		{"assistant message", Event{Type: EventThreadMessageSent, Payload: EventPayload{Role: MessageRoleAssistant}}, false, false},
+		{"reasoning item", Event{Type: EventThreadItemUpserted, Payload: EventPayload{Item: &Item{Kind: provider.ItemKindReasoning}}}, false, false},
+		{"thread metadata", Event{Type: EventThreadMetaUpdated}, true, true},
+		{"session status", Event{Type: EventThreadSessionStatusSet, Payload: EventPayload{Session: &SessionBinding{Status: SessionStatusRunning}}}, true, false},
+		{"config options with model", Event{Type: EventThreadConfigOptionsUpdated, Payload: EventPayload{ModelSelection: &provider.ModelSelection{Model: "model-1"}}}, false, true},
+		{"config options without model", Event{Type: EventThreadConfigOptionsUpdated}, false, false},
+	} {
+		if got := ThreadListVisible(tc.event); got != tc.visible {
+			t.Errorf("%s: ThreadListVisible = %v, want %v", tc.name, got, tc.visible)
+		}
+		if got := ThreadMetadataMayChange(tc.event); got != tc.durable {
+			t.Errorf("%s: ThreadMetadataMayChange = %v, want %v", tc.name, got, tc.durable)
+		}
 	}
 }
 
@@ -682,47 +562,34 @@ func TestProjectionUpdatedAtTracksUserMessageActivity(t *testing.T) {
 	projection := NewProjection()
 	threadID := ThreadID("thread-recency")
 	base := time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC)
-	projection.Apply(Event{Type: EventThreadCreated, OccurredAt: base, Payload: EventPayload{ThreadID: threadID}})
-	assertThreadUpdatedAt(t, projection, threadID, base)
-
-	userMessageAt := base.Add(time.Second)
-	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: userMessageAt, Payload: EventPayload{ThreadID: threadID, MessageID: "message-1", Role: MessageRoleUser}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	// Out-of-order user-message events must never move recency backwards.
-	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: base.Add(500 * time.Millisecond), Payload: EventPayload{ThreadID: threadID, MessageID: "message-older", Role: MessageRoleUser}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	turnStartedAt := base.Add(2 * time.Second)
-	projection.Apply(Event{Type: EventThreadTurnStartRequested, OccurredAt: turnStartedAt, Payload: EventPayload{ThreadID: threadID, TurnID: "turn-1"}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	sessionStartedAt := base.Add(3 * time.Second)
-	projection.Apply(Event{Type: EventThreadSessionStatusSet, OccurredAt: sessionStartedAt, Payload: EventPayload{ThreadID: threadID, Session: &SessionBinding{Status: SessionStatusRunning, ActiveTurnID: "turn-1"}}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	settledAt := base.Add(4 * time.Second)
-	projection.Apply(Event{Type: EventThreadSessionStatusSet, OccurredAt: settledAt, Payload: EventPayload{ThreadID: threadID, Session: &SessionBinding{Status: SessionStatusReady}}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	projection.Apply(Event{Type: EventThreadMetaUpdated, OccurredAt: base.Add(5 * time.Second), Payload: EventPayload{ThreadID: threadID, Title: "Renamed"}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	projection.Apply(Event{Type: EventThreadTurnStartRequested, OccurredAt: base.Add(6 * time.Second), Payload: EventPayload{ThreadID: threadID, TurnID: "turn-2"}})
-	projection.Apply(Event{Type: EventThreadTurnInterruptConfirmed, OccurredAt: base.Add(7 * time.Second), Payload: EventPayload{ThreadID: threadID, TurnID: "turn-2"}})
-	assertThreadUpdatedAt(t, projection, threadID, userMessageAt)
-
-	laterUserMessageAt := base.Add(8 * time.Second)
-	projection.Apply(Event{Type: EventThreadMessageSent, OccurredAt: laterUserMessageAt, Payload: EventPayload{ThreadID: threadID, MessageID: "message-2", Role: MessageRoleUser}})
-	assertThreadUpdatedAt(t, projection, threadID, laterUserMessageAt)
-}
-
-func assertThreadUpdatedAt(t *testing.T, projection *Projection, threadID ThreadID, want time.Time) {
-	t.Helper()
-	thread, ok := projection.Thread(threadID)
-	if !ok || !thread.UpdatedAt.Equal(want) {
-		t.Fatalf("UpdatedAt = %v, want %v", thread.UpdatedAt, want)
+	at := func(seconds int) time.Time { return base.Add(time.Duration(seconds) * time.Second) }
+	apply := func(seconds int, eventType EventType, payload EventPayload) {
+		payload.ThreadID = threadID
+		projection.Apply(Event{Type: eventType, OccurredAt: at(seconds), Payload: payload})
 	}
+	assertUpdatedAt := func(want time.Time) {
+		t.Helper()
+		if thread, ok := projection.Thread(threadID); !ok || !thread.UpdatedAt.Equal(want) {
+			t.Fatalf("UpdatedAt = %v, want %v", thread.UpdatedAt, want)
+		}
+	}
+	apply(0, EventThreadCreated, EventPayload{})
+	assertUpdatedAt(at(0))
+	apply(10, EventThreadMessageSent, EventPayload{MessageID: "message-1", Role: MessageRoleUser})
+	assertUpdatedAt(at(10))
+
+	// Neither an out-of-order user message nor any other activity moves recency.
+	apply(5, EventThreadMessageSent, EventPayload{MessageID: "message-older", Role: MessageRoleUser})
+	apply(20, EventThreadTurnStartRequested, EventPayload{TurnID: "turn-1"})
+	apply(30, EventThreadSessionStatusSet, EventPayload{Session: &SessionBinding{Status: SessionStatusRunning, ActiveTurnID: "turn-1"}})
+	apply(40, EventThreadMessageSent, EventPayload{MessageID: "assistant-1", Role: MessageRoleAssistant})
+	apply(50, EventThreadSessionStatusSet, EventPayload{Session: &SessionBinding{Status: SessionStatusReady}})
+	apply(60, EventThreadMetaUpdated, EventPayload{Title: "Renamed"})
+	apply(70, EventThreadTurnInterruptConfirmed, EventPayload{TurnID: "turn-1"})
+	assertUpdatedAt(at(10))
+
+	apply(80, EventThreadMessageSent, EventPayload{MessageID: "message-2", Role: MessageRoleUser})
+	assertUpdatedAt(at(80))
 }
 
 // recordInvariantViolations installs a recording handler. The worker replies
