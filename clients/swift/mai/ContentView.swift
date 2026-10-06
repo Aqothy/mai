@@ -30,7 +30,7 @@ struct MaiApp: App {
         usesSyntheticBenchmarkStore = syntheticStore != nil
         _threadStore = State(
             initialValue: syntheticStore
-                ?? ThreadStore(rpc: rpc, connection: connection)
+                ?? ThreadStore(rpc: rpc, connection: connection, readState: ThreadReadStateStore())
         )
         _terminalStore = State(
             initialValue: TerminalStore(rpc: rpc, connection: connection)
