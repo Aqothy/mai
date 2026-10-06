@@ -58,6 +58,10 @@ struct ChatNativeClipboardTests {
         render(.code(.init(code: firstCode, language: "swift")), id: "code-first")
         _ = try copyButton("Copy code", expecting: firstCode)
         let code = try #require(host.subviews.compactMap { $0 as? ChatMacCodeBlockHostView }.first)
+        // VoiceOver reads the language label, then the copy button, then the code.
+        let children = try #require(host.accessibilityChildren())
+        #expect(children.count == 3)
+        #expect((children[2] as? NSView) === code)
         let codeText = try #require(code.documentView as? ChatAnnotationTextView)
         code.contentView.scroll(to: NSPoint(x: 100, y: 0))
         try #require(code.contentView.bounds.minX > 0, "Wide code did not scroll horizontally")

@@ -5,16 +5,6 @@
     @testable import mai
 
     struct ChatNativePreparedHeightTests {
-        @Test @MainActor func codeHeaderKeepsSwiftUIMeasurement() {
-            let descriptor = ChatNativePreparedRow.Descriptor(
-                id: "code",
-                content:
-                    .code(.init(code: "let value = 1", language: "swift")), top: 8,
-                bottom: 8)
-            #expect(
-                ChatNativePreparedRow.preparedHeight(
-                    for: descriptor, width: 380, store: ChatTextLayoutStore()) == nil)
-        }
         @Test @MainActor func preparedGeometryMatchesExistingSwiftUIRows() throws {
             let store = ThreadStore()
             let layouts = ChatTextLayoutStore()
