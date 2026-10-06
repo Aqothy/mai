@@ -405,7 +405,7 @@ nonisolated struct ChatActivityGroup: Identifiable {
     static let maxToolNames = 3
 
     /// A phrase built only from what providers stated, such as
-    /// "Read 2 files, ran a command, WebFetch, github · list_issues".
+    /// "Read files, ran a command, WebFetch, github · list_issues".
     var summary: String {
         var counts: [(verb: ChatActivityVerb, count: Int)] = []
         for item in items {
@@ -477,23 +477,24 @@ nonisolated enum ChatActivityVerb: Equatable {
         return item.kind
     }
 
-    /// The phrase for `count` such items. `leading` capitalizes a verb that
-    /// starts a sentence; raw tool names are never reformatted.
+    /// The phrase for one or more such items, without counts. `leading`
+    /// capitalizes a verb that starts a sentence; raw tool names are never
+    /// reformatted.
     func phrase(count: Int, leading: Bool = false) -> String {
         let text: String
         switch self {
         case .thought:
             text = "thought"
         case .read:
-            text = count == 1 ? "read a file" : "read \(count) files"
+            text = count == 1 ? "read a file" : "read files"
         case .searched:
-            text = count == 1 ? "searched" : "ran \(count) searches"
+            text = "searched"
         case .edited:
-            text = count == 1 ? "edited a file" : "edited \(count) files"
+            text = count == 1 ? "edited a file" : "edited files"
         case .ranCommand:
-            text = count == 1 ? "ran a command" : "ran \(count) commands"
+            text = count == 1 ? "ran a command" : "ran commands"
         case .tool(let name):
-            return count == 1 ? name : "\(name) ×\(count)"
+            return name
         }
         return leading ? text.prefix(1).uppercased() + text.dropFirst() : text
     }
