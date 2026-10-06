@@ -125,15 +125,8 @@ struct ChatAnnotationContext {
     let model: ChatAnnotationModel
 }
 
-private struct ChatAnnotationContextKey: EnvironmentKey {
-    static let defaultValue: ChatAnnotationContext? = nil
-}
-
 extension EnvironmentValues {
-    var chatAnnotationContext: ChatAnnotationContext? {
-        get { self[ChatAnnotationContextKey.self] }
-        set { self[ChatAnnotationContextKey.self] = newValue }
-    }
+    @Entry var chatAnnotationContext: ChatAnnotationContext?
 }
 
 struct ChatAnnotationEditor: View {
