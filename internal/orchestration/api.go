@@ -23,7 +23,6 @@ type ThreadListEntry struct {
 type ThreadDetailSnapshot struct {
 	// HistoryRestorePending is true while the daemon's persisted metadata stub
 	// has not yet been fully materialized from provider-owned history.
-	// Omission means ready, preserving compatibility with older clients.
 	HistoryRestorePending bool   `json:"historyRestorePending,omitempty"`
 	SnapshotSequence      uint64 `json:"snapshotSequence"`
 	Thread                Thread `json:"thread"`

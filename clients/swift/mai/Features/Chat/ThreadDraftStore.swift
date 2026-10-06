@@ -14,12 +14,7 @@ final class ThreadDraftStore {
     private struct StoredDrafts: Codable {
         var activeDraftThreadID: String?
         var textByThreadID: [String: String]
-        var annotationsByThreadID: [String: [ChatPendingAnnotation]]?
-    }
-
-    private struct LegacyStoredDraft: Codable {
-        var threadID: String?
-        var text: String
+        var annotationsByThreadID: [String: [ChatPendingAnnotation]]
     }
 
     private static let storageKey = "thread-drafts"
@@ -39,25 +34,16 @@ final class ThreadDraftStore {
         self.defaults = defaults
         preferences = DraftPreferencesStore(defaults: defaults)
 
-        guard let data = defaults.data(forKey: Self.storageKey) else {
+        guard let data = defaults.data(forKey: Self.storageKey),
+              let stored = try? JSONDecoder().decode(StoredDrafts.self, from: data)
+        else {
             activeDraftThreadID = nil
             textByThreadID = [:]
             return
         }
-
-        if let stored = try? JSONDecoder().decode(StoredDrafts.self, from: data) {
-            activeDraftThreadID = stored.activeDraftThreadID
-            textByThreadID = stored.textByThreadID.filter { !$0.value.isEmpty }
-            annotationsByThreadID = (stored.annotationsByThreadID ?? [:]).filter { !$0.value.isEmpty }
-        } else if let legacy = try? JSONDecoder().decode(LegacyStoredDraft.self, from: data) {
-            activeDraftThreadID = legacy.threadID
-            textByThreadID = legacy.threadID.map {
-                legacy.text.isEmpty ? [:] : [$0: legacy.text]
-            } ?? [:]
-        } else {
-            activeDraftThreadID = nil
-            textByThreadID = [:]
-        }
+        activeDraftThreadID = stored.activeDraftThreadID
+        textByThreadID = stored.textByThreadID.filter { !$0.value.isEmpty }
+        annotationsByThreadID = stored.annotationsByThreadID.filter { !$0.value.isEmpty }
     }
 
     func text(for threadID: String) -> String {

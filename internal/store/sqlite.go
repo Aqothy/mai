@@ -101,42 +101,7 @@ func Open(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: ensure schema: %w", err)
 	}
-	if err := ensureThreadsAdditionalDirectoriesColumn(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	return &SQLite{db: db}, nil
-}
-
-func ensureThreadsAdditionalDirectoriesColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(threads)`)
-	if err != nil {
-		return fmt.Errorf("store: inspect threads schema: %w", err)
-	}
-	defer rows.Close()
-	found := false
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return fmt.Errorf("store: inspect threads schema row: %w", err)
-		}
-		if name == "additional_directories" {
-			found = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("store: inspect threads schema: %w", err)
-	}
-	if found {
-		return nil
-	}
-	if _, err := db.Exec(`ALTER TABLE threads ADD COLUMN additional_directories TEXT`); err != nil {
-		return fmt.Errorf("store: add threads.additional_directories: %w", err)
-	}
-	return nil
 }
 
 func (s *SQLite) Close() error {
