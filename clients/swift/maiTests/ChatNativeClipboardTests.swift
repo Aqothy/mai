@@ -40,7 +40,7 @@ struct ChatNativeClipboardTests {
             try #require(button.accessibilityLabel() == "Copied", "Copy feedback absent")
             return button
         }
-        render(.prose("Select **café 👩🏽‍💻** without Markdown punctuation."), id: "prose")
+        render(.prose(.source("Select **café 👩🏽‍💻** without Markdown punctuation.")), id: "prose")
         let prose = try #require(host.subviews.compactMap { $0 as? ChatSelectableTextHostView }.first)
         let text = try #require(prose.subviews.compactMap { $0 as? ChatAnnotationTextView }.first)
         let selected = "café 👩🏽‍💻"
@@ -69,9 +69,10 @@ struct ChatNativeClipboardTests {
         text.comment(oldMenu)
         try #require(annotations.editorDraft == nil, "Detached prose menu created a comment")
 
+        let cell = { ChatMarkdownText(NSAttributedString(string: $0)) }
         let table = ChatMarkdownTable(alignments: [.leading, .center, .trailing],
-                                     header: [AttributedString("Name"), AttributedString("Quote"), AttributedString("Value")],
-                                     rows: [[AttributedString("café"), AttributedString(String(repeating: "Wide 👩🏽‍💻 ", count: 20)), AttributedString("保持")]])
+                                     header: [cell("Name"), cell("Quote"), cell("Value")],
+                                     rows: [[cell("café"), cell(String(repeating: "Wide 👩🏽‍💻 ", count: 20)), cell("保持")]])
         render(.table(table), id: "table")
         let tableCopy = try copyButton("Copy table", expecting: table.tabSeparatedText)
         let tableHost = try #require(host.subviews.compactMap { $0 as? ChatMacTableHostView }.first)
@@ -99,7 +100,7 @@ struct ChatNativeClipboardTests {
             try #require(codeText.attributedString().isEqual(to: expected), "Rendered syntax attributes differ from the prepared theme")
             _ = try copyButton("Copy code", expecting: secondCode.code)
         }
-        render(.prose("Fresh unrelated row"), id: "prose-new")
+        render(.prose(.source("Fresh unrelated row")), id: "prose-new")
         try #require(host.subviews.contains { $0 === prose }, "Prose body was not reused")
         try #require(text.string == "Fresh unrelated row" && text.selectedRange().length == 0, "Prose selection/content leaked")
         try #require(host.accessibilityValue() == nil, "Old table accessibility value leaked")

@@ -558,10 +558,7 @@ nonisolated struct ChatIncrementalMarkdownRenderPlanner {
                 open.source.utf8.count < Self.stableProseRunUTF8Limit
             {
                 stableBlocks[stableBlocks.count - 1] = .prose(
-                    ChatMarkdownProseRun(
-                        source: open.source + prose.source,
-                        pieces: open.pieces + prose.pieces
-                    )
+                    ChatMarkdownProseRun(joining: [open, prose])
                 )
             } else {
                 stableBlocks.append(block)

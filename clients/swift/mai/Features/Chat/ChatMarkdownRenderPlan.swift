@@ -1,6 +1,6 @@
 import Foundation
 
-/// Immutable, Sendable output from Markdown parsing. SwiftUI receives these
+/// Immutable, Sendable output from Markdown parsing. Views receive these
 /// small value models instead of retaining swift-markdown's reference tree.
 nonisolated struct ChatMarkdownRenderPlan: Equatable, Sendable {
     enum Block: Equatable, Sendable {
@@ -29,60 +29,50 @@ nonisolated struct ChatMarkdownRenderPlan: Equatable, Sendable {
     ) -> [Block] {
         var result: [Block] = []
         result.reserveCapacity(blocks.count)
-        var proseSources: [String] = []
-        var prosePieces: [ChatMarkdownProseRun.Piece] = []
+        var run: [ChatMarkdownProseRun] = []
+
+        func appendRun() {
+            guard !run.isEmpty else { return }
+            result.append(.prose(ChatMarkdownProseRun(joining: run)))
+            run.removeAll(keepingCapacity: true)
+        }
 
         for block in blocks {
             if case .prose(let prose) = block {
-                proseSources.append(prose.source)
-                prosePieces.append(contentsOf: prose.pieces)
+                run.append(prose)
             } else {
-                appendProseRun(
-                    sources: &proseSources,
-                    pieces: &prosePieces,
-                    to: &result
-                )
+                appendRun()
                 result.append(block)
             }
         }
-        appendProseRun(
-            sources: &proseSources,
-            pieces: &prosePieces,
-            to: &result
-        )
+        appendRun()
         return result
-    }
-
-    private static func appendProseRun(
-        sources: inout [String],
-        pieces: inout [ChatMarkdownProseRun.Piece],
-        to blocks: inout [Block]
-    ) {
-        guard !sources.isEmpty else { return }
-        blocks.append(
-            .prose(
-                ChatMarkdownProseRun(
-                    source: sources.joined(),
-                    pieces: pieces
-                )
-            )
-        )
-        sources.removeAll(keepingCapacity: true)
-        pieces.removeAll(keepingCapacity: true)
     }
 }
 
-/// Source is retained for the existing selectable TextKit prose renderer.
-/// Pieces keep the active streaming tail cheap and semantically decorated.
+/// Consecutive prose root blocks: their source and their text rendered from
+/// the whole parsed document, so reference links stay resolved.
 nonisolated struct ChatMarkdownProseRun: Equatable, Sendable {
-    enum Piece: Equatable, Sendable {
-        case text(AttributedString)
-        case quote(AttributedString)
-        case thematicBreak
+    let source: String
+    let text: ChatMarkdownText
+
+    init(source: String, text: ChatMarkdownText) {
+        self.source = source
+        self.text = text
     }
 
-    let source: String
-    let pieces: [Piece]
+    init(joining runs: [ChatMarkdownProseRun]) {
+        if runs.count == 1, let run = runs.first {
+            self = run
+        } else {
+            self.init(
+                source: runs.map(\.source).joined(),
+                text: ChatMarkdownText(
+                    ChatMarkdownTextRenderer.joined(runs.map(\.text.value))
+                )
+            )
+        }
+    }
 }
 
 nonisolated struct ChatMarkdownCodeBlock: Equatable, Sendable {
@@ -149,8 +139,8 @@ nonisolated struct ChatMarkdownTable: Equatable, Sendable {
     }
 
     let alignments: [ColumnAlignment]
-    let header: [AttributedString]
-    let rows: [[AttributedString]]
+    let header: [ChatMarkdownText]
+    let rows: [[ChatMarkdownText]]
 
     var columnCount: Int {
         max(
@@ -167,7 +157,7 @@ nonisolated struct ChatMarkdownTable: Equatable, Sendable {
                 (0..<columnCount)
                     .map { column in
                         guard row.indices.contains(column) else { return "" }
-                        return String(row[column].characters)
+                        return row[column].string
                     }
                     .joined(separator: "\t")
             }

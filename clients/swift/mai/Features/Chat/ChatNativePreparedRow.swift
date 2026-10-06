@@ -9,8 +9,7 @@
         nonisolated deinit {}
 
         enum Content: Equatable {
-            case prose(String)
-            case resolvedProse(ChatMarkdownProseRun)
+            case prose(ChatTextContent)
             case code(ChatMarkdownCodeBlock)
             case table(ChatMarkdownTable)
         }
@@ -30,15 +29,14 @@
                     segment.annotations?.isEmpty != false
                 else { return nil }
                 id = segment.rowID
-                content = .prose(segment.source)
+                content = .prose(.source(segment.source))
             case .resolvedMarkdown(let block):
                 guard block.attachments?.isEmpty != false else { return nil }
                 id = block.rowID
                 switch block.content {
-                case .proseRun(let prose): content = .resolvedProse(prose)
+                case .proseRun(let prose): content = .prose(.rendered(prose.text))
                 case .code(let code): content = .code(code)
                 case .table(let table): content = .table(table)
-                case .prose: return nil
                 }
             case .richMarkdown(let segment):
                 guard segment.role == "assistant", segment.attachments?.isEmpty != false,
@@ -67,12 +65,9 @@
         ) -> CGFloat? {
             let bodyHeight: CGFloat
             switch descriptor.content {
-            case .prose(let source):
+            case .prose(let text):
                 bodyHeight = store.layout(
-                    id: descriptor.id, source: source, width: width).height
-            case .resolvedProse(let prose):
-                bodyHeight = store.resolvedLayout(
-                    id: descriptor.id, prose: prose, width: width).height
+                    id: descriptor.id, content: text, width: width).height
             case .table(let table):
                 bodyHeight = store.tableLayout(id: descriptor.id, table: table).size.height
                     + ChatRichBlockStyle.tableToolbarHeight
@@ -139,16 +134,11 @@
             copyButton.isHidden = true
             setAccessibilityElement(false)
             switch descriptor.content {
-            case .prose(let source):
+            case .prose(let text):
                 let prose = proseView
                 setBody(prose)
                 prose.annotationContext = annotationContext
-                prose.update(layoutID: descriptor.id, source: source, layoutStore: store)
-            case .resolvedProse(let text):
-                let prose = proseView
-                setBody(prose)
-                prose.annotationContext = annotationContext
-                prose.update(layoutID: descriptor.id, resolvedProse: text, layoutStore: store)
+                prose.update(layoutID: descriptor.id, content: text, layoutStore: store)
             case .code(let code):
                 let codeView = self.codeView
                 setBody(codeView)
@@ -204,7 +194,7 @@
                 x: (bounds.width - width) / 2, y: descriptor.top, width: width,
                 height: max(0, bounds.height - descriptor.top - descriptor.bottom))
             switch descriptor.content {
-            case .prose, .resolvedProse:
+            case .prose:
                 bodyView?.frame = rect
             case .code:
                 let headerHeight = max(0, rect.height - codeHeight)

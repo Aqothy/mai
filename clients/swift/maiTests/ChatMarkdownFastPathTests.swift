@@ -26,6 +26,24 @@ struct ChatMarkdownFastPathTests {
         }
     }
 
+    /// Plans render each root block from the parsed document and join them.
+    /// The joined runs must style exactly like rendering their source at once,
+    /// or plan-backed rows would differ from source-backed prose rows.
+    @Test @MainActor
+    func planProseRunsMatchWholeSourceRendering() {
+        var proseRuns = 0
+        for case .prose(let prose) in ChatMarkdownRenderPlanner.plan(
+            from: MockChatMarkdownFixtures.componentCatalog
+        ).blocks {
+            proseRuns += 1
+            #expect(
+                prose.text
+                    == ChatMarkdownText(ChatMarkdownTextRenderer.attributedString(from: prose.source)),
+                "\(prose.source.prefix(60))")
+        }
+        #expect(proseRuns > 1)
+    }
+
     /// Streaming freezes stable prose at a chunk limit so a settle touches a
     /// bounded tail. Chunking is presentation-only: the streamed plan must
     /// converge on the settled full parse.

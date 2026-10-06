@@ -18,29 +18,128 @@ extension NSAttributedString.Key {
         Self("ChatThematicBreakIndent")
 }
 
-/// Converts the prose subset of Markdown into the attributed string used
-/// by the native selectable text view. Rich blocks never enter this path.
-nonisolated enum ChatProseMarkdownRenderer {
+/// Rendered Markdown text. The attributed string is immutable once built, so
+/// render plans can carry it across actors.
+nonisolated struct ChatMarkdownText: Equatable, @unchecked Sendable {
+    let value: NSAttributedString
+
+    init(_ value: NSAttributedString) {
+        self.value = value
+    }
+
+    var string: String { value.string }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.value === rhs.value || lhs.value.isEqual(to: rhs.value)
+    }
+}
+
+/// The one place where chat Markdown becomes styled text. Settled, live and
+/// resolved prose and table cells all render here, so rows cannot diverge.
+/// Rich root blocks (code, tables) are routed elsewhere by the planner.
+nonisolated enum ChatMarkdownTextRenderer {
     static func attributedString(from source: String) -> NSAttributedString {
-        var builder = ChatProseAttributedStringBuilder(source: source)
-        for block in Markdown.Document(chatSource: source).children {
+        attributedString(
+            blocks: Markdown.Document(chatSource: source).children,
+            source: source
+        )
+    }
+
+    /// Renders already-parsed root blocks. `source` is the text the blocks
+    /// were parsed from; whole-document state such as reference links is
+    /// already resolved in the blocks.
+    static func attributedString(
+        blocks: some Sequence<Markup>,
+        source: String
+    ) -> NSAttributedString {
+        var builder = ChatMarkdownAttributedStringBuilder(source: source)
+        for block in blocks {
             builder.append(block: block, environment: .root)
         }
         return builder.finish()
     }
+
+    static func attributedString(
+        tableCell children: some Sequence<Markup>,
+        isHeader: Bool
+    ) -> NSAttributedString {
+        ChatMarkdownAttributedStringBuilder(source: "")
+            .inlineText(children, isBold: isHeader)
+    }
+
+    /// Source with no renderable Markdown blocks, shown as written.
+    static func plainAttributedString(_ text: String) -> NSAttributedString {
+        ChatMarkdownAttributedStringBuilder(source: "")
+            .inlineText(text, isBold: false)
+    }
+
+    /// Joins separately rendered root-block runs exactly as rendering their
+    /// blocks together would.
+    static func joined(
+        _ runs: some Sequence<NSAttributedString>
+    ) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        for run in runs where run.length > 0 {
+            if output.length > 0 {
+                // Restore the paragraph terminator `finish()` trimmed.
+                let previous = output.attributes(
+                    at: output.length - 1,
+                    effectiveRange: nil
+                )
+                output.append(
+                    NSAttributedString(
+                        string: "\n",
+                        attributes: previous.filter {
+                            ChatMarkdownAttributedStringBuilder
+                                .paragraphTerminatorKeys.contains($0.key)
+                        }
+                    )
+                )
+                ChatMarkdownAttributedStringBuilder.appendBlockSpacer(
+                    to: output,
+                    height: ChatMarkdownProseStyle.blockSpacing,
+                    connectingTo: run.attribute(
+                        .chatQuoteBarOffsets,
+                        at: 0,
+                        effectiveRange: nil
+                    ) as? [CGFloat] ?? []
+                )
+            }
+            output.append(run)
+        }
+        return output
+    }
+
+    /// Link styling, also applied by text views that would otherwise restyle
+    /// link ranges themselves.
+    static func linkAttributes() -> [NSAttributedString.Key: Any] {
+        [
+            .foregroundColor: ChatMarkdownAttributedStringBuilder.labelColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+    }
 }
 
-private nonisolated struct ChatProseAttributedStringBuilder {
+private nonisolated struct ChatMarkdownAttributedStringBuilder {
+    static let labelColor: ChatPlatformColor = {
+        #if os(macOS)
+            .labelColor
+        #else
+            .label
+        #endif
+    }()
+
+    static let paragraphTerminatorKeys: Set<NSAttributedString.Key> = {
+        var keys: Set<NSAttributedString.Key> = [.paragraphStyle, .chatQuoteBarOffsets]
+        #if os(iOS)
+            keys.insert(.accessibilityTextHeadingLevel)
+        #endif
+        return keys
+    }()
+
     struct Environment {
         var indent: CGFloat = 0
         var quoteBarOffsets: [CGFloat] = []
-        var color: ChatPlatformColor = {
-            #if os(macOS)
-                .labelColor
-            #else
-                .label
-            #endif
-        }()
         var blockSpacing = ChatMarkdownProseStyle.blockSpacing
 
         static let root = Environment()
@@ -53,7 +152,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
 
     private struct InlineStyle {
         var font: ChatPlatformFont
-        var color: ChatPlatformColor
+        var color: ChatPlatformColor = ChatMarkdownAttributedStringBuilder.labelColor
         var isBold = false
         var isItalic = false
         var isStruck = false
@@ -61,7 +160,8 @@ private nonisolated struct ChatProseAttributedStringBuilder {
     }
 
     private let output = NSMutableAttributedString()
-    private let sourceLines: [String]
+    private let source: String
+    private var sourceLines: [String]?
     private let bodyFont = ChatPlatformFont.preferredFont(forTextStyle: .body)
     private let bulletFont = ChatPlatformFont.preferredFont(forTextStyle: .headline)
     private let codeFont = ChatPlatformFont.monospacedSystemFont(
@@ -70,41 +170,39 @@ private nonisolated struct ChatProseAttributedStringBuilder {
     )
 
     init(source: String) {
-        sourceLines = source.split(
-            separator: "\n",
-            omittingEmptySubsequences: false
-        ).map(String.init)
+        self.source = source
     }
 
     mutating func append(block: Markup, environment: Environment) {
         switch block {
         case let paragraph as Paragraph:
             appendParagraph(
-                inlineText(paragraph.children, style: inlineStyle(environment)),
-                firstLineIndent: environment.indent,
-                remainingLineIndent: environment.indent,
-                quoteBarOffsets: environment.quoteBarOffsets,
-                spacingBefore: environment.blockSpacing
+                inlineText(paragraph.children, style: bodyStyle),
+                environment: environment
             )
 
         case let heading as Heading:
-            var style = inlineStyle(environment)
+            var style = bodyStyle
             style.font = headingFont(level: heading.level)
             style.isBold = true
             appendParagraph(
                 inlineText(heading.children, style: style),
-                firstLineIndent: environment.indent,
-                remainingLineIndent: environment.indent,
-                quoteBarOffsets: environment.quoteBarOffsets,
-                spacingBefore: environment.blockSpacing,
+                environment: environment,
                 accessibilityHeadingLevel: heading.level
             )
 
         case let quote as BlockQuote:
-            append(quote: quote, environment: environment)
+            var quoted = environment
+            quoted.quoteBarOffsets.append(environment.indent)
+            quoted.indent +=
+                ChatMarkdownProseStyle.quoteBarWidth
+                + ChatMarkdownProseStyle.quoteIndent
+            for child in quote.children {
+                append(block: child, environment: quoted)
+            }
 
         case let list as UnorderedList:
-            append(items: list.listItems, environment: environment) { _, _ in
+            append(items: list.listItems, environment: environment) { _ in
                 ListMarker(
                     text: Self.bullet(for: environment.indent),
                     isBullet: true
@@ -112,7 +210,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
             }
 
         case let list as OrderedList:
-            append(items: list.listItems, environment: environment) { _, offset in
+            append(items: list.listItems, environment: environment) { offset in
                 ListMarker(
                     text: "\(Int(list.startIndex) + offset). ",
                     isBullet: false
@@ -120,7 +218,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
             }
 
         case let thematicBreak as ThematicBreak:
-            var style = inlineStyle(environment)
+            var style = bodyStyle
             // Retain the source marker for continuous selection/copy;
             // the text host draws its full-width visual representation.
             style.color = .clear
@@ -135,23 +233,25 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                 value: environment.indent,
                 range: NSRange(location: 0, length: text.length)
             )
+            appendParagraph(text, environment: environment)
+
+        case let codeBlock as CodeBlock:
             appendParagraph(
-                text,
-                firstLineIndent: environment.indent,
-                remainingLineIndent: environment.indent,
-                quoteBarOffsets: environment.quoteBarOffsets,
-                spacingBefore: environment.blockSpacing
+                code(codeBlock.code),
+                environment: environment
             )
 
+        case let html as HTMLBlock:
+            appendParagraph(code(html.rawHTML), environment: environment)
+
+        case let table as Markdown.Table:
+            appendParagraph(nestedTable(table), environment: environment)
+
         default:
-            // The segmenter keeps dedicated rich nodes out of this path.
-            // Preserve any future/custom prose node instead of dropping it.
+            // Preserve any future/custom node instead of dropping it.
             appendParagraph(
-                inlineText(block.format(), style: inlineStyle(environment)),
-                firstLineIndent: environment.indent,
-                remainingLineIndent: environment.indent,
-                quoteBarOffsets: environment.quoteBarOffsets,
-                spacingBefore: environment.blockSpacing
+                inlineText(block.format(), style: bodyStyle),
+                environment: environment
             )
         }
     }
@@ -165,25 +265,29 @@ private nonisolated struct ChatProseAttributedStringBuilder {
         return NSAttributedString(attributedString: output)
     }
 
-    private mutating func append(
-        quote: BlockQuote,
-        environment: Environment
-    ) {
-        var quoted = environment
-        quoted.quoteBarOffsets.append(environment.indent)
-        quoted.indent +=
-            ChatMarkdownProseStyle.quoteBarWidth
-            + ChatMarkdownProseStyle.quoteIndent
+    func inlineText(
+        _ nodes: some Sequence<Markup>,
+        isBold: Bool
+    ) -> NSAttributedString {
+        var style = bodyStyle
+        style.isBold = isBold
+        return inlineText(nodes, style: style)
+    }
 
-        for child in quote.children {
-            append(block: child, environment: quoted)
-        }
+    func inlineText(_ text: String, isBold: Bool) -> NSAttributedString {
+        var style = bodyStyle
+        style.isBold = isBold
+        return inlineText(text, style: style)
+    }
+
+    private var bodyStyle: InlineStyle {
+        InlineStyle(font: bodyFont)
     }
 
     private mutating func append(
         items: some Sequence<ListItem>,
         environment: Environment,
-        marker: (ListItem, Int) -> ListMarker
+        marker: (Int) -> ListMarker
     ) {
         for (offset, item) in items.enumerated() {
             var isFirstBlock = true
@@ -194,25 +298,21 @@ private nonisolated struct ChatProseAttributedStringBuilder {
 
                 if isFirstBlock, let paragraph = child as? Paragraph {
                     let line = NSMutableAttributedString()
-                    let listMarker = marker(item, offset)
-                    var markerStyle = inlineStyle(environment)
+                    let listMarker = marker(offset)
+                    var markerStyle = bodyStyle
                     if listMarker.isBullet {
                         markerStyle.font = bulletFont
                     }
-                    line.append(
-                        inlineText(listMarker.text, style: markerStyle)
-                    )
-                    line.append(
-                        inlineText(paragraph.children, style: inlineStyle(environment))
-                    )
+                    line.append(inlineText(listMarker.text, style: markerStyle))
+                    line.append(inlineText(paragraph.children, style: bodyStyle))
+                    var first = environment
+                    first.blockSpacing = offset == 0
+                        ? environment.blockSpacing
+                        : ChatMarkdownProseStyle.listItemSpacing
                     appendParagraph(
                         line,
-                        firstLineIndent: environment.indent,
-                        remainingLineIndent: nested.indent,
-                        quoteBarOffsets: environment.quoteBarOffsets,
-                        spacingBefore: offset == 0
-                            ? environment.blockSpacing
-                            : ChatMarkdownProseStyle.listItemSpacing
+                        environment: first,
+                        remainingLineIndent: nested.indent
                     )
                 } else {
                     append(block: child, environment: nested)
@@ -224,17 +324,18 @@ private nonisolated struct ChatProseAttributedStringBuilder {
 
     private mutating func appendParagraph(
         _ text: NSAttributedString,
-        firstLineIndent: CGFloat,
-        remainingLineIndent: CGFloat,
-        quoteBarOffsets: [CGFloat] = [],
-        spacingBefore: CGFloat,
+        environment: Environment,
+        remainingLineIndent: CGFloat? = nil,
         accessibilityHeadingLevel: Int? = nil
     ) {
         guard text.length > 0 else { return }
-        appendBlockSpacer(
-            height: spacingBefore,
-            connectingTo: quoteBarOffsets
-        )
+        if output.length > 0 {
+            Self.appendBlockSpacer(
+                to: output,
+                height: environment.blockSpacing,
+                connectingTo: environment.quoteBarOffsets
+            )
+        }
 
         let start = output.length
         output.append(text)
@@ -242,13 +343,13 @@ private nonisolated struct ChatProseAttributedStringBuilder {
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = ChatMarkdownProseStyle.lineSpacing
-        paragraph.firstLineHeadIndent = firstLineIndent
-        paragraph.headIndent = remainingLineIndent
+        paragraph.firstLineHeadIndent = environment.indent
+        paragraph.headIndent = remainingLineIndent ?? environment.indent
         let range = NSRange(location: start, length: output.length - start)
-        if !quoteBarOffsets.isEmpty {
+        if !environment.quoteBarOffsets.isEmpty {
             output.addAttribute(
                 .chatQuoteBarOffsets,
-                value: quoteBarOffsets,
+                value: environment.quoteBarOffsets,
                 range: range
             )
         }
@@ -270,12 +371,13 @@ private nonisolated struct ChatProseAttributedStringBuilder {
         )
     }
 
-    private func appendBlockSpacer(
+    /// A fixed-height empty line between blocks. Quote bars continue through
+    /// it only when the blocks on both sides share them.
+    static func appendBlockSpacer(
+        to output: NSMutableAttributedString,
         height: CGFloat,
         connectingTo offsets: [CGFloat]
     ) {
-        guard output.length > 0 else { return }
-
         let spacerStart = output.length
         let spacerStyle = NSMutableParagraphStyle()
         spacerStyle.minimumLineHeight = height
@@ -312,12 +414,15 @@ private nonisolated struct ChatProseAttributedStringBuilder {
         return bullets[depth % bullets.count] + "  "
     }
 
-    private func inlineStyle(_ environment: Environment) -> InlineStyle {
-        InlineStyle(font: bodyFont, color: environment.color)
-    }
-
-    private func sourceSpelling(for thematicBreak: ThematicBreak) -> String {
-        guard let location = thematicBreak.range?.lowerBound,
+    private mutating func sourceSpelling(for thematicBreak: ThematicBreak) -> String {
+        if sourceLines == nil {
+            sourceLines = source.split(
+                separator: "\n",
+                omittingEmptySubsequences: false
+            ).map(String.init)
+        }
+        guard let sourceLines,
+            let location = thematicBreak.range?.lowerBound,
             sourceLines.indices.contains(location.line - 1)
         else { return thematicBreak.format() }
 
@@ -325,6 +430,45 @@ private nonisolated struct ChatProseAttributedStringBuilder {
         let offset = min(max(0, location.column - 1), line.count)
         return String(decoding: line[offset...], as: UTF8.self)
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    private func code(_ text: String) -> NSAttributedString {
+        var style = bodyStyle
+        style.font = codeFont
+        return inlineText(
+            text.hasSuffix("\n") ? String(text.dropLast()) : text,
+            style: style
+        )
+    }
+
+    /// A table nested inside a list or quote: one line per row.
+    private func nestedTable(_ table: Markdown.Table) -> NSAttributedString {
+        var separatorStyle = bodyStyle
+        separatorStyle.color = {
+            #if os(macOS)
+                .secondaryLabelColor
+            #else
+                .secondaryLabel
+            #endif
+        }()
+        let separator = inlineText("  │  ", style: separatorStyle)
+        let rows = [table.head.children.compactMap { $0 as? Markdown.Table.Cell }]
+            + table.body.children.compactMap { row in
+                (row as? Markdown.Table.Row)?.children.compactMap {
+                    $0 as? Markdown.Table.Cell
+                }
+            }
+        let result = NSMutableAttributedString()
+        for (rowIndex, cells) in rows.enumerated() {
+            if rowIndex > 0 {
+                result.append(inlineText("\n", style: bodyStyle))
+            }
+            for (column, cell) in cells.enumerated() {
+                if column > 0 { result.append(separator) }
+                result.append(inlineText(cell.children, isBold: rowIndex == 0))
+            }
+        }
+        return result
     }
 
     private func inlineText(
@@ -359,10 +503,12 @@ private nonisolated struct ChatProseAttributedStringBuilder {
                 )
                 result.append(inlineText(link.children, style: nested))
             case let image as Markdown.Image:
+                // Images stay as literal Markdown; never fetch their source.
                 var nested = style
                 nested.font = codeFont
                 result.append(inlineText(image.format(), style: nested))
             case let html as InlineHTML:
+                // Inline HTML is inert source text, not executable markup.
                 var nested = style
                 nested.font = codeFont
                 result.append(inlineText(html.rawHTML, style: nested))
@@ -391,6 +537,7 @@ private nonisolated struct ChatProseAttributedStringBuilder {
         }
         if let link = style.link {
             attributes[.link] = link
+            attributes.merge(ChatMarkdownTextRenderer.linkAttributes()) { _, link in link }
         }
         return NSAttributedString(string: text, attributes: attributes)
     }

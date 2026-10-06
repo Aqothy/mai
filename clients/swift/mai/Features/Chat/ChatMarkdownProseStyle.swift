@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 
 #if os(macOS)
     import AppKit
@@ -10,8 +10,8 @@ import SwiftUI
     typealias ChatPlatformTextStyle = UIFont.TextStyle
 #endif
 
-/// The typography and spacing for chat prose, shared by the SwiftUI and
-/// TextKit renderers. The heading scale stays compact at chat widths.
+/// The typography and spacing for chat prose and the hosts that decorate it.
+/// The heading scale stays compact at chat widths.
 nonisolated enum ChatMarkdownProseStyle {
     static let blockSpacing: CGFloat = 16
     static let lineSpacing: CGFloat = 2
@@ -19,23 +19,6 @@ nonisolated enum ChatMarkdownProseStyle {
     static let listItemSpacing: CGFloat = 8
     static let quoteIndent: CGFloat = 14
     static let quoteBarWidth: CGFloat = 3
-
-    static func headingFont(level: Int) -> Font {
-        switch max(1, min(6, level)) {
-        case 1:
-            .title2
-        case 2:
-            .title3
-        case 3:
-            .headline
-        case 4:
-            .body
-        case 5:
-            .callout
-        default:
-            .subheadline
-        }
-    }
 
     static func headingTextStyle(level: Int) -> ChatPlatformTextStyle {
         switch max(1, min(6, level)) {

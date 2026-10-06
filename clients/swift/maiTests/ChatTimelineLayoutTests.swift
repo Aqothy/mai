@@ -39,28 +39,28 @@ struct ChatTimelineLayoutTests {
             }
 
             let store = ChatTextLayoutStore()
-            await store.prepareResolvedProse(
+            await store.prepare(
                 requests: [
-                    ChatResolvedProseLayoutRequest(
+                    ChatTextLayoutRequest(
                         id: "leading",
-                        prose: leadingProse,
+                        content: .rendered(leadingProse.text),
                         width: 700
                     ),
-                    ChatResolvedProseLayoutRequest(
+                    ChatTextLayoutRequest(
                         id: "trailing",
-                        prose: trailingProse,
+                        content: .rendered(trailingProse.text),
                         width: 700
                     ),
                 ]
             )
-            let leadingLayout = store.resolvedLayout(
+            let leadingLayout = store.layout(
                 id: "leading",
-                prose: leadingProse,
+                content: .rendered(leadingProse.text),
                 width: 700
             )
-            let trailingLayout = store.resolvedLayout(
+            let trailingLayout = store.layout(
                 id: "trailing",
-                prose: trailingProse,
+                content: .rendered(trailingProse.text),
                 width: 700
             )
 

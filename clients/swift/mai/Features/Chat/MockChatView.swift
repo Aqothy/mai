@@ -985,7 +985,7 @@ private struct MockChatTimeline: View {
                         layoutRequests.append(
                             ChatTextLayoutRequest(
                                 id: "mock-\(messageID)-\(index)-prose",
-                                source: segment.source,
+                                content: .source(segment.source),
                                 width: textWidth
                             )
                         )
@@ -1019,7 +1019,7 @@ private struct MockChatTimeline: View {
                 layoutRequests.append(
                     ChatTextLayoutRequest(
                         id: "\(request.messageID)-block-\(index)",
-                        source: prose.source,
+                        content: .rendered(prose.text),
                         width: width
                     )
                 )
@@ -1057,7 +1057,7 @@ private struct MockChatTimeline: View {
                     guard segments[index].kind == .prose else { return nil }
                     return ChatTextLayoutRequest(
                         id: "mock-\(message.id.uuidString)-\(index)-prose",
-                        source: segments[index].source,
+                        content: .source(segments[index].source),
                         width: textWidth
                     )
                 }
@@ -1437,7 +1437,7 @@ private struct MockChatOptimizedText: View {
                 if segment.kind == .prose {
                     ChatSelectableText(
                         layoutID: "mock-\(message.id.uuidString)-\(index)-prose",
-                        source: segment.source,
+                        content: .source(segment.source),
                         layoutStore: textLayoutStore
                     )
                 } else {

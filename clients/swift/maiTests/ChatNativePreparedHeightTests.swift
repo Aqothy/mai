@@ -10,18 +10,17 @@
             let layouts = ChatTextLayoutStore()
             let fold = ChatTimelineFoldModel()
             let scroll = ChatScrollState()
-            let table = ChatMarkdownTable(
-                alignments: [.leading, .trailing],
-                header: [AttributedString("Name"), AttributedString("Value")],
-                rows: [[AttributedString("Long table cell"), AttributedString("42")]])
-            let prose = ChatMarkdownProseRun(
-                source: "resolved quote",
-                pieces: [
-                    .text(AttributedString("Resolved text with several words for wrapping.")),
-                    .quote(AttributedString("A nested quotation that needs complete height.")),
-                    .thematicBreak,
-                ])
             let tableSource = "| Name | Value |\n| --- | ---: |\n| Long table cell | 42 |"
+            let resolved = ChatMarkdownRenderPlanner.plan(
+                from: "Resolved text with several words for wrapping.\n\n"
+                    + "> A nested quotation that needs complete height.\n\n---\n\n"
+                    + tableSource)
+            guard case .prose(let prose) = resolved.blocks.first,
+                case .table(let table) = resolved.blocks.last
+            else {
+                Issue.record("Expected a prose run followed by a table")
+                return
+            }
             _ = ChatMarkdownRenderCache.shared.plan(
                 messageID: "rich-table#segment-0", source: tableSource)
             for width: CGFloat in [220, 380, 760] {

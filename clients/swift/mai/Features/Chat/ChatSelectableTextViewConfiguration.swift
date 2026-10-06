@@ -21,10 +21,7 @@
             // display graph prevents recycled rows from showing an empty tail
             // after AppKit jumps directly into their lower half.
             view.layoutManager?.allowsNonContiguousLayout = false
-            view.linkTextAttributes = [
-                .foregroundColor: NSColor.labelColor,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ]
+            view.linkTextAttributes = ChatMarkdownTextRenderer.linkAttributes()
             return view
         }
     }
@@ -42,10 +39,7 @@
             view.textContainer.lineFragmentPadding = 0
             view.contentInset = .zero
             view.adjustsFontForContentSizeCategory = false
-            view.linkTextAttributes = [
-                .foregroundColor: UIColor.label,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ]
+            view.linkTextAttributes = ChatMarkdownTextRenderer.linkAttributes()
             view.accessibilityTraits.insert(.staticText)
             return view
         }

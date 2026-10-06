@@ -22,19 +22,4 @@ extension View {
             self
         #endif
     }
-
-    /// Give SwiftUI-rendered chat prose the native text-selection pointer.
-    /// Rich text rendered by `NSTextView` supplies the same cursor itself.
-    @ViewBuilder
-    func chatTextPointerStyle() -> some View {
-        #if os(macOS)
-            if #available(macOS 26.0, *) {
-                self.pointerStyle(.horizontalText)
-            } else {
-                self
-            }
-        #else
-            self
-        #endif
-    }
 }

@@ -217,14 +217,13 @@ struct ChatBetaIntegrationTests {
             ("First line\nsecond line\n\nNext paragraph", "First line\nsecond line"),
         ]
         for (source, shown) in cases {
-            guard case .prose(let prose) = try #require(ChatMarkdownRenderPlanner.plan(from: source).blocks.first),
-                case .text(let text) = try #require(prose.pieces.first)
+            guard case .prose(let prose) = try #require(ChatMarkdownRenderPlanner.plan(from: source).blocks.first)
             else {
                 Issue.record("Expected a prose text block for \(source)")
                 continue
             }
-            #expect(String(text.characters) == shown)
-            #expect(ChatProseMarkdownRenderer.attributedString(from: source).string.hasPrefix(shown))
+            #expect(prose.text.string.hasPrefix(shown))
+            #expect(ChatMarkdownTextRenderer.attributedString(from: source).string.hasPrefix(shown))
         }
     }
 

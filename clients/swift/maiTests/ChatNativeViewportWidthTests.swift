@@ -50,7 +50,7 @@
             document.nativeRowFactory = { _, reused in
                 let row = reused as? ChatNativePreparedRow ?? ChatNativePreparedRow(frame: .zero)
                 row.update(
-                    .init(id: "prose", content: .prose("Centered prose"), top: 0, bottom: 0),
+                    .init(id: "prose", content: .prose(.source("Centered prose")), top: 0, bottom: 0),
                     width: 760, store: store, theme: .light)
                 return row
             }

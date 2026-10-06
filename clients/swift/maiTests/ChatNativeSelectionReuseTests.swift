@@ -5,6 +5,30 @@
     @testable import mai
 
     struct ChatNativeSelectionReuseTests {
+        /// The live reply tail renders in TextKit, so a reader's selection
+        /// must survive every streamed append into that same text view.
+        @Test @MainActor
+        func liveProseKeepsSelectionWhileTextAppends() throws {
+            let layouts = ChatTextLayoutStore()
+            let host = ChatSelectableTextHostView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+            var planner = ChatIncrementalMarkdownRenderPlanner()
+            func stream(_ source: String) throws -> NSTextView {
+                let snapshot = planner.snapshot(source: source, sourceIsAppendOnly: true)
+                guard case .prose(let live) = try #require(snapshot.plan.blocks.last) else {
+                    throw CancellationError()
+                }
+                host.update(layoutID: "live", content: .rendered(live.text), layoutStore: layouts)
+                host.layoutSubtreeIfNeeded()
+                return try #require(host.subviews.compactMap { $0 as? NSTextView }.first)
+            }
+            let text = try stream("Streaming **bold** reply")
+            text.setSelectedRange(NSRange(location: 0, length: 9))
+            let grown = try stream("Streaming **bold** reply that keeps *grow")
+            #expect(grown === text)
+            #expect(text.string == "Streaming bold reply that keeps grow")
+            #expect(text.selectedRange() == NSRange(location: 0, length: 9))
+        }
+
         @Test @MainActor
         func referenceSelectionSurvivesRealVirtualizationAndRejectsStaleMenus() async throws {
             let model = ChatAnnotationModel()

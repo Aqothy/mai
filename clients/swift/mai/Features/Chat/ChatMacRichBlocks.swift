@@ -258,14 +258,13 @@
                 repeating: Self.minimumColumnWidth,
                 count: columnCount
             )
-            for (rowIndex, row) in rows.enumerated() {
+            for row in rows {
                 var measuredRow: [(NSAttributedString, NSSize)] = []
                 for column in 0..<columnCount {
                     let text = Self.cellText(
-                        row.indices.contains(column) ? row[column] : AttributedString(),
+                        row.indices.contains(column) ? row[column] : nil,
                         alignment: table.alignments.indices.contains(column)
-                            ? table.alignments[column] : .leading,
-                        isHeader: rowIndex == 0
+                            ? table.alignments[column] : .leading
                     )
                     let size = Self.measure(text)
                     columnWidths[column] = max(columnWidths[column], size.width)
@@ -320,27 +319,16 @@
         }
 
         private static func cellText(
-            _ value: AttributedString,
-            alignment: ChatMarkdownTable.ColumnAlignment,
-            isHeader: Bool
+            _ value: ChatMarkdownText?,
+            alignment: ChatMarkdownTable.ColumnAlignment
         ) -> NSAttributedString {
-            let text = ChatTextLayout.inlineAttributedString(from: value)
-            if isHeader {
-                text.enumerateAttribute(
-                    .font,
-                    in: NSRange(location: 0, length: text.length)
-                ) { value, range, _ in
-                    guard let font = value as? NSFont else { return }
-                    text.addAttribute(
-                        .font,
-                        value: NSFontManager.shared.convert(
-                            font,
-                            toHaveTrait: .boldFontMask
-                        ),
-                        range: range
-                    )
-                }
-            }
+            let text = NSMutableAttributedString(
+                attributedString: value?.value ?? NSAttributedString()
+            )
+            let range = NSRange(location: 0, length: text.length)
+            // Drawn cells are not interactive. AppKit would otherwise replace
+            // the renderer's link styling with its own link color.
+            text.removeAttribute(.link, range: range)
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment =
                 switch alignment {
@@ -348,11 +336,7 @@
                 case .center: .center
                 case .trailing: .right
                 }
-            text.addAttribute(
-                .paragraphStyle,
-                value: paragraph,
-                range: NSRange(location: 0, length: text.length)
-            )
+            text.addAttribute(.paragraphStyle, value: paragraph, range: range)
             return text
         }
 

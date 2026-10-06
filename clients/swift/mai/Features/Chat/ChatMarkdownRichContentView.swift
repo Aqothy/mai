@@ -78,6 +78,60 @@ struct ChatMarkdownRichContentView: View {
     .preferredColorScheme(.dark)
 }
 
+#if DEBUG
+    private let chatMarkdownParitySource = #"""
+        ## Heading two
+        ### Heading three
+        Paragraph with *italic*, **bold**, ~~strike~~, `inline code` and a [link](https://example.com).
+
+        - Bullet one
+        - Bullet two
+          - Nested bullet
+            1. Nested ordered
+
+        1. First
+        2. Second
+
+        > Quote with **bold** and `code`.
+        >
+        > > Nested quote
+
+        ---
+
+        | Name | Value |
+        | :--- | ---: |
+        | **Bold** | `code` |
+        | [Link](https://example.com) | ~~old~~ *new* |
+        """#
+
+    /// Settled and live presentations of the same plan must look identical.
+    #Preview("Markdown parity – settled") {
+        ScrollView {
+            ChatMarkdownRichContentView(
+                layoutIDPrefix: "parity-settled",
+                plan: ChatMarkdownRenderPlanner.plan(from: chatMarkdownParitySource),
+                streamingStableBlockCount: nil,
+                textLayoutStore: ChatTextLayoutStore()
+            )
+            .padding()
+        }
+        .frame(width: 420, height: 760)
+    }
+
+    #Preview("Markdown parity – streaming") {
+        ScrollView {
+            ChatMarkdownRichContentView(
+                layoutIDPrefix: "parity-streaming",
+                plan: ChatMarkdownRenderPlanner.plan(from: chatMarkdownParitySource),
+                streamingStableBlockCount: 0,
+                textLayoutStore: ChatTextLayoutStore()
+            )
+            .padding()
+        }
+        .frame(width: 420, height: 760)
+    }
+#endif
+
 private struct ChatMarkdownRenderBlockView: Equatable, View {
     let block: ChatMarkdownRenderPlan.Block
     let isStreaming: Bool
@@ -97,16 +151,14 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     var body: some View {
         switch block {
         case .prose(let prose):
-            if !isStreaming {
-                ChatSelectableMarkdownProseRun(
-                    layoutID: layoutID,
-                    prose: prose,
-                    textLayoutStore: textLayoutStore
-                )
-                .equatable()
-            } else {
-                ChatMarkdownResolvedProseView(prose: prose)
-            }
+            // The live tail renders through the same TextKit path as settled
+            // prose, so it stays selectable and never restyles on settle.
+            ChatSelectableMarkdownProseRun(
+                layoutID: layoutID,
+                prose: prose,
+                textLayoutStore: textLayoutStore
+            )
+            .equatable()
 
         case .code(let codeBlock):
             ChatMarkdownCodeBlockView(
@@ -126,8 +178,7 @@ private struct ChatMarkdownRenderBlockView: Equatable, View {
     }
 }
 
-/// Completed prose uses the thread-owned layout and native-view cache. The
-/// actively changing tail never enters this view.
+/// Prose uses the thread-owned layout and native-view cache.
 private struct ChatSelectableMarkdownProseRun: Equatable, View {
     let layoutID: String
     let prose: ChatMarkdownProseRun
@@ -145,31 +196,13 @@ private struct ChatSelectableMarkdownProseRun: Equatable, View {
     var body: some View {
         ChatSelectableText(
             layoutID: layoutID,
-            source: prose.source,
+            content: .rendered(prose.text),
             layoutStore: textLayoutStore
         )
     }
 }
 
-private struct ChatMarkdownResolvedProseView: Equatable, View {
-    let prose: ChatMarkdownProseRun
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: ChatMarkdownProseStyle.blockSpacing) {
-            ForEach(prose.pieces.indices, id: \.self) { index in
-                ChatMarkdownResolvedProsePieceView(
-                    piece: prose.pieces[index]
-                )
-                .equatable()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .textSelection(.enabled)
-    }
-}
-
 enum ChatResolvedMarkdownRowContent: Equatable {
-    case prose(ChatMarkdownProseRun.Piece)
     case proseRun(ChatMarkdownProseRun)
     case code(ChatMarkdownCodeBlock)
     case table(ChatMarkdownTable)
@@ -182,11 +215,7 @@ nonisolated enum ChatResolvedMarkdownRowPlanner {
         plan.blocks.flatMap { block in
             switch block {
             case .prose(let prose):
-                #if os(macOS)
-                    [ChatResolvedMarkdownRowContent.proseRun(prose)]
-                #else
-                    prose.pieces.map(ChatResolvedMarkdownRowContent.prose)
-                #endif
+                [ChatResolvedMarkdownRowContent.proseRun(prose)]
             case .code(let code):
                 [ChatResolvedMarkdownRowContent.code(code)]
             case .table(let table):
@@ -216,20 +245,12 @@ struct ChatResolvedMarkdownBlockRow: View {
     var body: some View {
         VStack(alignment: .leading) {
             switch model.content {
-            case .prose(let piece):
-                ChatMarkdownResolvedProsePieceView(piece: piece)
-                    .equatable()
-                    .textSelection(.enabled)
             case .proseRun(let prose):
-                #if os(macOS)
-                    ChatSelectableResolvedProse(
-                        layoutID: model.rowID,
-                        prose: prose,
-                        layoutStore: textLayoutStore
-                    )
-                #else
-                    ChatMarkdownResolvedProseView(prose: prose)
-                #endif
+                ChatSelectableText(
+                    layoutID: model.rowID,
+                    content: .rendered(prose.text),
+                    layoutStore: textLayoutStore
+                )
             case .code(let code):
                 ChatMarkdownCodeBlockView(
                     block: code,
@@ -251,40 +272,5 @@ struct ChatResolvedMarkdownBlockRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(ChatMarkdownContentStyle())
-    }
-}
-
-struct ChatMarkdownResolvedProsePieceView: Equatable, View {
-    let piece: ChatMarkdownProseRun.Piece
-
-    var body: some View {
-        switch piece {
-        case .text(let text):
-            Text(text)
-            .frame(maxWidth: .infinity, alignment: .leading)
-                .chatTextPointerStyle()
-
-        case .quote(let quote):
-            Text(quote)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(
-                .leading,
-                ChatMarkdownProseStyle.quoteBarWidth
-                    + ChatMarkdownProseStyle.quoteIndent
-            )
-            .overlay(alignment: .leading) {
-                RoundedRectangle(
-                    cornerRadius: ChatMarkdownProseStyle.quoteBarWidth / 2
-                )
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: ChatMarkdownProseStyle.quoteBarWidth)
-                .accessibilityHidden(true)
-            }
-                .chatTextPointerStyle()
-
-        case .thematicBreak:
-            Divider()
-                .frame(maxWidth: .infinity)
-        }
     }
 }

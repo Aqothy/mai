@@ -1467,12 +1467,6 @@ struct ChatTimeline: View {
             )
         #endif
         await textLayoutStore.prepare(requests: layoutRequests)
-        await textLayoutStore.prepareResolvedProse(
-            requests: Self.resolvedProseLayoutRequests(
-                in: renderedRows,
-                rowWidth: rowWidth
-            )
-        )
         // Prose first: it is most of every page. Code highlighting is
         // JavaScript-backed and tables are rarer, so they follow.
         await textLayoutStore.prepareTables(requests: richBlocks.tables)
@@ -1536,7 +1530,7 @@ struct ChatTimeline: View {
                     tables.append(
                         ChatTableLayoutRequest(id: block.rowID, table: table)
                     )
-                case .prose, .proseRun:
+                case .proseRun:
                     break
                 }
             case .standard, .prose:
@@ -1767,7 +1761,7 @@ struct ChatTimeline: View {
                     requests.append(
                         ChatTextLayoutRequest(
                             id: id,
-                            source: prose.source,
+                            content: .rendered(prose.text),
                             width: ChatTimelineMetrics.proseTextWidth(
                                 role: role,
                                 in: rowWidth
@@ -1786,7 +1780,7 @@ struct ChatTimeline: View {
                 requests.append(
                     ChatTextLayoutRequest(
                         id: segment.rowID,
-                        source: segment.source,
+                        content: .source(segment.source),
                         width: ChatTimelineMetrics.proseTextWidth(
                             role: segment.role,
                             in: rowWidth
@@ -1810,36 +1804,24 @@ struct ChatTimeline: View {
                     source: message.text,
                     role: message.role
                 )
-            case .standard, .resolvedMarkdown:
+            case .resolvedMarkdown(let block):
+                guard case .proseRun(let prose) = block.content else { continue }
+                requests.append(
+                    ChatTextLayoutRequest(
+                        id: block.rowID,
+                        content: .rendered(prose.text),
+                        width: ChatTimelineMetrics.proseTextWidth(
+                            role: MaidMessageRole.assistant.rawValue,
+                            in: rowWidth
+                        )
+                    )
+                )
+            case .standard:
                 break
             }
         }
         return requests
     }
-
-    static func resolvedProseLayoutRequests(
-        in rows: [ChatTimelineRenderRow],
-        rowWidth: CGFloat
-    ) -> [ChatResolvedProseLayoutRequest] {
-        #if os(macOS)
-            rows.compactMap { row in
-                guard case .resolvedMarkdown(let block) = row,
-                    case .proseRun(let prose) = block.content
-                else { return nil }
-                return ChatResolvedProseLayoutRequest(
-                    id: block.rowID,
-                    prose: prose,
-                    width: ChatTimelineMetrics.proseTextWidth(
-                        role: MaidMessageRole.assistant.rawValue,
-                        in: rowWidth
-                    )
-                )
-            }
-        #else
-            return []
-        #endif
-    }
-
 }
 
 enum ChatTimelineRenderRow: Identifiable {
@@ -1937,7 +1919,7 @@ struct ChatTimelineRenderRowView: View {
                 ) {
                     ChatSelectableText(
                         layoutID: segment.rowID,
-                        source: segment.source,
+                        content: .source(segment.source),
                         layoutStore: textLayoutStore
                     )
                 }

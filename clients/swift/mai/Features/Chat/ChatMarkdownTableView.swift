@@ -63,8 +63,7 @@ private struct ChatMarkdownTableGrid: View {
         ) {
             ChatMarkdownTableRow(
                 cells: table.header,
-                table: table,
-                isHeader: true
+                table: table
             )
 
             Divider()
@@ -73,8 +72,7 @@ private struct ChatMarkdownTableGrid: View {
             ForEach(table.rows.indices, id: \.self) { index in
                 ChatMarkdownTableRow(
                     cells: table.rows[index],
-                    table: table,
-                    isHeader: false
+                    table: table
                 )
 
                 if index < table.rows.count - 1 {
@@ -87,35 +85,58 @@ private struct ChatMarkdownTableGrid: View {
 }
 
 private struct ChatMarkdownTableRow: View {
-    let cells: [AttributedString]
+    let cells: [ChatMarkdownText]
     let table: ChatMarkdownTable
-    let isHeader: Bool
 
     var body: some View {
         GridRow(alignment: .top) {
             ForEach(0..<table.columnCount, id: \.self) { column in
                 ChatMarkdownTableCell(
                     content: cells.indices.contains(column)
-                        ? cells[column]
+                        ? Self.swiftUIText(cells[column])
                         : AttributedString(),
                     alignment: table.alignments.indices.contains(column)
                         ? table.alignments[column]
-                        : .leading,
-                    isHeader: isHeader
+                        : .leading
                 )
             }
         }
+    }
+
+    /// SwiftUI `Text` ignores UIKit attributes, so the renderer's cell text
+    /// is carried over attribute by attribute; styling is decided only there.
+    private static func swiftUIText(_ text: ChatMarkdownText) -> AttributedString {
+        var result = AttributedString(text.string)
+        text.value.enumerateAttributes(
+            in: NSRange(location: 0, length: text.value.length)
+        ) { attributes, range, _ in
+            guard let range = Range(range, in: result) else { return }
+            if let font = attributes[.font] as? UIFont {
+                result[range].font = Font(font as CTFont)
+            }
+            if let color = attributes[.foregroundColor] as? UIColor {
+                result[range].foregroundColor = Color(uiColor: color)
+            }
+            if attributes[.strikethroughStyle] != nil {
+                result[range].strikethroughStyle = .single
+            }
+            if attributes[.underlineStyle] != nil {
+                result[range].underlineStyle = .single
+            }
+            if let link = attributes[.link] as? URL {
+                result[range].link = link
+            }
+        }
+        return result
     }
 }
 
 private struct ChatMarkdownTableCell: View {
     let content: AttributedString
     let alignment: ChatMarkdownTable.ColumnAlignment
-    let isHeader: Bool
 
     var body: some View {
         Text(content)
-            .bold(isHeader)
             .multilineTextAlignment(textAlignment)
             .frame(
                 minWidth: 96,

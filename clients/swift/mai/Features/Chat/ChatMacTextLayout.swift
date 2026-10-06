@@ -18,21 +18,8 @@
         let thematicBreakRects: [NSRect]
         let hasMarkdownDecorations: Bool
 
-        convenience init(source: String, width: CGFloat) {
-            self.init(
-                attributedString: ChatProseMarkdownRenderer.attributedString(from: source),
-                width: width
-            )
-        }
-
-        convenience init(
-            resolvedProse prose: ChatMarkdownProseRun,
-            width: CGFloat
-        ) {
-            self.init(
-                attributedString: Self.attributedString(from: prose),
-                width: width
-            )
+        convenience init(content: ChatTextContent, width: CGFloat) {
+            self.init(attributedString: content.attributedString, width: width)
         }
 
         /// Unwrapped code: lines run to their natural width and the host
@@ -145,186 +132,6 @@
             self.hasMarkdownDecorations =
                 !quoteBarRects.isEmpty || !thematicBreakRects.isEmpty
         }
-
-        /// Converts an already-resolved whole-document prose run into the
-        /// AppKit attributes used by the normal selectable Markdown path.
-        /// Links come from the resolved value, so definitions outside this
-        /// run never need to be reparsed or duplicated.
-        private static func attributedString(
-            from prose: ChatMarkdownProseRun
-        ) -> NSAttributedString {
-            let output = NSMutableAttributedString()
-            for piece in prose.pieces {
-                if output.length > 0 {
-                    appendBlockSpacer(to: output)
-                }
-
-                switch piece {
-                case .text(let text):
-                    append(text, quoteBarOffset: nil, to: output)
-                case .quote(let quote):
-                    append(quote, quoteBarOffset: 0, to: output)
-                case .thematicBreak:
-                    let start = output.length
-                    output.append(
-                        NSAttributedString(
-                            string: "---\n",
-                            attributes: [
-                                .font: NSFont.preferredFont(
-                                    forTextStyle: .body
-                                ),
-                                .foregroundColor: NSColor.clear,
-                            ]
-                        )
-                    )
-                    output.addAttribute(
-                        .chatThematicBreakIndent,
-                        value: CGFloat.zero,
-                        range: NSRange(
-                            location: start,
-                            length: output.length - start
-                        )
-                    )
-                }
-            }
-            while output.string.hasSuffix("\n") {
-                output.deleteCharacters(
-                    in: NSRange(location: output.length - 1, length: 1)
-                )
-            }
-            return output
-        }
-
-        private static func append(
-            _ value: AttributedString,
-            quoteBarOffset: CGFloat?,
-            to output: NSMutableAttributedString
-        ) {
-            let inline = inlineAttributedString(from: value)
-            guard inline.length > 0 else { return }
-            let start = output.length
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = ChatMarkdownProseStyle.lineSpacing
-            if quoteBarOffset != nil {
-                paragraph.firstLineHeadIndent =
-                    ChatMarkdownProseStyle.quoteBarWidth
-                    + ChatMarkdownProseStyle.quoteIndent
-                paragraph.headIndent = paragraph.firstLineHeadIndent
-            }
-            inline.addAttribute(
-                .paragraphStyle,
-                value: paragraph,
-                range: NSRange(location: 0, length: inline.length)
-            )
-            output.append(inline)
-
-            output.append(NSAttributedString(string: "\n"))
-            if let quoteBarOffset {
-                output.addAttribute(
-                    .chatQuoteBarOffsets,
-                    value: [quoteBarOffset],
-                    range: NSRange(
-                        location: start,
-                        length: output.length - start
-                    )
-                )
-            }
-        }
-
-        /// Converts inline Markdown intents (code, emphasis, headings,
-        /// strikethrough, links) from the parser's `AttributedString` into
-        /// AppKit attributes. Shared by resolved prose runs and table cells.
-        static func inlineAttributedString(
-            from value: AttributedString
-        ) -> NSMutableAttributedString {
-            let string = String(value.characters)
-            let output = NSMutableAttributedString(
-                string: string,
-                attributes: [
-                    .font: NSFont.preferredFont(forTextStyle: .body),
-                    .foregroundColor: NSColor.labelColor,
-                ]
-            )
-            guard !string.isEmpty else { return output }
-
-            for run in value.runs {
-                let prefix = String(
-                    value[value.startIndex..<run.range.lowerBound].characters
-                )
-                let runText = String(value[run.range].characters)
-                let range = NSRange(
-                    location: prefix.utf16.count,
-                    length: runText.utf16.count
-                )
-                guard range.length > 0 else { continue }
-
-                let intents = run.inlinePresentationIntent ?? []
-                let headingLevel = run.accessibilityHeadingLevel?.rawValue
-                var font: NSFont
-                if intents.contains(.code) {
-                    font = NSFont.monospacedSystemFont(
-                        ofSize: NSFont.preferredFont(
-                            forTextStyle: .body
-                        ).pointSize,
-                        weight: .regular
-                    )
-                } else if let headingLevel {
-                    font = NSFont.preferredFont(
-                        forTextStyle: ChatMarkdownProseStyle.headingTextStyle(
-                            level: headingLevel
-                        )
-                    )
-                } else {
-                    font = NSFont.preferredFont(forTextStyle: .body)
-                }
-                if intents.contains(.stronglyEmphasized) {
-                    font = NSFontManager.shared.convert(
-                        font,
-                        toHaveTrait: .boldFontMask
-                    )
-                }
-                if intents.contains(.emphasized) {
-                    font = NSFontManager.shared.convert(
-                        font,
-                        toHaveTrait: .italicFontMask
-                    )
-                }
-                output.addAttribute(.font, value: font, range: range)
-                if intents.contains(.strikethrough) {
-                    output.addAttribute(
-                        .strikethroughStyle,
-                        value: NSUnderlineStyle.single.rawValue,
-                        range: range
-                    )
-                }
-                if let link = run.link {
-                    output.addAttribute(.link, value: link, range: range)
-                    output.addAttribute(
-                        .underlineStyle,
-                        value: NSUnderlineStyle.single.rawValue,
-                        range: range
-                    )
-                }
-            }
-            return output
-        }
-
-        private static func appendBlockSpacer(
-            to output: NSMutableAttributedString
-        ) {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.minimumLineHeight = ChatMarkdownProseStyle.blockSpacing
-            paragraph.maximumLineHeight = ChatMarkdownProseStyle.blockSpacing
-            output.append(
-                NSAttributedString(
-                    string: "\n",
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: 1),
-                        .paragraphStyle: paragraph,
-                    ]
-                )
-            )
-        }
     }
 
     /// Thread-owned cache for completed and in-flight layouts. Native view
@@ -341,12 +148,7 @@
         }
 
         private struct Entry {
-            let source: String
-            let layout: ChatTextLayout
-        }
-
-        private struct ResolvedEntry {
-            let prose: ChatMarkdownProseRun
+            let content: ChatTextContent
             let layout: ChatTextLayout
         }
 
@@ -366,8 +168,6 @@
 
         private var entries: [Key: Entry] = [:]
         private var inFlightKeys: Set<Key> = []
-        private var resolvedEntries: [Key: ResolvedEntry] = [:]
-        private var resolvedInFlightKeys: Set<Key> = []
         private var codeEntries: [String: CodeEntry] = [:]
         private var codeInFlightIDs: Set<String> = []
         private var tableEntries: [String: TableEntry] = [:]
@@ -375,7 +175,7 @@
 
         #if DEBUG
         var cachedLayoutCount: Int {
-            entries.count + resolvedEntries.count + codeEntries.count + tableEntries.count
+            entries.count + codeEntries.count + tableEntries.count
         }
         #endif
 
@@ -386,11 +186,11 @@
 
         func layout(
             id: String,
-            source: String,
+            content: ChatTextContent,
             width: CGFloat
         ) -> ChatTextLayout {
             let key = Key(id: id, width: width)
-            if let entry = entries[key], entry.source == source {
+            if let entry = entries[key], entry.content == content {
                 return entry.layout
             }
 
@@ -399,11 +199,11 @@
             // temporarily reports the wrong height.
             #if DEBUG
                 ChatBenchmarkAutoRun.trace(
-                    "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(source.utf8.count)"
+                    "layout miss id=\(id) width=\(width) cached=\(entries[key] != nil) bytes=\(content.utf8Count)"
                 )
             #endif
-            let layout = ChatTextLayout(source: source, width: width)
-            entries[key] = Entry(source: source, layout: layout)
+            let layout = ChatTextLayout(content: content, width: width)
+            entries[key] = Entry(content: content, layout: layout)
             return layout
         }
 
@@ -418,84 +218,7 @@
                 }
                 remaining = remaining.filter { request in
                     let key = Key(id: request.id, width: request.width)
-                    return entries[key]?.source != request.source
-                }
-                if remaining.isEmpty || Task.isCancelled { break }
-                if pending.isEmpty {
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-            }
-        }
-
-        func resolvedLayout(
-            id: String,
-            prose: ChatMarkdownProseRun,
-            width: CGFloat
-        ) -> ChatTextLayout {
-            let key = Key(id: id, width: width)
-            if let entry = resolvedEntries[key], entry.prose == prose {
-                return entry.layout
-            }
-            #if DEBUG
-                ChatBenchmarkAutoRun.trace(
-                    "resolved layout miss id=\(id) width=\(width) bytes=\(prose.source.utf8.count)"
-                )
-            #endif
-            let layout = ChatTextLayout(
-                resolvedProse: prose,
-                width: width
-            )
-            resolvedEntries[key] = ResolvedEntry(
-                prose: prose,
-                layout: layout
-            )
-            return layout
-        }
-
-        func prepareResolvedProse(
-            requests: [ChatResolvedProseLayoutRequest]
-        ) async {
-            var remaining = requests.filter { $0.width > 0 }
-            while !remaining.isEmpty, !Task.isCancelled {
-                var pending: [(ChatResolvedProseLayoutRequest, Key)] = []
-                var seen: Set<Key> = []
-                for request in remaining.reversed() {
-                    let key = Key(id: request.id, width: request.width)
-                    guard seen.insert(key).inserted,
-                        resolvedEntries[key]?.prose != request.prose,
-                        !resolvedInFlightKeys.contains(key)
-                    else { continue }
-                    resolvedInFlightKeys.insert(key)
-                    pending.append((request, key))
-                }
-                if !pending.isEmpty {
-                    let claimed = pending
-                    let worker = Task.detached(priority: .userInitiated) {
-                        claimed.map { request, _ in
-                            ChatTextLayout(
-                                resolvedProse: request.prose,
-                                width: request.width
-                            )
-                        }
-                    }
-                    let layouts = await withTaskCancellationHandler {
-                        await worker.value
-                    } onCancel: {
-                        worker.cancel()
-                    }
-                    for ((request, key), layout) in zip(claimed, layouts) {
-                        resolvedInFlightKeys.remove(key)
-                        if resolvedEntries[key]?.prose != request.prose {
-                            resolvedEntries[key] = ResolvedEntry(
-                                prose: request.prose,
-                                layout: layout
-                            )
-                        }
-                    }
-                }
-                remaining = remaining.filter { request in
-                    let key = Key(id: request.id, width: request.width)
-                    return resolvedEntries[key]?.prose != request.prose
+                    return entries[key]?.content != request.content
                 }
                 if remaining.isEmpty || Task.isCancelled { break }
                 if pending.isEmpty {
@@ -667,7 +390,7 @@
                 for item in pending {
                     guard !Task.isCancelled else { break }
                     layouts.append(
-                        ChatTextLayout(source: item.request.source, width: item.request.width)
+                        ChatTextLayout(content: item.request.content, width: item.request.width)
                     )
                 }
                 return layouts
@@ -679,8 +402,8 @@
             }
             for (item, layout) in zip(pending, layouts) {
                 inFlightKeys.remove(item.key)
-                if entries[item.key]?.source != item.request.source {
-                    entries[item.key] = Entry(source: item.request.source, layout: layout)
+                if entries[item.key]?.content != item.request.content {
+                    entries[item.key] = Entry(content: item.request.content, layout: layout)
                 }
             }
             // Unbuilt claims must not block future preparation for these rows.
@@ -700,7 +423,7 @@
             for request in requests.reversed() {
                 let key = Key(id: request.id, width: request.width)
                 guard seen.insert(key).inserted,
-                    entries[key]?.source != request.source,
+                    entries[key]?.content != request.content,
                     !inFlightKeys.contains(key)
                 else { continue }
                 inFlightKeys.insert(key)
@@ -711,11 +434,11 @@
 
     }
 
-    /// Native macOS range selection for settled prose.
+    /// Native macOS range selection for chat prose.
     struct ChatSelectableText: NSViewRepresentable {
         @Environment(\.chatAnnotationContext) private var annotationContext
         let layoutID: String
-        let source: String
+        let content: ChatTextContent
         let layoutStore: ChatTextLayoutStore
 
         func makeNSView(context: Context) -> ChatSelectableTextHostView {
@@ -727,7 +450,7 @@
             context: Context
         ) {
             nsView.annotationContext = annotationContext
-            nsView.update(layoutID: layoutID, source: source, layoutStore: layoutStore)
+            nsView.update(layoutID: layoutID, content: content, layoutStore: layoutStore)
         }
 
         static func dismantleNSView(
@@ -743,51 +466,7 @@
             context: Context
         ) -> CGSize? {
             guard let width = proposal.width, width > 0 else { return nil }
-            let layout = layoutStore.layout(id: layoutID, source: source, width: width)
-            return CGSize(width: width, height: layout.height)
-        }
-    }
-
-    struct ChatSelectableResolvedProse: NSViewRepresentable {
-        @Environment(\.chatAnnotationContext) private var annotationContext
-        let layoutID: String
-        let prose: ChatMarkdownProseRun
-        let layoutStore: ChatTextLayoutStore
-
-        func makeNSView(context: Context) -> ChatSelectableTextHostView {
-            ChatSelectableTextHostView()
-        }
-
-        func updateNSView(
-            _ nsView: ChatSelectableTextHostView,
-            context: Context
-        ) {
-            nsView.annotationContext = annotationContext
-            nsView.update(
-                layoutID: layoutID,
-                resolvedProse: prose,
-                layoutStore: layoutStore
-            )
-        }
-
-        static func dismantleNSView(
-            _ nsView: ChatSelectableTextHostView,
-            coordinator: Void
-        ) {
-            nsView.dismantle()
-        }
-
-        func sizeThatFits(
-            _ proposal: ProposedViewSize,
-            nsView: ChatSelectableTextHostView,
-            context: Context
-        ) -> CGSize? {
-            guard let width = proposal.width, width > 0 else { return nil }
-            let layout = layoutStore.resolvedLayout(
-                id: layoutID,
-                prose: prose,
-                width: width
-            )
+            let layout = layoutStore.layout(id: layoutID, content: content, width: width)
             return CGSize(width: width, height: layout.height)
         }
     }
@@ -795,11 +474,6 @@
     final class ChatSelectableTextHostView: NSView {
         // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
         nonisolated deinit {}
-
-        private enum Content: Equatable {
-            case source(String)
-            case resolvedProse(ChatMarkdownProseRun)
-        }
 
         private final class MarkdownDecorationView: NSView {
             // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -836,7 +510,7 @@
         private var decorationView: MarkdownDecorationView?
         private let textView: NSTextView
         private var layoutID: String?
-        private var content: Content?
+        private var content: ChatTextContent?
         private weak var layoutStore: ChatTextLayoutStore?
         private var presentedLayout: ChatTextLayout?
         private var presentedLayoutID: String?
@@ -860,31 +534,7 @@
 
         func update(
             layoutID: String,
-            source: String,
-            layoutStore: ChatTextLayoutStore
-        ) {
-            update(
-                layoutID: layoutID,
-                content: .source(source),
-                layoutStore: layoutStore
-            )
-        }
-
-        func update(
-            layoutID: String,
-            resolvedProse: ChatMarkdownProseRun,
-            layoutStore: ChatTextLayoutStore
-        ) {
-            update(
-                layoutID: layoutID,
-                content: .resolvedProse(resolvedProse),
-                layoutStore: layoutStore
-            )
-        }
-
-        private func update(
-            layoutID: String,
-            content: Content,
+            content: ChatTextContent,
             layoutStore: ChatTextLayoutStore
         ) {
             guard self.layoutID != layoutID || self.content != content
@@ -902,16 +552,7 @@
                 bounds.width > 0, bounds.height >= 0
             else { return }
 
-            let layout = switch content {
-            case .source(let source):
-                layoutStore.layout(id: layoutID, source: source, width: bounds.width)
-            case .resolvedProse(let prose):
-                layoutStore.resolvedLayout(
-                    id: layoutID,
-                    prose: prose,
-                    width: bounds.width
-                )
-            }
+            let layout = layoutStore.layout(id: layoutID, content: content, width: bounds.width)
             if presentedLayout !== layout {
                 present(layout)
             }
