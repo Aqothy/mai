@@ -43,7 +43,7 @@ struct IOSChatDestinationView: View {
         .task(id: route) {
             switch route {
             case .newChat:
-                store.startNewDraft()
+                store.selectThread(nil)
             case .thread(let threadID):
                 guard store.selectedThreadID != threadID else { return }
                 store.selectThread(threadID)

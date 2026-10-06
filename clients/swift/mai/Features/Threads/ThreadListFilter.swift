@@ -47,4 +47,12 @@ struct ThreadListFilter: Equatable {
                     || terminal.observedTitle?.localizedStandardContains(query) == true)
         }
     }
+
+    /// The filtered agent threads and terminals merged into one list.
+    func workspaceItems(store: ThreadStore, terminalStore: TerminalStore) -> [WorkspaceListItem] {
+        WorkspaceListItem.merged(
+            threads: apply(to: store.threads, providerID: store.providerID(for:)),
+            terminals: apply(toTerminals: terminalStore.terminals)
+        )
+    }
 }

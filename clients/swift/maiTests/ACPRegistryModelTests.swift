@@ -186,7 +186,7 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     }
 
     func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem {
-        throw RPCError(code: nil, message: "Thread subscriptions are unavailable", data: nil)
+        throw RPCError("Thread subscriptions are unavailable")
     }
 
     func unsubscribeThread(_ input: SubscribeThreadInput) async throws {}

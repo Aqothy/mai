@@ -200,7 +200,7 @@
                 HStack(spacing: SidebarMetrics.actionSpacing) {
                     Button("New Chat", systemImage: "square.and.pencil") {
                         terminalRoute = nil
-                        store.startNewDraft()
+                        store.selectThread(nil)
                     }
                     .keyboardShortcut("n", modifiers: .command)
                     .help("New Chat (⌘N)")
@@ -245,7 +245,7 @@
         @State private var topAligner = DesktopSidebarTopAligner()
 
         var body: some View {
-            let items = filteredItems
+            let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
             List(selection: $selection) {
                 if isLoading {
                     ProgressView()
@@ -255,7 +255,7 @@
                     switch displayMode {
                     case .recent:
                         ForEach(items) { item in
-                            DesktopSelectableWorkspaceRow(
+                            DesktopWorkspaceRow(
                                 store: store,
                                 item: item,
                                 isCompact: false,
@@ -266,7 +266,7 @@
                     case .byProject:
                         let groups = WorkspaceListGroups(items: items)
                         ForEach(groups.ungrouped) { item in
-                            DesktopSelectableWorkspaceRow(
+                            DesktopWorkspaceRow(
                                 store: store,
                                 item: item,
                                 isCompact: true,
@@ -277,7 +277,7 @@
                         ForEach(groups.projects) { section in
                             Section(isExpanded: expansionBinding(for: section.id)) {
                                 ForEach(section.items) { item in
-                                    DesktopSelectableWorkspaceRow(
+                                    DesktopWorkspaceRow(
                                         store: store,
                                         item: item,
                                         isCompact: true,
@@ -332,16 +332,6 @@
             !store.threads.isEmpty || !terminalStore.terminals.isEmpty
         }
 
-        private var filteredItems: [WorkspaceListItem] {
-            WorkspaceListItem.merged(
-                threads: filter.apply(
-                    to: store.threads,
-                    providerID: store.providerID(for:)
-                ),
-                terminals: filter.apply(toTerminals: terminalStore.terminals)
-            )
-        }
-
         private func expansionBinding(for projectDirectory: String) -> Binding<Bool> {
             Binding(
                 get: { collapsedProjects.isExpanded(projectDirectory) },
@@ -349,25 +339,6 @@
             )
         }
 
-    }
-
-    private struct DesktopSelectableWorkspaceRow: View {
-        let store: ThreadStore
-        let item: WorkspaceListItem
-        let isCompact: Bool
-        let openTerminalHere: (ThreadListEntry) -> (() -> Void)?
-        let deleteTerminal: (String) -> Void
-
-        var body: some View {
-            DesktopWorkspaceRow(
-                store: store,
-                item: item,
-                isCompact: isCompact,
-                openTerminalHere: openTerminalHere,
-                deleteTerminal: deleteTerminal
-            )
-            .tag(item.id)
-        }
     }
 
     private struct DesktopSidebarFilteredEmptyState: View {
@@ -488,6 +459,7 @@
                     )
                 }
             }
+            .tag(item.id)
         }
     }
 

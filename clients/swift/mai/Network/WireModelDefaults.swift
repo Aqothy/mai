@@ -21,37 +21,6 @@ extension Attachment {
     }
 }
 
-extension Capabilities {
-    init(
-        auth: Bool?,
-        configOptions: Bool?,
-        loadReplay: Bool?,
-        logout: Bool?,
-        mcp: MCPCapabilities?,
-        modelSwitch: String?,
-        promptContent: PromptContentCapabilities?,
-        resume: Bool?,
-        sessionList: Bool?
-    ) {
-        self.init(
-            additionalDirectories: nil,
-            auth: auth,
-            configOptions: configOptions,
-            fork: nil,
-            loadReplay: loadReplay,
-            logout: logout,
-            mcp: mcp,
-            modelSwitch: modelSwitch,
-            promptContent: promptContent,
-            resume: resume,
-            sessionClose: nil,
-            sessionDelete: nil,
-            sessionList: sessionList,
-            skills: nil
-        )
-    }
-}
-
 extension Command {
     init(
         commandID: String?,
@@ -88,12 +57,6 @@ extension Command {
             type: type,
             value: value
         )
-    }
-}
-
-extension CommandMessage {
-    init(attachments: [Attachment]?, messageID: String?, text: String) {
-        self.init(annotations: nil, attachments: attachments, messageID: messageID, text: text)
     }
 }
 
@@ -187,16 +150,6 @@ extension Message {
     }
 }
 
-extension ProviderOptionsResult {
-    init(configOptions: [ConfigOption], optionsSessionID: String) {
-        self.init(
-            configOptions: configOptions,
-            optionsSessionID: optionsSessionID,
-            skills: nil
-        )
-    }
-}
-
 extension SessionBinding {
     init(
         activeTurnID: String?,
@@ -228,18 +181,6 @@ extension SessionBinding {
             stopRequested: stopRequested,
             threadID: threadID,
             tokenUsage: tokenUsage,
-            updatedAt: updatedAt
-        )
-    }
-}
-
-extension SessionSummary {
-    init(cwd: String?, sessionID: String, title: String?, updatedAt: String?) {
-        self.init(
-            additionalDirectories: nil,
-            cwd: cwd,
-            sessionID: sessionID,
-            title: title,
             updatedAt: updatedAt
         )
     }

@@ -379,13 +379,7 @@ final class DraftPromptModel {
         guard requestedAdditionalDirectories.isEmpty
             || store.providerSupportsAdditionalDirectories(providerID)
         else {
-            showError(
-                RPCError(
-                    code: nil,
-                    message: "This provider does not support additional project folders",
-                    data: nil
-                )
-            )
+            showError(RPCError("This provider does not support additional project folders"))
             return
         }
 

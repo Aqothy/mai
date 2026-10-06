@@ -101,11 +101,7 @@ final class RPCConnectionCoordinator {
             }
             guard let self, attemptID == id else { return }
             failConnection(
-                RPCError(
-                    code: nil,
-                    message: "Connection attempt timed out",
-                    data: nil
-                ),
+                RPCError("Connection attempt timed out"),
                 attemptID: id,
                 disconnectTransport: true
             )

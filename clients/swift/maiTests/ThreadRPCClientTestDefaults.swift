@@ -4,7 +4,7 @@
 /// fails like an unsupported daemon method.
 extension ThreadRPCClient {
     private var unavailable: RPCError {
-        RPCError(code: nil, message: "Unavailable in this test double", data: nil)
+        RPCError("Unavailable in this test double")
     }
 
     func listProviders() async throws -> [InstanceInfo] { [] }

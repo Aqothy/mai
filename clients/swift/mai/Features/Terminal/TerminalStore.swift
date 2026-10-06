@@ -9,8 +9,6 @@ final class TerminalStore {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
-
     /// Terminal summaries ordered by updatedAt descending, then id — the
     /// same deterministic order the daemon persists.
     private(set) var terminals: [TerminalSummary] = []
@@ -21,23 +19,18 @@ final class TerminalStore {
 
     @ObservationIgnored let rpc: any TerminalRPCClient
     @ObservationIgnored private let connection: RPCConnectionCoordinator
-    @ObservationIgnored private let snapshotRestorer: SnapshotRestorer
     @ObservationIgnored private var isAwaitingListSnapshot = false
     @ObservationIgnored private var bufferedListItems: [TerminalListStreamItem] = []
     @ObservationIgnored private var listSubscriptionGeneration = 0
 
     init(
         rpc: any TerminalRPCClient = RPCClient(),
-        connection: RPCConnectionCoordinator? = nil,
-        snapshotRestorer: @escaping SnapshotRestorer = { controller, data in
-            try await controller.restore(snapshot: data)
-        }
+        connection: RPCConnectionCoordinator? = nil
     ) {
         let connection = connection ?? RPCConnectionCoordinator(rpc: rpc)
         precondition(connection.uses(rpc), "TerminalStore must use the coordinator's RPC client")
         self.rpc = rpc
         self.connection = connection
-        self.snapshotRestorer = snapshotRestorer
 
         rpc.onTerminalStreamItem = { [weak self] item in
             self?.receiveStreamItem(item)
@@ -167,8 +160,7 @@ final class TerminalStore {
         let attachment = TerminalAttachment(
             store: self,
             origin: request,
-            mode: mode,
-            snapshotRestorer: snapshotRestorer
+            mode: mode
         )
         activeAttachment = attachment
         return attachment
@@ -194,8 +186,7 @@ final class TerminalStore {
         let attachment = TerminalAttachment(
             store: self,
             origin: active.origin,
-            mode: .relaunch(terminalID: terminalID),
-            snapshotRestorer: snapshotRestorer
+            mode: .relaunch(terminalID: terminalID)
         )
         activeAttachment = attachment
         return attachment

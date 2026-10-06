@@ -58,7 +58,6 @@ final class TerminalAttachment {
     @ObservationIgnored private var mode: Mode
     @ObservationIgnored private weak var store: TerminalStore?
     @ObservationIgnored private let backend: TerminalAttachmentBackend
-    @ObservationIgnored private let snapshotRestorer: TerminalStore.SnapshotRestorer
 
     @ObservationIgnored private var lastAppliedSequence = 0
     @ObservationIgnored private var awaitingSnapshot = true
@@ -73,13 +72,11 @@ final class TerminalAttachment {
     init(
         store: TerminalStore,
         origin: TerminalOpenRequest,
-        mode: Mode,
-        snapshotRestorer: @escaping TerminalStore.SnapshotRestorer
+        mode: Mode
     ) {
         self.store = store
         self.origin = origin
         self.mode = mode
-        self.snapshotRestorer = snapshotRestorer
         let backend = TerminalAttachmentBackend()
         self.backend = backend
         controller = TerminalSessionController(
@@ -296,7 +293,7 @@ final class TerminalAttachment {
         }
 
         do {
-            try await snapshotRestorer(controller, data)
+            try await controller.restore(snapshot: data)
         } catch {
             guard !isClosed else { return }
             // A layout change can race the native install after the earlier

@@ -1155,7 +1155,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
         ProviderOptionsResult(
             configOptions: providerOptions,
-            optionsSessionID: "options-session-1"
+            optionsSessionID: "options-session-1",
+            skills: nil
         )
     }
 
@@ -1171,7 +1172,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         }
         return ProviderOptionsResult(
             configOptions: providerOptions,
-            optionsSessionID: input.optionsSessionID
+            optionsSessionID: input.optionsSessionID,
+            skills: nil
         )
     }
 
@@ -1303,8 +1305,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         InstanceInfo(
             auth: Auth(methods: nil, status: "authenticated"),
             capabilities: Capabilities(
+                additionalDirectories: nil,
                 auth: nil,
                 configOptions: true,
+                fork: nil,
                 loadReplay: nil,
                 logout: nil,
                 mcp: nil,
@@ -1313,7 +1317,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
                     ? PromptContentCapabilities(audio: nil, embeddedContext: nil, image: true)
                     : nil,
                 resume: nil,
-                sessionList: nil
+                sessionClose: nil,
+                sessionDelete: nil,
+                sessionList: nil,
+                skills: nil
             ),
             driver: "mock",
             initializedAt: .now,
