@@ -401,15 +401,15 @@ nonisolated struct ChatActivityGroup: Identifiable {
         items.contains { $0.itemStatus == .failed }
     }
 
-    /// A Codex-style phrase such as "Read 2 files, ran a command".
+    /// At most this many distinct tool names appear before "+N more".
+    static let maxToolNames = 3
+
+    /// A phrase built only from what providers stated, such as
+    /// "Read 2 files, ran a command, WebFetch, github · list_issues".
     var summary: String {
         var counts: [(verb: ChatActivityVerb, count: Int)] = []
-        var toolName: String?
         for item in items {
             let verb = ChatActivityVerb(item: item)
-            if verb == .tool, toolName == nil {
-                toolName = item.toolCallSummary?.name ?? item.title
-            }
             if let index = counts.firstIndex(where: { $0.verb == verb }) {
                 counts[index].count += 1
             } else {
@@ -417,70 +417,85 @@ nonisolated struct ChatActivityGroup: Identifiable {
             }
         }
 
-        let phrases = counts.map { verb, count in
-            verb.phrase(count: count, toolName: toolName)
+        var phrases: [String] = []
+        var toolNameCount = 0
+        for (verb, count) in counts {
+            if case .tool = verb {
+                toolNameCount += 1
+                guard toolNameCount <= Self.maxToolNames else { continue }
+            }
+            phrases.append(verb.phrase(count: count, leading: phrases.isEmpty))
         }
-        guard let first = phrases.first else { return "" }
-        return ([first.capitalizedFirst] + phrases.dropFirst())
-            .joined(separator: ", ")
+        if toolNameCount > Self.maxToolNames {
+            phrases.append("+\(toolNameCount - Self.maxToolNames) more")
+        }
+        return phrases.joined(separator: ", ")
     }
 }
 
-/// Provider-neutral verb bucket used to summarize grouped activity.
+/// What a provider stated about one activity item, used to summarize groups.
+/// Only stated facts count: the item kind, or a read/search action the
+/// provider declared. Any other tool is identified by its raw name.
 nonisolated enum ChatActivityVerb: Equatable {
     case thought
     case read
     case searched
     case edited
     case ranCommand
-    case fetched
-    case tool
+    /// A tool with no stated action, by its raw (namespaced) name.
+    case tool(String)
 
     init(item: Item) {
-        switch item.itemKind {
-        case .reasoning:
-            self = .thought
-            return
-        case .commandExecution:
-            self = .ranCommand
-            return
-        case .fileChange:
-            self = .edited
-            return
-        default:
-            break
-        }
-        switch item.toolCallSummary.flatMap({ MaidToolAction(rawValue: $0.action) }) {
-        case .read, .view: self = .read
-        case .search: self = .searched
-        case .edit, .delete, .move: self = .edited
-        case .execute: self = .ranCommand
-        case .think: self = .thought
-        case .fetch: self = .fetched
-        default: self = .tool
+        let summary = item.toolCallSummary
+        switch summary?.action.flatMap(MaidToolAction.init(rawValue:)) {
+        case .read:
+            self = .read
+        case .search:
+            self = .searched
+        case nil:
+            switch item.itemKind {
+            case .reasoning: self = .thought
+            case .commandExecution: self = .ranCommand
+            case .fileChange: self = .edited
+            default: self = .tool(Self.toolName(summary: summary, item: item))
+            }
         }
     }
 
-    func phrase(count: Int, toolName: String?) -> String {
+    /// The provider's own tool name, qualified by its namespace (an MCP
+    /// server, for example), falling back to the item title and kind.
+    private static func toolName(summary: ToolCallSummary?, item: Item) -> String {
+        if let name = summary?.name, !name.isEmpty {
+            if let namespace = summary?.namespace, !namespace.isEmpty {
+                return "\(namespace) · \(name)"
+            }
+            return name
+        }
+        if let title = item.title, !title.isEmpty {
+            return title
+        }
+        return item.kind
+    }
+
+    /// The phrase for `count` such items. `leading` capitalizes a verb that
+    /// starts a sentence; raw tool names are never reformatted.
+    func phrase(count: Int, leading: Bool = false) -> String {
+        let text: String
         switch self {
         case .thought:
-            return "thought"
+            text = "thought"
         case .read:
-            return count == 1 ? "read a file" : "read \(count) files"
+            text = count == 1 ? "read a file" : "read \(count) files"
         case .searched:
-            return count == 1 ? "searched" : "ran \(count) searches"
+            text = count == 1 ? "searched" : "ran \(count) searches"
         case .edited:
-            return count == 1 ? "edited a file" : "edited \(count) files"
+            text = count == 1 ? "edited a file" : "edited \(count) files"
         case .ranCommand:
-            return count == 1 ? "ran a command" : "ran \(count) commands"
-        case .fetched:
-            return count == 1 ? "fetched a page" : "fetched \(count) pages"
-        case .tool:
-            if count == 1, let toolName, !toolName.isEmpty {
-                return "used \(toolName)"
-            }
-            return count == 1 ? "used a tool" : "used \(count) tools"
+            text = count == 1 ? "ran a command" : "ran \(count) commands"
+        case .tool(let name):
+            return count == 1 ? name : "\(name) ×\(count)"
         }
+        return leading ? text.prefix(1).uppercased() + text.dropFirst() : text
     }
 }
 
@@ -488,12 +503,5 @@ extension ChatTimelineLayout.Block {
     fileprivate nonisolated var activityGroup: ChatActivityGroup? {
         if case .activityGroup(let group) = row { return group }
         return nil
-    }
-}
-
-extension String {
-    nonisolated var capitalizedFirst: String {
-        guard let first = first else { return self }
-        return first.uppercased() + dropFirst()
     }
 }

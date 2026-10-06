@@ -14,7 +14,7 @@ func TestNewToolState(t *testing.T) {
 		check             func(toolState) bool
 	}{
 		{"bash", "Bash", `{"command":"echo hi","description":"Print hi"}`, func(state toolState) bool {
-			return state.itemKind == provider.ItemKindCommandExecution && state.call.Command == "echo hi" && state.call.Action == provider.ToolActionExecute && state.title == "Print hi"
+			return state.itemKind == provider.ItemKindCommandExecution && state.call.Command == "echo hi" && state.title == "Print hi"
 		}},
 		{"edit", "Edit", `{"file_path":"/tmp/a.go","old_string":"x","new_string":"y"}`, func(state toolState) bool {
 			return state.itemKind == provider.ItemKindFileChange && len(state.call.Changes) == 1 &&
@@ -24,7 +24,7 @@ func TestNewToolState(t *testing.T) {
 			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == provider.FileChangeAdd && state.call.Changes[0].NewText == "data"
 		}},
 		{"mcp", "mcp__github__list_issues", ``, func(state toolState) bool {
-			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues" && state.call.Action == provider.ToolActionOther
+			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues"
 		}},
 		{"todo write is plan only", "TodoWrite", `{"todos":[]}`, func(state toolState) bool { return state.itemKind == "" }},
 	} {
@@ -38,23 +38,22 @@ func TestNewToolState(t *testing.T) {
 	}
 }
 
-// Only exact built-in names carry a semantic action; anything else (MCP,
-// unknown or newer tools) is summarized by name as other.
+// Only built-ins whose own identity is a file read or search state an action;
+// every other tool (MCP, unknown, or newer) leaves it empty.
 func TestNewToolStateActions(t *testing.T) {
 	for tool, want := range map[string]provider.ToolAction{
-		"Bash":                     provider.ToolActionExecute,
-		"PowerShell":               provider.ToolActionExecute,
-		"Edit":                     provider.ToolActionEdit,
 		"Read":                     provider.ToolActionRead,
-		"ReadMcpResourceTool":      provider.ToolActionRead,
 		"Grep":                     provider.ToolActionSearch,
-		"ToolSearch":               provider.ToolActionSearch,
-		"WebFetch":                 provider.ToolActionFetch,
-		"Agent":                    provider.ToolActionDelegate,
-		"ExitPlanMode":             provider.ToolActionSwitchMode,
-		"TaskList":                 provider.ToolActionOther,
-		"CronDelete":               provider.ToolActionOther,
-		"mcp__github__list_issues": provider.ToolActionOther,
+		"Glob":                     provider.ToolActionSearch,
+		"Bash":                     "",
+		"Edit":                     "",
+		"WebSearch":                "",
+		"WebFetch":                 "",
+		"ToolSearch":               "",
+		"ReadMcpResourceTool":      "",
+		"Agent":                    "",
+		"mcp__github__list_issues": "",
+		"FutureTool":               "",
 	} {
 		if got := newToolState(tool, nil).call.Action; got != want {
 			t.Errorf("newToolState(%q) action = %q, want %q", tool, got, want)

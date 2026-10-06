@@ -364,7 +364,6 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 			ItemStatus: status,
 			Title:      "Plan",
 			ToolCall: &provider.ToolCall{
-				Action:       provider.ToolActionThink,
 				Name:         "Plan",
 				ProviderKind: item.Type,
 				Output:       boundedAppOutput(item.Text),
@@ -402,7 +401,6 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 			ItemStatus: status,
 			Title:      item.Type,
 			ToolCall: &provider.ToolCall{
-				Action:       provider.ToolActionOther,
 				Name:         item.Type,
 				ProviderKind: item.Type,
 			},
@@ -442,69 +440,57 @@ func commandToolCall(item appItem) *provider.ToolCall {
 	return call
 }
 
+// commandAction reports the action Codex's own command parser stated: read
+// when every parsed action is read/listFiles, search when every one is
+// search, and none for mixed, unknown, or unparsed commands.
 func commandAction(actions []appCommandAction) provider.ToolAction {
-	if len(actions) == 0 {
-		return provider.ToolActionExecute
-	}
-	result := provider.ToolActionRead
+	var result provider.ToolAction
 	for _, action := range actions {
+		var stated provider.ToolAction
 		switch action.Type {
 		case "read", "listFiles":
+			stated = provider.ToolActionRead
 		case "search":
-			if result == provider.ToolActionRead {
-				result = provider.ToolActionSearch
-			}
+			stated = provider.ToolActionSearch
 		default:
-			return provider.ToolActionExecute
+			return ""
 		}
+		if result != "" && result != stated {
+			return ""
+		}
+		result = stated
 	}
 	return result
 }
 
 func fileChangeToolCall(item appItem) *provider.ToolCall {
-	call := &provider.ToolCall{Action: provider.ToolActionEdit, Name: "File change", ProviderKind: item.Type}
-	allDelete := len(item.Changes) > 0
-	allMove := len(item.Changes) > 0
+	call := &provider.ToolCall{Name: "File change", ProviderKind: item.Type}
 	for _, change := range item.Changes {
 		converted := provider.FileChange{Path: change.Path, Diff: change.Diff}
 		switch change.Kind.Type {
 		case "add":
 			converted.Kind = provider.FileChangeAdd
-			allDelete = false
-			allMove = false
 		case "delete":
 			converted.Kind = provider.FileChangeDelete
-			allMove = false
 		case "update":
 			converted.Kind = provider.FileChangeUpdate
-			allDelete = false
 			if change.Kind.MovePath != nil && strings.TrimSpace(*change.Kind.MovePath) != "" {
 				converted.Kind = provider.FileChangeMove
 				converted.MovePath = strings.TrimSpace(*change.Kind.MovePath)
-			} else {
-				allMove = false
 			}
 		default:
 			converted.Kind = provider.FileChangeUpdate
-			allDelete = false
-			allMove = false
 		}
 		call.Changes = append(call.Changes, converted)
 		if change.Path != "" {
 			call.Locations = append(call.Locations, provider.ToolLocation{Path: change.Path})
 		}
 	}
-	if allDelete {
-		call.Action = provider.ToolActionDelete
-	} else if allMove {
-		call.Action = provider.ToolActionMove
-	}
 	return call
 }
 
 func mcpToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               provider.ToolActionOther,
 		Name:                 item.Tool,
 		Namespace:            item.Server,
 		ProviderKind:         item.Type,
@@ -574,7 +560,6 @@ func mcpResultContent(result appMCPResult) (string, []provider.Attachment) {
 
 func dynamicToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:               provider.ToolActionOther,
 		Name:                 item.Tool,
 		Namespace:            stringValue(item.Namespace),
 		ProviderKind:         item.Type,
@@ -606,7 +591,6 @@ func dynamicToolCall(item appItem) *provider.ToolCall {
 
 func collabToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{
-		Action:       provider.ToolActionDelegate,
 		Name:         item.Tool,
 		Namespace:    "collaboration",
 		ProviderKind: item.Type,
@@ -622,7 +606,6 @@ func collabToolCall(item appItem) *provider.ToolCall {
 
 func subagentToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
-		Action:       provider.ToolActionDelegate,
 		Name:         item.Kind,
 		Namespace:    "collaboration",
 		ProviderKind: item.Type,
@@ -631,16 +614,14 @@ func subagentToolCall(item appItem) *provider.ToolCall {
 }
 
 func webSearchToolCall(item appItem) *provider.ToolCall {
-	call := &provider.ToolCall{Action: provider.ToolActionSearch, Name: "Web search", ProviderKind: item.Type, Query: item.Query}
+	call := &provider.ToolCall{Name: "Web search", ProviderKind: item.Type, Query: item.Query}
 	if item.Action == nil {
 		return call
 	}
 	switch item.Action.Type {
 	case "openPage":
-		call.Action = provider.ToolActionFetch
 		call.Query = stringValue(item.Action.URL)
 	case "findInPage":
-		call.Action = provider.ToolActionSearch
 		call.Query = stringValue(item.Action.Pattern)
 		if call.Query == "" {
 			call.Query = stringValue(item.Action.URL)
@@ -663,7 +644,7 @@ func webSearchTitle(item appItem) string {
 }
 
 func imageViewToolCall(item appItem) *provider.ToolCall {
-	call := &provider.ToolCall{Action: provider.ToolActionView, Name: "Image", ProviderKind: item.Type}
+	call := &provider.ToolCall{Name: "Image", ProviderKind: item.Type}
 	if strings.TrimSpace(item.Path) != "" {
 		call.Locations = []provider.ToolLocation{{Path: item.Path}}
 		call.Attachments = []provider.Attachment{{Kind: "image", URI: item.Path}}
@@ -672,7 +653,7 @@ func imageViewToolCall(item appItem) *provider.ToolCall {
 }
 
 func imageGenerationToolCall(item appItem) *provider.ToolCall {
-	call := &provider.ToolCall{Action: provider.ToolActionView, Name: "Image generation", ProviderKind: item.Type, Output: boundedAppOutput(stringValue(item.RevisedPrompt))}
+	call := &provider.ToolCall{Name: "Image generation", ProviderKind: item.Type, Output: boundedAppOutput(stringValue(item.RevisedPrompt))}
 	var generated string
 	if len(item.Result) > 0 {
 		_ = json.Unmarshal(item.Result, &generated)
@@ -694,7 +675,6 @@ func imageGenerationToolCall(item appItem) *provider.ToolCall {
 
 func reviewModeToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
-		Action:       provider.ToolActionSwitchMode,
 		Name:         item.Type,
 		ProviderKind: item.Type,
 		Output:       boundedAppOutput(item.Review),
@@ -703,7 +683,6 @@ func reviewModeToolCall(item appItem) *provider.ToolCall {
 
 func sleepToolCall(item appItem) *provider.ToolCall {
 	return &provider.ToolCall{
-		Action:               provider.ToolActionOther,
 		Name:                 "Sleep",
 		ProviderKind:         item.Type,
 		DurationMilliseconds: item.DurationMS,

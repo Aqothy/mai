@@ -665,7 +665,7 @@ func TestIngestionItemUpsertTracksToolCallLifecycle(t *testing.T) {
 	// Providers send the COMPLETE neutral tool-call state on every data-bearing
 	// event (the ACP adapter accumulates sparse updates itself); a status-only
 	// update keeps the previous snapshot.
-	startTool := &provider.ToolCall{Action: provider.ToolActionExecute, Command: "go test ./...", Locations: []provider.ToolLocation{{Path: "main.go"}}}
+	startTool := &provider.ToolCall{Command: "go test ./...", Locations: []provider.ToolLocation{{Path: "main.go"}}}
 	doneValue := *startTool
 	doneTool := &doneValue
 	doneTool.Output = "ok"

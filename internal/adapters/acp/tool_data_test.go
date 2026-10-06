@@ -122,7 +122,7 @@ func TestToolCallPatchOverlayAccumulatesSparseUpdates(t *testing.T) {
 		t.Fatalf("merged title = %#v, want fields from earlier updates preserved", merged.title)
 	}
 	call := merged.toolCall()
-	if call.Action != provider.ToolActionEdit || call.Command != "go test" {
+	if call.ProviderKind != "edit" || call.Command != "go test" {
 		t.Fatalf("tool call = %#v, want kind and rawInput from earlier updates preserved", call)
 	}
 	if len(call.Changes) != 0 || len(call.Locations) != 0 {
@@ -149,7 +149,7 @@ func TestToolCallPatchNormalizesDisplayFields(t *testing.T) {
 	if call == nil {
 		t.Fatal("tool call is nil")
 	}
-	if call.Action != provider.ToolActionExecute || call.ProviderKind != "execute" || call.Command != "go test ./..." || call.Cwd != "/repo" {
+	if call.ProviderKind != "execute" || call.Command != "go test ./..." || call.Cwd != "/repo" {
 		t.Fatalf("identity/input = %#v", call)
 	}
 	if len(call.Locations) != 1 || call.Locations[0].Path != "main.go" || call.Locations[0].Line == nil || *call.Locations[0].Line != 12 {
@@ -174,8 +174,31 @@ func TestToolCallPatchNormalizesQuery(t *testing.T) {
 		"rawInput":{"query":"needle"}
 	}`))
 	call := patch.toolCall()
-	if call == nil || call.Action != provider.ToolActionSearch || call.Query != "needle" {
+	if call == nil || call.Query != "needle" {
 		t.Fatalf("tool call = %#v", call)
+	}
+}
+
+// Only ACP's read and search tool kinds state an action; every other kind,
+// including ones this adapter does not know, leaves it empty.
+func TestToolCallPatchActionFromKind(t *testing.T) {
+	for kind, want := range map[string]provider.ToolAction{
+		"read":        provider.ToolActionRead,
+		"search":      provider.ToolActionSearch,
+		"edit":        "",
+		"delete":      "",
+		"move":        "",
+		"execute":     "",
+		"think":       "",
+		"fetch":       "",
+		"switch_mode": "",
+		"other":       "",
+		"future_kind": "",
+	} {
+		patch := toolCallPatchFromUpdate(decodeSessionUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"tool-1","kind":"`+kind+`"}`))
+		if got := patch.toolCall().Action; got != want {
+			t.Errorf("kind %q action = %q, want %q", kind, got, want)
+		}
 	}
 }
 

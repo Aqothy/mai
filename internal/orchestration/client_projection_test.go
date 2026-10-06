@@ -23,7 +23,7 @@ func TestClientProjectionCompactsToolItemWithoutMutatingCanonicalItem(t *testing
 	item := Item{
 		ID: "tool-1", Kind: provider.ItemKindCommandExecution, Status: provider.ItemStatusCompleted,
 		ToolCall: &provider.ToolCall{
-			Action:      provider.ToolActionExecute,
+			Action:      provider.ToolActionRead,
 			Command:     strings.Repeat("c", maxToolSummaryFieldRunes+1),
 			Output:      strings.Repeat("o", maxToolSummaryOutputRunes+1),
 			Locations:   locations,
@@ -39,6 +39,7 @@ func TestClientProjectionCompactsToolItemWithoutMutatingCanonicalItem(t *testing
 	}
 	summary := projected.ToolCallSummary
 	if summary == nil ||
+		summary.Action != provider.ToolActionRead ||
 		len([]rune(summary.CommandPreview)) != maxToolSummaryFieldRunes ||
 		len([]rune(summary.OutputPreview)) != maxToolSummaryOutputRunes ||
 		len(summary.Locations) != maxToolSummaryEntries ||
@@ -94,7 +95,7 @@ func TestThreadSnapshotOmitsFullToolDetailAndGetItemDetailReturnsIt(t *testing.T
 	for _, newText := range []string{"draft", "after"} {
 		result := mustAppend(t, engine, EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: occurredAt, Payload: EventPayload{Item: &Item{
 			ID: "tool-1", Kind: provider.ItemKindFileChange, Status: provider.ItemStatusCompleted,
-			ToolCall: &provider.ToolCall{Action: provider.ToolActionEdit, Changes: []provider.FileChange{{Path: "main.go", Kind: provider.FileChangeUpdate, OldText: "before", NewText: newText}}},
+			ToolCall: &provider.ToolCall{Changes: []provider.FileChange{{Path: "main.go", Kind: provider.FileChangeUpdate, OldText: "before", NewText: newText}}},
 		}}})
 		sequences = append(sequences, result.Sequence)
 	}
@@ -140,7 +141,6 @@ func TestProjectEventForClientCompactsToolUpdatesWithoutMutatingCanonicalEvent(t
 				Kind:   kind,
 				Status: provider.ItemStatusCompleted,
 				ToolCall: &provider.ToolCall{
-					Action: provider.ToolActionExecute,
 					Output: "complete output",
 				},
 			}},

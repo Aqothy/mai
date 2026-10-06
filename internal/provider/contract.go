@@ -541,24 +541,22 @@ const (
 	ItemKindContextCompaction ItemKind = "context_compaction"
 )
 
-// ToolAction is the provider-neutral semantic action performed by a tool.
-// Provider-native names and kinds are retained separately on ToolCall so
-// clients can render a stable action without branching on an adapter.
+// ToolAction is a semantic action a provider explicitly states for a tool
+// call. The empty value means the provider stated none, which is the normal
+// case: clients then identify the call by its raw Name.
+//
+// Adapters set it ONLY from what the provider itself states: its protocol's
+// tool kind (ACP "read"/"search"), its own parsed command actions (Codex
+// commandActions), or the identity of one of its own built-in tools (Claude
+// Code's Read, Grep, Glob). Never infer it from a tool or command name, and
+// leave it empty for MCP, dynamic, and unknown tools.
 type ToolAction string
 
 const (
-	ToolActionRead       ToolAction = "read"
-	ToolActionEdit       ToolAction = "edit"
-	ToolActionDelete     ToolAction = "delete"
-	ToolActionMove       ToolAction = "move"
-	ToolActionSearch     ToolAction = "search"
-	ToolActionExecute    ToolAction = "execute"
-	ToolActionThink      ToolAction = "think"
-	ToolActionFetch      ToolAction = "fetch"
-	ToolActionSwitchMode ToolAction = "switch_mode"
-	ToolActionDelegate   ToolAction = "delegate"
-	ToolActionView       ToolAction = "view"
-	ToolActionOther      ToolAction = "other"
+	// ToolActionRead reads files or lists their contents.
+	ToolActionRead ToolAction = "read"
+	// ToolActionSearch searches files or file contents.
+	ToolActionSearch ToolAction = "search"
 )
 
 type ToolLocation struct {
@@ -591,7 +589,8 @@ type FileChange struct {
 // snapshot as immutable. Provider-native input and output blobs stay private to
 // adapters and must be normalized into these client-facing fields.
 type ToolCall struct {
-	Action               ToolAction     `json:"action"`
+	// Action is empty unless the provider stated one; see ToolAction.
+	Action               ToolAction     `json:"action,omitempty"`
 	Name                 string         `json:"name,omitempty"`
 	Namespace            string         `json:"namespace,omitempty"`
 	ProviderKind         string         `json:"providerKind,omitempty"`

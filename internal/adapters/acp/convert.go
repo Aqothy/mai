@@ -555,12 +555,11 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 		return nil
 	}
 	providerKind := strings.ToLower(strings.TrimSpace(toolKindString(s.kind)))
-	action := toolActionFromACP(providerKind)
 	call := &provider.ToolCall{
-		Action:       action,
+		Action:       toolActionFromACP(providerKind),
 		ProviderKind: providerKind,
 		Locations:    toolLocationsFromACP(s.locations),
-		Changes:      toolChangesFromACP(s.content, action),
+		Changes:      toolChangesFromACP(s.content, providerKind),
 		Attachments:  toolAttachmentsFromACP(s.content),
 		Output:       toolTextFromACP(s.content),
 	}
@@ -621,28 +620,16 @@ func rawOutputText(raw any) string {
 	return ""
 }
 
+// toolActionFromACP keeps only the actions ACP's tool kind states; every
+// other kind leaves the action empty.
 func toolActionFromACP(kind string) provider.ToolAction {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
+	switch kind {
 	case "read":
 		return provider.ToolActionRead
-	case "edit", "patch", "file_change", "write", "create":
-		return provider.ToolActionEdit
-	case "delete":
-		return provider.ToolActionDelete
-	case "move":
-		return provider.ToolActionMove
 	case "search":
 		return provider.ToolActionSearch
-	case "execute", "terminal", "command", "shell":
-		return provider.ToolActionExecute
-	case "think":
-		return provider.ToolActionThink
-	case "fetch":
-		return provider.ToolActionFetch
-	case "switch_mode":
-		return provider.ToolActionSwitchMode
 	default:
-		return provider.ToolActionOther
+		return ""
 	}
 }
 
@@ -687,7 +674,7 @@ func toolTextFromACP(content []schema.ToolCallContent) string {
 	return strings.Join(parts, "\n")
 }
 
-func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAction) []provider.FileChange {
+func toolChangesFromACP(content []schema.ToolCallContent, kind string) []provider.FileChange {
 	if content == nil {
 		return nil
 	}
@@ -696,7 +683,7 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 		if entry.Type != schema.ToolCallContentTypeDiff {
 			continue
 		}
-		change := provider.FileChange{Kind: fileChangeKindFromAction(action)}
+		change := provider.FileChange{Kind: fileChangeKindFromACP(kind)}
 		if entry.Path != nil {
 			change.Path = *entry.Path
 		}
@@ -711,11 +698,11 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 	return changes
 }
 
-func fileChangeKindFromAction(action provider.ToolAction) provider.FileChangeKind {
-	switch action {
-	case provider.ToolActionDelete:
+func fileChangeKindFromACP(kind string) provider.FileChangeKind {
+	switch kind {
+	case "delete":
 		return provider.FileChangeDelete
-	case provider.ToolActionMove:
+	case "move":
 		return provider.FileChangeMove
 	default:
 		return provider.FileChangeUpdate

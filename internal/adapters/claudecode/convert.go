@@ -40,7 +40,7 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		_ = json.Unmarshal(rawInput, &input)
 	}
 	state := &toolState{itemKind: provider.ItemKindToolCall}
-	call := provider.ToolCall{Name: name, ProviderKind: name, Action: provider.ToolActionOther}
+	call := provider.ToolCall{Name: name, ProviderKind: name}
 	title := name
 
 	if server, tool, ok := splitMCPToolName(name); ok {
@@ -52,21 +52,15 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		return state
 	}
 
+	// Action is set only for built-ins whose own identity is a file read or
+	// search (Claude Code's isSearchOrReadCommand for Read, Grep, and Glob).
 	switch name {
-	case "PowerShell":
-		call.Action = provider.ToolActionExecute
-	case "ToolSearch":
-		call.Action = provider.ToolActionSearch
-	case "ReadMcpResourceTool":
-		call.Action = provider.ToolActionRead
 	case "Bash", "BashOutput", "KillShell":
 		state.itemKind = provider.ItemKindCommandExecution
-		call.Action = provider.ToolActionExecute
 		call.Command = input.Command
 		title = trimmedOrDefault(input.Description, "Ran command")
 	case "Edit":
 		state.itemKind = provider.ItemKindFileChange
-		call.Action = provider.ToolActionEdit
 		if input.FilePath != "" {
 			call.Changes = []provider.FileChange{{Path: input.FilePath, Kind: provider.FileChangeUpdate, OldText: input.OldString, NewText: input.NewString}}
 			call.Locations = []provider.ToolLocation{{Path: input.FilePath}}
@@ -74,7 +68,6 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		title = "Edited file"
 	case "Write":
 		state.itemKind = provider.ItemKindFileChange
-		call.Action = provider.ToolActionEdit
 		if input.FilePath != "" {
 			call.Changes = []provider.FileChange{{Path: input.FilePath, Kind: provider.FileChangeAdd, NewText: input.Content}}
 			call.Locations = []provider.ToolLocation{{Path: input.FilePath}}
@@ -82,7 +75,6 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		title = "Wrote file"
 	case "NotebookEdit":
 		state.itemKind = provider.ItemKindFileChange
-		call.Action = provider.ToolActionEdit
 		if input.NotebookPath != "" {
 			call.Changes = []provider.FileChange{{Path: input.NotebookPath, Kind: provider.FileChangeUpdate, NewText: input.NewSource}}
 			call.Locations = []provider.ToolLocation{{Path: input.NotebookPath}}
@@ -109,27 +101,20 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		}
 	case "WebSearch":
 		state.itemKind = provider.ItemKindWebSearch
-		call.Action = provider.ToolActionSearch
 		call.Query = input.Query
 		title = trimmedOrDefault(input.Query, "Searched the web")
 	case "WebFetch":
-		call.Action = provider.ToolActionFetch
 		call.Query = input.URL
 		title = trimmedOrDefault(input.URL, "Fetched URL")
 	case "Task", "Agent":
-		call.Action = provider.ToolActionDelegate
 		call.Query = input.SubagentType
 		title = trimmedOrDefault(input.Description, "Delegated to agent")
 	case "Skill":
-		call.Action = provider.ToolActionDelegate
 		call.Query = firstNonEmpty(input.Skill, input.Command)
 		title = trimmedOrDefault("Skill "+call.Query, "Ran skill")
 	case "ExitPlanMode":
-		call.Action = provider.ToolActionSwitchMode
 		call.Output = boundedOutput(input.Plan)
 		title = "Proposed plan"
-	case "EnterPlanMode", "EnterWorktree", "ExitWorktree":
-		call.Action = provider.ToolActionSwitchMode
 	case "TodoWrite":
 		state.itemKind = ""
 	}

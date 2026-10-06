@@ -2112,7 +2112,7 @@ public extension Item {
 
 // MARK: - ToolCall
 public struct ToolCall: Codable {
-    public var action: String
+    public var action: String?
     public var attachments: [Attachment]?
     public var changes: [FileChange]?
     public var command, cwd: String?
@@ -2123,7 +2123,7 @@ public struct ToolCall: Codable {
     public var name, namespace, output, providerKind: String?
     public var query: String?
 
-    public init(action: String, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?) {
+    public init(action: String?, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?) {
         self.action = action
         self.attachments = attachments
         self.changes = changes
@@ -2160,7 +2160,7 @@ public extension ToolCall {
     }
 
     func with(
-        action: String? = nil,
+        action: String?? = nil,
         attachments: [Attachment]?? = nil,
         changes: [FileChange]?? = nil,
         command: String?? = nil,
@@ -2313,7 +2313,7 @@ public extension ToolLocation {
 
 // MARK: - ToolCallSummary
 public struct ToolCallSummary: Codable {
-    public var action: String
+    public var action: String?
     public var attachmentCount: Int?
     public var attachments: [ToolAttachmentSummary]?
     public var changeCount: Int?
@@ -2327,7 +2327,7 @@ public struct ToolCallSummary: Codable {
     public var queryPreview: String?
     public var truncated: Bool?
 
-    public init(action: String, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
+    public init(action: String?, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
         self.action = action
         self.attachmentCount = attachmentCount
         self.attachments = attachments
@@ -2368,7 +2368,7 @@ public extension ToolCallSummary {
     }
 
     func with(
-        action: String? = nil,
+        action: String?? = nil,
         attachmentCount: Int?? = nil,
         attachments: [ToolAttachmentSummary]?? = nil,
         changeCount: Int?? = nil,

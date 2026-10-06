@@ -498,7 +498,7 @@ private func makeItem(
 
 private func makeToolCall(command: String) -> ToolCall {
     ToolCall(
-        action: MaidToolAction.execute.rawValue,
+        action: nil,
         attachments: nil,
         changes: nil,
         command: command,
@@ -517,7 +517,7 @@ private func makeToolCall(command: String) -> ToolCall {
 
 private func makeToolCallSummary(commandPreview: String) -> ToolCallSummary {
     ToolCallSummary(
-        action: MaidToolAction.execute.rawValue, attachmentCount: nil, attachments: nil, changeCount: nil,
+        action: nil, attachmentCount: nil, attachments: nil, changeCount: nil,
         changes: nil, commandPreview: commandPreview, cwd: nil, durationMilliseconds: nil, errorPreview: nil,
         exitCode: nil, locationCount: nil, locations: nil, name: nil, namespace: nil, outputPreview: nil,
         providerKind: nil, queryPreview: nil, truncated: nil

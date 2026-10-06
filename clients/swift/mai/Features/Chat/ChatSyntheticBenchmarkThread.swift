@@ -199,7 +199,7 @@
             at date: Date
         ) -> TimelineEntry {
             let summary = ToolCallSummary(
-                action: MaidToolAction.execute.rawValue,
+                action: nil,
                 attachmentCount: nil,
                 attachments: nil,
                 changeCount: nil,

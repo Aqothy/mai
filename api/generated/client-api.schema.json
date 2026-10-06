@@ -2092,9 +2092,6 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "action"
-      ],
       "title": "ToolCall"
     },
     "ToolCallSummary": {
@@ -2165,9 +2162,6 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "action"
-      ],
       "title": "ToolCallSummary"
     },
     "ToolLocation": {

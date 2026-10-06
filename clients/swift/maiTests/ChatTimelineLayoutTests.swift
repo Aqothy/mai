@@ -330,18 +330,54 @@ struct ChatTimelineLayoutTests {
     // MARK: Summaries
 
     @Test
-    func summarizesGroupedActivity() {
-        let cases: [(items: [Item], summary: String)] = [
-            ([makeItem(id: "i1", kind: .toolCall, action: .read),
-              makeItem(id: "i2", kind: .toolCall, action: .read),
-              makeItem(id: "i3", kind: .commandExecution)], "Read 2 files, ran a command"),
-            ([makeItem(id: "i1", kind: .fileChange),
-              makeItem(id: "i2", kind: .fileChange),
-              makeItem(id: "i3", kind: .toolCall, action: .search)], "Edited 2 files, searched"),
-            ([makeItem(id: "i1", kind: .mcpToolCall, action: .other, toolName: "list_issues")], "Used list_issues"),
+    func summarizesGroupedActivityFromStatedFacts() {
+        func command(_ id: String, _ action: MaidToolAction? = nil) -> Item {
+            makeItem(id: id, kind: .commandExecution, action: action)
+        }
+        func tool(
+            _ id: String, _ name: String?, kind: MaidItemKind = .toolCall,
+            action: MaidToolAction? = nil, namespace: String? = nil, title: String? = nil
+        ) -> Item {
+            makeItem(id: id, kind: kind, action: action, toolName: name, namespace: namespace, title: title)
+        }
+        let cases: [(name: String, items: [Item], summary: String)] = [
+            ("codex read and search commands",
+             [command("c1", .read), command("c2", .read), command("c3", .search),
+              command("c4", .search), command("c5")],
+             "Read 2 files, ran 2 searches, ran a command"),
+            ("acp read and search kinds fall back to titles",
+             [tool("a1", nil, action: .read, title: "Read main.go"),
+              tool("a2", nil, action: .search, title: "Find needle"),
+              tool("a3", nil, title: "Fetch https://example.com"),
+              makeItem(id: "a4", kind: .fileChange), makeItem(id: "a5", kind: .fileChange)],
+             "Read a file, searched, Fetch https://example.com, edited 2 files"),
+            ("claude built-ins",
+             [tool("b1", "Read", action: .read), tool("b2", "Grep", action: .search),
+              tool("b3", "Glob", action: .search), tool("b4", "WebFetch"), command("b5")],
+             "Read a file, ran 2 searches, WebFetch, ran a command"),
+            ("mcp tools keep raw names and counts",
+             [tool("m1", "search_issues", kind: .mcpToolCall, namespace: "github"),
+              tool("m2", "search_issues", kind: .mcpToolCall, namespace: "github"),
+              tool("m3", "Read")],
+             "github · search_issues ×2, Read"),
+            ("more than three tool names",
+             [makeItem(id: "r1", kind: .reasoning),
+              command("x1", .read), command("x2", .read), command("x3", .read), command("x4", .read),
+              command("x5", .search), command("x6", .search), command("x7"),
+              makeItem(id: "x8", kind: .fileChange), makeItem(id: "x9", kind: .fileChange),
+              makeItem(id: "x10", kind: .fileChange),
+              tool("t1", "WebFetch"), tool("t2", "list_issues", kind: .mcpToolCall, namespace: "github"),
+              tool("t3", "Agent"), tool("t4", "Skill"), tool("t5", "Skill")],
+             "Thought, read 4 files, ran 2 searches, ran a command, edited 3 files, "
+                + "WebFetch, github · list_issues, Agent, +1 more"),
+            ("unnamed tool falls back to its kind",
+             [makeItem(id: "u1", kind: .toolCall)], "tool_call"),
         ]
         for testCase in cases {
-            #expect(ChatActivityGroup(items: testCase.items).summary == testCase.summary)
+            #expect(
+                ChatActivityGroup(items: testCase.items).summary == testCase.summary,
+                "\(testCase.name)"
+            )
         }
         #expect(ChatTurnActivity.formatted(.seconds(3)) == "3s")
         #expect(ChatTurnActivity.formatted(.seconds(60)) == "1m")
@@ -470,6 +506,8 @@ private func makeItem(
     status: MaidItemStatus = .completed,
     action: MaidToolAction? = nil,
     toolName: String? = nil,
+    namespace: String? = nil,
+    title: String? = nil,
     turnID: String? = nil,
     createdAt: Date = Date(timeIntervalSince1970: 0),
     updatedAt: Date = Date(timeIntervalSince1970: 0)
@@ -483,11 +521,12 @@ private func makeItem(
         sequence: nil,
         status: status.rawValue,
         textDelta: nil,
-        title: nil,
+        title: title,
         toolCall: nil,
-        toolCallSummary: action.map { action in
-            ToolCallSummary(
-                action: action.rawValue,
+        toolCallSummary: action == nil && toolName == nil
+            ? nil
+            : ToolCallSummary(
+                action: action?.rawValue,
                 attachmentCount: nil,
                 attachments: nil,
                 changeCount: nil,
@@ -500,13 +539,12 @@ private func makeItem(
                 locationCount: nil,
                 locations: nil,
                 name: toolName,
-                namespace: nil,
+                namespace: namespace,
                 outputPreview: nil,
                 providerKind: nil,
                 queryPreview: nil,
                 truncated: nil
-            )
-        },
+            ),
         turnID: turnID,
         updatedAt: updatedAt
     )

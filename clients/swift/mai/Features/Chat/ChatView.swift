@@ -2409,15 +2409,13 @@ private struct ChatActivityGroupRow: View {
             if let query = summary?.queryPreview, !query.isEmpty {
                 return Text("Searched \(monospaced(query))")
             }
-        case .fetched, .tool:
+        case .tool:
             break
         }
         if let title = item.title, !title.isEmpty {
             return Text(title)
         }
-        return Text(
-            verb.phrase(count: 1, toolName: summary?.name).capitalizedFirst
-        )
+        return Text(verb.phrase(count: 1, leading: true))
     }
 
     private static func monospaced(_ value: String) -> Text {
@@ -2436,7 +2434,6 @@ private struct ChatActivityGroupRow: View {
         case .searched: "magnifyingglass"
         case .edited: "pencil"
         case .ranCommand: "terminal"
-        case .fetched: "globe"
         case .tool: "wrench.and.screwdriver"
         }
     }

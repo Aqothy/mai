@@ -351,7 +351,7 @@ func (h *Instance) emitFilePatch(raw json.RawMessage) {
 	if !ok {
 		return
 	}
-	tool := provider.ToolCall{Action: provider.ToolActionEdit, ProviderKind: "fileChange", Changes: providerFileChanges(notification.Changes)}
+	tool := provider.ToolCall{ProviderKind: "fileChange", Changes: providerFileChanges(notification.Changes)}
 	h.mu.Lock()
 	session := h.sessionsByLocal[local]
 	if session == nil {

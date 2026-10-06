@@ -169,12 +169,46 @@ func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
 		Path: "/repo/old.swift", Diff: "diff", Kind: appPatchChangeKind{Type: "update", MovePath: &movePath},
 	}}}
 	fileEvent, ok := runtimeEventFromItem("thread", "turn", fileItem, provider.RuntimeEventItemCompleted, time.Unix(2, 0))
-	if !ok || fileEvent.Payload.ToolCall == nil || fileEvent.Payload.ToolCall.Action != provider.ToolActionMove {
+	if !ok || fileEvent.Payload.ToolCall == nil {
 		t.Fatalf("file event = %#v, ok = %v", fileEvent, ok)
 	}
 	changes := fileEvent.Payload.ToolCall.Changes
 	if len(changes) != 1 || changes[0].Kind != provider.FileChangeMove || changes[0].MovePath != movePath {
 		t.Fatalf("file changes = %#v", changes)
+	}
+}
+
+// Only Codex's own parsed commandActions state an action: all read/listFiles
+// is read, all search is search, and anything mixed, unknown, or unparsed,
+// like every non-command item, leaves it empty.
+func TestRuntimeEventFromItemStatedActions(t *testing.T) {
+	commands := func(types ...string) appItem {
+		item := appItem{Type: "commandExecution", ID: "cmd", Command: "cmd"}
+		for _, actionType := range types {
+			item.CommandActions = append(item.CommandActions, appCommandAction{Type: actionType})
+		}
+		return item
+	}
+	for _, tc := range []struct {
+		name string
+		item appItem
+		want provider.ToolAction
+	}{
+		{"read", commands("read"), provider.ToolActionRead},
+		{"read and list", commands("read", "listFiles"), provider.ToolActionRead},
+		{"search", commands("search", "search"), provider.ToolActionSearch},
+		{"read and search", commands("read", "search"), ""},
+		{"unknown", commands("unknown"), ""},
+		{"read and unknown", commands("read", "unknown"), ""},
+		{"unparsed", commands(), ""},
+		{"mcp", appItem{Type: "mcpToolCall", ID: "mcp", Server: "github", Tool: "search_issues"}, ""},
+		{"web search", appItem{Type: "webSearch", ID: "web", Query: "needle"}, ""},
+		{"file change", appItem{Type: "fileChange", ID: "patch"}, ""},
+	} {
+		event, ok := runtimeEventFromItem("thread", "turn", tc.item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
+		if !ok || event.Payload.ToolCall == nil || event.Payload.ToolCall.Action != tc.want {
+			t.Errorf("%s: tool call = %#v, want action %q", tc.name, event.Payload.ToolCall, tc.want)
+		}
 	}
 }
 
@@ -188,8 +222,7 @@ func TestRuntimeEventFromItemNormalizesMCPResult(t *testing.T) {
 		t.Fatalf("MCP event = %#v, ok = %v", event, ok)
 	}
 	call := event.Payload.ToolCall
-	// MCP tools state no semantics, so clients summarize them by name.
-	if call.Action != provider.ToolActionOther || call.Namespace != "docs" || call.Name != "lookup" || call.Output != "done" {
+	if call.Namespace != "docs" || call.Name != "lookup" || call.Output != "done" {
 		t.Fatalf("MCP call = %#v", call)
 	}
 	if len(call.Attachments) != 2 || call.Attachments[0].Kind != "image" || call.Attachments[0].Data != "aW1n" {

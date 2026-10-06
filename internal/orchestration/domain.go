@@ -170,7 +170,7 @@ type Item struct {
 // thread snapshots and live item events. Complete tool data remains in the
 // server projection and is available through orchestration.getItemDetail.
 type ToolCallSummary struct {
-	Action               provider.ToolAction     `json:"action"`
+	Action               provider.ToolAction     `json:"action,omitempty"`
 	Name                 string                  `json:"name,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty"`
 	ProviderKind         string                  `json:"providerKind,omitempty"`

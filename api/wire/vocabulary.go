@@ -176,20 +176,10 @@ var Vocabularies = []VocabularyDefinition{
 	},
 	{
 		Name:        "ToolAction",
-		Description: "Provider-neutral semantic action performed by a tool call.",
+		Description: "Action a provider explicitly stated for a tool call; absent when it stated none.",
 		Values: []string{
 			string(provider.ToolActionRead),
-			string(provider.ToolActionEdit),
-			string(provider.ToolActionDelete),
-			string(provider.ToolActionMove),
 			string(provider.ToolActionSearch),
-			string(provider.ToolActionExecute),
-			string(provider.ToolActionThink),
-			string(provider.ToolActionFetch),
-			string(provider.ToolActionSwitchMode),
-			string(provider.ToolActionDelegate),
-			string(provider.ToolActionView),
-			string(provider.ToolActionOther),
 		},
 	},
 	{
