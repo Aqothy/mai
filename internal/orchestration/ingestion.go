@@ -615,8 +615,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 	i.settleTurn(event, reasoningStatusFromTurnState(event.Payload.TurnState), createdAt)
 	if event.Payload.TurnState == provider.RuntimeTurnFailed {
 		failureMessage := firstNonEmpty(event.Payload.Message, event.Payload.Detail, event.Payload.StopReason, "Turn failed")
-		item := &Item{ID: firstNonEmpty(string(event.EventID), newID("error")), Kind: provider.ItemKindError, Title: failureMessage, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": failureMessage}), TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}
-		i.recordItem(event, item, createdAt)
+		i.recordItem(event, errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), failureMessage), createdAt)
 	}
 	update := sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: TurnID(event.TurnID), TurnState: event.Payload.TurnState, StopReason: event.Payload.StopReason, Error: firstNonEmpty(event.Payload.Message, event.Payload.Detail)}
 	if i.recordSessionUpdate(event.ThreadID, update, createdAt) {
@@ -633,7 +632,7 @@ func (i *ProviderRuntimeIngestion) ingestRuntimeWarning(event provider.RuntimeEv
 
 func (i *ProviderRuntimeIngestion) ingestRuntimeError(event provider.RuntimeEvent, createdAt time.Time) {
 	message := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Runtime error")
-	item := &Item{ID: firstNonEmpty(string(event.EventID), newID("error")), Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: TurnID(event.TurnID)}
+	item := errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), message)
 	// A turn-less error settles the streams of the thread's active turn. This
 	// read only steers local buffer cleanup — the authoritative staleness
 	// decision for the session status happens in the engine below.
@@ -958,6 +957,11 @@ func (i *ProviderRuntimeIngestion) recordSessionUpdate(threadID string, update s
 		return false
 	}
 	return result.Sequence != 0
+}
+
+// errorItem is the failed timeline item that tells clients why work failed.
+func errorItem(id string, turnID TurnID, message string) *Item {
+	return &Item{ID: id, Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: turnID}
 }
 
 func reasoningStatusFromTurnState(state provider.RuntimeTurnState) provider.ItemStatus {

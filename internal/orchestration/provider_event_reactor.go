@@ -283,6 +283,13 @@ func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotat
 		return text
 	}
 	var prompt strings.Builder
+	quote := func(text string) {
+		for _, line := range strings.Split(text, "\n") {
+			prompt.WriteString("> ")
+			prompt.WriteString(line)
+			prompt.WriteByte('\n')
+		}
+	}
 	prompt.WriteString("The user selected these passages from earlier in the chat as context:\n")
 	for index, annotation := range annotations {
 		if strings.TrimSpace(annotation.Quote) == "" {
@@ -293,18 +300,10 @@ func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotat
 			fmt.Fprintf(&prompt, " (%s)", annotation.Role)
 		}
 		prompt.WriteString(":\n")
-		for _, line := range strings.Split(annotation.Quote, "\n") {
-			prompt.WriteString("> ")
-			prompt.WriteString(line)
-			prompt.WriteByte('\n')
-		}
+		quote(annotation.Quote)
 		if note := strings.TrimSpace(annotation.Note); note != "" {
 			prompt.WriteString("Comment:\n")
-			for _, line := range strings.Split(note, "\n") {
-				prompt.WriteString("> ")
-				prompt.WriteString(line)
-				prompt.WriteByte('\n')
-			}
+			quote(note)
 		}
 	}
 	if strings.TrimSpace(text) != "" {
@@ -471,9 +470,7 @@ func (r *ProviderEventReactor) failThread(threadID ThreadID, turnID TurnID, mess
 }
 
 func (r *ProviderEventReactor) appendErrorItem(threadID ThreadID, turnID TurnID, message string) {
-	now := time.Now()
-	item := &Item{ID: newID("error"), Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: turnID, CreatedAt: now, UpdatedAt: now}
-	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: now, Payload: EventPayload{Item: item}})
+	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: errorItem(newID("error"), turnID, message)}})
 }
 
 func (r *ProviderEventReactor) record(input EventInput) {
