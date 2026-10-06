@@ -704,14 +704,12 @@ func TestEnginePreMutationPanicIsRecoverableWithoutFatal(t *testing.T) {
 // TestSessionStatusEventPayloadIsTheCompleteClientState is the client
 // conformance test for the thread.session-status-set contract: the event's
 // session payload IS the complete new session state, and clients must REPLACE
-// their cached binding with it — no field merging. It pins
-// that (a) the engine-derived payload byte-equals the server projection after
-// every status event, (b) metadata set between status events (slash commands,
-// config options, token usage) is carried forward in the next payload, so
-// replacement loses nothing, and
-// (c) a provider switch emits a payload WITHOUT the old provider's metadata,
-// so replacement clears it — the case where the old merge rule left clients
-// permanently out of sync with fresh snapshots.
+// their cached binding with it — no field merging. It pins that (a) the
+// engine-derived payload byte-equals the server projection after every status
+// event, (b) metadata set between status events (slash commands, config
+// options, token usage) is carried forward in the next payload, so replacement
+// loses nothing, and (c) a provider switch emits a payload WITHOUT the previous
+// provider's metadata, so replacement clears it.
 func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -791,8 +789,7 @@ func TestSessionStatusEventPayloadIsTheCompleteClientState(t *testing.T) {
 	}
 
 	// 4. Switching providers emits a fresh binding WITHOUT provider A's
-	// metadata; replacement clears it. (The old documented merge rule kept
-	// the stale slash commands here — the client-divergence bug.)
+	// metadata; replacement clears it.
 	appendUpdate("bind prov-b", sessionUpdate{Kind: sessionUpdateBound, Binding: &SessionBinding{ProviderInstanceID: "prov-b", ProviderName: "Provider B", Driver: "acp"}})
 	switched := snapshotMustEqualLastPayload("after provider switch")
 	if strings.Contains(string(switched), `"compact"`) || strings.Contains(string(switched), "Provider A") {

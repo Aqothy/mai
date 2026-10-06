@@ -571,12 +571,9 @@ func TestIngestionSeparatesAssistantMessagesByProviderMessageID(t *testing.T) {
 	}
 }
 
-// Regression: a session stop landing before a turn's completion settles must
-// not be resurrected Stopped->Ready by that completion. The old ingestion path
-// computed its guards from one SessionView and built the status binding from
-// a SECOND read, so a stop landing between the reads revived the session; the
-// engine now derives the binding and applies the stopped-preservation guard
-// atomically under its write lock (the settle update is dropped: no event).
+// A session stop that lands before a turn's completion must not be resurrected
+// Stopped->Ready by that completion: the engine drops the late settle (no
+// event) because it derives the binding under its write lock.
 func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
