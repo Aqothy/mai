@@ -94,6 +94,7 @@ final class ChatTimelineProjectionTests: XCTestCase {
                 var entry = timeline[index]
                 if entry.approval == nil {
                     entry.approval = Approval(
+                        answers: nil,
                         args: nil,
                         createdAt: Date(timeIntervalSince1970: 0),
                         decision: nil,
@@ -102,7 +103,8 @@ final class ChatTimelineProjectionTests: XCTestCase {
                         requestID: "approval-\(event)",
                         status: MaidApprovalStatus.pending.rawValue,
                         turnID: nil,
-                        updatedAt: Date(timeIntervalSince1970: 0)
+                        updatedAt: Date(timeIntervalSince1970: 0),
+                        userInput: nil
                     )
                 } else {
                     entry.approval?.decision = "allow"

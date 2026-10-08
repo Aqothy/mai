@@ -42,7 +42,7 @@ struct ChatPendingAttachment: Identifiable {
         }
         attachment = Attachment(
             data: loaded.data,
-            kind: "image",
+            kind: MaidAttachmentKind.image.rawValue,
             mimeType: loaded.mimeType,
             name: loaded.name,
             uri: nil

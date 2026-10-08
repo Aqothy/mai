@@ -41,6 +41,7 @@ extension Command {
     ) {
         self.init(
             additionalDirectories: nil,
+            answers: nil,
             commandID: commandID,
             configSelections: configSelections,
             createdAt: createdAt,
@@ -97,6 +98,7 @@ extension EventPayload {
         self.init(
             additionalDirectories: nil,
             annotations: nil,
+            answers: nil,
             approval: approval,
             attachments: attachments,
             configOptions: configOptions,

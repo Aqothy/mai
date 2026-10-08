@@ -92,6 +92,9 @@ final class PromptCompletionModel {
     private(set) var phase = Phase.idle
     private(set) var retryCount = 0
     private(set) var cursorRequest: PromptCompletionCursorRequest?
+    /// Workspace files picked from completions, by path relative to the
+    /// search scope's directory.
+    private(set) var mentionedFilePaths: Set<String> = []
 
     private let store: ThreadStore
     private var context: PromptCompletionInsertionContext?
@@ -197,6 +200,9 @@ final class PromptCompletionModel {
             )
         else { return nil }
 
+        if match.kind == .workspaceFile {
+            mentionedFilePaths.insert(match.insertionValue)
+        }
         requestCursor(for: edit)
         latestText = edit.text
         latestCursorOffset = edit.cursorOffset
@@ -205,6 +211,29 @@ final class PromptCompletionModel {
         suppressedInput = .completed(text: edit.text)
         clearPresentation()
         return edit
+    }
+
+    /// Resource links for the picked files that `text` still mentions as an
+    /// `@path` token, resolved against `directory`. Each provider decides how
+    /// to pass them on; most already read the `@path` in the text.
+    func fileMentionLinks(in text: String, directory: String) -> [Attachment] {
+        let mentioned = Set(
+            text.split(whereSeparator: \.isWhitespace)
+                .filter { $0.hasPrefix("@") }
+                .map { String($0.dropFirst()) }
+        )
+        return mentionedFilePaths.intersection(mentioned).sorted().map { path in
+            let url = URL(filePath: directory).appending(path: path)
+            return Attachment(
+                meta: nil, annotations: nil, data: nil, description: nil,
+                kind: MaidAttachmentKind.resourceLink.rawValue, mimeType: nil, name: url.lastPathComponent,
+                resourceMeta: nil, size: nil, title: nil, uri: url.absoluteString
+            )
+        }
+    }
+
+    func clearMentionedFiles() {
+        mentionedFilePaths.removeAll()
     }
 
     func editBySelectingCurrentMatch(in text: String) -> PromptCompletionEdit? {

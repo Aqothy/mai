@@ -148,6 +148,7 @@ struct ProviderAccountDetailView: View {
                 openURL(challengeURL)
             }
         }
+        .modifier(ProviderSignInTerminalPresenter(model: model))
         .alert("Provider Account Error", isPresented: $model.isErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {

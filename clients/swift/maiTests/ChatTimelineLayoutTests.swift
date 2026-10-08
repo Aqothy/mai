@@ -484,6 +484,7 @@ private func approvalEntry(
 ) -> TimelineEntry {
     TimelineEntry(
         approval: Approval(
+            answers: nil,
             args: nil,
             createdAt: Date(timeIntervalSince1970: 0),
             decision: nil,
@@ -492,7 +493,8 @@ private func approvalEntry(
             requestID: requestID,
             status: status.rawValue,
             turnID: turnID,
-            updatedAt: Date(timeIntervalSince1970: 0)
+            updatedAt: Date(timeIntervalSince1970: 0),
+            userInput: nil
         ),
         item: nil,
         kind: MaidTimelineEntryKind.approval.rawValue,
@@ -540,6 +542,7 @@ private func makeItem(
                 locations: nil,
                 name: toolName,
                 namespace: namespace,
+                outputFormat: nil,
                 outputPreview: nil,
                 providerKind: nil,
                 queryPreview: nil,

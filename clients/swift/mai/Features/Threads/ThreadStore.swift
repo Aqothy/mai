@@ -512,6 +512,35 @@ final class ThreadStore {
         return turn.turnID
     }
 
+    /// The provider to sign in to when the thread's latest turn failed and that
+    /// provider now reports being signed out.
+    func failedTurnSignInProviderID(for threadID: String) -> String? {
+        guard failedTurnID(for: threadID) != nil,
+            let thread = sessionsByID[threadID]?.thread,
+            let providerID = providerID(for: thread),
+            providerInfo(for: providerID)?.auth.status == MaidAuthStatus.unauthenticated.rawValue
+        else { return nil }
+        return providerID
+    }
+
+    /// Re-reads provider state after a turn failed, since the failure may be
+    /// the provider refusing an unauthenticated request.
+    func refreshProvidersAfterFailedTurn(_ threadID: String) async {
+        guard failedTurnID(for: threadID) != nil, connectionState == .connected,
+            let refreshed = try? await rpc.listProviders()
+        else { return }
+        providers = refreshed
+        rebuildProviderCaches()
+    }
+
+    /// Why the thread's latest turn ended early, when it completed early.
+    func completedTurnStopReason(for threadID: String) -> MaidStopReason? {
+        guard let turn = sessionsByID[threadID]?.thread?.latestTurn,
+            turn.turnState == .completed
+        else { return nil }
+        return turn.stopReason.flatMap(MaidStopReason.init(rawValue:))
+    }
+
     func failedTurnError(for threadID: String) -> String? {
         guard failedTurnID(for: threadID) != nil else { return nil }
         return sessionsByID[threadID]?.thread?.latestTurn?.error
@@ -670,7 +699,8 @@ final class ThreadStore {
         threadID: String,
         requestID: String,
         decision: MaidApprovalDecision,
-        optionID: String?
+        optionID: String?,
+        answers: [String: [String]]? = nil
     ) async throws {
         var response = command(
             type: MaidCommandType.threadApprovalRespond.rawValue,
@@ -679,6 +709,7 @@ final class ThreadStore {
         )
         response.decision = decision.rawValue
         response.requestID = requestID
+        response.answers = answers
         _ = try await rpc.dispatchCommand(response)
     }
 
@@ -849,6 +880,13 @@ final class ThreadStore {
         }
 
         scheduleMaintenance()
+    }
+
+    /// The directory a thread's workspace file search, and so its file
+    /// mentions, are relative to.
+    func workingDirectory(forThread threadID: String) -> String? {
+        guard let thread = sessionsByID[threadID]?.thread else { return nil }
+        return thread.cwd ?? thread.session?.cwd
     }
 
     private func isACPProvider(_ provider: InstanceInfo) -> Bool {

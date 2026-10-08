@@ -278,6 +278,19 @@ private struct ChatTokenUsageView: View {
             }
         }
         .accessibilityLabel("Context usage")
+
+        if let cost = usage.cost, let currency = usage.currency {
+            LabeledContent {
+                Text(cost, format: .currency(code: currency))
+            } label: {
+                Label {
+                    Text("Session cost")
+                } icon: {
+                    Image(systemName: "dollarsign.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private var percentage: Double? {

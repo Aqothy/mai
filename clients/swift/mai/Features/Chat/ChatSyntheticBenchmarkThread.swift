@@ -213,6 +213,7 @@
                 locations: nil,
                 name: nil,
                 namespace: nil,
+                outputFormat: nil,
                 outputPreview: "Build complete! (\(step + 1).\(turn % 10)s)",
                 providerKind: nil,
                 queryPreview: nil,

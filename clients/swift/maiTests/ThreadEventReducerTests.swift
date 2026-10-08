@@ -510,6 +510,7 @@ private func makeToolCall(command: String) -> ToolCall {
         name: nil,
         namespace: nil,
         output: nil,
+        outputFormat: nil,
         providerKind: nil,
         query: nil
     )
@@ -519,7 +520,7 @@ private func makeToolCallSummary(commandPreview: String) -> ToolCallSummary {
     ToolCallSummary(
         action: nil, attachmentCount: nil, attachments: nil, changeCount: nil,
         changes: nil, commandPreview: commandPreview, cwd: nil, durationMilliseconds: nil, errorPreview: nil,
-        exitCode: nil, locationCount: nil, locations: nil, name: nil, namespace: nil, outputPreview: nil,
+        exitCode: nil, locationCount: nil, locations: nil, name: nil, namespace: nil, outputFormat: nil, outputPreview: nil,
         providerKind: nil, queryPreview: nil, truncated: nil
     )
 }
@@ -531,6 +532,7 @@ private func makeApprovalEvent(
     optionID: String? = nil
 ) -> ApprovalEvent {
     ApprovalEvent(
+        answers: nil,
         args: nil,
         cancelled: nil,
         decision: decision?.rawValue,
@@ -539,7 +541,8 @@ private func makeApprovalEvent(
         options: nil,
         requestID: requestID,
         requestType: nil,
-        turnID: turnID
+        turnID: turnID,
+        userInput: nil
     )
 }
 

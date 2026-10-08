@@ -113,6 +113,42 @@ public enum MaidRequestType: String, Codable, Sendable, CaseIterable {
     case dynamicToolCall = "dynamic_tool_call"
 }
 
+/// How a sign-in method or challenge proceeds.
+public enum MaidAuthKind: String, Codable, Sendable, CaseIterable {
+    case browser = "browser"
+    case deviceCode = "device-code"
+    case secret = "secret"
+    case terminal = "terminal"
+}
+
+/// What a message or tool attachment carries.
+public enum MaidAttachmentKind: String, Codable, Sendable, CaseIterable {
+    case image = "image"
+    case audio = "audio"
+    case resource = "resource"
+    case resourceLink = "resource_link"
+}
+
+/// Why a completed turn ended early; absent when it finished normally.
+public enum MaidStopReason: String, Codable, Sendable, CaseIterable {
+    case maxTokens = "max_tokens"
+    case maxTurnRequests = "max_turn_requests"
+    case refusal = "refusal"
+}
+
+/// How to render tool output; absent means plain text.
+public enum MaidOutputFormat: String, Codable, Sendable, CaseIterable {
+    case markdown = "markdown"
+}
+
+/// Input a user-input question takes.
+public enum MaidQuestionKind: String, Codable, Sendable, CaseIterable {
+    case text = "text"
+    case number = "number"
+    case integer = "integer"
+    case choice = "choice"
+}
+
 /// Kind of a non-message timeline item.
 public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case userMessage = "user_message"

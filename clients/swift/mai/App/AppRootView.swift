@@ -7,20 +7,24 @@ struct AppRootView: View {
     let terminalStore: TerminalStore
 
     var body: some View {
-        #if os(macOS)
-            DesktopAppContainer(
-                store: store,
-                draftStore: draftStore,
-                projectFolders: projectFolders,
-                terminalStore: terminalStore
-            )
-        #else
-            IOSAppContainer(
-                store: store,
-                draftStore: draftStore,
-                projectFolders: projectFolders,
-                terminalStore: terminalStore
-            )
-        #endif
+        Group {
+            #if os(macOS)
+                DesktopAppContainer(
+                    store: store,
+                    draftStore: draftStore,
+                    projectFolders: projectFolders,
+                    terminalStore: terminalStore
+                )
+            #else
+                IOSAppContainer(
+                    store: store,
+                    draftStore: draftStore,
+                    projectFolders: projectFolders,
+                    terminalStore: terminalStore
+                )
+            #endif
+        }
+        // Lets deep screens (provider sign-in) open a terminal.
+        .environment(terminalStore)
     }
 }

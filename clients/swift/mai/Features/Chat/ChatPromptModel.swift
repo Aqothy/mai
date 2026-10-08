@@ -86,6 +86,24 @@ final class ChatPromptModel {
         store.failedTurnError(for: threadID)
     }
 
+    /// Why the latest turn ended early, if it did.
+    var stopReason: MaidStopReason? {
+        store.completedTurnStopReason(for: threadID)
+    }
+
+    var failedTurnID: String? {
+        store.failedTurnID(for: threadID)
+    }
+
+    /// Set when the failed turn's provider needs the user to sign in.
+    var signInProviderID: String? {
+        store.failedTurnSignInProviderID(for: threadID)
+    }
+
+    func refreshProviderAfterFailedTurn() async {
+        await store.refreshProvidersAfterFailedTurn(threadID)
+    }
+
     var canForkThread: Bool {
         store.connectionState == .connected
             && store.threadSupportsFork(threadID)
@@ -130,13 +148,18 @@ final class ChatPromptModel {
         isSending = true
         defer { isSending = false }
 
+        let fileLinks = store.workingDirectory(forThread: threadID).map {
+            promptCompletion.fileMentionLinks(in: submittedText, directory: $0)
+        } ?? []
+
         do {
             try await store.submitTurn(
                 threadID: threadID,
                 text: submittedText,
-                attachments: submittedAttachments.compactMap(\.attachment),
+                attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
                 annotations: submittedAnnotations.map(\.promptAnnotation)
             )
+            promptCompletion.clearMentionedFiles()
             if text == submittedDraft,
                draftStore.text(for: threadID) == submittedDraft {
                 text = ""

@@ -390,6 +390,8 @@ private struct ChatComposerStack: View {
         VStack(alignment: .leading) {
             if let chatModel, chatModel.showsFailedTurnRetry {
                 ChatFailedTurnRetryView(model: chatModel)
+            } else if let reason = chatModel?.stopReason {
+                ChatTurnStopNoticeView(reason: reason)
             }
 
             if chatModel == nil {
@@ -510,6 +512,8 @@ private struct ChatComposerStack: View {
 private struct ChatFailedTurnRetryView: View {
     let model: ChatPromptModel
 
+    @State private var isSignInPresented = false
+
     var body: some View {
         HStack {
             Label(
@@ -521,6 +525,12 @@ private struct ChatFailedTurnRetryView: View {
             .lineLimit(2)
 
             Spacer()
+
+            if model.signInProviderID != nil {
+                Button("Sign In", systemImage: "person.crop.circle.badge.exclamationmark") {
+                    isSignInPresented = true
+                }
+            }
 
             Button(
                 model.isRetryingFailedTurn ? "Retrying…" : "Retry",
@@ -535,6 +545,33 @@ private struct ChatFailedTurnRetryView: View {
         .padding(.horizontal)
         .padding(.bottom)
         .accessibilityElement(children: .contain)
+        .task(id: model.failedTurnID) { await model.refreshProviderAfterFailedTurn() }
+        .sheet(isPresented: $isSignInPresented) {
+            if let providerID = model.signInProviderID {
+                ChatProviderSignInSheet(providerID: providerID, store: model.store)
+            }
+        }
+    }
+}
+
+private struct ChatProviderSignInSheet: View {
+    let providerID: String
+    let store: ThreadStore
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ProviderAccountDetailView(providerID: providerID, store: store)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        #if os(macOS)
+            .frame(minWidth: 500, minHeight: 440)
+        #endif
     }
 }
 
@@ -2119,8 +2156,14 @@ private struct ChatTimelineRow: View {
             case .notice(let item):
                 ChatNoticeRow(item: item)
             case .approval(let approval):
-                ChatApprovalRow(approval: approval, threadID: threadID, store: store)
-                    .padding(.vertical, 10)
+                Group {
+                    if let request = approval.userInput {
+                        ChatQuestionRow(approval: approval, request: request, threadID: threadID, store: store)
+                    } else {
+                        ChatApprovalRow(approval: approval, threadID: threadID, store: store)
+                    }
+                }
+                .padding(.vertical, 10)
             }
         }
     }
@@ -2553,11 +2596,15 @@ private struct ChatActivityItemRow: View {
                 // Summary previews render instantly; fetched detail replaces
                 // them in place without hiding already available output.
                 ChatStepOutputBox(
+                    itemID: item.id,
                     command: toolCall?.command ?? summary?.commandPreview,
                     query: toolCall?.query ?? summary?.queryPreview,
                     output: toolCall?.output ?? summary?.outputPreview,
+                    outputIsMarkdown: (toolCall?.outputFormat ?? summary?.outputFormat)
+                        == MaidOutputFormat.markdown.rawValue,
                     error: toolCall?.error ?? summary?.errorPreview,
-                    metadata: metadata
+                    metadata: metadata,
+                    textLayoutStore: store.selectedThreadTextLayoutStore
                 )
             }
 
@@ -2706,11 +2753,15 @@ private struct ChatActivityItemRow: View {
 private struct ChatStepOutputBox: View {
     private static let maximumCharacters = 4_000
 
+    let itemID: String
     let command: String?
     let query: String?
     let output: String?
+    /// Agent text (ACP tool content) is Markdown; command output is not.
+    let outputIsMarkdown: Bool
     let error: String?
     let metadata: String?
+    let textLayoutStore: ChatTextLayoutStore?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -2723,7 +2774,16 @@ private struct ChatStepOutputBox: View {
                     .textSelection(.enabled)
             }
             if let output, !output.isEmpty {
-                monospacedText(output, style: .secondary)
+                if outputIsMarkdown, let textLayoutStore {
+                    ChatMarkdownMessageView(
+                        messageID: "\(itemID):output",
+                        source: output,
+                        presentation: ChatMarkdownPresentation(isStreaming: false),
+                        textLayoutStore: textLayoutStore
+                    )
+                } else {
+                    monospacedText(output, style: .secondary)
+                }
             }
             if let error, !error.isEmpty {
                 monospacedText(error, style: .red)

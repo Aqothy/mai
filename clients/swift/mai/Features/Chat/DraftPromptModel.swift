@@ -383,6 +383,8 @@ final class DraftPromptModel {
             return
         }
 
+        let fileLinks = promptCompletion.fileMentionLinks(in: text, directory: requestedCwd)
+
         do {
             try await store.startThread(
                 threadID: threadID,
@@ -391,7 +393,7 @@ final class DraftPromptModel {
                 additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
                     annotations: nil,
-                    attachments: submittedAttachments.compactMap(\.attachment),
+                    attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
                     messageID: UUID().uuidString,
                     text: text
                 ),
@@ -400,6 +402,7 @@ final class DraftPromptModel {
             // The model outlives this chat; the next new chat must not offer
             // the sent images again.
             attachmentsModel.remove(ids: Set(submittedAttachments.map(\.id)))
+            promptCompletion.clearMentionedFiles()
             draftStore.removeDraft(for: threadID)
             store.selectThread(threadID)
         } catch is CancellationError {

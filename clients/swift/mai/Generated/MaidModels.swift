@@ -320,6 +320,7 @@ public extension ACPRegistryStartParams {
 
 // MARK: - Approval
 public struct Approval: Codable {
+    public var answers: [String: [String]]?
     public var args: JSONAny?
     public var createdAt: Date
     public var decision, optionID: String?
@@ -327,18 +328,20 @@ public struct Approval: Codable {
     public var requestID, status: String
     public var turnID: String?
     public var updatedAt: Date
+    public var userInput: UserInputRequest?
 
     public enum CodingKeys: String, CodingKey {
-        case args, createdAt, decision
+        case answers, args, createdAt, decision
         case optionID = "optionId"
         case options
         case requestID = "requestId"
         case status
         case turnID = "turnId"
-        case updatedAt
+        case updatedAt, userInput
     }
 
-    public init(args: JSONAny?, createdAt: Date, decision: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, status: String, turnID: String?, updatedAt: Date) {
+    public init(answers: [String: [String]]?, args: JSONAny?, createdAt: Date, decision: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, status: String, turnID: String?, updatedAt: Date, userInput: UserInputRequest?) {
+        self.answers = answers
         self.args = args
         self.createdAt = createdAt
         self.decision = decision
@@ -348,6 +351,7 @@ public struct Approval: Codable {
         self.status = status
         self.turnID = turnID
         self.updatedAt = updatedAt
+        self.userInput = userInput
     }
 }
 
@@ -370,6 +374,7 @@ public extension Approval {
     }
 
     func with(
+        answers: [String: [String]]?? = nil,
         args: JSONAny?? = nil,
         createdAt: Date? = nil,
         decision: String?? = nil,
@@ -378,9 +383,11 @@ public extension Approval {
         requestID: String? = nil,
         status: String? = nil,
         turnID: String?? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        userInput: UserInputRequest?? = nil
     ) -> Approval {
         return Approval(
+            answers: answers ?? self.answers,
             args: args ?? self.args,
             createdAt: createdAt ?? self.createdAt,
             decision: decision ?? self.decision,
@@ -389,7 +396,8 @@ public extension Approval {
             requestID: requestID ?? self.requestID,
             status: status ?? self.status,
             turnID: turnID ?? self.turnID,
-            updatedAt: updatedAt ?? self.updatedAt
+            updatedAt: updatedAt ?? self.updatedAt,
+            userInput: userInput ?? self.userInput
         )
     }
 
@@ -458,25 +466,215 @@ public extension ApprovalOption {
     }
 }
 
+// MARK: - UserInputRequest
+public struct UserInputRequest: Codable {
+    public var message: String
+    public var questions: [Question]?
+    public var url: String?
+
+    public init(message: String, questions: [Question]?, url: String?) {
+        self.message = message
+        self.questions = questions
+        self.url = url
+    }
+}
+
+// MARK: UserInputRequest convenience initializers and mutators
+
+public extension UserInputRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(UserInputRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        message: String? = nil,
+        questions: [Question]?? = nil,
+        url: String?? = nil
+    ) -> UserInputRequest {
+        return UserInputRequest(
+            message: message ?? self.message,
+            questions: questions ?? self.questions,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Question
+public struct Question: Codable {
+    public var allowsFreeText: Bool?
+    public var questionDefault: [String]?
+    public var description: String?
+    public var id, kind: String
+    public var multiSelect: Bool?
+    public var options: [QuestionOption]?
+    public var questionRequired: Bool?
+    public var title: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case allowsFreeText
+        case questionDefault = "default"
+        case description, id, kind, multiSelect, options
+        case questionRequired = "required"
+        case title
+    }
+
+    public init(allowsFreeText: Bool?, questionDefault: [String]?, description: String?, id: String, kind: String, multiSelect: Bool?, options: [QuestionOption]?, questionRequired: Bool?, title: String?) {
+        self.allowsFreeText = allowsFreeText
+        self.questionDefault = questionDefault
+        self.description = description
+        self.id = id
+        self.kind = kind
+        self.multiSelect = multiSelect
+        self.options = options
+        self.questionRequired = questionRequired
+        self.title = title
+    }
+}
+
+// MARK: Question convenience initializers and mutators
+
+public extension Question {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Question.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        allowsFreeText: Bool?? = nil,
+        questionDefault: [String]?? = nil,
+        description: String?? = nil,
+        id: String? = nil,
+        kind: String? = nil,
+        multiSelect: Bool?? = nil,
+        options: [QuestionOption]?? = nil,
+        questionRequired: Bool?? = nil,
+        title: String?? = nil
+    ) -> Question {
+        return Question(
+            allowsFreeText: allowsFreeText ?? self.allowsFreeText,
+            questionDefault: questionDefault ?? self.questionDefault,
+            description: description ?? self.description,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            multiSelect: multiSelect ?? self.multiSelect,
+            options: options ?? self.options,
+            questionRequired: questionRequired ?? self.questionRequired,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - QuestionOption
+public struct QuestionOption: Codable {
+    public var description: String?
+    public var label, value: String
+
+    public init(description: String?, label: String, value: String) {
+        self.description = description
+        self.label = label
+        self.value = value
+    }
+}
+
+// MARK: QuestionOption convenience initializers and mutators
+
+public extension QuestionOption {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(QuestionOption.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        description: String?? = nil,
+        label: String? = nil,
+        value: String? = nil
+    ) -> QuestionOption {
+        return QuestionOption(
+            description: description ?? self.description,
+            label: label ?? self.label,
+            value: value ?? self.value
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ApprovalEvent
 public struct ApprovalEvent: Codable {
+    public var answers: [String: [String]]?
     public var args: JSONAny?
     public var cancelled: Bool?
     public var decision, detail, optionID: String?
     public var options: [ApprovalOption]?
     public var requestID: String
     public var requestType, turnID: String?
+    public var userInput: UserInputRequest?
 
     public enum CodingKeys: String, CodingKey {
-        case args, cancelled, decision, detail
+        case answers, args, cancelled, decision, detail
         case optionID = "optionId"
         case options
         case requestID = "requestId"
         case requestType
         case turnID = "turnId"
+        case userInput
     }
 
-    public init(args: JSONAny?, cancelled: Bool?, decision: String?, detail: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, requestType: String?, turnID: String?) {
+    public init(answers: [String: [String]]?, args: JSONAny?, cancelled: Bool?, decision: String?, detail: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, requestType: String?, turnID: String?, userInput: UserInputRequest?) {
+        self.answers = answers
         self.args = args
         self.cancelled = cancelled
         self.decision = decision
@@ -486,6 +684,7 @@ public struct ApprovalEvent: Codable {
         self.requestID = requestID
         self.requestType = requestType
         self.turnID = turnID
+        self.userInput = userInput
     }
 }
 
@@ -508,6 +707,7 @@ public extension ApprovalEvent {
     }
 
     func with(
+        answers: [String: [String]]?? = nil,
         args: JSONAny?? = nil,
         cancelled: Bool?? = nil,
         decision: String?? = nil,
@@ -516,9 +716,11 @@ public extension ApprovalEvent {
         options: [ApprovalOption]?? = nil,
         requestID: String? = nil,
         requestType: String?? = nil,
-        turnID: String?? = nil
+        turnID: String?? = nil,
+        userInput: UserInputRequest?? = nil
     ) -> ApprovalEvent {
         return ApprovalEvent(
+            answers: answers ?? self.answers,
             args: args ?? self.args,
             cancelled: cancelled ?? self.cancelled,
             decision: decision ?? self.decision,
@@ -527,7 +729,8 @@ public extension ApprovalEvent {
             options: options ?? self.options,
             requestID: requestID ?? self.requestID,
             requestType: requestType ?? self.requestType,
-            turnID: turnID ?? self.turnID
+            turnID: turnID ?? self.turnID,
+            userInput: userInput ?? self.userInput
         )
     }
 
@@ -737,19 +940,21 @@ public extension AuthenticationResult {
 
 // MARK: - AuthChallenge
 public struct AuthChallenge: Codable {
-    public var kind, loginID, url, userCode: String?
-    public var verificationURL: String?
+    public var kind, loginID, terminalID, url: String?
+    public var userCode, verificationURL: String?
 
     public enum CodingKeys: String, CodingKey {
         case kind
         case loginID = "loginId"
+        case terminalID = "terminalId"
         case url, userCode
         case verificationURL = "verificationUrl"
     }
 
-    public init(kind: String?, loginID: String?, url: String?, userCode: String?, verificationURL: String?) {
+    public init(kind: String?, loginID: String?, terminalID: String?, url: String?, userCode: String?, verificationURL: String?) {
         self.kind = kind
         self.loginID = loginID
+        self.terminalID = terminalID
         self.url = url
         self.userCode = userCode
         self.verificationURL = verificationURL
@@ -777,6 +982,7 @@ public extension AuthChallenge {
     func with(
         kind: String?? = nil,
         loginID: String?? = nil,
+        terminalID: String?? = nil,
         url: String?? = nil,
         userCode: String?? = nil,
         verificationURL: String?? = nil
@@ -784,6 +990,7 @@ public extension AuthChallenge {
         return AuthChallenge(
             kind: kind ?? self.kind,
             loginID: loginID ?? self.loginID,
+            terminalID: terminalID ?? self.terminalID,
             url: url ?? self.url,
             userCode: userCode ?? self.userCode,
             verificationURL: verificationURL ?? self.verificationURL
@@ -1176,6 +1383,7 @@ public extension PromptContentCapabilities {
 // MARK: - Command
 public struct Command: Codable {
     public var additionalDirectories: [String]?
+    public var answers: [String: [String]]?
     public var commandID: String?
     public var configSelections: [ConfigOptionSelection]?
     public var createdAt: Date?
@@ -1188,7 +1396,7 @@ public struct Command: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories
+        case additionalDirectories, answers
         case commandID = "commandId"
         case configSelections, createdAt, cwd, decision, message, modelSelection
         case optionID = "optionId"
@@ -1200,8 +1408,9 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(additionalDirectories: [String]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
+        self.answers = answers
         self.commandID = commandID
         self.configSelections = configSelections
         self.createdAt = createdAt
@@ -1240,6 +1449,7 @@ public extension Command {
 
     func with(
         additionalDirectories: [String]?? = nil,
+        answers: [String: [String]]?? = nil,
         commandID: String?? = nil,
         configSelections: [ConfigOptionSelection]?? = nil,
         createdAt: Date?? = nil,
@@ -1258,6 +1468,7 @@ public extension Command {
     ) -> Command {
         return Command(
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
+            answers: answers ?? self.answers,
             commandID: commandID ?? self.commandID,
             configSelections: configSelections ?? self.configSelections,
             createdAt: createdAt ?? self.createdAt,
@@ -1857,6 +2068,7 @@ public extension EventMetadata {
 public struct EventPayload: Codable {
     public var additionalDirectories: [String]?
     public var annotations: [PromptAnnotation]?
+    public var answers: [String: [String]]?
     public var approval: ApprovalEvent?
     public var attachments: [Attachment]?
     public var configOptions: [ConfigOption]?
@@ -1879,7 +2091,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories, annotations, approval, attachments, configOptions, createdAt, cwd, decision, item
+        case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, item
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -1893,9 +2105,10 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.annotations = annotations
+        self.answers = answers
         self.approval = approval
         self.attachments = attachments
         self.configOptions = configOptions
@@ -1946,6 +2159,7 @@ public extension EventPayload {
     func with(
         additionalDirectories: [String]?? = nil,
         annotations: [PromptAnnotation]?? = nil,
+        answers: [String: [String]]?? = nil,
         approval: ApprovalEvent?? = nil,
         attachments: [Attachment]?? = nil,
         configOptions: [ConfigOption]?? = nil,
@@ -1976,6 +2190,7 @@ public extension EventPayload {
         return EventPayload(
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             annotations: annotations ?? self.annotations,
+            answers: answers ?? self.answers,
             approval: approval ?? self.approval,
             attachments: attachments ?? self.attachments,
             configOptions: configOptions ?? self.configOptions,
@@ -2120,10 +2335,10 @@ public struct ToolCall: Codable {
     public var error: String?
     public var exitCode: Int?
     public var locations: [ToolLocation]?
-    public var name, namespace, output, providerKind: String?
-    public var query: String?
+    public var name, namespace, output, outputFormat: String?
+    public var providerKind, query: String?
 
-    public init(action: String?, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, providerKind: String?, query: String?) {
+    public init(action: String?, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, outputFormat: String?, providerKind: String?, query: String?) {
         self.action = action
         self.attachments = attachments
         self.changes = changes
@@ -2136,6 +2351,7 @@ public struct ToolCall: Codable {
         self.name = name
         self.namespace = namespace
         self.output = output
+        self.outputFormat = outputFormat
         self.providerKind = providerKind
         self.query = query
     }
@@ -2172,6 +2388,7 @@ public extension ToolCall {
         name: String?? = nil,
         namespace: String?? = nil,
         output: String?? = nil,
+        outputFormat: String?? = nil,
         providerKind: String?? = nil,
         query: String?? = nil
     ) -> ToolCall {
@@ -2188,6 +2405,7 @@ public extension ToolCall {
             name: name ?? self.name,
             namespace: namespace ?? self.namespace,
             output: output ?? self.output,
+            outputFormat: outputFormat ?? self.outputFormat,
             providerKind: providerKind ?? self.providerKind,
             query: query ?? self.query
         )
@@ -2323,11 +2541,11 @@ public struct ToolCallSummary: Codable {
     public var errorPreview: String?
     public var exitCode, locationCount: Int?
     public var locations: [ToolLocation]?
-    public var name, namespace, outputPreview, providerKind: String?
-    public var queryPreview: String?
+    public var name, namespace, outputFormat, outputPreview: String?
+    public var providerKind, queryPreview: String?
     public var truncated: Bool?
 
-    public init(action: String?, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
+    public init(action: String?, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputFormat: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
         self.action = action
         self.attachmentCount = attachmentCount
         self.attachments = attachments
@@ -2342,6 +2560,7 @@ public struct ToolCallSummary: Codable {
         self.locations = locations
         self.name = name
         self.namespace = namespace
+        self.outputFormat = outputFormat
         self.outputPreview = outputPreview
         self.providerKind = providerKind
         self.queryPreview = queryPreview
@@ -2382,6 +2601,7 @@ public extension ToolCallSummary {
         locations: [ToolLocation]?? = nil,
         name: String?? = nil,
         namespace: String?? = nil,
+        outputFormat: String?? = nil,
         outputPreview: String?? = nil,
         providerKind: String?? = nil,
         queryPreview: String?? = nil,
@@ -2402,6 +2622,7 @@ public extension ToolCallSummary {
             locations: locations ?? self.locations,
             name: name ?? self.name,
             namespace: namespace ?? self.namespace,
+            outputFormat: outputFormat ?? self.outputFormat,
             outputPreview: outputPreview ?? self.outputPreview,
             providerKind: providerKind ?? self.providerKind,
             queryPreview: queryPreview ?? self.queryPreview,

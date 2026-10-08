@@ -213,16 +213,18 @@ enum ThreadEventReducer {
                 if !resolved {
                     approval.args = update.args
                     approval.options = update.options
+                    approval.userInput = update.userInput
                 }
                 approval.decision = resolved ? update.decision : nil
                 approval.optionID = resolved ? update.optionID : nil
+                approval.answers = resolved ? update.answers : nil
                 approval.status = status.rawValue
                 if let turnID = update.turnID { approval.turnID = turnID }
                 approval.updatedAt = occurredAt
                 thread.timeline[index].approval = approval
             } else {
                 note(thread.timeline.count)
-                let approval = Approval(args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt)
+                let approval = Approval(answers: resolved ? update.answers : nil, args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt, userInput: resolved ? nil : update.userInput)
                 thread.timeline.append(TimelineEntry(approval: approval, item: nil, kind: MaidTimelineEntryKind.approval.rawValue, message: nil))
             }
 
