@@ -227,7 +227,7 @@
                 let ids = ids.isEmpty ? heights.indices.map(String.init) : ids
                 let oldIDs = geometry.ids
                 geometry.replace(ids: ids, estimatedHeight: 1)
-                geometry.updateHeights(Dictionary(uniqueKeysWithValues: zip(ids, heights)))
+                geometry.updateHeights(Dictionary(zip(ids, heights), uniquingKeysWith: { first, _ in first }))
                 rowRevisions = rowRevisions.filter { geometry.index(for: $0.key) != nil }
                 // An unchanged live row keeps its reporting identity across parent
                 // updates; otherwise a queued height can be discarded permanently.

@@ -17,11 +17,14 @@
 
         var totalHeight: CGFloat { offsets.last ?? 0 }
 
+        /// Row IDs should be unique. A duplicate degrades to the first row with
+        /// that ID instead of trapping, matching SwiftUI's `ForEach`.
         mutating func replace(ids: [String], estimatedHeight: CGFloat) {
-            let previous = Dictionary(uniqueKeysWithValues: zip(self.ids, heights))
+            let previous = Dictionary(zip(self.ids, heights), uniquingKeysWith: { first, _ in first })
             self.ids = ids
             indices = Dictionary(
-                uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+                ids.enumerated().map { ($0.element, $0.offset) },
+                uniquingKeysWith: { first, _ in first })
             heights = ids.map { previous[$0] ?? max(1, estimatedHeight) }
             offsets = Array(repeating: 0, count: ids.count + 1)
             rebuildOffsets(from: 0)

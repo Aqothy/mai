@@ -7,6 +7,11 @@ import Foundation
 /// is enough to reconstruct turns. Restored history replays without turn ids;
 /// those entries fall back to sections split on user messages.
 ///
+/// A turn is not always contiguous: retrying a failed turn moves its prompt
+/// onto the new turn, ahead of the failed turn's entries. One turn can then
+/// span several sections, so a section is identified by its first entry,
+/// never by its turn.
+///
 /// Layout rules:
 /// - User messages and the turn's final assistant message are always visible.
 /// - Reasoning renders as plain dimmed text rows, not as steps among tools.
@@ -38,15 +43,26 @@ nonisolated enum ChatTimelineLayout {
         if let latestTurn {
             turnsByID[latestTurn.turnID] = latestTurn
         }
+        // Only the running turn's last section is live, so a split turn
+        // shows one "Working" header.
+        let runningSectionIndex = streamingTurnID.flatMap { streamingTurnID in
+            sections.lastIndex { $0.turnID == streamingTurnID }
+        }
         var rows: [ChatTimelineRowModel] = []
-        for section in sections {
-            appendRows(
+        var pendingHeader: ChatTimelineRowModel?
+        for (index, section) in sections.enumerated() {
+            if let header = appendRows(
                 for: section,
                 into: &rows,
-                streamingTurnID: streamingTurnID,
+                isRunning: index == runningSectionIndex,
                 turn: section.turnID.flatMap { turnsByID[$0] },
                 isExpanded: expandedSectionIDs.contains(section.id)
-            )
+            ) {
+                pendingHeader = header
+            }
+        }
+        if let pendingHeader {
+            rows.append(pendingHeader)
         }
         return rows
     }
@@ -55,6 +71,7 @@ nonisolated enum ChatTimelineLayout {
 
     /// One turn's worth of contiguous timeline entries.
     struct Section {
+        /// Derived from the first entry, which is unique in the timeline.
         var id: String
         var turnID: String?
         var blocks: [Block] = []
@@ -87,10 +104,7 @@ nonisolated enum ChatTimelineLayout {
 
         if startsNewSection {
             sections.append(
-                Section(
-                    id: turnID ?? "local-\(entryIdentity(entry))",
-                    turnID: turnID
-                )
+                Section(id: "section-\(entry.kind)-\(entryIdentity(entry))", turnID: turnID)
             )
         }
 
@@ -206,14 +220,14 @@ nonisolated enum ChatTimelineLayout {
 
     // MARK: Row emission
 
+    /// Returns the running section's header when no activity placed it yet.
     private static func appendRows(
         for section: Section,
         into rows: inout [ChatTimelineRowModel],
-        streamingTurnID: String?,
+        isRunning: Bool,
         turn: Turn?,
         isExpanded: Bool
-    ) {
-        let isRunning = streamingTurnID != nil && section.turnID == streamingTurnID
+    ) -> ChatTimelineRowModel? {
         let showsFoldedContent = isRunning || isExpanded
         let finalMessageIndex = section.blocks.lastIndex { block in
             if case .message = block.row { return block.isFoldable }
@@ -244,10 +258,10 @@ nonisolated enum ChatTimelineLayout {
         }
 
         // A running turn shows its header from the start, even before the
-        // first tool call or thought arrives.
-        if isRunning, !didInsertHeader {
-            rows.append(header)
-        }
+        // first tool call or thought arrives. It ends the transcript, below
+        // any older entries that follow the turn's prompt, such as the failed
+        // attempt a retry continues from.
+        return isRunning && !didInsertHeader ? header : nil
     }
 
     private static func turnActivity(

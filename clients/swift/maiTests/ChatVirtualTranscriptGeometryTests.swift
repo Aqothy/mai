@@ -33,6 +33,17 @@ import Testing
             #expect(geometry.totalHeight == 0)
         }
 
+        @Test func duplicateIDsResolveToTheFirstRowInsteadOfTrapping() {
+            var geometry = ChatVirtualTranscriptGeometry()
+            geometry.replace(ids: ["a", "dup", "dup"], estimatedHeight: 100)
+            #expect(geometry.index(for: "dup") == 1)
+            geometry.updateHeights(["dup": 50])
+            #expect(geometry.totalHeight == 250)
+            geometry.replace(ids: ["dup", "dup", "b"], estimatedHeight: 100)
+            #expect(geometry.index(for: "dup") == 0)
+            #expect(geometry.totalHeight == 200)
+        }
+
         @Test func streamingTailGrowthLeavesHistoryPositionsUnchanged() {
             var geometry = ChatVirtualTranscriptGeometry()
             let ids = (0..<5850).map { "row-\($0)" }

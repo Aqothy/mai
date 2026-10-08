@@ -141,7 +141,7 @@ struct ChatTimelineLayoutTests {
             userMessageLimit: 10
         )
 
-        #expect(firstPage.map(\.id) == [
+        #expect(firstPage.map(\.turnID) == [
             "turn-3", "turn-4", "turn-5", "turn-6", "turn-7",
         ])
         #expect(secondPage.map(\.id) == sections.map(\.id))
@@ -182,7 +182,7 @@ struct ChatTimelineLayoutTests {
               assistantMessageEntry(id: "m2", turnID: "turn-1"),
               itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
               assistantMessageEntry(id: "m3", turnID: "turn-1")],
-             nil, ["turn-1"], ["message", "turnActivity", "group", "message", "group", "message"]),
+             nil, ["section-message-m1"], ["message", "turnActivity", "group", "message", "group", "message"]),
             ("empty streamed segment produces no row",
              [userMessageEntry(id: "m1", turnID: "turn-1"),
               messageEntry(id: "m2", role: .assistant, turnID: "turn-1", text: ""),
@@ -209,7 +209,7 @@ struct ChatTimelineLayoutTests {
               userMessageEntry(id: "m3", turnID: nil),
               itemEntry(id: "i2", kind: .toolCall, turnID: nil),
               assistantMessageEntry(id: "m4", turnID: nil)],
-             nil, ["local-m3"], ["message", "turnActivity", "message", "message", "turnActivity", "group", "message"]),
+             nil, ["section-message-m3"], ["message", "turnActivity", "message", "message", "turnActivity", "group", "message"]),
             ("warnings and errors never fold",
              [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
               itemEntry(id: "i2", kind: .warning, turnID: "turn-1"),
@@ -234,6 +234,30 @@ struct ChatTimelineLayoutTests {
         let previous = rows(cases[6].timeline, streaming: "turn-2")
         #expect(turnActivity(previous[1])?.isRunning == false)
         #expect(turnActivity(previous[4])?.isRunning == true)
+    }
+
+    /// Retry moves the failed turn's prompt onto the new turn, so that turn
+    /// spans two sections around the failed attempt. Duplicate row IDs crash
+    /// the Mac transcript, and the live header must stay below the attempt.
+    @Test
+    func retriedTurnSplitAroundFailedAttempt() {
+        let retried = [
+            userMessageEntry(id: "m1", turnID: "turn-2"),
+            itemEntry(id: "e1", kind: .error, turnID: "turn-1"),
+        ]
+        let cases: [(name: String, timeline: [TimelineEntry], kinds: [String])] = [
+            ("before the retry's first activity", retried,
+             ["message", "notice", "turnActivity"]),
+            ("after the retry's first activity",
+             retried + [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-2")],
+             ["message", "notice", "turnActivity", "group"]),
+        ]
+        for testCase in cases {
+            let result = rows(testCase.timeline, streaming: "turn-2")
+            #expect(result.map(kindLabel) == testCase.kinds, "\(testCase.name)")
+            #expect(Set(result.map(\.id)).count == result.count, "\(testCase.name)")
+            #expect(result.compactMap(turnActivity).map(\.isRunning) == [true], "\(testCase.name)")
+        }
     }
 
     /// The header appears as soon as the turn starts, before any activity.
