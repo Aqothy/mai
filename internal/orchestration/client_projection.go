@@ -1,6 +1,10 @@
 package orchestration
 
-import "github.com/Aqothy/maiD/internal/provider"
+import (
+	"maps"
+
+	"github.com/Aqothy/maiD/internal/provider"
+)
 
 const (
 	maxToolSummaryEntries     = 20
@@ -35,6 +39,7 @@ func projectThreadForClient(thread Thread) Thread {
 			approval := *entry.Approval
 			approval.Args = cloneRawMessage(entry.Approval.Args)
 			approval.Options = append([]provider.ApprovalOption(nil), entry.Approval.Options...)
+			approval.Answers = maps.Clone(entry.Approval.Answers)
 			projectedEntry.Approval = &approval
 		}
 		projected.Timeline[index] = projectedEntry
@@ -93,6 +98,7 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 	}
 	summary := &ToolCallSummary{
 		Action:               call.Action,
+		OutputFormat:         call.OutputFormat,
 		LocationCount:        len(call.Locations),
 		ChangeCount:          len(call.Changes),
 		AttachmentCount:      len(call.Attachments),
@@ -134,12 +140,11 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 	summary.Attachments = make([]ToolAttachmentSummary, attachmentLimit)
 	for index := range attachmentLimit {
 		attachment := call.Attachments[index]
-		kind, kindTruncated := truncateRunes(attachment.Kind, maxToolSummaryFieldRunes)
 		name, nameTruncated := truncateRunes(attachment.Name, maxToolSummaryFieldRunes)
 		mimeType, mimeTypeTruncated := truncateRunes(attachment.MimeType, maxToolSummaryFieldRunes)
 		uri, uriTruncated := truncateRunes(attachment.URI, maxToolSummaryFieldRunes)
-		summary.Attachments[index] = ToolAttachmentSummary{Kind: kind, Name: name, MimeType: mimeType, URI: uri}
-		summary.Truncated = summary.Truncated || kindTruncated || nameTruncated || mimeTypeTruncated || uriTruncated
+		summary.Attachments[index] = ToolAttachmentSummary{Kind: attachment.Kind, Name: name, MimeType: mimeType, URI: uri}
+		summary.Truncated = summary.Truncated || nameTruncated || mimeTypeTruncated || uriTruncated
 	}
 	summary.Truncated = summary.Truncated || attachmentLimit < len(call.Attachments)
 	return summary

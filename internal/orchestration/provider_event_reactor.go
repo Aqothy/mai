@@ -409,16 +409,12 @@ func (r *ProviderEventReactor) handleStop(event Event) {
 		}
 		return
 	}
-	stopReason := ""
-	if activeTurnIDOf(view.Session, view.LatestTurn) != "" {
-		stopReason = "cancelled"
-	}
 	if err := r.provider.StopSession(ctx, input); err != nil {
 		r.record(EventInput{Type: EventThreadSessionStopFailed, ThreadID: threadID, Actor: ActorKindServer})
 		r.appendErrorItem(threadID, event.Payload.TurnID, err.Error())
 		return
 	}
-	r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateStopped, StopReason: stopReason})
+	r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateStopped})
 }
 
 func (r *ProviderEventReactor) handleConfigOption(event Event) {
@@ -456,7 +452,7 @@ func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	defer cancel()
 	// The decision was validated (and defaulted) by the engine's decider before
 	// the event was appended, so it passes through as-is.
-	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID}); err != nil {
+	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID, Answers: event.Payload.Answers}); err != nil {
 		r.appendErrorItem(threadID, view.Approval.TurnID, err.Error())
 	}
 }

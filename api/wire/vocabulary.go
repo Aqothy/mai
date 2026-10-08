@@ -145,6 +145,50 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
+		Name:        "AuthKind",
+		Description: "How a sign-in method or challenge proceeds.",
+		Values: []string{
+			string(provider.AuthKindBrowser),
+			string(provider.AuthKindDeviceCode),
+			string(provider.AuthKindSecret),
+			string(provider.AuthKindTerminal),
+		},
+	},
+	{
+		Name:        "AttachmentKind",
+		Description: "What a message or tool attachment carries.",
+		Values: []string{
+			string(provider.AttachmentImage),
+			string(provider.AttachmentAudio),
+			string(provider.AttachmentResource),
+			string(provider.AttachmentResourceLink),
+		},
+	},
+	{
+		Name:        "StopReason",
+		Description: "Why a completed turn ended early; absent when it finished normally.",
+		Values: []string{
+			string(provider.StopReasonMaxTokens),
+			string(provider.StopReasonMaxTurnRequests),
+			string(provider.StopReasonRefusal),
+		},
+	},
+	{
+		Name:        "OutputFormat",
+		Description: "How to render tool output; absent means plain text.",
+		Values:      []string{string(provider.OutputFormatMarkdown)},
+	},
+	{
+		Name:        "QuestionKind",
+		Description: "Input a user-input question takes.",
+		Values: []string{
+			string(provider.QuestionKindText),
+			string(provider.QuestionKindNumber),
+			string(provider.QuestionKindInteger),
+			string(provider.QuestionKindChoice),
+		},
+	},
+	{
 		Name:        "ItemKind",
 		Description: "Kind of a non-message timeline item.",
 		Values: []string{

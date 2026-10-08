@@ -210,7 +210,7 @@ func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provi
 					promptText += block.Text
 				case "image":
 					if block.Source != nil {
-						attachments = append(attachments, provider.Attachment{Kind: "image", MimeType: block.Source.MediaType, Data: block.Source.Data})
+						attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentImage, MimeType: block.Source.MediaType, Data: block.Source.Data})
 					}
 				}
 			}

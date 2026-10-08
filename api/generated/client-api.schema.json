@@ -175,6 +175,18 @@
         "optionId": {
           "type": "string"
         },
+        "userInput": {
+          "$ref": "#/$defs/UserInputRequest"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -223,6 +235,18 @@
         },
         "cancelled": {
           "type": "boolean"
+        },
+        "userInput": {
+          "$ref": "#/$defs/UserInputRequest"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -326,6 +350,9 @@
           "type": "string"
         },
         "verificationUrl": {
+          "type": "string"
+        },
+        "terminalId": {
           "type": "string"
         }
       },
@@ -466,6 +493,15 @@
         },
         "optionId": {
           "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
         },
         "value": true,
         "configSelections": {
@@ -752,6 +788,15 @@
         },
         "optionId": {
           "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
         },
         "value": true,
         "item": {
@@ -1311,6 +1356,70 @@
       "additionalProperties": false,
       "type": "object",
       "title": "ProviderStartParams"
+    },
+    "Question": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "multiSelect": {
+          "type": "boolean"
+        },
+        "allowsFreeText": {
+          "type": "boolean"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/QuestionOption"
+          },
+          "type": "array"
+        },
+        "default": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Question"
+    },
+    "QuestionOption": {
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value",
+        "label"
+      ],
+      "title": "QuestionOption"
     },
     "SessionBinding": {
       "properties": {
@@ -2062,6 +2171,9 @@
         "output": {
           "type": "string"
         },
+        "outputFormat": {
+          "type": "string"
+        },
         "error": {
           "type": "string"
         },
@@ -2118,6 +2230,9 @@
           "type": "string"
         },
         "outputPreview": {
+          "type": "string"
+        },
+        "outputFormat": {
           "type": "string"
         },
         "errorPreview": {
@@ -2218,6 +2333,28 @@
         "requestedAt"
       ],
       "title": "Turn"
+    },
+    "UserInputRequest": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/Question"
+          },
+          "type": "array"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "message"
+      ],
+      "title": "UserInputRequest"
     },
     "WorkspaceBrowseDirectoriesParams": {
       "properties": {

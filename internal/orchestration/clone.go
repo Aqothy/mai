@@ -98,7 +98,8 @@ func clonePlanPtr(value *Plan) *Plan {
 		return nil
 	}
 	clone := *value
-	clone.Entries = append([]provider.PlanEntry(nil), value.Entries...)
+	// Never nil: clients decode a plan's entries as a required array.
+	clone.Entries = append([]provider.PlanEntry{}, value.Entries...)
 	return &clone
 }
 

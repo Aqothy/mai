@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/go-acp/schema"
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -30,8 +31,16 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 	if input.OptionID != "" && !hasPermissionOption(pending.options, input.OptionID) {
 		return fmt.Errorf("approval option %q was not offered for request %s", input.OptionID, input.RequestID)
 	}
+	response := approvalResponse{decision: input.Decision, optionID: input.OptionID}
+	if pending.form != nil && input.Decision == provider.ApprovalDecisionAccept {
+		content, err := pending.form.Content(input.Answers)
+		if err != nil {
+			return err
+		}
+		response.answers, response.content = input.Answers, content
+	}
 	select {
-	case pending.ch <- approvalResponse{decision: input.Decision, optionID: input.OptionID}:
+	case pending.ch <- response:
 		return nil
 	default:
 		return fmt.Errorf("approval request %q is already resolved", input.RequestID)
@@ -99,6 +108,8 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 type pendingPermission struct {
 	ch      chan approvalResponse
 	options []schema.PermissionOption
+	// form is set for a form elicitation, to validate and convert answers.
+	form    *elicitation.Form
 	settled bool
 	cancel  context.CancelFunc
 }
@@ -109,6 +120,10 @@ type pendingPermission struct {
 type approvalResponse struct {
 	decision provider.ApprovalDecision
 	optionID string
+	// answers and content answer an accepted form elicitation: as submitted,
+	// and converted to the types the form asked for.
+	answers map[string][]string
+	content map[string]any
 }
 
 type permissionState struct {
@@ -135,24 +150,26 @@ func (h *Instance) beginPermissionRequest(ctx context.Context, sessionID string,
 	permissionCtx, cancel := context.WithCancel(ctx)
 	pending := &pendingPermission{ch: make(chan approvalResponse, 1), options: options, cancel: cancel}
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	session := h.sessionLocked(sessionID)
 	collector := h.updateCollectorLocked(sessionID)
-	if session == nil || collector == nil || collector.cancelled {
-		h.mu.Unlock()
+	if session == nil || (collector != nil && collector.cancelled) {
 		cancel()
 		return permissionCtx, cancel, pending
 	}
-	if _, settled := collector.settledPermissionKeys[requestID]; settled {
-		h.mu.Unlock()
-		cancel()
-		return permissionCtx, cancel, pending
+	// Outside a turn (e.g. an MCP server asking during session setup) the
+	// request stays answerable; only the agent or the connection ends it.
+	if collector != nil {
+		if _, settled := collector.settledPermissionKeys[requestID]; settled {
+			cancel()
+			return permissionCtx, cancel, pending
+		}
+		if collector.pendingPermissionCancels == nil {
+			collector.pendingPermissionCancels = make(map[string]*pendingPermission)
+		}
+		collector.pendingPermissionCancels[requestID] = pending
 	}
 	session.pendingPermissions[requestID] = pending
-	if collector.pendingPermissionCancels == nil {
-		collector.pendingPermissionCancels = make(map[string]*pendingPermission)
-	}
-	collector.pendingPermissionCancels[requestID] = pending
-	h.mu.Unlock()
 	return permissionCtx, cancel, pending
 }
 

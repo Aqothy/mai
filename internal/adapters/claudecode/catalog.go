@@ -73,9 +73,8 @@ func (h *Instance) probe(ctx context.Context) error {
 	return nil
 }
 
-// updateAccountLocked derives auth state from the initialize handshake. The
-// CLI has no non-interactive login flow (the Agent SDK requires pre-existing
-// credentials too), so no auth methods are advertised.
+// updateAccountLocked derives auth state from the initialize handshake; a
+// restart after signing in (see auth.go) re-runs it.
 func (h *Instance) updateAccountLocked(account *sdkAccount) {
 	if account != nil && (account.Email != "" || account.SubscriptionType != "") {
 		h.info.Auth.Status = provider.AuthStatusAuthenticated

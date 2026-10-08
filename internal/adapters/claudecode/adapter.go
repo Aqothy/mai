@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -94,8 +95,12 @@ type pendingApproval struct {
 	toolName         string
 	input            json.RawMessage
 	suggestions      []json.RawMessage
-	question         *askUserQuestion
-	client           *streamClient
+	// question is set for AskUserQuestion; elicitation for an MCP server's
+	// elicitation, with form set in form mode.
+	question      *askUserQuestion
+	isElicitation bool
+	form          *elicitation.Form
+	client        *streamClient
 }
 
 type optionsState struct {
@@ -173,13 +178,15 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			Skills:                true,
 			ConfigOptions:         true,
 			AdditionalDirectories: true,
+			Auth:                  true,
+			Logout:                true,
 			// The stream-json user message accepts base64 image blocks. Audio
 			// and embedded-resource blocks are not part of the SDK prompt
 			// surface, so they are not advertised.
 			PromptContent: provider.PromptContentCapabilities{Image: true},
 			ModelSwitch:   provider.ModelSwitchInSession,
 		},
-		Auth: provider.Auth{Status: provider.AuthStatusUnknown},
+		Auth: provider.Auth{Status: provider.AuthStatusUnknown, Methods: claudeAuthMethods()},
 	}
 	// The probe performs the SDK initialize handshake only — the CLI answers
 	// it before any API request, so this is free and works logged-out too.
@@ -222,25 +229,12 @@ func (h *Instance) Close() error {
 
 // buildCommand assembles one CLI invocation with the shared stream-json flags.
 func (h *Instance) buildCommand(cwd string, extra []string) *exec.Cmd {
-	args := append([]string(nil), h.config.Command[1:]...)
-	args = append(args,
-		"--print",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--verbose",
-	)
-	args = append(args, extra...)
-	command := exec.Command(h.config.Command[0], args...)
+	argv := h.cliArgv("--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose")
+	argv = append(argv, extra...)
+	command := exec.Command(argv[0], argv[1:]...)
 	command.Dir = cwd
 	command.Stderr = os.Stderr
-	env := append([]string(nil), os.Environ()...)
-	if h.config.ConfigDir != "" {
-		env = append(env, "CLAUDE_CONFIG_DIR="+h.config.ConfigDir)
-	}
-	for key, value := range h.config.Env {
-		env = append(env, key+"="+value)
-	}
-	command.Env = env
+	command.Env = append(os.Environ(), h.launchEnv()...)
 	procgroup.Configure(command)
 	return command
 }

@@ -662,7 +662,7 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 
 	var started provider.InstanceInfo
 	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", fakeACPAgentCommand())}, &started)
-	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 1 || started.Auth.Methods[0].ID != "agent-login" {
+	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 2 || started.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("auth state = %#v, want unknown status with the advertised agent-login method", started.Auth)
 	}
 
@@ -681,6 +681,64 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	client.call(t, wire.MethodProviderLogout, wire.ProviderInstanceParams{InstanceID: "codex"}, &loggedOut)
 	if loggedOut.Auth.Status != provider.AuthStatusUnauthenticated {
 		t.Fatalf("auth status after logout = %q, want unauthenticated", loggedOut.Auth.Status)
+	}
+}
+
+// Terminal sign-in runs the agent's own command in a maiD terminal; when it
+// exits successfully the provider restarts so the agent re-initializes.
+// A successful terminal sign-in restarts the provider so it picks up the new
+// credentials, but only once no turn is running on it.
+func TestRPCProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+	var started provider.InstanceInfo
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, &started)
+	threadID := orchestration.ThreadID("thread-sign-in-busy")
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-sign-in-create", ThreadID: threadID, Title: "Busy", ProviderInstanceID: "agent", Cwd: t.TempDir()})
+	client.subscribeThread(t, threadID)
+	blocked := client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-sign-in-block", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-sign-in-block", Text: "block"}})
+	client.waitThread(t, threadID, "turn running", sessionStatusAfter(blocked.Sequence, orchestration.SessionStatusRunning))
+
+	var result provider.AuthenticationResult
+	client.call(t, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "agent", MethodID: "terminal-login"}, &result)
+	if result.Challenge == nil || result.Challenge.Kind != provider.AuthKindTerminal || result.Challenge.TerminalID == "" {
+		t.Fatalf("challenge = %#v, want a terminal to open", result.Challenge)
+	}
+	providerInfo := func() provider.InstanceInfo {
+		info, _ := s.providerService.Info("agent")
+		return info
+	}
+	waitUntil(t, "sign-in program exits", func() bool {
+		session, err := s.terminals.service.Get(result.Challenge.TerminalID)
+		if err != nil {
+			return false
+		}
+		_, exited := session.ExitCode()
+		return exited
+	})
+	// Give a pending restart a few chances to (wrongly) run mid-turn.
+	time.Sleep(3 * providerIdlePollInterval)
+	if info := providerInfo(); info.PID != started.PID {
+		t.Fatalf("provider restarted (pid %d -> %d) while a turn was running", started.PID, info.PID)
+	}
+
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnInterrupt, CommandID: "cmd-sign-in-interrupt", ThreadID: threadID})
+	client.waitThread(t, threadID, "turn interrupted", interruptSettledAfter(blocked.Sequence))
+	waitUntil(t, "provider restarts once idle", func() bool {
+		info := providerInfo()
+		return info.PID != started.PID && info.Status == provider.InstanceStatusInitialized
+	})
+}
+
+func waitUntil(t *testing.T, desc string, done func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !done() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for: %s", desc)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

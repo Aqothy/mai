@@ -3,6 +3,8 @@ package claudecode
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/Aqothy/maiD/internal/provider"
 )
 
 // Wire DTOs for the Claude Code CLI stream-json protocol, following the
@@ -25,7 +27,10 @@ type sdkMessage struct {
 	RequestID       string          `json:"request_id,omitempty"`
 	Request         json.RawMessage `json:"request,omitempty"`
 	Response        json.RawMessage `json:"response,omitempty"`
-	Raw             json.RawMessage `json:"-"`
+	// Error is set on an assistant message the API failed to produce, e.g.
+	// "authentication_failed".
+	Error string          `json:"error,omitempty"`
+	Raw   json.RawMessage `json:"-"`
 }
 
 // apiMessage is the Anthropic API message carried by assistant/user lines.
@@ -152,6 +157,12 @@ type controlRequestBody struct {
 	Description           string            `json:"description,omitempty"`
 	Title                 string            `json:"title,omitempty"`
 	DecisionReason        string            `json:"decision_reason,omitempty"`
+	// MCP elicitation fields (subtype "elicitation").
+	MCPServerName   string          `json:"mcp_server_name,omitempty"`
+	Message         string          `json:"message,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	URL             string          `json:"url,omitempty"`
+	RequestedSchema json.RawMessage `json:"requested_schema,omitempty"`
 }
 
 // controlResponse correlates a control_response line to a pending request.
@@ -203,14 +214,35 @@ type transcriptLine struct {
 }
 
 // askUserQuestion mirrors the AskUserQuestionInput tool schema. Answers are
-// returned via updatedInput as {questions, answers: {questionText: label}}.
+// returned via updatedInput as {questions, answers: {questionText: answer}},
+// with several selections joined by ", ". The user may always type an answer
+// of their own instead of choosing an option.
 type askUserQuestion struct {
 	Questions []struct {
-		Question string `json:"question"`
-		Options  []struct {
-			Label string `json:"label"`
+		Question    string `json:"question"`
+		MultiSelect bool   `json:"multiSelect,omitempty"`
+		Options     []struct {
+			Label       string `json:"label"`
+			Description string `json:"description,omitempty"`
 		} `json:"options,omitempty"`
 	} `json:"questions"`
+}
+
+// userInput presents the questions as a provider-neutral request, keyed by
+// question text as the answers are.
+func (q askUserQuestion) userInput() provider.UserInputRequest {
+	request := provider.UserInputRequest{Message: "Claude has a question."}
+	if len(q.Questions) > 1 {
+		request.Message = "Claude has questions."
+	}
+	for _, question := range q.Questions {
+		converted := provider.Question{ID: question.Question, Kind: provider.QuestionKindChoice, Title: question.Question, Required: true, MultiSelect: question.MultiSelect, AllowsFreeText: true}
+		for _, option := range question.Options {
+			converted.Options = append(converted.Options, provider.QuestionOption{Value: option.Label, Label: option.Label, Description: option.Description})
+		}
+		request.Questions = append(request.Questions, converted)
+	}
+	return request
 }
 
 func trimmedOrDefault(value, fallback string) string {

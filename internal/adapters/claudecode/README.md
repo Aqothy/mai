@@ -114,11 +114,12 @@ permission_suggestions, tool_use_id, decision_reason, ...}`. Mapping:
   (would persist to `.claude/settings.local.json`!) — every suggestion is
   rewritten to `destination:"session"`, with a whole-tool session `addRules`
   fallback when no suggestions came (common for MCP tools).
-- **AskUserQuestion** (single question): answer options become approval
-  Options (`answer:<i>`); the allow response sets
-  `updatedInput.answers = {<full question text>: <label>}` — the SDK looks
-  answers up **by question text**. Multi-question prompts are denied with a
-  message telling the model to ask in plain text.
+- **AskUserQuestion**: a provider-neutral user-input request (every question,
+  multi-select, and a typed answer instead of an option). The allow response
+  sets `updatedInput.answers = {<full question text>: <answer>}` — the SDK
+  looks answers up **by question text**; several selections join with ", ".
+- **MCP elicitation** (`control_request` subtype `elicitation`): converted by
+  `internal/adapters/elicitation` and answered `{action, content}`.
 - **ExitPlanMode**: normal approval ("Approve plan"/"Keep planning"); approving
   lets the CLI exit plan mode itself; the resulting mode change flows back via
   `system/status`.
@@ -179,9 +180,11 @@ munging replaces every non-alphanumeric char with `-` (configDir =
 `{InstanceID:"claude-code", Name:"Claude Code"}`. Config accepts
 `{command, env, configDir}`; defaults to `["claude"]` on PATH.
 
-Auth/Logout capabilities are false — the CLI has no non-interactive login;
-auth *status* is still reported from the probe account, and users log in via
-`claude /login` in a terminal.
+Sign-in (`auth.go`): the CLI only signs in interactively, so Authenticate
+returns `claude auth login [--console]` for the daemon to run in a terminal;
+the daemon restarts the instance afterwards and the probe account reports the
+new status. Logout runs `claude auth logout`. An assistant message with
+`error: "authentication_failed"` marks the instance signed out.
 
 ## Known gaps
 
@@ -192,13 +195,15 @@ limits (`--max-turns`, `--max-budget-usd`), file rewind/checkpoints,
 background tasks, MCP server management from the client (the CLI still loads
 the user's own MCP config).
 
-Claude-specific: audio attachments unsupported (codex has them); effort
+Claude-specific: audio attachments unsupported (codex has them); file-mention
+`resource_link` attachments are skipped since the CLI reads `@path` in the
+prompt text; effort
 changes apply from the next turn; `Write` renders as FileChangeAdd and `Edit`
 as Update (the CLI doesn't say whether Write created or overwrote).
 
 Claude-only extras other providers lack: full per-model capability matrix in
 one free handshake, permission suggestions, plan-approval flow, dollar cost
-reporting, AskUserQuestion option prompts.
+reporting.
 
 ## Testing
 

@@ -131,6 +131,52 @@
       ]
     },
     {
+      "name": "AuthKind",
+      "description": "How a sign-in method or challenge proceeds.",
+      "values": [
+        "browser",
+        "device-code",
+        "secret",
+        "terminal"
+      ]
+    },
+    {
+      "name": "AttachmentKind",
+      "description": "What a message or tool attachment carries.",
+      "values": [
+        "image",
+        "audio",
+        "resource",
+        "resource_link"
+      ]
+    },
+    {
+      "name": "StopReason",
+      "description": "Why a completed turn ended early; absent when it finished normally.",
+      "values": [
+        "max_tokens",
+        "max_turn_requests",
+        "refusal"
+      ]
+    },
+    {
+      "name": "OutputFormat",
+      "description": "How to render tool output; absent means plain text.",
+      "values": [
+        "markdown"
+      ]
+    },
+    {
+      "name": "QuestionKind",
+      "description": "Input a user-input question takes.",
+      "values": [
+        "text",
+        "number",
+        "integer",
+        "choice"
+      ]
+    },
+    {
       "name": "ItemKind",
       "description": "Kind of a non-message timeline item.",
       "values": [

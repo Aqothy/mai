@@ -37,11 +37,13 @@ func userInputsFromTurn(input provider.SendTurnInput, skills []provider.Skill) (
 		converted = append(converted, appUserInput{Type: "skill", Name: skill.Name, Path: skill.Path})
 	}
 	for _, attachment := range input.Attachments {
-		value, err := userInputFromAttachment(attachment)
+		value, ok, err := userInputFromAttachment(attachment)
 		if err != nil {
 			return nil, err
 		}
-		converted = append(converted, value)
+		if ok {
+			converted = append(converted, value)
+		}
 	}
 	return converted, nil
 }
@@ -112,50 +114,32 @@ func isSkillTokenRune(value rune) bool {
 	return unicode.IsLetter(value) || unicode.IsDigit(value) || value == '_' || value == '-'
 }
 
-func userInputFromAttachment(attachment provider.Attachment) (appUserInput, error) {
-	kind := strings.ToLower(strings.TrimSpace(attachment.Kind))
-	switch kind {
-	case "", "text":
-		return appUserInput{Type: "text", Text: attachment.Data, TextElements: []appTextElement{}}, nil
-	case "image", "local_image", "localimage":
-		if kind != "image" {
-			if path := firstAttachmentPath(attachment); path != "" {
-				return appUserInput{Type: "localImage", Path: path}, nil
-			}
-			return appUserInput{}, fmt.Errorf("Codex local image attachment requires an absolute path")
-		}
+// userInputFromAttachment converts one attachment; ok is false for an
+// attachment the prompt text already carries.
+func userInputFromAttachment(attachment provider.Attachment) (input appUserInput, ok bool, err error) {
+	switch attachment.Kind {
+	case provider.AttachmentResourceLink:
+		// Codex reads files mentioned by path in the prompt text; the link
+		// carries nothing more.
+		return appUserInput{}, false, nil
+	case provider.AttachmentImage:
 		if value := attachmentDataURL(attachment, "image/png"); value != "" {
-			return appUserInput{Type: "image", URL: value}, nil
+			return appUserInput{Type: "image", URL: value}, true, nil
 		}
 		if path, local := localAttachmentPath(attachment.URI); local {
-			return appUserInput{Type: "localImage", Path: path}, nil
+			return appUserInput{Type: "localImage", Path: path}, true, nil
 		}
-		return appUserInput{}, fmt.Errorf("Codex image attachment requires inline data or a local path; remote URLs are not supported")
-	case "audio", "local_audio", "localaudio":
-		if kind != "audio" {
-			if path := firstAttachmentPath(attachment); path != "" {
-				return appUserInput{Type: "localAudio", Path: path}, nil
-			}
-			return appUserInput{}, fmt.Errorf("Codex local audio attachment requires an absolute path")
-		}
+		return appUserInput{}, false, fmt.Errorf("Codex image attachment requires inline data or a local path; remote URLs are not supported")
+	case provider.AttachmentAudio:
 		if value := attachmentDataURL(attachment, "audio/mpeg"); value != "" {
-			return appUserInput{Type: "audio", URL: value}, nil
+			return appUserInput{Type: "audio", URL: value}, true, nil
 		}
 		if path, local := localAttachmentPath(attachment.URI); local {
-			return appUserInput{Type: "localAudio", Path: path}, nil
+			return appUserInput{Type: "localAudio", Path: path}, true, nil
 		}
-		return appUserInput{}, fmt.Errorf("Codex audio attachment requires inline data or a local path; remote URLs are not supported")
-	case "skill":
-		name := strings.TrimSpace(attachment.Name)
-		path := strings.TrimSpace(attachment.URI)
-		if name != "" && path != "" {
-			return appUserInput{Type: "skill", Name: name, Path: path}, nil
-		}
-		return appUserInput{}, fmt.Errorf("Codex skill attachment requires a name and path")
-	case "resource", "embedded_context", "embeddedcontext", "resource_link", "resourcelink":
-		return appUserInput{}, fmt.Errorf("Codex app-server does not accept embedded-resource prompt attachments")
+		return appUserInput{}, false, fmt.Errorf("Codex audio attachment requires inline data or a local path; remote URLs are not supported")
 	default:
-		return appUserInput{}, fmt.Errorf("Codex app-server does not accept attachment kind %q", attachment.Kind)
+		return appUserInput{}, false, fmt.Errorf("Codex app-server does not accept %q attachments", attachment.Kind)
 	}
 }
 
@@ -175,19 +159,6 @@ func attachmentDataURL(attachment provider.Attachment, fallbackMIME string) stri
 		mimeType = fallbackMIME
 	}
 	return "data:" + mimeType + ";base64," + data
-}
-
-func firstAttachmentPath(attachment provider.Attachment) string {
-	if path, _ := localAttachmentPath(attachment.URI); path != "" {
-		return path
-	}
-	if path, _ := localAttachmentPath(attachment.Data); path != "" {
-		return path
-	}
-	if path, _ := localAttachmentPath(attachment.Name); path != "" {
-		return path
-	}
-	return ""
 }
 
 func localAttachmentPath(value string) (string, bool) {
@@ -537,10 +508,14 @@ func mcpResultContent(result appMCPResult) (string, []provider.Attachment) {
 				parts = append(parts, content.Text)
 			}
 		case "image", "audio":
-			attachments = append(attachments, provider.Attachment{Kind: content.Type, Data: content.Data, MimeType: content.MimeType, URI: content.URI, Name: content.Name})
+			kind := provider.AttachmentImage
+			if content.Type == "audio" {
+				kind = provider.AttachmentAudio
+			}
+			attachments = append(attachments, provider.Attachment{Kind: kind, Data: content.Data, MimeType: content.MimeType, URI: content.URI, Name: content.Name})
 		case "resource_link":
 			attachment := provider.Attachment{
-				Kind: content.Type, URI: content.URI, Name: content.Name, Title: content.Title,
+				Kind: provider.AttachmentResourceLink, URI: content.URI, Name: content.Name, Title: content.Title,
 				Description: content.Description, MimeType: content.MimeType, Size: content.Size, Metadata: content.Meta,
 			}
 			if content.Annotations != nil {
@@ -573,11 +548,11 @@ func dynamicToolCall(item appItem) *provider.ToolCall {
 				output = append(output, content.Text)
 			}
 		case "inputImage":
-			if attachment, ok := attachmentFromAppURL("image", content.ImageURL); ok {
+			if attachment, ok := attachmentFromAppURL(provider.AttachmentImage, content.ImageURL); ok {
 				call.Attachments = append(call.Attachments, attachment)
 			}
 		case "inputAudio":
-			if attachment, ok := attachmentFromAppURL("audio", content.AudioURL); ok {
+			if attachment, ok := attachmentFromAppURL(provider.AttachmentAudio, content.AudioURL); ok {
 				call.Attachments = append(call.Attachments, attachment)
 			}
 		}
@@ -647,7 +622,7 @@ func imageViewToolCall(item appItem) *provider.ToolCall {
 	call := &provider.ToolCall{Name: "Image", ProviderKind: item.Type}
 	if strings.TrimSpace(item.Path) != "" {
 		call.Locations = []provider.ToolLocation{{Path: item.Path}}
-		call.Attachments = []provider.Attachment{{Kind: "image", URI: item.Path}}
+		call.Attachments = []provider.Attachment{{Kind: provider.AttachmentImage, URI: item.Path}}
 	}
 	return call
 }
@@ -660,15 +635,15 @@ func imageGenerationToolCall(item appItem) *provider.ToolCall {
 	}
 	if generated != "" {
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(generated)), "data:") {
-			if attachment, ok := attachmentFromAppURL("image", generated); ok {
+			if attachment, ok := attachmentFromAppURL(provider.AttachmentImage, generated); ok {
 				call.Attachments = append(call.Attachments, attachment)
 			}
 		} else {
-			call.Attachments = append(call.Attachments, provider.Attachment{Kind: "image", Data: generated, MimeType: "image/png"})
+			call.Attachments = append(call.Attachments, provider.Attachment{Kind: provider.AttachmentImage, Data: generated, MimeType: "image/png"})
 		}
 	}
 	if item.SavedPath != nil && strings.TrimSpace(*item.SavedPath) != "" {
-		call.Attachments = append(call.Attachments, provider.Attachment{Kind: "image", URI: strings.TrimSpace(*item.SavedPath)})
+		call.Attachments = append(call.Attachments, provider.Attachment{Kind: provider.AttachmentImage, URI: strings.TrimSpace(*item.SavedPath)})
 	}
 	return call
 }
@@ -706,17 +681,17 @@ func userMessageContent(inputs []appUserInput) (string, []provider.Attachment) {
 		case "text":
 			text.WriteString(input.Text)
 		case "image":
-			if attachment, ok := attachmentFromAppURL("image", input.URL); ok {
+			if attachment, ok := attachmentFromAppURL(provider.AttachmentImage, input.URL); ok {
 				attachments = append(attachments, attachment)
 			}
 		case "localImage":
-			attachments = append(attachments, provider.Attachment{Kind: "image", URI: input.Path})
+			attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentImage, URI: input.Path})
 		case "audio":
-			if attachment, ok := attachmentFromAppURL("audio", input.URL); ok {
+			if attachment, ok := attachmentFromAppURL(provider.AttachmentAudio, input.URL); ok {
 				attachments = append(attachments, attachment)
 			}
 		case "localAudio":
-			attachments = append(attachments, provider.Attachment{Kind: "audio", URI: input.Path})
+			attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentAudio, URI: input.Path})
 		case "skill":
 			if input.Name != "" {
 				skillNames = append(skillNames, "$"+input.Name)
@@ -729,7 +704,7 @@ func userMessageContent(inputs []appUserInput) (string, []provider.Attachment) {
 	return text.String(), attachments
 }
 
-func attachmentFromAppURL(kind, value string) (provider.Attachment, bool) {
+func attachmentFromAppURL(kind provider.AttachmentKind, value string) (provider.Attachment, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return provider.Attachment{}, false

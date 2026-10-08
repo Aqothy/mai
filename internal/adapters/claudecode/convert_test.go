@@ -2,9 +2,11 @@ package claudecode
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -83,11 +85,17 @@ func TestToolResultContent(t *testing.T) {
 }
 
 func TestTurnStateFromResult(t *testing.T) {
-	// Success and aborted (interrupted) results are covered by the fake-CLI turns.
-	state, _, message := turnStateFromResult(resultMessage{Subtype: "error_max_turns", IsError: true})
-	if state != provider.RuntimeTurnFailed || message != "max_turns" {
-		t.Fatalf("max turns state = %q message = %q", state, message)
+	// Plain success and aborted (interrupted) results are covered by the
+	// fake-CLI turns. Running out of turns or tokens completes the turn early.
+	state, reason, _ := turnStateFromResult(resultMessage{Subtype: "error_max_turns", IsError: true})
+	if state != provider.RuntimeTurnCompleted || reason != provider.StopReasonMaxTurnRequests {
+		t.Fatalf("max turns = %q %q, want completed early at the request limit", state, reason)
 	}
+	state, reason, _ = turnStateFromResult(resultMessage{Subtype: "success", StopReason: "max_tokens"})
+	if state != provider.RuntimeTurnCompleted || reason != provider.StopReasonMaxTokens {
+		t.Fatalf("max tokens = %q %q, want completed early at the output limit", state, reason)
+	}
+	var message string
 	// Internal diagnostics must never surface as the error banner.
 	_, _, message = turnStateFromResult(resultMessage{Subtype: "error_during_execution", IsError: true, Errors: []string{"[ede_diagnostic] noise", "real problem"}})
 	if message != "real problem" {
@@ -176,22 +184,52 @@ func TestPermissionResponseDecisions(t *testing.T) {
 	}
 }
 
-func TestPermissionResponseAskUserQuestion(t *testing.T) {
-	input := json.RawMessage(`{"questions":[{"question":"Which one?","header":"Pick","options":[{"label":"A"},{"label":"B"}]}]}`)
+// AskUserQuestion answers go back in updatedInput.answers keyed by question
+// text; several selections join with ", " and a typed answer replaces the
+// options. A missing answer is reported instead of sent.
+func TestAskUserQuestionAnswers(t *testing.T) {
+	input := json.RawMessage(`{"questions":[
+		{"question":"Which one?","header":"Pick","options":[{"label":"A"},{"label":"B"}]},
+		{"question":"Which tools?","header":"Tools","multiSelect":true,"options":[{"label":"git"},{"label":"make"}]}
+	]}`)
 	var question askUserQuestion
 	if err := json.Unmarshal(input, &question); err != nil {
 		t.Fatal(err)
 	}
 	pending := &pendingApproval{toolName: "AskUserQuestion", input: input, question: &question}
-	payload, decision := permissionResponse(pending, "answer:1")
-	if decision != provider.ApprovalDecisionAccept || payload["behavior"] != "allow" {
-		t.Fatalf("payload = %#v", payload)
+	respond := func(answers map[string][]string) (map[string]any, error) {
+		payload, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: answers})
+		return payload, err
 	}
-	updated := payload["updatedInput"].(map[string]any)
-	// Answers must key by the full question text (SDK looks answers up by it).
-	answers := updated["answers"].(map[string]string)
-	if answers["Which one?"] != "B" {
+	if _, err := respond(map[string][]string{"Which one?": {"B"}}); err == nil {
+		t.Fatal("an unanswered question was sent")
+	}
+	payload, err := respond(map[string][]string{"Which one?": {"something else"}, "Which tools?": {"git", "make"}})
+	if err != nil || payload["behavior"] != "allow" {
+		t.Fatalf("payload = %#v, %v", payload, err)
+	}
+	answers := payload["updatedInput"].(map[string]any)["answers"].(map[string]string)
+	if answers["Which one?"] != "something else" || answers["Which tools?"] != "git, make" {
 		t.Fatalf("answers = %#v", answers)
+	}
+}
+
+// An MCP server's elicitation is answered with the SDK's {action, content}.
+func TestElicitationResponse(t *testing.T) {
+	_, form, err := elicitation.Parse("Name?", "", "", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := &pendingApproval{isElicitation: true, form: form}
+	if _, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept}); err == nil {
+		t.Fatal("a missing required answer was sent")
+	}
+	payload, decision, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"name": {"maiD"}}})
+	if err != nil || decision != provider.ApprovalDecisionAccept || !reflect.DeepEqual(payload, map[string]any{"action": elicitation.ActionAccept, "content": map[string]any{"name": "maiD"}}) {
+		t.Fatalf("payload = %#v, %v, %v", payload, decision, err)
+	}
+	if payload, _, _ := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionDecline}); payload["action"] != elicitation.ActionDecline {
+		t.Fatalf("decline payload = %#v", payload)
 	}
 }
 

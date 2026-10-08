@@ -122,12 +122,24 @@ const (
 	AuthStatusUnauthenticated AuthStatus = "unauthenticated"
 )
 
+// AuthKind is how a sign-in method or challenge proceeds.
+type AuthKind string
+
+const (
+	AuthKindBrowser    AuthKind = "browser"
+	AuthKindDeviceCode AuthKind = "device-code"
+	AuthKindSecret     AuthKind = "secret"
+	// AuthKindTerminal runs the agent's own login program in an interactive
+	// terminal instead of an authenticate call.
+	AuthKindTerminal AuthKind = "terminal"
+)
+
 type AuthMethod struct {
-	ID             string `json:"id"`
-	Name           string `json:"name,omitempty"`
-	Description    string `json:"description,omitempty"`
-	Kind           string `json:"kind,omitempty"`
-	RequiresSecret bool   `json:"requiresSecret,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	Kind           AuthKind `json:"kind,omitempty"`
+	RequiresSecret bool     `json:"requiresSecret,omitempty"`
 }
 
 type AuthenticateInput struct {
@@ -139,16 +151,30 @@ type AuthenticateInput struct {
 // provider.authenticate returns. Credentials are accepted in requests but are
 // never echoed through this value or persisted by the daemon.
 type AuthChallenge struct {
-	Kind            string `json:"kind,omitempty"`
-	LoginID         string `json:"loginId,omitempty"`
-	URL             string `json:"url,omitempty"`
-	UserCode        string `json:"userCode,omitempty"`
-	VerificationURL string `json:"verificationUrl,omitempty"`
+	Kind            AuthKind `json:"kind,omitempty"`
+	LoginID         string   `json:"loginId,omitempty"`
+	URL             string   `json:"url,omitempty"`
+	UserCode        string   `json:"userCode,omitempty"`
+	VerificationURL string   `json:"verificationUrl,omitempty"`
+	// TerminalID names the maiD terminal running a terminal sign-in (Kind
+	// "terminal"). The provider restarts once that program exits successfully.
+	TerminalID string `json:"terminalId,omitempty"`
+}
+
+// TerminalCommand is a program to run in an interactive terminal: Argv, with
+// Env (KEY=VALUE) overriding the inherited environment.
+type TerminalCommand struct {
+	Argv []string
+	Env  []string
 }
 
 type AuthenticationResult struct {
 	Instance  InstanceInfo   `json:"instance"`
 	Challenge *AuthChallenge `json:"challenge,omitempty"`
+	// Terminal asks the host to run this sign-in program in an interactive
+	// terminal. The host reports it to clients as a terminal challenge and
+	// restarts the provider once the program exits successfully.
+	Terminal *TerminalCommand `json:"-"`
 }
 
 // Auth is the provider-neutral auth state surfaced to clients (for a provider
@@ -356,8 +382,21 @@ type StartSessionResult struct {
 	HistoryUnavailable bool
 }
 
+// AttachmentKind is what an attachment carries.
+type AttachmentKind string
+
+const (
+	AttachmentImage AttachmentKind = "image"
+	AttachmentAudio AttachmentKind = "audio"
+	// AttachmentResource embeds a file's contents (Data, named by URI).
+	AttachmentResource AttachmentKind = "resource"
+	// AttachmentResourceLink refers to a file or URI by URI, without its
+	// contents, e.g. a file the prompt mentions.
+	AttachmentResourceLink AttachmentKind = "resource_link"
+)
+
 type Attachment struct {
-	Kind             string              `json:"kind"`
+	Kind             AttachmentKind      `json:"kind"`
 	Name             string              `json:"name,omitempty"`
 	Title            string              `json:"title,omitempty"`
 	Description      string              `json:"description,omitempty"`
@@ -470,6 +509,51 @@ type RespondToRequestInput struct {
 	// When set it takes precedence over Decision, which then only serves as the
 	// fallback for providers without option-level responses.
 	OptionID string `json:"optionId,omitempty"`
+	// Answers answers a user-input request when Decision is accept, keyed by
+	// Question.ID. Choice questions answer with option values; other kinds
+	// with one entered value.
+	Answers map[string][]string `json:"answers,omitempty"`
+}
+
+// UserInputRequest is a question an agent asks the user, as opposed to a
+// permission request. It either asks Questions (a form) or asks for consent to
+// open URL in the browser (for out-of-band flows such as OAuth). Accepting a
+// URL request only means the user agreed to open it.
+type UserInputRequest struct {
+	Message   string     `json:"message"`
+	Questions []Question `json:"questions,omitempty"`
+	URL       string     `json:"url,omitempty"`
+}
+
+type QuestionKind string
+
+const (
+	QuestionKindText    QuestionKind = "text"
+	QuestionKindNumber  QuestionKind = "number"
+	QuestionKindInteger QuestionKind = "integer"
+	QuestionKindChoice  QuestionKind = "choice"
+)
+
+// Question is one field of a user-input request. Choice questions offer
+// Options (one, or several when MultiSelect), and AllowsFreeText also takes a
+// typed answer instead of an option. The other kinds take one typed value.
+// Default holds the pre-filled answer, in the same form as an answer.
+type Question struct {
+	ID             string           `json:"id"`
+	Kind           QuestionKind     `json:"kind"`
+	Title          string           `json:"title,omitempty"`
+	Description    string           `json:"description,omitempty"`
+	Required       bool             `json:"required,omitempty"`
+	MultiSelect    bool             `json:"multiSelect,omitempty"`
+	AllowsFreeText bool             `json:"allowsFreeText,omitempty"`
+	Options        []QuestionOption `json:"options,omitempty"`
+	Default        []string         `json:"default,omitempty"`
+}
+
+type QuestionOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type RuntimeEventID string
@@ -498,6 +582,16 @@ type RuntimeContentStreamKind string
 const (
 	RuntimeContentAssistantText RuntimeContentStreamKind = "assistant_text"
 	RuntimeContentReasoningText RuntimeContentStreamKind = "reasoning_text"
+)
+
+// StopReason says why a completed turn ended early. It is empty when the turn
+// finished normally; failures and cancellation are turn states instead.
+type StopReason string
+
+const (
+	StopReasonMaxTokens       StopReason = "max_tokens"
+	StopReasonMaxTurnRequests StopReason = "max_turn_requests"
+	StopReasonRefusal         StopReason = "refusal"
 )
 
 type RuntimeTurnState string
@@ -598,6 +692,7 @@ type ToolCall struct {
 	Query                string         `json:"query,omitempty"`
 	Cwd                  string         `json:"cwd,omitempty"`
 	Output               string         `json:"output,omitempty"`
+	OutputFormat         OutputFormat   `json:"outputFormat,omitempty"`
 	Error                string         `json:"error,omitempty"`
 	Locations            []ToolLocation `json:"locations,omitempty"`
 	Changes              []FileChange   `json:"changes,omitempty"`
@@ -605,6 +700,12 @@ type ToolCall struct {
 	ExitCode             *int           `json:"exitCode,omitempty"`
 	DurationMilliseconds *int64         `json:"durationMilliseconds,omitempty"`
 }
+
+// OutputFormat says how to render tool output. Empty means plain text, such
+// as command output.
+type OutputFormat string
+
+const OutputFormatMarkdown OutputFormat = "markdown"
 
 // ItemStatus is the provider-neutral lifecycle status of an item.
 type ItemStatus string
@@ -648,7 +749,7 @@ type RuntimeEventPayload struct {
 	ClientMessageID string                   `json:"-"`
 	Presentation    *PromptPresentation      `json:"-"`
 	TurnState       RuntimeTurnState         `json:"turnState,omitempty"`
-	StopReason      string                   `json:"stopReason,omitempty"`
+	StopReason      StopReason               `json:"stopReason,omitempty"`
 	StreamKind      RuntimeContentStreamKind `json:"streamKind,omitempty"`
 	Delta           string                   `json:"delta,omitempty"`
 	Attachments     []Attachment             `json:"attachments,omitempty"`
@@ -667,6 +768,10 @@ type RuntimeEventPayload struct {
 	Args       json.RawMessage  `json:"args,omitempty"`
 	Resolution json.RawMessage  `json:"resolution,omitempty"`
 	ToolCall   *ToolCall        `json:"toolCall,omitempty"`
+	// UserInput makes a request.opened a question instead of a permission
+	// request; Answers is set on its request.resolved when the user answered.
+	UserInput *UserInputRequest   `json:"userInput,omitempty"`
+	Answers   map[string][]string `json:"answers,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`

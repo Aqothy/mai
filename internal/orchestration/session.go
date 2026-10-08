@@ -30,7 +30,7 @@ type sessionUpdate struct {
 	Binding             *SessionBinding
 	TurnID              TurnID
 	TurnState           provider.RuntimeTurnState
-	StopReason          string
+	StopReason          provider.StopReason
 	Error               string
 	historyReplayFailed bool
 }
@@ -60,15 +60,11 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 		if !ok {
 			return nil
 		}
-		stopReason := ""
-		if update.Kind != sessionUpdateStopped || activeTurnID(*thread) != "" {
-			stopReason = update.StopReason
-		}
 		appended := appendEvent(Event{
 			Type:                EventThreadSessionStatusSet,
 			OccurredAt:          update.occurredAt,
 			Actor:               ActorKindServer,
-			Payload:             EventPayload{ThreadID: update.threadID, Session: session, StopReason: stopReason},
+			Payload:             EventPayload{ThreadID: update.threadID, Session: session, StopReason: update.StopReason},
 			historyReplayFailed: update.historyReplayFailed,
 		})
 		sequence = appended.Sequence
@@ -184,7 +180,7 @@ func deriveSessionTurnSettled(thread *Thread, update sessionUpdate, occurredAt t
 	switch update.TurnState {
 	case provider.RuntimeTurnFailed:
 		session.Status = SessionStatusError
-		session.LastError = firstNonEmpty(update.Error, update.StopReason, "Turn failed")
+		session.LastError = firstNonEmpty(update.Error, "Turn failed")
 	case provider.RuntimeTurnInterrupted, provider.RuntimeTurnCancelled:
 		session.Status = SessionStatusInterrupted
 	default:

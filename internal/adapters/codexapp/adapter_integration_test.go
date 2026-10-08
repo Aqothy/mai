@@ -242,7 +242,7 @@ func TestAuthoritativeNullServiceTierRemainsStandard(t *testing.T) {
 func TestInstanceAccountLoginUnionsAndParameterlessLogout(t *testing.T) {
 	instance := openFakeInstance(t, "auth", nil)
 
-	browser, err := instance.AuthenticateWithInput(testContext(t), provider.AuthenticateInput{MethodID: authMethodChatGPT})
+	browser, err := instance.Authenticate(testContext(t), provider.AuthenticateInput{MethodID: authMethodChatGPT})
 	if err != nil {
 		t.Fatalf("browser login: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestInstanceAccountLoginUnionsAndParameterlessLogout(t *testing.T) {
 		t.Fatalf("browser challenge = %#v", browser.Challenge)
 	}
 
-	device, err := instance.AuthenticateWithInput(testContext(t), provider.AuthenticateInput{MethodID: authMethodDevice})
+	device, err := instance.Authenticate(testContext(t), provider.AuthenticateInput{MethodID: authMethodDevice})
 	if err != nil {
 		t.Fatalf("device login: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestInstanceAccountLoginUnionsAndParameterlessLogout(t *testing.T) {
 		t.Fatalf("device challenge = %#v", device.Challenge)
 	}
 
-	apiKey, err := instance.AuthenticateWithInput(testContext(t), provider.AuthenticateInput{MethodID: authMethodAPIKey, Secret: "sk-test"})
+	apiKey, err := instance.Authenticate(testContext(t), provider.AuthenticateInput{MethodID: authMethodAPIKey, Secret: "sk-test"})
 	if err != nil {
 		t.Fatalf("API key login: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestInstanceAccountLoginUnionsAndParameterlessLogout(t *testing.T) {
 
 func TestInstanceRejectsMismatchedAccountLoginUnion(t *testing.T) {
 	instance := openFakeInstance(t, "bad-auth-union", nil)
-	_, err := instance.AuthenticateWithInput(testContext(t), provider.AuthenticateInput{MethodID: authMethodChatGPT})
+	_, err := instance.Authenticate(testContext(t), provider.AuthenticateInput{MethodID: authMethodChatGPT})
 	if err == nil || !strings.Contains(err.Error(), "returned type") {
 		t.Fatalf("mismatched login error = %v", err)
 	}
@@ -342,6 +342,44 @@ func TestInstanceApprovalResponseUsesStableDecision(t *testing.T) {
 	if resolved.Payload.Decision != provider.ApprovalDecisionAcceptForSession || resolved.Payload.Cancelled {
 		t.Fatalf("approval resolved payload = %#v", resolved.Payload)
 	}
+	waitForAcceptedReply(t, events)
+}
+
+// waitForAcceptedReply waits for the fake app-server to complete the turn,
+// which it does only after receiving the reply it expects.
+func waitForAcceptedReply(t *testing.T, events <-chan provider.RuntimeEvent) {
+	t.Helper()
+	completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if completed.Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("turn = %q %q, want completed after the expected reply", completed.Payload.TurnState, completed.Payload.Message)
+	}
+}
+
+// A Codex MCP server's form elicitation is asked as a user-input question and
+// answered with typed content.
+func TestInstanceAnswersMCPElicitation(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "elicitation", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+
+	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestOpened
+	})
+	if opened.Payload.UserInput == nil || len(opened.Payload.UserInput.Questions) != 1 {
+		t.Fatalf("elicitation opened = %#v", opened.Payload)
+	}
+	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"confirmed": {"true"}}}); err != nil {
+		t.Fatalf("respond to elicitation: %v", err)
+	}
+	resolved := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestResolved
+	})
+	if resolved.Payload.Decision != provider.ApprovalDecisionAccept || resolved.Payload.Answers["confirmed"][0] != "true" {
+		t.Fatalf("elicitation resolved payload = %#v", resolved.Payload)
+	}
+	waitForAcceptedReply(t, events)
 }
 
 func TestStopSessionResolvesPendingApproval(t *testing.T) {
@@ -792,6 +830,15 @@ func runFakeAppServer(scenario string) error {
 					return nil
 				}
 			}
+			if scenario == "elicitation" {
+				if err := writeFakeRequest(encoder, json.RawMessage("78"), "mcpServer/elicitation/request", map[string]any{
+					"threadId": "native-thread", "turnId": "native-turn", "serverName": "codex_apps", "mode": "form",
+					"message": "Allow this request?", "_meta": nil,
+					"requestedSchema": map[string]any{"type": "object", "required": []string{"confirmed"}, "properties": map[string]any{"confirmed": map[string]any{"type": "boolean"}}},
+				}); err != nil {
+					return err
+				}
+			}
 		case "qa/malformed":
 			if _, err := fmt.Fprintln(os.Stdout, "{not-json}"); err != nil {
 				return err
@@ -852,6 +899,17 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "":
+			// A valid reply to a server request completes the turn, which
+			// the tests wait for; an invalid one exits and fails the turn.
+			if string(message["id"]) == "78" {
+				if got := string(message["result"]); got != `{"action":"accept","content":{"confirmed":true}}` {
+					return fmt.Errorf("invalid elicitation response: %s", fakeMessageJSON(message))
+				}
+				if err := writeFakeTurnCompleted(encoder); err != nil {
+					return err
+				}
+				continue
+			}
 			if string(message["id"]) == "77" {
 				var result struct {
 					Decision string `json:"decision"`
@@ -862,6 +920,11 @@ func runFakeAppServer(scenario string) error {
 				}
 				if err := json.Unmarshal(message["result"], &result); err != nil || result.Decision != want {
 					return fmt.Errorf("invalid approval response: %s", fakeMessageJSON(message))
+				}
+				if scenario == "approval" {
+					if err := writeFakeTurnCompleted(encoder); err != nil {
+						return err
+					}
 				}
 				continue
 			}
@@ -1009,6 +1072,12 @@ func writeFakeRequest(encoder *json.Encoder, id json.RawMessage, method string, 
 		Method string          `json:"method"`
 		Params any             `json:"params"`
 	}{ID: id, Method: method, Params: params})
+}
+
+func writeFakeTurnCompleted(encoder *json.Encoder) error {
+	completed := fakeTurn("native-turn", "completed")
+	completed["completedAt"] = 2.0
+	return writeFakeNotification(encoder, "turn/completed", map[string]any{"threadId": "native-thread", "turn": completed})
 }
 
 func writeFakeNotification(encoder *json.Encoder, method string, params any) error {

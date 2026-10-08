@@ -14,6 +14,7 @@ package acp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Aqothy/go-acp/schema"
@@ -159,6 +160,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 // prompt. The caller must already have removed rec from the stream's slots.
 func (h *Instance) settlePrompt(stream *sessionStream, rec *pendingPrompt, resp schema.PromptResponse, err error) {
 	sessionID := stream.sessionID
+	h.noteAuthRequired(err)
 	if err != nil && sessionNotFoundError(err) {
 		// The agent dropped a session this thread still had bound in-process.
 		// Unbind it so the next prompt's StartSession falls back through
@@ -200,17 +202,13 @@ func (h *Instance) settlePrompt(stream *sessionStream, rec *pendingPrompt, resp 
 
 	payload := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted}
 	switch {
-	case wasCancelled:
+	case wasCancelled, err == nil && resp.StopReason == schema.StopReasonCancelled:
 		payload.TurnState = provider.RuntimeTurnCancelled
-		payload.StopReason = string(schema.StopReasonCancelled)
 	case err != nil:
 		payload.TurnState = provider.RuntimeTurnFailed
 		payload.Message = acpRequestError(err).Error()
 	default:
-		payload.StopReason = string(resp.StopReason)
-		if resp.StopReason == schema.StopReasonCancelled {
-			payload.TurnState = provider.RuntimeTurnCancelled
-		}
+		payload.StopReason = stopReasonFromACP(resp.StopReason)
 	}
 	if emitStart {
 		// A queued prompt can settle before it was ever dispatched (interrupt,
@@ -232,10 +230,9 @@ func (h *Instance) finishSettledTurn(stream *sessionStream, settled *promptColle
 			if session.collector == settled {
 				session.collector = nil
 			}
-			// The turn is over: post-cancel updates were dropped, so terminal
-			// statuses for its interrupted tools will never arrive. Drop the
-			// turn's tool reconciliation entries (open states and tombstones)
-			// instead of leaking them until session unbind.
+			// The turn is over: the agent sends nothing more for it, so drop
+			// the turn's tool reconciliation entries (open states and
+			// tombstones) instead of leaking them until session unbind.
 			for itemID, state := range session.toolStates {
 				if state.turnID == settled.turnID {
 					delete(session.toolStates, itemID)
@@ -362,36 +359,35 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 
 func (h *Instance) handleACPSessionUpdate(notification schema.SessionNotification) {
 	sessionID := string(notification.SessionID)
-	switch u := notification.Update; u.SessionUpdate {
+	u := notification.Update
+	switch u.SessionUpdate {
 	case schema.SessionUpdateConfigOptionUpdate:
 		h.cacheSessionState(sessionID, u.ConfigOptions, nil)
 		h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
 		return
 	case schema.SessionUpdateCurrentModeUpdate:
-		if u.CurrentModeID != nil {
-			ok := false
-			h.mu.Lock()
-			if session := h.sessionLocked(sessionID); session != nil && session.modes != nil {
-				session.modes.CurrentModeID = *u.CurrentModeID
-				ok = true
-			}
-			h.mu.Unlock()
-			if ok {
-				h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
-			}
+		if u.CurrentModeID != nil && h.applyCurrentMode(sessionID, *u.CurrentModeID) {
+			h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
 		}
 		return
 	}
-	update := sessionRuntimeEvent(notification)
+	update, ok := sessionRuntimeEvent(notification)
+	if !ok {
+		slog.Debug("ignoring ACP session update", "sessionId", sessionID, "sessionUpdate", u.SessionUpdate)
+		return
+	}
+	isToolUpdate := u.SessionUpdate == schema.SessionUpdateToolCall || u.SessionUpdate == schema.SessionUpdateToolCallUpdate
 	drop := false
 	h.mu.Lock()
 	session := h.sessionLocked(sessionID)
 	h.scopeRuntimeEventIDsLocked(sessionID, &update)
 	if collector := h.updateCollectorLocked(sessionID); collector != nil {
-		if collector.cancelled || update.Payload.ItemType == provider.ItemKindUserMessage {
-			// The optimistic user message is already in orchestration. ACP
-			// user_message_chunk updates during a live prompt are its echo. Display
-			// replay has no collector and routes through the session branch below.
+		// The optimistic user message is already in orchestration, so ACP
+		// user_message_chunk updates during a live prompt are its echo. After a
+		// cancel only tool updates are kept, as the spec asks, so an edit the
+		// agent finishes applying still lands with its diff. Display replay has
+		// no collector and routes through the session branch below.
+		if update.Payload.ItemType == provider.ItemKindUserMessage || (collector.cancelled && !isToolUpdate) {
 			drop = true
 		} else {
 			update.ThreadID = collector.threadID

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -531,28 +532,57 @@ func selectedOption(resp schema.RequestPermissionResponse) string {
 	return string(optionID)
 }
 
-func TestAuthCapabilityOnlyCountsStableAgentAuthMethods(t *testing.T) {
-	var unstable []schema.AuthMethod
-	if err := json.Unmarshal([]byte(`[{"type":"env_var","id":"env-login","name":"Env","vars":[]},{"type":"terminal","id":"terminal-login","name":"Terminal"}]`), &unstable); err != nil {
-		t.Fatalf("decode unstable auth methods: %v", err)
+// Terminal sign-in methods are offered (with their kind) and run the agent's
+// own command, never `authenticate`; unknown method types are skipped.
+func TestTerminalAuthMethods(t *testing.T) {
+	var methods []schema.AuthMethod
+	if err := json.Unmarshal([]byte(`[
+		{"type":"_future","id":"future-login","name":"Future"},
+		{"type":"terminal","id":"terminal-login","name":"Terminal","args":["--login"],"env":{"MODE":"login"}}
+	]`), &methods); err != nil {
+		t.Fatalf("decode auth methods: %v", err)
+	}
+	initResp := schema.InitializeResponse{AuthMethods: methods}
+	if !capabilitySet(initResp).Auth {
+		t.Fatal("a terminal method should advertise auth support")
+	}
+	if auth := authStateFromACP(initResp); len(auth.Methods) != 1 || auth.Methods[0].ID != "terminal-login" || auth.Methods[0].Kind != provider.AuthKindTerminal {
+		t.Fatalf("auth methods = %#v, want only the terminal method", auth.Methods)
 	}
 
-	initResp := schema.InitializeResponse{AuthMethods: unstable}
-	if capabilitySet(initResp).Auth {
-		t.Fatal("unstable-only auth methods should not advertise daemon auth support")
+	// No agent connection: a terminal method must never reach ACP authenticate.
+	h := &Instance{initialize: initResp, config: Config{Command: []string{"agent", "--acp"}, Env: map[string]string{"MODE": "acp", "TOKEN": "x"}}}
+	result, err := h.Authenticate(context.Background(), provider.AuthenticateInput{MethodID: "terminal-login"})
+	if err != nil || result.Terminal == nil {
+		t.Fatalf("Authenticate = %#v, %v; want a terminal command", result, err)
 	}
-	if auth := authStateFromACP(initResp); auth.Status != provider.AuthStatusUnknown || len(auth.Methods) != 0 {
-		t.Fatalf("auth state = %#v, want unknown with no invokable methods", auth)
+	command := *result.Terminal
+	if want := []string{"agent", "--acp", "--login"}; !slices.Equal(command.Argv, want) {
+		t.Fatalf("argv = %v, want %v", command.Argv, want)
 	}
-	if _, err := (&Instance{initialize: initResp}).resolveAuthMethodID("env-login"); err == nil {
-		t.Fatal("resolve unstable auth method err = nil")
+	// exec keeps the last of duplicated keys, so the method's MODE wins.
+	if want := []string{"MODE=acp", "TOKEN=x", "MODE=login"}; !slices.Equal(command.Env, want) {
+		t.Fatalf("env = %v, want %v", command.Env, want)
 	}
-	// The stable agent-method path is owned by the daemon's provider
-	// authenticate/logout RPC test.
+}
+
+// A request refused with auth_required marks the provider signed out, which is
+// what makes clients offer sign-in.
+func TestAuthRequiredMarksProviderUnauthenticated(t *testing.T) {
+	agent := &fakeWireAgent{onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+		a.respondError(id, -32000, "Authentication required")
+	}}
+	h := newWireTestHandle(t, agent)
+	if _, err := h.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: "/tmp"}); err == nil {
+		t.Fatal("StartSession err = nil, want auth_required")
+	}
+	if status := h.Info().Auth.Status; status != provider.AuthStatusUnauthenticated {
+		t.Fatalf("auth status = %q, want unauthenticated", status)
+	}
 }
 
 func TestSessionUpdateMapsAvailableCommands(t *testing.T) {
-	event := sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"[commit]"}}]}}`))
+	event, _ := sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"[commit]"}}]}}`))
 	if len(event.Payload.SlashCommands) != 1 {
 		t.Fatalf("slash commands = %#v, want one command", event.Payload.SlashCommands)
 	}
@@ -561,7 +591,7 @@ func TestSessionUpdateMapsAvailableCommands(t *testing.T) {
 	}
 
 	// An explicit empty list must still serialize so clients clear stale commands.
-	event = sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`))
+	event, _ = sessionRuntimeEvent(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`))
 	if event.Type != provider.RuntimeEventThreadMetadataUpdate || event.Payload.SlashCommands == nil || len(event.Payload.SlashCommands) != 0 {
 		t.Fatalf("event = %#v, want explicit empty slash-command update", event)
 	}
@@ -583,7 +613,7 @@ func TestSessionUpdateMapsNonTextAssistantContent(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"image","data":"base64","mimeType":"image/png"}}}`), &notification); err != nil {
 		t.Fatalf("decode image message update: %v", err)
 	}
-	event := sessionRuntimeEvent(notification)
+	event, _ := sessionRuntimeEvent(notification)
 	if event.Type != provider.RuntimeEventContentDelta || event.ItemID != "msg_1" || event.Payload.Delta != "" || event.Payload.StreamKind != provider.RuntimeContentAssistantText || len(event.Payload.Attachments) != 1 || event.Payload.Attachments[0].Kind != "image" || event.Payload.Attachments[0].Data != "base64" || event.Payload.Attachments[0].MimeType != "image/png" {
 		t.Fatalf("event = %#v, want image attachment preserved", event)
 	}
@@ -627,7 +657,7 @@ func TestSessionUpdateMapsPlan(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"sessionId":"sess","update":{"sessionUpdate":"plan","entries":[{"content":"Do it","priority":"high","status":"pending"}]}}`), &notification); err != nil {
 		t.Fatalf("decode plan update: %v", err)
 	}
-	event := sessionRuntimeEvent(notification)
+	event, _ := sessionRuntimeEvent(notification)
 	if event.Type != provider.RuntimeEventTurnPlanUpdated || len(event.Payload.PlanEntries) != 1 {
 		t.Fatalf("event = %#v, want one plan entry", event)
 	}
@@ -1242,7 +1272,7 @@ func TestInterruptTurnCancelFailureLeavesTurnLive(t *testing.T) {
 				gotDelta = true
 			}
 			if event.Type == provider.RuntimeEventTurnCompleted {
-				if !gotDelta || event.Payload.TurnState != provider.RuntimeTurnCompleted || event.Payload.StopReason != "end_turn" {
+				if !gotDelta || event.Payload.TurnState != provider.RuntimeTurnCompleted || event.Payload.StopReason != "" {
 					t.Fatalf("events after failed interrupt: delta=%v completion=%#v", gotDelta, event)
 				}
 				return
@@ -1731,6 +1761,55 @@ func TestReplayHistoryLoadsAndReturnsReplayedUpdates(t *testing.T) {
 	}
 }
 
+// session/load replays a flat stream; maiD rebuilds one turn per user message
+// and settles a tool the agent never finished, so history has turns and no
+// tool stays running forever.
+func TestReplayHistoryGroupsTurnsAndSettlesOpenTools(t *testing.T) {
+	userMessage := func(text string) map[string]any {
+		return map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": text}}
+	}
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"loadSession": true},
+		onLoadSession: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			a.sendUpdate("old", userMessage("first"))
+			a.sendUpdate("old", map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tool-1", "kind": "execute", "status": "in_progress"})
+			a.sendUpdate("old", userMessage("second"))
+			a.sendUpdate("old", agentMessageUpdate("msg-2", "done"))
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	result, err := h.StartSession(context.Background(), provider.StartSessionInput{
+		ThreadID:      "thread-1",
+		ResumeCursor:  marshalRaw(map[string]string{"sessionId": "old"}),
+		ReplayHistory: true,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	var got []string
+	turns := map[string]bool{}
+	for _, event := range result.Replay {
+		entry := string(event.Type)
+		if event.Payload.ItemStatus != "" {
+			entry += ":" + string(event.Payload.ItemStatus)
+		}
+		got = append(got, entry)
+		if event.TurnID == "" {
+			t.Fatalf("replayed event %s has no turn", entry)
+		}
+		turns[event.TurnID] = true
+	}
+	want := []string{
+		"turn.started", "item.completed:completed", "item.started:in_progress", "item.updated:interrupted", "turn.completed",
+		"turn.started", "item.completed:completed", "content.delta", "turn.completed",
+	}
+	if !slices.Equal(got, want) || len(turns) != 2 {
+		t.Fatalf("replay = %v across %d turns, want %v across 2", got, len(turns), want)
+	}
+}
+
 func TestReplayHistoryDiscardsFailedLoadBeforeRetry(t *testing.T) {
 	var h *Instance
 	var attemptsMu sync.Mutex
@@ -1964,9 +2043,13 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	}
 	h := newWireTestHandle(t, agent)
 	eventCh := make(chan provider.RuntimeEvent, 4)
+	toolCh := make(chan provider.RuntimeEvent, 4)
 	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventContentDelta {
+		switch event.Type {
+		case provider.RuntimeEventContentDelta:
 			eventCh <- event
+		case provider.RuntimeEventItemStarted, provider.RuntimeEventItemUpdated:
+			toolCh <- event
 		}
 	}
 	bindStreamingSession(h)
@@ -1989,10 +2072,16 @@ func TestSendTurnWaitsForCancelledPromptBeforeFollowUpSoNewUpdatesAreDelivered(t
 	case <-time.After(50 * time.Millisecond):
 	}
 	agent.sendUpdate("sess", agentMessageUpdate("msg-old", "late"))
+	// Tool updates after a cancel are still applied to the cancelled turn
+	// (prompt-turn spec), so an edit the agent finishes keeps its status.
+	agent.sendUpdate("sess", map[string]any{"sessionUpdate": "tool_call", "toolCallId": "edit-1", "kind": "edit", "status": "completed"})
+	if tool := waitFor(t, toolCh, "post-cancel tool update was dropped"); tool.TurnID != "turn-1" || tool.Payload.ItemStatus != provider.ItemStatusCompleted {
+		t.Fatalf("post-cancel tool event = %#v, want completed on turn-1", tool)
+	}
 	select {
 	case event := <-eventCh:
-		t.Fatalf("event while old prompt drains = %#v, want stale update suppressed", event)
-	case <-time.After(50 * time.Millisecond):
+		t.Fatalf("event while old prompt drains = %#v, want stale message suppressed", event)
+	default:
 	}
 
 	close(firstPromptRelease)

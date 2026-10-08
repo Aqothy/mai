@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -231,6 +232,9 @@ func (h *Instance) refreshToolInput(session *claudeSession, turn, itemID string,
 // any text the deltas did not deliver is emitted as a final suffix, and tool
 // blocks that never streamed are materialized.
 func (h *Instance) handleAssistant(session *claudeSession, message sdkMessage) {
+	if message.Error == "authentication_failed" {
+		h.markSignedOut()
+	}
 	var api apiMessage
 	if json.Unmarshal(message.Message, &api) != nil {
 		return
@@ -414,13 +418,17 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		_ = proc.client.respondControlError(requestID, "session process was replaced")
 		return
 	}
-	if request.Subtype != "can_use_tool" {
+	if request.Subtype != "can_use_tool" && request.Subtype != "elicitation" {
 		_ = proc.client.respondControlError(requestID, fmt.Sprintf("control request %q is not supported by maiD", request.Subtype))
 		return
 	}
 	h.mu.Lock()
 	turn := session.activeLocalTurn
 	h.mu.Unlock()
+	if request.Subtype == "elicitation" {
+		h.openElicitation(session, proc, requestID, request, turn)
+		return
+	}
 	pending := &pendingApproval{
 		controlRequestID: requestID,
 		requestID:        "claude:" + requestID,
@@ -438,25 +446,17 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		{ID: "decline", Name: "Decline", Kind: "reject_once"},
 	}
 	pending.requestType = approvalRequestType(request.ToolName)
+	var userInput *provider.UserInputRequest
 	switch request.ToolName {
 	case "AskUserQuestion":
 		var question askUserQuestion
-		if json.Unmarshal(request.Input, &question) == nil && len(question.Questions) == 1 {
-			pending.question = &question
-			first := question.Questions[0]
-			detail = first.Question
-			options = options[:0]
-			for index, option := range first.Options {
-				name := option.Label
-				options = append(options, provider.ApprovalOption{ID: fmt.Sprintf("answer:%d", index), Name: name, Kind: "allow_once"})
-			}
-			options = append(options, provider.ApprovalOption{ID: "decline", Name: "Dismiss", Kind: "reject_once"})
-		} else {
-			// Multi-question prompts cannot be expressed as one approval;
-			// steer the model to plain text instead of wedging the turn.
-			_ = proc.client.respondControl(requestID, map[string]any{"behavior": "deny", "message": "Structured multi-question prompts are not supported by this client. Ask the user in plain text."})
+		if json.Unmarshal(request.Input, &question) != nil || len(question.Questions) == 0 {
+			_ = proc.client.respondControl(requestID, map[string]any{"behavior": "deny", "message": "The question could not be shown. Ask the user in plain text."})
 			return
 		}
+		pending.question = &question
+		input := question.userInput()
+		userInput, options = &input, nil
 	case "ExitPlanMode":
 		options = []provider.ApprovalOption{
 			{ID: "accept", Name: "Approve plan", Kind: "allow_once"},
@@ -466,24 +466,52 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, ItemID: request.ToolUseID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, ItemID: request.ToolUseID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options, UserInput: userInput}})
+}
+
+// openElicitation surfaces an MCP server's elicitation as a user-input request.
+func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, turn string) {
+	input, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema)
+	if err != nil {
+		// The user never saw it, so it was neither accepted nor declined.
+		_ = proc.client.respondControl(requestID, map[string]any{"action": elicitation.ActionCancel})
+		return
+	}
+	pending := &pendingApproval{
+		controlRequestID: requestID,
+		requestID:        "claude:" + requestID,
+		localThread:      session.localThreadID,
+		localTurn:        turn,
+		isElicitation:    true,
+		form:             form,
+		client:           proc.client,
+	}
+	h.mu.Lock()
+	h.pendingApprovals[pending.requestID] = pending
+	h.mu.Unlock()
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{UserInput: &input}})
 }
 
 func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {
 	h.mu.Lock()
 	pending := h.pendingApprovals[input.RequestID]
-	if pending != nil {
-		delete(h.pendingApprovals, input.RequestID)
-	}
 	h.mu.Unlock()
 	if pending == nil {
 		return fmt.Errorf("Claude Code approval request %q is not pending", input.RequestID)
 	}
-	decision := string(input.Decision)
-	if input.OptionID != "" {
-		decision = input.OptionID
+	// Build the reply before claiming the request: an invalid answer must
+	// leave the question answerable.
+	payload, resolved, err := approvalResponse(pending, input)
+	if err != nil {
+		return err
 	}
-	payload, resolved := permissionResponse(pending, decision)
+	h.mu.Lock()
+	if h.pendingApprovals[input.RequestID] != pending {
+		h.mu.Unlock()
+		return fmt.Errorf("Claude Code approval request %q is not pending", input.RequestID)
+	}
+	delete(h.pendingApprovals, input.RequestID)
+	h.mu.Unlock()
 	if err := pending.client.respondControl(pending.controlRequestID, payload); err != nil {
 		h.mu.Lock()
 		if _, exists := h.pendingApprovals[input.RequestID]; !exists {
@@ -492,7 +520,11 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 		h.mu.Unlock()
 		return err
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: resolved}})
+	answers := input.Answers
+	if resolved != provider.ApprovalDecisionAccept {
+		answers = nil
+	}
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: resolved, Answers: answers}})
 	return nil
 }
 

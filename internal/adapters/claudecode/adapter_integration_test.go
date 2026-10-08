@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,11 @@ func fakeCLIMain() {
 					}
 				}
 			}
+			if strings.Contains(text, "SIGNED_OUT") {
+				fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "error": "authentication_failed", "message": map[string]any{"id": "msg_err", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Invalid API key · Please run /login"}}}})
+				emitResult(map[string]any{"subtype": "success", "is_error": true, "result": "Invalid API key · Please run /login"})
+				continue
+			}
 			if strings.Contains(text, "SLOW") {
 				slowTurn = true
 				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
@@ -201,6 +207,35 @@ func TestOpenInstanceProbe(t *testing.T) {
 	}
 	if info.Auth.Status != provider.AuthStatusAuthenticated {
 		t.Fatalf("auth = %#v, want authenticated from probe account", info.Auth)
+	}
+}
+
+// A turn the API refuses for authentication marks the provider signed out,
+// which is what makes clients offer sign-in; sign-in runs `claude auth login`.
+func TestAuthenticationFailureOffersSignIn(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "SIGNED_OUT"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if status := instance.Info().Auth.Status; status != provider.AuthStatusUnauthenticated {
+		t.Fatalf("auth status = %q, want unauthenticated", status)
+	}
+
+	result, err := instance.Authenticate(context.Background(), provider.AuthenticateInput{MethodID: authMethodConsole})
+	if err != nil || result.Terminal == nil {
+		t.Fatalf("Authenticate = %#v, %v; want a terminal command", result, err)
+	}
+	if want := append(slices.Clone(instance.config.Command), "auth", "login", "--console"); !slices.Equal(result.Terminal.Argv, want) {
+		t.Fatalf("argv = %v, want %v", result.Terminal.Argv, want)
+	}
+	if !slices.Contains(result.Terminal.Env, "CLAUDE_CONFIG_DIR="+instance.config.ConfigDir) {
+		t.Fatalf("env = %v, want the instance's config dir", result.Terminal.Env)
 	}
 }
 

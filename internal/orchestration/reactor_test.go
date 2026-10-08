@@ -497,8 +497,8 @@ func TestReactorStopConfirmsIntentAndSettlesActiveTurn(t *testing.T) {
 	if thread.Session.Status != SessionStatusStopped || thread.Session.ActiveTurnID != "" || thread.Session.StopRequested {
 		t.Fatalf("session after confirmed stop = %#v, want stopped with no active turn", thread.Session)
 	}
-	if thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State != TurnStateInterrupted || thread.LatestTurn.StopReason != "cancelled" || thread.LatestTurn.CompletedAt == nil {
-		t.Fatalf("latest turn after confirmed stop = %#v, want interrupted with cancelled stop reason", thread.LatestTurn)
+	if thread.LatestTurn.ID != oldTurnID || thread.LatestTurn.State != TurnStateInterrupted || thread.LatestTurn.CompletedAt == nil {
+		t.Fatalf("latest turn after confirmed stop = %#v, want interrupted", thread.LatestTurn)
 	}
 
 	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-after-stop", ThreadID: threadID, Message: &CommandMessage{Text: "next"}})

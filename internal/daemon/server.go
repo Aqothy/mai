@@ -450,6 +450,52 @@ func (s *Server) cleanupUnpersistedProviderFork(ctx context.Context, instanceID 
 	}
 }
 
+// authenticateProvider signs in to a provider. A provider whose sign-in is an
+// interactive program gets it run in a maiD terminal the client then opens;
+// once it exits successfully the provider restarts, as soon as no turn is
+// running on it, so it picks up the new credentials.
+func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+	result, err := s.providerService.Authenticate(ctx, instanceID, input)
+	if err != nil || result.Terminal == nil {
+		return result, err
+	}
+	terminalID, err := s.startCommandTerminal("Sign in to "+result.Instance.Name, *result.Terminal, func(exitCode *int) {
+		if exitCode == nil || *exitCode != 0 {
+			s.logger.Info("terminal sign-in did not succeed", "provider", instanceID, "exitCode", exitCode)
+			return
+		}
+		s.restartProviderWhenIdle(instanceID)
+	})
+	if err != nil {
+		return provider.AuthenticationResult{}, err
+	}
+	result.Challenge = &provider.AuthChallenge{Kind: provider.AuthKindTerminal, TerminalID: terminalID}
+	return result, nil
+}
+
+// providerIdlePollInterval is how often a pending provider restart checks
+// whether the provider's turns have finished.
+const providerIdlePollInterval = time.Second
+
+// restartProviderWhenIdle restarts a provider once no turn runs on it, so a
+// restart never cuts off another thread's turn.
+func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID) {
+	ticker := time.NewTicker(providerIdlePollInterval)
+	defer ticker.Stop()
+	for s.orchestration.ProviderTurnRunning(instanceID) {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
+	defer cancel()
+	if _, err := s.providerService.RestartInstance(ctx, instanceID); err != nil {
+		s.logger.Warn("restart provider after terminal sign-in", "provider", instanceID, "error", err)
+	}
+}
+
 func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 //	-list-only       advertise session/list without load/resume/close
 //	-linger          ignore stdin EOF, like real agents that only die with their process group
 //	-pidfile <path>  write the agent's pid at startup
+//	-login           act as the terminal sign-in program: exit 0 at once
 //
 // Per-turn behavior is scripted by the prompt text; see fakeACPAgent.prompt.
 func fakeACPAgentCommand(flags ...string) []string {
@@ -59,7 +60,12 @@ func TestHelperProcess(t *testing.T) {
 	listOnly := flags.Bool("list-only", false, "")
 	linger := flags.Bool("linger", false, "")
 	pidPath := flags.String("pidfile", "", "")
+	login := flags.Bool("login", false, "")
 	_ = flags.Parse(args)
+	if *login {
+		fmt.Println("signed in")
+		os.Exit(0)
+	}
 	if *pidPath != "" {
 		if err := os.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 			fakeAgentFail("write pidfile: %v", err)
@@ -127,9 +133,15 @@ type fakeACPMessage struct {
 		Cwd       string `json:"cwd"`
 		SessionID string `json:"sessionId"`
 		MethodID  string `json:"methodId"`
-		ConfigID  string `json:"configId"`
-		Value     string `json:"value"`
-		Prompt    []struct {
+		// ClientCapabilities is set on initialize.
+		ClientCapabilities struct {
+			Auth struct {
+				Terminal bool `json:"terminal"`
+			} `json:"auth"`
+		} `json:"clientCapabilities"`
+		ConfigID string `json:"configId"`
+		Value    string `json:"value"`
+		Prompt   []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"prompt"`
@@ -208,11 +220,16 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			sessionCapabilities["resume"] = map[string]any{}
 			sessionCapabilities["close"] = map[string]any{}
 		}
+		authMethods := []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
+		// Terminal methods may only be offered to clients that run them.
+		if msg.Params.ClientCapabilities.Auth.Terminal {
+			authMethods = append(authMethods, map[string]any{"id": "terminal-login", "name": "Terminal login", "type": "terminal", "args": []string{"-login"}})
+		}
 		result = map[string]any{
 			"protocolVersion":   1,
 			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "loadSession": !a.listOnly, "sessionCapabilities": sessionCapabilities},
 			"agentInfo":         map[string]any{"name": "fake-acp-agent"},
-			"authMethods":       []any{map[string]any{"id": "agent-login", "name": "Agent login"}},
+			"authMethods":       authMethods,
 		}
 	case "authenticate":
 		if msg.Params.MethodID != "agent-login" {

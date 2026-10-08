@@ -60,13 +60,22 @@ func validateApprovalDecision(commandType string, decision provider.ApprovalDeci
 	}
 }
 
-func validateApprovalResponse(commandType string, thread Thread, requestID ApprovalID, optionID string) error {
+func validateApprovalResponse(commandType string, thread Thread, requestID ApprovalID, decision provider.ApprovalDecision, optionID string, answers map[string][]string) error {
 	approval := thread.Timeline.Approval(string(requestID))
 	if approval == nil {
 		return fmt.Errorf("%s request %q is not pending", commandType, requestID)
 	}
 	if approval.Status != ApprovalStatusPending {
 		return fmt.Errorf("%s request %q is already resolved", commandType, requestID)
+	}
+	if approval.UserInput != nil {
+		if decision == provider.ApprovalDecisionAcceptForSession || optionID != "" {
+			return fmt.Errorf("%s request %q is a question; answer it with accept, decline or cancel", commandType, requestID)
+		}
+		return nil
+	}
+	if len(answers) > 0 {
+		return fmt.Errorf("%s request %q is not a question and takes no answers", commandType, requestID)
 	}
 	if optionID == "" {
 		return nil
@@ -77,4 +86,20 @@ func validateApprovalResponse(commandType string, thread Thread, requestID Appro
 		}
 	}
 	return fmt.Errorf("%s optionId %q was not offered for request %q", commandType, optionID, requestID)
+}
+
+// validateCommandMessage checks a client prompt: it must say something, and
+// its attachments must be kinds every layer understands.
+func validateCommandMessage(commandType string, message *CommandMessage) error {
+	if message == nil || (message.Text == "" && len(message.Attachments) == 0 && len(message.Annotations) == 0) {
+		return fmt.Errorf("%s requires message text, attachments or annotations", commandType)
+	}
+	for _, attachment := range message.Attachments {
+		switch attachment.Kind {
+		case provider.AttachmentImage, provider.AttachmentAudio, provider.AttachmentResource, provider.AttachmentResourceLink:
+		default:
+			return fmt.Errorf("%s attachment kind %q is not supported", commandType, attachment.Kind)
+		}
+	}
+	return nil
 }

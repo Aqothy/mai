@@ -36,16 +36,11 @@ type ProviderInstance interface {
 	StopSession(ctx context.Context, input provider.StopSessionInput) error
 }
 
+// Authenticator is the optional sign-in facet. Authenticate signs in directly,
+// returns a challenge the user finishes elsewhere (browser, device code), or
+// returns a Terminal command for the host to run interactively.
 type Authenticator interface {
-	Authenticate(ctx context.Context, methodID string) (provider.InstanceInfo, error)
-	Logout(ctx context.Context) (provider.InstanceInfo, error)
-}
-
-// LoginProvider is the richer authentication facet used by providers with
-// browser/device-code flows or secret-bearing methods. Authenticator remains
-// supported for ACP's stable agent-handled authentication surface.
-type LoginProvider interface {
-	AuthenticateWithInput(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error)
+	Authenticate(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error)
 	Logout(ctx context.Context) (provider.InstanceInfo, error)
 }
 
@@ -652,21 +647,23 @@ func (s *Service) Authenticate(ctx context.Context, instanceID provider.Instance
 	if err != nil {
 		return provider.AuthenticationResult{}, err
 	}
-	if !instance.Info().Capabilities.Auth {
+	authenticator, ok := instance.(Authenticator)
+	if !ok || !instance.Info().Capabilities.Auth {
 		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
 	}
-	if loginProvider, ok := instance.(LoginProvider); ok {
-		return loginProvider.AuthenticateWithInput(ctx, input)
+	return authenticator.Authenticate(ctx, input)
+}
+
+// RestartInstance replaces a running instance with a fresh process using its
+// current configuration, e.g. so an agent re-initializes after signing in.
+func (s *Service) RestartInstance(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
+	s.mu.Lock()
+	spec, ok := s.instanceSpecs[instanceID]
+	s.mu.Unlock()
+	if !ok {
+		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not running", instanceID)
 	}
-	authenticator, supportsAuth := instance.(Authenticator)
-	if !supportsAuth {
-		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
-	}
-	if input.Secret != "" {
-		return provider.AuthenticationResult{}, fmt.Errorf("provider authentication method does not accept a secret")
-	}
-	info, err := authenticator.Authenticate(ctx, input.MethodID)
-	return provider.AuthenticationResult{Instance: info}, err
+	return s.startInstance(ctx, spec, true, false)
 }
 
 func (s *Service) Logout(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
@@ -674,15 +671,9 @@ func (s *Service) Logout(ctx context.Context, instanceID provider.InstanceID) (p
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	if !instance.Info().Capabilities.Logout {
+	authenticator, ok := instance.(Authenticator)
+	if !ok || !instance.Info().Capabilities.Logout {
 		return provider.InstanceInfo{}, fmt.Errorf("provider does not support logout")
-	}
-	if loginProvider, ok := instance.(LoginProvider); ok {
-		return loginProvider.Logout(ctx)
-	}
-	authenticator, supportsAuth := instance.(Authenticator)
-	if !supportsAuth {
-		return provider.InstanceInfo{}, fmt.Errorf("provider does not support authentication")
 	}
 	return authenticator.Logout(ctx)
 }

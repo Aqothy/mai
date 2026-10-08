@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -84,6 +86,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	}
 
 	h := newInstance(emit)
+	h.config = config
 	h.cmd = cmd
 	h.stdin = stdin
 	h.stdout = stdout
@@ -122,7 +125,10 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 }
 
 type Instance struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// config is the agent's launch configuration, reused to run terminal
+	// sign-in methods.
+	config        Config
 	cmd           *exec.Cmd
 	stdin         io.WriteCloser
 	stdout        io.ReadCloser
@@ -181,6 +187,9 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 	}).OnRequestPermission(func(ctx context.Context, call acp.ClientRequest[schema.RequestPermissionRequest]) (schema.RequestPermissionResponse, error) {
 		return h.requestPermission(ctx, call.Params)
 	})
+	acp.RegisterClientRequest(app, schema.ClientMethodElicitationCreate, func(ctx context.Context, call acp.ClientRequest[json.RawMessage]) (schema.CreateElicitationResponse, error) {
+		return h.createElicitation(ctx, call.Params)
+	})
 	conn, err := app.Connect(h.ctx, rwc)
 	if err != nil {
 		return fmt.Errorf("connect ACP client: %w", err)
@@ -192,9 +201,21 @@ func (h *Instance) connectClient(rwc io.ReadWriteCloser, logger *slog.Logger) er
 
 func (h *Instance) initializeConnection(ctx context.Context) (schema.InitializeResponse, error) {
 	title := "Mai Daemon"
+	terminalAuth := true
 	initReq := schema.InitializeRequest{
 		ProtocolVersion: schema.CurrentProtocolVersion,
 		ClientInfo:      &schema.Implementation{Name: "maiD", Title: &title, Version: "0.1.0"},
+		// fs and terminal stay unadvertised on purpose (see connectClient).
+		ClientCapabilities: &schema.ClientCapabilities{
+			Auth: &schema.AuthCapabilities{Terminal: &terminalAuth},
+			Elicitation: &schema.ElicitationCapabilities{
+				Form: &schema.ElicitationFormCapabilities{},
+				URL:  &schema.ElicitationUrlCapabilities{},
+			},
+			Session: &schema.ClientSessionCapabilities{
+				ConfigOptions: &schema.SessionConfigOptionsCapabilities{Boolean: &schema.BooleanConfigOptionCapabilities{}},
+			},
+		},
 	}
 	initResp, err := h.agentPeer.Initialize(ctx, initReq)
 	if err != nil {
@@ -224,20 +245,56 @@ func cloneInstanceInfo(conn provider.InstanceInfo) provider.InstanceInfo {
 	return conn
 }
 
-func (h *Instance) Authenticate(ctx context.Context, methodID string) (provider.InstanceInfo, error) {
-	resolvedMethodID, err := h.resolveAuthMethodID(methodID)
-	if err != nil {
-		return provider.InstanceInfo{}, err
+// Authenticate signs in with an advertised method: agent methods run through
+// ACP authenticate; terminal methods run the agent's own command with the
+// method's args and env, which the host shows in a terminal.
+func (h *Instance) Authenticate(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+	if input.Secret != "" {
+		return provider.AuthenticationResult{}, fmt.Errorf("ACP sign-in methods take no secret")
 	}
-	_, err = h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: schema.AuthMethodId(resolvedMethodID)})
-	if err != nil {
-		return provider.InstanceInfo{}, acpRequestError(err)
+	method, ok := h.authMethod(input.MethodID)
+	if !ok || !isSupportedAuthMethod(method) {
+		return provider.AuthenticationResult{}, fmt.Errorf("ACP auth method %q was not advertised as a supported method", input.MethodID)
 	}
-
+	if !isAgentAuthMethod(method) {
+		command := provider.TerminalCommand{Argv: append(slices.Clone(h.config.Command), method.Args...)}
+		for _, env := range []map[string]string{h.config.Env, method.Env} {
+			for _, key := range slices.Sorted(maps.Keys(env)) {
+				command.Env = append(command.Env, key+"="+env[key])
+			}
+		}
+		return provider.AuthenticationResult{Instance: h.Info(), Terminal: &command}, nil
+	}
+	if _, err := h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: method.ID}); err != nil {
+		return provider.AuthenticationResult{}, acpRequestError(err)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.info.Auth.Status = provider.AuthStatusAuthenticated
-	return cloneInstanceInfo(h.info), nil
+	return provider.AuthenticationResult{Instance: cloneInstanceInfo(h.info)}, nil
+}
+
+func (h *Instance) authMethod(methodID string) (schema.AuthMethod, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, method := range h.initialize.AuthMethods {
+		if string(method.ID) == methodID {
+			return method, true
+		}
+	}
+	return schema.AuthMethod{}, false
+}
+
+// noteAuthRequired records that the agent refused a request with
+// auth_required, so clients offer sign-in for this provider.
+func (h *Instance) noteAuthRequired(err error) {
+	var requestErr *provider.RequestError
+	if !errors.As(acpRequestError(err), &requestErr) || int64(requestErr.Code) != acp.CodeAuthentication {
+		return
+	}
+	h.mu.Lock()
+	h.info.Auth.Status = provider.AuthStatusUnauthenticated
+	h.mu.Unlock()
 }
 
 func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
@@ -307,25 +364,6 @@ func (h *Instance) closeIO() error {
 		errs = append(errs, h.stdout.Close())
 	}
 	return errors.Join(errs...)
-}
-
-func (h *Instance) resolveAuthMethodID(methodID string) (string, error) {
-	if methodID == "" {
-		return "", fmt.Errorf("ACP authenticate requires a method id")
-	}
-	h.mu.Lock()
-	methods := append([]schema.AuthMethod(nil), h.initialize.AuthMethods...)
-	h.mu.Unlock()
-	for _, method := range methods {
-		if string(method.ID) != methodID {
-			continue
-		}
-		if !isStableAuthMethod(method) {
-			return "", fmt.Errorf("ACP auth method %q is an unstable client-driven %q method", methodID, stringValue(method.Type))
-		}
-		return methodID, nil
-	}
-	return "", fmt.Errorf("ACP auth method %q was not advertised as a supported agent auth method", methodID)
 }
 
 func newID() string {

@@ -59,13 +59,18 @@ type Session struct {
 	terminateOnce sync.Once
 }
 
-// SpawnSpec describes one shell launch.
+// SpawnSpec describes one terminal launch: the user's login shell, or
+// Command when set.
 type SpawnSpec struct {
 	// Cwd is resolved to the user's home directory when empty. It must name
 	// an existing directory.
 	Cwd     string
 	Columns uint16
 	Rows    uint16
+	// Command is the argv to run instead of the login shell.
+	Command []string
+	// Env adds KEY=VALUE entries, overriding same-named variables.
+	Env []string
 }
 
 func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
@@ -77,12 +82,18 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		return nil, err
 	}
 
-	shell := resolveShell()
-	cmd := exec.Command(shell)
-	// The dash-prefixed argv[0] asks the shell to behave as a login shell.
-	cmd.Args = []string{"-" + filepath.Base(shell)}
+	var cmd *exec.Cmd
+	if len(spec.Command) > 0 {
+		cmd = exec.Command(spec.Command[0], spec.Command[1:]...)
+	} else {
+		shell := resolveShell()
+		cmd = exec.Command(shell)
+		// The dash-prefixed argv[0] asks the shell to behave as a login shell.
+		cmd.Args = []string{"-" + filepath.Base(shell)}
+	}
 	cmd.Dir = cwd
-	cmd.Env = sessionEnv()
+	// exec keeps the last value of a duplicated key, so spec.Env overrides.
+	cmd.Env = append(sessionEnv(), spec.Env...)
 
 	s := &Session{
 		TerminalID: terminalID,
@@ -108,7 +119,7 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: spec.Rows, Cols: spec.Columns})
 	if err != nil {
 		attachVT.Close()
-		return nil, fmt.Errorf("spawn %s: %w", shell, err)
+		return nil, fmt.Errorf("spawn %s: %w", cmd.Path, err)
 	}
 	s.ptyFile = ptyFile
 	s.status = StatusRunning

@@ -78,14 +78,14 @@ type Thread struct {
 }
 
 type Turn struct {
-	ID                 TurnID     `json:"turnId"`
-	State              TurnState  `json:"state"`
-	RequestedAt        time.Time  `json:"requestedAt"`
-	StartedAt          *time.Time `json:"startedAt,omitempty"`
-	CompletedAt        *time.Time `json:"completedAt,omitempty"`
-	StopReason         string     `json:"stopReason,omitempty"`
-	Error              string     `json:"error,omitempty"`
-	InterruptRequested bool       `json:"interruptRequested,omitempty"`
+	ID                 TurnID              `json:"turnId"`
+	State              TurnState           `json:"state"`
+	RequestedAt        time.Time           `json:"requestedAt"`
+	StartedAt          *time.Time          `json:"startedAt,omitempty"`
+	CompletedAt        *time.Time          `json:"completedAt,omitempty"`
+	StopReason         provider.StopReason `json:"stopReason,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	InterruptRequested bool                `json:"interruptRequested,omitempty"`
 }
 
 type Message struct {
@@ -107,8 +107,12 @@ type Approval struct {
 	Status    ApprovalStatus            `json:"status"`
 	Decision  provider.ApprovalDecision `json:"decision,omitempty"`
 	OptionID  string                    `json:"optionId,omitempty"`
-	CreatedAt time.Time                 `json:"createdAt"`
-	UpdatedAt time.Time                 `json:"updatedAt"`
+	// UserInput is set when the agent asks the user a question rather than
+	// for permission; Answers holds what the user submitted.
+	UserInput *provider.UserInputRequest `json:"userInput,omitempty"`
+	Answers   map[string][]string        `json:"answers,omitempty"`
+	CreatedAt time.Time                  `json:"createdAt"`
+	UpdatedAt time.Time                  `json:"updatedAt"`
 }
 
 // SessionBinding is orchestration's view of the provider session for a thread.
@@ -178,6 +182,7 @@ type ToolCallSummary struct {
 	QueryPreview         string                  `json:"queryPreview,omitempty"`
 	Cwd                  string                  `json:"cwd,omitempty"`
 	OutputPreview        string                  `json:"outputPreview,omitempty"`
+	OutputFormat         provider.OutputFormat   `json:"outputFormat,omitempty"`
 	ErrorPreview         string                  `json:"errorPreview,omitempty"`
 	Locations            []provider.ToolLocation `json:"locations,omitempty"`
 	LocationCount        int                     `json:"locationCount,omitempty"`
@@ -200,10 +205,10 @@ type FileChangeSummary struct {
 // ToolAttachmentSummary excludes inline attachment data while retaining
 // enough metadata to describe the result before full details are requested.
 type ToolAttachmentSummary struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name,omitempty"`
-	MimeType string `json:"mimeType,omitempty"`
-	URI      string `json:"uri,omitempty"`
+	Kind     provider.AttachmentKind `json:"kind"`
+	Name     string                  `json:"name,omitempty"`
+	MimeType string                  `json:"mimeType,omitempty"`
+	URI      string                  `json:"uri,omitempty"`
 }
 
 type TimelineEntryKind string

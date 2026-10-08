@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -61,6 +62,58 @@ type pendingApproval struct {
 	localThread  string
 	localTurn    string
 	requestType  provider.RuntimeRequestType
+	kind         pendingKind
+	// form is an elicitation's form; nil for a URL elicitation.
+	form *elicitation.Form
+}
+
+// pendingKind is what a server request asks, which decides its reply format.
+type pendingKind int
+
+const (
+	// pendingApprovalRequest asks permission and is answered with a decision.
+	pendingApprovalRequest pendingKind = iota
+	// pendingElicitation is an MCP server's elicitation, answered with an
+	// action and, for a form, content.
+	pendingElicitation
+)
+
+// reply builds the server-request response for the user's answer.
+func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+	switch p.kind {
+	case pendingElicitation:
+		action := elicitation.ActionFor(input.Decision)
+		reply := map[string]any{"action": action, "content": nil}
+		if action == elicitation.ActionAccept && p.form != nil {
+			content, err := p.form.Content(input.Answers)
+			if err != nil {
+				return nil, "", err
+			}
+			reply["content"] = content
+		}
+		return reply, action.Decision(), nil
+	}
+	// Approval options are named after the decisions they make.
+	decision := input.Decision
+	if input.OptionID != "" {
+		decision = provider.ApprovalDecision(input.OptionID)
+	}
+	switch decision {
+	case provider.ApprovalDecisionAccept, provider.ApprovalDecisionAcceptForSession, provider.ApprovalDecisionDecline:
+	default:
+		decision = provider.ApprovalDecisionCancel
+	}
+	return map[string]any{"decision": decision}, decision, nil
+}
+
+// cancelReply answers the request as cancelled, in its own format.
+func (p *pendingApproval) cancelReply() map[string]any {
+	switch p.kind {
+	case pendingElicitation:
+		return map[string]any{"action": elicitation.ActionCancel, "content": nil}
+	default:
+		return map[string]any{"decision": "cancel"}
+	}
 }
 
 type optionsState struct {
@@ -272,7 +325,7 @@ func (h *Instance) handleTransportClosed(err error) {
 			activeTurns = append(activeTurns, provider.RuntimeEvent{
 				Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID,
 				TurnID:  h.resolveTurnLocked(session, nativeTurn),
-				Payload: provider.RuntimeEventPayload{TurnState: state, StopReason: "connection_closed", Message: message},
+				Payload: provider.RuntimeEventPayload{TurnState: state, Message: message},
 			})
 		}
 		// A pending turn/start is released by rpc.fail and its caller records

@@ -83,10 +83,10 @@ type EventPayload struct {
 	Attachments           []provider.Attachment       `json:"attachments,omitempty"`
 	Annotations           []provider.PromptAnnotation `json:"annotations,omitempty"`
 	TurnID                TurnID                      `json:"turnId,omitempty"`
-	// StopReason is the provider's reason a turn settled (end_turn, max_tokens,
-	// refusal, ...), carried on session-status-set settle events so clients can
-	// surface latestTurn.stopReason.
-	StopReason string `json:"stopReason,omitempty"`
+	// StopReason says why a completed turn ended early, carried on
+	// session-status-set settle events so clients can surface
+	// latestTurn.stopReason.
+	StopReason provider.StopReason `json:"stopReason,omitempty"`
 	// Steering records that a turn-start command was accepted against an
 	// already-running turn. It is internal reactor metadata, not a wire field.
 	Steering  bool                      `json:"-"`
@@ -95,6 +95,7 @@ type EventPayload struct {
 	RequestID ApprovalID                `json:"requestId,omitempty"`
 	Decision  provider.ApprovalDecision `json:"decision,omitempty"`
 	OptionID  string                    `json:"optionId,omitempty"`
+	Answers   map[string][]string       `json:"answers,omitempty"`
 	Value     any                       `json:"value,omitempty"`
 	Item      *Item                     `json:"item,omitempty"`
 	Plan      *Plan                     `json:"plan,omitempty"`
@@ -151,6 +152,8 @@ type ApprovalEvent struct {
 	Decision    provider.ApprovalDecision   `json:"decision,omitempty"`
 	OptionID    string                      `json:"optionId,omitempty"`
 	Cancelled   bool                        `json:"cancelled,omitempty"`
+	UserInput   *provider.UserInputRequest  `json:"userInput,omitempty"`
+	Answers     map[string][]string         `json:"answers,omitempty"`
 }
 
 func marshalEventPayload(value any) json.RawMessage {

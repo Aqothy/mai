@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,8 +20,8 @@ func authStateFromACP(initResp schema.InitializeResponse) provider.Auth {
 	// methods say auth is AVAILABLE, not that it is required: ACP has no
 	// auth-status probe, and agents (e.g. claude-code-acp) advertise their login
 	// method even while already authenticated. So report unknown; clients render
-	// the methods as actions and open the auth flow only when an
-	// operation fails with auth_required, never off this status.
+	// the methods as actions, and the status turns unauthenticated once a
+	// request fails with auth_required (noteAuthRequired).
 	status := provider.AuthStatusAuthenticated
 	if len(initResp.AuthMethods) > 0 {
 		status = provider.AuthStatusUnknown
@@ -45,7 +46,7 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 		LoadReplay:            boolValue(capabilities.LoadSession),
 		Resume:                sessionResumeSupported(capabilities),
 		AdditionalDirectories: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.AdditionalDirectories != nil,
-		Auth:                  hasStableAuthMethod(initResp.AuthMethods),
+		Auth:                  hasSupportedAuthMethod(initResp.AuthMethods),
 		Logout:                capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
@@ -89,20 +90,18 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 	for _, attachment := range input.Attachments {
 		var block schema.ContentBlock
 		switch attachment.Kind {
-		case "", "text":
-			block = schema.TextBlock(attachment.Data)
-		case "image":
+		case provider.AttachmentImage:
 			if !caps.Image {
 				return nil, fmt.Errorf("ACP agent does not accept image content")
 			}
 			block = schema.ImageBlock(attachment.Data, attachment.MimeType)
 			block.URI = stringPtr(attachment.URI)
-		case "audio":
+		case provider.AttachmentAudio:
 			if !caps.Audio {
 				return nil, fmt.Errorf("ACP agent does not accept audio content")
 			}
 			block = schema.AudioBlock(attachment.Data, attachment.MimeType)
-		case "resource", "embedded_context", "embeddedContext":
+		case provider.AttachmentResource:
 			if !caps.EmbeddedContext {
 				return nil, fmt.Errorf("ACP agent does not accept embedded resource content")
 			}
@@ -116,7 +115,7 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 				resource.Blob = stringPtr(attachment.Data)
 			}
 			block = schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource}
-		case "resource_link", "resourceLink":
+		case provider.AttachmentResourceLink:
 			name := attachment.Name
 			if name == "" {
 				name = attachment.URI
@@ -130,7 +129,7 @@ func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapa
 				block.Size = &size
 			}
 		default:
-			return nil, fmt.Errorf("unsupported generic attachment kind %q for ACP", attachment.Kind)
+			return nil, fmt.Errorf("unsupported attachment kind %q for ACP", attachment.Kind)
 		}
 		block.Annotations = annotationsToACP(attachment.Annotations)
 		block.Meta = cloneMetadata(attachment.Metadata)
@@ -253,7 +252,10 @@ func permissionDecisionFromResponse(options []schema.PermissionOption, resp sche
 	return provider.ApprovalDecisionCancel, ""
 }
 
-func sessionRuntimeEvent(notification schema.SessionNotification) provider.RuntimeEvent {
+// sessionRuntimeEvent converts a session/update into a runtime event. It
+// reports false for variants maiD does not render (unknown or unstable ones
+// the agent sends regardless), which callers drop.
+func sessionRuntimeEvent(notification schema.SessionNotification) (provider.RuntimeEvent, bool) {
 	update := provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Provider:  DriverKind,
@@ -279,11 +281,11 @@ func sessionRuntimeEvent(notification schema.SessionNotification) provider.Runti
 	case schema.SessionUpdateToolCall:
 		update.Type = provider.RuntimeEventItemStarted
 		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
+		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(toolCallStatus(u.Status))), Title: stringValue(u.Title)}
 	case schema.SessionUpdateToolCallUpdate:
 		update.Type = provider.RuntimeEventItemUpdated
 		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
+		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(toolCallStatus(u.Status))), Title: stringValue(u.Title)}
 	case schema.SessionUpdatePlan:
 		update.Type = provider.RuntimeEventTurnPlanUpdated
 		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries)}
@@ -297,10 +299,24 @@ func sessionRuntimeEvent(notification schema.SessionNotification) provider.Runti
 		update.Type = provider.RuntimeEventThreadTokenUsage
 		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u)}
 	default:
-		update.Type = provider.RuntimeEventRuntimeWarning
-		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update"}
+		return provider.RuntimeEvent{}, false
 	}
-	return update
+	return update, true
+}
+
+// stopReasonFromACP keeps the stop reasons that say a completed turn ended
+// early; end_turn is a normal finish.
+func stopReasonFromACP(reason schema.StopReason) provider.StopReason {
+	switch reason {
+	case schema.StopReasonMaxTokens:
+		return provider.StopReasonMaxTokens
+	case schema.StopReasonMaxTurnRequests:
+		return provider.StopReasonMaxTurnRequests
+	case schema.StopReasonRefusal:
+		return provider.StopReasonRefusal
+	default:
+		return ""
+	}
 }
 
 func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachment {
@@ -334,7 +350,10 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 	}
 	switch block.Type {
 	case schema.ContentBlockTypeImage, schema.ContentBlockTypeAudio:
-		attachment.Kind = block.Type
+		attachment.Kind = provider.AttachmentImage
+		if block.Type == schema.ContentBlockTypeAudio {
+			attachment.Kind = provider.AttachmentAudio
+		}
 		if block.Data != nil {
 			attachment.Data = *block.Data
 		}
@@ -342,7 +361,7 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 			attachment.MimeType = *block.MimeType
 		}
 	case schema.ContentBlockTypeResourceLink:
-		attachment.Kind = "resource_link"
+		attachment.Kind = provider.AttachmentResourceLink
 		if block.Name != nil {
 			attachment.Name = *block.Name
 		}
@@ -353,7 +372,7 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		if block.Resource == nil {
 			return provider.Attachment{}, false
 		}
-		attachment.Kind = "resource"
+		attachment.Kind = provider.AttachmentResource
 		attachment.URI = block.Resource.URI
 		attachment.ResourceMetadata = cloneMetadata(block.Resource.Meta)
 		if block.Resource.MimeType != nil {
@@ -458,6 +477,7 @@ func itemStatusFromACP(status string) provider.ItemStatus {
 // old/new text — on every sparse update.
 type toolCallPatch struct {
 	title     *string
+	name      *string
 	kind      *schema.ToolKind
 	status    *schema.ToolCallStatus
 	content   []schema.ToolCallContent
@@ -470,6 +490,12 @@ type toolCallPatch struct {
 	// content blocks — without client terminal support, command output often
 	// arrives only here. Only bounded text is ever extracted from it.
 	rawOutput any
+	// terminalOutput accumulates codex-acp's `_meta.terminal_output_delta`
+	// chunks (its output channel for clients without terminal support); a
+	// patch carries just the new chunk, which overlay appends.
+	terminalOutput string
+	// exitCode comes from codex-acp's `_meta.terminal_exit`.
+	exitCode *int
 }
 
 // toolCallPatchFromUpdate extracts the sparse patch a tool_call or
@@ -480,14 +506,18 @@ func toolCallPatchFromUpdate(u schema.SessionUpdate) *toolCallPatch {
 	default:
 		return nil
 	}
+	output, exitCode := terminalMeta(u.Meta)
 	return &toolCallPatch{
-		title:     u.Title,
-		kind:      u.Kind,
-		status:    u.Status,
-		content:   toolCallContentFromAny(u.Content),
-		locations: u.Locations,
-		rawInput:  u.RawInput,
-		rawOutput: u.RawOutput,
+		title:          u.Title,
+		name:           u.Name,
+		terminalOutput: output,
+		exitCode:       exitCode,
+		kind:           u.Kind,
+		status:         toolCallStatus(u.Status),
+		content:        toolCallContentFromAny(u.Content),
+		locations:      u.Locations,
+		rawInput:       u.RawInput,
+		rawOutput:      u.RawOutput,
 	}
 }
 
@@ -544,7 +574,36 @@ func (s *toolCallPatch) overlay(patch *toolCallPatch) *toolCallPatch {
 	if patch.rawOutput != nil {
 		s.rawOutput = patch.rawOutput
 	}
+	if patch.name != nil {
+		s.name = patch.name
+	}
+	if patch.exitCode != nil {
+		s.exitCode = patch.exitCode
+	}
+	if room := toolOutputCharacterLimit - len(s.terminalOutput); room > 0 && patch.terminalOutput != "" {
+		s.terminalOutput += boundedText(patch.terminalOutput, room)
+	}
 	return s
+}
+
+// terminalMeta reads codex-acp's command output conventions from a tool
+// update's `_meta`: `terminal_output_delta: {data}` chunks and
+// `terminal_exit: {exit_code}`. They are not part of the ACP spec, but they
+// are the only place codex-acp reports output to a client that, like maiD,
+// does not advertise terminals.
+func terminalMeta(meta map[string]any) (string, *int) {
+	var output string
+	if delta, ok := meta["terminal_output_delta"].(map[string]any); ok {
+		output, _ = delta["data"].(string)
+	}
+	var exitCode *int
+	if exit, ok := meta["terminal_exit"].(map[string]any); ok {
+		if code, ok := exit["exit_code"].(float64); ok {
+			value := int(code)
+			exitCode = &value
+		}
+	}
+	return output, exitCode
 }
 
 // toolCall converts the accumulated adapter-private snapshot into the public
@@ -557,16 +616,25 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 	providerKind := strings.ToLower(strings.TrimSpace(toolKindString(s.kind)))
 	call := &provider.ToolCall{
 		Action:       toolActionFromACP(providerKind),
+		Name:         stringValue(s.name),
 		ProviderKind: providerKind,
+		ExitCode:     s.exitCode,
 		Locations:    toolLocationsFromACP(s.locations),
 		Changes:      toolChangesFromACP(s.content, providerKind),
 		Attachments:  toolAttachmentsFromACP(s.content),
 		Output:       toolTextFromACP(s.content),
 	}
+	if call.Output != "" {
+		// ACP text content is Markdown; terminal and raw output are not.
+		call.OutputFormat = provider.OutputFormatMarkdown
+	}
+	if call.Output == "" {
+		call.Output = s.terminalOutput
+	}
 	if call.Output == "" {
 		call.Output = rawOutputText(s.rawOutput)
 	}
-	call.Output = boundedOutputText(call.Output)
+	call.Output = boundedText(call.Output, toolOutputCharacterLimit)
 	call.Command, call.Query, call.Cwd = toolInputDetails(s.rawInput)
 	return call
 }
@@ -577,12 +645,12 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 // re-emit on every sparse update.
 const toolOutputCharacterLimit = 16_384
 
-// boundedOutputText truncates output on a rune boundary.
-func boundedOutputText(text string) string {
-	if len(text) <= toolOutputCharacterLimit {
+// boundedText truncates text to at most limit bytes on a rune boundary.
+func boundedText(text string, limit int) string {
+	if len(text) <= limit {
 		return text
 	}
-	cut := toolOutputCharacterLimit
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
@@ -777,6 +845,16 @@ func toolKindString(kind *schema.ToolKind) string {
 	return strings.ToLower(string(*kind))
 }
 
+// toolCallStatus types a session update's status, which the schema shares
+// between tool calls and compactions.
+func toolCallStatus(status *string) *schema.ToolCallStatus {
+	if status == nil {
+		return nil
+	}
+	typed := schema.ToolCallStatus(*status)
+	return &typed
+}
+
 func toolStatusString(status *schema.ToolCallStatus) string {
 	if status == nil {
 		return ""
@@ -856,6 +934,12 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 			}
 			convertedOption.CurrentValue = current
 			convertedOption.Choices = configChoices(option.Options)
+		case schema.SessionConfigOptionTypeBoolean:
+			current, ok := option.CurrentValue.(bool)
+			if !ok {
+				continue
+			}
+			convertedOption.CurrentValue = current
 		default:
 			continue
 		}
@@ -895,29 +979,32 @@ func uint64Value(value *uint64) uint64 {
 	return *value
 }
 
-// isStableAuthMethod reports whether the advertised method is the stable
-// agent-handled variant. The type field discriminates: absent (or empty) means
-// agent; env_var/terminal are unstable client-driven methods maiD skips.
-func isStableAuthMethod(method schema.AuthMethod) bool {
+// isAgentAuthMethod reports whether the method is the agent-handled variant
+// (type absent or empty), which runs through `authenticate`.
+func isAgentAuthMethod(method schema.AuthMethod) bool {
 	return method.Type == nil || *method.Type == ""
 }
 
-func hasStableAuthMethod(methods []schema.AuthMethod) bool {
-	for _, method := range methods {
-		if isStableAuthMethod(method) && method.ID != "" {
-			return true
-		}
-	}
-	return false
+// isSupportedAuthMethod reports whether maiD can run the method: agent-handled
+// ones, or terminal ones run in a maiD terminal.
+func isSupportedAuthMethod(method schema.AuthMethod) bool {
+	return method.ID != "" && (isAgentAuthMethod(method) || stringValue(method.Type) == schema.AuthMethodTypeTerminal)
+}
+
+func hasSupportedAuthMethod(methods []schema.AuthMethod) bool {
+	return slices.ContainsFunc(methods, isSupportedAuthMethod)
 }
 
 func authMethodsFromACP(methods []schema.AuthMethod) []provider.AuthMethod {
 	converted := make([]provider.AuthMethod, 0, len(methods))
 	for _, method := range methods {
-		if !isStableAuthMethod(method) {
-			continue // skip unstable env/terminal auth methods
+		if !isSupportedAuthMethod(method) {
+			continue
 		}
 		am := provider.AuthMethod{ID: string(method.ID), Name: method.Name}
+		if !isAgentAuthMethod(method) {
+			am.Kind = provider.AuthKindTerminal
+		}
 		if method.Description != nil {
 			am.Description = *method.Description
 		}

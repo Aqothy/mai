@@ -31,8 +31,8 @@ func TestToolCallOutputPrefersContentOverRawOutput(t *testing.T) {
 		"content":[{"type":"content","content":{"type":"text","text":"from content"}}],
 		"rawOutput":{"output":"from raw"}
 	}`))
-	if call := patch.toolCall(); call == nil || call.Output != "from content" {
-		t.Fatalf("output = %#v, want content text preferred", call)
+	if call := patch.toolCall(); call == nil || call.Output != "from content" || call.OutputFormat != provider.OutputFormatMarkdown {
+		t.Fatalf("output = %#v, want content text preferred, as Markdown", call)
 	}
 }
 
@@ -201,5 +201,24 @@ func TestToolCallPatchFromNonToolUpdateIsNil(t *testing.T) {
 		"content":{"type":"text","text":"hello"}
 	}`)); patch != nil {
 		t.Fatalf("patch = %#v, want nil for non-tool updates", patch)
+	}
+}
+
+// codex-acp reports command output only through `_meta` chunks when the
+// client advertises no terminals; they accumulate across updates, and the
+// exit code arrives with the final update.
+func TestToolCallAccumulatesCodexTerminalOutputMeta(t *testing.T) {
+	var state *toolCallPatch
+	for _, raw := range []string{
+		`{"sessionUpdate":"tool_call","toolCallId":"cmd","kind":"execute","name":"exec_command","content":[{"type":"terminal","terminalId":"cmd"}]}`,
+		`{"sessionUpdate":"tool_call_update","toolCallId":"cmd","_meta":{"terminal_output_delta":{"terminal_id":"cmd","data":"line 1\n"}}}`,
+		`{"sessionUpdate":"tool_call_update","toolCallId":"cmd","_meta":{"terminal_output_delta":{"terminal_id":"cmd","data":"line 2\n"}}}`,
+		`{"sessionUpdate":"tool_call_update","toolCallId":"cmd","status":"failed","_meta":{"terminal_exit":{"terminal_id":"cmd","exit_code":2,"signal":null}}}`,
+	} {
+		state = state.overlay(toolCallPatchFromUpdate(decodeSessionUpdate(t, raw)))
+	}
+	call := state.toolCall()
+	if call.Output != "line 1\nline 2\n" || call.OutputFormat != "" || call.ExitCode == nil || *call.ExitCode != 2 || call.Name != "exec_command" {
+		t.Fatalf("tool call = %#v, want accumulated plain output, exit code 2 and the tool name", call)
 	}
 }

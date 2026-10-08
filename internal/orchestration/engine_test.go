@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -240,14 +243,28 @@ func TestEngineActiveTurnPinsSelectionAndAcceptsSteering(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsClientSuppliedTurnIDOnTurnStart(t *testing.T) {
+// Invalid turn.start commands are rejected at the boundary without touching
+// the thread.
+func TestEngineRejectsInvalidTurnStart(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	threadID := ThreadID("thread-client-turn-id")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-client-turn-id", ThreadID: threadID, ProviderInstanceID: "codex"})
-	_, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadTurnStart, CommandID: "turn-client-turn-id", ThreadID: threadID, TurnID: "client-turn", Message: &CommandMessage{Text: "hello"}})
-	if err == nil || !strings.Contains(err.Error(), "turnId") {
-		t.Fatalf("client-supplied turnId err = %v, want turnId rejection", err)
+	threadID := ThreadID("thread-invalid-turn-start")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-invalid-turn-start", ThreadID: threadID, ProviderInstanceID: "codex"})
+	cases := []struct {
+		name    string
+		command Command
+		want    string
+	}{
+		{"client turn id", Command{TurnID: "client-turn", Message: &CommandMessage{Text: "hello"}}, "turnId"},
+		{"empty message", Command{Message: &CommandMessage{}}, "requires message"},
+		{"unknown attachment kind", Command{Message: &CommandMessage{Attachments: []provider.Attachment{{Kind: "video"}}}}, `"video"`},
+	}
+	for index, test := range cases {
+		command := test.command
+		command.Type, command.ThreadID, command.CommandID = CommandThreadTurnStart, threadID, CommandID(fmt.Sprintf("turn-invalid-%d", index))
+		if _, err := engine.Dispatch(context.Background(), command); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%s: err = %v, want rejection mentioning %s", test.name, err, test.want)
+		}
 	}
 	if thread, _ := engine.Thread(threadID); thread.LatestTurn != nil || len(thread.Timeline) != 0 {
 		t.Fatalf("rejected turn.start mutated the thread: %#v", thread)
@@ -292,6 +309,9 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-bad-approval-option", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "allow-typo"}); err == nil {
 		t.Fatal("thread.approval.respond unoffered optionId err = nil, want rejection")
 	}
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-answers-to-permission", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"q": {"a"}}}); err == nil {
+		t.Fatal("thread.approval.respond answers to a permission request err = nil, want rejection")
+	}
 	if recorded := events.matching("", 0); len(recorded) != 2 {
 		t.Fatalf("events after rejected approval responses = %#v, want only create/open", recorded)
 	}
@@ -306,6 +326,28 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 	}
 	if recorded := events.matching("", 0); len(recorded) != 3 {
 		t.Fatalf("events after stale approval response = %#v, want create/open/resolve", recorded)
+	}
+}
+
+// A question is answered with accept plus answers, never with a permission
+// option or a session-wide grant.
+func TestEngineQuestionApprovalCarriesAnswers(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	events := observeEvents(t, engine)
+	threadID := ThreadID("thread-question")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-question", ThreadID: threadID, Title: "Thread"})
+	question := &ApprovalEvent{RequestID: "question-1", UserInput: &provider.UserInputRequest{Message: "Color?", Questions: []provider.Question{{ID: "color", Kind: provider.QuestionKindText}}}}
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: question}})
+
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-question-session", ThreadID: threadID, RequestID: "question-1", Decision: provider.ApprovalDecisionAcceptForSession}); err == nil {
+		t.Fatal("acceptForSession on a question err = nil, want rejection")
+	}
+	answers := map[string][]string{"color": {"blue"}}
+	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-question-answer", ThreadID: threadID, RequestID: "question-1", Decision: provider.ApprovalDecisionAccept, Answers: answers})
+	recorded := events.matching(threadID, 0)
+	if response := recorded[len(recorded)-1]; response.Type != EventThreadApprovalResponseRequested || !maps.EqualFunc(response.Payload.Answers, answers, slices.Equal) {
+		t.Fatalf("response event = %#v, want the answers forwarded", response)
 	}
 }
 
@@ -365,7 +407,6 @@ func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
 func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-completion-before-stop")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-completion-before-stop", ThreadID: threadID, ProviderInstanceID: "prov-a"})
 	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "cmd-turn-completion-before-stop", ThreadID: threadID, Message: &CommandMessage{Text: "hello"}})
@@ -374,21 +415,17 @@ func TestStoppedFactDoesNotOverwriteCompletedTurnStopReason(t *testing.T) {
 	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: turnID, Binding: &SessionBinding{ProviderInstanceID: "prov-a"}}); err != nil {
 		t.Fatalf("bound update: %v", err)
 	}
-	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: turnID, TurnState: provider.RuntimeTurnCompleted, StopReason: "end_turn"}); err != nil {
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: turnID, TurnState: provider.RuntimeTurnCompleted, StopReason: provider.StopReasonMaxTokens}); err != nil {
 		t.Fatalf("completion update: %v", err)
 	}
-	result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateStopped, StopReason: "cancelled"})
+	result, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateStopped})
 	if err != nil || result.Sequence == 0 {
 		t.Fatalf("stopped update = (%#v, %v), want accepted", result, err)
 	}
 
 	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || thread.LatestTurn.StopReason != "end_turn" {
+	if thread.LatestTurn == nil || thread.LatestTurn.StopReason != provider.StopReasonMaxTokens {
 		t.Fatalf("latest turn = %#v, want completed turn reason preserved", thread.LatestTurn)
-	}
-	recorded := events.matching(threadID, result.Sequence-1)
-	if len(recorded) != 1 || recorded[0].Payload.StopReason != "" {
-		t.Fatalf("stopped event = %#v, want no stale cancelled reason", recorded)
 	}
 }
 

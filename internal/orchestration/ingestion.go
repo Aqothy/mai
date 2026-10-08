@@ -569,12 +569,12 @@ func (i *ProviderRuntimeIngestion) ingestPlanUpdated(event provider.RuntimeEvent
 
 func (i *ProviderRuntimeIngestion) ingestRequestOpened(event provider.RuntimeEvent, createdAt time.Time) {
 	i.completeTurnText(event, createdAt)
-	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Args: append(json.RawMessage(nil), event.Payload.Args...), Options: event.Payload.Options, Detail: event.Payload.Detail}
+	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Args: append(json.RawMessage(nil), event.Payload.Args...), Options: event.Payload.Options, Detail: event.Payload.Detail, UserInput: event.Payload.UserInput}
 	i.record(EventInput{Type: EventThreadApprovalOpened, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Approval: approval}})
 }
 
 func (i *ProviderRuntimeIngestion) ingestRequestResolved(event provider.RuntimeEvent, createdAt time.Time) {
-	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Decision: approvalDecisionOrCancel(event.Payload.Decision), OptionID: optionIDFromResolution(event.Payload.Resolution), Detail: event.Payload.Detail, Cancelled: event.Payload.Cancelled}
+	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Decision: approvalDecisionOrCancel(event.Payload.Decision), OptionID: optionIDFromResolution(event.Payload.Resolution), Detail: event.Payload.Detail, Cancelled: event.Payload.Cancelled, Answers: event.Payload.Answers}
 	i.record(EventInput{Type: EventThreadApprovalResolved, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Approval: approval}})
 }
 
@@ -614,7 +614,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 	// turnState entry leaks.
 	i.settleTurn(event, reasoningStatusFromTurnState(event.Payload.TurnState), createdAt)
 	if event.Payload.TurnState == provider.RuntimeTurnFailed {
-		failureMessage := firstNonEmpty(event.Payload.Message, event.Payload.Detail, event.Payload.StopReason, "Turn failed")
+		failureMessage := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Turn failed")
 		i.recordItem(event, errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), failureMessage), createdAt)
 	}
 	update := sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: TurnID(event.TurnID), TurnState: event.Payload.TurnState, StopReason: event.Payload.StopReason, Error: firstNonEmpty(event.Payload.Message, event.Payload.Detail)}

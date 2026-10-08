@@ -2,12 +2,12 @@ module github.com/Aqothy/maiD
 
 go 1.26.5
 
-require github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505
+require github.com/Aqothy/jsonrpc2 v0.0.0-20261008054236-f91ab22fc4e3
 
 require github.com/coder/websocket v1.8.14
 
 require (
-	github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be
+	github.com/Aqothy/go-acp v0.0.0-20261008054301-516b42744af3
 	github.com/BurntSushi/toml v1.6.0
 	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0

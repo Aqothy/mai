@@ -458,7 +458,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.providerService.Authenticate(ctx, params.InstanceID, provider.AuthenticateInput{MethodID: params.MethodID, Secret: params.Secret})
+		return h.server.authenticateProvider(ctx, params.InstanceID, provider.AuthenticateInput{MethodID: params.MethodID, Secret: params.Secret})
 	case wire.MethodProviderLogout:
 		var params wire.ProviderInstanceParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -616,7 +616,7 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params wire.Provide
 	if current != nil && current.cwd == params.Cwd {
 		result := wire.ProviderOptionsResult{
 			OptionsSessionID: current.optionsSessionID,
-			ConfigOptions:    append([]provider.ConfigOption(nil), current.configOptions...),
+			ConfigOptions:    append([]provider.ConfigOption{}, current.configOptions...),
 			Skills:           append([]provider.Skill(nil), current.skills...),
 		}
 		h.client.optionsMu.Unlock()
@@ -657,7 +657,7 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params wire.Provide
 	h.client.optionsMu.Unlock()
 	return wire.ProviderOptionsResult{
 		OptionsSessionID: optionsSessionID,
-		ConfigOptions:    append([]provider.ConfigOption(nil), opened.ConfigOptions...),
+		ConfigOptions:    append([]provider.ConfigOption{}, opened.ConfigOptions...),
 		Skills:           append([]provider.Skill(nil), opened.Skills...),
 	}, nil
 }
@@ -699,7 +699,7 @@ func (h *rpcHandler) setProviderOption(ctx context.Context, params wire.Provider
 	h.client.optionsMu.Unlock()
 	return wire.ProviderOptionsResult{
 		OptionsSessionID: snapshot.optionsSessionID,
-		ConfigOptions:    append([]provider.ConfigOption(nil), options...),
+		ConfigOptions:    append([]provider.ConfigOption{}, options...),
 		Skills:           skills,
 	}, nil
 }
@@ -717,7 +717,7 @@ func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, option
 	if active {
 		h.client.notify(wire.MethodProviderOptionsUpdated, wire.ProviderOptionsResult{
 			OptionsSessionID: optionsSessionID,
-			ConfigOptions:    append([]provider.ConfigOption(nil), options...),
+			ConfigOptions:    append([]provider.ConfigOption{}, options...),
 			Skills:           skills,
 		})
 	}

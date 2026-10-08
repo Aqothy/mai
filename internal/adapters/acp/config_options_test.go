@@ -9,7 +9,8 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestInitializeOmitsUnstableBooleanCapability(t *testing.T) {
+// maiD advertises exactly what it implements: no fs or terminal client methods.
+func TestInitializeAdvertisesSupportedClientCapabilities(t *testing.T) {
 	initializeRequests := make(chan schema.InitializeRequest, 1)
 	agent := &fakeWireAgent{
 		onInitialize: func(params json.RawMessage) {
@@ -22,9 +23,18 @@ func TestInitializeOmitsUnstableBooleanCapability(t *testing.T) {
 		},
 	}
 	_ = newWireTestHandle(t, agent)
-	request := waitFor(t, initializeRequests, "initialize request was not observed")
-	if request.ClientCapabilities != nil {
-		t.Fatalf("client capabilities = %#v, want stable-only capabilities omitted", request.ClientCapabilities)
+	caps := waitFor(t, initializeRequests, "initialize request was not observed").ClientCapabilities
+	if caps == nil || caps.Session == nil || caps.Session.ConfigOptions == nil || caps.Session.ConfigOptions.Boolean == nil {
+		t.Fatalf("client capabilities = %#v, want boolean config options advertised", caps)
+	}
+	if caps.Elicitation == nil || caps.Elicitation.Form == nil || caps.Elicitation.URL == nil {
+		t.Fatalf("elicitation capabilities = %#v, want form and url", caps.Elicitation)
+	}
+	if caps.Auth == nil || caps.Auth.Terminal == nil || !*caps.Auth.Terminal {
+		t.Fatalf("auth capabilities = %#v, want terminal sign-in", caps.Auth)
+	}
+	if caps.FS != nil || caps.Terminal != nil {
+		t.Fatalf("client capabilities = %#v, want fs and terminal unadvertised", caps)
 	}
 }
 
@@ -37,13 +47,16 @@ func TestConfigOptionsFromACPKeepsValidDescriptorsOnly(t *testing.T) {
 			Options: []schema.SessionConfigSelectOption{{Value: schema.SessionConfigValueId("fast"), Name: "Fast"}},
 		},
 		{ID: "bad-boolean", Type: schema.SessionConfigOptionTypeBoolean, CurrentValue: "true"},
-		{ID: "unsupported-boolean", Type: schema.SessionConfigOptionTypeBoolean, CurrentValue: true},
+		{ID: "auto-approve", Type: schema.SessionConfigOptionTypeBoolean, Name: "Auto approve", CurrentValue: false},
 		{ID: "bad-select", Type: schema.SessionConfigOptionTypeSelect, CurrentValue: false},
 		{ID: "unknown", Type: "future", CurrentValue: "value"},
 	})
 	// A select without a current value is kept; malformed descriptors are skipped.
-	if len(options) != 1 || options[0].ID != "model" || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
-		t.Fatalf("options = %#v, want only the select kept with empty current value", options)
+	if len(options) != 2 || options[0].ID != "model" || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
+		t.Fatalf("options = %#v, want the select kept with empty current value", options)
+	}
+	if options[1].ID != "auto-approve" || options[1].Type != provider.ConfigOptionTypeBoolean || options[1].CurrentValue != false {
+		t.Fatalf("options = %#v, want the well-formed boolean kept", options)
 	}
 }
 
@@ -52,6 +65,42 @@ func TestSetSessionConfigOptionRejectsNonACPValue(t *testing.T) {
 	err := instance.setSessionConfigOptionValue(context.Background(), "session", "option", []string{"value"})
 	if err == nil {
 		t.Fatal("non-ACP config value was accepted")
+	}
+}
+
+func TestSetBooleanConfigOptionSendsBooleanType(t *testing.T) {
+	booleanOption := func(current bool) []any {
+		return []any{map[string]any{"type": "boolean", "id": "auto-approve", "name": "Auto approve", "currentValue": current}}
+	}
+	sets := make(chan wireSessionParams, 1)
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"close": map[string]any{}}},
+		onNewSession: func(agent *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			agent.respond(id, map[string]any{"sessionId": "options-session", "configOptions": booleanOption(false)})
+		},
+		onSetConfigOption: func(agent *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			sets <- params
+			agent.respond(id, map[string]any{"configOptions": booleanOption(true)})
+		},
+	}
+	instance := newWireTestHandle(t, agent)
+	opened, err := instance.OpenOptionsSession(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{})
+	if err != nil {
+		t.Fatalf("OpenOptionsSession: %v", err)
+	}
+	if len(opened.ConfigOptions) != 1 || opened.ConfigOptions[0].CurrentValue != false {
+		t.Fatalf("opened options = %#v, want auto-approve=false", opened.ConfigOptions)
+	}
+
+	options, err := instance.SetOptionsSessionValue(context.Background(), opened.Handle, "auto-approve", true)
+	if err != nil {
+		t.Fatalf("SetOptionsSessionValue: %v", err)
+	}
+	if params := waitFor(t, sets, "set_config_option was not sent"); params.Type != "boolean" || params.Value != true {
+		t.Fatalf("set params = %#v, want type boolean value true", params)
+	}
+	if len(options) != 1 || options[0].CurrentValue != true {
+		t.Fatalf("options = %#v, want auto-approve=true", options)
 	}
 }
 
@@ -155,4 +204,24 @@ func (h *Instance) sessionLockedForTest(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.sessionLocked(sessionID) != nil
+}
+
+// claude-acp can switch modes with only current_mode_update while exposing the
+// mode as a config option; the option must follow, or the picker goes stale.
+func TestCurrentModeUpdateMovesModeConfigOption(t *testing.T) {
+	instance := newInstance(nil)
+	if err := instance.bindSession("thread", "sess"); err != nil {
+		t.Fatal(err)
+	}
+	category := schema.SessionConfigOptionCategoryMode
+	instance.cacheSessionState("sess", []schema.SessionConfigOption{{
+		ID: "mode", Name: "Mode", Type: schema.SessionConfigOptionTypeSelect, Category: &category, CurrentValue: "auto",
+		Options: []schema.SessionConfigSelectOption{{Value: "auto", Name: "Auto"}, {Value: "acceptEdits", Name: "Accept edits"}},
+	}}, nil)
+
+	instance.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"current_mode_update","currentModeId":"acceptEdits"}}`))
+
+	if current, _ := provider.CurrentConfigString(instance.combinedConfigOptions("sess"), "mode"); current != "acceptEdits" {
+		t.Fatalf("mode option = %q, want acceptEdits", current)
+	}
 }

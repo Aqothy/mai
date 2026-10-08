@@ -219,10 +219,10 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 		return
 	}
 	if failedTurn != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: failedTurn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, StopReason: "process_exited", Message: "Claude Code process exited unexpectedly"}})
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: failedTurn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly"}})
 	}
 	for _, turn := range cancelledTurns {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled, StopReason: "process_exited"}})
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}})
 	}
 }
 
@@ -343,7 +343,7 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 	session.queuedTurns = nil
 	h.mu.Unlock()
 	for _, turn := range cancelled {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled, StopReason: "interrupted"}})
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}})
 	}
 	return nil
 }

@@ -3,9 +3,11 @@ package claudecode
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -188,26 +190,36 @@ func toolResultContent(raw json.RawMessage) (string, []provider.Attachment) {
 			}
 		case "image":
 			if block.Source != nil && block.Source.Data != "" {
-				attachments = append(attachments, provider.Attachment{Kind: "image", MimeType: block.Source.MediaType, Data: block.Source.Data})
+				attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentImage, MimeType: block.Source.MediaType, Data: block.Source.Data})
 			}
 		}
 	}
 	return strings.Join(parts, "\n"), attachments
 }
 
-func turnStateFromResult(result resultMessage) (provider.RuntimeTurnState, string, string) {
-	stopReason := firstNonEmpty(result.TerminalReason, result.StopReason, result.Subtype)
+func turnStateFromResult(result resultMessage) (provider.RuntimeTurnState, provider.StopReason, string) {
 	if strings.Contains(result.TerminalReason, "aborted") {
-		return provider.RuntimeTurnInterrupted, stopReason, ""
+		return provider.RuntimeTurnInterrupted, "", ""
+	}
+	if result.Subtype == "error_max_turns" {
+		// The agent ran out of turns: a completed turn that ended early.
+		return provider.RuntimeTurnCompleted, provider.StopReasonMaxTurnRequests, ""
+	}
+	if result.Subtype == "success" && !result.IsError {
+		switch result.StopReason {
+		case "max_tokens":
+			return provider.RuntimeTurnCompleted, provider.StopReasonMaxTokens, ""
+		case "refusal":
+			return provider.RuntimeTurnCompleted, provider.StopReasonRefusal, ""
+		default:
+			return provider.RuntimeTurnCompleted, "", ""
+		}
 	}
 	message := resultErrorMessage(result)
-	if result.Subtype == "success" && !result.IsError {
-		return provider.RuntimeTurnCompleted, stopReason, ""
-	}
 	if message == "" && strings.HasPrefix(result.Subtype, "error_") {
 		message = strings.TrimPrefix(result.Subtype, "error_")
 	}
-	return provider.RuntimeTurnFailed, stopReason, message
+	return provider.RuntimeTurnFailed, "", message
 }
 
 // resultErrorMessage extracts a user-facing error, skipping the CLI's internal
@@ -263,13 +275,11 @@ func userContentBlocks(input provider.SendTurnInput) ([]map[string]any, error) {
 		blocks = append(blocks, map[string]any{"type": "text", "text": input.Input})
 	}
 	for _, attachment := range input.Attachments {
-		kind := strings.ToLower(strings.TrimSpace(attachment.Kind))
-		switch kind {
-		case "", "text":
-			if attachment.Data != "" {
-				blocks = append(blocks, map[string]any{"type": "text", "text": attachment.Data})
-			}
-		case "image":
+		switch attachment.Kind {
+		case provider.AttachmentResourceLink:
+			// Claude Code resolves files mentioned as `@path` in the prompt
+			// text itself; the link carries nothing more.
+		case provider.AttachmentImage:
 			mediaType := trimmedOrDefault(attachment.MimeType, "image/png")
 			data := strings.TrimSpace(attachment.Data)
 			if cut := strings.Index(data, ";base64,"); strings.HasPrefix(strings.ToLower(data), "data:") && cut >= 0 {
@@ -306,8 +316,12 @@ func slashCommandsFromSDK(commands []sdkCommand) []provider.SlashCommand {
 	return result
 }
 
+// approvalRequestType is the permission a tool asks for; questions ask for
+// none.
 func approvalRequestType(toolName string) provider.RuntimeRequestType {
 	switch toolName {
+	case "AskUserQuestion":
+		return ""
 	case "Bash", "BashOutput", "KillShell":
 		return provider.RuntimeRequestCommandExecution
 	case "Edit", "Write", "NotebookEdit":
@@ -335,25 +349,67 @@ func approvalDetail(request controlRequestBody) string {
 	return request.ToolName
 }
 
+// approvalResponse builds the control response for a pending request: a
+// permission decision, AskUserQuestion answers, or an MCP elicitation result.
+func approvalResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+	switch {
+	case pending.isElicitation:
+		action := elicitation.ActionFor(input.Decision)
+		response := map[string]any{"action": action}
+		if action == elicitation.ActionAccept && pending.form != nil {
+			content, err := pending.form.Content(input.Answers)
+			if err != nil {
+				return nil, "", err
+			}
+			response["content"] = content
+		}
+		return response, action.Decision(), nil
+	case pending.question != nil:
+		return questionResponse(pending, input)
+	default:
+		decision := string(input.Decision)
+		if input.OptionID != "" {
+			decision = input.OptionID
+		}
+		payload, resolved := permissionResponse(pending, decision)
+		return payload, resolved, nil
+	}
+}
+
+// questionResponse answers AskUserQuestion through updatedInput.answers, keyed
+// by question text, with several selections joined by ", ". Declining or
+// dismissing tells the model without interrupting the turn.
+func questionResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+	switch input.Decision {
+	case provider.ApprovalDecisionAccept:
+	case provider.ApprovalDecisionDecline:
+		return map[string]any{"behavior": "deny", "message": "The user declined to answer."}, provider.ApprovalDecisionDecline, nil
+	default:
+		return map[string]any{"behavior": "deny", "message": "The user dismissed the question without answering."}, provider.ApprovalDecisionCancel, nil
+	}
+	answers := make(map[string]string, len(pending.question.Questions))
+	for _, question := range pending.question.Questions {
+		values := slices.DeleteFunc(slices.Clone(input.Answers[question.Question]), func(value string) bool { return strings.TrimSpace(value) == "" })
+		if len(values) == 0 {
+			return nil, "", fmt.Errorf("%q needs an answer", question.Question)
+		}
+		if !question.MultiSelect && len(values) > 1 {
+			return nil, "", fmt.Errorf("%q takes a single answer", question.Question)
+		}
+		answers[question.Question] = strings.Join(values, ", ")
+	}
+	var updated map[string]any
+	_ = json.Unmarshal(pending.input, &updated)
+	if updated == nil {
+		updated = map[string]any{}
+	}
+	updated["answers"] = answers
+	return map[string]any{"behavior": "allow", "updatedInput": updated}, provider.ApprovalDecisionAccept, nil
+}
+
 // permissionResponse builds the PermissionResult payload for a decision and
 // reports the decision that should be echoed on request.resolved.
 func permissionResponse(pending *pendingApproval, decision string) (map[string]any, provider.ApprovalDecision) {
-	if pending.question != nil && strings.HasPrefix(decision, "answer:") {
-		index := 0
-		_, _ = fmt.Sscanf(decision, "answer:%d", &index)
-		first := pending.question.Questions[0]
-		if index >= 0 && index < len(first.Options) {
-			var original map[string]any
-			_ = json.Unmarshal(pending.input, &original)
-			if original == nil {
-				original = map[string]any{}
-			}
-			// Answers key by the full question text; the SDK looks answers up
-			// by question text when folding them into the tool result.
-			original["answers"] = map[string]string{first.Question: first.Options[index].Label}
-			return map[string]any{"behavior": "allow", "updatedInput": original}, provider.ApprovalDecisionAccept
-		}
-	}
 	switch decision {
 	case "accept":
 		return map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(pending.input)}, provider.ApprovalDecisionAccept

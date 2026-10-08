@@ -11,6 +11,7 @@ import (
 
 	"github.com/Aqothy/jsonrpc2"
 	"github.com/Aqothy/maiD/api/wire"
+	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/terminal"
 )
@@ -37,6 +38,9 @@ type terminalEntry struct {
 	cwd        string
 	createdAt  time.Time
 	updatedAt  time.Time
+	// onExit runs once, off the event path, when the current run ends. Only
+	// command terminals set it; relaunching (to a shell) clears it.
+	onExit func(exitCode *int)
 }
 
 func newTerminalRuntime(meta store.TerminalStore, logger *slog.Logger) *terminalRuntime {
@@ -179,6 +183,38 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	return snapshot, nil
 }
 
+// startCommandTerminal starts a terminal running command instead of a shell,
+// in the user's home directory. Clients attach to it by id with their own grid
+// size. onExit runs once with the exit code when the program ends.
+func (s *Server) startCommandTerminal(title string, command provider.TerminalCommand, onExit func(exitCode *int)) (string, error) {
+	if len(command.Argv) == 0 {
+		return "", fmt.Errorf("terminal command is empty")
+	}
+	rt := s.terminals
+	cwd, err := terminal.ResolveCwd("")
+	if err != nil {
+		return "", err
+	}
+	terminalID := terminal.NewID()
+	now := time.Now().UTC()
+	entry := &terminalEntry{terminalID: terminalID, title: title, cwd: cwd, createdAt: now, updatedAt: now, onExit: onExit}
+	entry.operations.Lock()
+	rt.mu.Lock()
+	rt.entries[terminalID] = entry
+	rt.mu.Unlock()
+	if _, err := rt.service.Start(terminalID, terminal.SpawnSpec{Cwd: cwd, Columns: 80, Rows: 24, Command: command.Argv, Env: command.Env}, s.terminalEvents()); err != nil {
+		rt.mu.Lock()
+		delete(rt.entries, terminalID)
+		rt.mu.Unlock()
+		entry.operations.Unlock()
+		return "", fmt.Errorf("start %s: %w", command.Argv[0], err)
+	}
+	rt.persist(entry, s.logger)
+	entry.operations.Unlock()
+	s.publishTerminalListUpsert(s.terminalListSummary(entry))
+	return terminalID, nil
+}
+
 // attachTerminal registers the calling client as another stream listener and
 // returns the authoritative snapshot. Subscription happens before snapshot
 // capture, so live output above the snapshot sequence can be buffered by the
@@ -246,6 +282,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
 	addedSubscription := client.subscribeTerminal(params.TerminalID)
+	entry.onExit = nil
 	session, err := rt.service.Relaunch(params.TerminalID, terminal.SpawnSpec{
 		Cwd:     entry.cwd,
 		Columns: params.Columns,
@@ -642,7 +679,12 @@ func (s *Server) publishTerminalExit(terminalID, runID string, seq uint64, statu
 	// Enqueue the run's final list state before releasing the terminal fence,
 	// so a later relaunch/delete update cannot be overtaken by this exit.
 	s.publishTerminalListUpsert(summary)
+	onExit := entry.onExit
+	entry.onExit = nil
 	entry.operations.Unlock()
+	if onExit != nil {
+		go onExit(exitCode)
+	}
 
 	s.publishTerminalStreamItem(terminalID, wire.TerminalStreamItem{
 		Kind:       terminal.StreamItemStatus,

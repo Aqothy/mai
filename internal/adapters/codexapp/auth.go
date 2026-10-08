@@ -15,9 +15,9 @@ const (
 
 func codexAuthMethods() []provider.AuthMethod {
 	return []provider.AuthMethod{
-		{ID: authMethodChatGPT, Name: "Continue with ChatGPT", Description: "Sign in in your browser", Kind: "browser"},
-		{ID: authMethodDevice, Name: "ChatGPT device code", Description: "Sign in with a one-time code", Kind: "device-code"},
-		{ID: authMethodAPIKey, Name: "OpenAI API key", Description: "Use an API key for this Codex installation", Kind: "secret", RequiresSecret: true},
+		{ID: authMethodChatGPT, Name: "Continue with ChatGPT", Description: "Sign in in your browser", Kind: provider.AuthKindBrowser},
+		{ID: authMethodDevice, Name: "ChatGPT device code", Description: "Sign in with a one-time code", Kind: provider.AuthKindDeviceCode},
+		{ID: authMethodAPIKey, Name: "OpenAI API key", Description: "Use an API key for this Codex installation", Kind: provider.AuthKindSecret, RequiresSecret: true},
 	}
 }
 
@@ -43,7 +43,7 @@ func (h *Instance) refreshAccount(ctx context.Context) error {
 	return nil
 }
 
-func (h *Instance) AuthenticateWithInput(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+func (h *Instance) Authenticate(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	var params map[string]any
 	expectedResponseType := ""
 	switch input.MethodID {
@@ -81,12 +81,12 @@ func (h *Instance) AuthenticateWithInput(ctx context.Context, input provider.Aut
 		if response.LoginID == "" || response.AuthURL == "" {
 			return provider.AuthenticationResult{}, fmt.Errorf("account/login/start returned an incomplete ChatGPT browser challenge")
 		}
-		challenge = &provider.AuthChallenge{Kind: "browser", LoginID: response.LoginID, URL: response.AuthURL}
+		challenge = &provider.AuthChallenge{Kind: provider.AuthKindBrowser, LoginID: response.LoginID, URL: response.AuthURL}
 	case "chatgptDeviceCode":
 		if response.LoginID == "" || response.VerificationURL == "" || response.UserCode == "" {
 			return provider.AuthenticationResult{}, fmt.Errorf("account/login/start returned an incomplete ChatGPT device-code challenge")
 		}
-		challenge = &provider.AuthChallenge{Kind: "device-code", LoginID: response.LoginID, URL: response.VerificationURL, VerificationURL: response.VerificationURL, UserCode: response.UserCode}
+		challenge = &provider.AuthChallenge{Kind: provider.AuthKindDeviceCode, LoginID: response.LoginID, URL: response.VerificationURL, VerificationURL: response.VerificationURL, UserCode: response.UserCode}
 	case "apiKey":
 		if err := h.refreshAccount(ctx); err != nil {
 			return provider.AuthenticationResult{}, err

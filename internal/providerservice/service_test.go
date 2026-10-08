@@ -164,20 +164,20 @@ type fakeProviderInstance struct {
 	forkSession        func(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error)
 }
 
-type fakeLoginProvider struct {
+type fakeAuthenticator struct {
 	*fakeProviderInstance
 	authenticateCalls int
 	logoutCalls       int
 }
 
-func (i *fakeLoginProvider) AuthenticateWithInput(context.Context, provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+func (i *fakeAuthenticator) Authenticate(context.Context, provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	i.mu.Lock()
 	i.authenticateCalls++
 	i.mu.Unlock()
 	return provider.AuthenticationResult{Instance: i.Info()}, nil
 }
 
-func (i *fakeLoginProvider) Logout(context.Context) (provider.InstanceInfo, error) {
+func (i *fakeAuthenticator) Logout(context.Context) (provider.InstanceInfo, error) {
 	i.mu.Lock()
 	i.logoutCalls++
 	i.mu.Unlock()
@@ -992,7 +992,7 @@ func TestStopSessionDoesNotRecoverStaleRouteAfterRestart(t *testing.T) {
 }
 
 func TestServiceGatesAuthenticationCapabilities(t *testing.T) {
-	instance := &fakeLoginProvider{fakeProviderInstance: &fakeProviderInstance{info: provider.InstanceInfo{
+	instance := &fakeAuthenticator{fakeProviderInstance: &fakeProviderInstance{info: provider.InstanceInfo{
 		InstanceID: "login", Name: "Login", Driver: "test", Status: provider.InstanceStatusInitialized,
 	}}}
 	s := New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (ProviderInstance, error) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -433,6 +434,15 @@ func (e *Engine) ThreadListSnapshot() ThreadListStreamItem {
 	return ThreadListStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}
 }
 
+// ProviderTurnRunning reports whether a turn is running on any thread of the
+// provider instance.
+func (e *Engine) ProviderTurnRunning(instanceID provider.InstanceID) bool {
+	snapshot := e.ThreadListSnapshot().Snapshot
+	return slices.ContainsFunc(snapshot.Threads, func(entry ThreadListEntry) bool {
+		return entry.ProviderInstanceID == instanceID && activeTurnIDOf(entry.Session, entry.LatestTurn) != ""
+	})
+}
+
 func (e *Engine) ThreadListEntry(threadID ThreadID) (ThreadListEntry, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -668,8 +678,8 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 	if command.ProviderInstanceID == "" {
 		return DispatchResult{}, fmt.Errorf("thread.start requires providerInstanceId")
 	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0 && len(command.Message.Annotations) == 0) {
-		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
+	if err := validateCommandMessage(command.Type, command.Message); err != nil {
+		return DispatchResult{}, err
 	}
 	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
 	if err != nil {
@@ -781,8 +791,8 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 	if err := validateTurnStartBoundary(command); err != nil {
 		return DispatchResult{}, err
 	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0 && len(command.Message.Annotations) == 0) {
-		return DispatchResult{}, fmt.Errorf("thread.turn.start requires message.text or message.attachments")
+	if err := validateCommandMessage(command.Type, command.Message); err != nil {
+		return DispatchResult{}, err
 	}
 	messageID := MessageID(command.Message.MessageID)
 	if messageID == "" {
@@ -864,10 +874,10 @@ func (e *Engine) dispatchApprovalRespond(command Command) (DispatchResult, error
 		return DispatchResult{}, err
 	}
 	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateApprovalResponse(command.Type, *thread, command.RequestID, command.OptionID); err != nil {
+		if err := validateApprovalResponse(command.Type, *thread, command.RequestID, decision, command.OptionID, command.Answers); err != nil {
 			return Event{}, err
 		}
-		event := threadEvent(command, EventThreadApprovalResponseRequested, ActorKindClient, EventPayload{RequestID: command.RequestID, Decision: decision, OptionID: command.OptionID})
+		event := threadEvent(command, EventThreadApprovalResponseRequested, ActorKindClient, EventPayload{RequestID: command.RequestID, Decision: decision, OptionID: command.OptionID, Answers: command.Answers})
 		event.Metadata = EventMetadata{RequestID: string(command.RequestID)}
 		return event, nil
 	})

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,12 @@ type acpSession struct {
 }
 
 func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	opened, err := h.openOptionsSession(ctx, cwd, callbacks)
+	h.noteAuthRequired(err)
+	return opened, err
+}
+
+func (h *Instance) openOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
 	if cwd == "" {
 		return provider.OptionsSession{}, fmt.Errorf("provider options session requires cwd")
 	}
@@ -139,6 +146,12 @@ func (h *Instance) sessionForThreadLocked(threadID string) *acpSession {
 //     dropping replay because orchestration already has the projection.
 //  4. Otherwise create a new session.
 func (h *Instance) StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
+	result, err := h.startSession(ctx, input)
+	h.noteAuthRequired(err)
+	return result, err
+}
+
+func (h *Instance) startSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
 	if input.ThreadID == "" {
 		return provider.StartSessionResult{}, fmt.Errorf("provider session start requires threadId")
 	}
@@ -244,7 +257,8 @@ func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionI
 	// Drain load replay before applying preferences, but keep capture active:
 	// preference requests can themselves emit config updates or warnings and
 	// those setup events must not overtake the returned history batch.
-	if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
+	replayed := 0
+	if err := h.awaitSessionBarrier(ctx, stream, func() { replayed = h.sessionReplayLen(sessionID) }); err != nil {
 		h.unbindSessionID(sessionID)
 		return provider.StartSessionResult{}, fmt.Errorf("await ACP session/load replay drain: %w", err)
 	}
@@ -256,7 +270,55 @@ func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionI
 		return provider.StartSessionResult{}, fmt.Errorf("await ACP session setup drain: %w", err)
 	}
 	separateReplayReasoningBlocks(replay)
+	replay = append(groupReplayIntoTurns(replay[:replayed]), replay[replayed:]...)
 	return provider.StartSessionResult{Session: h.sessionProjection(input, sessionID), Replay: replay}, nil
+}
+
+// groupReplayIntoTurns gives session/load replay the turn structure live
+// prompts have. ACP replays a session as one flat update stream, so each user
+// message starts a turn that lasts until the next one. Tools still in progress
+// when their turn ends (the agent stopped mid-run) are settled as interrupted,
+// since no further update will ever arrive for them.
+func groupReplayIntoTurns(events []provider.RuntimeEvent) []provider.RuntimeEvent {
+	grouped := make([]provider.RuntimeEvent, 0, len(events)+2)
+	var turnID string
+	var lastAt time.Time
+	var openTools []provider.RuntimeEvent
+	closeTurn := func() {
+		if turnID == "" {
+			return
+		}
+		for _, tool := range openTools {
+			tool.EventID = provider.RuntimeEventID(newID())
+			tool.Type = provider.RuntimeEventItemUpdated
+			tool.CreatedAt = lastAt
+			tool.Payload.ItemStatus = provider.ItemStatusInterrupted
+			grouped = append(grouped, tool)
+		}
+		openTools = openTools[:0]
+		grouped = append(grouped, provider.RuntimeEvent{EventID: provider.RuntimeEventID(newID()), Type: provider.RuntimeEventTurnCompleted, Provider: DriverKind, TurnID: turnID, CreatedAt: lastAt, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted}})
+	}
+	inUserMessage := false
+	for _, event := range events {
+		isUserMessage := event.Payload.ItemType == provider.ItemKindUserMessage
+		if isUserMessage && !inUserMessage {
+			closeTurn()
+			turnID = newID()
+			grouped = append(grouped, provider.RuntimeEvent{EventID: provider.RuntimeEventID(newID()), Type: provider.RuntimeEventTurnStarted, Provider: DriverKind, TurnID: turnID, CreatedAt: event.CreatedAt})
+		}
+		inUserMessage = isUserMessage
+		event.TurnID = turnID
+		grouped = append(grouped, event)
+		lastAt = event.CreatedAt
+		if event.Payload.ToolCall != nil && event.ItemID != "" {
+			openTools = slices.DeleteFunc(openTools, func(tool provider.RuntimeEvent) bool { return tool.ItemID == event.ItemID })
+			if event.Payload.ItemStatus == provider.ItemStatusInProgress {
+				openTools = append(openTools, event)
+			}
+		}
+	}
+	closeTurn()
+	return grouped
 }
 
 // in session/load agents emits the replayed thoughts without separators
@@ -283,6 +345,15 @@ func (h *Instance) beginSessionLoad(sessionID string) {
 		session.replayEvents = make([]provider.RuntimeEvent, 0)
 	}
 	h.mu.Unlock()
+}
+
+func (h *Instance) sessionReplayLen(sessionID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if session := h.sessionLocked(sessionID); session != nil {
+		return len(session.replayEvents)
+	}
+	return 0
 }
 
 func (h *Instance) finishSessionLoad(sessionID string) []provider.RuntimeEvent {
@@ -691,8 +762,13 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 		ConfigID:  schema.SessionConfigId(optionID),
 		Value:     value,
 	}
-	if _, ok := value.(string); !ok {
-		return fmt.Errorf("ACP config option %q requires a string value", optionID)
+	switch value.(type) {
+	case string:
+	case bool:
+		booleanType := schema.SetSessionConfigOptionRequestTypeBoolean
+		request.Type = &booleanType
+	default:
+		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
 	}
 	resp, err := h.agentPeer.SetSessionConfigOption(ctx, request)
 	if err != nil {
@@ -700,6 +776,36 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 	}
 	h.cacheSessionState(sessionID, resp.ConfigOptions, nil)
 	return nil
+}
+
+// applyCurrentMode records an agent-initiated mode change. Agents that expose
+// their mode as a config option may still report a change only through
+// current_mode_update, so the mode-category option offering that mode is
+// updated too. It reports whether any state changed.
+func (h *Instance) applyCurrentMode(sessionID string, modeID schema.SessionModeId) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session := h.sessionLocked(sessionID)
+	if session == nil {
+		return false
+	}
+	if session.modes != nil {
+		session.modes.CurrentModeID = modeID
+		return true
+	}
+	for i := range session.config {
+		option := &session.config[i]
+		if option.Category != provider.ConfigOptionCategoryMode || option.Type != provider.ConfigOptionTypeSelect {
+			continue
+		}
+		for _, choice := range option.Choices {
+			if choice.Value == string(modeID) {
+				option.CurrentValue = choice.Value
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, modeID schema.SessionModeId) error {

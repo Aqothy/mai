@@ -42,6 +42,7 @@ type Command struct {
 	RequestID             ApprovalID                       `json:"requestId,omitempty"`
 	Decision              provider.ApprovalDecision        `json:"decision,omitempty"`
 	OptionID              string                           `json:"optionId,omitempty"`
+	Answers               map[string][]string              `json:"answers,omitempty"`
 	Value                 any                              `json:"value,omitempty"`
 	ConfigSelections      []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
 	CreatedAt             time.Time                        `json:"createdAt,omitzero"`
