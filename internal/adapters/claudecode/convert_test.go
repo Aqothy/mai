@@ -235,6 +235,31 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 	}
 }
 
+// ExitPlanMode's review approves the plan, or keeps planning and hands the
+// user's typed feedback to the model as the deny message.
+func TestPlanReviewResponse(t *testing.T) {
+	pending := &pendingApproval{input: json.RawMessage(`{"plan":"Do it"}`), reviewsPlan: true}
+	tests := []struct {
+		name    string
+		answer  []string
+		want    map[string]any
+		wantErr bool
+	}{
+		{"approve", []string{planApprove}, map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(`{"plan":"Do it"}`)}, false},
+		{"keep planning", []string{planKeepPlanning}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning."}, false},
+		{"feedback", []string{"Add tests first"}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning. Their feedback on the plan: Add tests first"}, false},
+		{"approve with feedback", []string{planApprove, "Add tests first"}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{planReviewQuestionID: tt.answer}})
+			if (err != nil) != tt.wantErr || !reflect.DeepEqual(payload, tt.want) {
+				t.Fatalf("payload = %#v, err = %v; want %#v", payload, err, tt.want)
+			}
+		})
+	}
+}
+
 // An MCP server's elicitation is answered with the SDK's {action, content}.
 func TestElicitationResponse(t *testing.T) {
 	_, form, err := elicitation.Parse("Name?", "", "", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))

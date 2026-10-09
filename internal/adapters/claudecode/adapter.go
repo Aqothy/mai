@@ -119,9 +119,10 @@ type pendingApproval struct {
 	requestType      provider.RuntimeRequestType
 	input            json.RawMessage
 	suggestions      []json.RawMessage
-	// question is set for AskUserQuestion; elicitation for an MCP server's
-	// elicitation, with form set in form mode.
+	// question is set for AskUserQuestion, reviewsPlan for ExitPlanMode, and
+	// isElicitation for an MCP server's elicitation, with form set in form mode.
 	question      *askUserQuestion
+	reviewsPlan   bool
 	isElicitation bool
 	form          *elicitation.Form
 	client        *streamClient

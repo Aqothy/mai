@@ -607,10 +607,9 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		input := question.userInput()
 		userInput, options = &input, nil
 	case "ExitPlanMode":
-		options = []provider.ApprovalOption{
-			{ID: "accept", Name: "Approve plan", Kind: "allow_once"},
-			{ID: "decline", Name: "Keep planning", Kind: "reject_once"},
-		}
+		pending.reviewsPlan = true
+		input := planReviewInput()
+		userInput, options = &input, nil
 	}
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending

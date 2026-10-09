@@ -476,6 +476,8 @@ func approvalResponse(pending *pendingApproval, input provider.RespondToRequestI
 		return response, action.Decision(), nil
 	case pending.question != nil:
 		return questionResponse(pending, input)
+	case pending.reviewsPlan:
+		return planReviewResponse(pending, input)
 	default:
 		decision := string(input.Decision)
 		if input.OptionID != "" {
@@ -515,6 +517,60 @@ func questionResponse(pending *pendingApproval, input provider.RespondToRequestI
 	}
 	updated["answers"] = answers
 	return map[string]any{"behavior": "allow", "updatedInput": updated}, provider.ApprovalDecisionAccept, nil
+}
+
+const (
+	planReviewQuestionID = "plan"
+	planApprove          = "approve"
+	planKeepPlanning     = "keep-planning"
+)
+
+// planReviewInput asks the user to approve Claude's plan or keep planning,
+// with a typed answer telling Claude what to change, like the CLI's prompt.
+func planReviewInput() provider.UserInputRequest {
+	return provider.UserInputRequest{
+		Message: "Claude has a plan ready.",
+		Questions: []provider.Question{{
+			ID:             planReviewQuestionID,
+			Kind:           provider.QuestionKindChoice,
+			Title:          "Approve this plan?",
+			Description:    "To keep planning, you can tell Claude what to change.",
+			Required:       true,
+			AllowsFreeText: true,
+			Options: []provider.QuestionOption{
+				{Value: planApprove, Label: "Approve plan"},
+				{Value: planKeepPlanning, Label: "Keep planning"},
+			},
+		}},
+	}
+}
+
+// planReviewResponse approves the plan, or denies ExitPlanMode with the
+// user's typed feedback as the message the model reads.
+func planReviewResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+	if input.Decision != provider.ApprovalDecisionAccept {
+		payload, resolved := permissionResponse(pending, string(input.Decision))
+		return payload, resolved, nil
+	}
+	values := input.Answers[planReviewQuestionID]
+	if slices.Contains(values, planApprove) {
+		if len(values) > 1 {
+			return nil, "", fmt.Errorf("approve the plan or say what to change, not both")
+		}
+		payload, resolved := permissionResponse(pending, "accept")
+		return payload, resolved, nil
+	}
+	if len(values) == 0 {
+		return nil, "", fmt.Errorf("approve the plan or keep planning")
+	}
+	feedback := strings.Join(slices.DeleteFunc(slices.Clone(values), func(value string) bool {
+		return value == planKeepPlanning || strings.TrimSpace(value) == ""
+	}), "\n")
+	message := "The user wants to keep planning."
+	if feedback != "" {
+		message = "The user wants to keep planning. Their feedback on the plan: " + feedback
+	}
+	return map[string]any{"behavior": "deny", "message": message}, provider.ApprovalDecisionDecline, nil
 }
 
 // permissionResponse builds the PermissionResult payload for a decision and
