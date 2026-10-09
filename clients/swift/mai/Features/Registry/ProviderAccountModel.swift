@@ -67,6 +67,15 @@ final class ProviderAccountModel {
         set { if !newValue { signInTerminalID = nil } }
     }
 
+    /// A question the agent asks during the sign-in in progress.
+    var question: ProviderQuestion? {
+        store.providerQuestion
+    }
+
+    func answerQuestion(_ decision: MaidApprovalDecision, answers: [String: [String]]?) async throws {
+        try await store.answerProviderQuestion(decision, answers: answers)
+    }
+
     var isErrorPresented: Bool {
         get { errorMessage != nil }
         set { if !newValue { errorMessage = nil } }

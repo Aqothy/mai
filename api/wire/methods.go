@@ -41,6 +41,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderForkThread, Params: "ProviderForkThreadParams", Result: "ProviderImportSessionResult"},
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
+	{Name: MethodProviderQuestionAnswer, Params: "ProviderQuestionAnswerParams", ResultNull: true},
 	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachSnapshot"},
 	{Name: MethodTerminalAttach, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
 	{Name: MethodTerminalRelaunch, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
@@ -63,6 +64,7 @@ var Notifications = []NotificationDefinition{
 	{Name: MethodOrchestrationSubscribeThread, Payload: "ThreadStreamItem"},
 	{Name: MethodProviderOptionsUpdated, Payload: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
+	{Name: MethodProviderQuestionAsked, Payload: "ProviderQuestion"},
 	{Name: MethodTerminalSubscribe, Payload: "TerminalStreamItem"},
 	{Name: MethodTerminalSubscribeList, Payload: "TerminalListStreamItem"},
 }

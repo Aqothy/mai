@@ -31,9 +31,7 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		return schema.CreateElicitationResponse{}, acp.InvalidParamsError(err)
 	}
 	if req.SessionID == nil {
-		// Request-scoped elicitations (e.g. during authenticate) have no
-		// thread to ask on; the agent must handle cancel.
-		return schema.CreateElicitationResponse{Action: string(elicitation.ActionCancel)}, nil
+		return h.askDuringSignIn(ctx, input, form), nil
 	}
 	sessionID := string(*req.SessionID)
 	// Like permission requests, re-enter the session's ordered stream first so
@@ -70,13 +68,7 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 	if action != elicitation.ActionAccept {
 		response.answers = nil
 	}
-	resp := schema.CreateElicitationResponse{Action: string(action)}
-	if action == elicitation.ActionAccept && len(response.content) > 0 {
-		resp.Content = make(map[string]schema.ElicitationContentValue, len(response.content))
-		for key, value := range response.content {
-			resp.Content[key] = value
-		}
-	}
+	resp := elicitationResponse(action, response.content)
 	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Provider:  DriverKind,
@@ -92,4 +84,40 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		},
 	})
 	return resp, nil
+}
+
+// askDuringSignIn shows a request-scoped elicitation (one with no session,
+// e.g. while authenticate runs) through the sign-in in progress. With no
+// sign-in to ask on, nobody can answer it, so it is cancelled.
+func (h *Instance) askDuringSignIn(ctx context.Context, input provider.UserInputRequest, form *elicitation.Form) schema.CreateElicitationResponse {
+	h.mu.Lock()
+	ask := h.signInAsk
+	h.mu.Unlock()
+	cancelled := schema.CreateElicitationResponse{Action: string(elicitation.ActionCancel)}
+	if ask == nil {
+		return cancelled
+	}
+	answer, err := ask(ctx, input)
+	if err != nil {
+		return cancelled
+	}
+	action := elicitation.ActionFor(answer.Decision)
+	var content map[string]any
+	if action == elicitation.ActionAccept && form != nil {
+		if content, err = form.Content(answer.Answers); err != nil {
+			return cancelled
+		}
+	}
+	return elicitationResponse(action, content)
+}
+
+func elicitationResponse(action elicitation.Action, content map[string]any) schema.CreateElicitationResponse {
+	resp := schema.CreateElicitationResponse{Action: string(action)}
+	if action == elicitation.ActionAccept && len(content) > 0 {
+		resp.Content = make(map[string]schema.ElicitationContentValue, len(content))
+		for key, value := range content {
+			resp.Content[key] = value
+		}
+	}
+	return resp
 }

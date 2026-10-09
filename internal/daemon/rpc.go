@@ -19,7 +19,10 @@ import (
 	"github.com/coder/websocket"
 )
 
-var nextRPCClientID atomic.Uint64
+var (
+	nextRPCClientID atomic.Uint64
+	nextQuestionID  atomic.Uint64
+)
 
 const (
 	rpcOutboundQueueSize = 1024
@@ -66,6 +69,11 @@ type rpcClient struct {
 	// sent go away with the connection.
 	uploadsMu sync.Mutex
 	uploads   map[string]string
+
+	// questions are the sign-in questions this client was asked and has not
+	// answered, by request ID.
+	questionsMu sync.Mutex
+	questions   map[string]chan provider.UserInputAnswer
 
 	optionsLifecycleMu   sync.Mutex
 	optionsMu            sync.Mutex
@@ -206,6 +214,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
 		terminalSubscriptions: make(map[string]string),
 		uploads:               make(map[string]string),
+		questions:             make(map[string]chan provider.UserInputAnswer),
 	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
@@ -407,6 +416,30 @@ func (c *rpcClient) takeUploads(attachments []provider.Attachment) error {
 	return nil
 }
 
+// ask sends this client a question an agent asks during its sign-in and
+// waits for the answer, until the sign-in ends or the client goes away.
+func (c *rpcClient) ask(ctx context.Context, instanceID provider.InstanceID, request provider.UserInputRequest) (provider.UserInputAnswer, error) {
+	requestID := fmt.Sprintf("%s-question-%d", c.id, nextQuestionID.Add(1))
+	answer := make(chan provider.UserInputAnswer, 1)
+	c.questionsMu.Lock()
+	c.questions[requestID] = answer
+	c.questionsMu.Unlock()
+	defer func() {
+		c.questionsMu.Lock()
+		delete(c.questions, requestID)
+		c.questionsMu.Unlock()
+	}()
+	c.notify(wire.MethodProviderQuestionAsked, wire.ProviderQuestion{InstanceID: instanceID, RequestID: requestID, Request: request})
+	select {
+	case response := <-answer:
+		return response, nil
+	case <-ctx.Done():
+		return provider.UserInputAnswer{}, ctx.Err()
+	case <-c.done:
+		return provider.UserInputAnswer{}, fmt.Errorf("client disconnected")
+	}
+}
+
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
 	started := time.Now()
 	// jsonrpc2 treats a non-nil result alongside a non-nil error as a handler
@@ -563,7 +596,27 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.authenticateProvider(ctx, params.InstanceID, provider.AuthenticateInput{MethodID: params.MethodID, Secret: params.Secret})
+		return h.server.authenticateProvider(ctx, params.InstanceID, provider.AuthenticateInput{
+			MethodID: params.MethodID,
+			Secret:   params.Secret,
+			Ask: func(ctx context.Context, request provider.UserInputRequest) (provider.UserInputAnswer, error) {
+				return h.client.ask(ctx, params.InstanceID, request)
+			},
+		})
+	case wire.MethodProviderQuestionAnswer:
+		var params wire.ProviderQuestionAnswerParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.client.questionsMu.Lock()
+		answer, ok := h.client.questions[params.RequestID]
+		delete(h.client.questions, params.RequestID)
+		h.client.questionsMu.Unlock()
+		if !ok {
+			return nil, fmt.Errorf("%w: question %q is not pending", jsonrpc2.ErrInvalidParams, params.RequestID)
+		}
+		answer <- provider.UserInputAnswer{Decision: params.Decision, Answers: params.Answers}
+		return nil, nil
 	case wire.MethodProviderLogout:
 		var params wire.ProviderInstanceParams
 		if err := decodeRPCParams(req, &params); err != nil {

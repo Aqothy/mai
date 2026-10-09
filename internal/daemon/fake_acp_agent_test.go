@@ -23,6 +23,8 @@ import (
 //	-linger          ignore stdin EOF, like real agents that only die with their process group
 //	-pidfile <path>  write the agent's pid at startup
 //	-login           act as the terminal sign-in program: exit 0 at once
+//	-ask-to-sign-in  offer an "ask-login" method that asks for a code (a
+//	                 session-less elicitation) and succeeds only with 1234
 //
 // Per-turn behavior is scripted by the prompt text; see fakeACPAgent.prompt.
 func fakeACPAgentCommand(flags ...string) []string {
@@ -61,6 +63,7 @@ func TestHelperProcess(t *testing.T) {
 	linger := flags.Bool("linger", false, "")
 	pidPath := flags.String("pidfile", "", "")
 	login := flags.Bool("login", false, "")
+	askToSignIn := flags.Bool("ask-to-sign-in", false, "")
 	_ = flags.Parse(args)
 	if *login {
 		fmt.Println("signed in")
@@ -74,6 +77,7 @@ func TestHelperProcess(t *testing.T) {
 
 	agent := &fakeACPAgent{
 		listOnly:    *listOnly,
+		askToSignIn: *askToSignIn,
 		out:         json.NewEncoder(os.Stdout),
 		cwds:        map[string]string{},
 		parked:      map[string]string{},
@@ -108,7 +112,10 @@ func TestHelperProcess(t *testing.T) {
 // parked prompts and pending permission requests are keyed state, so other
 // sessions keep being served while one waits on an approval or a cancel.
 type fakeACPAgent struct {
-	listOnly bool
+	listOnly    bool
+	askToSignIn bool
+	// signIn is the authenticate request waiting on its elicitation.
+	signIn json.RawMessage
 
 	mu          sync.Mutex // serializes stdout and the state below with gate goroutines
 	out         *json.Encoder
@@ -151,6 +158,9 @@ type fakeACPMessage struct {
 			Outcome  string `json:"outcome"`
 			OptionID string `json:"optionId"`
 		} `json:"outcome"`
+		// Action and Content answer elicitation/create.
+		Action  string         `json:"action"`
+		Content map[string]any `json:"content"`
 	} `json:"result"`
 }
 
@@ -205,6 +215,14 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 	var result any = map[string]any{}
 	switch msg.Method {
 	case "":
+		if string(msg.ID) == `"sign-in-code"` {
+			if msg.Result.Action == "accept" && msg.Result.Content["code"] == "1234" {
+				a.result(a.signIn, map[string]any{})
+			} else {
+				a.write(map[string]any{"jsonrpc": "2.0", "id": a.signIn, "error": map[string]any{"code": -32000, "message": "sign-in code refused"}})
+			}
+			return
+		}
 		a.settlePermission(strings.Trim(string(msg.ID), `"`), msg.Result.Outcome.Outcome, msg.Result.Outcome.OptionID)
 		return
 	case "$/cancel_request":
@@ -222,6 +240,9 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 		}
 		authMethods := []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
 		// Terminal methods may only be offered to clients that run them.
+		if a.askToSignIn {
+			authMethods = append(authMethods, map[string]any{"id": "ask-login", "name": "Ask login"})
+		}
 		if msg.Params.ClientCapabilities.Auth.Terminal {
 			authMethods = append(authMethods, map[string]any{"id": "terminal-login", "name": "Terminal login", "type": "terminal", "args": []string{"-login"}})
 		}
@@ -232,6 +253,14 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			"authMethods":       authMethods,
 		}
 	case "authenticate":
+		if a.askToSignIn && msg.Params.MethodID == "ask-login" {
+			a.signIn = msg.ID
+			a.write(map[string]any{"jsonrpc": "2.0", "id": "sign-in-code", "method": "elicitation/create", "params": map[string]any{
+				"mode": "form", "message": "Enter the code from your email.",
+				"requestedSchema": map[string]any{"type": "object", "properties": map[string]any{"code": map[string]any{"type": "string"}}, "required": []string{"code"}},
+			}})
+			return
+		}
 		if msg.Params.MethodID != "agent-login" {
 			fakeAgentFail("unexpected authenticate request: %s", line)
 		}

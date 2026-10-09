@@ -14,6 +14,7 @@ extension ThreadRPCClient {
 
     func getItemDetail(_ input: GetItemDetailInput) async throws -> Item { throw unavailable }
     func getAttachment(_ input: GetAttachmentInput) async throws -> Attachment { throw unavailable }
+    func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws { throw unavailable }
     func uploadAttachment(_ input: AttachmentUploadParams) async throws { throw unavailable }
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         throw unavailable

@@ -44,6 +44,7 @@ type recordingClient struct {
 	terminalListItems  []wire.TerminalListStreamItem
 	terminalListCursor int
 	terminalOutput     bytes.Buffer
+	providerQuestions  []wire.ProviderQuestion
 }
 
 func dialRecordingClient(t testing.TB, url string) *recordingClient {
@@ -104,6 +105,12 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			return nil, err
 		}
 		c.terminalListItems = append(c.terminalListItems, item)
+	case wire.MethodProviderQuestionAsked:
+		var question wire.ProviderQuestion
+		if err := decodeRPCParams(req, &question); err != nil {
+			return nil, err
+		}
+		c.providerQuestions = append(c.providerQuestions, question)
 	}
 	return nil, nil
 }

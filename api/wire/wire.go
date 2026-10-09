@@ -38,6 +38,8 @@ const (
 	MethodProviderOptionsSet         = "provider.options.set"
 	MethodProviderOptionsUpdated     = "provider.options.updated"
 	MethodProviderOptionsInvalidated = "provider.options.invalidated"
+	MethodProviderQuestionAsked      = "provider.question.asked"
+	MethodProviderQuestionAnswer     = "provider.question.answer"
 )
 
 // EmptyParams is the params object sent to methods that take no arguments.
@@ -120,6 +122,21 @@ type ACPCustomAgentAddParams struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+}
+
+// ProviderQuestion is a question an agent asks during provider.authenticate,
+// outside any thread. It goes to the client whose sign-in is running, which
+// answers it with provider.question.answer before the sign-in can finish.
+type ProviderQuestion struct {
+	InstanceID provider.InstanceID       `json:"instanceId"`
+	RequestID  string                    `json:"requestId"`
+	Request    provider.UserInputRequest `json:"request"`
+}
+
+type ProviderQuestionAnswerParams struct {
+	RequestID string                    `json:"requestId"`
+	Decision  provider.ApprovalDecision `json:"decision"`
+	Answers   map[string][]string       `json:"answers,omitempty"`
 }
 
 type ProviderAuthenticateParams struct {

@@ -2,13 +2,18 @@ import Foundation
 import Observation
 
 /// Form state for an agent question (a user-input request): typed answers,
-/// choice selections, and the response sent back through the approval command.
+/// choice selections, and the response sent back through `send`.
 @Observable
 final class ChatQuestionModel {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
+    /// Delivers a response: the approval command for a question in a chat,
+    /// or the sign-in answer for one asked while signing in.
+    typealias Send = (MaidApprovalDecision, [String: [String]]?) async throws -> Void
+
     let request: UserInputRequest
+    @ObservationIgnored private let send: Send
     private(set) var isResponding = false
     private(set) var errorMessage: String?
 
@@ -18,8 +23,9 @@ final class ChatQuestionModel {
     /// Selected option values for choice questions.
     private(set) var choiceAnswers: [String: Set<String>] = [:]
 
-    init(request: UserInputRequest) {
+    init(request: UserInputRequest, send: @escaping Send) {
         self.request = request
+        self.send = send
         for question in request.questions ?? [] {
             guard let defaults = question.questionDefault, !defaults.isEmpty else { continue }
             if question.questionKind == .choice {
@@ -130,29 +136,17 @@ final class ChatQuestionModel {
         }
     }
 
-    func submit(threadID: String, requestID: String, store: ThreadStore) async {
-        await respond(.accept, answers: answers, threadID: threadID, requestID: requestID, store: store)
+    func submit() async {
+        await respond(.accept, answers: answers)
     }
 
-    func respond(
-        _ decision: MaidApprovalDecision,
-        answers: [String: [String]]? = nil,
-        threadID: String,
-        requestID: String,
-        store: ThreadStore
-    ) async {
+    func respond(_ decision: MaidApprovalDecision, answers: [String: [String]]? = nil) async {
         guard !isResponding else { return }
         isResponding = true
         errorMessage = nil
         defer { isResponding = false }
         do {
-            try await store.respondToApproval(
-                threadID: threadID,
-                requestID: requestID,
-                decision: decision,
-                optionID: nil,
-                answers: answers
-            )
+            try await send(decision, answers)
         } catch {
             errorMessage = error.localizedDescription
         }

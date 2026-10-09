@@ -1372,6 +1372,53 @@
       ],
       "title": "ProviderOptionsSetParams"
     },
+    "ProviderQuestion": {
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/UserInputRequest"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instanceId",
+        "requestId",
+        "request"
+      ],
+      "title": "ProviderQuestion"
+    },
+    "ProviderQuestionAnswerParams": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "requestId",
+        "decision"
+      ],
+      "title": "ProviderQuestionAnswerParams"
+    },
     "ProviderSessionParams": {
       "properties": {
         "instanceId": {
@@ -2728,6 +2775,12 @@
         "providerOptionsInvalidated": {
           "$ref": "#/$defs/ProviderOptionsInvalidated"
         },
+        "providerQuestion": {
+          "$ref": "#/$defs/ProviderQuestion"
+        },
+        "providerQuestionAnswerParams": {
+          "$ref": "#/$defs/ProviderQuestionAnswerParams"
+        },
         "acpRegistryAgent": {
           "$ref": "#/$defs/ACPRegistryAgent"
         },
@@ -2849,6 +2902,8 @@
         "providerOptionsSetParams",
         "providerOptionsResult",
         "providerOptionsInvalidated",
+        "providerQuestion",
+        "providerQuestionAnswerParams",
         "acpRegistryAgent",
         "acpRegistryInstalledAgent",
         "acpRegistryInstallParams",

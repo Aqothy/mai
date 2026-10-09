@@ -129,6 +129,9 @@ type Instance struct {
 	sessions         map[string]*acpSession
 	sessionsByThread map[string]string
 
+	// signInAsk answers request-scoped elicitations while authenticate runs.
+	signInAsk func(context.Context, provider.UserInputRequest) (provider.UserInputAnswer, error)
+
 	runtimeEventListener provider.RuntimeEventListener
 	once                 sync.Once
 }
@@ -237,11 +240,16 @@ func (h *Instance) Authenticate(ctx context.Context, input provider.Authenticate
 		}
 		return provider.AuthenticationResult{Instance: h.Info(), Terminal: &command}, nil
 	}
-	if _, err := h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: method.ID}); err != nil {
-		return provider.AuthenticationResult{}, acpRequestError(err)
-	}
+	h.mu.Lock()
+	h.signInAsk = input.Ask
+	h.mu.Unlock()
+	_, err := h.agentPeer.Authenticate(ctx, schema.AuthenticateRequest{MethodID: method.ID})
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.signInAsk = nil
+	if err != nil {
+		return provider.AuthenticationResult{}, acpRequestError(err)
+	}
 	h.info.Auth.Status = provider.AuthStatusAuthenticated
 	return provider.AuthenticationResult{Instance: cloneInstanceInfo(h.info)}, nil
 }

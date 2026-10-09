@@ -68,6 +68,9 @@ final class ThreadStore {
     private(set) var errorMessage: String?
     private(set) var selectedThreadLoadErrorMessage: String?
     private(set) var providers: [InstanceInfo] = []
+    /// A question an agent asks while the user signs in to it, shown on the
+    /// provider account screen until answered or the sign-in ends.
+    private(set) var providerQuestion: ProviderQuestion?
     private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
     var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
     var onProviderOptionsInvalidated: ((ProviderOptionsInvalidated) -> Void)?
@@ -338,6 +341,7 @@ final class ThreadStore {
         guard providerInfo(for: instanceID)?.capabilities.auth == true else {
             throw RPCError("This provider does not support sign in")
         }
+        defer { providerQuestion = nil }
         let result = try await rpc.authenticateProvider(
             ProviderAuthenticateParams(
                 instanceID: instanceID,
@@ -347,6 +351,22 @@ final class ThreadStore {
         )
         replaceProvider(result.instance)
         return result
+    }
+
+    func answerProviderQuestion(
+        _ decision: MaidApprovalDecision,
+        answers: [String: [String]]?
+    ) async throws {
+        guard let question = providerQuestion else { return }
+        try await rpc.answerProviderQuestion(
+            ProviderQuestionAnswerParams(
+                answers: answers,
+                decision: decision.rawValue,
+                requestID: question.requestID
+            ))
+        if providerQuestion?.requestID == question.requestID {
+            providerQuestion = nil
+        }
     }
 
     func logoutProvider(_ providerID: String) async throws -> InstanceInfo {
@@ -1366,6 +1386,12 @@ final class ThreadStore {
                     from: data
                 )
                 onProviderOptionsInvalidated?(notification.params)
+            case MaidRPCMethod.providerQuestionAsked:
+                let notification = try decoder.decode(
+                    Notification<ProviderQuestion>.self,
+                    from: data
+                )
+                providerQuestion = notification.params
             default:
                 break
             }

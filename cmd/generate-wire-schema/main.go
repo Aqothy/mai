@@ -70,6 +70,8 @@ type contract struct {
 	ProviderOptionsSetParams         wire.ProviderOptionsSetParams         `json:"providerOptionsSetParams"`
 	ProviderOptionsResult            wire.ProviderOptionsResult            `json:"providerOptionsResult"`
 	ProviderOptionsInvalidated       wire.ProviderOptionsInvalidated       `json:"providerOptionsInvalidated"`
+	ProviderQuestion                 wire.ProviderQuestion                 `json:"providerQuestion"`
+	ProviderQuestionAnswerParams     wire.ProviderQuestionAnswerParams     `json:"providerQuestionAnswerParams"`
 	ACPRegistryAgent                 wire.ACPRegistryAgent                 `json:"acpRegistryAgent"`
 	ACPRegistryInstalledAgent        wire.ACPRegistryInstalledAgent        `json:"acpRegistryInstalledAgent"`
 	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"acpRegistryInstallParams"`

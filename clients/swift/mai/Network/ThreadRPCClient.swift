@@ -26,6 +26,7 @@ protocol ThreadRPCClient: RPCTransportClient {
     func closeProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
+    func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws
     func browseWorkspaceDirectories(
         _ input: WorkspaceBrowseDirectoriesParams
     ) async throws -> WorkspaceBrowseDirectoriesResult
@@ -151,6 +152,10 @@ extension RPCClient: ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         try await call(MaidRPCMethod.providerOptionsSet, params: input)
+    }
+
+    func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws {
+        try await callVoid(MaidRPCMethod.providerQuestionAnswer, params: input)
     }
 
     func browseWorkspaceDirectories(

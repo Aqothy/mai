@@ -24,6 +24,7 @@ nonisolated public enum MaidRPCMethod {
     public static let providerForkThread = "provider.forkThread"
     public static let providerOptionsGet = "provider.options.get"
     public static let providerOptionsSet = "provider.options.set"
+    public static let providerQuestionAnswer = "provider.question.answer"
     public static let terminalCreate = "terminal.create"
     public static let terminalAttach = "terminal.attach"
     public static let terminalRelaunch = "terminal.relaunch"
@@ -38,5 +39,6 @@ nonisolated public enum MaidRPCMethod {
     public static let workspaceSearchFiles = "workspace.searchFiles"
     public static let providerOptionsUpdated = "provider.options.updated"
     public static let providerOptionsInvalidated = "provider.options.invalidated"
+    public static let providerQuestionAsked = "provider.question.asked"
     public static let terminalSubscribe = "terminal.subscribe"
 }

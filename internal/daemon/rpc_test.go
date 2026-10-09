@@ -686,6 +686,43 @@ func TestRPCProviderAuthenticateAndLogout(t *testing.T) {
 	}
 }
 
+// An agent can ask a question while signing in, before any session exists
+// (an ACP request-scoped elicitation). It goes to the client whose sign-in is
+// running, and the answer reaches the agent before authenticate returns.
+func TestRPCProviderSignInQuestionReachesSigningInClient(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", fakeACPAgentCommand("-ask-to-sign-in"))}, nil)
+
+	signedIn := make(chan error, 1)
+	var result provider.AuthenticationResult
+	go func() {
+		signedIn <- client.callErr(wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "codex", MethodID: "ask-login"}, &result)
+	}()
+	var question wire.ProviderQuestion
+	waitUntil(t, "sign-in question", func() bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		if len(client.providerQuestions) == 0 {
+			return false
+		}
+		question = client.providerQuestions[0]
+		return true
+	})
+	if question.InstanceID != "codex" || question.Request.Message != "Enter the code from your email." || len(question.Request.Questions) != 1 || question.Request.Questions[0].ID != "code" {
+		t.Fatalf("question = %+v", question)
+	}
+
+	client.call(t, wire.MethodProviderQuestionAnswer, wire.ProviderQuestionAnswerParams{RequestID: question.RequestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"code": {"1234"}}}, nil)
+	if err := <-signedIn; err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if result.Instance.Auth.Status != provider.AuthStatusAuthenticated {
+		t.Fatalf("auth status = %q, want authenticated", result.Instance.Auth.Status)
+	}
+}
+
 // Terminal sign-in runs the agent's own command in a maiD terminal; when it
 // exits successfully the provider restarts so the agent re-initializes.
 // A successful terminal sign-in restarts the provider so it picks up the new

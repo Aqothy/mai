@@ -120,6 +120,11 @@
       "result": "ProviderOptionsResult"
     },
     {
+      "name": "provider.question.answer",
+      "params": "ProviderQuestionAnswerParams",
+      "resultNull": true
+    },
+    {
       "name": "terminal.create",
       "params": "TerminalCreateParams",
       "result": "TerminalAttachSnapshot"
@@ -196,6 +201,10 @@
     {
       "name": "provider.options.invalidated",
       "payload": "ProviderOptionsInvalidated"
+    },
+    {
+      "name": "provider.question.asked",
+      "payload": "ProviderQuestion"
     },
     {
       "name": "terminal.subscribe",

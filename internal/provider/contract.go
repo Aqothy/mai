@@ -7,6 +7,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,6 +148,16 @@ type AuthMethod struct {
 type AuthenticateInput struct {
 	MethodID string `json:"methodId"`
 	Secret   string `json:"secret,omitempty"`
+	// Ask shows the user a question the agent asks while signing in, outside
+	// any thread, and waits for the answer. Nil when nobody can answer.
+	Ask func(context.Context, UserInputRequest) (UserInputAnswer, error) `json:"-"`
+}
+
+// UserInputAnswer is the user's response to a UserInputRequest; Answers is
+// set when Decision is accept, keyed by Question.ID.
+type UserInputAnswer struct {
+	Decision ApprovalDecision    `json:"decision"`
+	Answers  map[string][]string `json:"answers,omitempty"`
 }
 
 // AuthChallenge describes a browser or device-code login that continues after

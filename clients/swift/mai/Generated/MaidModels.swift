@@ -3965,6 +3965,120 @@ public extension ProviderOptionsSetParams {
     }
 }
 
+// MARK: - ProviderQuestion
+public struct ProviderQuestion: Codable {
+    public var instanceID: String
+    public var request: UserInputRequest
+    public var requestID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case instanceID = "instanceId"
+        case request
+        case requestID = "requestId"
+    }
+
+    public init(instanceID: String, request: UserInputRequest, requestID: String) {
+        self.instanceID = instanceID
+        self.request = request
+        self.requestID = requestID
+    }
+}
+
+// MARK: ProviderQuestion convenience initializers and mutators
+
+public extension ProviderQuestion {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderQuestion.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        instanceID: String? = nil,
+        request: UserInputRequest? = nil,
+        requestID: String? = nil
+    ) -> ProviderQuestion {
+        return ProviderQuestion(
+            instanceID: instanceID ?? self.instanceID,
+            request: request ?? self.request,
+            requestID: requestID ?? self.requestID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderQuestionAnswerParams
+public struct ProviderQuestionAnswerParams: Codable {
+    public var answers: [String: [String]]?
+    public var decision, requestID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case answers, decision
+        case requestID = "requestId"
+    }
+
+    public init(answers: [String: [String]]?, decision: String, requestID: String) {
+        self.answers = answers
+        self.decision = decision
+        self.requestID = requestID
+    }
+}
+
+// MARK: ProviderQuestionAnswerParams convenience initializers and mutators
+
+public extension ProviderQuestionAnswerParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderQuestionAnswerParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        answers: [String: [String]]?? = nil,
+        decision: String? = nil,
+        requestID: String? = nil
+    ) -> ProviderQuestionAnswerParams {
+        return ProviderQuestionAnswerParams(
+            answers: answers ?? self.answers,
+            decision: decision ?? self.decision,
+            requestID: requestID ?? self.requestID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ProviderSessionParams
 public struct ProviderSessionParams: Codable {
     public var instanceID, sessionID: String

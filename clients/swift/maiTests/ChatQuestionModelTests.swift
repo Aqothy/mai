@@ -16,7 +16,7 @@ struct ChatQuestionModelTests {
                "options":[{"value":"a","label":"A"},{"value":"b","label":"B"},{"value":"c","label":"C"}]},
               {"id":"name","kind":"text","default":["maiD"]}
             ]}
-            """))
+            """), send: { _, _ in })
         let tags = model.questions[0]
         // Selecting in reverse order still answers in the options' order.
         model.toggle(tags.options![2], in: tags)
@@ -29,7 +29,7 @@ struct ChatQuestionModelTests {
     func requiredAndNumericAnswersBlockSubmit() throws {
         let model = ChatQuestionModel(request: try request("""
             {"message":"Count","questions":[{"id":"count","kind":"integer","required":true}]}
-            """))
+            """), send: { _, _ in })
         let count = model.questions[0]
         #expect(model.validationMessage(for: count) != nil)
 
@@ -46,7 +46,7 @@ struct ChatQuestionModelTests {
         let model = ChatQuestionModel(request: try request("""
             {"message":"Pick","questions":[{"id":"q","kind":"choice","allowsFreeText":true,"required":true,
               "options":[{"value":"A","label":"A"},{"value":"B","label":"B"}]}]}
-            """))
+            """), send: { _, _ in })
         let question = model.questions[0]
         model.toggle(question.options![0], in: question)
         model.setTextAnswer("Neither", for: question)
@@ -63,7 +63,7 @@ struct ChatQuestionModelTests {
               {"id":"color","kind":"choice","title":"Color","options":[{"value":"b","label":"Blue"}]},
               {"id":"note","kind":"text"}
             ]}
-            """))
+            """), send: { _, _ in })
         let shown = model.submittedAnswers(["note": ["Thanks"], "color": ["b"]])
         #expect(shown.map(\.title) == ["Color", "note"])
         #expect(shown.map(\.answer) == ["Blue", "Thanks"])
@@ -71,7 +71,7 @@ struct ChatQuestionModelTests {
 
     @Test
     func urlRequestsOnlyAcceptWebLinks() throws {
-        #expect(ChatQuestionModel(request: try request(#"{"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#)).hasSuspiciousHost)
-        #expect(ChatQuestionModel(request: try request(#"{"message":"Run","url":"file:///etc/passwd"}"#)).url == nil)
+        #expect(ChatQuestionModel(request: try request(#"{"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
+        #expect(ChatQuestionModel(request: try request(#"{"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)
     }
 }

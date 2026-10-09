@@ -149,6 +149,9 @@ struct ProviderAccountDetailView: View {
             }
         }
         .modifier(ProviderSignInTerminalPresenter(model: model))
+        .sheet(item: .constant(model.question)) { question in
+            ProviderQuestionSheet(question: question, account: model)
+        }
         .alert("Provider Account Error", isPresented: $model.isErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
