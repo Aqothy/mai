@@ -694,6 +694,17 @@ final class ThreadStore {
         )
     }
 
+    /// Renames a thread. The daemon also names the provider's own session
+    /// where sessions have names (Claude Code, Codex). A blank title is
+    /// ignored.
+    func renameThread(threadID: String, title: String) async throws {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        var rename = command(type: MaidCommandType.threadMetaUpdate.rawValue, threadID: threadID)
+        rename.title = title
+        _ = try await rpc.dispatchCommand(rename)
+    }
+
     func respondToApproval(
         threadID: String,
         requestID: String,

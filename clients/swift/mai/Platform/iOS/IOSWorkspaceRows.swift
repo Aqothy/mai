@@ -49,7 +49,8 @@ private struct IOSWorkspaceRow: View {
                     select: { selectThread(thread.id) },
                     markRead: { store.markThreadRead(thread.id) },
                     markUnread: { store.markThreadUnread(thread.id) },
-                    openTerminalHere: openTerminalHereAction(for: thread)
+                    openTerminalHere: openTerminalHereAction(for: thread),
+                    rename: { try await store.renameThread(threadID: thread.id, title: $0) }
                 )
             case .terminal(let summary):
                 IOSTerminalRowButton(
@@ -86,6 +87,9 @@ private struct IOSThreadRowButton: View {
     let markRead: () -> Void
     let markUnread: () -> Void
     let openTerminalHere: (() -> Void)?
+    let rename: (String) async throws -> Void
+
+    @State private var isRenaming = false
 
     var body: some View {
         Button(action: select) {
@@ -95,7 +99,9 @@ private struct IOSThreadRowButton: View {
                 ThreadRow(thread: thread, isUnread: isUnread, providerName: providerName)
             }
         }
+        .threadRenameAlert(isPresented: $isRenaming, currentTitle: thread.title, rename: rename)
         .contextMenu {
+            Button("Rename…", systemImage: "pencil") { isRenaming = true }
             if isUnread {
                 Button("Mark as Read", systemImage: "envelope.open", action: markRead)
             } else {

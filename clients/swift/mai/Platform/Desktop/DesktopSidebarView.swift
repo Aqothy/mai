@@ -449,7 +449,8 @@
                         providerName: store.providerDisplayName(for: thread),
                         markRead: { store.markThreadRead(thread.id) },
                         markUnread: { store.markThreadUnread(thread.id) },
-                        openTerminalHere: openTerminalHere(thread)
+                        openTerminalHere: openTerminalHere(thread),
+                        rename: { try await store.renameThread(threadID: thread.id, title: $0) }
                     )
                 case .terminal(let summary):
                     DesktopTerminalRow(
@@ -471,6 +472,9 @@
         let markRead: () -> Void
         let markUnread: () -> Void
         let openTerminalHere: (() -> Void)?
+        let rename: (String) async throws -> Void
+
+        @State private var isRenaming = false
 
         var body: some View {
             VStack(spacing: 0) {
@@ -480,7 +484,9 @@
                     ThreadRow(thread: thread, isUnread: isUnread, providerName: providerName)
                 }
             }
+            .threadRenameAlert(isPresented: $isRenaming, currentTitle: thread.title, rename: rename)
             .contextMenu {
+                Button("Rename…", systemImage: "pencil") { isRenaming = true }
                 if isUnread {
                     Button("Mark as Read", systemImage: "envelope.open", action: markRead)
                 } else {
