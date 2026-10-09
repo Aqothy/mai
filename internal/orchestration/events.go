@@ -37,6 +37,7 @@ const (
 	EventThreadPromptRemoved             EventType = "thread.prompt-removed"
 	EventThreadMessageSteerRequested     EventType = "thread.message-steer-requested"
 	EventThreadMessageDeliveryUpdated    EventType = "thread.message-delivery-updated"
+	EventThreadMessageSteerMissed        EventType = "thread.message-steer-missed"
 )
 
 type ActorKind string

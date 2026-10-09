@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -576,6 +577,45 @@ func TestReactorRefusedSteerMarksOnlyTheMessageNotDelivered(t *testing.T) {
 	thread, _ = engine.Thread(threadID)
 	if retried := thread.Timeline.Message("msg-steer"); retried.Delivery != "" || retried.TurnID != runningTurn || len(thread.Timeline.Messages()) != 2 {
 		t.Fatalf("after retry: message %#v; want the same message delivered on %q", retried, runningTurn)
+	}
+}
+
+// A steer whose turn ended at the provider before it arrived (the completion
+// is still on its way to orchestration) is sent as the next turn, like a
+// message sent just then: ahead of the queue and without an error.
+func TestReactorSteerThatMissedItsTurnStartsTheNextTurn(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	fake.steerErr = fmt.Errorf("turn completed: %w", provider.ErrTurnNotRunning)
+	reactor := newTestReactor(engine, fake)
+	threadID := ThreadID("thread-missed-steer")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-missed-steer", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
+	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "first", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-first", Text: "first"}})
+	for _, id := range []string{"msg-late", "msg-queued"} {
+		mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: CommandID("queue-" + id), ThreadID: threadID, Message: &CommandMessage{MessageID: id, Text: id}})
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptSend, CommandID: "steer-late", ThreadID: threadID, MessageID: "msg-late"})
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ := engine.Thread(threadID)
+	firstTurn := thread.LatestTurn.ID
+	if late := thread.Timeline.Message("msg-late"); late.Delivery != MessageSending {
+		t.Fatalf("missed steer delivery = %q, want it still sending", late.Delivery)
+	}
+
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: firstTurn, TurnState: provider.RuntimeTurnCompleted}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	waitFor(t, "missed steer sent as the next turn", func() bool {
+		sent := fake.lastSendInput()
+		return sent.Input == "msg-late" && !sent.Steer && sent.TurnID != string(firstTurn)
+	})
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ = engine.Thread(threadID)
+	late := thread.Timeline.Message("msg-late")
+	if late.Delivery != "" || late.TurnID != thread.LatestTurn.ID || !slices.Equal(queuedMessageIDs(thread), []MessageID{"msg-queued"}) {
+		t.Fatalf("after the turn ended: msg-late %#v, queue %v; want it delivered on the new turn ahead of msg-queued", late, queuedMessageIDs(thread))
 	}
 }
 

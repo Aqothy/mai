@@ -139,11 +139,10 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		return fmt.Errorf("Codex thread %q is not bound", input.ThreadID)
 	}
 	if input.Steer {
-		// app-server rejects an expectedTurnId that is no longer running.
 		nativeTurn := session.localToNativeTurn[input.TurnID]
-		if nativeTurn == "" {
+		if nativeTurn == "" || nativeTurn != session.activeNativeTurn {
 			h.mu.Unlock()
-			return fmt.Errorf("Codex thread %q has no turn %q to steer", input.ThreadID, input.TurnID)
+			return fmt.Errorf("Codex thread %q turn %q: %w", input.ThreadID, input.TurnID, provider.ErrTurnNotRunning)
 		}
 		nativeThread := session.nativeThreadID
 		skills := append([]provider.Skill(nil), session.skills...)

@@ -351,7 +351,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 func sendConflictLocked(session *claudeSession, input provider.SendTurnInput) error {
 	switch {
 	case input.Steer && session.activeLocalTurn != input.TurnID:
-		return fmt.Errorf("Claude Code thread %q has no running turn %q to steer", session.localThreadID, input.TurnID)
+		return fmt.Errorf("Claude Code thread %q turn %q: %w", session.localThreadID, input.TurnID, provider.ErrTurnNotRunning)
 	case !input.Steer && session.activeLocalTurn != "" && !session.cliStartedTurn:
 		return fmt.Errorf("Claude Code thread %q already has a running turn", session.localThreadID)
 	}

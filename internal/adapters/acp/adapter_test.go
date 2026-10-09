@@ -2289,8 +2289,8 @@ func TestNextTurnDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 
 	// The steer and the next turn land while turn-1's completion emission is
 	// still in progress.
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer", Steer: true}); err == nil {
-		t.Fatal("steer of a completing turn succeeded, want an error so orchestration sends it as the next turn")
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer", Steer: true}); !errors.Is(err, provider.ErrTurnNotRunning) {
+		t.Fatalf("steer of a completing turn err = %v, want ErrTurnNotRunning so orchestration sends it as the next turn", err)
 	}
 	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-2", Input: "next"}); err != nil {
 		t.Fatalf("next SendTurn: %v", err)

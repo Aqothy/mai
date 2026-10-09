@@ -82,6 +82,10 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadMessageSteerRequested(event)
 	case EventThreadMessageDeliveryUpdated:
 		p.applyThreadMessageDeliveryUpdated(event)
+	case EventThreadMessageSteerMissed:
+		if thread := p.ensureThread(event); thread != nil {
+			thread.MissedSteers = append(thread.MissedSteers, event.Payload.MessageID)
+		}
 	}
 }
 
@@ -386,6 +390,7 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 		replaceLatestTurn(thread, Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now})
 	}
 	thread.QueueHeld = false // starting a turn picks the thread back up
+	thread.MissedSteers = slices.DeleteFunc(thread.MissedSteers, func(id MessageID) bool { return id == event.Payload.MessageID })
 	sendMessage(thread, event.Payload.MessageID, turnID)
 	if thread.Session != nil {
 		thread.Session.Status = SessionStatusRunning

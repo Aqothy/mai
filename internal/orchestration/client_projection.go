@@ -18,6 +18,7 @@ func projectThreadForClient(thread Thread) Thread {
 	projected := thread
 	projected.ModelSelection = cloneModelSelection(thread.ModelSelection)
 	projected.ConfigSelections = nil
+	projected.MissedSteers = nil
 	projected.Session = cloneSessionPtr(thread.Session)
 	projected.LatestTurn = cloneTurnPtr(thread.LatestTurn)
 	projected.PreviousTurns = cloneTurns(thread.PreviousTurns)

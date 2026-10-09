@@ -77,9 +77,12 @@ type Thread struct {
 	// QueueHeld pauses the queue after the user stops a turn or a turn fails,
 	// so waiting prompts don't run into the same stop or failure. Sending or
 	// retrying releases it. It is only ever set while prompts wait.
-	QueueHeld bool      `json:"-"`
-	Plan      *Plan     `json:"plan,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	QueueHeld bool `json:"-"`
+	// MissedSteers are messages whose steer arrived after its turn ended at
+	// the provider. Like a message sent just then, each starts the next turn.
+	MissedSteers []MessageID `json:"-"`
+	Plan         *Plan       `json:"plan,omitempty"`
+	CreatedAt    time.Time   `json:"createdAt"`
 	// UpdatedAt is the sidebar recency timestamp: the latest user-message time,
 	// or CreatedAt before the first user message.
 	UpdatedAt time.Time `json:"updatedAt"`

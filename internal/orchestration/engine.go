@@ -924,10 +924,11 @@ func appendPromptTurn(appendEvent func(Event) Event, header Event, prompt Queued
 	return appendEvent(turn)
 }
 
-// sendQueuedPromptsLocked is the queue's one dispatch rule. Every write ends
-// here, so a thread that can take a turn never keeps a prompt waiting: its
-// first queued prompt starts the next turn.
-func (e *Engine) sendQueuedPromptsLocked(appended []Event, appendEvent func(Event) Event) {
+// startNextTurnLocked is the one rule that starts a turn on its own. Every
+// write ends here, so a thread that can take a turn never keeps a message
+// waiting: a steer that missed its turn goes first, like a message sent just
+// now; then the first queued prompt, unless a stop or failure holds the queue.
+func (e *Engine) startNextTurnLocked(appended []Event, appendEvent func(Event) Event) {
 	var threadIDs []ThreadID
 	for _, event := range appended {
 		if !slices.Contains(threadIDs, event.ThreadID()) {
@@ -936,11 +937,19 @@ func (e *Engine) sendQueuedPromptsLocked(appended []Event, appendEvent func(Even
 	}
 	for _, threadID := range threadIDs {
 		thread := e.projection.liveThread(threadID)
-		if thread == nil || len(thread.QueuedPrompts) == 0 || thread.QueueHeld || !canStartTurn(*thread) {
+		if thread == nil || !canStartTurn(*thread) {
 			continue
 		}
 		header := Event{OccurredAt: appended[len(appended)-1].OccurredAt, Actor: ActorKindServer, Payload: EventPayload{ThreadID: threadID}}
-		appendPromptTurn(appendEvent, header, thread.QueuedPrompts[0], EventPayload{})
+		switch {
+		case len(thread.MissedSteers) > 0:
+			start := header
+			start.Type = EventThreadTurnStartRequested
+			start.Payload.MessageID, start.Payload.TurnID = thread.MissedSteers[0], TurnID(newID("turn"))
+			appendEvent(start)
+		case len(thread.QueuedPrompts) > 0 && !thread.QueueHeld:
+			appendPromptTurn(appendEvent, header, thread.QueuedPrompts[0], EventPayload{})
+		}
 	}
 }
 
@@ -1170,7 +1179,7 @@ func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) er
 	}
 	err := fn(appendEvent)
 	if len(appended) > 0 {
-		e.sendQueuedPromptsLocked(appended, appendEvent)
+		e.startNextTurnLocked(appended, appendEvent)
 	}
 	return err
 }

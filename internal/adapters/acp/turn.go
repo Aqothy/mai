@@ -103,7 +103,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if input.Steer {
 		if !collectorAcceptsSteer(prev, turnID) {
 			h.mu.Unlock()
-			return fmt.Errorf("thread %q has no running turn %q to steer", input.ThreadID, turnID)
+			return fmt.Errorf("thread %q turn %q: %w", input.ThreadID, turnID, provider.ErrTurnNotRunning)
 		}
 	} else {
 		if turnID == "" {

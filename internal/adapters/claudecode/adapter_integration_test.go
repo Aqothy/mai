@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -388,10 +389,10 @@ func TestFoldedSteerEndsWithTheRunningQuery(t *testing.T) {
 	if done.TurnID != "turn-1" || done.Payload.TurnState != provider.RuntimeTurnCompleted {
 		t.Fatalf("completion = %#v, want turn-1 completed", done)
 	}
-	// The turn is over, so a late steer fails and orchestration sends the
-	// message as the next turn instead.
-	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "late", Steer: true}); err == nil {
-		t.Fatal("steer after the turn ended succeeded, want an error")
+	// The turn is over, so a late steer reports it and orchestration sends
+	// the message as the next turn instead.
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "late", Steer: true}); !errors.Is(err, provider.ErrTurnNotRunning) {
+		t.Fatalf("steer after the turn ended err = %v, want ErrTurnNotRunning", err)
 	}
 }
 

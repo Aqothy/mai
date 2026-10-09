@@ -34,6 +34,7 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadPromptRemoved = "thread.prompt-removed"
     case threadMessageSteerRequested = "thread.message-steer-requested"
     case threadMessageDeliveryUpdated = "thread.message-delivery-updated"
+    case threadMessageSteerMissed = "thread.message-steer-missed"
 }
 
 /// Type discriminator of a client command sent to orchestration.dispatchCommand.

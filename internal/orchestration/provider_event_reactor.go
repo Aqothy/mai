@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -274,8 +275,10 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	r.recordDelivery(threadID, messageID, "", "")
 }
 
-// handleSteer hands a message to the running turn. A steer the provider
-// refuses only marks the message not delivered: the turn keeps running.
+// handleSteer hands a message to the running turn. A steer that arrives after
+// its turn ended is sent as the next turn, like a message sent just then; one
+// the provider refuses only marks the message not delivered, and the turn
+// keeps running.
 func (r *ProviderEventReactor) handleSteer(event Event) {
 	threadID := event.ThreadID()
 	turnID := event.Payload.TurnID
@@ -284,17 +287,23 @@ func (r *ProviderEventReactor) handleSteer(event Event) {
 	if !ok {
 		return
 	}
+	missed := func() {
+		r.record(EventInput{Type: EventThreadMessageSteerMissed, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: messageID}})
+	}
 	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
-		r.recordDelivery(threadID, messageID, MessageNotDelivered, "The turn ended before it reached the agent.")
+		missed()
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	if err := r.provider.SendTurn(ctx, sendTurnInput(view, turnID, true)); err != nil {
+	switch err := r.provider.SendTurn(ctx, sendTurnInput(view, turnID, true)); {
+	case errors.Is(err, provider.ErrTurnNotRunning):
+		missed()
+	case err != nil:
 		r.recordDelivery(threadID, messageID, MessageNotDelivered, err.Error())
-		return
+	default:
+		r.recordDelivery(threadID, messageID, "", "")
 	}
-	r.recordDelivery(threadID, messageID, "", "")
 }
 
 func (r *ProviderEventReactor) recordDelivery(threadID ThreadID, messageID MessageID, delivery MessageDelivery, reason string) {

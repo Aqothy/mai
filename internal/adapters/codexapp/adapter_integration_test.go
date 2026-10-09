@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -91,6 +92,11 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	})
 	if completed.Payload.TurnState != provider.RuntimeTurnFailed || completed.Payload.Message != "model failed" || completed.Payload.Detail != "retry later" {
 		t.Fatalf("failed turn payload = %#v", completed.Payload)
+	}
+	// A steer that lost the race with the turn's end reports it, so
+	// orchestration sends the prompt as the next turn.
+	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "too late", Steer: true}); !errors.Is(err, provider.ErrTurnNotRunning) {
+		t.Fatalf("steer after turn completion err = %v, want ErrTurnNotRunning", err)
 	}
 	if err := instance.StopSession(testContext(t), provider.StopSessionInput{ThreadID: "local-thread"}); err != nil {
 		t.Fatalf("stop session: %v", err)

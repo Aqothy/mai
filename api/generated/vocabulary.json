@@ -30,7 +30,8 @@
         "thread.prompt-queued",
         "thread.prompt-removed",
         "thread.message-steer-requested",
-        "thread.message-delivery-updated"
+        "thread.message-delivery-updated",
+        "thread.message-steer-missed"
       ]
     },
     {

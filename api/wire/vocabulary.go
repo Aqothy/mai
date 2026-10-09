@@ -45,6 +45,7 @@ var Vocabularies = []VocabularyDefinition{
 			string(orchestration.EventThreadPromptRemoved),
 			string(orchestration.EventThreadMessageSteerRequested),
 			string(orchestration.EventThreadMessageDeliveryUpdated),
+			string(orchestration.EventThreadMessageSteerMissed),
 		},
 	},
 	{
