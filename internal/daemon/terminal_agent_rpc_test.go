@@ -87,7 +87,7 @@ func TestTerminalAgentDoneWhileDetachedAndAttachAcknowledges(t *testing.T) {
 
 	// Navigate away: the shell keeps running with no attached client, and
 	// activity keeps updating server-side.
-	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID, RunID: created.RunID})
+	controller.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
 
 	// The job finishes while detached: the working run reports done and
 	// holds it.

@@ -4029,15 +4029,18 @@ public extension SubscribeThreadInput {
 
 // MARK: - TerminalAttachParams
 public struct TerminalAttachParams: Codable {
+    public var attachmentID: String
     public var columns, rows: Int
     public var terminalID: String
 
     public enum CodingKeys: String, CodingKey {
+        case attachmentID = "attachmentId"
         case columns, rows
         case terminalID = "terminalId"
     }
 
-    public init(columns: Int, rows: Int, terminalID: String) {
+    public init(attachmentID: String, columns: Int, rows: Int, terminalID: String) {
+        self.attachmentID = attachmentID
         self.columns = columns
         self.rows = rows
         self.terminalID = terminalID
@@ -4063,11 +4066,13 @@ public extension TerminalAttachParams {
     }
 
     func with(
+        attachmentID: String? = nil,
         columns: Int? = nil,
         rows: Int? = nil,
         terminalID: String? = nil
     ) -> TerminalAttachParams {
         return TerminalAttachParams(
+            attachmentID: attachmentID ?? self.attachmentID,
             columns: columns ?? self.columns,
             rows: rows ?? self.rows,
             terminalID: terminalID ?? self.terminalID
@@ -4245,12 +4250,19 @@ public extension TerminalSummary {
 
 // MARK: - TerminalCreateParams
 public struct TerminalCreateParams: Codable {
+    public var attachmentID: String
     public var columns: Int
     public var cwd: String
     public var rows: Int
     public var title: String?
 
-    public init(columns: Int, cwd: String, rows: Int, title: String?) {
+    public enum CodingKeys: String, CodingKey {
+        case attachmentID = "attachmentId"
+        case columns, cwd, rows, title
+    }
+
+    public init(attachmentID: String, columns: Int, cwd: String, rows: Int, title: String?) {
+        self.attachmentID = attachmentID
         self.columns = columns
         self.cwd = cwd
         self.rows = rows
@@ -4277,12 +4289,14 @@ public extension TerminalCreateParams {
     }
 
     func with(
+        attachmentID: String? = nil,
         columns: Int? = nil,
         cwd: String? = nil,
         rows: Int? = nil,
         title: String?? = nil
     ) -> TerminalCreateParams {
         return TerminalCreateParams(
+            attachmentID: attachmentID ?? self.attachmentID,
             columns: columns ?? self.columns,
             cwd: cwd ?? self.cwd,
             rows: rows ?? self.rows,
@@ -4301,15 +4315,15 @@ public extension TerminalCreateParams {
 
 // MARK: - TerminalDetachParams
 public struct TerminalDetachParams: Codable {
-    public var runID, terminalID: String
+    public var attachmentID, terminalID: String
 
     public enum CodingKeys: String, CodingKey {
-        case runID = "runId"
+        case attachmentID = "attachmentId"
         case terminalID = "terminalId"
     }
 
-    public init(runID: String, terminalID: String) {
-        self.runID = runID
+    public init(attachmentID: String, terminalID: String) {
+        self.attachmentID = attachmentID
         self.terminalID = terminalID
     }
 }
@@ -4333,11 +4347,11 @@ public extension TerminalDetachParams {
     }
 
     func with(
-        runID: String? = nil,
+        attachmentID: String? = nil,
         terminalID: String? = nil
     ) -> TerminalDetachParams {
         return TerminalDetachParams(
-            runID: runID ?? self.runID,
+            attachmentID: attachmentID ?? self.attachmentID,
             terminalID: terminalID ?? self.terminalID
         )
     }

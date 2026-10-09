@@ -133,7 +133,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		updatedAt:  now,
 	}
 	entry.operations.Lock()
-	client.subscribeTerminal(terminalID)
+	undoSubscribe := client.subscribeTerminal(terminalID, params.AttachmentID)
 	// Register the entry (and with it the output subscription) before the
 	// shell starts so no early output is lost; the client buffers stream items
 	// until this call returns its snapshot.
@@ -153,13 +153,13 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 			rt.mu.Lock()
 			delete(rt.entries, terminalID)
 			rt.mu.Unlock()
-			client.unsubscribeTerminal(terminalID)
+			undoSubscribe()
 			entry.operations.Unlock()
 			return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
 		// Spawn failures keep the stopped metadata row so the user can retry
 		// or delete it.
-		client.unsubscribeTerminal(terminalID)
+		undoSubscribe()
 		rt.persist(entry, s.logger)
 		entry.operations.Unlock()
 		s.publishTerminalListUpsert(s.terminalMetaSummary(entry))
@@ -170,7 +170,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	session.SetAttached(true)
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
-		client.unsubscribeTerminal(terminalID)
+		undoSubscribe()
 		session.SetAttached(false)
 		entry.operations.Unlock()
 		s.publishTerminalListUpsert(s.terminalListSummary(entry))
@@ -238,16 +238,14 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
 	}
 
-	addedSubscription := client.subscribeTerminal(params.TerminalID)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID)
 	// Resize before capturing the snapshot: the attach model reflows to the
 	// caller's grid first, so the native snapshot paints current state at
 	// exactly the grid the client renders — the mis-wrap class raw replay
 	// suffered cannot occur. The snapshot's grid matching the request also
 	// keeps the client from immediately re-sending the same resize.
 	if err := session.Resize(params.Columns, params.Rows); err != nil {
-		if addedSubscription {
-			client.unsubscribeTerminal(params.TerminalID)
-		}
+		undoSubscribe()
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal attach resize: %w", err)
@@ -257,9 +255,7 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	session.SetAttached(true)
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
-		if addedSubscription {
-			client.unsubscribeTerminal(params.TerminalID)
-		}
+		undoSubscribe()
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		return wire.TerminalAttachSnapshot{}, err
@@ -281,7 +277,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	if !ok {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
-	addedSubscription := client.subscribeTerminal(params.TerminalID)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID)
 	entry.onExit = nil
 	session, err := rt.service.Relaunch(params.TerminalID, terminal.SpawnSpec{
 		Cwd:     entry.cwd,
@@ -289,9 +285,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 		Rows:    params.Rows,
 	}, s.terminalEvents())
 	if err != nil {
-		if addedSubscription {
-			client.unsubscribeTerminal(params.TerminalID)
-		}
+		undoSubscribe()
 		entry.operations.Unlock()
 		if errors.Is(err, terminal.ErrInvalidDimensions) || errors.Is(err, terminal.ErrInvalidCwd) {
 			return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
@@ -317,9 +311,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	})
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
-		if addedSubscription {
-			client.unsubscribeTerminal(params.TerminalID)
-		}
+		undoSubscribe()
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		s.publishTerminalListUpsert(s.terminalListSummary(entry))
@@ -333,21 +325,16 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 }
 
 // detachTerminal removes only the caller's listener without touching the
-// shell or any other attached client. A stale detach from an old run is a
-// no-op so it cannot remove a newer attachment on the same connection.
+// shell or any other attached client.
 func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachParams) {
-	rt := s.terminals
-	entry, ok := rt.lockEntry(params.TerminalID)
+	entry, ok := s.terminals.lockEntry(params.TerminalID)
 	if !ok {
 		return
 	}
 	defer entry.operations.Unlock()
-	session, err := rt.service.Get(params.TerminalID)
-	if err != nil || session.RunID != params.RunID {
-		return
+	if client.detachTerminal(params.TerminalID, params.AttachmentID) {
+		s.refreshTerminalAttachment(params.TerminalID)
 	}
-	client.unsubscribeTerminal(params.TerminalID)
-	session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 }
 
 func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.Session) (wire.TerminalAttachSnapshot, error) {

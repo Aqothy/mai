@@ -134,7 +134,7 @@ func TestTerminalDetachAndDisconnectKeepShellRunning(t *testing.T) {
 	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'BEFORE-%d\\n' $((10+1))\n")
 	client.waitForOutput(t, "BEFORE-11")
 
-	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID, RunID: snapshot.RunID})
+	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
 	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'DETACHED-%d\\n' $((10+2))\n")
 
 	reattach := client.mustAttachTerminal(t, terminalID, 80, 24)
@@ -153,6 +153,26 @@ func TestTerminalDetachAndDisconnectKeepShellRunning(t *testing.T) {
 	if attach := next.mustAttachTerminal(t, terminalID, 80, 24); attach.RunID != snapshot.RunID {
 		t.Fatal("client disconnect terminated the shell")
 	}
+}
+
+// TestTerminalLateDetachKeepsReplacementAttachment reopens a terminal on the
+// same connection while the closed view's detach is still on its way: the
+// late detach names the old attachment and must not drop the new one's
+// stream or input.
+func TestTerminalLateDetachKeepsReplacementAttachment(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+
+	created := createTestTerminal(t, client)
+	terminalID := created.Terminal.TerminalID
+	var reopened wire.TerminalAttachSnapshot
+	client.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24, AttachmentID: "view-2"}, &reopened)
+	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
+
+	client.writeTerminal(t, terminalID, reopened.RunID, "printf 'REOPENED-%d\\n' $((30+3))\n")
+	client.waitForOutput(t, "REOPENED-33")
 }
 
 func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {

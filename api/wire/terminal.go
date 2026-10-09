@@ -111,10 +111,11 @@ type TerminalStreamItem struct {
 }
 
 type TerminalCreateParams struct {
-	Title   string `json:"title,omitempty"`
-	Cwd     string `json:"cwd"`
-	Columns uint16 `json:"columns"`
-	Rows    uint16 `json:"rows"`
+	Title        string `json:"title,omitempty"`
+	Cwd          string `json:"cwd"`
+	Columns      uint16 `json:"columns"`
+	Rows         uint16 `json:"rows"`
+	AttachmentID string `json:"attachmentId"`
 }
 
 type TerminalIDParams struct {
@@ -123,17 +124,21 @@ type TerminalIDParams struct {
 
 // TerminalAttachParams attaches the calling client to a terminal (or, for
 // terminal.relaunch, to a fresh run) with the client's measured grid.
+// AttachmentID is client-generated and names the view that owns the
+// attachment; a connection has one attachment per terminal, and a newer one
+// replaces the older.
 type TerminalAttachParams struct {
-	TerminalID string `json:"terminalId"`
-	Columns    uint16 `json:"columns"`
-	Rows       uint16 `json:"rows"`
+	TerminalID   string `json:"terminalId"`
+	Columns      uint16 `json:"columns"`
+	Rows         uint16 `json:"rows"`
+	AttachmentID string `json:"attachmentId"`
 }
 
-// TerminalDetachParams releases control without terminating the shell. RunID
-// fences the detach so it cannot release a newer attachment or run.
+// TerminalDetachParams releases control without terminating the shell. A
+// detach for an attachment that a newer one already replaced is ignored.
 type TerminalDetachParams struct {
-	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
+	TerminalID   string `json:"terminalId"`
+	AttachmentID string `json:"attachmentId"`
 }
 
 // TerminalRenameParams gives a terminal a user-chosen title.

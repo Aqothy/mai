@@ -1643,6 +1643,9 @@
         },
         "rows": {
           "type": "integer"
+        },
+        "attachmentId": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1650,7 +1653,8 @@
       "required": [
         "terminalId",
         "columns",
-        "rows"
+        "rows",
+        "attachmentId"
       ],
       "title": "TerminalAttachParams"
     },
@@ -1705,6 +1709,9 @@
         },
         "rows": {
           "type": "integer"
+        },
+        "attachmentId": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1712,7 +1719,8 @@
       "required": [
         "cwd",
         "columns",
-        "rows"
+        "rows",
+        "attachmentId"
       ],
       "title": "TerminalCreateParams"
     },
@@ -1721,7 +1729,7 @@
         "terminalId": {
           "type": "string"
         },
-        "runId": {
+        "attachmentId": {
           "type": "string"
         }
       },
@@ -1729,7 +1737,7 @@
       "type": "object",
       "required": [
         "terminalId",
-        "runId"
+        "attachmentId"
       ],
       "title": "TerminalDetachParams"
     },

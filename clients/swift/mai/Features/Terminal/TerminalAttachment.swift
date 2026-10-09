@@ -55,6 +55,9 @@ final class TerminalAttachment {
     @ObservationIgnored let origin: TerminalOpenRequest
 
     @ObservationIgnored private(set) var runID: String?
+    /// Names this view's subscription on the connection, so a detach sent
+    /// after the terminal was reopened elsewhere cannot drop the new view's.
+    @ObservationIgnored private let attachmentID = UUID().uuidString
     @ObservationIgnored private var mode: Mode
     @ObservationIgnored private weak var store: TerminalStore?
     @ObservationIgnored private let backend: TerminalAttachmentBackend
@@ -158,9 +161,9 @@ final class TerminalAttachment {
             startTask?.cancel()
             startTask = nil
         }
-        if let terminalID, let runID {
+        if let terminalID {
             store?.rpc.detachTerminal(
-                TerminalDetachParams(runID: runID, terminalID: terminalID))
+                TerminalDetachParams(attachmentID: attachmentID, terminalID: terminalID))
         }
         controller.setInputEnabled(false)
     }
@@ -207,6 +210,7 @@ final class TerminalAttachment {
             case .create(let cwd, let title):
                 snapshot = try await rpc.createTerminal(
                     TerminalCreateParams(
+                        attachmentID: attachmentID,
                         columns: Int(grid.columns),
                         cwd: cwd,
                         rows: Int(grid.rows),
@@ -215,6 +219,7 @@ final class TerminalAttachment {
             case .attach(let terminalID):
                 snapshot = try await rpc.attachTerminal(
                     TerminalAttachParams(
+                        attachmentID: attachmentID,
                         columns: Int(grid.columns),
                         rows: Int(grid.rows),
                         terminalID: terminalID
@@ -222,6 +227,7 @@ final class TerminalAttachment {
             case .relaunch(let terminalID):
                 snapshot = try await rpc.relaunchTerminal(
                     TerminalAttachParams(
+                        attachmentID: attachmentID,
                         columns: Int(grid.columns),
                         rows: Int(grid.rows),
                         terminalID: terminalID
@@ -236,7 +242,7 @@ final class TerminalAttachment {
             if isClosed {
                 rpc.detachTerminal(
                     TerminalDetachParams(
-                        runID: snapshot.runID,
+                        attachmentID: attachmentID,
                         terminalID: snapshot.terminal.terminalID
                     ))
                 return
@@ -412,9 +418,9 @@ final class TerminalAttachment {
         awaitingSnapshot = false
         bufferedItems.removeAll()
         controller.setInputEnabled(false)
-        if let terminalID, let runID {
+        if let terminalID {
             store?.rpc.detachTerminal(
-                TerminalDetachParams(runID: runID, terminalID: terminalID))
+                TerminalDetachParams(attachmentID: attachmentID, terminalID: terminalID))
         }
     }
 

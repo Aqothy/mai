@@ -40,7 +40,7 @@ type rpcClient struct {
 
 	subscriptionsMu        sync.Mutex
 	threadSubscriptions    map[orchestration.ThreadID]struct{}
-	terminalSubscriptions  map[string]struct{}
+	terminalSubscriptions  map[string]string // terminal ID -> attachment ID
 	threadListSubscribed   bool
 	terminalListSubscribed bool
 
@@ -180,7 +180,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
-		terminalSubscriptions: make(map[string]struct{}),
+		terminalSubscriptions: make(map[string]string),
 	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
@@ -303,15 +303,38 @@ func (c *rpcClient) subscribedTerminalList() bool {
 	return c.terminalListSubscribed
 }
 
-// subscribeTerminal adds one terminal stream listener and reports whether it
-// was newly added. The result lets failed create/relaunch calls roll back only
-// the subscription they introduced.
-func (c *rpcClient) subscribeTerminal(terminalID string) bool {
+// subscribeTerminal makes attachmentID this connection's listener for the
+// terminal, replacing any earlier attachment. The returned undo restores the
+// previous listener, so a failed attach leaves the subscription as it found it.
+func (c *rpcClient) subscribeTerminal(terminalID, attachmentID string) (undo func()) {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
-	_, existed := c.terminalSubscriptions[terminalID]
-	c.terminalSubscriptions[terminalID] = struct{}{}
-	return !existed
+	previous, existed := c.terminalSubscriptions[terminalID]
+	c.terminalSubscriptions[terminalID] = attachmentID
+	return func() {
+		c.subscriptionsMu.Lock()
+		defer c.subscriptionsMu.Unlock()
+		if c.terminalSubscriptions[terminalID] != attachmentID {
+			return
+		}
+		if existed {
+			c.terminalSubscriptions[terminalID] = previous
+		} else {
+			delete(c.terminalSubscriptions, terminalID)
+		}
+	}
+}
+
+// detachTerminal removes the listener only while attachmentID is still the
+// current one, so a closed view's late detach cannot drop its replacement.
+func (c *rpcClient) detachTerminal(terminalID, attachmentID string) bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	if current, ok := c.terminalSubscriptions[terminalID]; !ok || current != attachmentID {
+		return false
+	}
+	delete(c.terminalSubscriptions, terminalID)
+	return true
 }
 
 func (c *rpcClient) unsubscribeTerminal(terminalID string) {
