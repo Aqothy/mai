@@ -6,6 +6,8 @@ protocol ThreadRPCClient: RPCTransportClient {
     func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem
     func unsubscribeThread(_ input: SubscribeThreadInput) async throws
     func getItemDetail(_ input: GetItemDetailInput) async throws -> Item
+    func getAttachment(_ input: GetAttachmentInput) async throws -> Attachment
+    func uploadAttachment(_ input: AttachmentUploadParams) async throws
     func listProviders() async throws -> [InstanceInfo]
     func listRegistryAgents() async throws -> [ACPRegistryAgent]
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent]
@@ -58,6 +60,14 @@ extension RPCClient: ThreadRPCClient {
             MaidRPCMethod.orchestrationGetItemDetail,
             params: input
         )
+    }
+
+    func getAttachment(_ input: GetAttachmentInput) async throws -> Attachment {
+        try await call(MaidRPCMethod.orchestrationGetAttachment, params: input)
+    }
+
+    func uploadAttachment(_ input: AttachmentUploadParams) async throws {
+        try await callVoid(MaidRPCMethod.orchestrationUploadAttachment, params: input)
     }
 
     func listProviders() async throws -> [InstanceInfo] {

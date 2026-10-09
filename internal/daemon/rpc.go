@@ -61,6 +61,12 @@ type rpcClient struct {
 	threadListSubscribed   bool
 	terminalListSubscribed bool
 
+	// uploads holds attachment data sent ahead of the command that lists the
+	// attachments, by attachment ID. A command takes its uploads; ones never
+	// sent go away with the connection.
+	uploadsMu sync.Mutex
+	uploads   map[string]string
+
 	optionsLifecycleMu   sync.Mutex
 	optionsMu            sync.Mutex
 	optionsSessions      map[provider.InstanceID]*clientOptionsSession
@@ -199,6 +205,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 		calls:                 make(chan struct{}, rpcConcurrentCalls),
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
 		terminalSubscriptions: make(map[string]string),
+		uploads:               make(map[string]string),
 	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
@@ -378,6 +385,28 @@ func (c *rpcClient) terminalSubscriptionIDs() []string {
 	return ids
 }
 
+// takeUploads fills in the data of attachments a command lists by ID, from
+// this connection's uploads, and releases those uploads.
+func (c *rpcClient) takeUploads(attachments []provider.Attachment) error {
+	c.uploadsMu.Lock()
+	defer c.uploadsMu.Unlock()
+	for index := range attachments {
+		attachment := &attachments[index]
+		if attachment.ID == "" || attachment.Data != "" {
+			continue
+		}
+		data, ok := c.uploads[attachment.ID]
+		if !ok {
+			return fmt.Errorf("%w: attachment %q was not uploaded", jsonrpc2.ErrInvalidParams, attachment.ID)
+		}
+		attachment.Data = data
+	}
+	for _, attachment := range attachments {
+		delete(c.uploads, attachment.ID)
+	}
+	return nil
+}
+
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
 	started := time.Now()
 	// jsonrpc2 treats a non-nil result alongside a non-nil error as a handler
@@ -412,7 +441,33 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &command); err != nil {
 			return nil, err
 		}
+		if command.Message != nil {
+			if err := h.client.takeUploads(command.Message.Attachments); err != nil {
+				return nil, err
+			}
+		}
 		return h.server.orchestration.Dispatch(ctx, command)
+	case wire.MethodOrchestrationUploadAttachment:
+		var params wire.AttachmentUploadParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.ID == "" || params.Data == "" {
+			return nil, fmt.Errorf("%w: uploadAttachment requires id and data", jsonrpc2.ErrInvalidParams)
+		}
+		h.client.uploadsMu.Lock()
+		h.client.uploads[params.ID] = params.Data
+		h.client.uploadsMu.Unlock()
+		return nil, nil
+	case wire.MethodOrchestrationGetAttachment:
+		var params orchestration.GetAttachmentInput
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.ThreadID == "" || params.AttachmentID == "" {
+			return nil, fmt.Errorf("%w: getAttachment requires threadId and attachmentId", jsonrpc2.ErrInvalidParams)
+		}
+		return h.server.orchestration.Attachment(params)
 	case wire.MethodOrchestrationSubscribeThread:
 		var params orchestration.SubscribeThreadInput
 		if err := decodeRPCParams(req, &params); err != nil {

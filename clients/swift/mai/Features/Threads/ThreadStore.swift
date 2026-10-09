@@ -194,7 +194,7 @@ final class ThreadStore {
                 try await self?.synchronizeConnection()
             },
             connected: { [weak self] in
-                self?.connectionDidConnect()
+                await self?.restoreSubscriptions()
             },
             disconnected: { [weak self] error in
                 self?.connectionDidDisconnect(error)
@@ -266,12 +266,6 @@ final class ThreadStore {
         providers = try await rpc.listProviders()
         installedAgents = (try? await rpc.listInstalledAgents()) ?? []
         rebuildProviderCaches()
-    }
-
-    private func connectionDidConnect() {
-        Task { [weak self] in
-            await self?.restoreSubscriptions()
-        }
     }
 
     func providerSupportsConfigOptions(_ providerID: String) -> Bool {
@@ -605,7 +599,7 @@ final class ThreadStore {
         var start = command(
             type: MaidCommandType.threadStart.rawValue,
             threadID: threadID,
-            message: message
+            message: try await uploadingAttachmentData(of: message)
         )
         start.additionalDirectories = additionalDirectories.isEmpty ? nil : additionalDirectories
         start.configSelections = configSelections
@@ -628,18 +622,44 @@ final class ThreadStore {
         guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
             throw RPCError("Sending a message requires text, an attachment, or an annotation")
         }
+        let message = try await uploadingAttachmentData(
+            of: CommandMessage(
+                annotations: annotations.isEmpty ? nil : annotations,
+                attachments: attachments.isEmpty ? nil : attachments,
+                messageID: UUID().uuidString,
+                text: text
+            ))
         _ = try await rpc.dispatchCommand(
             command(
                 type: MaidCommandType.threadTurnStart.rawValue,
                 threadID: threadID,
-                message: CommandMessage(
-                    annotations: annotations.isEmpty ? nil : annotations,
-                    attachments: attachments.isEmpty ? nil : attachments,
-                    messageID: UUID().uuidString,
-                    text: text
-                )
+                message: message
             )
         )
+    }
+
+    /// Uploads each attachment's data on its own and lists the attachment by
+    /// ID, so a message stays small however many images it carries.
+    private func uploadingAttachmentData(of message: CommandMessage) async throws -> CommandMessage {
+        var message = message
+        for index in message.attachments?.indices ?? 0..<0 {
+            guard let data = message.attachments?[index].data, !data.isEmpty else { continue }
+            let id = message.attachments?[index].id ?? UUID().uuidString
+            try await rpc.uploadAttachment(AttachmentUploadParams(data: data, id: id))
+            message.attachments?[index].id = id
+            message.attachments?[index].data = nil
+        }
+        return message
+    }
+
+    /// One transcript attachment's data, which thread snapshots leave out.
+    func attachmentData(threadID: String, attachmentID: String) async throws -> String {
+        let attachment = try await rpc.getAttachment(
+            GetAttachmentInput(attachmentID: attachmentID, threadID: threadID))
+        guard let data = attachment.data, !data.isEmpty else {
+            throw RPCError("The attachment has no data")
+        }
+        return data
     }
 
     /// Prompts the daemon sends when this chat's running turn ends.
@@ -1081,15 +1101,8 @@ final class ThreadStore {
         let timestamp = now()
         performSubscriptionMaintenance(at: timestamp)
 
-        if let selectedThreadID {
-            ensureSubscribed(selectedThreadID)
-        }
-
         let protectedIDs = sessionsByID.compactMap { id, session in
             id != selectedThreadID && session.isProtected ? id : nil
-        }
-        for id in protectedIDs {
-            ensureSubscribed(id)
         }
 
         let inactiveIDs = sessionsByID.compactMap { id, session -> (String, Date)? in
@@ -1107,8 +1120,12 @@ final class ThreadStore {
             .prefix(Self.maximumInactiveSubscriptions)
             .map(\.0)
 
-        for id in inactiveIDs {
+        let restoredIDs = [selectedThreadID].compactMap(\.self) + protectedIDs + inactiveIDs
+        for id in restoredIDs {
             ensureSubscribed(id)
+        }
+        for id in restoredIDs {
+            await subscriptionTasks[id]?.task.value
         }
     }
 

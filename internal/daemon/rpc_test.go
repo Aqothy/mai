@@ -1101,3 +1101,49 @@ func TestRPCSlowCallDoesNotBlockConnection(t *testing.T) {
 	default:
 	}
 }
+
+// TestRPCAttachmentDataTravelsOutsideThreadMessages sends images the way the
+// app does: each uploaded on its own, then the turn lists them by ID. Thread
+// snapshots and events carry only attachment metadata, so a chat full of
+// images cannot outgrow the client's frame limit; each image is fetched by ID.
+func TestRPCAttachmentDataTravelsOutsideThreadMessages(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	startFakeACPAgent(t, s, "codex")
+	client := newRecordingClient(t, s)
+	threadID := orchestration.ThreadID("thread-attachments")
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-attachments", ThreadID: threadID, Title: "Attachments", ProviderInstanceID: "codex", Cwd: t.TempDir()})
+	client.subscribeThread(t, threadID)
+
+	image := strings.Repeat("A", 1<<20)
+	var attachments []provider.Attachment
+	for _, id := range []string{"upload-1", "upload-2", "upload-3"} {
+		client.call(t, wire.MethodOrchestrationUploadAttachment, wire.AttachmentUploadParams{ID: id, Data: image}, nil)
+		attachments = append(attachments, provider.Attachment{ID: id, Kind: provider.AttachmentImage, MimeType: "image/png"})
+	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-attachments", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-attachments", Text: "look", Attachments: attachments}})
+	sent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
+		return event.Type == orchestration.EventThreadMessageSent && event.Payload.MessageID == "msg-attachments"
+	})
+	if len(sent.Payload.Attachments) != 3 || sent.Payload.Attachments[0].ID != "upload-1" || sent.Payload.Attachments[0].Data != "" {
+		t.Fatalf("message event attachments = %+v, want IDs without data", sent.Payload.Attachments)
+	}
+
+	var snapshot orchestration.ThreadStreamItem
+	client.call(t, wire.MethodOrchestrationSubscribeThread, orchestration.SubscribeThreadInput{ThreadID: threadID}, &snapshot)
+	if encoded, _ := json.Marshal(snapshot); len(encoded) > 64<<10 {
+		t.Fatalf("thread snapshot is %d bytes, want attachment data left out", len(encoded))
+	}
+
+	var fetched provider.Attachment
+	client.call(t, wire.MethodOrchestrationGetAttachment, orchestration.GetAttachmentInput{ThreadID: threadID, AttachmentID: "upload-2"}, &fetched)
+	if fetched.Data != image || fetched.MimeType != "image/png" {
+		t.Fatalf("fetched attachment = %d data bytes, mime %q", len(fetched.Data), fetched.MimeType)
+	}
+
+	// The turn took its uploads: listing one again without data is refused.
+	_, err := client.dispatchErr(orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-reused", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-reused", Text: "again", Attachments: attachments[:1]}})
+	if err == nil || !strings.Contains(err.Error(), "was not uploaded") {
+		t.Fatalf("dispatch with a consumed upload err = %v, want not uploaded", err)
+	}
+}

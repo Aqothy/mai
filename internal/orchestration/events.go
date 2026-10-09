@@ -2,6 +2,8 @@ package orchestration
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -130,10 +132,20 @@ func (e Event) EndsHistoryReplay() bool {
 	return e.Type == EventThreadHistoryReplayCompleted || e.historyReplayFailed
 }
 
-// normalizeEvent completes sparse item metadata before the event is applied or
-// published. Existing item projections preserve their original CreatedAt; new
-// items use the time of their first upsert, and every upsert carries its sequence.
+// normalizeEvent completes sparse metadata before the event is applied or
+// published. Message attachments get an ID unique to their event. Existing
+// item projections preserve their original CreatedAt; new items use the time
+// of their first upsert, and every upsert carries its sequence.
 func normalizeEvent(event Event) Event {
+	if slices.ContainsFunc(event.Payload.Attachments, func(attachment provider.Attachment) bool { return attachment.ID == "" }) {
+		attachments := slices.Clone(event.Payload.Attachments)
+		for index := range attachments {
+			if attachments[index].ID == "" {
+				attachments[index].ID = fmt.Sprintf("att-%d-%d", event.Sequence, index)
+			}
+		}
+		event.Payload.Attachments = attachments
+	}
 	if event.Type != EventThreadItemUpserted || event.Payload.Item == nil {
 		return event
 	}

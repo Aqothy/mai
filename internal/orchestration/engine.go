@@ -431,6 +431,33 @@ func (e *Engine) GetItemDetail(input GetItemDetailInput) (Item, error) {
 	return cloneItem(*item), nil
 }
 
+// Attachment returns one message attachment with its data, which thread
+// snapshots and events leave out.
+func (e *Engine) Attachment(input GetAttachmentInput) (provider.Attachment, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	thread := e.projection.liveThread(input.ThreadID)
+	if thread == nil {
+		return provider.Attachment{}, fmt.Errorf("thread %q not found", input.ThreadID)
+	}
+	matches := func(attachment provider.Attachment) bool { return attachment.ID == input.AttachmentID }
+	for _, entry := range thread.Timeline {
+		if entry.Message == nil {
+			continue
+		}
+		if index := slices.IndexFunc(entry.Message.Attachments, matches); index >= 0 {
+			return cloneAttachments(entry.Message.Attachments[index : index+1])[0], nil
+		}
+	}
+	for _, prompt := range thread.QueuedPrompts {
+		if index := slices.IndexFunc(prompt.Attachments, matches); index >= 0 {
+			return cloneAttachments(prompt.Attachments[index : index+1])[0], nil
+		}
+	}
+	return provider.Attachment{}, fmt.Errorf("attachment %q not found in thread %q", input.AttachmentID, input.ThreadID)
+}
+
 func (e *Engine) ThreadListSnapshot() ThreadListStreamItem {
 	e.mu.Lock()
 	snapshot := e.projection.ThreadListSnapshot()

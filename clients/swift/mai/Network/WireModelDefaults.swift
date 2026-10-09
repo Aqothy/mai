@@ -10,6 +10,7 @@ extension Attachment {
             annotations: nil,
             data: data,
             description: nil,
+            id: nil,
             kind: kind,
             mimeType: mimeType,
             name: name,

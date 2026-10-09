@@ -28,7 +28,7 @@ final class RPCConnectionCoordinator {
     private struct Participant {
         let prepare: () -> Void
         let synchronize: () async throws -> Void
-        let connected: () -> Void
+        let connected: () async -> Void
         let disconnected: ((any Error)?) -> Void
     }
 
@@ -46,6 +46,7 @@ final class RPCConnectionCoordinator {
     private var participants: [Participant] = []
     private var reconnectTask: Task<Void, Never>?
     private var attemptID: UUID?
+    private var connectionID: UUID?
 
     init(
         rpc: any RPCTransportClient,
@@ -66,7 +67,7 @@ final class RPCConnectionCoordinator {
     func register(
         prepare: @escaping () -> Void,
         synchronize: @escaping () async throws -> Void,
-        connected: @escaping () -> Void,
+        connected: @escaping () async -> Void,
         disconnected: @escaping ((any Error)?) -> Void
     ) {
         participants.append(
@@ -118,14 +119,20 @@ final class RPCConnectionCoordinator {
             guard attemptID == id else { return }
 
             attemptID = nil
+            connectionID = id
             state = .connected
             reconnectTask?.cancel()
             reconnectTask = nil
-            reconnectAttempt = 0
             nextReconnectAt = nil
             for participant in participants {
-                participant.connected()
+                await participant.connected()
             }
+            // The connection counts as recovered only once every feature has
+            // restored its subscriptions on it. One that a restore drops (a
+            // snapshot the transport refuses) keeps counting toward the retry
+            // limit instead of reconnecting forever.
+            guard connectionID == id, state == .connected else { return }
+            reconnectAttempt = 0
         } catch {
             failConnection(error, attemptID: id, disconnectTransport: true)
         }
@@ -156,6 +163,7 @@ final class RPCConnectionCoordinator {
         guard attemptID != nil || state != .disconnected else { return }
 
         attemptID = nil
+        connectionID = nil
         state = .disconnected
         for participant in participants {
             participant.disconnected(error)

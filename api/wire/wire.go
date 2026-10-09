@@ -17,6 +17,8 @@ const (
 	MethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
 	MethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
 	MethodOrchestrationGetItemDetail       = "orchestration.getItemDetail"
+	MethodOrchestrationGetAttachment       = "orchestration.getAttachment"
+	MethodOrchestrationUploadAttachment    = "orchestration.uploadAttachment"
 
 	MethodProviderStart              = "provider.start"
 	MethodProviderList               = "provider.list"
@@ -49,6 +51,7 @@ type CommandMessage = orchestration.CommandMessage
 type DispatchResult = orchestration.DispatchResult
 type SubscribeThreadParams = orchestration.SubscribeThreadInput
 type GetItemDetailParams = orchestration.GetItemDetailInput
+type GetAttachmentParams = orchestration.GetAttachmentInput
 type ThreadStreamItem = orchestration.ThreadStreamItem
 type ThreadListStreamItem = orchestration.ThreadListStreamItem
 type ThreadDetailSnapshot = orchestration.ThreadDetailSnapshot
@@ -90,6 +93,15 @@ type ApprovalOption = provider.ApprovalOption
 type ProviderStartParams struct {
 	provider.InstanceSpec
 	Restart bool `json:"restart,omitempty"`
+}
+
+// AttachmentUploadParams carries one attachment's data ahead of the
+// thread.start or thread.turn.start command that sends it. The command lists
+// the attachment by ID without data, so no single message grows with the
+// number of attachments.
+type AttachmentUploadParams struct {
+	ID   string `json:"id"`
+	Data string `json:"data"`
 }
 
 type ACPRegistryStartParams struct {

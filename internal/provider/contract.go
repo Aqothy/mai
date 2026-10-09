@@ -412,6 +412,10 @@ const (
 )
 
 type Attachment struct {
+	// ID names a message attachment the daemon holds, so clients can fetch
+	// its Data separately from thread snapshots. Orchestration assigns it (or
+	// keeps the one a client uploaded the data under); adapters ignore it.
+	ID               string              `json:"id,omitempty"`
 	Kind             AttachmentKind      `json:"kind"`
 	Name             string              `json:"name,omitempty"`
 	Title            string              `json:"title,omitempty"`

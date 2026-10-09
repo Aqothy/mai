@@ -129,6 +129,38 @@ func TestThreadSnapshotOmitsFullToolDetailAndGetItemDetailReturnsIt(t *testing.T
 	}
 }
 
+// A provider message can add images over several events. Each gets its own
+// ID, snapshots leave the data out, and the engine returns it by ID.
+func TestMessageAttachmentsGetIDsAndAreFetchedByID(t *testing.T) {
+	t.Parallel()
+
+	engine := NewEngine()
+	defer engine.Close()
+	threadID := ThreadID("thread-1")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-attachments", ThreadID: threadID})
+	for _, data := range []string{"first-image", "second-image"} {
+		mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{
+			MessageID: "assistant-1", Role: MessageRoleAssistant,
+			Attachments: []provider.Attachment{{Kind: provider.AttachmentImage, Data: data}},
+		}})
+	}
+
+	stream, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
+	if err != nil {
+		t.Fatalf("SubscribeThread: %v", err)
+	}
+	attachments := stream.Snapshot.Thread.Timeline[0].Message.Attachments
+	if len(attachments) != 2 || attachments[0].ID == "" || attachments[0].ID == attachments[1].ID || attachments[0].Data != "" || attachments[1].Data != "" {
+		t.Fatalf("snapshot attachments = %+v, want distinct IDs without data", attachments)
+	}
+	for index, want := range []string{"first-image", "second-image"} {
+		fetched, err := engine.Attachment(GetAttachmentInput{ThreadID: threadID, AttachmentID: attachments[index].ID})
+		if err != nil || fetched.Data != want {
+			t.Fatalf("Attachment(%s) = %q, %v; want %q", attachments[index].ID, fetched.Data, err, want)
+		}
+	}
+}
+
 func TestProjectEventForClientCompactsToolUpdatesWithoutMutatingCanonicalEvent(t *testing.T) {
 	t.Parallel()
 

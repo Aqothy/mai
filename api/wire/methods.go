@@ -23,6 +23,8 @@ var Methods = []MethodDefinition{
 	{Name: MethodOrchestrationSubscribeThread, Params: "SubscribeThreadInput", Result: "ThreadStreamItem"},
 	{Name: MethodOrchestrationUnsubscribeThread, Params: "SubscribeThreadInput", ResultNull: true},
 	{Name: MethodOrchestrationGetItemDetail, Params: "GetItemDetailInput", Result: "Item"},
+	{Name: MethodOrchestrationGetAttachment, Params: "GetAttachmentInput", Result: "Attachment"},
+	{Name: MethodOrchestrationUploadAttachment, Params: "AttachmentUploadParams", ResultNull: true},
 	{Name: MethodProviderStart, Params: "ProviderStartParams", Result: "InstanceInfo"},
 	{Name: MethodProviderList, Params: "EmptyParams", Result: "InstanceInfo", ResultArray: true},
 	{Name: MethodACPRegistryList, Params: "EmptyParams", Result: "ACPRegistryAgent", ResultArray: true},

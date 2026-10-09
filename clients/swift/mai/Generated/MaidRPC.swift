@@ -6,6 +6,8 @@ nonisolated public enum MaidRPCMethod {
     public static let orchestrationSubscribeThread = "orchestration.subscribeThread"
     public static let orchestrationUnsubscribeThread = "orchestration.unsubscribeThread"
     public static let orchestrationGetItemDetail = "orchestration.getItemDetail"
+    public static let orchestrationGetAttachment = "orchestration.getAttachment"
+    public static let orchestrationUploadAttachment = "orchestration.uploadAttachment"
     public static let providerStart = "provider.start"
     public static let providerList = "provider.list"
     public static let acpRegistryList = "acp.registry.list"

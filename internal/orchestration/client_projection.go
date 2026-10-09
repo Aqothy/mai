@@ -24,13 +24,16 @@ func projectThreadForClient(thread Thread) Thread {
 	projected.PreviousTurns = cloneTurns(thread.PreviousTurns)
 	projected.Plan = clonePlanPtr(thread.Plan)
 	projected.QueuedPrompts = cloneQueuedPrompts(thread.QueuedPrompts)
+	for index := range projected.QueuedPrompts {
+		projected.QueuedPrompts[index].Attachments = attachmentsForClient(projected.QueuedPrompts[index].Attachments)
+	}
 	projected.Timeline = make(Timeline, len(thread.Timeline))
 
 	for index, entry := range thread.Timeline {
 		projectedEntry := TimelineEntry{Kind: entry.Kind}
 		if entry.Message != nil {
 			message := *entry.Message
-			message.Attachments = cloneAttachments(entry.Message.Attachments)
+			message.Attachments = attachmentsForClient(entry.Message.Attachments)
 			projectedEntry.Message = &message
 		}
 		if entry.Item != nil {
@@ -49,15 +52,28 @@ func projectThreadForClient(thread Thread) Thread {
 	return projected
 }
 
-// ProjectEventForClient applies the same compact item representation to live
-// notifications as thread snapshots. The canonical event remains untouched.
+// ProjectEventForClient applies the same compact item and attachment
+// representation to live notifications as thread snapshots. The canonical
+// event remains untouched.
 func ProjectEventForClient(event Event) Event {
+	event.Payload.Attachments = attachmentsForClient(event.Payload.Attachments)
 	if event.Payload.Item == nil {
 		return event
 	}
 	item := projectItemForClient(*event.Payload.Item)
 	event.Payload.Item = &item
 	return event
+}
+
+// attachmentsForClient drops message attachment data, which clients fetch by
+// attachment ID: a chat's images would otherwise make every snapshot and
+// message event as large as all of them together.
+func attachmentsForClient(attachments []provider.Attachment) []provider.Attachment {
+	projected := cloneAttachments(attachments)
+	for index := range projected {
+		projected[index].Data = ""
+	}
+	return projected
 }
 
 func projectItemForClient(item Item) Item {

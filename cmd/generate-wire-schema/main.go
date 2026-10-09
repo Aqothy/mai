@@ -22,6 +22,8 @@ type contract struct {
 	DispatchResult                   wire.DispatchResult                   `json:"dispatchResult"`
 	SubscribeThreadParams            wire.SubscribeThreadParams            `json:"subscribeThreadParams"`
 	GetItemDetailParams              wire.GetItemDetailParams              `json:"getItemDetailParams"`
+	GetAttachmentParams              wire.GetAttachmentParams              `json:"getAttachmentParams"`
+	AttachmentUploadParams           wire.AttachmentUploadParams           `json:"attachmentUploadParams"`
 	ThreadStreamItem                 wire.ThreadStreamItem                 `json:"threadStreamItem"`
 	ThreadListStreamItem             wire.ThreadListStreamItem             `json:"threadListStreamItem"`
 	ThreadDetailSnapshot             wire.ThreadDetailSnapshot             `json:"threadDetailSnapshot"`

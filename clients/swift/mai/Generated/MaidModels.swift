@@ -747,7 +747,7 @@ public extension ApprovalEvent {
 public struct Attachment: Codable {
     public var meta: [String: JSONAny]?
     public var annotations: ContentAnnotations?
-    public var data, description: String?
+    public var data, description, id: String?
     public var kind: String
     public var mimeType, name: String?
     public var resourceMeta: [String: JSONAny]?
@@ -756,14 +756,15 @@ public struct Attachment: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case meta = "_meta"
-        case annotations, data, description, kind, mimeType, name, resourceMeta, size, title, uri
+        case annotations, data, description, id, kind, mimeType, name, resourceMeta, size, title, uri
     }
 
-    public init(meta: [String: JSONAny]?, annotations: ContentAnnotations?, data: String?, description: String?, kind: String, mimeType: String?, name: String?, resourceMeta: [String: JSONAny]?, size: Int?, title: String?, uri: String?) {
+    public init(meta: [String: JSONAny]?, annotations: ContentAnnotations?, data: String?, description: String?, id: String?, kind: String, mimeType: String?, name: String?, resourceMeta: [String: JSONAny]?, size: Int?, title: String?, uri: String?) {
         self.meta = meta
         self.annotations = annotations
         self.data = data
         self.description = description
+        self.id = id
         self.kind = kind
         self.mimeType = mimeType
         self.name = name
@@ -797,6 +798,7 @@ public extension Attachment {
         annotations: ContentAnnotations?? = nil,
         data: String?? = nil,
         description: String?? = nil,
+        id: String?? = nil,
         kind: String? = nil,
         mimeType: String?? = nil,
         name: String?? = nil,
@@ -810,6 +812,7 @@ public extension Attachment {
             annotations: annotations ?? self.annotations,
             data: data ?? self.data,
             description: description ?? self.description,
+            id: id ?? self.id,
             kind: kind ?? self.kind,
             mimeType: mimeType ?? self.mimeType,
             name: name ?? self.name,
@@ -878,6 +881,53 @@ public extension ContentAnnotations {
             audience: audience ?? self.audience,
             lastModified: lastModified ?? self.lastModified,
             priority: priority ?? self.priority
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - AttachmentUploadParams
+public struct AttachmentUploadParams: Codable {
+    public var data, id: String
+
+    public init(data: String, id: String) {
+        self.data = data
+        self.id = id
+    }
+}
+
+// MARK: AttachmentUploadParams convenience initializers and mutators
+
+public extension AttachmentUploadParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AttachmentUploadParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: String? = nil,
+        id: String? = nil
+    ) -> AttachmentUploadParams {
+        return AttachmentUploadParams(
+            data: data ?? self.data,
+            id: id ?? self.id
         )
     }
 
@@ -3124,6 +3174,58 @@ public extension TokenUsage {
             currency: currency ?? self.currency,
             maxTokens: maxTokens ?? self.maxTokens,
             usedTokens: usedTokens ?? self.usedTokens
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - GetAttachmentInput
+public struct GetAttachmentInput: Codable {
+    public var attachmentID, threadID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case attachmentID = "attachmentId"
+        case threadID = "threadId"
+    }
+
+    public init(attachmentID: String, threadID: String) {
+        self.attachmentID = attachmentID
+        self.threadID = threadID
+    }
+}
+
+// MARK: GetAttachmentInput convenience initializers and mutators
+
+public extension GetAttachmentInput {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(GetAttachmentInput.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachmentID: String? = nil,
+        threadID: String? = nil
+    ) -> GetAttachmentInput {
+        return GetAttachmentInput(
+            attachmentID: attachmentID ?? self.attachmentID,
+            threadID: threadID ?? self.threadID
         )
     }
 

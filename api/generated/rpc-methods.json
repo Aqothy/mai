@@ -26,6 +26,16 @@
       "result": "Item"
     },
     {
+      "name": "orchestration.getAttachment",
+      "params": "GetAttachmentInput",
+      "result": "Attachment"
+    },
+    {
+      "name": "orchestration.uploadAttachment",
+      "params": "AttachmentUploadParams",
+      "resultNull": true
+    },
+    {
       "name": "provider.start",
       "params": "ProviderStartParams",
       "result": "InstanceInfo"

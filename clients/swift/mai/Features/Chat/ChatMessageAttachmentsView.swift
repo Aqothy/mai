@@ -11,6 +11,7 @@ nonisolated struct ChatTranscriptImage: @unchecked Sendable {
 }
 
 nonisolated enum ChatTranscriptImageLoadingError: Error, Equatable {
+    case unavailable
     case encodedPayloadTooLarge
     case invalidBase64
     case imageDataTooLarge
@@ -111,6 +112,54 @@ nonisolated enum ChatTranscriptImageDecoder {
     }
 }
 
+/// Where a transcript image's bytes come from: inline base64, or the daemon,
+/// which leaves message attachment data out of thread snapshots and events.
+nonisolated enum ChatTranscriptImageSource: Hashable {
+    case inline(String)
+    case fetched(attachmentID: String)
+}
+
+/// Fetches one thread's transcript attachment data (base64) by attachment
+/// ID. Equal per thread, so re-rendering the chat does not invalidate every
+/// image that reads it.
+struct ChatTranscriptAttachmentLoader: Equatable {
+    let threadID: String
+    let load: @Sendable (_ attachmentID: String) async throws -> String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.threadID == rhs.threadID
+    }
+}
+
+extension EnvironmentValues {
+    /// Nil where no daemon can be asked, such as previews.
+    @Entry var attachmentLoader: ChatTranscriptAttachmentLoader?
+}
+
+/// Decoded transcript images by attachment ID, so scrolling back to an image
+/// neither fetches nor decodes it again.
+enum ChatTranscriptImageCache {
+    private final class Entry {
+        let image: ChatTranscriptImage
+        init(_ image: ChatTranscriptImage) { self.image = image }
+    }
+
+    private static let images: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        cache.totalCostLimit = 256 * 1024 * 1024
+        return cache
+    }()
+
+    static func image(for attachmentID: String) -> ChatTranscriptImage? {
+        images.object(forKey: attachmentID as NSString)?.image
+    }
+
+    static func insert(_ image: ChatTranscriptImage, for attachmentID: String) {
+        let cost = image.cgImage.bytesPerRow * image.cgImage.height
+        images.setObject(Entry(image), forKey: attachmentID as NSString, cost: cost)
+    }
+}
+
 /// Presentation-only interpretation of provider attachments. ACP image blocks
 /// carry raw base64, while data URLs are accepted defensively for providers
 /// that surface that representation instead.
@@ -128,6 +177,16 @@ nonisolated enum ChatMessageAttachmentPresentation {
             return name
         }
         return attachment.kind.isEmpty ? "Attachment" : attachment.kind
+    }
+
+    static func imageSource(for attachment: Attachment) -> ChatTranscriptImageSource? {
+        if let payload = inlineImagePayload(from: attachment) {
+            return .inline(payload)
+        }
+        if let id = attachment.id, !id.isEmpty {
+            return .fetched(attachmentID: id)
+        }
+        return nil
     }
 
     static func inlineImagePayload(from attachment: Attachment) -> String? {
@@ -167,12 +226,12 @@ struct ChatMessageAttachmentsView: View {
 
     var body: some View {
         let categorized = attachments.reduce(
-            into: (images: [(attachment: Attachment, payload: String)](), others: [Attachment]())
+            into: (images: [(attachment: Attachment, source: ChatTranscriptImageSource)](), others: [Attachment]())
         ) { result, attachment in
             if ChatMessageAttachmentPresentation.isImage(attachment),
-                let payload = ChatMessageAttachmentPresentation.inlineImagePayload(from: attachment)
+                let source = ChatMessageAttachmentPresentation.imageSource(for: attachment)
             {
-                result.images.append((attachment, payload))
+                result.images.append((attachment, source))
             } else {
                 result.others.append(attachment)
             }
@@ -186,7 +245,7 @@ struct ChatMessageAttachmentsView: View {
                     let image = imageAttachments[0]
                     ChatMessageImageAttachmentView(
                         attachment: image.attachment,
-                        payload: image.payload
+                        source: image.source
                     )
                     .frame(maxWidth: 480)
                 } else {
@@ -204,7 +263,7 @@ struct ChatMessageAttachmentsView: View {
                         ForEach(imageAttachments.indices, id: \.self) { index in
                             ChatMessageImageAttachmentView(
                                 attachment: imageAttachments[index].attachment,
-                                payload: imageAttachments[index].payload
+                                source: imageAttachments[index].source
                             )
                         }
                     }
@@ -275,8 +334,20 @@ private struct ChatMessageImageAttachmentView: View {
     }
 
     let attachment: Attachment
-    let payload: String
-    @State private var phase = Phase.loading
+    let source: ChatTranscriptImageSource
+    @State private var phase: Phase
+    @Environment(\.attachmentLoader) private var attachmentLoader
+
+    init(attachment: Attachment, source: ChatTranscriptImageSource) {
+        self.attachment = attachment
+        self.source = source
+        // A cached image shows at once instead of flashing the placeholder.
+        if case .fetched(let id) = source, let cached = ChatTranscriptImageCache.image(for: id) {
+            _phase = State(initialValue: .loaded(cached))
+        } else {
+            _phase = State(initialValue: .loading)
+        }
+    }
 
     var body: some View {
         let name = ChatMessageAttachmentPresentation.displayName(attachment)
@@ -285,12 +356,11 @@ private struct ChatMessageImageAttachmentView: View {
             imageContent(name: name)
                 // Images can share byte count, headers and trailers while
                 // their pixels differ. Reuse must compare the whole payload.
-                .task(id: payload) {
+                .task(id: source) {
+                    if case .loaded = phase, case .fetched = source { return }
                     phase = .loading
                     do {
-                        let image = try await ChatTranscriptImageDecoder.decodeBase64(
-                            payload
-                        )
+                        let image = try await loadImage()
                         try Task.checkCancellation()
                         phase = .loaded(image)
                     } catch is CancellationError {
@@ -307,6 +377,25 @@ private struct ChatMessageImageAttachmentView: View {
                 .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func loadImage() async throws -> ChatTranscriptImage {
+        switch source {
+        case .inline(let payload):
+            return try await ChatTranscriptImageDecoder.decodeBase64(payload)
+        case .fetched(let id):
+            if let cached = ChatTranscriptImageCache.image(for: id) {
+                return cached
+            }
+            guard let attachmentLoader else {
+                throw ChatTranscriptImageLoadingError.unavailable
+            }
+            let image = try await ChatTranscriptImageDecoder.decodeBase64(
+                try await attachmentLoader.load(id)
+            )
+            ChatTranscriptImageCache.insert(image, for: id)
+            return image
+        }
     }
 
     @ViewBuilder

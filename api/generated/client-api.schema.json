@@ -278,6 +278,9 @@
     },
     "Attachment": {
       "properties": {
+        "id": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
@@ -318,6 +321,23 @@
         "kind"
       ],
       "title": "Attachment"
+    },
+    "AttachmentUploadParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "data"
+      ],
+      "title": "AttachmentUploadParams"
     },
     "Auth": {
       "properties": {
@@ -889,6 +909,23 @@
         "path"
       ],
       "title": "FileChangeSummary"
+    },
+    "GetAttachmentInput": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId",
+        "attachmentId"
+      ],
+      "title": "GetAttachmentInput"
     },
     "GetItemDetailInput": {
       "properties": {
@@ -2547,6 +2584,12 @@
         "getItemDetailParams": {
           "$ref": "#/$defs/GetItemDetailInput"
         },
+        "getAttachmentParams": {
+          "$ref": "#/$defs/GetAttachmentInput"
+        },
+        "attachmentUploadParams": {
+          "$ref": "#/$defs/AttachmentUploadParams"
+        },
         "threadStreamItem": {
           "$ref": "#/$defs/ThreadStreamItem"
         },
@@ -2758,6 +2801,8 @@
         "dispatchResult",
         "subscribeThreadParams",
         "getItemDetailParams",
+        "getAttachmentParams",
+        "attachmentUploadParams",
         "threadStreamItem",
         "threadListStreamItem",
         "threadDetailSnapshot",

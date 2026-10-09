@@ -67,3 +67,8 @@ type GetItemDetailInput struct {
 	ThreadID ThreadID `json:"threadId"`
 	ItemID   string   `json:"itemId"`
 }
+
+type GetAttachmentInput struct {
+	ThreadID     ThreadID `json:"threadId"`
+	AttachmentID string   `json:"attachmentId"`
+}

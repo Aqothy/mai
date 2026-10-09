@@ -76,6 +76,12 @@ struct ChatView: View {
                             segmentCache: segmentCache,
                             textLayoutStore: textLayoutStore
                         )
+                        .environment(
+                            \.attachmentLoader,
+                            ChatTranscriptAttachmentLoader(threadID: thread.id) { [store, threadID = thread.id] attachmentID in
+                                try await store.attachmentData(threadID: threadID, attachmentID: attachmentID)
+                            }
+                        )
                     } else {
                         ProgressView("Loading Chat…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)

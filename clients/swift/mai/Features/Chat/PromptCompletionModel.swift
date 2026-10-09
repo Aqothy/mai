@@ -225,9 +225,8 @@ final class PromptCompletionModel {
         return mentionedFilePaths.intersection(mentioned).sorted().map { path in
             let url = URL(filePath: directory).appending(path: path)
             return Attachment(
-                meta: nil, annotations: nil, data: nil, description: nil,
-                kind: MaidAttachmentKind.resourceLink.rawValue, mimeType: nil, name: url.lastPathComponent,
-                resourceMeta: nil, size: nil, title: nil, uri: url.absoluteString
+                data: nil, kind: MaidAttachmentKind.resourceLink.rawValue, mimeType: nil,
+                name: url.lastPathComponent, uri: url.absoluteString
             )
         }
     }
