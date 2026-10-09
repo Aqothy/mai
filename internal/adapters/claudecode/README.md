@@ -192,8 +192,8 @@ signed out.
 ## Known gaps
 
 Need contract or client work: stopping a background task (`stop_task`),
-subagent narration as nested items, hook lifecycle events, file rewind, forking from a chosen
-message, and the cost/compacting/retry details the client does not show yet.
+subagent narration as nested items, hook lifecycle events, file rewind,
+forking from a chosen message, and the cost/compacting/retry details the client does not show yet.
 Audio and embedded-resource attachments are not part of the SDK prompt
 surface; `resource_link` attachments are skipped since the CLI reads `@path`
 in the prompt text.
