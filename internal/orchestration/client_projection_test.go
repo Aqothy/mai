@@ -130,26 +130,32 @@ func TestThreadSnapshotOmitsFullToolDetailAndGetItemDetailReturnsIt(t *testing.T
 }
 
 // A provider message can add images over several events. Each gets its own
-// ID, snapshots leave the data out, and the engine returns it by ID.
+// ID, snapshots leave the data out, and the engine returns it by ID. IDs stay
+// unique across engines: a restarted daemon replaying the same history must
+// not reuse an ID a client already cached other data under.
 func TestMessageAttachmentsGetIDsAndAreFetchedByID(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine()
-	defer engine.Close()
 	threadID := ThreadID("thread-1")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-attachments", ThreadID: threadID})
-	for _, data := range []string{"first-image", "second-image"} {
-		mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{
-			MessageID: "assistant-1", Role: MessageRoleAssistant,
-			Attachments: []provider.Attachment{{Kind: provider.AttachmentImage, Data: data}},
-		}})
+	snapshotAttachments := func(engine *Engine) []provider.Attachment {
+		t.Helper()
+		mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-attachments", ThreadID: threadID})
+		for _, data := range []string{"first-image", "second-image"} {
+			mustAppend(t, engine, EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Payload: EventPayload{
+				MessageID: "assistant-1", Role: MessageRoleAssistant,
+				Attachments: []provider.Attachment{{Kind: provider.AttachmentImage, Data: data}},
+			}})
+		}
+		stream, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
+		if err != nil {
+			t.Fatalf("SubscribeThread: %v", err)
+		}
+		return stream.Snapshot.Thread.Timeline[0].Message.Attachments
 	}
 
-	stream, err := engine.SubscribeThread(SubscribeThreadInput{ThreadID: threadID})
-	if err != nil {
-		t.Fatalf("SubscribeThread: %v", err)
-	}
-	attachments := stream.Snapshot.Thread.Timeline[0].Message.Attachments
+	engine := NewEngine()
+	defer engine.Close()
+	attachments := snapshotAttachments(engine)
 	if len(attachments) != 2 || attachments[0].ID == "" || attachments[0].ID == attachments[1].ID || attachments[0].Data != "" || attachments[1].Data != "" {
 		t.Fatalf("snapshot attachments = %+v, want distinct IDs without data", attachments)
 	}
@@ -158,6 +164,12 @@ func TestMessageAttachmentsGetIDsAndAreFetchedByID(t *testing.T) {
 		if err != nil || fetched.Data != want {
 			t.Fatalf("Attachment(%s) = %q, %v; want %q", attachments[index].ID, fetched.Data, err, want)
 		}
+	}
+
+	restarted := NewEngine()
+	defer restarted.Close()
+	if replayed := snapshotAttachments(restarted); replayed[0].ID == attachments[0].ID {
+		t.Fatalf("a second engine reused attachment ID %q", replayed[0].ID)
 	}
 }
 

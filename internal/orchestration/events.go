@@ -133,15 +133,17 @@ func (e Event) EndsHistoryReplay() bool {
 }
 
 // normalizeEvent completes sparse metadata before the event is applied or
-// published. Message attachments get an ID unique to their event. Existing
-// item projections preserve their original CreatedAt; new items use the time
-// of their first upsert, and every upsert carries its sequence.
+// published. Message attachments get an ID derived from the event's random
+// ID, so no two attachments share one, even across daemon restarts (clients
+// cache attachment data by ID). Existing item projections preserve their
+// original CreatedAt; new items use the time of their first upsert, and every
+// upsert carries its sequence.
 func normalizeEvent(event Event) Event {
 	if slices.ContainsFunc(event.Payload.Attachments, func(attachment provider.Attachment) bool { return attachment.ID == "" }) {
 		attachments := slices.Clone(event.Payload.Attachments)
 		for index := range attachments {
 			if attachments[index].ID == "" {
-				attachments[index].ID = fmt.Sprintf("att-%d-%d", event.Sequence, index)
+				attachments[index].ID = fmt.Sprintf("%s-att-%d", event.EventID, index)
 			}
 		}
 		event.Payload.Attachments = attachments
