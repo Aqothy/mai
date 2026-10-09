@@ -29,9 +29,8 @@
         "thread.history-replay-completed",
         "thread.prompt-queued",
         "thread.prompt-removed",
-        "thread.prompt-steer-requested",
-        "thread.prompt-steer-failed",
-        "thread.queue-resumed"
+        "thread.message-steer-requested",
+        "thread.message-delivery-updated"
       ]
     },
     {
@@ -44,9 +43,8 @@
         "thread.turn.start",
         "thread.turn.retry",
         "thread.turn.interrupt",
-        "thread.prompt.steer",
+        "thread.prompt.send",
         "thread.prompt.remove",
-        "thread.queue.resume",
         "thread.approval.respond",
         "thread.session.prepare",
         "thread.session.stop",
@@ -86,6 +84,14 @@
       "values": [
         "user",
         "assistant"
+      ]
+    },
+    {
+      "name": "MessageDelivery",
+      "description": "A user message on its way to the provider; absent once delivered.",
+      "values": [
+        "sending",
+        "not-delivered"
       ]
     },
     {

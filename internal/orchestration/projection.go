@@ -78,14 +78,10 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadPromptQueued(event)
 	case EventThreadPromptRemoved:
 		p.applyThreadPromptRemoved(event)
-	case EventThreadPromptSteerRequested:
-		p.applyThreadPromptSteerRequested(event)
-	case EventThreadPromptSteerFailed:
-		p.applyThreadPromptSteerFailed(event)
-	case EventThreadQueueResumed:
-		if thread := p.ensureThread(event); thread != nil {
-			thread.QueueHeld = false
-		}
+	case EventThreadMessageSteerRequested:
+		p.applyThreadMessageSteerRequested(event)
+	case EventThreadMessageDeliveryUpdated:
+		p.applyThreadMessageDeliveryUpdated(event)
 	}
 }
 
@@ -105,30 +101,32 @@ func (p *Projection) applyThreadPromptRemoved(event Event) {
 	}
 }
 
-// applyThreadPromptSteerRequested moves the prompt to the front: if the turn
-// ends before the provider takes it, it goes first.
-func (p *Projection) applyThreadPromptSteerRequested(event Event) {
-	thread := p.ensureThread(event)
-	if thread == nil {
-		return
+// applyThreadMessageSteerRequested hands the message to the running turn.
+func (p *Projection) applyThreadMessageSteerRequested(event Event) {
+	if thread := p.ensureThread(event); thread != nil {
+		sendMessage(thread, event.Payload.MessageID, event.Payload.TurnID)
 	}
-	prompt := thread.queuedPrompt(event.Payload.MessageID)
-	if prompt == nil {
-		return
-	}
-	steering := *prompt
-	steering.Steering = true
-	removeQueuedPrompt(thread, steering.MessageID)
-	thread.QueuedPrompts = slices.Insert(thread.QueuedPrompts, 0, steering)
 }
 
-func (p *Projection) applyThreadPromptSteerFailed(event Event) {
+func (p *Projection) applyThreadMessageDeliveryUpdated(event Event) {
 	thread := p.ensureThread(event)
 	if thread == nil {
 		return
 	}
-	if prompt := thread.queuedPrompt(event.Payload.MessageID); prompt != nil {
-		prompt.Steering = false
+	if message := thread.Timeline.Message(event.Payload.MessageID); message != nil {
+		message.Delivery = event.Payload.Delivery
+		message.DeliveryError = event.Payload.DeliveryError
+	}
+}
+
+// sendMessage marks a user message as on its way to the provider in turnID.
+// A turn start or steer is what hands a message over, never the message
+// event itself, so a retry resends the same message.
+func sendMessage(thread *Thread, messageID MessageID, turnID TurnID) {
+	if message := thread.Timeline.Message(messageID); message != nil {
+		message.TurnID = turnID
+		message.Delivery = MessageSending
+		message.DeliveryError = ""
 	}
 }
 
@@ -387,13 +385,8 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != turnID {
 		replaceLatestTurn(thread, Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now})
 	}
-	thread.QueueHeld = false // a retry picks the thread back up
-	// A retry moves the failed turn's message onto the fresh turn.
-	if event.Payload.MessageID != "" {
-		if message := thread.Timeline.Message(event.Payload.MessageID); message != nil {
-			message.TurnID = turnID
-		}
-	}
+	thread.QueueHeld = false // starting a turn picks the thread back up
+	sendMessage(thread, event.Payload.MessageID, turnID)
 	if thread.Session != nil {
 		thread.Session.Status = SessionStatusRunning
 		thread.Session.ActiveTurnID = turnID

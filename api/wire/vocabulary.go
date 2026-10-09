@@ -43,9 +43,8 @@ var Vocabularies = []VocabularyDefinition{
 			string(orchestration.EventThreadHistoryReplayCompleted),
 			string(orchestration.EventThreadPromptQueued),
 			string(orchestration.EventThreadPromptRemoved),
-			string(orchestration.EventThreadPromptSteerRequested),
-			string(orchestration.EventThreadPromptSteerFailed),
-			string(orchestration.EventThreadQueueResumed),
+			string(orchestration.EventThreadMessageSteerRequested),
+			string(orchestration.EventThreadMessageDeliveryUpdated),
 		},
 	},
 	{
@@ -58,9 +57,8 @@ var Vocabularies = []VocabularyDefinition{
 			orchestration.CommandThreadTurnStart,
 			orchestration.CommandThreadTurnRetry,
 			orchestration.CommandThreadTurnInterrupt,
-			orchestration.CommandThreadPromptSteer,
+			orchestration.CommandThreadPromptSend,
 			orchestration.CommandThreadPromptRemove,
-			orchestration.CommandThreadQueueResume,
 			orchestration.CommandThreadApprovalRespond,
 			orchestration.CommandThreadSessionPrepare,
 			orchestration.CommandThreadSessionStop,
@@ -100,6 +98,14 @@ var Vocabularies = []VocabularyDefinition{
 		Values: []string{
 			string(orchestration.MessageRoleUser),
 			string(orchestration.MessageRoleAssistant),
+		},
+	},
+	{
+		Name:        "MessageDelivery",
+		Description: "A user message on its way to the provider; absent once delivered.",
+		Values: []string{
+			string(orchestration.MessageSending),
+			string(orchestration.MessageNotDelivered),
 		},
 	},
 	{

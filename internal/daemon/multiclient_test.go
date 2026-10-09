@@ -437,7 +437,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 		client.waitThread(t, threadTwo, "base turn running before steer", sessionStatusAfter(baseReceipt.Sequence, orchestration.SessionStatusRunning))
 	}
 	a.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer-queue", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer", Text: "stream 5 16"}})
-	steerReceipt := b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadPromptSteer, CommandID: "cmd-multi-steer", ThreadID: threadTwo, MessageID: "msg-multi-steer"})
+	steerReceipt := b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadPromptSend, CommandID: "cmd-multi-steer", ThreadID: threadTwo, MessageID: "msg-multi-steer"})
 	for _, client := range []*recordingClient{a, b} {
 		client.waitThread(t, threadTwo, "steer answered by the agent", assistantMessageAfter(steerReceipt.Sequence))
 		client.waitThread(t, threadTwo, "steered turn settle", sessionStatusAfter(steerReceipt.Sequence, orchestration.SessionStatusReady))

@@ -772,6 +772,12 @@
         "turnId": {
           "type": "string"
         },
+        "delivery": {
+          "type": "string"
+        },
+        "deliveryError": {
+          "type": "string"
+        },
         "stopReason": {
           "type": "string"
         },
@@ -1037,6 +1043,12 @@
           "type": "array"
         },
         "turnId": {
+          "type": "string"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "deliveryError": {
           "type": "string"
         },
         "createdAt": {
@@ -1447,9 +1459,6 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
-        },
-        "steering": {
-          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -1956,9 +1965,6 @@
             "$ref": "#/$defs/QueuedPrompt"
           },
           "type": "array"
-        },
-        "queueHeld": {
-          "type": "boolean"
         },
         "plan": {
           "$ref": "#/$defs/Plan"

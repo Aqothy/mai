@@ -70,7 +70,7 @@ func (r *ProviderEventReactor) handle(event Event) {
 		r.enqueueThread(event, func() { r.handleSessionPrepare(event) })
 	case EventThreadTurnStartRequested:
 		r.enqueueThread(event, func() { r.handleTurnStart(event) })
-	case EventThreadPromptSteerRequested:
+	case EventThreadMessageSteerRequested:
 		r.enqueueThread(event, func() { r.handleSteer(event) })
 	case EventThreadTurnInterruptRequested:
 		r.enqueueThread(event, func() { r.handleInterrupt(event) })
@@ -212,27 +212,34 @@ func (r *ProviderEventReactor) handleSessionPrepare(event Event) {
 func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	threadID := event.ThreadID()
 	turnID := event.Payload.TurnID
-	view, ok := r.engine.ProviderView(threadID, event.Payload.MessageID)
+	messageID := event.Payload.MessageID
+	view, ok := r.engine.ProviderView(threadID, messageID)
 	if !ok {
 		return
 	}
-	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
-		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
-		return
+	// The message never reaches the provider: it says why, and the turn
+	// settles as failed so nothing queued runs into the same failure.
+	notDelivered := func(reason string) {
+		r.recordDelivery(threadID, messageID, MessageNotDelivered, reason)
+		r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateError, TurnID: turnID, Error: reason})
 	}
-	if view.Message == nil {
-		r.failThread(threadID, turnID, "turn start message not found")
+	stoppedFirst := func(binding *SessionBinding) {
+		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, binding)
+		r.recordDelivery(threadID, messageID, MessageNotDelivered, "Stopped before it reached the agent.")
+	}
+	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
+		stoppedFirst(nil)
 		return
 	}
 	providerInstanceID := view.ProviderInstanceID
 	if providerInstanceID == "" {
-		r.failThread(threadID, turnID, "thread has no provider instance")
+		notDelivered("This chat has no agent.")
 		return
 	}
 	// Prebind: the engine derives a "starting" binding for the turn from the
 	// live thread — or drops the update if the turn was interrupted first.
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID}) {
-		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
+		stoppedFirst(nil)
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
@@ -240,7 +247,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 
 	result, err := r.provider.StartSession(ctx, string(view.ID), startSessionInputFromProviderView(view))
 	if err != nil {
-		r.failThread(threadID, turnID, err.Error())
+		notDelivered(err.Error())
 		return
 	}
 	providerSession := result.Session
@@ -249,7 +256,7 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// drops the update, and the interrupt is confirmed instead of dispatching.
 	binding := bindingFromProviderSession(providerInstanceID, providerSession)
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding, TurnID: turnID}) {
-		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, &binding)
+		stoppedFirst(&binding)
 		return
 	}
 	r.dispatchProviderSessionMetadata(threadID, providerSession, time.Now())
@@ -261,36 +268,37 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
 	if err := r.provider.SendTurn(sendCtx, sendTurnInput(view, turnID, false)); err != nil {
-		r.failThread(threadID, turnID, err.Error())
+		notDelivered(err.Error())
+		return
 	}
+	r.recordDelivery(threadID, messageID, "", "")
 }
 
-// handleSteer adds a queued prompt to the running turn. A refused steer never
-// fails that turn, which the provider is still running: the prompt stays
-// queued and is sent first once the turn ends.
+// handleSteer hands a message to the running turn. A steer the provider
+// refuses only marks the message not delivered: the turn keeps running.
 func (r *ProviderEventReactor) handleSteer(event Event) {
 	threadID := event.ThreadID()
 	turnID := event.Payload.TurnID
-	view, ok := r.engine.ProviderView(threadID, event.Payload.MessageID)
-	if !ok || view.Message == nil {
+	messageID := event.Payload.MessageID
+	view, ok := r.engine.ProviderView(threadID, messageID)
+	if !ok {
 		return
 	}
-	steerFailed := func() {
-		r.record(EventInput{Type: EventThreadPromptSteerFailed, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: view.Message.ID}})
-	}
 	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
-		steerFailed()
+		r.recordDelivery(threadID, messageID, MessageNotDelivered, "The turn ended before it reached the agent.")
 		return
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 	if err := r.provider.SendTurn(ctx, sendTurnInput(view, turnID, true)); err != nil {
-		steerFailed()
-		r.appendWarningItem(threadID, turnID, fmt.Sprintf("Couldn't add your message to the running turn: %v. It will be sent as the next turn.", err))
+		r.recordDelivery(threadID, messageID, MessageNotDelivered, err.Error())
 		return
 	}
-	message := view.Message
-	r.record(EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: message.ID, Role: MessageRoleUser, Text: message.Text, Attachments: message.Attachments, Annotations: message.Annotations, TurnID: turnID, CreatedAt: message.CreatedAt, UpdatedAt: message.CreatedAt}})
+	r.recordDelivery(threadID, messageID, "", "")
+}
+
+func (r *ProviderEventReactor) recordDelivery(threadID ThreadID, messageID MessageID, delivery MessageDelivery, reason string) {
+	r.record(EventInput{Type: EventThreadMessageDeliveryUpdated, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: messageID, Delivery: delivery, DeliveryError: reason}})
 }
 
 // sendTurnInput is the provider request for view.Message on turnID.
@@ -453,20 +461,8 @@ func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	}
 }
 
-// failThread records both failure contracts: session state settles the turn,
-// while the timeline item gives clients a human-readable error. The engine
-// drops the session update when the named turn already settled.
-func (r *ProviderEventReactor) failThread(threadID ThreadID, turnID TurnID, message string) {
-	r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateError, TurnID: turnID, Error: message})
-	r.appendErrorItem(threadID, turnID, message)
-}
-
 func (r *ProviderEventReactor) appendErrorItem(threadID ThreadID, turnID TurnID, message string) {
 	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: errorItem(newID("error"), turnID, message)}})
-}
-
-func (r *ProviderEventReactor) appendWarningItem(threadID ThreadID, turnID TurnID, message string) {
-	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: warningItem(newID("warning"), turnID, message)}})
 }
 
 func (r *ProviderEventReactor) record(input EventInput) {

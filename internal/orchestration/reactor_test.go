@@ -537,11 +537,11 @@ func TestReactorRestoresConfirmedConfigOptionsAfterSessionStop(t *testing.T) {
 	}
 }
 
-// A steer the provider refuses (Codex will not steer a compact turn) must not
-// fail the turn the provider is still running: the prompt stays queued, is
-// sent first when the turn ends, and a steer it accepts joins the running
-// turn's timeline.
-func TestReactorRefusedSteerKeepsTheTurnRunningAndTheMessageQueued(t *testing.T) {
+// A steer the provider refuses (Codex will not steer a compact turn) marks
+// only that message not delivered, with the provider's reason: the running
+// turn is untouched. Retrying sends the same message again, and once the
+// provider takes it the message is delivered on the running turn.
+func TestReactorRefusedSteerMarksOnlyTheMessageNotDelivered(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
@@ -551,46 +551,32 @@ func TestReactorRefusedSteerKeepsTheTurnRunningAndTheMessageQueued(t *testing.T)
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-refused-steer", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}})
 	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "first", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-first", Text: "first"}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "refused", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-refused", Text: "do not lose this"}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "accepted", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-accepted", Text: "join the turn"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "steer", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-steer", Text: "join the turn"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptSend, CommandID: "send-steer", ThreadID: threadID, MessageID: "msg-steer"})
+	waitForReactorIdle(t, reactor, threadID)
+
 	thread, _ := engine.Thread(threadID)
 	runningTurn := thread.LatestTurn.ID
-
-	mustDispatch(t, engine, Command{Type: CommandThreadPromptSteer, CommandID: "steer-refused", ThreadID: threadID, MessageID: "msg-refused"})
-	waitForReactorIdle(t, reactor, threadID)
-	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn.ID != runningTurn || thread.LatestTurn.State != TurnStateRunning || thread.Session.Status != SessionStatusRunning {
-		t.Fatalf("turn %#v, session %q after a refused steer; want %q still running", thread.LatestTurn, thread.Session.Status, runningTurn)
+	if first := thread.Timeline.Message("msg-first"); first.Delivery != "" {
+		t.Fatalf("first message delivery = %q, want delivered", first.Delivery)
 	}
-	if queued := queuedMessageIDs(thread); !slices.Equal(queued, []MessageID{"msg-refused", "msg-accepted"}) || thread.QueuedPrompts[0].Steering {
-		t.Fatalf("queue = %#v, want the refused steer back at the front, no longer steering", thread.QueuedPrompts)
-	}
-	if !slices.ContainsFunc(thread.Timeline, func(entry TimelineEntry) bool {
-		return entry.Item != nil && entry.Item.Kind == provider.ItemKindWarning && strings.Contains(entry.Item.Title, "cannot steer a compact turn")
-	}) {
-		t.Fatal("timeline has no warning explaining the refused steer")
+	refused := thread.Timeline.Message("msg-steer")
+	if refused.Delivery != MessageNotDelivered || refused.DeliveryError != "cannot steer a compact turn" || thread.LatestTurn.State != TurnStateRunning || thread.Session.Status != SessionStatusRunning {
+		t.Fatalf("after a refused steer: message %#v, turn %#v; want the message not delivered and the turn still running", refused, thread.LatestTurn)
 	}
 
 	fake.mu.Lock()
 	fake.steerErr = nil
 	fake.mu.Unlock()
-	mustDispatch(t, engine, Command{Type: CommandThreadPromptSteer, CommandID: "steer-accepted", ThreadID: threadID, MessageID: "msg-accepted"})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnRetry, CommandID: "retry-steer", ThreadID: threadID, MessageID: "msg-steer"})
 	waitForReactorIdle(t, reactor, threadID)
 	if sent := fake.lastSendInput(); !sent.Steer || sent.TurnID != string(runningTurn) || sent.Input != "join the turn" {
-		t.Fatalf("steer input = %#v, want a steer of %q", sent, runningTurn)
+		t.Fatalf("retried steer input = %#v, want a steer of %q", sent, runningTurn)
 	}
 	thread, _ = engine.Thread(threadID)
-	if message := thread.Timeline.Message("msg-accepted"); message == nil || message.TurnID != runningTurn || slices.Contains(queuedMessageIDs(thread), "msg-accepted") {
-		t.Fatalf("accepted steer message = %#v, queue = %v; want it in the timeline on %q", message, queuedMessageIDs(thread), runningTurn)
+	if retried := thread.Timeline.Message("msg-steer"); retried.Delivery != "" || retried.TurnID != runningTurn || len(thread.Timeline.Messages()) != 2 {
+		t.Fatalf("after retry: message %#v; want the same message delivered on %q", retried, runningTurn)
 	}
-
-	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: runningTurn, TurnState: provider.RuntimeTurnCompleted}); err != nil {
-		t.Fatalf("settle: %v", err)
-	}
-	waitFor(t, "refused steer sent as the next turn", func() bool {
-		sent := fake.lastSendInput()
-		return sent.Input == "do not lose this" && !sent.Steer && sent.TurnID != string(runningTurn)
-	})
 }
 
 func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T) {
@@ -617,7 +603,7 @@ func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
 	fake.startErr = errors.New("agent unavailable")
-	newTestReactor(engine, fake)
+	reactor := newTestReactor(engine, fake)
 	threadID := ThreadID("thread-first-turn-retry-config")
 
 	if _, err := engine.Dispatch(context.Background(), Command{
@@ -631,15 +617,21 @@ func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 		t.Fatalf("thread.start: %v", err)
 	}
 	waitForSessionStatus(t, engine, threadID, SessionStatusError)
-	if thread, _ := engine.Thread(threadID); thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError || !strings.Contains(thread.LatestTurn.Error, "agent unavailable") || thread.LatestTurn.CompletedAt == nil {
+	thread, _ := engine.Thread(threadID)
+	if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError || thread.LatestTurn.CompletedAt == nil {
 		t.Fatalf("latest turn after start failure = %#v, want completed error turn", thread.LatestTurn)
+	}
+	// The message never reached the agent: it carries the reason, and no
+	// separate error row repeats it.
+	if message := thread.Timeline.Message("message-first-turn-retry-config"); message.Delivery != MessageNotDelivered || message.DeliveryError != "agent unavailable" || len(thread.Timeline) != 1 {
+		t.Fatalf("timeline after start failure = %#v, want only the message, not delivered", thread.Timeline)
 	}
 
 	fake.mu.Lock()
 	fake.startErr = nil
 	fake.mu.Unlock()
 	if _, err := engine.Dispatch(context.Background(), Command{
-		Type: CommandThreadTurnRetry, CommandID: "retry-first-turn-config", ThreadID: threadID,
+		Type: CommandThreadTurnRetry, CommandID: "retry-first-turn-config", ThreadID: threadID, MessageID: "message-first-turn-retry-config",
 	}); err != nil {
 		t.Fatalf("thread.turn.retry: %v", err)
 	}
@@ -656,8 +648,9 @@ func TestReactorFirstTurnRetryPreservesDraftConfigSelections(t *testing.T) {
 		input.ConfigSelections[0].Value != "plan" {
 		t.Fatalf("retry config selections = %#v, want mode=plan", input.ConfigSelections)
 	}
-	thread, _ := engine.Thread(threadID)
-	if messages := thread.Timeline.Messages(); len(messages) != 1 || messages[0].ID != "message-first-turn-retry-config" || thread.LatestTurn == nil || messages[0].TurnID != thread.LatestTurn.ID {
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ = engine.Thread(threadID)
+	if messages := thread.Timeline.Messages(); len(messages) != 1 || messages[0].ID != "message-first-turn-retry-config" || messages[0].Delivery != "" || thread.LatestTurn == nil || messages[0].TurnID != thread.LatestTurn.ID {
 		t.Fatalf("thread after retry = %#v, want the one original message rebound to the retry turn", thread)
 	}
 }

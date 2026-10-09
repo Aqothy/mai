@@ -22,9 +22,8 @@ const (
 	CommandThreadTurnStart       CommandType = "thread.turn.start"
 	CommandThreadTurnRetry       CommandType = "thread.turn.retry"
 	CommandThreadTurnInterrupt   CommandType = "thread.turn.interrupt"
-	CommandThreadPromptSteer     CommandType = "thread.prompt.steer"
+	CommandThreadPromptSend      CommandType = "thread.prompt.send"
 	CommandThreadPromptRemove    CommandType = "thread.prompt.remove"
-	CommandThreadQueueResume     CommandType = "thread.queue.resume"
 	CommandThreadApprovalRespond CommandType = "thread.approval.respond"
 	CommandThreadSessionPrepare  CommandType = "thread.session.prepare"
 	CommandThreadSessionStop     CommandType = "thread.session.stop"
@@ -42,7 +41,8 @@ type Command struct {
 	AdditionalDirectories []string                 `json:"additionalDirectories,omitempty"`
 	ModelSelection        *provider.ModelSelection `json:"modelSelection,omitempty"`
 	Message               *CommandMessage          `json:"message,omitempty"`
-	// MessageID names the queued prompt thread.prompt.steer/remove act on.
+	// MessageID names the queued prompt thread.prompt.send/remove act on, or
+	// the message thread.turn.retry sends again.
 	MessageID        MessageID                        `json:"messageId,omitempty"`
 	RequestID        ApprovalID                       `json:"requestId,omitempty"`
 	Decision         provider.ApprovalDecision        `json:"decision,omitempty"`

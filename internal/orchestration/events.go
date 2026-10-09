@@ -35,9 +35,8 @@ const (
 	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
 	EventThreadPromptQueued              EventType = "thread.prompt-queued"
 	EventThreadPromptRemoved             EventType = "thread.prompt-removed"
-	EventThreadPromptSteerRequested      EventType = "thread.prompt-steer-requested"
-	EventThreadPromptSteerFailed         EventType = "thread.prompt-steer-failed"
-	EventThreadQueueResumed              EventType = "thread.queue-resumed"
+	EventThreadMessageSteerRequested     EventType = "thread.message-steer-requested"
+	EventThreadMessageDeliveryUpdated    EventType = "thread.message-delivery-updated"
 )
 
 type ActorKind string
@@ -88,6 +87,10 @@ type EventPayload struct {
 	Attachments           []provider.Attachment       `json:"attachments,omitempty"`
 	Annotations           []provider.PromptAnnotation `json:"annotations,omitempty"`
 	TurnID                TurnID                      `json:"turnId,omitempty"`
+	// Delivery and DeliveryError carry a message-delivery-updated outcome; an
+	// empty Delivery means the provider has the message.
+	Delivery      MessageDelivery `json:"delivery,omitempty"`
+	DeliveryError string          `json:"deliveryError,omitempty"`
 	// StopReason says why a completed turn ended early, carried on
 	// session-status-set settle events so clients can surface
 	// latestTurn.stopReason.

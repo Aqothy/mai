@@ -75,9 +75,9 @@ type Thread struct {
 	// prompt is either queued or a timeline message, never both.
 	QueuedPrompts []QueuedPrompt `json:"queuedPrompts,omitempty"`
 	// QueueHeld pauses the queue after the user stops a turn or a turn fails,
-	// so waiting prompts don't run into the same stop or failure. Sending,
-	// retrying or resuming releases it. It is only ever set while prompts wait.
-	QueueHeld bool      `json:"queueHeld,omitempty"`
+	// so waiting prompts don't run into the same stop or failure. Sending or
+	// retrying releases it. It is only ever set while prompts wait.
+	QueueHeld bool      `json:"-"`
 	Plan      *Plan     `json:"plan,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	// UpdatedAt is the sidebar recency timestamp: the latest user-message time,
@@ -103,23 +103,31 @@ type Message struct {
 	Attachments []provider.Attachment       `json:"attachments,omitempty"`
 	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
 	TurnID      TurnID                      `json:"turnId,omitempty"`
-	CreatedAt   time.Time                   `json:"createdAt"`
-	UpdatedAt   time.Time                   `json:"updatedAt"`
+	// Delivery is empty once the provider has the message. DeliveryError is
+	// the reason a message was not delivered.
+	Delivery      MessageDelivery `json:"delivery,omitempty"`
+	DeliveryError string          `json:"deliveryError,omitempty"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
+// MessageDelivery tracks a user message on its way to the provider.
+type MessageDelivery string
+
+const (
+	MessageSending      MessageDelivery = "sending"
+	MessageNotDelivered MessageDelivery = "not-delivered"
+)
+
 // QueuedPrompt is a prompt sent while the thread was busy. The engine sends
-// the first one as soon as the thread can take a turn; until then the user can
-// remove it or steer it into the running turn.
+// the first one when the running turn ends; until then the user can remove
+// it, steer it into the running turn, or send it once the thread is idle.
 type QueuedPrompt struct {
 	MessageID   MessageID                   `json:"messageId"`
 	Text        string                      `json:"text"`
 	Attachments []provider.Attachment       `json:"attachments,omitempty"`
 	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
 	CreatedAt   time.Time                   `json:"createdAt"`
-	// Steering is set while the prompt is being added to the running turn. A
-	// steering prompt leads the queue and holds it: it either joins the turn
-	// or is sent first once the turn ends.
-	Steering bool `json:"steering,omitempty"`
 }
 
 func (thread *Thread) queuedPrompt(messageID MessageID) *QueuedPrompt {

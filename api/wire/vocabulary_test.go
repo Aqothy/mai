@@ -20,6 +20,7 @@ var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
 	"ActorKind":                  {"../../internal/orchestration", "ActorKind"},
 	"TimelineEntryKind":          {"../../internal/orchestration", "TimelineEntryKind"},
 	"MessageRole":                {"../../internal/orchestration", "MessageRole"},
+	"MessageDelivery":            {"../../internal/orchestration", "MessageDelivery"},
 	"TurnState":                  {"../../internal/orchestration", "TurnState"},
 	"SessionStatus":              {"../../internal/orchestration", "SessionStatus"},
 	"ApprovalStatus":             {"../../internal/orchestration", "ApprovalStatus"},
