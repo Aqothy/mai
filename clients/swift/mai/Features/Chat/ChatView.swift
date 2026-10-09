@@ -3083,14 +3083,11 @@ private struct ChatPromptQueueView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(model.queuedPrompts) { prompt in
-                QueuedPromptRow(
-                    model: model,
-                    promptID: prompt.id,
-                    text: prompt.text,
-                    attachmentCount: prompt.attachments.count,
-                    annotationCount: prompt.annotations.count
-                )
+            if model.isQueueHeld {
+                PausedQueueHeader(model: model)
+            }
+            ForEach(model.queuedPrompts, id: \.messageID) { prompt in
+                QueuedPromptRow(model: model, prompt: prompt)
             }
         }
         .padding(.bottom, composerOverlap)
@@ -3105,12 +3102,32 @@ private struct ChatPromptQueueView: View {
     }
 }
 
+/// Shown after a stop or failed turn: queued prompts wait for the user.
+private struct PausedQueueHeader: View {
+    let model: ChatPromptModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Label("Queue paused", systemImage: "pause.circle")
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button("Resume", systemImage: "play.fill") {
+                Task { await model.resumeQueue() }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+    }
+}
+
 private struct QueuedPromptRow: View {
     let model: ChatPromptModel
-    let promptID: String
-    let text: String
-    let attachmentCount: Int
-    let annotationCount: Int
+    let prompt: QueuedPrompt
 
     var body: some View {
         HStack(spacing: 12) {
@@ -3119,27 +3136,35 @@ private struct QueuedPromptRow: View {
 
             Text(
                 Self.summary(
-                    text: text,
-                    attachmentCount: attachmentCount,
-                    annotationCount: annotationCount
+                    text: prompt.text,
+                    attachmentCount: prompt.attachments?.count ?? 0,
+                    annotationCount: prompt.annotations?.count ?? 0
                 )
             )
             .lineLimit(1)
 
             Spacer()
 
-            Button("Steer", systemImage: "arrow.triangle.branch") {
-                Task { await model.steerQueuedPrompt(promptID) }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            if prompt.steering == true {
+                // The daemon holds the prompt until the agent takes it.
+                ProgressView("Steering")
+                    .controlSize(.small)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button("Steer", systemImage: "arrow.triangle.branch") {
+                    Task { await model.steerQueuedPrompt(prompt.messageID) }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(!model.canSteerQueuedPrompts)
 
-            Button("Remove queued prompt", systemImage: "trash") {
-                model.removeQueuedPrompt(promptID)
+                Button("Remove queued prompt", systemImage: "trash") {
+                    Task { await model.removeQueuedPrompt(prompt.messageID) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .font(.callout)
         .padding(.horizontal, 14)

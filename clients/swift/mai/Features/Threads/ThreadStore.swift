@@ -18,13 +18,6 @@ struct ProviderChoice: Identifiable, Equatable {
     }
 }
 
-struct QueuedChatPrompt: Identifiable {
-    let id: String
-    let text: String
-    let attachments: [Attachment]
-    let annotations: [PromptAnnotation]
-}
-
 /// Stable text storage for one actively streaming timeline entry. The thread
 /// projection still records every chunk for restore, while the visible leaf
 /// row observes this reference directly.
@@ -170,8 +163,6 @@ final class ThreadStore {
     private var bufferedThreadListItems: [ThreadListStreamItem] = []
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
     private var itemDetailsByID: [ItemDetailID: CachedItemDetail] = [:]
-    private var queuedPromptsByThreadID: [String: [QueuedChatPrompt]] = [:]
-    private var dispatchingQueuedPromptThreadIDs: Set<String> = []
     @ObservationIgnored private var refreshingProviderIDs: Set<String> = []
     private var maintenanceTask: Task<Void, Never>?
 
@@ -505,6 +496,10 @@ final class ThreadStore {
         sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
     }
 
+    func threadQueueHeld(_ threadID: String) -> Bool {
+        sessionsByID[threadID]?.thread?.queueHeld == true
+    }
+
     func failedTurnID(for threadID: String) -> String? {
         guard let turn = sessionsByID[threadID]?.thread?.latestTurn,
             turn.turnState == .error
@@ -609,57 +604,56 @@ final class ThreadStore {
         await subscriptionTasks[threadID]?.task.value
     }
 
+    /// Sends a prompt. The daemon starts a turn with it, or queues it while
+    /// the chat is busy and sends it once the running turn ends.
     func submitTurn(
         threadID: String,
         text: String,
         attachments: [Attachment] = [],
         annotations: [PromptAnnotation] = []
     ) async throws {
-        let prompt = try validatedPrompt(
-            text: text,
-            attachments: attachments,
-            annotations: annotations,
-            messageID: UUID().uuidString
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
+            throw RPCError("Sending a message requires text, an attachment, or an annotation")
+        }
+        _ = try await rpc.dispatchCommand(
+            command(
+                type: MaidCommandType.threadTurnStart.rawValue,
+                threadID: threadID,
+                message: CommandMessage(
+                    annotations: annotations.isEmpty ? nil : annotations,
+                    attachments: attachments.isEmpty ? nil : attachments,
+                    messageID: UUID().uuidString,
+                    text: text
+                )
+            )
         )
-        let isRunning = sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
-        let hasQueue = !(queuedPromptsByThreadID[threadID] ?? []).isEmpty
-        let isDispatchingQueue = dispatchingQueuedPromptThreadIDs.contains(threadID)
-
-        if isRunning || hasQueue || isDispatchingQueue {
-            enqueue(prompt, threadID: threadID)
-        } else {
-            try await dispatchTurn(threadID: threadID, prompt: prompt)
-        }
     }
 
-    func queuedPrompts(for threadID: String) -> [QueuedChatPrompt] {
-        queuedPromptsByThreadID[threadID] ?? []
+    /// Prompts the daemon holds for this chat until its running turn ends.
+    func queuedPrompts(for threadID: String) -> [QueuedPrompt] {
+        sessionsByID[threadID]?.thread?.queuedPrompts ?? []
     }
 
-    /// Dispatches a queued prompt into the running turn immediately, removing
-    /// it from the queue once the dispatch succeeds.
-    func steerQueuedPrompt(threadID: String, promptID: String) async throws {
-        guard
-            let prompt = queuedPromptsByThreadID[threadID]?
-                .first(where: { $0.id == promptID }),
-            !dispatchingQueuedPromptThreadIDs.contains(threadID)
-        else { return }
-
-        dispatchingQueuedPromptThreadIDs.insert(threadID)
-        defer { dispatchingQueuedPromptThreadIDs.remove(threadID) }
-
-        try await dispatchTurn(threadID: threadID, prompt: prompt)
-        removeQueuedPrompt(threadID: threadID, promptID: promptID)
+    /// Asks the daemon to add a queued prompt to the running turn. It stays
+    /// queued, marked steering, until the agent takes it.
+    func steerQueuedPrompt(threadID: String, messageID: String) async throws {
+        var steer = command(type: MaidCommandType.threadPromptSteer.rawValue, threadID: threadID)
+        steer.messageID = messageID
+        _ = try await rpc.dispatchCommand(steer)
     }
 
-    func removeQueuedPrompt(threadID: String, promptID: String) {
-        queuedPromptsByThreadID[threadID]?.removeAll { $0.id == promptID }
-        if queuedPromptsByThreadID[threadID]?.isEmpty == true {
-            queuedPromptsByThreadID[threadID] = nil
-            sessionsByID[threadID]?.hasQueuedPrompts = false
-            reconcileSubscriptionState(threadID, at: now())
-        }
-        performSubscriptionMaintenance()
+    /// Sends queued prompts again after a stop or failure paused them.
+    func resumeQueue(threadID: String) async throws {
+        _ = try await rpc.dispatchCommand(
+            command(type: MaidCommandType.threadQueueResume.rawValue, threadID: threadID)
+        )
+    }
+
+    func removeQueuedPrompt(threadID: String, messageID: String) async throws {
+        var remove = command(type: MaidCommandType.threadPromptRemove.rawValue, threadID: threadID)
+        remove.messageID = messageID
+        _ = try await rpc.dispatchCommand(remove)
     }
 
     func promptContentCapabilities(
@@ -1014,94 +1008,6 @@ final class ThreadStore {
         throw RPCError("No agent is available")
     }
 
-    private func validatedPrompt(
-        text: String,
-        attachments: [Attachment],
-        annotations: [PromptAnnotation],
-        messageID: String
-    ) throws -> QueuedChatPrompt {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
-            throw RPCError("Sending a message requires text, an attachment, or an annotation")
-        }
-        return QueuedChatPrompt(
-            id: messageID,
-            text: text,
-            attachments: attachments,
-            annotations: annotations
-        )
-    }
-
-    private func enqueue(_ prompt: QueuedChatPrompt, threadID: String) {
-        queuedPromptsByThreadID[threadID, default: []].append(prompt)
-        var session = sessionsByID[threadID] ?? ThreadSession()
-        session.hasQueuedPrompts = true
-        sessionsByID[threadID] = session
-        reconcileSubscriptionState(threadID, at: now())
-        dispatchNextQueuedPromptIfPossible(threadID)
-    }
-
-    private func dispatchTurn(threadID: String, prompt: QueuedChatPrompt) async throws {
-        _ = try await rpc.dispatchCommand(
-            command(
-                type: MaidCommandType.threadTurnStart.rawValue,
-                threadID: threadID,
-                message: CommandMessage(
-                    annotations: prompt.annotations.isEmpty ? nil : prompt.annotations,
-                    attachments: prompt.attachments.isEmpty ? nil : prompt.attachments,
-                    messageID: prompt.id,
-                    text: prompt.text
-                )
-            )
-        )
-    }
-
-    private func dispatchNextQueuedPromptIfPossible(_ threadID: String) {
-        guard connectionState == .connected,
-            !dispatchingQueuedPromptThreadIDs.contains(threadID),
-            let thread = sessionsByID[threadID]?.thread,
-            thread.latestTurn?.turnState != .running,
-            thread.session?.sessionStatus == .ready
-                || thread.session?.sessionStatus == .interrupted,
-            let prompt = queuedPromptsByThreadID[threadID]?.first
-        else {
-            return
-        }
-
-        let turnBeforeDispatch = thread.latestTurn?.turnID
-        dispatchingQueuedPromptThreadIDs.insert(threadID)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await dispatchTurn(threadID: threadID, prompt: prompt)
-                if queuedPromptsByThreadID[threadID]?.first?.id == prompt.id {
-                    queuedPromptsByThreadID[threadID]?.removeFirst()
-                } else {
-                    queuedPromptsByThreadID[threadID]?.removeAll { $0.id == prompt.id }
-                }
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-                if queuedPromptsByThreadID[threadID]?.isEmpty == true {
-                    queuedPromptsByThreadID[threadID] = nil
-                    sessionsByID[threadID]?.hasQueuedPrompts = false
-                    reconcileSubscriptionState(threadID, at: now())
-                }
-                performSubscriptionMaintenance()
-
-                let currentTurn = sessionsByID[threadID]?.thread?.latestTurn
-                if currentTurn?.turnID != turnBeforeDispatch,
-                    currentTurn?.turnState != .running
-                {
-                    dispatchNextQueuedPromptIfPossible(threadID)
-                }
-            } catch is CancellationError {
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-            } catch {
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
     private func command(
         type: String,
         threadID: String,
@@ -1139,7 +1045,6 @@ final class ThreadStore {
             subscriptionTask.task.cancel()
         }
         subscriptionTasks.removeAll()
-        dispatchingQueuedPromptThreadIDs.removeAll()
 
         for id in sessionsByID.keys {
             guard var session = sessionsByID[id] else { continue }
@@ -1476,11 +1381,10 @@ final class ThreadStore {
         }
         reconcileSubscriptionState(threadID, at: now())
         performSubscriptionMaintenance()
-        dispatchNextQueuedPromptIfPossible(threadID)
     }
 
-    /// Replaces only server-owned thread data, preserving local subscription,
-    /// presentation-cache, and queued-prompt state.
+    /// Replaces only server-owned thread data, preserving local subscription
+    /// and presentation-cache state.
     private func replaceThreadContents(
         with snapshot: ThreadDetailSnapshot,
         session: inout ThreadSession
@@ -1547,7 +1451,6 @@ final class ThreadStore {
             reconcileSubscriptionState(threadID, at: now())
             performSubscriptionMaintenance()
         }
-        dispatchNextQueuedPromptIfPossible(threadID)
     }
 
     /// Invalidates observers of the selected-thread computed properties when a
@@ -1682,7 +1585,7 @@ final class ThreadStore {
         let completedFinalQueuedTurn =
             hadActiveTurn
             && !hasActiveTurn
-            && queuedPromptsByThreadID[threadID]?.isEmpty != false
+            && queuedPrompts(for: threadID).isEmpty
         let requiresAttention =
             event.eventType == .threadApprovalOpened
             || event.eventType == .threadSessionStatusSet

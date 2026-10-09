@@ -47,18 +47,43 @@ struct ThreadEventReducerTests {
         #expect(thread.session?.activeTurnID == "turn-1")
     }
 
-    /// Steering sends another turn.start for the turn already running; the
-    /// original turn's timestamps must survive.
+    /// The queue mirrors the daemon's: steering moves a prompt to the front, a
+    /// refused steer keeps its place, and a sent prompt leaves the queue for
+    /// the timeline.
     @Test
-    func turnStartForTheRunningTurnKeepsItsOriginalTimestamps() {
-        let started = Date(timeIntervalSince1970: 1_000)
-        var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running, at: started))
+    func queuedPromptsFollowSteeringAndLeaveWhenSent() {
+        var thread = makeThread()
+        for id in ["p1", "p2", "p3"] {
+            thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: id, text: id)))
+        }
+        thread.apply(makeEvent(.threadPromptSteerRequested, payload: makePayload(messageID: "p3", turnID: "turn-1")))
+        thread.apply(makeEvent(.threadPromptSteerRequested, payload: makePayload(messageID: "p2", turnID: "turn-1")))
+        #expect(thread.queuedPrompts?.map(\.messageID) == ["p2", "p3", "p1"])
+        #expect(thread.queuedPrompts?.map { $0.steering == true } == [true, true, false])
 
-        thread.apply(
-            makeEvent(.threadTurnStartRequested, occurredAt: started.addingTimeInterval(60), payload: makePayload(turnID: "turn-1"))
-        )
+        thread.apply(makeEvent(.threadMessageSent, payload: makePayload(messageID: "p2", role: MaidMessageRole.user.rawValue, text: "p2", turnID: "turn-1")))
+        thread.apply(makeEvent(.threadPromptSteerFailed, payload: makePayload(messageID: "p3")))
+        thread.apply(makeEvent(.threadPromptRemoved, payload: makePayload(messageID: "p1")))
 
-        #expect(thread.latestTurn?.requestedAt == started)
+        #expect(thread.queuedPrompts?.map(\.messageID) == ["p3"])
+        #expect(thread.queuedPrompts?.first?.steering != true)
+        #expect(thread.timeline.map(\.message?.id) == ["p2"])
+    }
+
+    /// Mirrors the daemon's hold: a stop with prompts waiting pauses the
+    /// queue, sending again releases it, and an empty queue is never held.
+    @Test
+    func stopHoldsWaitingPromptsUntilTheUserSendsAgain() {
+        var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
+        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
+        #expect(thread.queueHeld == nil)
+
+        thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: "p1", text: "p1")))
+        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
+        #expect(thread.queueHeld == true)
+
+        thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: "p2", text: "p2")))
+        #expect(thread.queueHeld == nil)
     }
 
     @Test

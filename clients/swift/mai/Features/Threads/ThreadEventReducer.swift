@@ -43,6 +43,8 @@ enum ThreadEventReducer {
 
         case .threadMessageSent:
             guard let id = payload.messageID, let role = payload.role else { break }
+            // A sent prompt leaves the queue: it is queued or in the timeline, never both.
+            removeQueuedPrompt(id, from: &thread)
             if let index = thread.timeline.lastIndex(where: { $0.message?.id == id }),
                thread.timeline[index].message != nil {
                 note(index)
@@ -89,11 +91,10 @@ enum ThreadEventReducer {
                 note(index)
                 thread.timeline[index].message?.turnID = turnID
             }
-            // A turn.start for the already-running turn is steering: the same
-            // logical turn continues, so its timestamps must survive.
             if thread.latestTurn?.turnID != turnID {
                 replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID))
             }
+            thread.queueHeld = nil // a retry picks the thread back up
             if thread.session != nil {
                 thread.session?.activeTurnID = turnID
                 thread.session?.status = MaidSessionStatus.running.rawValue
@@ -103,6 +104,7 @@ enum ThreadEventReducer {
         case .threadTurnInterruptRequested:
             if let turn = thread.latestTurn, payload.turnID == nil || payload.turnID == turn.turnID {
                 thread.latestTurn?.interruptRequested = true
+                holdQueue(&thread)
             }
 
         case .threadTurnInterruptConfirmed:
@@ -152,7 +154,10 @@ enum ThreadEventReducer {
                 default: .completed
                 }
                 thread.latestTurn?.completedAt = occurredAt
-                if failed { thread.latestTurn?.error = session.lastError }
+                if failed {
+                    thread.latestTurn?.error = session.lastError
+                    holdQueue(&thread)
+                }
                 thread.latestTurn?.interruptRequested = false
                 thread.latestTurn?.state = state.rawValue
                 thread.latestTurn?.stopReason = payload.stopReason
@@ -262,12 +267,63 @@ enum ThreadEventReducer {
             session.updatedAt = occurredAt
             thread.session = session
 
+        case .threadPromptQueued:
+            guard let id = payload.messageID else { break }
+            let prompt = QueuedPrompt(
+                annotations: payload.annotations,
+                attachments: payload.attachments,
+                createdAt: payload.createdAt ?? occurredAt,
+                messageID: id,
+                steering: nil,
+                text: payload.text ?? ""
+            )
+            thread.queuedPrompts = (thread.queuedPrompts ?? []) + [prompt]
+            thread.queueHeld = nil // sending again picks the thread back up
+
+        case .threadPromptRemoved:
+            guard let id = payload.messageID else { break }
+            removeQueuedPrompt(id, from: &thread)
+
+        case .threadPromptSteerRequested:
+            // A steering prompt moves to the front: it goes first if refused.
+            guard let id = payload.messageID,
+                  var prompts = thread.queuedPrompts,
+                  let index = prompts.firstIndex(where: { $0.messageID == id })
+            else { break }
+            var prompt = prompts.remove(at: index)
+            prompt.steering = true
+            prompts.insert(prompt, at: 0)
+            thread.queuedPrompts = prompts
+
+        case .threadPromptSteerFailed:
+            guard let id = payload.messageID,
+                  let index = thread.queuedPrompts?.firstIndex(where: { $0.messageID == id })
+            else { break }
+            thread.queuedPrompts?[index].steering = nil
+
+        case .threadQueueResumed:
+            thread.queueHeld = nil
+
         // Remaining cases change nothing client-visible; `nil` is an event type
         // this build does not know.
         default:
             break
         }
         return firstChangedIndex
+    }
+
+    private static func removeQueuedPrompt(_ messageID: String, from thread: inout Thread) {
+        guard let index = thread.queuedPrompts?.firstIndex(where: { $0.messageID == messageID }) else { return }
+        thread.queuedPrompts?.remove(at: index)
+        if thread.queuedPrompts?.isEmpty == true {
+            thread.queuedPrompts = nil
+            thread.queueHeld = nil
+        }
+    }
+
+    /// Mirrors the daemon: a stop or failure holds the prompts still waiting.
+    private static func holdQueue(_ thread: inout Thread) {
+        thread.queueHeld = thread.queuedPrompts?.isEmpty == false ? true : nil
     }
 
     /// Mirrors the daemon: the replaced turn has settled, so it keeps its own

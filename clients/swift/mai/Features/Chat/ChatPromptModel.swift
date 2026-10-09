@@ -48,8 +48,17 @@ final class ChatPromptModel {
         attachmentsModel.attachments
     }
 
-    var queuedPrompts: [QueuedChatPrompt] {
+    var queuedPrompts: [QueuedPrompt] {
         store.queuedPrompts(for: threadID)
+    }
+
+    /// A stop or failed turn paused the queue until the user resumes it.
+    var isQueueHeld: Bool {
+        store.threadQueueHeld(threadID)
+    }
+
+    var canSteerQueuedPrompts: Bool {
+        store.connectionState == .connected && store.threadIsRunning(threadID)
     }
 
     /// This chat's unsent annotations; the draft store owns them.
@@ -122,13 +131,29 @@ final class ChatPromptModel {
         }
     }
 
-    func removeQueuedPrompt(_ promptID: String) {
-        store.removeQueuedPrompt(threadID: threadID, promptID: promptID)
+    func removeQueuedPrompt(_ messageID: String) async {
+        do {
+            try await store.removeQueuedPrompt(threadID: threadID, messageID: messageID)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
-    func steerQueuedPrompt(_ promptID: String) async {
+    func resumeQueue() async {
         do {
-            try await store.steerQueuedPrompt(threadID: threadID, promptID: promptID)
+            try await store.resumeQueue(threadID: threadID)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func steerQueuedPrompt(_ messageID: String) async {
+        do {
+            try await store.steerQueuedPrompt(threadID: threadID, messageID: messageID)
         } catch is CancellationError {
             return
         } catch {

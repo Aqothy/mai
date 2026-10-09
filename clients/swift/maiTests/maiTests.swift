@@ -831,32 +831,6 @@ struct ThreadStoreTests {
         #expect(relaunchedAfterSend.annotations(for: "b").map(\.quote) == ["Quote B"])
     }
 
-    @Test
-    func queuedAnnotationSteersToItsOwnThreadAndSurvivesDispatchFailure() async throws {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true), makeThread("b")])
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        store.selectThread("a")
-        await waitUntil { store.subscribedThreadIDs.contains("a") }
-        let annotation = PromptAnnotation(id: "comment", messageID: "message-a", note: "Clarify", quote: "Quoted", role: "assistant")
-        try await store.submitTurn(threadID: "a", text: "", annotations: [annotation])
-        let queued = try #require(store.queuedPrompts(for: "a").first)
-        store.selectThread("b")
-        rpc.turnFailuresRemaining = 1
-        do {
-            try await store.steerQueuedPrompt(threadID: "a", promptID: queued.id)
-            Issue.record("Expected the simulated dispatch failure")
-        } catch {}
-        #expect(store.queuedPrompts(for: "a").first?.id == queued.id)
-        try await store.steerQueuedPrompt(threadID: "a", promptID: queued.id)
-        let sent = try #require(rpc.dispatchedCommands.last)
-        #expect(sent.threadID == "a")
-        #expect(sent.message?.annotations?.first?.messageID == "message-a")
-        #expect(sent.message?.annotations?.first?.note == "Clarify")
-        #expect(store.queuedPrompts(for: "a").isEmpty)
-        #expect(store.selectedThreadID == "b")
-    }
-
     private final class Invalidations: Sendable {
         let timeline = Mutex(false)
         let sidebar = Mutex(false)

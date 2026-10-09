@@ -31,7 +31,6 @@ struct ThreadSession {
     var inactiveSince: Date?
     var bufferedItems: [ThreadStreamItem] = []
     var shouldRestoreAfterReconnect = false
-    var hasQueuedPrompts = false
     var historyRestorePending = false
 
     var isRestoringHistory: Bool {
@@ -56,8 +55,8 @@ struct ThreadSession {
     }
 
     var isProtected: Bool {
-        if hasQueuedPrompts { return true }
         guard let thread else { return false }
+        if thread.queuedPrompts?.isEmpty == false { return true }
         if let turn = thread.latestTurn, turn.completedAt == nil {
             return true
         }
@@ -99,8 +98,10 @@ struct ThreadSession {
     }
 
     /// High-frequency streamed content events cannot change `isProtected`:
-    /// they never touch `latestTurn`, `session.activeTurnID`, or approvals.
-    /// Anything else (turn, session, approval, meta, unknown) is re-evaluated.
+    /// they never touch `latestTurn`, `session.activeTurnID`, or approvals,
+    /// and a prompt leaving the queue joins or starts a running turn.
+    /// Anything else (turn, session, approval, queue, meta, unknown) is
+    /// re-evaluated.
     private static func canChangeProtection(_ eventType: MaidEventType?) -> Bool {
         switch eventType {
         case .threadMessageSent,
