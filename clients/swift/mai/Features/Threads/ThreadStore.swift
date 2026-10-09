@@ -496,32 +496,38 @@ final class ThreadStore {
         sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
     }
 
-    func threadQueueHeld(_ threadID: String) -> Bool {
-        sessionsByID[threadID]?.thread?.queueHeld == true
-    }
-
     func failedTurnID(for threadID: String) -> String? {
-        guard let turn = sessionsByID[threadID]?.thread?.latestTurn,
-            turn.turnState == .error
-        else { return nil }
-        return turn.turnID
+        failedTurn(threadID)?.turnID
     }
 
-    /// The provider to sign in to when the thread's latest turn failed and that
-    /// provider now reports being signed out.
-    func failedTurnSignInProviderID(for threadID: String) -> String? {
-        guard failedTurnID(for: threadID) != nil,
-            let thread = sessionsByID[threadID]?.thread,
+    /// The latest turn when it failed after its prompt reached the agent. A
+    /// prompt that never reached it shows the failure on the message instead.
+    private func failedTurn(_ threadID: String) -> (turnID: String, messageID: String)? {
+        guard let thread = sessionsByID[threadID]?.thread,
+            let turn = thread.latestTurn,
+            turn.turnState == .error,
+            let message = thread.timeline.last(where: {
+                $0.message?.role == MaidMessageRole.user.rawValue && $0.message?.turnID == turn.turnID
+            })?.message,
+            message.messageDelivery == nil
+        else { return nil }
+        return (turn.turnID, message.id)
+    }
+
+    /// The chat's provider when it reports being signed out, which is the one
+    /// failure the user can fix from the chat.
+    func signedOutProviderID(for threadID: String) -> String? {
+        guard let thread = sessionsByID[threadID]?.thread,
             let providerID = providerID(for: thread),
             providerInfo(for: providerID)?.auth.status == MaidAuthStatus.unauthenticated.rawValue
         else { return nil }
         return providerID
     }
 
-    /// Re-reads provider state after a turn failed, since the failure may be
-    /// the provider refusing an unauthenticated request.
-    func refreshProvidersAfterFailedTurn(_ threadID: String) async {
-        guard failedTurnID(for: threadID) != nil, connectionState == .connected,
+    /// Re-reads provider state after a failure, since it may be the provider
+    /// refusing an unauthenticated request.
+    func refreshProvidersAfterFailure() async {
+        guard connectionState == .connected,
             let refreshed = try? await rpc.listProviders()
         else { return }
         providers = refreshed
@@ -571,15 +577,21 @@ final class ThreadStore {
     /// rebinds the original user message to the new turn, preserving its text,
     /// attachments, and annotations without appending a duplicate message.
     func retryFailedTurn(threadID: String) async throws {
-        guard connectionState == .connected else {
-            throw RPCError("Reconnect before retrying this turn")
-        }
-        guard failedTurnID(for: threadID) != nil else {
+        guard let messageID = failedTurn(threadID)?.messageID else {
             throw RPCError("This chat has no failed turn to retry")
         }
-        _ = try await rpc.dispatchCommand(
-            command(type: MaidCommandType.threadTurnRetry.rawValue, threadID: threadID)
-        )
+        try await retryMessage(threadID: threadID, messageID: messageID)
+    }
+
+    /// Sends a message again: one that never reached the agent, or a failed
+    /// turn's prompt. The same message is sent, not a copy.
+    func retryMessage(threadID: String, messageID: String) async throws {
+        guard connectionState == .connected else {
+            throw RPCError("Reconnect before retrying this message")
+        }
+        var retry = command(type: MaidCommandType.threadTurnRetry.rawValue, threadID: threadID)
+        retry.messageID = messageID
+        _ = try await rpc.dispatchCommand(retry)
     }
 
     func startThread(
@@ -630,24 +642,17 @@ final class ThreadStore {
         )
     }
 
-    /// Prompts the daemon holds for this chat until its running turn ends.
+    /// Prompts the daemon sends when this chat's running turn ends.
     func queuedPrompts(for threadID: String) -> [QueuedPrompt] {
         sessionsByID[threadID]?.thread?.queuedPrompts ?? []
     }
 
-    /// Asks the daemon to add a queued prompt to the running turn. It stays
-    /// queued, marked steering, until the agent takes it.
-    func steerQueuedPrompt(threadID: String, messageID: String) async throws {
-        var steer = command(type: MaidCommandType.threadPromptSteer.rawValue, threadID: threadID)
-        steer.messageID = messageID
-        _ = try await rpc.dispatchCommand(steer)
-    }
-
-    /// Sends queued prompts again after a stop or failure paused them.
-    func resumeQueue(threadID: String) async throws {
-        _ = try await rpc.dispatchCommand(
-            command(type: MaidCommandType.threadQueueResume.rawValue, threadID: threadID)
-        )
+    /// Sends a queued prompt now: steered into the running turn, or as the
+    /// next turn when nothing runs.
+    func sendQueuedPrompt(threadID: String, messageID: String) async throws {
+        var send = command(type: MaidCommandType.threadPromptSend.rawValue, threadID: threadID)
+        send.messageID = messageID
+        _ = try await rpc.dispatchCommand(send)
     }
 
     func removeQueuedPrompt(threadID: String, messageID: String) async throws {

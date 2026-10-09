@@ -21,7 +21,7 @@ import Foundation
 ///   intermediate assistant segments — behind a single `ChatTurnActivity`
 ///   header row ("Worked for 42s") until the user expands that section.
 /// - The running turn's content is always visible.
-/// - Warnings, errors, and pending approvals never fold.
+/// - Warnings, errors, pending approvals, and undelivered messages never fold.
 nonisolated enum ChatTimelineLayout {
     /// Emits rows from an already projected timeline. Keeping these sections
     /// as the List input prevents a live view from retaining the generated
@@ -177,6 +177,9 @@ nonisolated enum ChatTimelineLayout {
             // last one in the section is exempted at emission time.
             let isAssistant = message.role == MaidMessageRole.assistant.rawValue
             section.blocks.append(Block(row: .message(message), isFoldable: isAssistant))
+            if message.messageDelivery == .notDelivered {
+                section.blocks.append(Block(row: .undelivered(message), isFoldable: false))
+            }
         case .approval:
             guard let approval = entry.approval else { return }
             note(created: approval.createdAt, updated: approval.updatedAt, in: &section)
@@ -350,6 +353,8 @@ nonisolated enum ChatTimelineLayout {
 /// One rendered row in the chat timeline.
 nonisolated enum ChatTimelineRowModel: Identifiable {
     case message(Message)
+    /// Why a message never reached the agent, under that message.
+    case undelivered(Message)
     case thought(Item)
     case turnActivity(ChatTurnActivity)
     case activityGroup(ChatActivityGroup)
@@ -359,6 +364,7 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
     var id: String {
         switch self {
         case .message(let message): "message-\(message.id)"
+        case .undelivered(let message): "undelivered-\(message.id)"
         case .thought(let item): "thought-\(item.id)"
         case .turnActivity(let activity): activity.id
         case .activityGroup(let group): group.id

@@ -2079,7 +2079,7 @@ public struct EventPayload: Codable {
     public var attachments: [Attachment]?
     public var configOptions: [ConfigOption]?
     public var createdAt: Date?
-    public var cwd, decision: String?
+    public var cwd, decision, delivery, deliveryError: String?
     public var item: Item?
     public var messageID: String?
     public var modelSelection: ModelSelection?
@@ -2097,7 +2097,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, item
+        case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, delivery, deliveryError, item
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -2111,7 +2111,7 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.annotations = annotations
         self.answers = answers
@@ -2121,6 +2121,8 @@ public struct EventPayload: Codable {
         self.createdAt = createdAt
         self.cwd = cwd
         self.decision = decision
+        self.delivery = delivery
+        self.deliveryError = deliveryError
         self.item = item
         self.messageID = messageID
         self.modelSelection = modelSelection
@@ -2172,6 +2174,8 @@ public extension EventPayload {
         createdAt: Date?? = nil,
         cwd: String?? = nil,
         decision: String?? = nil,
+        delivery: String?? = nil,
+        deliveryError: String?? = nil,
         item: Item?? = nil,
         messageID: String?? = nil,
         modelSelection: ModelSelection?? = nil,
@@ -2203,6 +2207,8 @@ public extension EventPayload {
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             decision: decision ?? self.decision,
+            delivery: delivery ?? self.delivery,
+            deliveryError: deliveryError ?? self.deliveryError,
             item: item ?? self.item,
             messageID: messageID ?? self.messageID,
             modelSelection: modelSelection ?? self.modelSelection,
@@ -3187,20 +3193,23 @@ public struct Message: Codable {
     public var annotations: [PromptAnnotation]?
     public var attachments: [Attachment]?
     public var createdAt: Date
+    public var delivery, deliveryError: String?
     public var id, role, text: String
     public var turnID: String?
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case annotations, attachments, createdAt, id, role, text
+        case annotations, attachments, createdAt, delivery, deliveryError, id, role, text
         case turnID = "turnId"
         case updatedAt
     }
 
-    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, id: String, role: String, text: String, turnID: String?, updatedAt: Date) {
+    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, delivery: String?, deliveryError: String?, id: String, role: String, text: String, turnID: String?, updatedAt: Date) {
         self.annotations = annotations
         self.attachments = attachments
         self.createdAt = createdAt
+        self.delivery = delivery
+        self.deliveryError = deliveryError
         self.id = id
         self.role = role
         self.text = text
@@ -3231,6 +3240,8 @@ public extension Message {
         annotations: [PromptAnnotation]?? = nil,
         attachments: [Attachment]?? = nil,
         createdAt: Date? = nil,
+        delivery: String?? = nil,
+        deliveryError: String?? = nil,
         id: String? = nil,
         role: String? = nil,
         text: String? = nil,
@@ -3241,6 +3252,8 @@ public extension Message {
             annotations: annotations ?? self.annotations,
             attachments: attachments ?? self.attachments,
             createdAt: createdAt ?? self.createdAt,
+            delivery: delivery ?? self.delivery,
+            deliveryError: deliveryError ?? self.deliveryError,
             id: id ?? self.id,
             role: role ?? self.role,
             text: text ?? self.text,
@@ -4706,7 +4719,6 @@ public struct Thread: Codable {
     public var previousTurns: [Turn]?
     public var providerInstanceID: String?
     public var queuedPrompts: [QueuedPrompt]?
-    public var queueHeld: Bool?
     public var session: SessionBinding?
     public var timeline: [TimelineEntry]
     public var title: String
@@ -4715,10 +4727,10 @@ public struct Thread: Codable {
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, createdAt, cwd, id, latestTurn, modelSelection, plan, previousTurns
         case providerInstanceID = "providerInstanceId"
-        case queuedPrompts, queueHeld, session, timeline, title, updatedAt
+        case queuedPrompts, session, timeline, title, updatedAt
     }
 
-    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, previousTurns: [Turn]?, providerInstanceID: String?, queuedPrompts: [QueuedPrompt]?, queueHeld: Bool?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, previousTurns: [Turn]?, providerInstanceID: String?, queuedPrompts: [QueuedPrompt]?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
         self.additionalDirectories = additionalDirectories
         self.createdAt = createdAt
         self.cwd = cwd
@@ -4729,7 +4741,6 @@ public struct Thread: Codable {
         self.previousTurns = previousTurns
         self.providerInstanceID = providerInstanceID
         self.queuedPrompts = queuedPrompts
-        self.queueHeld = queueHeld
         self.session = session
         self.timeline = timeline
         self.title = title
@@ -4766,7 +4777,6 @@ public extension Thread {
         previousTurns: [Turn]?? = nil,
         providerInstanceID: String?? = nil,
         queuedPrompts: [QueuedPrompt]?? = nil,
-        queueHeld: Bool?? = nil,
         session: SessionBinding?? = nil,
         timeline: [TimelineEntry]? = nil,
         title: String? = nil,
@@ -4783,7 +4793,6 @@ public extension Thread {
             previousTurns: previousTurns ?? self.previousTurns,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             queuedPrompts: queuedPrompts ?? self.queuedPrompts,
-            queueHeld: queueHeld ?? self.queueHeld,
             session: session ?? self.session,
             timeline: timeline ?? self.timeline,
             title: title ?? self.title,
@@ -4882,22 +4891,19 @@ public struct QueuedPrompt: Codable {
     public var annotations: [PromptAnnotation]?
     public var attachments: [Attachment]?
     public var createdAt: Date
-    public var messageID: String
-    public var steering: Bool?
-    public var text: String
+    public var messageID, text: String
 
     public enum CodingKeys: String, CodingKey {
         case annotations, attachments, createdAt
         case messageID = "messageId"
-        case steering, text
+        case text
     }
 
-    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, messageID: String, steering: Bool?, text: String) {
+    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, messageID: String, text: String) {
         self.annotations = annotations
         self.attachments = attachments
         self.createdAt = createdAt
         self.messageID = messageID
-        self.steering = steering
         self.text = text
     }
 }
@@ -4925,7 +4931,6 @@ public extension QueuedPrompt {
         attachments: [Attachment]?? = nil,
         createdAt: Date? = nil,
         messageID: String? = nil,
-        steering: Bool?? = nil,
         text: String? = nil
     ) -> QueuedPrompt {
         return QueuedPrompt(
@@ -4933,7 +4938,6 @@ public extension QueuedPrompt {
             attachments: attachments ?? self.attachments,
             createdAt: createdAt ?? self.createdAt,
             messageID: messageID ?? self.messageID,
-            steering: steering ?? self.steering,
             text: text ?? self.text
         )
     }

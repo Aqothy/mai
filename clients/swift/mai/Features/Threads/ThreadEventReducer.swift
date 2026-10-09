@@ -74,6 +74,8 @@ enum ThreadEventReducer {
                     annotations: payload.annotations,
                     attachments: payload.attachments,
                     createdAt: payload.createdAt ?? occurredAt,
+                    delivery: nil,
+                    deliveryError: nil,
                     id: id,
                     role: role,
                     text: payload.text ?? "",
@@ -86,15 +88,12 @@ enum ThreadEventReducer {
         case .threadTurnStartRequested:
             applyProviderSelection(payload, to: &thread)
             let turnID = nonEmpty(payload.turnID) ?? event.eventID
-            if let messageID = payload.messageID,
-               let index = thread.timeline.lastIndex(where: { $0.message?.id == messageID }) {
-                note(index)
-                thread.timeline[index].message?.turnID = turnID
+            if let messageID = payload.messageID {
+                note(sendMessage(messageID, turnID: turnID, in: &thread))
             }
             if thread.latestTurn?.turnID != turnID {
                 replaceLatestTurn(of: &thread, with: Turn(completedAt: nil, error: nil, interruptRequested: false, requestedAt: occurredAt, startedAt: occurredAt, state: MaidTurnState.running.rawValue, stopReason: nil, turnID: turnID))
             }
-            thread.queueHeld = nil // a retry picks the thread back up
             if thread.session != nil {
                 thread.session?.activeTurnID = turnID
                 thread.session?.status = MaidSessionStatus.running.rawValue
@@ -104,7 +103,6 @@ enum ThreadEventReducer {
         case .threadTurnInterruptRequested:
             if let turn = thread.latestTurn, payload.turnID == nil || payload.turnID == turn.turnID {
                 thread.latestTurn?.interruptRequested = true
-                holdQueue(&thread)
             }
 
         case .threadTurnInterruptConfirmed:
@@ -154,10 +152,7 @@ enum ThreadEventReducer {
                 default: .completed
                 }
                 thread.latestTurn?.completedAt = occurredAt
-                if failed {
-                    thread.latestTurn?.error = session.lastError
-                    holdQueue(&thread)
-                }
+                if failed { thread.latestTurn?.error = session.lastError }
                 thread.latestTurn?.interruptRequested = false
                 thread.latestTurn?.state = state.rawValue
                 thread.latestTurn?.stopReason = payload.stopReason
@@ -274,35 +269,25 @@ enum ThreadEventReducer {
                 attachments: payload.attachments,
                 createdAt: payload.createdAt ?? occurredAt,
                 messageID: id,
-                steering: nil,
                 text: payload.text ?? ""
             )
             thread.queuedPrompts = (thread.queuedPrompts ?? []) + [prompt]
-            thread.queueHeld = nil // sending again picks the thread back up
 
         case .threadPromptRemoved:
             guard let id = payload.messageID else { break }
             removeQueuedPrompt(id, from: &thread)
 
-        case .threadPromptSteerRequested:
-            // A steering prompt moves to the front: it goes first if refused.
-            guard let id = payload.messageID,
-                  var prompts = thread.queuedPrompts,
-                  let index = prompts.firstIndex(where: { $0.messageID == id })
-            else { break }
-            var prompt = prompts.remove(at: index)
-            prompt.steering = true
-            prompts.insert(prompt, at: 0)
-            thread.queuedPrompts = prompts
+        case .threadMessageSteerRequested:
+            guard let id = payload.messageID, let turnID = nonEmpty(payload.turnID) else { break }
+            note(sendMessage(id, turnID: turnID, in: &thread))
 
-        case .threadPromptSteerFailed:
+        case .threadMessageDeliveryUpdated:
             guard let id = payload.messageID,
-                  let index = thread.queuedPrompts?.firstIndex(where: { $0.messageID == id })
+                  let index = thread.timeline.lastIndex(where: { $0.message?.id == id })
             else { break }
-            thread.queuedPrompts?[index].steering = nil
-
-        case .threadQueueResumed:
-            thread.queueHeld = nil
+            note(index)
+            thread.timeline[index].message?.delivery = payload.delivery
+            thread.timeline[index].message?.deliveryError = payload.deliveryError
 
         // Remaining cases change nothing client-visible; `nil` is an event type
         // this build does not know.
@@ -315,16 +300,19 @@ enum ThreadEventReducer {
     private static func removeQueuedPrompt(_ messageID: String, from thread: inout Thread) {
         guard let index = thread.queuedPrompts?.firstIndex(where: { $0.messageID == messageID }) else { return }
         thread.queuedPrompts?.remove(at: index)
-        if thread.queuedPrompts?.isEmpty == true {
-            thread.queuedPrompts = nil
-            thread.queueHeld = nil
-        }
+        if thread.queuedPrompts?.isEmpty == true { thread.queuedPrompts = nil }
     }
 
-    /// Mirrors the daemon: a stop or failure holds the prompts still waiting.
-    private static func holdQueue(_ thread: inout Thread) {
-        thread.queueHeld = thread.queuedPrompts?.isEmpty == false ? true : nil
+    /// Mirrors the daemon: a turn start or steer hands the message to the
+    /// provider, so it is sending until the delivery outcome arrives.
+    private static func sendMessage(_ messageID: String, turnID: String, in thread: inout Thread) -> Int? {
+        guard let index = thread.timeline.lastIndex(where: { $0.message?.id == messageID }) else { return nil }
+        thread.timeline[index].message?.turnID = turnID
+        thread.timeline[index].message?.delivery = MaidMessageDelivery.sending.rawValue
+        thread.timeline[index].message?.deliveryError = nil
+        return index
     }
+
 
     /// Mirrors the daemon: the replaced turn has settled, so it keeps its own
     /// outcome and timing in `previousTurns`.

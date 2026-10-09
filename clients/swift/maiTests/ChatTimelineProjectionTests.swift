@@ -131,6 +131,8 @@ final class ChatTimelineProjectionTests: XCTestCase {
             switch row {
             case .message(let message):
                 return "\(row.id)|\(message.text)|\(message.updatedAt.timeIntervalSince1970)"
+            case .undelivered(let message):
+                return "\(row.id)|\(message.deliveryError ?? "")"
             case .thought(let item):
                 return "\(row.id)|\(item.status)|\(item.updatedAt.timeIntervalSince1970)"
             case .activityGroup(let group):

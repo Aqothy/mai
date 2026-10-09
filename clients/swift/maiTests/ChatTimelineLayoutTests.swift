@@ -430,6 +430,7 @@ private func rows(
 private func kindLabel(_ row: ChatTimelineRowModel) -> String {
     switch row {
     case .message: "message"
+    case .undelivered: "undelivered"
     case .thought: "thought"
     case .turnActivity: "turnActivity"
     case .activityGroup: "group"

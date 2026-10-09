@@ -32,9 +32,8 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
     case threadPromptQueued = "thread.prompt-queued"
     case threadPromptRemoved = "thread.prompt-removed"
-    case threadPromptSteerRequested = "thread.prompt-steer-requested"
-    case threadPromptSteerFailed = "thread.prompt-steer-failed"
-    case threadQueueResumed = "thread.queue-resumed"
+    case threadMessageSteerRequested = "thread.message-steer-requested"
+    case threadMessageDeliveryUpdated = "thread.message-delivery-updated"
 }
 
 /// Type discriminator of a client command sent to orchestration.dispatchCommand.
@@ -45,9 +44,8 @@ public enum MaidCommandType: String, Codable, Sendable, CaseIterable {
     case threadTurnStart = "thread.turn.start"
     case threadTurnRetry = "thread.turn.retry"
     case threadTurnInterrupt = "thread.turn.interrupt"
-    case threadPromptSteer = "thread.prompt.steer"
+    case threadPromptSend = "thread.prompt.send"
     case threadPromptRemove = "thread.prompt.remove"
-    case threadQueueResume = "thread.queue.resume"
     case threadApprovalRespond = "thread.approval.respond"
     case threadSessionPrepare = "thread.session.prepare"
     case threadSessionStop = "thread.session.stop"
@@ -79,6 +77,12 @@ public enum MaidTimelineEntryKind: String, Codable, Sendable, CaseIterable {
 public enum MaidMessageRole: String, Codable, Sendable, CaseIterable {
     case user = "user"
     case assistant = "assistant"
+}
+
+/// A user message on its way to the provider; absent once delivered.
+public enum MaidMessageDelivery: String, Codable, Sendable, CaseIterable {
+    case sending = "sending"
+    case notDelivered = "not-delivered"
 }
 
 /// Lifecycle state of a thread's latest turn.

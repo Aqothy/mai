@@ -52,13 +52,9 @@ final class ChatPromptModel {
         store.queuedPrompts(for: threadID)
     }
 
-    /// A stop or failed turn paused the queue until the user resumes it.
-    var isQueueHeld: Bool {
-        store.threadQueueHeld(threadID)
-    }
-
-    var canSteerQueuedPrompts: Bool {
-        store.connectionState == .connected && store.threadIsRunning(threadID)
+    /// Queued prompts steer into a running turn, or send as the next turn.
+    var isTurnRunning: Bool {
+        store.threadIsRunning(threadID)
     }
 
     /// This chat's unsent annotations; the draft store owns them.
@@ -106,11 +102,11 @@ final class ChatPromptModel {
 
     /// Set when the failed turn's provider needs the user to sign in.
     var signInProviderID: String? {
-        store.failedTurnSignInProviderID(for: threadID)
+        failedTurnID == nil ? nil : store.signedOutProviderID(for: threadID)
     }
 
     func refreshProviderAfterFailedTurn() async {
-        await store.refreshProvidersAfterFailedTurn(threadID)
+        await store.refreshProvidersAfterFailure()
     }
 
     var canForkThread: Bool {
@@ -141,19 +137,9 @@ final class ChatPromptModel {
         }
     }
 
-    func resumeQueue() async {
+    func sendQueuedPrompt(_ messageID: String) async {
         do {
-            try await store.resumeQueue(threadID: threadID)
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func steerQueuedPrompt(_ messageID: String) async {
-        do {
-            try await store.steerQueuedPrompt(threadID: threadID, messageID: messageID)
+            try await store.sendQueuedPrompt(threadID: threadID, messageID: messageID)
         } catch is CancellationError {
             return
         } catch {

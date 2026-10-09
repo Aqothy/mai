@@ -122,7 +122,7 @@ struct ChatBetaIntegrationTests {
         let annotation = PromptAnnotation(
             id: "comment", messageID: "earlier", note: "Explain this", quote: "quoted", role: "assistant")
         var message = Message(
-            annotations: [annotation], attachments: nil, createdAt: .now,
+            annotations: [annotation], attachments: nil, createdAt: .now, delivery: nil, deliveryError: nil,
             id: "reference-message", role: "assistant",
             text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide",
             turnID: nil, updatedAt: .now)
@@ -156,7 +156,7 @@ struct ChatBetaIntegrationTests {
     func resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() throws {
         let attachment = Attachment(data: nil, kind: "image", mimeType: "image/png", name: "QA attachment", uri: "https://example.invalid/qa.png")
         var message = Message(
-            annotations: nil, attachments: [attachment], createdAt: .now,
+            annotations: nil, attachments: [attachment], createdAt: .now, delivery: nil, deliveryError: nil,
             id: "reference-with-attachment", role: "assistant",
             text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide",
             turnID: "turn", updatedAt: .now)

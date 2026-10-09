@@ -13,6 +13,11 @@ extension Turn {
     nonisolated var turnState: MaidTurnState? { MaidTurnState(rawValue: state) }
 }
 
+extension Message {
+    /// `nil` once the provider has the message.
+    nonisolated var messageDelivery: MaidMessageDelivery? { delivery.flatMap(MaidMessageDelivery.init(rawValue:)) }
+}
+
 extension SessionBinding {
     var sessionStatus: MaidSessionStatus? { MaidSessionStatus(rawValue: status) }
 }

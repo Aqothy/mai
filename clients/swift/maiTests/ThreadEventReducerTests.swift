@@ -47,43 +47,33 @@ struct ThreadEventReducerTests {
         #expect(thread.session?.activeTurnID == "turn-1")
     }
 
-    /// The queue mirrors the daemon's: steering moves a prompt to the front, a
-    /// refused steer keeps its place, and a sent prompt leaves the queue for
-    /// the timeline.
+    /// Mirrors the daemon: a sent prompt leaves the queue for the timeline,
+    /// a steer marks it sending, and the delivery outcome either clears that
+    /// or keeps the provider's reason until a retry sends it again.
     @Test
-    func queuedPromptsFollowSteeringAndLeaveWhenSent() {
+    func sentPromptLeavesTheQueueAndTracksItsDelivery() {
         var thread = makeThread()
-        for id in ["p1", "p2", "p3"] {
+        for id in ["p1", "p2"] {
             thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: id, text: id)))
         }
-        thread.apply(makeEvent(.threadPromptSteerRequested, payload: makePayload(messageID: "p3", turnID: "turn-1")))
-        thread.apply(makeEvent(.threadPromptSteerRequested, payload: makePayload(messageID: "p2", turnID: "turn-1")))
-        #expect(thread.queuedPrompts?.map(\.messageID) == ["p2", "p3", "p1"])
-        #expect(thread.queuedPrompts?.map { $0.steering == true } == [true, true, false])
-
         thread.apply(makeEvent(.threadMessageSent, payload: makePayload(messageID: "p2", role: MaidMessageRole.user.rawValue, text: "p2", turnID: "turn-1")))
-        thread.apply(makeEvent(.threadPromptSteerFailed, payload: makePayload(messageID: "p3")))
-        thread.apply(makeEvent(.threadPromptRemoved, payload: makePayload(messageID: "p1")))
+        thread.apply(makeEvent(.threadMessageSteerRequested, payload: makePayload(messageID: "p2", turnID: "turn-1")))
+        #expect(thread.queuedPrompts?.map(\.messageID) == ["p1"])
+        #expect(thread.timeline.first?.message?.messageDelivery == .sending)
 
-        #expect(thread.queuedPrompts?.map(\.messageID) == ["p3"])
-        #expect(thread.queuedPrompts?.first?.steering != true)
-        #expect(thread.timeline.map(\.message?.id) == ["p2"])
-    }
+        var refused = makePayload(messageID: "p2")
+        refused.delivery = MaidMessageDelivery.notDelivered.rawValue
+        refused.deliveryError = "cannot steer a compact turn"
+        thread.apply(makeEvent(.threadMessageDeliveryUpdated, payload: refused))
+        #expect(thread.timeline.first?.message?.messageDelivery == .notDelivered)
+        #expect(thread.timeline.first?.message?.deliveryError == "cannot steer a compact turn")
 
-    /// Mirrors the daemon's hold: a stop with prompts waiting pauses the
-    /// queue, sending again releases it, and an empty queue is never held.
-    @Test
-    func stopHoldsWaitingPromptsUntilTheUserSendsAgain() {
-        var thread = makeThread(latestTurn: makeTurn(id: "turn-1", state: .running))
-        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
-        #expect(thread.queueHeld == nil)
-
-        thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: "p1", text: "p1")))
-        thread.apply(makeEvent(.threadTurnInterruptRequested, payload: makePayload(turnID: "turn-1")))
-        #expect(thread.queueHeld == true)
-
-        thread.apply(makeEvent(.threadPromptQueued, payload: makePayload(messageID: "p2", text: "p2")))
-        #expect(thread.queueHeld == nil)
+        thread.apply(makeEvent(.threadMessageSteerRequested, payload: makePayload(messageID: "p2", turnID: "turn-1")))
+        #expect(thread.timeline.first?.message?.messageDelivery == .sending)
+        #expect(thread.timeline.first?.message?.deliveryError == nil)
+        thread.apply(makeEvent(.threadMessageDeliveryUpdated, payload: makePayload(messageID: "p2")))
+        #expect(thread.timeline.first?.message?.delivery == nil)
+        #expect(thread.timeline.count == 1)
     }
 
     @Test

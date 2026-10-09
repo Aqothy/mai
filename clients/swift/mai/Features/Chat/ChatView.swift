@@ -512,7 +512,7 @@ private struct ChatComposerStack: View {
 private struct ChatFailedTurnRetryView: View {
     let model: ChatPromptModel
 
-    @State private var isSignInPresented = false
+    @State private var signIn: ChatSignInTarget?
 
     var body: some View {
         HStack {
@@ -526,9 +526,9 @@ private struct ChatFailedTurnRetryView: View {
 
             Spacer()
 
-            if model.signInProviderID != nil {
+            if let providerID = model.signInProviderID {
                 Button("Sign In", systemImage: "person.crop.circle.badge.exclamationmark") {
-                    isSignInPresented = true
+                    signIn = ChatSignInTarget(id: providerID)
                 }
             }
 
@@ -546,12 +546,68 @@ private struct ChatFailedTurnRetryView: View {
         .padding(.bottom)
         .accessibilityElement(children: .contain)
         .task(id: model.failedTurnID) { await model.refreshProviderAfterFailedTurn() }
-        .sheet(isPresented: $isSignInPresented) {
-            if let providerID = model.signInProviderID {
-                ChatProviderSignInSheet(providerID: providerID, store: model.store)
+        .sheet(item: $signIn) { ChatProviderSignInSheet(providerID: $0.id, store: model.store) }
+    }
+}
+
+/// Under a message that never reached the agent: why, and a way to send the
+/// same message again.
+private struct ChatUndeliveredMessageRow: View {
+    let message: Message
+    let threadID: String
+    let store: ThreadStore
+
+    @State private var isRetrying = false
+    @State private var retryError: String?
+    @State private var signIn: ChatSignInTarget?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Spacer(minLength: 0)
+
+            Label {
+                Text("Not delivered: \(retryError ?? message.deliveryError ?? "unknown error")")
+                    .lineLimit(3)
+            } icon: {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
             }
+            .foregroundStyle(.secondary)
+
+            if let providerID = store.signedOutProviderID(for: threadID) {
+                Button("Sign In") { signIn = ChatSignInTarget(id: providerID) }
+            }
+
+            Button(isRetrying ? "Retrying…" : "Retry", systemImage: "arrow.clockwise") {
+                Task { await retry() }
+            }
+            .disabled(isRetrying || store.connectionState != .connected)
+        }
+        .font(.footnote)
+        .buttonStyle(.borderless)
+        .padding(.bottom, 6)
+        .task(id: message.id) { await store.refreshProvidersAfterFailure() }
+        .sheet(item: $signIn) { ChatProviderSignInSheet(providerID: $0.id, store: store) }
+    }
+
+    private func retry() async {
+        isRetrying = true
+        defer { isRetrying = false }
+        do {
+            try await store.retryMessage(threadID: threadID, messageID: message.id)
+            retryError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            retryError = error.localizedDescription
         }
     }
+}
+
+/// The provider a sign-in sheet opened for. Capturing it keeps the sheet up
+/// once sign-in succeeds and the provider no longer reports signed out.
+private struct ChatSignInTarget: Identifiable {
+    let id: String
 }
 
 private struct ChatProviderSignInSheet: View {
@@ -1707,7 +1763,8 @@ struct ChatTimeline: View {
                             ? message.attachments
                             : nil,
                         isFirst: index == 0,
-                        isLast: index == segments.count - 1
+                        isLast: index == segments.count - 1,
+                        isPending: message.messageDelivery != nil
                     )
                     return segment.kind == .prose
                         ? .prose(model)
@@ -1943,6 +2000,7 @@ struct ChatTimelineRenderRowView: View {
                     role: segment.role,
                     annotations: segment.annotations,
                     attachments: segment.attachments,
+                    isPending: segment.isPending,
                     streamingText: nil,
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
@@ -1952,7 +2010,8 @@ struct ChatTimelineRenderRowView: View {
                 ChatMessageBubble(
                     role: segment.role,
                     annotations: segment.annotations,
-                    attachments: segment.attachments
+                    attachments: segment.attachments,
+                    isPending: segment.isPending
                 ) {
                     ChatSelectableText(
                         layoutID: segment.rowID,
@@ -1997,6 +2056,8 @@ struct ChatMessageSegmentRowModel {
     let attachments: [Attachment]?
     let isFirst: Bool
     let isLast: Bool
+    /// The agent does not have the message yet, or never got it.
+    var isPending = false
 
     var rowID: String { "\(messageID)#segment-\(index)" }
 }
@@ -2007,6 +2068,8 @@ struct ChatMessageBubble<Content: View>: View {
     let role: String
     var annotations: [PromptAnnotation]? = nil
     var attachments: [Attachment]? = nil
+    /// Dims a message the agent does not have yet, or never got.
+    var isPending = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -2028,6 +2091,7 @@ struct ChatMessageBubble<Content: View>: View {
             isUser ? Color.accentColor.opacity(0.15) : Color.clear,
             in: .rect(cornerRadius: 18)
         )
+        .opacity(isPending ? 0.5 : 1)
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
@@ -2097,6 +2161,7 @@ private struct ChatTimelineRow: View {
                     role: message.role,
                     annotations: message.annotations,
                     attachments: message.attachments,
+                    isPending: message.messageDelivery != nil,
                     streamingText: store.streamingMessageText(
                         threadID: threadID,
                         messageID: message.id
@@ -2117,6 +2182,8 @@ private struct ChatTimelineRow: View {
                     )
                 )
                 .padding(.vertical, 10)
+            case .undelivered(let message):
+                ChatUndeliveredMessageRow(message: message, threadID: threadID, store: store)
             case .thought(let item):
                 ChatThoughtRow(
                     item: item,
@@ -2863,12 +2930,13 @@ private struct ChatMessageRow: View {
     let role: String
     let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
+    let isPending: Bool
     let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
-        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments) {
+        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments, isPending: isPending) {
             if !text.isEmpty {
                 // A restored thread can retain a replayed streaming buffer
                 // for its final messages. Once the message presents as
@@ -3083,9 +3151,6 @@ private struct ChatPromptQueueView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.isQueueHeld {
-                PausedQueueHeader(model: model)
-            }
             ForEach(model.queuedPrompts, id: \.messageID) { prompt in
                 QueuedPromptRow(model: model, prompt: prompt)
             }
@@ -3099,29 +3164,6 @@ private struct ChatPromptQueueView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal)
         .padding(.bottom, -composerOverlap)
-    }
-}
-
-/// Shown after a stop or failed turn: queued prompts wait for the user.
-private struct PausedQueueHeader: View {
-    let model: ChatPromptModel
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Label("Queue paused", systemImage: "pause.circle")
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Button("Resume", systemImage: "play.fill") {
-                Task { await model.resumeQueue() }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-        .font(.callout)
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
     }
 }
 
@@ -3145,26 +3187,27 @@ private struct QueuedPromptRow: View {
 
             Spacer()
 
-            if prompt.steering == true {
-                // The daemon holds the prompt until the agent takes it.
-                ProgressView("Steering")
-                    .controlSize(.small)
-                    .foregroundStyle(.secondary)
-            } else {
-                Button("Steer", systemImage: "arrow.triangle.branch") {
-                    Task { await model.steerQueuedPrompt(prompt.messageID) }
+            Group {
+                if model.isTurnRunning {
+                    Button("Steer", systemImage: "arrow.triangle.branch") {
+                        Task { await model.sendQueuedPrompt(prompt.messageID) }
+                    }
+                } else {
+                    Button("Send", systemImage: "arrow.up") {
+                        Task { await model.sendQueuedPrompt(prompt.messageID) }
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(!model.canSteerQueuedPrompts)
-
-                Button("Remove queued prompt", systemImage: "trash") {
-                    Task { await model.removeQueuedPrompt(prompt.messageID) }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(model.store.connectionState != .connected)
+
+            Button("Remove queued prompt", systemImage: "trash") {
+                Task { await model.removeQueuedPrompt(prompt.messageID) }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
         .font(.callout)
         .padding(.horizontal, 14)

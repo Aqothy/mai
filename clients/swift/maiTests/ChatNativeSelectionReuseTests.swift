@@ -36,7 +36,7 @@
             let cache = ChatMarkdownSegmentCache()
             let messages = (0..<40).map { index in
                 Message(
-                    annotations: nil, attachments: nil, createdAt: .now,
+                    annotations: nil, attachments: nil, createdAt: .now, delivery: nil, deliveryError: nil,
                     id: "reference-message-\(index)", role: "assistant",
                     text: "Quote \(index) café 👩🏽‍💻 [Guide][ref].\n\n[ref]: https://example.com/guide/\(index)",
                     turnID: nil, updatedAt: .now)
