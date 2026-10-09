@@ -38,6 +38,8 @@ type fakeProviderRuntime struct {
 	configSetEntered   chan struct{}
 	configSetRelease   chan struct{}
 	sendSignal         chan struct{}
+	renames            []string
+	renameSignal       chan struct{}
 }
 
 func newFakeProviderRuntime() *fakeProviderRuntime {
@@ -144,6 +146,16 @@ func (f *fakeProviderRuntime) StopSession(context.Context, provider.StopSessionI
 	}
 	return err
 }
+func (f *fakeProviderRuntime) RenameSession(_ context.Context, threadID, title string) error {
+	f.mu.Lock()
+	f.renames = append(f.renames, threadID+"="+title)
+	f.mu.Unlock()
+	if f.renameSignal != nil {
+		f.renameSignal <- struct{}{}
+	}
+	return nil
+}
+
 func (f *fakeProviderRuntime) ReleaseSession(_ context.Context, input provider.StopSessionInput) error {
 	f.mu.Lock()
 	f.releaseCalls++
@@ -257,6 +269,28 @@ func waitForReactorIdle(t *testing.T, reactor *ProviderEventReactor, threadID Th
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("reactor queue for %q did not drain", threadID)
+}
+
+// A title the user gives a thread names its provider session; one the
+// provider reported is not sent back.
+func TestReactorRenamesProviderSessionForClientTitles(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	fake.renameSignal = make(chan struct{}, 2)
+	reactor := newDetachedReactor(engine, fake)
+	reactor.handle(Event{Type: EventThreadMetaUpdated, Actor: ActorKindProvider, Payload: EventPayload{ThreadID: "thread-a", Title: "From provider"}})
+	reactor.handle(Event{Type: EventThreadMetaUpdated, Actor: ActorKindClient, Payload: EventPayload{ThreadID: "thread-a", Title: "Chosen"}})
+	select {
+	case <-fake.renameSignal:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rename not sent")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if !slices.Equal(fake.renames, []string{"thread-a=Chosen"}) {
+		t.Fatalf("renames = %q", fake.renames)
+	}
 }
 
 func TestReactorPreparesSessionBeforeFirstTurn(t *testing.T) {

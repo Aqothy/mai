@@ -18,6 +18,7 @@ const maxMessageBytes = 64 << 20
 type streamClient struct {
 	writeMu sync.Mutex
 	stdin   io.Writer
+	stdout  io.Reader
 
 	mu       sync.Mutex
 	pending  map[string]chan controlResponse
@@ -38,17 +39,21 @@ type streamClient struct {
 }
 
 func newStreamClient(stdout io.Reader, stdin io.Writer) *streamClient {
-	client := &streamClient{
+	return &streamClient{
 		stdin:   stdin,
+		stdout:  stdout,
 		pending: make(map[string]chan controlResponse),
 		done:    make(chan struct{}),
 	}
-	go client.run(stdout)
-	return client
 }
 
-func (c *streamClient) run(stdout io.Reader) {
-	scanner := bufio.NewScanner(stdout)
+// start begins reading; the handlers must be set before.
+func (c *streamClient) start() {
+	go c.run()
+}
+
+func (c *streamClient) run() {
+	scanner := bufio.NewScanner(c.stdout)
 	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
 	for scanner.Scan() {
 		line := scanner.Bytes()

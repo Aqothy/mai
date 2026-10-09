@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Aqothy/maiD/internal/adapters/elicitation"
+	"github.com/Aqothy/maiD/internal/adapters/unifieddiff"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -41,7 +41,7 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	if len(rawInput) > 0 {
 		_ = json.Unmarshal(rawInput, &input)
 	}
-	state := &toolState{itemKind: provider.ItemKindToolCall}
+	state := &toolState{itemKind: provider.ItemKindToolCall, input: rawInput}
 	call := provider.ToolCall{Name: name, ProviderKind: name}
 	title := name
 
@@ -57,7 +57,7 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	// Action is set only for built-ins whose own identity is a file read or
 	// search (Claude Code's isSearchOrReadCommand for Read, Grep, and Glob).
 	switch name {
-	case "Bash", "BashOutput", "KillShell":
+	case "Bash":
 		state.itemKind = provider.ItemKindCommandExecution
 		call.Command = input.Command
 		title = trimmedOrDefault(input.Description, "Ran command")
@@ -69,9 +69,11 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 		}
 		title = "Edited file"
 	case "Write":
+		// Whether Write creates or replaces the file is known only from
+		// its result (see applyResult).
 		state.itemKind = provider.ItemKindFileChange
 		if input.FilePath != "" {
-			call.Changes = []provider.FileChange{{Path: input.FilePath, Kind: provider.FileChangeAdd, NewText: input.Content}}
+			call.Changes = []provider.FileChange{{Path: input.FilePath, NewText: input.Content}}
 			call.Locations = []provider.ToolLocation{{Path: input.FilePath}}
 		}
 		title = "Wrote file"
@@ -117,12 +119,71 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	case "ExitPlanMode":
 		call.Output = boundedOutput(input.Plan)
 		title = "Proposed plan"
-	case "TodoWrite":
+	case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
+		// The plan tools surface as the turn's plan, not as timeline items.
 		state.itemKind = ""
 	}
 	state.call = call
 	state.title = title
 	return state
+}
+
+// applyResult records a tool's result on its snapshot and returns the item's
+// final status. result is the tool's structured result, which for file edits
+// carries the patch the CLI applied.
+func (s *toolState) applyResult(block contentBlock, result json.RawMessage) provider.ItemStatus {
+	output, attachments := toolResultContent(block.Content)
+	status := provider.ItemStatusCompleted
+	if block.IsError {
+		status = provider.ItemStatusFailed
+		s.call.Error = boundedOutput(output)
+	} else {
+		s.call.Output = boundedOutput(output)
+	}
+	s.call.Attachments = append(s.call.Attachments, attachments...)
+	s.completed = true
+	if !block.IsError && len(s.call.Changes) == 1 {
+		applyFileResult(&s.call.Changes[0], result)
+	}
+	return status
+}
+
+// fileEditResult is the structured result of Edit and Write.
+type fileEditResult struct {
+	// Type is "create" or "update" for Write.
+	Type            string `json:"type"`
+	Content         string `json:"content"`
+	StructuredPatch []struct {
+		OldStart int      `json:"oldStart"`
+		OldLines int      `json:"oldLines"`
+		NewStart int      `json:"newStart"`
+		NewLines int      `json:"newLines"`
+		Lines    []string `json:"lines"`
+	} `json:"structuredPatch"`
+}
+
+// applyFileResult replaces a change's snippet with the patch the CLI applied,
+// whose hunks have real line numbers.
+func applyFileResult(change *provider.FileChange, raw json.RawMessage) {
+	var result fileEditResult
+	if len(raw) == 0 || json.Unmarshal(raw, &result) != nil {
+		return
+	}
+	var diff strings.Builder
+	switch {
+	case result.Type == "create":
+		change.Kind = provider.FileChangeAdd
+		diff.WriteString(unifieddiff.WholeFile(result.Content, true))
+	case len(result.StructuredPatch) > 0:
+		change.Kind = provider.FileChangeUpdate
+		for _, hunk := range result.StructuredPatch {
+			diff.WriteString(unifieddiff.Hunk(hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines, hunk.Lines))
+		}
+	default:
+		return
+	}
+	change.Diff = diff.String()
+	change.OldText, change.NewText = "", ""
 }
 
 func splitMCPToolName(name string) (string, string, bool) {
@@ -238,7 +299,9 @@ func resultErrorMessage(result resultMessage) string {
 	return ""
 }
 
-func tokenUsageFromResult(result resultMessage) *provider.TokenUsage {
+// tokenUsageFromResult reads a result's usage. The context window is the
+// session model's: subagents on other models report theirs too.
+func tokenUsageFromResult(result resultMessage, model string) *provider.TokenUsage {
 	var usage resultUsage
 	if len(result.Usage) > 0 {
 		_ = json.Unmarshal(result.Usage, &usage)
@@ -249,10 +312,10 @@ func tokenUsageFromResult(result resultMessage) *provider.TokenUsage {
 		last := usage.Iterations[count-1]
 		used = last.InputTokens + last.CacheCreationInputTokens + last.CacheReadInputTokens + last.OutputTokens
 	}
-	window := 0
-	for _, model := range result.ModelUsage {
-		if model.ContextWindow > window {
-			window = model.ContextWindow
+	window := result.ModelUsage[model].ContextWindow
+	if window == 0 {
+		for _, usage := range result.ModelUsage {
+			window = max(window, usage.ContextWindow)
 		}
 	}
 	if used == 0 && window == 0 && result.TotalCostUSD == 0 {
@@ -322,7 +385,7 @@ func approvalRequestType(toolName string) provider.RuntimeRequestType {
 	switch toolName {
 	case "AskUserQuestion":
 		return ""
-	case "Bash", "BashOutput", "KillShell":
+	case "Bash":
 		return provider.RuntimeRequestCommandExecution
 	case "Edit", "Write", "NotebookEdit":
 		return provider.RuntimeRequestFileChange
@@ -428,7 +491,7 @@ func permissionResponse(pending *pendingApproval, decision string) (map[string]a
 
 // sessionScopedPermissions rewrites the CLI's permission suggestions to the
 // session destination so a session-only approval never persists to settings
-// files, falling back to a whole-tool session allow rule.
+// files.
 func sessionScopedPermissions(pending *pendingApproval) []map[string]any {
 	updates := make([]map[string]any, 0, len(pending.suggestions))
 	for _, raw := range pending.suggestions {
@@ -439,26 +502,11 @@ func sessionScopedPermissions(pending *pendingApproval) []map[string]any {
 		suggestion["destination"] = "session"
 		updates = append(updates, suggestion)
 	}
-	if len(updates) == 0 && pending.toolName != "" {
-		updates = append(updates, map[string]any{
-			"type":        "addRules",
-			"rules":       []map[string]any{{"toolName": pending.toolName}},
-			"behavior":    "allow",
-			"destination": "session",
-		})
-	}
 	return updates
 }
 
 func boundedOutput(value string) string {
-	if len(value) <= toolOutputLimit {
-		return value
-	}
-	cut := toolOutputLimit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
+	return provider.TruncateUTF8(value, toolOutputLimit)
 }
 
 func boundedRunes(value string, limit int) string {

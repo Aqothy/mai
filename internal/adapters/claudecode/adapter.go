@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -33,18 +32,13 @@ type Config struct {
 	ConfigDir string `json:"configDir,omitempty"`
 }
 
-// sessionProcess owns one CLI subprocess. reaped/killedTree fence
-// process-group cleanup exactly like codexapp: once Wait has reaped the
-// leader its pid must never be signalled again because the OS may recycle it.
+// sessionProcess owns one CLI subprocess. done is closed once waitProcess
+// has retired it; closing marks a deliberate stop.
 type sessionProcess struct {
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	client     *streamClient
-	effort     string // launch --effort; changing it needs a new process
-	done       chan struct{}
-	reaped     bool
-	killedTree bool
-	closing    bool
+	process *procgroup.Process
+	client  *streamClient
+	done    chan struct{}
+	closing bool
 }
 
 type claudeSession struct {
@@ -78,16 +72,31 @@ type claudeSession struct {
 	openBlocks   map[int]string
 	streamedText map[string]string
 	itemSeq      int
+	// seenAssistant holds the assistant messages already shown: after
+	// /compact the CLI sends the last kept one again.
+	seenAssistant map[string]bool
+	// compactionItem is the item of a compaction in progress.
+	compactionItem string
+	// tasks is the plan the CLI keeps with its Task tools.
+	tasks taskPlan
+	// title is the session title last published (see publishTitle).
+	title string
+
+	// activeModel is the model id the CLI reports it runs.
+	activeModel string
 
 	// Usage carried across turns for live token reporting.
+	contextTokens int
 	contextWindow int
 	costUSD       float64
 }
 
 type toolState struct {
-	call        provider.ToolCall
-	itemKind    provider.ItemKind
-	title       string
+	call     provider.ToolCall
+	itemKind provider.ItemKind
+	title    string
+	// input is the tool's latest parsed input.
+	input       json.RawMessage
 	partialJSON string
 	fingerprint string
 	completed   bool
@@ -99,7 +108,6 @@ type pendingApproval struct {
 	localThread      string
 	localTurn        string
 	requestType      provider.RuntimeRequestType
-	toolName         string
 	input            json.RawMessage
 	suggestions      []json.RawMessage
 	// question is set for AskUserQuestion; elicitation for an MCP server's
@@ -133,7 +141,10 @@ type Instance struct {
 	pendingApprovals map[string]*pendingApproval
 	models           []sdkModel
 	commands         []sdkCommand
-	options          map[string]*optionsState
+	// defaultPermissionMode is the mode a session starts in without a
+	// selection, from the user's settings.
+	defaultPermissionMode string
+	options               map[string]*optionsState
 
 	closeOnce sync.Once
 	closeErr  error
@@ -227,24 +238,37 @@ func (h *Instance) Close() error {
 		h.info.Status = provider.InstanceStatusExited
 		h.mu.Unlock()
 		h.cancelPendingApprovals()
+		var stopped sync.WaitGroup
 		for _, session := range sessions {
-			h.stopProcess(session)
+			stopped.Go(func() { h.stopProcess(session) })
 		}
+		stopped.Wait()
 	})
 	return h.closeErr
 }
 
-// buildCommand assembles one CLI invocation with the shared stream-json flags.
-func (h *Instance) buildCommand(cwd string, extra []string) *exec.Cmd {
+// startCLI starts one CLI process with the shared stream-json flags and its
+// stream client, whose handlers must be set before client.start.
+func (h *Instance) startCLI(cwd string, extra []string) (*procgroup.Process, *streamClient, error) {
 	argv := h.cliArgv("--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose")
 	argv = append(argv, extra...)
 	command := exec.Command(argv[0], argv[1:]...)
 	command.Dir = cwd
 	command.Stderr = os.Stderr
-	command.Env = append(os.Environ(), h.launchEnv()...)
-	procgroup.Configure(command)
-	return command
+	command.Env = h.commandEnv()
+	process, err := procgroup.Start(command)
+	if err != nil {
+		return nil, nil, err
+	}
+	return process, newStreamClient(process.Stdout(), process.Stdin()), nil
 }
+
+// stopGrace is how long a stopped CLI gets to exit on its own after stdin
+// closes; it flushes the session transcript then (as the SDKs wait for).
+const stopGrace = 5 * time.Second
+
+// drainTimeout bounds reading what an exited CLI wrote last.
+const drainTimeout = 2 * time.Second
 
 // configDir resolves where the CLI persists sessions and settings.
 func (h *Instance) configDir() string {
@@ -287,6 +311,7 @@ func newClaudeSession(localID, nativeID, cwd string) *claudeSession {
 		toolStates:      make(map[string]*toolState),
 		openBlocks:      make(map[int]string),
 		streamedText:    make(map[string]string),
+		seenAssistant:   make(map[string]bool),
 	}
 }
 

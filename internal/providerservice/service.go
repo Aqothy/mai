@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,12 @@ type SessionManager interface {
 // that identifier.
 type SessionForker interface {
 	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
+}
+
+// SessionRenamer is optional, for providers whose native sessions have names
+// (Codex threads, Claude Code sessions).
+type SessionRenamer interface {
+	RenameSession(ctx context.Context, input provider.RenameSessionInput) error
 }
 
 // ClientMessageIdentityProvider can return the exact dispatch identity in
@@ -761,6 +768,30 @@ type ForkedSession struct {
 	InstanceID provider.InstanceID
 	Summary    provider.SessionSummary
 	Settings   provider.StartSessionInput
+}
+
+// RenameSession names the native session bound to threadID. A thread with no
+// provider session yet, or a provider whose sessions have no names, has
+// nothing to rename.
+func (s *Service) RenameSession(ctx context.Context, threadID, title string) error {
+	route := s.routeForThread(threadID)
+	if route.InstanceID == "" || route.ProviderSessionID == "" || strings.TrimSpace(title) == "" {
+		return nil
+	}
+	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
+		return err
+	}
+	instance, err := s.instance(route.InstanceID)
+	if err != nil {
+		return err
+	}
+	renamer, ok := instance.(SessionRenamer)
+	if !ok {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	defer cancel()
+	return renamer.RenameSession(ctx, provider.RenameSessionInput{ProviderSessionID: route.ProviderSessionID, Title: strings.TrimSpace(title)})
 }
 
 // ForkSession forks the provider-owned session bound to sourceThreadID. The

@@ -2,16 +2,17 @@
 
 Native maiD provider that runs the **Claude Code harness** (not the raw
 Anthropic API) by spawning the `claude` CLI and speaking its stream-json
-protocol — the exact same wire protocol the official Claude Agent SDKs
+protocol — the same wire protocol the official Claude Agent SDKs
 (TypeScript/Python) speak. There is no official Go Agent SDK; those SDKs are
 thin wrappers that spawn this same CLI, so this adapter *is* the Agent SDK
 architecture minus the wrapper. Users get built-in tools, CLAUDE.md, settings,
 hooks, their configured MCP servers, skills, and claude.ai subscription auth
 exactly as in the terminal.
 
-Written against CLI `2.1.226` and `@anthropic-ai/claude-agent-sdk` `0.3.239`
-typings; all protocol shapes below were verified empirically against the
-installed CLI, not just docs.
+Checked against CLI `2.1.294`, `@anthropic-ai/claude-agent-sdk` `0.3.295`
+typings and the Python SDK `0.2.165` session helpers (`sessions.py`,
+`session_mutations.py`); protocol shapes were verified against the installed
+CLI.
 
 ## Architecture
 
@@ -24,43 +25,49 @@ internal/adapters/claudecode/
 │                 SetConfigOption, steering
 ├── events.go     stream-json -> provider.RuntimeEvent mapping, approvals
 ├── convert.go    pure conversions (tool_use -> ToolCall, results, permissions)
+├── plan.go       the plan kept by the Task tools
 ├── catalog.go    initialize probe, config options, skill discovery, options facet
-├── history.go    transcript replay, list/delete/close/fork sessions
-└── proc_*.go     process-group helpers (copied fencing pattern from codexapp)
+├── transcript.go transcript paths and the current conversation of a transcript
+├── replay.go     transcript -> replayed events
+├── history.go    session list/delete/close/fork/rename, list titles
+└── auth.go       sign-in, CLI environment
 ```
 
-`protocol.go` + `client.go` deliberately import nothing from
-`internal/provider` — they are extractable later as a standalone Go
-agent-SDK client library with a mechanical move.
+`protocol.go` + `client.go` import nothing from `internal/provider`; they are
+extractable as a standalone Go agent-SDK client library.
 
-### Process model (differs from codexapp!)
+### Process model
 
-Codex runs **one** app-server process for all threads. The claude CLI is one
-process **per conversation**, so:
+Codex runs **one** app-server for all threads. The claude CLI is one process
+**per conversation**, so `Instance` holds `sessionsByLocal` (threadID →
+`claudeSession`), each owning a `sessionProcess` (a `procgroup.Process` and its
+`streamClient`).
 
-- `Instance` holds `sessionsByLocal` (threadID → `claudeSession`), each owning
-  its own `sessionProcess` (cmd, stdin, `streamClient`).
-- `OpenInstance` never starts a long-lived process. It runs a **probe**: spawn
-  CLI, send the `initialize` control request, read the response, kill. The CLI
-  answers initialize **before any API request**, so the probe is free, works
-  logged-out, and returns in one round trip:
-  - `account` (email, subscriptionType, apiProvider) → auth status
-  - `models` — full per-model matrix (`supportedEffortLevels`,
-    `supportsAdaptiveThinking`, `supportsFastMode`, …). Unlike ACP, you do NOT
-    need to select a model to learn its config space.
-  - `commands` (slash commands + skills, with descriptions/argument hints)
-- Per-thread spawn (in `spawnProcess`):
+- `OpenInstance` runs a **probe**: spawn the CLI, send `initialize`, kill. The
+  CLI answers before any API request, so it is free, works logged-out, and
+  returns the account (auth status), the model catalog with per-model effort
+  levels, the commands, and `current_permission_mode` (the user's configured
+  default mode).
+- Per-thread spawn (`spawnProcess`):
   ```
   claude --print --input-format stream-json --output-format stream-json --verbose
     --include-partial-messages --replay-user-messages --permission-prompt-tool stdio
     --allow-dangerously-skip-permissions        # enables bypass as an OPTION only
-    (--session-id <uuid> | --resume <uuid>)     # resume iff transcript exists
+    --thinking-display summarized               # newer models omit thinking text otherwise
+    (--session-id <uuid> | --resume <uuid>)     # resume iff the transcript exists
     [--model X] [--effort Y] [--permission-mode M] [--add-dir D]...
   ```
-  The daemon generates the session UUID up front (`--session-id`) so the
-  durable id is known before the CLI answers. `--resume` is used only when the
-  transcript file actually exists; otherwise a resume of a never-run session
-  would fail.
+  `--permission-mode` is passed only for a mode the user chose; otherwise the
+  CLI starts in the user's configured default, which `initialize` reports and
+  maiD shows.
+- Processes start through `procgroup.Start`: own process group, and a stdout
+  pipe that stays readable after exit, so the CLI's last result or error is
+  still delivered (`Drain`). Stopping closes stdin and gives the CLI 5 s to
+  exit on its own (it flushes the transcript then, as the SDKs wait for)
+  before killing the group.
+- The CLI's environment drops the variables an enclosing Claude Code session
+  sets (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …), so a daemon started from
+  inside Claude Code does not spawn child sessions.
 
 ### Turn model
 
@@ -70,121 +77,103 @@ The CLI runs with `--replay-user-messages`, so it echoes each written message
 (`isReplay`, same `uuid`) when it takes it into a query.
 
 - `SendTurn` writes the user message with a fresh `uuid` and emits
-  `turn.started`. Orchestration starts a turn only when the thread is idle, so
-  a second user turn while one runs is an error.
-- A steer (`SendTurnInput.Steer`) of the running turn writes the message with
-  `"priority":"next"`. The CLI folds it into the running query at the next tool
-  boundary and echoes it; a message it could not fold runs as one more query
-  with its own `result`. So a `result` that arrives while a written message is
-  unechoed keeps the turn open, and the next `result` ends it. A steer of a
-  turn that already ended fails, and orchestration sends the prompt as the
-  next turn instead.
+  `turn.started`.
+- A steer (`SendTurnInput.Steer`) writes the message with `"priority":"next"`.
+  The CLI folds it into the running query at the next tool boundary and echoes
+  it; one it could not fold runs as one more query with its own `result`. So a
+  `result` that arrives while a written message is unechoed keeps the turn
+  open. A steer of a turn that already ended fails with `ErrTurnNotRunning`.
 - Output while no turn is active (a background task or agent finishing wakes
-  the CLI) starts a CLI-started turn with a fresh id, completed by its own
-  `result`. A user `SendTurn` during it ends that turn and continues as the
-  user's.
-- A `result` with no active turn and no output before it (resume handshake) is
-  **ignored** — emitting turn lifecycle there corrupts session state (learned
-  from t3code).
-- `InterruptTurn` sends control `{"subtype":"interrupt","cancel_queued":true}`,
-  which also drops unfolded steers, so the aborted `result` ends the turn.
+  the CLI) starts a CLI-started turn, completed by its own `result`.
+- A `result` with no active turn (resume handshake) is ignored.
+- `InterruptTurn` sends `{"subtype":"interrupt","cancel_queued":true}`, which
+  also drops unfolded steers, so the aborted `result` ends the turn.
 - When the process exits with a turn active, the turn completes as
-  interrupted (deliberate stop, restart) or failed (crash).
-- `terminal_reason` containing `aborted` ⇒ `RuntimeTurnInterrupted`, not failed.
+  interrupted (deliberate stop) or failed (crash).
 
 ### Event mapping
 
 | CLI stream | RuntimeEvent |
 |---|---|
-| `stream_event` `text_delta` / `thinking_delta` | `content.delta` (`assistant_text` / `reasoning_text`); item ids `claude:text:<turn>:<n>` / `claude:reasoning:...` |
-| `content_block_start` `tool_use`/`server_tool_use`/`mcp_tool_use` | `item.started` (ItemID = `toolu_...`, stable across lifecycle) |
-| `input_json_delta` | accumulate partial JSON, re-parse, `item.updated` on fingerprint change (complete ToolCall snapshots only — contract requirement) |
-| `assistant` snapshot (per block) | flush checkpoint: emit missing text suffix vs streamed, then `item.completed` (assistant_message / reasoning); materialize tool blocks that never streamed |
-| `user` `tool_result` | merge output/error into ToolCall, `item.completed` (failed if `is_error`) |
-| `TodoWrite` input | `turn.plan.updated` (no timeline item) |
-| `result` | `thread.token-usage.updated` (last `usage.iterations` entry = live context; MaxTokens = max `modelUsage[].contextWindow`; Cost = `total_cost_usd`) then `turn.completed` |
-| `system/init` | adopt CLI session id if it differs; permission-mode drift → `config.options.updated` |
-| `system/status` (permissionMode) | `config.options.updated` (fires when ExitPlanMode approval flips the mode) |
-| `system/compact_boundary` | `context_compaction` item |
-| `parent_tool_use_id != null` | **dropped** — subagent narration; the Task tool item represents the delegation |
+| `stream_event` `text_delta` / `thinking_delta` | `content.delta` (`assistant_text` / `reasoning_text`) |
+| `content_block_start` tool use | `item.started` (ItemID = `toolu_...`) |
+| `input_json_delta` | re-parsed partial input, `item.updated` with the complete snapshot |
+| `assistant` (per block) | flush checkpoint: missing text suffix, `item.completed`; tools that never streamed. A message already shown (resent after `/compact`) and the CLI's API-error message are skipped |
+| `user` `tool_result` | `item.completed`; Edit/Write take the CLI's `structuredPatch` (line-numbered hunks) and Write's create/update from `tool_use_result` |
+| `TodoWrite` input; `TaskCreate`/`TaskUpdate`/`TaskList` results | `turn.plan.updated` (no timeline item) |
+| `result` | `thread.token-usage.updated` (live context from the last `usage.iterations` entry, window of the session's model, cost); a local command's zero usage keeps the meter; then `turn.completed` |
+| `system/init` | adopt the CLI's session id; permission mode and model (e.g. after `/model`) → `config.options.updated` |
+| `system/status` | permission mode; `compacting` → compaction item in progress |
+| `system/compact_boundary` | compaction item completed |
+| `system/api_retry` | `runtime.warning` |
+| `system/informational` (warnings, prompts a hook blocked) | `runtime.warning` |
+| `conversation_reset` (`/clear`) | follow the new session id; "Cleared context" item |
+| `parent_tool_use_id != null` | dropped — subagent narration; the Agent tool item represents it |
 
-Error text filtering: `result.errors` entries prefixed `[ede_diagnostic]` are
-CLI-internal telemetry and are never surfaced.
+`result.errors` entries prefixed `[ede_diagnostic]` are CLI telemetry and are
+never surfaced.
 
 ### Permissions
 
-`--permission-prompt-tool stdio` makes the CLI pause tools and send
-`control_request {subtype:"can_use_tool", tool_name, input,
-permission_suggestions, tool_use_id, decision_reason, ...}`. Mapping:
+`--permission-prompt-tool stdio` makes the CLI send `control_request
+{subtype:"can_use_tool", ...}`:
 
-- request type: Bash/BashOutput/KillShell → command_execution_approval;
-  Edit/Write/NotebookEdit → file_change_approval; Read → file_read_approval;
-  else dynamic_tool_call. Options: accept / acceptForSession / decline.
-- Response is a `PermissionResult`: allow ⇒ `{behavior:"allow", updatedInput}`;
-  deny ⇒ `{behavior:"deny", message, interrupt?}`.
-- **acceptForSession**: the CLI's suggestions default to `localSettings`
-  (would persist to `.claude/settings.local.json`!) — every suggestion is
-  rewritten to `destination:"session"`, with a whole-tool session `addRules`
-  fallback when no suggestions came (common for MCP tools).
-- **AskUserQuestion**: a provider-neutral user-input request (every question,
-  multi-select, and a typed answer instead of an option). The allow response
-  sets `updatedInput.answers = {<full question text>: <answer>}` — the SDK
-  looks answers up **by question text**; several selections join with ", ".
-- **MCP elicitation** (`control_request` subtype `elicitation`): converted by
-  `internal/adapters/elicitation` and answered `{action, content}`.
-- **ExitPlanMode**: normal approval ("Approve plan"/"Keep planning"); approving
-  lets the CLI exit plan mode itself; the resulting mode change flows back via
-  `system/status`.
-- `control_cancel_request` (CLI no longer needs the answer, e.g. after
-  interrupt) resolves the approval as cancelled. Safe commands (e.g. `echo`)
-  never generate requests — that's CLI-side allowlisting, not a bug.
+- Request type: Bash → command; Edit/Write/NotebookEdit → file change; Read →
+  file read; else dynamic tool.
+- Options: allow once, decline, and — like the CLI — "Allow for session" only
+  when the CLI sent permission suggestions and did not set
+  `suppress_always_allow_rule`. Suggestions are rewritten to
+  `destination:"session"` so nothing persists to settings files.
+- **AskUserQuestion** → provider-neutral user-input request; answers go back in
+  `updatedInput.answers` keyed by question text.
+- **MCP elicitation** → `internal/adapters/elicitation`.
+- **ExitPlanMode** → "Approve plan" / "Keep planning".
+- `control_cancel_request` resolves the request as cancelled.
 
 ### Sessions on disk
 
-Transcripts: `<configDir>/projects/<munged-cwd>/<session-id>.jsonl` where
-munging replaces every non-alphanumeric char with `-` (configDir =
-`Config.ConfigDir` || `$CLAUDE_CONFIG_DIR` || `~/.claude`).
+Transcripts: `<configDir>/projects/<sanitized real cwd>/<session-id>.jsonl`
+(configDir = `Config.ConfigDir` || `$CLAUDE_CONFIG_DIR` || `~/.claude`).
+Sanitizing replaces non-alphanumerics with `-`; names over 200 characters get
+a hash only the CLI computes, so they are found by prefix. Lookups by session
+id search every project directory.
 
-- **Replay** (`history.go`): parsed directly from the transcript (no CLI
-  involved). Turn boundary = each non-meta, non-sidechain user prompt line;
-  deterministic event ids `claude:replay:<turn>:<item>:<suffix>`; synthetic
-  monotonic timestamps; `ai-title` line → thread title metadata. During a
-  replay start, setup events (slash commands/skills) ride the Replay batch,
-  never the live sink (contract rule).
-- **ListSessions**: directory scan; title from `ai-title` or first prompt.
-- **DeleteSession**: removes the transcript (id validated against a UUID-ish
-  pattern before any path is built).
-- **ForkSession**: copies the transcript to a fresh UUID rewriting each line's
-  `sessionId`. Chosen over native `--resume --fork-session` because the native
-  path only materializes the fork after a paid turn; the copy is instant, free,
-  and immediately resumable.
+- **Replay** (`replay.go`): built like the SDK's `get_session_messages` — the
+  `parentUuid` chain from the newest main-chain leaf, so branches the user
+  rewound away from are left out — but continuing across compactions and
+  keeping parallel tool calls (sibling lines). Steers (stored only as
+  `queued_command` attachments) join their turn; the interrupt marker ends its
+  turn as interrupted; API-error messages fail their turn; slash commands show
+  as typed; compaction summaries and CLI bookkeeping are hidden; a background
+  task waking the CLI starts a turn with no prompt. Event ids are
+  deterministic.
+- **Titles**: a name the user chose (`custom-title`, from `/rename` or maiD)
+  else the first prompt. Generated `ai-title`s are ignored, as maiD titles
+  threads by their prompt.
+- **DeleteSession**: removes the transcript and its subagent folder.
+- **ForkSession**: the SDK's `_build_fork_lines` — new session and message
+  uuids with the chain kept, sidechain/progress lines dropped, `forkedFrom`
+  recorded, titled "<source> (fork)".
+- **RenameSession**: appends a `custom-title` line (the SDK's `renameSession`)
+  and tells a live CLI through `rename_session`.
 
 ### Config options
 
-- `model` (category `model`): from probe catalog; live switch via control
-  `set_model` (`"default"` ⇒ `model: null` resets).
-- `effort` (category `thought_level`): per-selected-model levels + "default".
-  **Launch-flag only** — no control message exists; stored and applied at next
-  spawn: the next `SendTurn` relaunches an idle process started with another
-  effort (a running turn is never replaced).
-- `permission_mode` (category `mode`): default/auto/acceptEdits/plan/dontAsk/
-  bypassPermissions. Live switch via `set_permission_mode`. `default` is not a
-  valid `--permission-mode` launch value (the flag's ask-mode is `manual`,
-  semantics unverified) — so `default` is applied post-spawn via the control
-  request instead of guessing.
+- `model`: catalog from `initialize`; switched live with `set_model`.
+- `effort`: per-model levels + "default"; switched live with
+  `apply_flag_settings {effortLevel}` (`null` returns to the model default).
+- `permission_mode`: default/auto/acceptEdits/plan/dontAsk/bypassPermissions;
+  switched live with `set_permission_mode`.
 
-### Landmines (inherited from t3code's production Claude adapter — keep these)
+### Landmines (keep these)
 
 - Set `CLAUDE_CONFIG_DIR`, **never override `HOME`** — that breaks macOS
   keychain OAuth and the CLI reports "Not logged in".
-- Trust the CLI as authoritative for session id (`system/init` may differ on
-  fallback); never trust ids from hook-related messages.
-- Process fencing: `reaped`/`killedTree` — once `Wait` reaps the leader, never
-  signal that pid again (OS pid recycling). Copied verbatim from codexapp.
+- The CLI is authoritative for the session id (`system/init`,
+  `conversation_reset`); the next StartSession persists it.
 - Every stream callback fences on `session.proc == proc` so a replaced process
   cannot mutate its successor's state.
-- On process exit: settle the active turn and cancel pending approvals (a
-  `request.resolved` must be emitted on every exit path).
+- On process exit: settle the active turn and cancel pending approvals.
 
 ## Registration
 
@@ -194,41 +183,24 @@ munging replaces every non-alphanumeric char with `-` (configDir =
 
 Sign-in (`auth.go`): the CLI only signs in interactively, so Authenticate
 returns `claude auth login [--console]` for the daemon to run in a terminal;
-the daemon restarts the instance afterwards and the probe account reports the
-new status. Logout runs `claude auth logout`. An assistant message with
-`error: "authentication_failed"` marks the instance signed out.
+the daemon restarts the instance afterwards. Logout runs `claude auth logout`.
+An assistant message with `error: "authentication_failed"` marks the instance
+signed out.
 
 ## Known gaps
 
-Provider contract can't express (SDK offers them; would need contract work):
-subagent narration as nested items (Task shows as a single delegate item),
-hook lifecycle events, structured outputs (`--json-schema`), turn/budget
-limits (`--max-turns`, `--max-budget-usd`), file rewind/checkpoints,
-background tasks, MCP server management from the client (the CLI still loads
-the user's own MCP config).
-
-Claude-specific: audio attachments unsupported (codex has them); file-mention
-`resource_link` attachments are skipped since the CLI reads `@path` in the
-prompt text; effort
-changes apply from the next turn; `Write` renders as FileChangeAdd and `Edit`
-as Update (the CLI doesn't say whether Write created or overwrote).
-
-Claude-only extras other providers lack: full per-model capability matrix in
-one free handshake, permission suggestions, plan-approval flow, dollar cost
-reporting.
+Need contract or client work: background tasks (`task_*` messages,
+`stop_task`), subagent narration as nested items, a free-text reason for
+"Keep planning", hook lifecycle events, file rewind, forking from a chosen
+message, and the cost/compacting/retry details the client does not show yet.
+Audio and embedded-resource attachments are not part of the SDK prompt
+surface; `resource_link` attachments are skipped since the CLI reads `@path`
+in the prompt text.
 
 ## Testing
 
-- `go test ./internal/adapters/claudecode/` — conversion tests plus an
-  integration suite driving a **fake CLI**: `TestMain` re-executes the test
-  binary with `CLAUDE_FAKE_CLI=1` (see `fakeCLIMain`) and the adapter points
-  `Config.Command` at it.
+- `go test ./internal/adapters/claudecode/` — conversion and replay tests plus
+  an integration suite driving a **fake CLI**: `TestMain` re-executes the test
+  binary with `CLAUDE_FAKE_CLI=1` (see `fakeCLIMain`).
 - `CLAUDE_LIVE_TEST=1 go test ./internal/adapters/claudecode/ -run TestLiveSmoke -v`
-  — end-to-end against the real CLI on **haiku** (costs ~1¢; skips when
-  logged out).
-
-Protocol references: `@anthropic-ai/claude-agent-sdk` typings (`npm pack`,
-see `sdk.d.ts`/`agentSdkTypes.d.ts`/`sdk-tools.d.ts`),
-https://code.claude.com/docs/en/agent-sdk/overview.md, and
-`~/Code/Personal/t3code/apps/server/src/provider/Layers/ClaudeAdapter.ts`
-(TypeScript reference implementation whose workarounds are catalogued above).
+  — end-to-end against the real CLI on **haiku** (skips when logged out).

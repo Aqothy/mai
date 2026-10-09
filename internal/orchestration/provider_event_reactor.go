@@ -21,6 +21,7 @@ type ProviderRuntime interface {
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
 	StopSession(ctx context.Context, input provider.StopSessionInput) error
 	ReleaseSession(ctx context.Context, input provider.StopSessionInput) error
+	RenameSession(ctx context.Context, threadID, title string) error
 	RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error
 }
 
@@ -67,6 +68,11 @@ func (r *ProviderEventReactor) handle(event Event) {
 		if event.Payload.SessionCleared {
 			r.enqueueThread(event, func() { r.handleSessionRelease(event) })
 		}
+		// A title the user gave the thread names its native session too.
+		// Titles from the provider came from that session already.
+		if event.Payload.Title != "" && event.Actor == ActorKindClient {
+			r.enqueueThread(event, func() { r.handleRename(event) })
+		}
 	case EventThreadSessionPrepareRequested:
 		r.enqueueThread(event, func() { r.handleSessionPrepare(event) })
 	case EventThreadTurnStartRequested:
@@ -89,6 +95,14 @@ func (r *ProviderEventReactor) handleSessionRelease(event Event) {
 	defer cancel()
 	if err := r.provider.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: string(event.ThreadID())}); err != nil {
 		log.Printf("orchestration: release previous provider session for thread %q: %v", event.ThreadID(), err)
+	}
+}
+
+func (r *ProviderEventReactor) handleRename(event Event) {
+	ctx, cancel := r.providerRPCContext()
+	defer cancel()
+	if err := r.provider.RenameSession(ctx, string(event.ThreadID()), event.Payload.Title); err != nil {
+		log.Printf("orchestration: rename provider session for thread %q: %v", event.ThreadID(), err)
 	}
 }
 

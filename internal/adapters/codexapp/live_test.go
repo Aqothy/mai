@@ -104,6 +104,24 @@ func TestLiveSmoke(t *testing.T) {
 	}
 
 completed:
+	// /compact runs Codex's compaction as the turn maiD started.
+	if err := instance.SendTurn(ctx, provider.SendTurnInput{ThreadID: "live-thread", TurnID: "live-compact", Input: "/compact"}); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	for compacted := false; !compacted; {
+		select {
+		case event := <-events:
+			if event.ThreadID == "live-thread" && event.Type == provider.RuntimeEventTurnCompleted {
+				if event.TurnID != "live-compact" || event.Payload.TurnState != provider.RuntimeTurnCompleted {
+					t.Fatalf("compaction turn = %q %s (%s)", event.TurnID, event.Payload.TurnState, event.Payload.Message)
+				}
+				compacted = true
+			}
+		case <-ctx.Done():
+			t.Fatalf("waiting for compaction: %v", ctx.Err())
+		}
+	}
+
 	sessions, err := instance.ListSessions(ctx, cwd)
 	if err != nil {
 		t.Fatalf("list: %v", err)

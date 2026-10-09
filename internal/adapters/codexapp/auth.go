@@ -62,6 +62,15 @@ func (h *Instance) Authenticate(ctx context.Context, input provider.Authenticate
 	default:
 		return provider.AuthenticationResult{}, fmt.Errorf("Codex authentication method %q is not supported", input.MethodID)
 	}
+	// One sign-in at a time: an earlier one the user walked away from would
+	// otherwise keep its login server waiting.
+	h.mu.Lock()
+	previous := h.pendingLoginID
+	h.pendingLoginID = ""
+	h.mu.Unlock()
+	if previous != "" {
+		_ = h.rpc.call(ctx, "account/login/cancel", map[string]any{"loginId": previous}, nil)
+	}
 	var response struct {
 		Type            string `json:"type"`
 		LoginID         string `json:"loginId"`
@@ -91,6 +100,11 @@ func (h *Instance) Authenticate(ctx context.Context, input provider.Authenticate
 		if err := h.refreshAccount(ctx); err != nil {
 			return provider.AuthenticationResult{}, err
 		}
+	}
+	if challenge != nil {
+		h.mu.Lock()
+		h.pendingLoginID = challenge.LoginID
+		h.mu.Unlock()
 	}
 	return provider.AuthenticationResult{Instance: h.Info(), Challenge: challenge}, nil
 }

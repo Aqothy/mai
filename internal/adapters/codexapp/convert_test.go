@@ -3,6 +3,7 @@ package codexapp
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -391,5 +392,43 @@ func TestCommandOutputBeforeItemStartIsDropped(t *testing.T) {
 	last := events[len(events)-1]
 	if last.Type != provider.RuntimeEventItemUpdated || last.Payload.ToolCall == nil || last.Payload.ToolCall.Output != "/tmp" || last.Payload.ToolCall.Name == "" {
 		t.Fatalf("output update after item start = %#v, want merged into the started snapshot", last)
+	}
+}
+
+// Clients only parse unified diffs: added and deleted files become whole-file
+// hunks, and a move's diff loses the "Moved to" line Codex appends.
+func TestProviderFileChangesAreUnifiedDiffs(t *testing.T) {
+	moved := "/repo/new.go"
+	changes := providerFileChanges([]appFileUpdateChange{
+		{Path: "/repo/a.md", Kind: appPatchChangeKind{Type: "add"}, Diff: "# Title\n\n- item\n"},
+		{Path: "/repo/b.txt", Kind: appPatchChangeKind{Type: "delete"}, Diff: "gone\n"},
+		{Path: "/repo/old.go", Kind: appPatchChangeKind{Type: "update", MovePath: &moved}, Diff: "@@ -1 +1 @@\n-a\n+b\n\n\nMoved to: /repo/new.go"},
+	})
+	want := []provider.FileChange{
+		{Path: "/repo/a.md", Kind: provider.FileChangeAdd, Diff: "@@ -0,0 +1,3 @@\n+# Title\n+\n+- item\n"},
+		{Path: "/repo/b.txt", Kind: provider.FileChangeDelete, Diff: "@@ -1,1 +0,0 @@\n-gone\n"},
+		{Path: "/repo/old.go", Kind: provider.FileChangeMove, MovePath: moved, Diff: "@@ -1 +1 @@\n-a\n+b\n"},
+	}
+	if !slices.Equal(changes, want) {
+		t.Fatalf("changes = %#v", changes)
+	}
+}
+
+// /compact and /review run Codex's own operations; anything else is a prompt.
+func TestBuiltinCommand(t *testing.T) {
+	cases := []struct {
+		input, method, target string
+	}{
+		{"/compact", "thread/compact/start", ""},
+		{"/review", "review/start", `{"type":"uncommittedChanges"}`},
+		{" /review main ", "review/start", `{"branch":"main","type":"baseBranch"}`},
+		{"please /review", "", ""},
+	}
+	for _, test := range cases {
+		method, params, ok := builtinCommand(provider.SendTurnInput{Input: test.input}, "thread")
+		target, _ := json.Marshal(params["target"])
+		if method != test.method || ok != (test.method != "") || test.target != "" && string(target) != test.target {
+			t.Errorf("builtinCommand(%q) = %q %s %v", test.input, method, target, ok)
+		}
 	}
 }

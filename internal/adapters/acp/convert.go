@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/jsonrpc2"
@@ -581,7 +580,7 @@ func (s *toolCallPatch) overlay(patch *toolCallPatch) *toolCallPatch {
 		s.exitCode = patch.exitCode
 	}
 	if room := toolOutputCharacterLimit - len(s.terminalOutput); room > 0 && patch.terminalOutput != "" {
-		s.terminalOutput += boundedText(patch.terminalOutput, room)
+		s.terminalOutput += provider.TruncateUTF8(patch.terminalOutput, room)
 	}
 	return s
 }
@@ -634,7 +633,7 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 	if call.Output == "" {
 		call.Output = rawOutputText(s.rawOutput)
 	}
-	call.Output = boundedText(call.Output, toolOutputCharacterLimit)
+	call.Output = provider.TruncateUTF8(call.Output, toolOutputCharacterLimit)
 	call.Command, call.Query, call.Cwd = toolInputDetails(s.rawInput)
 	return call
 }
@@ -644,18 +643,6 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 // real command output, small enough that per-item snapshots stay cheap to
 // re-emit on every sparse update.
 const toolOutputCharacterLimit = 16_384
-
-// boundedText truncates text to at most limit bytes on a rune boundary.
-func boundedText(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut]
-}
 
 func rawOutputText(raw any) string {
 	switch value := raw.(type) {

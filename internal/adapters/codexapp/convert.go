@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Aqothy/maiD/internal/adapters/unifieddiff"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -366,6 +367,16 @@ func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, event
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), item.Type)
 	case "sleep":
 		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, sleepToolCall(item), "Waited")
+	case "hookPrompt":
+		var text []string
+		for _, fragment := range item.Fragments {
+			text = append(text, fragment.Text)
+		}
+		call := &provider.ToolCall{Name: "Hook", ProviderKind: item.Type, Output: boundedAppOutput(strings.Join(text, "\n"))}
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, call, "Hook added context")
+	case "functionCallOutput":
+		call := &provider.ToolCall{Name: item.Name, Namespace: stringValue(item.Namespace), ProviderKind: item.Type, Output: functionCallOutputText(item.Output)}
+		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, call, strings.Trim(stringValue(item.Namespace)+" · "+item.Name, " ·"))
 	default:
 		event.Payload = provider.RuntimeEventPayload{
 			ItemType:   provider.ItemKindToolCall,
@@ -435,24 +446,8 @@ func commandAction(actions []appCommandAction) provider.ToolAction {
 }
 
 func fileChangeToolCall(item appItem) *provider.ToolCall {
-	call := &provider.ToolCall{Name: "File change", ProviderKind: item.Type}
-	for _, change := range item.Changes {
-		converted := provider.FileChange{Path: change.Path, Diff: change.Diff}
-		switch change.Kind.Type {
-		case "add":
-			converted.Kind = provider.FileChangeAdd
-		case "delete":
-			converted.Kind = provider.FileChangeDelete
-		case "update":
-			converted.Kind = provider.FileChangeUpdate
-			if change.Kind.MovePath != nil && strings.TrimSpace(*change.Kind.MovePath) != "" {
-				converted.Kind = provider.FileChangeMove
-				converted.MovePath = strings.TrimSpace(*change.Kind.MovePath)
-			}
-		default:
-			converted.Kind = provider.FileChangeUpdate
-		}
-		call.Changes = append(call.Changes, converted)
+	call := &provider.ToolCall{Name: "File change", ProviderKind: item.Type, Changes: providerFileChanges(item.Changes)}
+	for _, change := range call.Changes {
 		if change.Path != "" {
 			call.Locations = append(call.Locations, provider.ToolLocation{Path: change.Path})
 		}
@@ -662,6 +657,27 @@ func sleepToolCall(item appItem) *provider.ToolCall {
 		ProviderKind:         item.Type,
 		DurationMilliseconds: item.DurationMS,
 	}
+}
+
+// functionCallOutputText is a function call output's text: the body when it
+// is a string, else its text content items.
+func functionCallOutputText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return boundedAppOutput(text)
+	}
+	var items []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(raw, &items)
+	var parts []string
+	for _, item := range items {
+		if item.Type == "input_text" && item.Text != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	return boundedAppOutput(strings.Join(parts, "\n"))
 }
 
 func collabTitle(tool string) string {
@@ -995,23 +1011,23 @@ func skillsFromResponse(response skillsListResponse) []provider.Skill {
 	return result
 }
 
+// providerFileChanges converts Codex's changes so every diff is a unified
+// diff: Codex sends an added or deleted file's whole content as its diff, and
+// appends "Moved to: <path>" to a moved file's.
 func providerFileChanges(changes []appFileUpdateChange) []provider.FileChange {
 	converted := make([]provider.FileChange, 0, len(changes))
 	for _, change := range changes {
-		value := provider.FileChange{Path: change.Path, Diff: change.Diff}
+		value := provider.FileChange{Path: change.Path, Diff: change.Diff, Kind: provider.FileChangeUpdate}
 		switch change.Kind.Type {
 		case "add":
-			value.Kind = provider.FileChangeAdd
+			value.Kind, value.Diff = provider.FileChangeAdd, unifieddiff.WholeFile(change.Diff, true)
 		case "delete":
-			value.Kind = provider.FileChangeDelete
+			value.Kind, value.Diff = provider.FileChangeDelete, unifieddiff.WholeFile(change.Diff, false)
 		case "update":
-			value.Kind = provider.FileChangeUpdate
-			if change.Kind.MovePath != nil && strings.TrimSpace(*change.Kind.MovePath) != "" {
-				value.Kind = provider.FileChangeMove
-				value.MovePath = strings.TrimSpace(*change.Kind.MovePath)
+			if movePath := strings.TrimSpace(stringValue(change.Kind.MovePath)); movePath != "" {
+				value.Kind, value.MovePath = provider.FileChangeMove, movePath
+				value.Diff = strings.TrimSuffix(change.Diff, "\n\nMoved to: "+movePath)
 			}
-		default:
-			value.Kind = provider.FileChangeUpdate
 		}
 		converted = append(converted, value)
 	}
@@ -1034,14 +1050,7 @@ func planEntriesFromApp(steps []appPlanStep) []provider.PlanEntry {
 }
 
 func boundedAppOutput(value string) string {
-	if len(value) <= appToolOutputLimit {
-		return value
-	}
-	cut := appToolOutputLimit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
+	return provider.TruncateUTF8(value, appToolOutputLimit)
 }
 
 func compactRawJSON(raw json.RawMessage) string {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	}
 
 	title := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
-		return event.Type == provider.RuntimeEventThreadMetadataUpdate
+		return event.Type == provider.RuntimeEventThreadMetadataUpdate && event.Payload.Title != ""
 	})
 	if title.Payload.Title != "Protocol title" {
 		t.Fatalf("thread title = %q", title.Payload.Title)
@@ -141,6 +142,14 @@ func TestResumeBindsBeforeNotificationsAndRejectsIdentityChanges(t *testing.T) {
 			t.Fatalf("failed resume left binding %#v", bound)
 		}
 	})
+}
+
+// A maiD rename names the Codex thread.
+func TestRenameSessionSetsThreadName(t *testing.T) {
+	instance := openFakeInstance(t, "lifecycle", nil)
+	if err := instance.RenameSession(testContext(t), provider.RenameSessionInput{ProviderSessionID: "native-thread", Title: "Renamed in maiD"}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
 }
 
 func TestStartSessionReusesLiveBinding(t *testing.T) {
@@ -351,6 +360,103 @@ func TestInstanceApprovalResponseUsesStableDecision(t *testing.T) {
 	waitForAcceptedReply(t, events)
 }
 
+// A permissions preset chosen for a new thread rides thread/start; one picked
+// mid-thread rides the next turn/start only, since turn settings persist.
+func TestPermissionsPresetFlowsThroughThreadAndTurn(t *testing.T) {
+	instance := openFakeInstance(t, "permissions", nil)
+	result, err := instance.StartSession(testContext(t), provider.StartSessionInput{
+		ThreadID: "local-thread", Cwd: "/tmp",
+		ConfigSelections: []provider.ConfigOptionSelection{{OptionID: permissionsOptionID, Value: "full-access"}},
+	})
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if got, _ := provider.CurrentConfigString(result.Session.ConfigOptions, permissionsOptionID); got != "full-access" {
+		t.Fatalf("session permissions = %q", got)
+	}
+	if err := instance.SetConfigOption(testContext(t), provider.SetConfigOptionInput{ThreadID: "local-thread", OptionID: permissionsOptionID, Value: customPermissions}); err == nil {
+		t.Fatal("custom permissions were accepted as a selection")
+	}
+	if err := instance.SetConfigOption(testContext(t), provider.SetConfigOptionInput{ThreadID: "local-thread", OptionID: permissionsOptionID, Value: "read-only"}); err != nil {
+		t.Fatalf("set permissions: %v", err)
+	}
+	// The fake checks the first turn carries the preset and the next none.
+	for _, turn := range []string{"local-turn", "next-turn"} {
+		if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: turn, Input: "hello", ClientMessageID: "local-turn"}); err != nil {
+			t.Fatalf("start %s: %v", turn, err)
+		}
+	}
+}
+
+// A request for more sandbox access is granted as asked, for the session
+// when the user allows it for the session. Context usage is the newest
+// request's, not the thread's running total.
+func TestInstanceGrantsRequestedPermissions(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "permissions-request", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+
+	usage := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventThreadTokenUsage
+	})
+	if got := usage.Payload.TokenUsage; got == nil || got.UsedTokens != 1200 || got.MaxTokens != 200000 {
+		t.Fatalf("token usage = %#v", got)
+	}
+	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestOpened
+	})
+	if opened.Payload.Detail != "Codex asks for network access" || opened.Payload.RequestType != provider.RuntimeRequestCommandExecution || len(opened.Payload.Options) != 3 {
+		t.Fatalf("permissions request = %#v", opened.Payload)
+	}
+	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptForSession"}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	waitForAcceptedReply(t, events)
+}
+
+// Like the Codex TUI, a command approval offers Codex's proposed rule, and
+// choosing it approves the command and adds the rule.
+func TestInstanceApprovalOffersProposedRule(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "approval-amendment", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestOpened
+	})
+	index := slices.IndexFunc(opened.Payload.Options, func(option provider.ApprovalOption) bool { return option.ID == "acceptWithExecpolicyAmendment" })
+	if index < 0 || opened.Payload.Options[index].Name != "Always allow commands that start with `echo hello`" {
+		t.Fatalf("options = %#v", opened.Payload.Options)
+	}
+	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptWithExecpolicyAmendment"}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	waitForAcceptedReply(t, events)
+}
+
+// A turn's failure shows once, on the failed turn; errors Codex retries and
+// model reroutes are warnings.
+func TestTurnFailureShowsOnce(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "turn-failure", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+	var warnings, errors []string
+	for {
+		event := waitForRuntimeEvent(t, events, func(provider.RuntimeEvent) bool { return true })
+		switch event.Type {
+		case provider.RuntimeEventRuntimeWarning:
+			warnings = append(warnings, event.Payload.Message)
+		case provider.RuntimeEventRuntimeError:
+			errors = append(errors, event.Payload.Message)
+		case provider.RuntimeEventTurnCompleted:
+			want := []string{"Reconnecting 1/5", "Codex switched from gpt-test to gpt-safe for this turn (highRiskCyberActivity)."}
+			if !slices.Equal(warnings, want) || len(errors) != 0 || event.Payload.TurnState != provider.RuntimeTurnFailed || event.Payload.Message != "boom" {
+				t.Fatalf("warnings %q, errors %q, turn %s %q", warnings, errors, event.Payload.TurnState, event.Payload.Message)
+			}
+			return
+		}
+	}
+}
+
 // waitForAcceptedReply waits for the fake app-server to complete the turn,
 // which it does only after receiving the reply it expects.
 func waitForAcceptedReply(t *testing.T, events <-chan provider.RuntimeEvent) {
@@ -452,8 +558,8 @@ func TestProcessExitSettlesActiveTurn(t *testing.T) {
 				if err := instance.Close(); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := instance.cmd.Process.Kill(); err != nil {
-				t.Fatal(err)
+			} else {
+				instance.process.Kill()
 			}
 			completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 				return event.Type == provider.RuntimeEventTurnCompleted
@@ -531,7 +637,7 @@ func openFakeInstance(t *testing.T, scenario string, emit provider.RuntimeEventL
 	t.Helper()
 	config, err := json.Marshal(Config{
 		Command: []string{os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$", "--", scenario},
-		Env:     map[string]string{fakeAppServerEnvironment: "1"},
+		Env:     map[string]string{fakeAppServerEnvironment: "1", "GORACE": "atexit_sleep_ms=0"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -623,6 +729,7 @@ func runFakeAppServer(scenario string) error {
 
 	loggedIn := false
 	interrupted := false
+	turnStarted := false
 	for scanner.Scan() {
 		message, err := decodeFakeMessage(scanner.Bytes())
 		if err != nil {
@@ -653,6 +760,13 @@ func runFakeAppServer(scenario string) error {
 			}
 		}
 		switch method {
+		case "config/read":
+			if err := writeFakeResult(encoder, message["id"], map[string]any{
+				"config":  map[string]any{"approval_policy": "on-request", "sandbox_mode": "workspace-write", "model_reasoning_summary": nil},
+				"origins": map[string]any{}, "layers": nil,
+			}); err != nil {
+				return err
+			}
 		case "account/read":
 			var params struct {
 				RefreshToken bool `json:"refreshToken"`
@@ -740,6 +854,17 @@ func runFakeAppServer(scenario string) error {
 			if err != nil {
 				return err
 			}
+		case "account/login/cancel":
+			// A new sign-in cancels the one before it.
+			var params struct {
+				LoginID string `json:"loginId"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.LoginID == "" {
+				return fmt.Errorf("invalid account/login/cancel params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"status": "canceled"}); err != nil {
+				return err
+			}
 		case "account/logout":
 			if hasFakeField(message, "params") {
 				return fmt.Errorf("account/logout must omit params: %s", fakeMessageJSON(message))
@@ -761,14 +886,26 @@ func runFakeAppServer(scenario string) error {
 			if scenario == "service-tier" {
 				response["serviceTier"] = "priority"
 			}
+			if scenario == "permissions" {
+				var permissions struct {
+					ApprovalPolicy string `json:"approvalPolicy"`
+					Sandbox        string `json:"sandbox"`
+				}
+				if err := decodeFakeParams(message, &permissions); err != nil || permissions.ApprovalPolicy != "never" || permissions.Sandbox != "danger-full-access" {
+					return fmt.Errorf("thread/start lost the permissions preset: %s", fakeMessageJSON(message))
+				}
+				response["approvalPolicy"] = "never"
+				response["sandbox"] = map[string]any{"type": "dangerFullAccess"}
+			}
 			if err := writeFakeResult(encoder, message["id"], response); err != nil {
 				return err
 			}
 		case "thread/resume":
 			var params struct {
-				ThreadID string `json:"threadId"`
+				ThreadID     string `json:"threadId"`
+				ExcludeTurns bool   `json:"excludeTurns"`
 			}
-			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" {
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || !params.ExcludeTurns {
 				return fmt.Errorf("invalid thread/resume params: %s", fakeMessageJSON(message))
 			}
 			if scenario == "resume-notification" {
@@ -793,6 +930,28 @@ func runFakeAppServer(scenario string) error {
 			if err := validateTurnStart(message, clientID); err != nil {
 				return err
 			}
+			var turnPermissions struct {
+				ApprovalPolicy string `json:"approvalPolicy"`
+				SandboxPolicy  *struct {
+					Type string `json:"type"`
+				} `json:"sandboxPolicy"`
+			}
+			if err := decodeFakeParams(message, &turnPermissions); err != nil {
+				return err
+			}
+			// A preset picked mid-thread rides the next turn/start only.
+			wantPolicy, wantSandbox := "", ""
+			if scenario == "permissions" && !turnStarted {
+				wantPolicy, wantSandbox = "on-request", "readOnly"
+			}
+			gotSandbox := ""
+			if turnPermissions.SandboxPolicy != nil {
+				gotSandbox = turnPermissions.SandboxPolicy.Type
+			}
+			if turnPermissions.ApprovalPolicy != wantPolicy || gotSandbox != wantSandbox {
+				return fmt.Errorf("turn/start permissions = %s, want %q/%q", fakeMessageJSON(message), wantPolicy, wantSandbox)
+			}
+			turnStarted = true
 			if scenario == "service-tier" {
 				var params struct {
 					ServiceTier string `json:"serviceTier"`
@@ -820,10 +979,11 @@ func runFakeAppServer(scenario string) error {
 			if err := writeFakeNotification(encoder, "thread/name/updated", map[string]any{"threadId": "native-thread", "threadName": "Protocol title"}); err != nil {
 				return err
 			}
-			if scenario == "approval" || scenario == "approval-stop" || scenario == "server-resolved" || scenario == "exit-with-approval" {
+			if scenario == "approval" || scenario == "approval-amendment" || scenario == "approval-stop" || scenario == "server-resolved" || scenario == "exit-with-approval" {
 				if err := writeFakeRequest(encoder, json.RawMessage("77"), "item/commandExecution/requestApproval", map[string]any{
 					"threadId": "native-thread", "turnId": "native-turn", "itemId": "command-1", "startedAtMs": 1,
 					"approvalId": "approval-1", "reason": "needs approval", "command": "echo hello", "cwd": "/tmp", "environmentId": nil,
+					"proposedExecpolicyAmendment": []string{"echo", "hello"},
 				}); err != nil {
 					return err
 				}
@@ -834,6 +994,44 @@ func runFakeAppServer(scenario string) error {
 				}
 				if scenario == "exit-with-approval" {
 					return nil
+				}
+			}
+			if scenario == "turn-failure" {
+				for _, notification := range []struct {
+					method string
+					params map[string]any
+				}{
+					{"error", map[string]any{"threadId": "native-thread", "turnId": "native-turn", "willRetry": true, "error": map[string]any{"message": "Reconnecting 1/5"}}},
+					{"model/rerouted", map[string]any{"threadId": "native-thread", "turnId": "native-turn", "fromModel": "gpt-test", "toModel": "gpt-safe", "reason": "highRiskCyberActivity"}},
+					{"error", map[string]any{"threadId": "native-thread", "turnId": "native-turn", "willRetry": false, "error": map[string]any{"message": "boom"}}},
+				} {
+					if err := writeFakeNotification(encoder, notification.method, notification.params); err != nil {
+						return err
+					}
+				}
+				failed := fakeTurn("native-turn", "failed")
+				failed["error"] = map[string]any{"message": "boom"}
+				if err := writeFakeNotification(encoder, "turn/completed", map[string]any{"threadId": "native-thread", "turn": failed}); err != nil {
+					return err
+				}
+			}
+			if scenario == "permissions-request" {
+				if err := writeFakeNotification(encoder, "thread/tokenUsage/updated", map[string]any{
+					"threadId": "native-thread", "turnId": "native-turn",
+					"tokenUsage": map[string]any{
+						"total":              map[string]any{"totalTokens": 900000, "inputTokens": 0, "cachedInputTokens": 0, "cacheWriteInputTokens": 0, "outputTokens": 0, "reasoningOutputTokens": 0},
+						"last":               map[string]any{"totalTokens": 1200, "inputTokens": 0, "cachedInputTokens": 0, "cacheWriteInputTokens": 0, "outputTokens": 0, "reasoningOutputTokens": 0},
+						"modelContextWindow": 200000,
+					},
+				}); err != nil {
+					return err
+				}
+				if err := writeFakeRequest(encoder, json.RawMessage("79"), "item/permissions/requestApproval", map[string]any{
+					"threadId": "native-thread", "turnId": "native-turn", "itemId": "command-2", "environmentId": nil, "startedAtMs": 1,
+					"cwd": "/tmp", "reason": nil,
+					"permissions": map[string]any{"network": map[string]any{"enabled": true}, "fileSystem": nil},
+				}); err != nil {
+					return err
 				}
 			}
 			if scenario == "elicitation" {
@@ -897,6 +1095,27 @@ func runFakeAppServer(scenario string) error {
 			}); err != nil {
 				return err
 			}
+		case "thread/name/set":
+			var params struct {
+				ThreadID string `json:"threadId"`
+				Name     string `json:"name"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.Name != "Renamed in maiD" {
+				return fmt.Errorf("invalid thread/name/set params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{}); err != nil {
+				return err
+			}
+		case "thread/turns/list":
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" {
+				return fmt.Errorf("invalid thread/turns/list params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"data": []any{}, "nextCursor": nil, "backwardsCursor": nil}); err != nil {
+				return err
+			}
 		case "thread/unsubscribe":
 			if scenario == "stop-active" && !interrupted {
 				return fmt.Errorf("active thread unsubscribed before interrupt")
@@ -907,9 +1126,27 @@ func runFakeAppServer(scenario string) error {
 		case "":
 			// A valid reply to a server request completes the turn, which
 			// the tests wait for; an invalid one exits and fails the turn.
+			if string(message["id"]) == "79" {
+				if got := string(message["result"]); got != `{"permissions":{"fileSystem":null,"network":{"enabled":true}},"scope":"session"}` {
+					return fmt.Errorf("invalid permissions response: %s", fakeMessageJSON(message))
+				}
+				if err := writeFakeTurnCompleted(encoder); err != nil {
+					return err
+				}
+				continue
+			}
 			if string(message["id"]) == "78" {
 				if got := string(message["result"]); got != `{"action":"accept","content":{"confirmed":true}}` {
 					return fmt.Errorf("invalid elicitation response: %s", fakeMessageJSON(message))
+				}
+				if err := writeFakeTurnCompleted(encoder); err != nil {
+					return err
+				}
+				continue
+			}
+			if string(message["id"]) == "77" && scenario == "approval-amendment" {
+				if got := string(message["result"]); got != `{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["echo","hello"]}}}` {
+					return fmt.Errorf("invalid amendment response: %s", fakeMessageJSON(message))
 				}
 				if err := writeFakeTurnCompleted(encoder); err != nil {
 					return err
@@ -972,11 +1209,13 @@ func validateTurnStart(message fakeWireMessage, clientID string) error {
 		ThreadID            string         `json:"threadId"`
 		ClientUserMessageID string         `json:"clientUserMessageId"`
 		Input               []appUserInput `json:"input"`
+		Summary             string         `json:"summary"`
 	}
 	if err := decodeFakeParams(message, &params); err != nil {
 		return err
 	}
-	if params.ThreadID != "native-thread" || params.ClientUserMessageID != clientID || len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "hello" {
+	// The fake configuration leaves reasoning summaries unset.
+	if params.ThreadID != "native-thread" || params.ClientUserMessageID != clientID || len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "hello" || params.Summary != "auto" {
 		return fmt.Errorf("invalid turn/start params: %s", fakeMessageJSON(message))
 	}
 	return nil
@@ -1006,6 +1245,8 @@ func fakeThreadResponse(threadID string) map[string]any {
 		"serviceTier":     nil,
 		"cwd":             "/tmp",
 		"reasoningEffort": "medium",
+		"approvalPolicy":  "on-request",
+		"sandbox":         map[string]any{"type": "workspaceWrite", "writableRoots": []any{}, "networkAccess": false},
 	}
 }
 

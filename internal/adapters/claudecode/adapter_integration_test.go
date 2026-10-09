@@ -36,16 +36,27 @@ func fakeWrite(value any) {
 }
 
 func fakeCLIMain() {
-	sessionID := "fake-session"
+	sessionID := ""
 	for index, arg := range os.Args {
 		if (arg == "--session-id" || arg == "--resume") && index+1 < len(os.Args) {
 			sessionID = os.Args[index+1]
 		}
 	}
-	// One line per launch in the session cwd lets tests assert launch flags.
-	if launches, err := os.OpenFile(fakeLaunchLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintln(launches, strings.Join(os.Args[1:], " "))
-		_ = launches.Close()
+	// Session processes log one line per launch and per control request in
+	// the session cwd, so tests can assert flags and control traffic. The
+	// probe has no session and runs in the home directory, so it logs nothing.
+	logTo := func(name, line string) {
+		if sessionID == "" {
+			return
+		}
+		if file, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintln(file, line)
+			_ = file.Close()
+		}
+	}
+	logTo(fakeLaunchLog, strings.Join(os.Args[1:], " "))
+	if sessionID == "" {
+		sessionID = "fake-session"
 	}
 	replayUserMessages := slices.Contains(os.Args, "--replay-user-messages")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -102,6 +113,9 @@ func fakeCLIMain() {
 			requestID, _ := message["request_id"].(string)
 			request, _ := message["request"].(map[string]any)
 			subtype, _ := request["subtype"].(string)
+			if encoded, err := json.Marshal(request); err == nil {
+				logTo(fakeControlLog, string(encoded))
+			}
 			respond := func(payload any) {
 				fakeWrite(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": requestID, "response": payload}})
 			}
@@ -110,8 +124,9 @@ func fakeCLIMain() {
 				respond(map[string]any{
 					"commands": []map[string]any{{"name": "compact", "description": "Compact context", "argumentHint": "[instructions]"}},
 					"models": []map[string]any{
-						{"value": "default", "displayName": "Default", "description": "Recommended", "supportsEffort": true, "supportedEffortLevels": []string{"low", "high"}},
+						{"value": "default", "resolvedModel": "fake-model", "displayName": "Default", "description": "Recommended", "supportsEffort": true, "supportedEffortLevels": []string{"low", "high"}},
 						{"value": "fake-model", "resolvedModel": "fake-model", "displayName": "Fake", "description": "Test model"},
+						{"value": "other", "resolvedModel": "other-model", "displayName": "Other", "description": "Another model"},
 					},
 					"account":                 map[string]any{"email": "fake@example.com", "subscriptionType": "Claude Max", "apiProvider": "firstParty"},
 					"current_permission_mode": "default",
@@ -178,6 +193,32 @@ func fakeCLIMain() {
 				emitResult(map[string]any{"subtype": "success", "is_error": true, "result": "Invalid API key · Please run /login"})
 				continue
 			}
+			// What the CLI reports on its own, scripted by prompt.
+			zeroUsage := map[string]any{"usage": map[string]any{}, "modelUsage": map[string]any{}, "total_cost_usd": 0.02}
+			if strings.Contains(text, "COMPACT") {
+				fakeWrite(map[string]any{"type": "system", "subtype": "status", "status": "compacting", "session_id": sessionID})
+				fakeWrite(map[string]any{"type": "system", "subtype": "compact_boundary", "uuid": "boundary-1", "session_id": sessionID})
+				// The CLI resends the last kept assistant message.
+				fakeWrite(map[string]any{"type": "assistant", "uuid": "hello-1", "session_id": sessionID, "message": map[string]any{"id": "msg_1", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Hello world"}}}})
+				emitResult(zeroUsage)
+				continue
+			}
+			if strings.Contains(text, "CLEAR") {
+				sessionID = "22222222-2222-4222-8222-222222222222"
+				fakeWrite(map[string]any{"type": "conversation_reset", "new_conversation_id": sessionID, "uuid": "reset-1", "session_id": sessionID})
+				emitResult(zeroUsage)
+				continue
+			}
+			if strings.Contains(text, "MODEL") {
+				fakeWrite(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID, "model": "other-model", "permissionMode": "plan"})
+				emitResult(zeroUsage)
+				continue
+			}
+			if strings.Contains(text, "BLOCKED") {
+				fakeWrite(map[string]any{"type": "system", "subtype": "informational", "level": "warning", "prevent_continuation": true, "content": "Prompt blocked by hook", "session_id": sessionID})
+				emitResult(zeroUsage)
+				continue
+			}
 			if strings.Contains(text, "SLOW") {
 				slowTurn = true
 				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
@@ -187,7 +228,7 @@ func fakeCLIMain() {
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": "Hello "}}})
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": "world"}}})
-			fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_1", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Hello world"}}}})
+			fakeWrite(map[string]any{"type": "assistant", "uuid": "hello-1", "session_id": sessionID, "message": map[string]any{"id": "msg_1", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Hello world"}}}})
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_stop", "index": 0}})
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": map[string]any{}}}})
 			fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "input_json_delta", "partial_json": `{"command":"ec`}}})
@@ -197,6 +238,8 @@ func fakeCLIMain() {
 				"subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "toolu_1",
 				"input":                  map[string]any{"command": "echo hi"},
 				"permission_suggestions": []map[string]any{{"type": "addRules", "rules": []map[string]any{{"toolName": "Bash"}}, "behavior": "allow", "destination": "localSettings"}},
+				// A request the CLI allows only once.
+				"suppress_always_allow_rule": strings.Contains(text, "ONCE"),
 			}})
 		}
 	}
@@ -209,7 +252,7 @@ func openTestInstance(t *testing.T) (*Instance, chan provider.RuntimeEvent, stri
 		t.Fatalf("os.Executable: %v", err)
 	}
 	configDir := t.TempDir()
-	config, err := json.Marshal(Config{Command: []string{executable}, Env: map[string]string{"CLAUDE_FAKE_CLI": "1"}, ConfigDir: configDir})
+	config, err := json.Marshal(Config{Command: []string{executable}, Env: map[string]string{"CLAUDE_FAKE_CLI": "1", "GORACE": "atexit_sleep_ms=0"}, ConfigDir: configDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,6 +488,107 @@ func TestCLIStartedOutputGetsItsOwnTurn(t *testing.T) {
 	}
 }
 
+// The thread follows what the CLI reports on its own, as the terminal shows
+// it: a compaction as one item (and the message it resends afterwards only
+// once), a cleared conversation's new session, a model or mode changed from
+// inside the CLI, and warnings such as a prompt a hook blocked. Local
+// commands report no usage, which must not empty the context meter.
+func TestThreadFollowsTheCLIReports(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	cwd := t.TempDir()
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-r", Cwd: cwd}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	turn := func(id, prompt string) []provider.RuntimeEvent {
+		t.Helper()
+		if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-r", TurnID: id, Input: prompt}); err != nil {
+			t.Fatalf("SendTurn %s: %v", id, err)
+		}
+		var seen []provider.RuntimeEvent
+		for {
+			event := waitForEvent(t, events, func(provider.RuntimeEvent) bool { return true })
+			seen = append(seen, event)
+			if event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == id {
+				return seen
+			}
+		}
+	}
+	usage := func(seen []provider.RuntimeEvent) int {
+		for _, event := range seen {
+			if event.Type == provider.RuntimeEventThreadTokenUsage && event.Payload.TokenUsage != nil {
+				return event.Payload.TokenUsage.UsedTokens
+			}
+		}
+		return -1
+	}
+
+	// A request the CLI allows only once offers no lasting approval.
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-r", TurnID: "t1", Input: "hello ONCE"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventRequestOpened })
+	var offered []string
+	for _, option := range opened.Payload.Options {
+		offered = append(offered, option.ID)
+	}
+	if !slices.Equal(offered, []string{"accept", "decline"}) {
+		t.Fatalf("options = %q", offered)
+	}
+	if err := instance.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-r", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventTurnCompleted })
+
+	compact := turn("t2", "COMPACT")
+	var kept string
+	var compaction []string
+	for _, event := range compact {
+		if event.Type == provider.RuntimeEventContentDelta {
+			kept += event.Payload.Delta
+		}
+		if event.Payload.ItemType == provider.ItemKindContextCompaction {
+			compaction = append(compaction, string(event.Type)+" "+event.ItemID[:len("compaction:")]+" "+string(event.Payload.ItemStatus))
+		}
+	}
+	if kept != "" || !slices.Equal(compaction, []string{"item.started compaction: in_progress", "item.completed compaction: completed"}) {
+		t.Fatalf("compaction turn: text %q, items %q", kept, compaction)
+	}
+	if used := usage(compact); used != 112 {
+		t.Fatalf("context after a local command = %d, want the last turn's 112", used)
+	}
+
+	blocked := turn("t3", "BLOCKED")
+	if !slices.ContainsFunc(blocked, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRuntimeWarning && event.Payload.Message == "Prompt blocked by hook"
+	}) {
+		t.Fatalf("no warning for the blocked prompt: %#v", blocked)
+	}
+
+	model := turn("t4", "MODEL")
+	options := func(seen []provider.RuntimeEvent) []provider.ConfigOption {
+		for _, event := range seen {
+			if event.Type == provider.RuntimeEventConfigOptionsUpdated {
+				return event.Payload.ConfigOptions
+			}
+		}
+		return nil
+	}(model)
+	selected, _ := provider.CurrentConfigString(options, "model")
+	mode, _ := provider.CurrentConfigString(options, "permission_mode")
+	if selected != "other" || mode != "plan" {
+		t.Fatalf("options after /model and plan mode = %q, %q", selected, mode)
+	}
+
+	cleared := turn("t5", "CLEAR")
+	if !slices.ContainsFunc(cleared, func(event provider.RuntimeEvent) bool { return event.Payload.Title == "Cleared context" }) {
+		t.Fatalf("no cleared-context item: %#v", cleared)
+	}
+	result, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-r", Cwd: cwd})
+	if err != nil || result.Session.ProviderSessionID != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("session after /clear = %q, %v", result.Session.ProviderSessionID, err)
+	}
+}
+
 // Closing the instance (a provider restart) kills the CLI mid-turn. No result
 // will arrive, so the turn must still settle instead of running forever.
 func TestClosingMidTurnInterruptsTheTurn(t *testing.T) {
@@ -460,18 +604,28 @@ func TestClosingMidTurnInterruptsTheTurn(t *testing.T) {
 	}
 }
 
-const fakeLaunchLog = "fake-cli-launches.log"
+const (
+	fakeLaunchLog  = "fake-cli-launches.log"
+	fakeControlLog = "fake-cli-controls.log"
+)
 
 func fakeLaunches(t *testing.T, cwd string) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(cwd, fakeLaunchLog))
+	return fakeLog(t, cwd, fakeLaunchLog)
+}
+
+func fakeLog(t *testing.T, cwd, name string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(cwd, name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-func TestEffortChangeAppliesFromTheNextTurn(t *testing.T) {
+// Effort changes apply to the live process through apply_flag_settings, even
+// mid-turn, without relaunching it.
+func TestEffortChangeAppliesInSession(t *testing.T) {
 	instance, events, _ := openTestInstance(t)
 	cwd := t.TempDir()
 	start := provider.StartSessionInput{ThreadID: "thread-effort", Cwd: cwd, ConfigSelections: []provider.ConfigOptionSelection{{OptionID: "effort", Value: "default"}}}
@@ -487,46 +641,51 @@ func TestEffortChangeAppliesFromTheNextTurn(t *testing.T) {
 	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventContentDelta && event.TurnID == "turn-slow"
 	})
-	// Changed while a turn runs: the running process must not be replaced.
-	if err := instance.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-effort", OptionID: "effort", Value: "high"}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
+	for _, value := range []string{"high", "default"} {
+		if err := instance.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-effort", OptionID: "effort", Value: value}); err != nil {
+			t.Fatalf("SetConfigOption(%q): %v", value, err)
+		}
 	}
 	if launches := fakeLaunches(t, cwd); len(launches) != 1 {
-		t.Fatalf("launches during turn = %q", launches)
+		t.Fatalf("launches = %q, want the process kept", launches)
 	}
-	if err := instance.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-effort", TurnID: "turn-slow"}); err != nil {
-		t.Fatalf("InterruptTurn: %v", err)
+	var applied []string
+	for _, line := range fakeLog(t, cwd, fakeControlLog) {
+		if strings.Contains(line, `"apply_flag_settings"`) {
+			applied = append(applied, line)
+		}
 	}
-	interrupted := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
-		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-slow"
-	})
-	if interrupted.Payload.TurnState != provider.RuntimeTurnInterrupted {
-		t.Fatalf("turn completion = %#v, want interrupted", interrupted.Payload)
+	want := []string{
+		`{"settings":{"effortLevel":"high"},"subtype":"apply_flag_settings"}`,
+		`{"settings":{"effortLevel":null},"subtype":"apply_flag_settings"}`,
 	}
-	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-effort", TurnID: "turn-next", Input: "next"}); err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
-	launches := fakeLaunches(t, cwd)
-	if len(launches) != 2 || !strings.Contains(launches[1], "--effort high") {
-		t.Fatalf("launches = %q, want the next turn relaunched with --effort high", launches)
+	if !slices.Equal(applied, want) {
+		t.Fatalf("apply_flag_settings requests = %q, want %q", applied, want)
 	}
 }
 
 func writeTranscriptFixture(t *testing.T, configDir, cwd, sessionID string) string {
 	t.Helper()
-	dir := filepath.Join(configDir, "projects", mungeProjectPath(cwd))
+	// The CLI names the project directory after the real path of its cwd.
+	realCwd, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(configDir, "projects", sanitizePath(realCwd))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, sessionID+".jsonl")
 	lines := []string{
 		`{"type":"queue-operation","operation":"enqueue"}`,
-		fmt.Sprintf(`{"type":"user","uuid":"u1","timestamp":"2026-08-21T10:00:00Z","sessionId":%q,"cwd":%q,"message":{"role":"user","content":"Fix the bug"}}`, sessionID, cwd),
-		fmt.Sprintf(`{"type":"assistant","uuid":"a1","timestamp":"2026-08-21T10:00:05Z","sessionId":%q,"message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]}}`, sessionID),
-		fmt.Sprintf(`{"type":"assistant","uuid":"a2","timestamp":"2026-08-21T10:00:06Z","sessionId":%q,"message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"make test"}}]}}`, sessionID),
-		fmt.Sprintf(`{"type":"user","uuid":"u2","timestamp":"2026-08-21T10:00:08Z","sessionId":%q,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"ok","is_error":false}]}}`, sessionID),
-		fmt.Sprintf(`{"type":"assistant","uuid":"a3","timestamp":"2026-08-21T10:00:09Z","sessionId":%q,"message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"Done."}]}}`, sessionID),
-		fmt.Sprintf(`{"type":"ai-title","aiTitle":"Fix the bug quickly","sessionId":%q}`, sessionID),
+		fmt.Sprintf(`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-08-21T10:00:00Z","sessionId":%q,"cwd":%q,"message":{"role":"user","content":"Fix the bug"}}`, sessionID, cwd),
+		fmt.Sprintf(`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-08-21T10:00:05Z","sessionId":%q,"message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]}}`, sessionID),
+		fmt.Sprintf(`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-08-21T10:00:06Z","sessionId":%q,"message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"make test"}}]}}`, sessionID),
+		fmt.Sprintf(`{"type":"user","uuid":"u2","parentUuid":"a2","timestamp":"2026-08-21T10:00:08Z","sessionId":%q,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"ok","is_error":false}]}}`, sessionID),
+		fmt.Sprintf(`{"type":"assistant","uuid":"a3","parentUuid":"u2","timestamp":"2026-08-21T10:00:09Z","sessionId":%q,"message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"Done."}]}}`, sessionID),
+		// A generated title never replaces the prompt; one the user chose does.
+		fmt.Sprintf(`{"type":"ai-title","aiTitle":"Generated title","sessionId":%q}`, sessionID),
+		fmt.Sprintf(`{"type":"custom-title","customTitle":"Fix the bug quickly","sessionId":%q}`, sessionID),
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -535,7 +694,7 @@ func writeTranscriptFixture(t *testing.T, configDir, cwd, sessionID string) stri
 }
 
 func TestStartSessionReplaysTranscript(t *testing.T) {
-	instance, _, configDir := openTestInstance(t)
+	instance, events, configDir := openTestInstance(t)
 	cwd := t.TempDir()
 	sessionID := "11111111-2222-3333-4444-555555555555"
 	writeTranscriptFixture(t, configDir, cwd, sessionID)
@@ -594,8 +753,16 @@ func TestStartSessionReplaysTranscript(t *testing.T) {
 	if !sawTitle || !sawCommands {
 		t.Fatalf("replay metadata missing: title=%v commands=%v", sawTitle, sawCommands)
 	}
+	// Live, the CLI streams no title; the transcript's is shown once a turn
+	// ends.
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-r", TurnID: "turn-live", Input: "BLOCKED"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventThreadMetadataUpdate && event.Payload.Title == "Fix the bug quickly"
+	})
 	// Deterministic ids: replaying twice yields identical event ids.
-	transcript, err := readTranscriptFile(filepath.Join(configDir, "projects", mungeProjectPath(cwd), sessionID+".jsonl"))
+	transcript, err := instance.readTranscript(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,17 +792,43 @@ func TestTranscriptSessionManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
-	if forked.Summary.SessionID == sessionID || forked.Summary.SessionID == "" || forked.Summary.Title != "Fix the bug quickly" {
+	if forked.Summary.SessionID == sessionID || forked.Summary.SessionID == "" || forked.Summary.Title != "Fix the bug quickly (fork)" {
 		t.Fatalf("fork summary = %#v", forked.Summary)
 	}
-	lines, err := readTranscriptFile(filepath.Join(configDir, "projects", mungeProjectPath(cwd), forked.Summary.SessionID+".jsonl"))
+	// Like the SDK's fork: new session and message ids with the chain kept,
+	// so the fork replays the same conversation.
+	lines, err := instance.readTranscript(forked.Summary.SessionID)
 	if err != nil {
 		t.Fatalf("read forked transcript: %v", err)
 	}
+	uuids := map[string]bool{}
 	for _, line := range lines {
-		if line.SessionID != "" && line.SessionID != forked.Summary.SessionID {
+		if line.SessionID != forked.Summary.SessionID {
 			t.Fatalf("forked line keeps old session id: %#v", line.SessionID)
 		}
+		if line.UUID != "" {
+			uuids[line.UUID] = true
+		}
+		if line.ParentUUID != "" && !uuids[line.ParentUUID] {
+			t.Fatalf("forked line %q has parent %q outside the fork", line.UUID, line.ParentUUID)
+		}
+		if line.UUID == "u1" || line.UUID == "a3" {
+			t.Fatalf("forked line keeps source uuid %q", line.UUID)
+		}
+	}
+	original, _ := instance.readTranscript(sessionID)
+	replayedSource := replayEventsFromTranscript("t", original)
+	replayedFork := replayEventsFromTranscript("t", lines)
+	if len(replayedFork) != len(replayedSource) {
+		t.Fatalf("fork replays %d events, source %d", len(replayedFork), len(replayedSource))
+	}
+
+	// A maiD rename names the session the way /rename does.
+	if err := instance.RenameSession(context.Background(), provider.RenameSessionInput{ProviderSessionID: sessionID, Title: "Renamed in maiD"}); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	if title, _ := transcriptSummary(path); title != "Renamed in maiD" {
+		t.Fatalf("title after rename = %q", title)
 	}
 
 	if err := instance.DeleteSession(context.Background(), sessionID); err != nil {

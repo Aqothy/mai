@@ -14,6 +14,7 @@ func TestStreamClientFailsPendingControlOnStreamClose(t *testing.T) {
 	cliReader, hostWriter := io.Pipe()
 	go func() { _, _ = io.Copy(io.Discard, cliReader) }()
 	client := newStreamClient(hostReader, hostWriter)
+	client.start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -28,12 +28,17 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	model, effort, serviceTier := modelEffortAndTier(input.ModelSelection, input.ConfigSelections)
 	params := threadSettingsParams(model, effort, serviceTier)
 	params["cwd"] = input.Cwd
+	if preset, ok := selectedPermissions(input.ConfigSelections); ok {
+		preset.setThreadParams(params)
+	}
 	var response threadStartResponse
 	method := "thread/start"
 	var provisional, previous *sessionState
 	if nativeID != "" {
 		method = "thread/resume"
 		params["threadId"] = nativeID
+		// Full-history hydration is deprecated; turns are paged below.
+		params["excludeTurns"] = true
 		provisional = newSessionState(input.ThreadID, nativeID, input.Cwd)
 		provisional.model = model
 		provisional.effort = effort
@@ -85,19 +90,18 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		serviceTier = defaultServiceTier
 	}
 
-	if input.ReplayHistory && len(response.Thread.Turns) == 0 {
-		var read struct {
-			Thread appThread `json:"thread"`
-		}
-		if err := h.rpc.call(ctx, "thread/read", map[string]any{"threadId": response.Thread.ID, "includeTurns": true}, &read); err != nil {
+	if nativeID != "" && input.ReplayHistory {
+		turns, err := h.listTurns(ctx, nativeID)
+		if err != nil {
 			rollbackProvisional()
 			return provider.StartSessionResult{}, fmt.Errorf("read Codex thread history: %w", err)
 		}
-		response.Thread = read.Thread
+		response.Thread.Turns = turns
 	}
 	skills, _ := h.listSkills(ctx, []string{input.Cwd})
 	h.mu.Lock()
-	options := configOptionsFromModels(h.models, model, effort, serviceTier)
+	permissions := permissionsFor(response.ApprovalPolicy, response.Sandbox.Type)
+	options := append(configOptionsFromModels(h.models, model, effort, serviceTier), permissionsOption(permissions))
 	serviceTier, _ = provider.CurrentConfigString(options, "service_tier")
 	session := provisional
 	if session == nil {
@@ -107,6 +111,7 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	session.model = model
 	session.effort = effort
 	session.serviceTier = serviceTier
+	session.permissions = permissions
 	session.skills = append([]provider.Skill(nil), skills...)
 	session.configOptions = append([]provider.ConfigOption(nil), options...)
 	for _, turn := range response.Thread.Turns {
@@ -121,8 +126,15 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	providerSession := h.providerSessionLocked(session)
 	h.mu.Unlock()
 	result := provider.StartSessionResult{Session: providerSession}
+	metadata := provider.RuntimeEvent{
+		EventID: provider.RuntimeEventID("codex:meta:" + input.ThreadID + ":start"), Type: provider.RuntimeEventThreadMetadataUpdate,
+		Provider: DriverKind, ThreadID: input.ThreadID, Payload: provider.RuntimeEventPayload{SlashCommands: slashCommands},
+	}
 	if input.ReplayHistory {
-		result.Replay = replayEvents(input.ThreadID, response.Thread)
+		// Same-thread setup events ride the replay batch, never the live sink.
+		result.Replay = append(replayEvents(input.ThreadID, response.Thread), metadata)
+	} else {
+		h.emitEvent(metadata)
 	}
 	return result, nil
 }
@@ -176,6 +188,8 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	model := session.model
 	effort := session.effort
 	serviceTier := session.serviceTier
+	permissions, permissionsChanged := session.permissions, session.permissionsChanged
+	requestSummaries := h.requestSummaries
 	skills := append([]provider.Skill(nil), session.skills...)
 	h.mu.Unlock()
 	turnInput, err := userInputsFromTurn(input, skills)
@@ -204,24 +218,47 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if serviceTier != "" {
 		params["serviceTier"] = serviceTier
 	}
+	if preset, ok := permissionPresetByID(permissions); ok && permissionsChanged {
+		preset.setTurnParams(params)
+	}
+	if requestSummaries {
+		// Every catalog model defaults to no reasoning summaries, which
+		// would leave reasoning items empty.
+		params["summary"] = "auto"
+	}
+	release := func() {
+		h.mu.Lock()
+		if current := h.sessionsByLocal[input.ThreadID]; current != nil && current.pendingLocalTurn == input.TurnID {
+			current.pendingLocalTurn = ""
+		}
+		h.mu.Unlock()
+	}
+	method, request := "turn/start", params
+	if command, commandParams, ok := builtinCommand(input, nativeThread); ok {
+		method, request = command, commandParams
+	}
 	var response struct {
 		Turn appTurn `json:"turn"`
 	}
-	if err := h.rpc.call(ctx, "turn/start", params, &response); err != nil {
-		h.mu.Lock()
-		if current := h.sessionsByLocal[input.ThreadID]; current != nil && current.pendingLocalTurn == input.TurnID {
-			current.pendingLocalTurn = ""
-		}
-		h.mu.Unlock()
+	if err := h.rpc.call(ctx, method, request, &response); err != nil {
+		release()
 		return err
 	}
+	if method == "thread/compact/start" {
+		// Compaction runs as a turn its turn/started notification starts.
+		return nil
+	}
 	if response.Turn.ID == "" {
+		release()
+		return fmt.Errorf("%s returned an empty turn id", method)
+	}
+	if permissionsChanged && method == "turn/start" {
+		// turn/start settings stay for the rest of the thread.
 		h.mu.Lock()
-		if current := h.sessionsByLocal[input.ThreadID]; current != nil && current.pendingLocalTurn == input.TurnID {
-			current.pendingLocalTurn = ""
+		if session.permissions == permissions {
+			session.permissionsChanged = false
 		}
 		h.mu.Unlock()
-		return fmt.Errorf("turn/start returned an empty turn id")
 	}
 	return h.emitTurnStarted(nativeThread, response.Turn.ID)
 }
@@ -284,7 +321,7 @@ func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionIn
 	}
 	h.mu.Unlock()
 	for _, pending := range approvals {
-		_ = h.rpc.respond(pending.id, map[string]any{"decision": "cancel"})
+		_ = h.rpc.respond(pending.id, pending.cancelReply())
 		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
 	}
 	return nil
@@ -318,6 +355,7 @@ func (h *Instance) SetConfigOption(_ context.Context, input provider.SetConfigOp
 	model := session.model
 	effort := session.effort
 	serviceTier := session.serviceTier
+	permissions := session.permissions
 	switch input.OptionID {
 	case "model":
 		model = value
@@ -325,11 +363,18 @@ func (h *Instance) SetConfigOption(_ context.Context, input provider.SetConfigOp
 		effort = value
 	case "service_tier":
 		serviceTier = value
+	case permissionsOptionID:
+		// Only a preset can be chosen; the next turn applies it.
+		if _, ok := permissionPresetByID(value); !ok {
+			h.mu.Unlock()
+			return fmt.Errorf("Codex config option %q does not accept value %q", input.OptionID, value)
+		}
+		permissions = value
 	default:
 		h.mu.Unlock()
 		return fmt.Errorf("Codex config option %q is not supported", input.OptionID)
 	}
-	options := configOptionsFromModels(h.models, model, effort, serviceTier)
+	options := append(configOptionsFromModels(h.models, model, effort, serviceTier), permissionsOption(permissions))
 	current, present := provider.CurrentConfigString(options, input.OptionID)
 	if !present || current != value {
 		h.mu.Unlock()
@@ -341,6 +386,8 @@ func (h *Instance) SetConfigOption(_ context.Context, input provider.SetConfigOp
 	session.model = model
 	session.effort = effort
 	session.serviceTier = serviceTier
+	session.permissionsChanged = session.permissionsChanged || permissions != session.permissions
+	session.permissions = permissions
 	session.configOptions = options
 	optionsSnapshot := append([]provider.ConfigOption(nil), session.configOptions...)
 	h.mu.Unlock()
@@ -395,6 +442,12 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 	// settings; the fork itself must carry the source's model and reasoning.
 	params := threadSettingsParams(modelEffortAndTier(input.ModelSelection, input.ConfigSelections))
 	params["threadId"] = input.ProviderSessionID
+	// The fork's history is read when its thread opens; full-history
+	// hydration is deprecated.
+	params["excludeTurns"] = true
+	if preset, ok := selectedPermissions(input.ConfigSelections); ok {
+		preset.setThreadParams(params)
+	}
 	var response threadStartResponse
 	if err := h.rpc.call(ctx, "thread/fork", params, &response); err != nil {
 		return provider.ForkSessionResult{}, err
@@ -403,6 +456,58 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 		return provider.ForkSessionResult{}, fmt.Errorf("thread/fork returned an empty thread id")
 	}
 	return provider.ForkSessionResult{Summary: sessionSummaryFromThread(response.Thread)}, nil
+}
+
+// slashCommands are the app-server operations offered as slash commands.
+var slashCommands = []provider.SlashCommand{
+	{Name: "compact", Description: "Summarize the conversation to free up context"},
+	{Name: "review", Description: "Review uncommitted changes, or the changes against a base branch", HasInput: true, InputHint: "[base branch]"},
+}
+
+// builtinCommand maps a prompt that is one of slashCommands to its
+// app-server request.
+func builtinCommand(input provider.SendTurnInput, threadID string) (string, map[string]any, bool) {
+	if len(input.Attachments) > 0 {
+		return "", nil, false
+	}
+	name, args, _ := strings.Cut(strings.TrimSpace(input.Input), " ")
+	args = strings.TrimSpace(args)
+	switch {
+	case name == "/compact" && args == "":
+		return "thread/compact/start", map[string]any{"threadId": threadID}, true
+	case name == "/review":
+		target := map[string]any{"type": "uncommittedChanges"}
+		if args != "" {
+			target = map[string]any{"type": "baseBranch", "branch": args}
+		}
+		return "review/start", map[string]any{"threadId": threadID, "target": target, "delivery": "inline"}, true
+	}
+	return "", nil, false
+}
+
+// listTurns pages a thread's turns, oldest first, with their items.
+func (h *Instance) listTurns(ctx context.Context, threadID string) ([]appTurn, error) {
+	params := map[string]any{"threadId": threadID, "sortDirection": "asc", "itemsView": "full", "limit": 100}
+	var turns []appTurn
+	seenCursors := make(map[string]struct{})
+	for {
+		var page struct {
+			Data       []appTurn `json:"data"`
+			NextCursor *string   `json:"nextCursor"`
+		}
+		if err := h.rpc.call(ctx, "thread/turns/list", params, &page); err != nil {
+			return nil, err
+		}
+		turns = append(turns, page.Data...)
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			return turns, nil
+		}
+		if _, seen := seenCursors[*page.NextCursor]; seen {
+			return nil, fmt.Errorf("thread/turns/list repeated cursor %q", *page.NextCursor)
+		}
+		seenCursors[*page.NextCursor] = struct{}{}
+		params["cursor"] = *page.NextCursor
+	}
 }
 
 // threadSettingsParams are the thread/start, thread/resume and thread/fork
@@ -466,4 +571,9 @@ func (h *Instance) refreshActiveSkills() {
 			h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: local, Payload: provider.RuntimeEventPayload{Skills: skills}})
 		}
 	}
+}
+
+// RenameSession names the Codex thread, as the TUI's /rename does.
+func (h *Instance) RenameSession(ctx context.Context, input provider.RenameSessionInput) error {
+	return h.rpc.call(ctx, "thread/name/set", map[string]any{"threadId": input.ProviderSessionID, "name": input.Title}, nil)
 }

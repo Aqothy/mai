@@ -4,14 +4,12 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -29,37 +27,19 @@ func (h *Instance) probe(ctx context.Context) error {
 	if err != nil {
 		cwd = os.TempDir()
 	}
-	command := h.buildCommand(cwd, []string{
+	process, client, err := h.startCLI(cwd, []string{
 		// Keep the probe hermetic and fast: no MCP servers, no hooks firing
 		// on a handshake that runs on every daemon start.
 		"--strict-mcp-config",
 		"--settings", `{"disableAllHooks":true}`,
 	})
-	stdin, err := command.StdinPipe()
 	if err != nil {
 		return err
 	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return err
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return err
-	}
-	client := newStreamClient(stdout, stdin)
-	done := make(chan struct{})
-	go func() {
-		_ = command.Wait()
-		client.fail(io.EOF)
-		close(done)
-	}()
+	client.start()
 	defer func() {
-		_ = stdin.Close()
-		procgroup.Kill(command)
-		<-done
+		process.Stop(0)
+		process.Drain(client.done, drainTimeout)
 	}()
 	var response initializeResponse
 	if err := client.control(ctx, map[string]any{"subtype": "initialize"}, &response); err != nil {
@@ -68,6 +48,7 @@ func (h *Instance) probe(ctx context.Context) error {
 	h.mu.Lock()
 	h.models = response.Models
 	h.commands = response.Commands
+	h.defaultPermissionMode = response.CurrentPermissionMode
 	h.updateAccountLocked(response.Account)
 	h.mu.Unlock()
 	return nil
@@ -143,7 +124,7 @@ func (h *Instance) configOptionsLocked(selectedModel, selectedEffort, selectedMo
 				Type:         provider.ConfigOptionTypeSelect,
 				Category:     provider.ConfigOptionCategoryThoughtLevel,
 				Label:        "Effort",
-				Description:  "Reasoning effort used for this thread; applies from the next turn",
+				Description:  "Reasoning effort used for this thread",
 				Choices:      effortChoices,
 				CurrentValue: effort,
 			})
@@ -158,6 +139,9 @@ func (h *Instance) configOptionsLocked(selectedModel, selectedEffort, selectedMo
 		{Value: "bypassPermissions", Label: "Bypass permissions", Description: "Run every tool without asking"},
 	}
 	mode := strings.TrimSpace(selectedMode)
+	if !validPermissionMode(mode) {
+		mode = h.defaultPermissionMode
+	}
 	if !validPermissionMode(mode) {
 		mode = "default"
 	}
@@ -180,6 +164,26 @@ func (h *Instance) modelBySelectionLocked(value string) *sdkModel {
 		}
 	}
 	return nil
+}
+
+// modelValueLocked maps a model id the CLI reports (system/init) to the
+// catalog value to show: the current selection when it resolves to that
+// model, else the first value that does. An unknown model keeps the current
+// selection.
+func (h *Instance) modelValueLocked(current, reported string) string {
+	if reported == "" {
+		return current
+	}
+	resolves := func(model sdkModel) bool { return model.Value == reported || model.ResolvedModel == reported }
+	if model := h.modelBySelectionLocked(trimmedOrDefault(current, "default")); model != nil && resolves(*model) {
+		return current
+	}
+	for _, model := range h.models {
+		if resolves(model) {
+			return model.Value
+		}
+	}
+	return current
 }
 
 func modelValueValid(models []sdkModel, value string) bool {
@@ -301,7 +305,8 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	options := h.configOptionsLocked("", "", "")
 	selectedModel, _ := provider.CurrentConfigString(options, "model")
 	handle := fmt.Sprintf("claude-options-%d", time.Now().UnixNano())
-	h.options[handle] = &optionsState{selectedModel: selectedModel, selectedMode: "default", options: options, callbacks: callbacks}
+	selectedMode, _ := provider.CurrentConfigString(options, "permission_mode")
+	h.options[handle] = &optionsState{selectedModel: selectedModel, selectedMode: selectedMode, options: options, callbacks: callbacks}
 	return provider.OptionsSession{
 		Handle:        handle,
 		ConfigOptions: append([]provider.ConfigOption(nil), options...),

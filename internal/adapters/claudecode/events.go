@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Aqothy/maiD/internal/adapters/elicitation"
@@ -47,6 +48,8 @@ func (h *Instance) handleMessage(session *claudeSession, proc *sessionProcess, m
 		h.handleUserMessage(session, message)
 	case "result":
 		h.handleResult(session, message)
+	case "conversation_reset":
+		h.clearConversation(session, message)
 	default:
 		// rate_limit_event, tool_progress, tool_use_summary, auth_status,
 		// prompt_suggestion, and future kinds are intentionally ignored.
@@ -76,50 +79,123 @@ func (h *Instance) handleSystem(session *claudeSession, message sdkMessage) {
 		if json.Unmarshal(message.Raw, &init) != nil {
 			return
 		}
+		h.adoptSessionID(session, init.SessionID)
 		h.mu.Lock()
-		if init.SessionID != "" && init.SessionID != session.nativeSessionID {
-			// The CLI is authoritative for the durable session id (a resume
-			// of a missing transcript falls back to a fresh session).
-			if h.localByNative[session.nativeSessionID] == session.localThreadID {
-				delete(h.localByNative, session.nativeSessionID)
-			}
-			session.nativeSessionID = init.SessionID
-			h.localByNative[init.SessionID] = session.localThreadID
-		}
-		changedMode := init.PermissionMode != "" && init.PermissionMode != session.permissionMode
-		if changedMode {
-			session.permissionMode = init.PermissionMode
-			session.configOptions = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
-		}
-		snapshot := append([]provider.ConfigOption(nil), session.configOptions...)
+		session.activeModel = init.Model
 		h.mu.Unlock()
-		if changedMode {
-			h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: session.localThreadID, Payload: provider.RuntimeEventPayload{ConfigOptions: snapshot}})
-		}
+		h.syncSettings(session, init.PermissionMode, init.Model)
 	case "status":
 		var status systemStatus
-		if json.Unmarshal(message.Raw, &status) != nil || status.PermissionMode == "" {
+		if json.Unmarshal(message.Raw, &status) != nil {
 			return
 		}
-		h.mu.Lock()
-		changed := status.PermissionMode != session.permissionMode
-		if changed {
-			session.permissionMode = status.PermissionMode
-			session.configOptions = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
-		}
-		snapshot := append([]provider.ConfigOption(nil), session.configOptions...)
-		h.mu.Unlock()
-		if changed {
-			h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: session.localThreadID, Payload: provider.RuntimeEventPayload{ConfigOptions: snapshot}})
+		h.syncSettings(session, status.PermissionMode, "")
+		switch {
+		case status.Status != nil && *status.Status == "compacting":
+			h.compaction(session, provider.ItemStatusInProgress, "")
+		case status.CompactResult == "failed":
+			h.compaction(session, provider.ItemStatusFailed, status.CompactError)
 		}
 	case "compact_boundary":
-		h.mu.Lock()
-		turn := session.activeLocalTurn
-		h.mu.Unlock()
-		itemID := "compaction:" + trimmedOrDefault(message.UUID, session.nativeSessionID)
-		payload := provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: provider.ItemStatusCompleted, Title: "Compacted context"}
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: session.localThreadID, TurnID: turn, ItemID: itemID, Payload: payload})
+		h.compaction(session, provider.ItemStatusCompleted, "")
+	case "api_retry":
+		var retry apiRetry
+		if json.Unmarshal(message.Raw, &retry) == nil {
+			h.emitWarning(session, retry.message())
+		}
+	case "informational":
+		// Warnings, and notices that stop the turn (a hook blocking the
+		// prompt), are the only reason the user gets for what happened.
+		var notice systemInformational
+		if json.Unmarshal(message.Raw, &notice) == nil && strings.TrimSpace(notice.Content) != "" && (notice.Level == "warning" || notice.PreventContinuation) {
+			h.emitWarning(session, strings.TrimSpace(notice.Content))
+		}
 	}
+}
+
+// adoptSessionID follows the CLI to the session id it reports: a resume of
+// a missing transcript starts a fresh session, and /clear continues in a new
+// one. The next StartSession persists it as the thread's resume cursor.
+func (h *Instance) adoptSessionID(session *claudeSession, sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if sessionID == "" || sessionID == session.nativeSessionID {
+		return
+	}
+	if h.localByNative[session.nativeSessionID] == session.localThreadID {
+		delete(h.localByNative, session.nativeSessionID)
+	}
+	session.nativeSessionID = sessionID
+	h.localByNative[sessionID] = session.localThreadID
+}
+
+// syncSettings records the permission mode and model the CLI reports, which
+// change through the CLI itself too (plan mode exit, /model), and publishes
+// the options when they changed.
+func (h *Instance) syncSettings(session *claudeSession, mode, model string) {
+	h.mu.Lock()
+	changed := false
+	if mode != "" && mode != session.permissionMode {
+		session.permissionMode, changed = mode, true
+	}
+	if value := h.modelValueLocked(session.model, model); value != session.model {
+		session.model, changed = value, true
+	}
+	if changed {
+		session.configOptions = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
+	}
+	snapshot := append([]provider.ConfigOption(nil), session.configOptions...)
+	h.mu.Unlock()
+	if changed {
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: session.localThreadID, Payload: provider.RuntimeEventPayload{ConfigOptions: snapshot}})
+	}
+}
+
+// compaction shows a compaction as one item: in progress while the CLI
+// compacts, then completed or failed.
+func (h *Instance) compaction(session *claudeSession, status provider.ItemStatus, errorText string) {
+	h.mu.Lock()
+	turn := session.activeLocalTurn
+	itemID := session.compactionItem
+	if status == provider.ItemStatusInProgress && itemID != "" {
+		h.mu.Unlock()
+		return
+	}
+	if itemID == "" {
+		itemID = "compaction:" + newSessionUUID()
+	}
+	session.compactionItem = ""
+	eventType, title := provider.RuntimeEventItemCompleted, "Compacted context"
+	switch status {
+	case provider.ItemStatusInProgress:
+		session.compactionItem = itemID
+		eventType, title = provider.RuntimeEventItemStarted, "Compacting context"
+	case provider.ItemStatusFailed:
+		title = trimmedOrDefault(errorText, "Compaction failed")
+	}
+	h.mu.Unlock()
+	h.emitEvent(provider.RuntimeEvent{Type: eventType, ThreadID: session.localThreadID, TurnID: turn, ItemID: itemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: status, Title: title}})
+}
+
+// clearConversation handles conversation_reset (/clear, or leaving plan mode
+// with a cleared context): the CLI continues in a new session, so the thread
+// follows it and marks where the context was cleared.
+func (h *Instance) clearConversation(session *claudeSession, message sdkMessage) {
+	h.adoptSessionID(session, message.NewConversationID)
+	h.mu.Lock()
+	turn := session.activeLocalTurn
+	session.tasks = taskPlan{}
+	session.seenAssistant = make(map[string]bool)
+	h.mu.Unlock()
+	itemID := "reset:" + trimmedOrDefault(message.UUID, newSessionUUID())
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: session.localThreadID, TurnID: turn, ItemID: itemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: provider.ItemStatusCompleted, Title: "Cleared context"}})
+}
+
+func (h *Instance) emitWarning(session *claudeSession, message string) {
+	h.mu.Lock()
+	turn := session.activeLocalTurn
+	h.mu.Unlock()
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRuntimeWarning, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{Message: message}})
 }
 
 func (h *Instance) handleStreamEvent(session *claudeSession, message sdkMessage) {
@@ -214,6 +290,7 @@ func (h *Instance) handleStreamEvent(session *claudeSession, message sdkMessage)
 			return
 		}
 		h.mu.Lock()
+		session.contextTokens = used
 		window := session.contextWindow
 		cost := session.costUSD
 		h.mu.Unlock()
@@ -235,12 +312,14 @@ func (h *Instance) refreshToolInput(session *claudeSession, turn, itemID string,
 		return
 	}
 	state.fingerprint = fingerprint
-	rebuilt := newToolState(state.call.Name, input)
+	// ProviderKind is the tool's full name; Name is shortened for MCP tools.
+	rebuilt := newToolState(state.call.ProviderKind, input)
 	rebuilt.call.Output = state.call.Output
 	rebuilt.call.Error = state.call.Error
 	state.call = rebuilt.call
 	state.title = rebuilt.title
 	state.itemKind = rebuilt.itemKind
+	state.input = rebuilt.input
 	call := state.call
 	kind := state.itemKind
 	title := state.title
@@ -267,7 +346,17 @@ func (h *Instance) handleAssistant(session *claudeSession, message sdkMessage) {
 	}
 	h.mu.Lock()
 	turn := session.activeLocalTurn
+	// After /compact the CLI sends the last kept assistant message again.
+	duplicate := message.UUID != "" && session.seenAssistant[message.UUID]
+	if message.UUID != "" {
+		session.seenAssistant[message.UUID] = true
+	}
 	h.mu.Unlock()
+	// A failed API request comes as an assistant message whose text is the
+	// error; the failed result carries the same error for the turn.
+	if duplicate || message.Error != "" && message.Error != "max_output_tokens" {
+		return
+	}
 	for _, block := range api.Content {
 		switch block.Type {
 		case "text", "thinking":
@@ -369,22 +458,20 @@ func (h *Instance) handleUserMessage(session *claudeSession, message sdkMessage)
 		}
 		h.mu.Lock()
 		state := session.toolStates[block.ToolUseID]
-		if state == nil || state.itemKind == "" {
+		if state == nil {
 			h.mu.Unlock()
 			continue
 		}
-		output, attachments := toolResultContent(block.Content)
-		status := provider.ItemStatusCompleted
-		if block.IsError {
-			status = provider.ItemStatusFailed
-			state.call.Error = boundedOutput(output)
-		} else {
-			state.call.Output = boundedOutput(output)
+		if state.itemKind == "" {
+			changed := !block.IsError && session.tasks.apply(state.call.ProviderKind, state.input, message.ToolUseResult)
+			entries := session.tasks.entries()
+			h.mu.Unlock()
+			if changed {
+				h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnPlanUpdated, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{PlanEntries: entries}})
+			}
+			continue
 		}
-		if len(attachments) > 0 {
-			state.call.Attachments = append(state.call.Attachments, attachments...)
-		}
-		state.completed = true
+		status := state.applyResult(block, message.ToolUseResult)
 		call := state.call
 		kind := state.itemKind
 		title := state.title
@@ -409,12 +496,19 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 		session.endTurnLocked()
 	}
 	session.resetStreamStateLocked()
-	usage := tokenUsageFromResult(result)
+	usage := tokenUsageFromResult(result, session.activeModel)
 	if usage != nil {
 		if usage.MaxTokens > 0 {
 			session.contextWindow = usage.MaxTokens
 		} else {
 			usage.MaxTokens = session.contextWindow
+		}
+		// A local command (/context, /model) makes no API request, so its
+		// result reports no usage while the context is unchanged.
+		if usage.UsedTokens > 0 {
+			session.contextTokens = usage.UsedTokens
+		} else {
+			usage.UsedTokens = session.contextTokens
 		}
 		session.costUSD = usage.Cost
 	}
@@ -427,6 +521,7 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 	if usage != nil {
 		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadTokenUsage, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TokenUsage: usage}})
 	}
+	h.publishTitle(session)
 	if continues {
 		return
 	}
@@ -459,17 +554,18 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		requestID:        "claude:" + requestID,
 		localThread:      session.localThreadID,
 		localTurn:        turn,
-		toolName:         request.ToolName,
 		input:            append(json.RawMessage(nil), request.Input...),
 		suggestions:      request.PermissionSuggestions,
 		client:           proc.client,
 	}
 	detail := approvalDetail(request)
-	options := []provider.ApprovalOption{
-		{ID: "accept", Name: "Allow once", Kind: "allow_once"},
-		{ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"},
-		{ID: "decline", Name: "Decline", Kind: "reject_once"},
+	// Like the CLI, offer a lasting approval only with a rule to approve:
+	// its suggestions, unless it says this request must not get one.
+	options := []provider.ApprovalOption{{ID: "accept", Name: "Allow once", Kind: "allow_once"}}
+	if len(request.PermissionSuggestions) > 0 && !request.SuppressAlwaysAllowRule {
+		options = append(options, provider.ApprovalOption{ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"})
 	}
+	options = append(options, provider.ApprovalOption{ID: "decline", Name: "Decline", Kind: "reject_once"})
 	pending.requestType = approvalRequestType(request.ToolName)
 	var userInput *provider.UserInputRequest
 	switch request.ToolName {
@@ -592,5 +688,31 @@ func (h *Instance) cancelApprovalsForClient(client *streamClient) {
 	h.mu.Unlock()
 	for _, pending := range resolved {
 		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
+	}
+}
+
+// publishTitle shows the session's title once it has one. The CLI streams no
+// title; it writes the user's /rename and its own generated title to the
+// transcript, so the transcript is read after each result.
+func (h *Instance) publishTitle(session *claudeSession) {
+	h.mu.Lock()
+	sessionID := session.nativeSessionID
+	h.mu.Unlock()
+	path, err := h.findTranscript(sessionID)
+	if err != nil {
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	title := transcriptTitle(file)
+	_ = file.Close()
+	h.mu.Lock()
+	changed := title != "" && title != session.title
+	session.title = title
+	h.mu.Unlock()
+	if changed {
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: session.localThreadID, Payload: provider.RuntimeEventPayload{Title: title}})
 	}
 }

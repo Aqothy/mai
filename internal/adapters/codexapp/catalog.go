@@ -56,6 +56,13 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	// like the catalog refresh above, so a transient skills/list failure does
 	// not make the draft's model/configuration controls unavailable.
 	skills, _ := h.listSkills(ctx, []string{cwd})
+	// The draft starts from the permissions the user's Codex configuration
+	// gives a thread in cwd.
+	permissions := customPermissions
+	var effective configReadResponse
+	if err := h.rpc.call(ctx, "config/read", map[string]any{"cwd": cwd}, &effective); err == nil && effective.Config.SandboxMode != nil {
+		permissions = permissionsFor(effective.Config.ApprovalPolicy, *effective.Config.SandboxMode)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	selectedModel := ""
@@ -68,9 +75,9 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	if selectedModel == "" && len(h.models) > 0 {
 		selectedModel = h.models[0].Model
 	}
-	options := configOptionsFromModels(h.models, selectedModel, "", "")
+	options := append(configOptionsFromModels(h.models, selectedModel, "", ""), permissionsOption(permissions))
 	handle := fmt.Sprintf("codex-options-%d", time.Now().UnixNano())
-	h.options[handle] = &optionsState{selectedModel: selectedModel, callbacks: callbacks}
+	h.options[handle] = &optionsState{selectedModel: selectedModel, permissions: permissions, callbacks: callbacks}
 	return provider.OptionsSession{
 		Handle:        handle,
 		ConfigOptions: append([]provider.ConfigOption(nil), options...),
@@ -93,6 +100,7 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 	selectedModel := state.selectedModel
 	selectedEffort := state.selectedEffort
 	selectedTier := state.selectedTier
+	permissions := state.permissions
 	switch optionID {
 	case "model":
 		selectedModel = text
@@ -100,11 +108,17 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 		selectedEffort = text
 	case "service_tier":
 		selectedTier = text
+	case permissionsOptionID:
+		if _, ok := permissionPresetByID(text); !ok {
+			h.mu.Unlock()
+			return nil, fmt.Errorf("Codex option %q does not accept value %q", optionID, text)
+		}
+		permissions = text
 	default:
 		h.mu.Unlock()
 		return nil, fmt.Errorf("Codex option %q is not supported", optionID)
 	}
-	options := configOptionsFromModels(h.models, selectedModel, selectedEffort, selectedTier)
+	options := append(configOptionsFromModels(h.models, selectedModel, selectedEffort, selectedTier), permissionsOption(permissions))
 	current, present := provider.CurrentConfigString(options, optionID)
 	if !present || current != text {
 		h.mu.Unlock()
@@ -113,6 +127,7 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 	state.selectedModel, _ = provider.CurrentConfigString(options, "model")
 	state.selectedEffort, _ = provider.CurrentConfigString(options, "reasoning_effort")
 	state.selectedTier, _ = provider.CurrentConfigString(options, "service_tier")
+	state.permissions = permissions
 	optionsSnapshot := append([]provider.ConfigOption(nil), options...)
 	callback := state.callbacks.Updated
 	h.mu.Unlock()

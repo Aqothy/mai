@@ -23,7 +23,8 @@ func TestNewToolState(t *testing.T) {
 				state.call.Changes[0] == provider.FileChange{Path: "/tmp/a.go", Kind: provider.FileChangeUpdate, OldText: "x", NewText: "y"}
 		}},
 		{"write", "Write", `{"file_path":"/tmp/b.go","content":"data"}`, func(state toolState) bool {
-			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == provider.FileChangeAdd && state.call.Changes[0].NewText == "data"
+			// Create or update is known only from the result.
+			return len(state.call.Changes) == 1 && state.call.Changes[0].Kind == "" && state.call.Changes[0].NewText == "data"
 		}},
 		{"mcp", "mcp__github__list_issues", ``, func(state toolState) bool {
 			return state.itemKind == provider.ItemKindMCPToolCall && state.call.Namespace == "github" && state.call.Name == "list_issues" && state.title == "github · list_issues"
@@ -54,6 +55,26 @@ func TestNewToolStateActions(t *testing.T) {
 		if got := newToolState(tool, nil).call.Action; got != want {
 			t.Errorf("newToolState(%q) action = %q, want %q", tool, got, want)
 		}
+	}
+}
+
+// File edits take the patch the CLI applied from the tool's structured
+// result: line-numbered hunks for an edit, and an added file for a Write that
+// created one.
+func TestApplyResultUsesTheAppliedPatch(t *testing.T) {
+	edit := newToolState("Edit", json.RawMessage(`{"file_path":"/tmp/a.go","old_string":"x","new_string":"y"}`))
+	status := edit.applyResult(contentBlock{Type: "tool_result", Content: json.RawMessage(`"ok"`)}, json.RawMessage(`{"structuredPatch":[{"oldStart":12,"oldLines":1,"newStart":12,"newLines":1,"lines":["-x","+y"]}]}`))
+	if status != provider.ItemStatusCompleted || edit.call.Changes[0] != (provider.FileChange{Path: "/tmp/a.go", Kind: provider.FileChangeUpdate, Diff: "@@ -12,1 +12,1 @@\n-x\n+y\n"}) {
+		t.Fatalf("edit = %v %#v", status, edit.call.Changes[0])
+	}
+	write := newToolState("Write", json.RawMessage(`{"file_path":"/tmp/b.go","content":"data\n"}`))
+	write.applyResult(contentBlock{Type: "tool_result"}, json.RawMessage(`{"type":"create","content":"data\n","structuredPatch":[]}`))
+	if change := write.call.Changes[0]; change.Kind != provider.FileChangeAdd || change.Diff != "@@ -0,0 +1,1 @@\n+data\n" {
+		t.Fatalf("write = %#v", change)
+	}
+	failed := newToolState("Edit", json.RawMessage(`{"file_path":"/tmp/a.go","old_string":"x","new_string":"y"}`))
+	if status := failed.applyResult(contentBlock{Type: "tool_result", IsError: true, Content: json.RawMessage(`"no match"`)}, nil); status != provider.ItemStatusFailed || failed.call.Error != "no match" || failed.call.Changes[0].Diff != "" {
+		t.Fatalf("failed edit = %v %#v", status, failed.call)
 	}
 }
 
@@ -107,8 +128,9 @@ func TestTokenUsageFromResult(t *testing.T) {
 	usage := tokenUsageFromResult(resultMessage{
 		TotalCostUSD: 0.5,
 		Usage:        json.RawMessage(`{"input_tokens":1,"cache_read_input_tokens":2,"cache_creation_input_tokens":3,"output_tokens":4,"iterations":[{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"output_tokens":40}]}`),
-		ModelUsage:   map[string]modelUsage{"claude-x": {ContextWindow: 200000}},
-	})
+		// A subagent on another model must not set the session's window.
+		ModelUsage: map[string]modelUsage{"claude-x": {ContextWindow: 200000}, "claude-sub": {ContextWindow: 1000000}},
+	}, "claude-x")
 	if usage == nil {
 		t.Fatal("usage = nil")
 	}
@@ -151,7 +173,6 @@ func TestUserContentBlocks(t *testing.T) {
 
 func TestPermissionResponseDecisions(t *testing.T) {
 	pending := &pendingApproval{
-		toolName:    "Bash",
 		input:       json.RawMessage(`{"command":"echo hi"}`),
 		suggestions: []json.RawMessage{json.RawMessage(`{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"echo *"}],"behavior":"allow","destination":"localSettings"}`)},
 	}
@@ -176,11 +197,11 @@ func TestPermissionResponseDecisions(t *testing.T) {
 		t.Fatalf("cancel payload = %#v", payload)
 	}
 
-	// Without CLI suggestions, session approval falls back to a tool rule.
-	payload, _ = permissionResponse(&pendingApproval{toolName: "mcp__github__list_issues", input: json.RawMessage(`{}`)}, "acceptForSession")
-	updates = payload["updatedPermissions"].([]map[string]any)
-	if len(updates) != 1 || updates[0]["type"] != "addRules" || updates[0]["destination"] != "session" {
-		t.Fatalf("updates = %#v, want session addRules fallback", updates)
+	// Without CLI suggestions there is no rule to approve: the CLI ignores a
+	// made-up whole-tool rule, so none is sent.
+	payload, _ = permissionResponse(&pendingApproval{input: json.RawMessage(`{}`)}, "acceptForSession")
+	if updates := payload["updatedPermissions"].([]map[string]any); len(updates) != 0 {
+		t.Fatalf("updates = %#v, want none", updates)
 	}
 }
 
@@ -196,7 +217,7 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 	if err := json.Unmarshal(input, &question); err != nil {
 		t.Fatal(err)
 	}
-	pending := &pendingApproval{toolName: "AskUserQuestion", input: input, question: &question}
+	pending := &pendingApproval{input: input, question: &question}
 	respond := func(answers map[string][]string) (map[string]any, error) {
 		payload, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: answers})
 		return payload, err
@@ -234,7 +255,7 @@ func TestElicitationResponse(t *testing.T) {
 }
 
 func TestMungeProjectPath(t *testing.T) {
-	if got := mungeProjectPath("/private/tmp/claude-proto-test"); got != "-private-tmp-claude-proto-test" {
+	if got := sanitizePath("/private/tmp/claude-proto-test"); got != "-private-tmp-claude-proto-test" {
 		t.Fatalf("munge = %q", got)
 	}
 }

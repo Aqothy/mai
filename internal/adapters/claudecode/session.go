@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters/procgroup"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -45,7 +44,7 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	var replay []provider.RuntimeEvent
 	historyUnavailable := false
 	if input.ReplayHistory {
-		transcript, err := h.readTranscript(session.cwd, nativeID)
+		transcript, err := h.readTranscript(nativeID)
 		if err != nil {
 			historyUnavailable = true
 		} else {
@@ -115,8 +114,14 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 		// Enables bypassPermissions as a selectable mode without turning it
 		// on: the mode still has to be chosen explicitly by the user.
 		"--allow-dangerously-skip-permissions",
+		// Newer models omit thinking text unless summaries are requested.
+		// This only sets how thinking is shown; whether the model thinks is
+		// still the user's setting.
+		"--thinking-display", "summarized",
 	}
-	if resume && h.transcriptExists(session.cwd, session.nativeSessionID) {
+	// Resuming a session that never ran fails: it has no transcript yet.
+	resume = resume && h.hasTranscript(session.nativeSessionID)
+	if resume {
 		extra = append(extra, "--resume", session.nativeSessionID)
 	} else {
 		extra = append(extra, "--session-id", session.nativeSessionID)
@@ -129,8 +134,10 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 	if effort := strings.TrimSpace(session.effort); effort != "" && effort != "default" {
 		extra = append(extra, "--effort", effort)
 	}
-	if mode := launchPermissionMode(session.permissionMode); mode != "" {
-		extra = append(extra, "--permission-mode", mode)
+	// Without a selection the CLI starts in the user's configured default
+	// mode, which initialize reports below.
+	if validPermissionMode(session.permissionMode) {
+		extra = append(extra, "--permission-mode", session.permissionMode)
 	}
 	for _, dir := range session.additionalDirs {
 		if strings.TrimSpace(dir) != "" {
@@ -138,28 +145,17 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 		}
 	}
 
-	command := h.buildCommand(session.cwd, extra)
-	stdin, err := command.StdinPipe()
+	process, client, err := h.startCLI(session.cwd, extra)
 	if err != nil {
-		return fmt.Errorf("open Claude Code stdin: %w", err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("open Claude Code stdout: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
 		return fmt.Errorf("start Claude Code CLI: %w", err)
 	}
-	proc := &sessionProcess{cmd: command, stdin: stdin, effort: session.effort, done: make(chan struct{})}
-	proc.client = newStreamClient(stdout, stdin)
+	proc := &sessionProcess{process: process, client: client, done: make(chan struct{})}
 	proc.client.onMessage = func(message sdkMessage) { h.handleMessage(session, proc, message) }
 	proc.client.onControlRequest = func(requestID string, request controlRequestBody, raw json.RawMessage) {
 		h.handleControlRequest(session, proc, requestID, request, raw)
 	}
 	proc.client.onControlCancel = func(requestID string) { h.handleControlCancel(requestID) }
+	proc.client.start()
 	h.mu.Lock()
 	session.proc = proc
 	h.mu.Unlock()
@@ -180,21 +176,18 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 		h.models = initResponse.Models
 	}
 	h.updateAccountLocked(initResponse.Account)
-	h.mu.Unlock()
-	// An explicit "default" mode selection cannot ride the launch flag; apply
-	// it through the control protocol instead.
-	if session.permissionMode == "default" {
-		_ = proc.client.control(ctx, map[string]any{"subtype": "set_permission_mode", "mode": "default"}, nil)
+	if validPermissionMode(initResponse.CurrentPermissionMode) {
+		session.permissionMode = initResponse.CurrentPermissionMode
 	}
+	h.mu.Unlock()
 	return nil
 }
 
 func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
-	err := proc.cmd.Wait()
+	// Deliver what the CLI wrote before exiting, such as the result or the
+	// error that ends its turn, while it is still the session's process.
+	proc.process.Drain(proc.client.done, drainTimeout)
 	h.mu.Lock()
-	proc.reaped = true
-	killed := proc.killedTree
-	proc.killedTree = true
 	closing := proc.closing
 	var endedTurn string
 	if session.proc == proc {
@@ -204,10 +197,7 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 		session.resetStreamStateLocked()
 	}
 	h.mu.Unlock()
-	if !killed {
-		procgroup.Kill(proc.cmd)
-	}
-	proc.client.fail(firstError(err, io.EOF))
+	proc.client.fail(firstError(proc.process.Err(), io.EOF))
 	h.cancelApprovalsForClient(proc.client)
 	// The process is gone, so no result will end its turn. Settle it here on
 	// every exit path, deliberate stops included, before stopProcess returns.
@@ -221,8 +211,8 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	close(proc.done)
 }
 
-// stopProcess tears down a session's CLI process if one is running and
-// returns once waitProcess has retired it.
+// stopProcess stops a session's CLI process if one is running, letting it
+// exit on its own first, and returns once waitProcess has retired it.
 func (h *Instance) stopProcess(session *claudeSession) {
 	h.mu.Lock()
 	proc := session.proc
@@ -231,15 +221,8 @@ func (h *Instance) stopProcess(session *claudeSession) {
 		return
 	}
 	proc.closing = true
-	shouldKill := !proc.reaped && !proc.killedTree
-	if shouldKill {
-		proc.killedTree = true
-	}
 	h.mu.Unlock()
-	_ = proc.stdin.Close()
-	if shouldKill {
-		procgroup.Kill(proc.cmd)
-	}
+	proc.process.Stop(stopGrace)
 	<-proc.done
 }
 
@@ -258,14 +241,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	}
 	proc := session.proc
 	model := session.model
-	// Effort is a launch flag with no in-session control message: an idle
-	// process launched with another effort is relaunched for this turn.
-	relaunch := proc != nil && proc.effort != session.effort && session.activeLocalTurn == ""
 	h.mu.Unlock()
-	if relaunch {
-		h.stopProcess(session)
-		proc = nil
-	}
 	if proc == nil {
 		if err := h.spawnProcess(ctx, session, true); err != nil {
 			return err
@@ -436,11 +412,22 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 		h.mu.Lock()
 		options := h.configOptionsLocked(session.model, value, session.permissionMode)
 		current, present := provider.CurrentConfigString(options, "effort")
+		proc := session.proc
+		h.mu.Unlock()
 		if !present || current != value {
-			h.mu.Unlock()
 			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)
 		}
-		// Applied when the next turn starts (see SendTurn).
+		if proc != nil {
+			// A null effortLevel returns to the model's default effort.
+			var level any = value
+			if value == "default" {
+				level = nil
+			}
+			if err := proc.client.control(ctx, map[string]any{"subtype": "apply_flag_settings", "settings": map[string]any{"effortLevel": level}}, nil); err != nil {
+				return err
+			}
+		}
+		h.mu.Lock()
 		session.effort = value
 		h.mu.Unlock()
 	case "permission_mode":
@@ -542,17 +529,6 @@ func modelEffortAndMode(selection *provider.ModelSelection, selections []provide
 		}
 	}
 	return model, effort, mode
-}
-
-// launchPermissionMode maps a selected mode to a value the --permission-mode
-// launch flag accepts. "default" is control-protocol-only and returns "".
-func launchPermissionMode(mode string) string {
-	switch mode {
-	case "acceptEdits", "auto", "bypassPermissions", "plan", "dontAsk":
-		return mode
-	default:
-		return ""
-	}
 }
 
 func validPermissionMode(mode string) bool {

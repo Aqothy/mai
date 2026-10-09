@@ -2,12 +2,14 @@ package claudecode
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,345 +17,115 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-var sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F-]{8,64}$`)
+// REPLAY_PLACEHOLDER
 
-// mungeProjectPath mirrors the CLI's project directory encoding: every
-// non-alphanumeric character becomes '-'.
-func mungeProjectPath(cwd string) string {
-	var builder strings.Builder
-	for _, r := range cwd {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			builder.WriteRune(r)
-		} else {
-			builder.WriteByte('-')
-		}
-	}
-	return builder.String()
-}
+// transcriptTailBytes is how much of a transcript's end is read for its
+// title, which the CLI appends as the session goes on.
+const transcriptTailBytes = 256 << 10
 
-func (h *Instance) projectDir(cwd string) string {
-	configDir := h.configDir()
-	if configDir == "" || cwd == "" {
-		return ""
-	}
-	return filepath.Join(configDir, "projects", mungeProjectPath(cwd))
-}
-
-func (h *Instance) transcriptPath(cwd, sessionID string) string {
-	dir := h.projectDir(cwd)
-	if dir == "" || !sessionIDPattern.MatchString(sessionID) {
-		return ""
-	}
-	return filepath.Join(dir, sessionID+".jsonl")
-}
-
-func (h *Instance) transcriptExists(cwd, sessionID string) bool {
-	path := h.transcriptPath(cwd, sessionID)
-	if path == "" {
-		return false
-	}
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-// findTranscript locates a transcript by session id across all project dirs.
-func (h *Instance) findTranscript(sessionID string) (string, error) {
-	if !sessionIDPattern.MatchString(sessionID) {
-		return "", fmt.Errorf("invalid Claude Code session id %q", sessionID)
-	}
-	configDir := h.configDir()
-	if configDir == "" {
-		return "", fmt.Errorf("Claude Code config directory is unavailable")
-	}
-	projects := filepath.Join(configDir, "projects")
-	entries, err := os.ReadDir(projects)
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(projects, entry.Name(), sessionID+".jsonl")
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("Claude Code session %q has no transcript", sessionID)
-}
-
-func (h *Instance) readTranscript(cwd, sessionID string) ([]transcriptLine, error) {
-	path := h.transcriptPath(cwd, sessionID)
-	if path == "" || !h.transcriptExists(cwd, sessionID) {
-		found, err := h.findTranscript(sessionID)
-		if err != nil {
-			return nil, err
-		}
-		path = found
-	}
-	return readTranscriptFile(path)
-}
-
-func readTranscriptFile(path string) ([]transcriptLine, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
-	var lines []transcriptLine
-	for scanner.Scan() {
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
-		var line transcriptLine
-		if json.Unmarshal(raw, &line) != nil {
-			continue
-		}
-		lines = append(lines, line)
-	}
-	return lines, scanner.Err()
-}
-
-// replayEventsFromTranscript rebuilds the canonical event stream from a
-// persisted transcript. Event ids are deterministic and timestamps are nudged
-// by microsecond offsets so ordering is stable, mirroring codexapp replay.
-func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provider.RuntimeEvent {
-	events := make([]provider.RuntimeEvent, 0, len(lines))
-	type replayTool struct {
-		state  *toolState
-		turnID string
-		at     time.Time
-	}
-	pendingTools := make(map[string]*replayTool)
-	currentTurn := ""
-	title := ""
-	var lastAt time.Time
-	offset := 0
-
-	nextAt := func(stamp string) time.Time {
-		offset++
-		if parsed, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
-			lastAt = parsed
-			return parsed
-		}
-		return lastAt.Add(time.Duration(offset) * time.Microsecond)
-	}
-	eventID := func(turn, item, suffix string) provider.RuntimeEventID {
-		return provider.RuntimeEventID("claude:replay:" + turn + ":" + item + ":" + suffix)
-	}
-	closeTurn := func(at time.Time) {
-		if currentTurn == "" {
-			return
-		}
-		events = append(events, provider.RuntimeEvent{
-			EventID: eventID(currentTurn, "", "turn-completed"), Type: provider.RuntimeEventTurnCompleted,
-			Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, CreatedAt: at.Add(time.Nanosecond),
-			Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted},
-		})
-		currentTurn = ""
-	}
-
-	for _, line := range lines {
-		if line.IsSidechain || line.IsMeta {
-			continue
-		}
-		switch line.Type {
-		case "ai-title":
-			title = line.AITitle
-		case "user":
-			var api userAPIMessage
-			if json.Unmarshal(line.Message, &api) != nil {
-				continue
-			}
-			blocks, text := api.blocks()
-			hasToolResult := false
-			for _, block := range blocks {
-				if block.Type == "tool_result" {
-					hasToolResult = true
-					pending := pendingTools[block.ToolUseID]
-					if pending == nil || pending.state.itemKind == "" {
-						continue
-					}
-					at := nextAt(line.Timestamp)
-					output, attachments := toolResultContent(block.Content)
-					status := provider.ItemStatusCompleted
-					if block.IsError {
-						status = provider.ItemStatusFailed
-						pending.state.call.Error = boundedOutput(output)
-					} else {
-						pending.state.call.Output = boundedOutput(output)
-					}
-					pending.state.call.Attachments = append(pending.state.call.Attachments, attachments...)
-					call := pending.state.call
-					events = append(events, provider.RuntimeEvent{
-						EventID: eventID(pending.turnID, block.ToolUseID, "completed"), Type: provider.RuntimeEventItemCompleted,
-						Provider: DriverKind, ThreadID: threadID, TurnID: pending.turnID, ItemID: block.ToolUseID, CreatedAt: at,
-						Payload: provider.RuntimeEventPayload{ItemType: pending.state.itemKind, ItemStatus: status, Title: pending.state.title, ToolCall: &call},
-					})
-					delete(pendingTools, block.ToolUseID)
-				}
-			}
-			if hasToolResult {
-				continue
-			}
-			promptText := text
-			var attachments []provider.Attachment
-			for _, block := range blocks {
-				switch block.Type {
-				case "text":
-					if promptText != "" {
-						promptText += "\n"
-					}
-					promptText += block.Text
-				case "image":
-					if block.Source != nil {
-						attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentImage, MimeType: block.Source.MediaType, Data: block.Source.Data})
-					}
-				}
-			}
-			if strings.TrimSpace(promptText) == "" && len(attachments) == 0 {
-				continue
-			}
-			at := nextAt(line.Timestamp)
-			closeTurn(at)
-			currentTurn = firstNonEmpty(line.UUID, fmt.Sprintf("turn-%d", offset))
-			events = append(events, provider.RuntimeEvent{
-				EventID: eventID(currentTurn, "", "turn-started"), Type: provider.RuntimeEventTurnStarted,
-				Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, CreatedAt: at,
-			})
-			events = append(events, provider.RuntimeEvent{
-				EventID: eventID(currentTurn, currentTurn, "user"), Type: provider.RuntimeEventItemCompleted,
-				Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, ItemID: "user:" + currentTurn, CreatedAt: at.Add(time.Nanosecond),
-				Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: promptText, Attachments: attachments},
-			})
-		case "assistant":
-			if currentTurn == "" {
-				continue
-			}
-			var api apiMessage
-			if json.Unmarshal(line.Message, &api) != nil {
-				continue
-			}
-			at := nextAt(line.Timestamp)
-			for index, block := range api.Content {
-				itemID := fmt.Sprintf("%s:%d", firstNonEmpty(line.UUID, api.ID), index)
-				blockAt := at.Add(time.Duration(index) * time.Microsecond)
-				switch block.Type {
-				case "text":
-					if block.Text == "" {
-						continue
-					}
-					events = append(events, provider.RuntimeEvent{
-						EventID: eventID(currentTurn, itemID, "content"), Type: provider.RuntimeEventContentDelta,
-						Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, ItemID: itemID, CreatedAt: blockAt,
-						Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: block.Text},
-					})
-					events = append(events, provider.RuntimeEvent{
-						EventID: eventID(currentTurn, itemID, "completed"), Type: provider.RuntimeEventItemCompleted,
-						Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, ItemID: itemID, CreatedAt: blockAt.Add(time.Nanosecond),
-						Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindAssistantMessage, ItemStatus: provider.ItemStatusCompleted},
-					})
-				case "thinking":
-					if block.Thinking == "" {
-						continue
-					}
-					events = append(events, provider.RuntimeEvent{
-						EventID: eventID(currentTurn, itemID, "content"), Type: provider.RuntimeEventContentDelta,
-						Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, ItemID: itemID, CreatedAt: blockAt,
-						Payload: provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: block.Thinking},
-					})
-				case "tool_use":
-					state := newToolState(block.Name, block.Input)
-					if state.itemKind == "" {
-						if entries := planEntriesFromInput(block.Input); entries != nil {
-							events = append(events, provider.RuntimeEvent{
-								EventID: eventID(currentTurn, itemID, "plan"), Type: provider.RuntimeEventTurnPlanUpdated,
-								Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, CreatedAt: blockAt,
-								Payload: provider.RuntimeEventPayload{PlanEntries: entries},
-							})
-						}
-						continue
-					}
-					call := state.call
-					events = append(events, provider.RuntimeEvent{
-						EventID: eventID(currentTurn, block.ID, "started"), Type: provider.RuntimeEventItemStarted,
-						Provider: DriverKind, ThreadID: threadID, TurnID: currentTurn, ItemID: block.ID, CreatedAt: blockAt,
-						Payload: provider.RuntimeEventPayload{ItemType: state.itemKind, ItemStatus: provider.ItemStatusInProgress, Title: state.title, ToolCall: &call},
-					})
-					pendingTools[block.ID] = &replayTool{state: state, turnID: currentTurn, at: blockAt}
-				}
-			}
-		}
-	}
-	// Tools with no recorded result were cut off mid-flight.
-	for id, pending := range pendingTools {
-		call := pending.state.call
-		events = append(events, provider.RuntimeEvent{
-			EventID: eventID(pending.turnID, id, "completed"), Type: provider.RuntimeEventItemCompleted,
-			Provider: DriverKind, ThreadID: threadID, TurnID: pending.turnID, ItemID: id, CreatedAt: pending.at.Add(time.Millisecond),
-			Payload: provider.RuntimeEventPayload{ItemType: pending.state.itemKind, ItemStatus: provider.ItemStatusInterrupted, Title: pending.state.title, ToolCall: &call},
-		})
-	}
-	closeTurn(lastAt.Add(time.Duration(offset+1) * time.Microsecond))
-	if title != "" {
-		events = append(events, provider.RuntimeEvent{
-			EventID: provider.RuntimeEventID("claude:replay:title"), Type: provider.RuntimeEventThreadMetadataUpdate,
-			Provider: DriverKind, ThreadID: threadID, CreatedAt: lastAt.Add(time.Duration(offset+2) * time.Microsecond),
-			Payload: provider.RuntimeEventPayload{Title: title},
-		})
-	}
-	return events
-}
-
-// transcriptSummary extracts the display title and cwd cheaply: the first
-// prompt and metadata live in the head of the file; a generated ai-title line
-// may appear anywhere in the first few hundred lines.
+// transcriptSummary extracts a session's title and cwd cheaply, as the SDK's
+// listSessions does: the cwd and first prompt live in the head of the file,
+// the title in its tail. A session without a title is titled by its first
+// prompt.
 func transcriptSummary(path string) (title, cwd string) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", ""
 	}
 	defer file.Close()
+	firstPrompt := ""
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
-	firstPrompt := ""
-	for count := 0; scanner.Scan() && count < 400; count++ {
+	for count := 0; scanner.Scan() && count < 400 && (cwd == "" || firstPrompt == ""); count++ {
 		var line transcriptLine
 		if json.Unmarshal(scanner.Bytes(), &line) != nil {
 			continue
 		}
-		if line.AITitle != "" {
-			title = line.AITitle
+		cwd = firstNonEmpty(cwd, line.Cwd)
+		if firstPrompt == "" {
+			firstPrompt = provider.PromptPreviewTitle(promptText(line))
 		}
-		if cwd == "" && line.Cwd != "" {
-			cwd = line.Cwd
+	}
+	return firstNonEmpty(transcriptTitle(file), firstPrompt), cwd
+}
+
+// transcriptTitle is the session's title: the latest one the user chose
+// (/rename, or a rename in maiD), else the latest the CLI generated.
+func transcriptTitle(file *os.File) string {
+	info, err := file.Stat()
+	if err != nil {
+		return ""
+	}
+	if _, err := file.Seek(max(info.Size()-transcriptTailBytes, 0), io.SeekStart); err != nil {
+		return ""
+	}
+	customTitle, aiTitle := "", ""
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
+	for scanner.Scan() {
+		var line transcriptLine
+		// The first line of a mid-file tail is partial and fails to decode.
+		if json.Unmarshal(scanner.Bytes(), &line) == nil {
+			customTitle = firstNonEmpty(line.CustomTitle, customTitle)
+			aiTitle = firstNonEmpty(line.AITitle, aiTitle)
 		}
-		if firstPrompt == "" && line.Type == "user" && !line.IsMeta && !line.IsSidechain {
-			var api userAPIMessage
-			if json.Unmarshal(line.Message, &api) == nil {
-				blocks, text := api.blocks()
-				if text == "" {
-					for _, block := range blocks {
-						if block.Type == "text" && block.Text != "" {
-							text = block.Text
-							break
-						}
-					}
-				}
-				firstPrompt = provider.PromptPreviewTitle(text)
+	}
+	return firstNonEmpty(customTitle, aiTitle)
+}
+
+// promptText is the prompt a user line shows as, or "" when it is not one.
+func promptText(line transcriptLine) string {
+	if line.Type != "user" || line.IsSidechain {
+		return ""
+	}
+	var api userAPIMessage
+	if json.Unmarshal(line.Message, &api) != nil {
+		return ""
+	}
+	blocks, text := api.blocks()
+	for _, block := range blocks {
+		if block.Type == "tool_result" {
+			return ""
+		}
+	}
+	prompt := classifyUserLine(line, blocks, text)
+	if prompt.kind != userLinePrompt {
+		return ""
+	}
+	return prompt.text
+}
+
+// promptContent is the text and images of a user prompt, given as content
+// blocks or as plain text.
+func promptContent(blocks []contentBlock, text string) (string, []provider.Attachment) {
+	var attachments []provider.Attachment
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			if text != "" {
+				text += "\n"
+			}
+			text += block.Text
+		case "image":
+			if block.Source != nil {
+				attachments = append(attachments, provider.Attachment{Kind: provider.AttachmentImage, MimeType: block.Source.MediaType, Data: block.Source.Data})
 			}
 		}
-		if title != "" && cwd != "" && firstPrompt != "" {
-			break
-		}
 	}
-	if title == "" {
-		title = firstPrompt
+	return text, attachments
+}
+
+// steeredPrompt returns the prompt of a queued_command attachment the user
+// sent, as opposed to commands the CLI queues itself (task notifications).
+func steeredPrompt(item *transcriptItem) (string, []provider.Attachment, bool) {
+	if item == nil || item.Type != "queued_command" || item.CommandMode != "prompt" || !item.Origin.fromUser() {
+		return "", nil, false
 	}
-	return title, cwd
+	text, attachments := promptContent(userAPIMessage{Content: item.Prompt}.blocks())
+	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
+		return "", nil, false
+	}
+	return text, attachments, true
 }
 
 func (h *Instance) ListSessions(_ context.Context, cwd string) ([]provider.SessionSummary, error) {
@@ -431,7 +203,11 @@ func (h *Instance) DeleteSession(_ context.Context, sessionID string) error {
 		delete(h.localByNative, sessionID)
 		h.mu.Unlock()
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	// Subagent transcripts live in a sibling <session id>/ directory.
+	return os.RemoveAll(filepath.Join(filepath.Dir(path), sessionID))
 }
 
 func (h *Instance) CloseSession(_ context.Context, sessionID string) error {
@@ -454,8 +230,10 @@ func (h *Instance) CloseSession(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// ForkSession copies the transcript under a fresh session id, rewriting the
-// per-line session id so the fork resumes independently of the original.
+// ForkSession copies the session into a new one, as the SDK's forkSession
+// does: sidechain and progress lines are dropped, every message gets a new
+// uuid with the parent chain kept, each records what it was forked from, and
+// the fork is titled after its source.
 func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
 	if input.ProviderSessionID == "" {
 		return provider.ForkSessionResult{}, fmt.Errorf("Claude Code fork requires a provider session id")
@@ -464,59 +242,177 @@ func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInpu
 	if err != nil {
 		return provider.ForkSessionResult{}, err
 	}
-	forkID := newSessionUUID()
+	title, _ := transcriptSummary(sourcePath)
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return provider.ForkSessionResult{}, err
+	}
+	forkID, lines, err := forkLines(data, input.ProviderSessionID, firstNonEmpty(title, "Forked session")+" (fork)")
+	if err != nil {
+		return provider.ForkSessionResult{}, err
+	}
 	targetPath := filepath.Join(filepath.Dir(sourcePath), forkID+".jsonl")
-	source, err := os.Open(sourcePath)
-	if err != nil {
+	if err := writeNewFile(targetPath, append(bytes.Join(lines, []byte("\n")), '\n')); err != nil {
 		return provider.ForkSessionResult{}, err
 	}
-	defer source.Close()
-	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return provider.ForkSessionResult{}, err
-	}
-	writer := bufio.NewWriter(target)
-	scanner := bufio.NewScanner(source)
-	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
-	for scanner.Scan() {
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
-		var line map[string]any
-		if json.Unmarshal(raw, &line) == nil {
-			if _, has := line["sessionId"]; has {
-				line["sessionId"] = forkID
-				if encoded, err := json.Marshal(line); err == nil {
-					raw = encoded
-				}
-			}
-		}
-		if _, err := writer.Write(append(raw, '\n')); err != nil {
-			_ = target.Close()
-			_ = os.Remove(targetPath)
-			return provider.ForkSessionResult{}, err
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		_ = target.Close()
-		_ = os.Remove(targetPath)
-		return provider.ForkSessionResult{}, err
-	}
-	if err := writer.Flush(); err != nil {
-		_ = target.Close()
-		_ = os.Remove(targetPath)
-		return provider.ForkSessionResult{}, err
-	}
-	if err := target.Close(); err != nil {
-		_ = os.Remove(targetPath)
-		return provider.ForkSessionResult{}, err
-	}
-	title, cwd := transcriptSummary(targetPath)
+	forkTitle, cwd := transcriptSummary(targetPath)
 	return provider.ForkSessionResult{Summary: provider.SessionSummary{
 		SessionID: forkID,
-		Title:     title,
+		Title:     forkTitle,
 		Cwd:       cwd,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}}, nil
+}
+
+// forkLines is the SDK's _build_fork_lines: the fork's transcript lines for
+// a source transcript, and the fork's session id. Values are kept as raw JSON
+// so message content is copied byte for byte.
+func forkLines(data []byte, sourceID, title string) (string, [][]byte, error) {
+	type entry = map[string]json.RawMessage
+	var transcript []entry
+	var replacements []json.RawMessage
+	for _, raw := range bytes.Split(data, []byte("\n")) {
+		var line entry
+		var head struct {
+			Type         string            `json:"type"`
+			UUID         string            `json:"uuid"`
+			SessionID    string            `json:"sessionId"`
+			IsSidechain  bool              `json:"isSidechain"`
+			Replacements []json.RawMessage `json:"replacements"`
+		}
+		if json.Unmarshal(raw, &line) != nil || json.Unmarshal(raw, &head) != nil {
+			continue
+		}
+		switch head.Type {
+		case "user", "assistant", "attachment", "system", "progress":
+			// Sidechains are subagent sessions with their own chains.
+			if head.UUID != "" && !head.IsSidechain {
+				transcript = append(transcript, line)
+			}
+		case "content-replacement":
+			if head.SessionID == sourceID {
+				replacements = append(replacements, head.Replacements...)
+			}
+		}
+	}
+	stringOf := func(line entry, key string) string {
+		var value string
+		_ = json.Unmarshal(line[key], &value)
+		return value
+	}
+	newUUIDs := make(map[string]string, len(transcript))
+	byUUID := make(map[string]entry, len(transcript))
+	var writable []entry
+	for _, line := range transcript {
+		id := stringOf(line, "uuid")
+		newUUIDs[id], byUUID[id] = newSessionUUID(), line
+		// Progress lines are UI-only links of the chain; the fork skips them.
+		if stringOf(line, "type") != "progress" {
+			writable = append(writable, line)
+		}
+	}
+	if len(writable) == 0 {
+		return "", nil, fmt.Errorf("Claude Code session %q has no messages to fork", sourceID)
+	}
+	forkID := newSessionUUID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	marshal := func(value any) json.RawMessage {
+		encoded, _ := json.Marshal(value)
+		return encoded
+	}
+	var lines [][]byte
+	for index, original := range writable {
+		id := stringOf(original, "uuid")
+		var parent any
+		for parentID := stringOf(original, "parentUuid"); parentID != ""; {
+			ancestor, ok := byUUID[parentID]
+			if !ok {
+				break
+			}
+			if stringOf(ancestor, "type") != "progress" {
+				parent = newUUIDs[parentID]
+				break
+			}
+			parentID = stringOf(ancestor, "parentUuid")
+		}
+		forked := make(entry, len(original)+2)
+		for key, value := range original {
+			forked[key] = value
+		}
+		for _, key := range []string{"teamName", "agentName", "slug", "sourceToolAssistantUUID"} {
+			delete(forked, key)
+		}
+		forked["uuid"] = marshal(newUUIDs[id])
+		forked["parentUuid"] = marshal(parent)
+		if logical := stringOf(original, "logicalParentUuid"); logical != "" {
+			forked["logicalParentUuid"] = marshal(newUUIDs[logical])
+		}
+		forked["sessionId"] = marshal(forkID)
+		forked["isSidechain"] = marshal(false)
+		forked["forkedFrom"] = marshal(map[string]string{"sessionId": sourceID, "messageUuid": id})
+		// The newest timestamp marks the leaf on resume.
+		if index == len(writable)-1 || len(original["timestamp"]) == 0 {
+			forked["timestamp"] = marshal(now)
+		}
+		lines = append(lines, marshal(forked))
+	}
+	if len(replacements) > 0 {
+		lines = append(lines, marshal(map[string]any{"type": "content-replacement", "sessionId": forkID, "replacements": replacements, "uuid": newSessionUUID(), "timestamp": now}))
+	}
+	lines = append(lines, marshal(map[string]any{"type": "custom-title", "sessionId": forkID, "customTitle": title, "uuid": newSessionUUID(), "timestamp": now}))
+	return forkID, lines, nil
+}
+
+// writeNewFile writes a file that must not exist yet.
+func writeNewFile(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+// RenameSession names the session as /rename does, with the custom-title
+// line the SDK's renameSession appends to the transcript. A live CLI is told
+// too, so its own title agrees. A session with no transcript yet has no
+// messages to name; its next prompt starts one.
+func (h *Instance) RenameSession(ctx context.Context, input provider.RenameSessionInput) error {
+	h.mu.Lock()
+	var proc *sessionProcess
+	if session := h.sessionsByLocal[h.localByNative[input.ProviderSessionID]]; session != nil {
+		proc = session.proc
+	}
+	h.mu.Unlock()
+	if proc != nil {
+		_ = proc.client.control(ctx, map[string]any{"subtype": "rename_session", "title": input.Title, "source": "host", "session_id": input.ProviderSessionID}, nil)
+	}
+	path, err := h.findTranscript(input.ProviderSessionID)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	line, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": input.Title, "sessionId": input.ProviderSessionID})
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(append(line, '\n')); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

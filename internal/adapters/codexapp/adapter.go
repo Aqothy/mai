@@ -4,6 +4,7 @@ package codexapp
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,8 +34,13 @@ type sessionState struct {
 	model          string
 	effort         string
 	serviceTier    string
-	skills         []provider.Skill
-	configOptions  []provider.ConfigOption
+	// permissions is the current permission preset, or customPermissions.
+	// permissionsChanged is set when the user picked a preset that the next
+	// turn/start must apply.
+	permissions        string
+	permissionsChanged bool
+	skills             []provider.Skill
+	configOptions      []provider.ConfigOption
 
 	pendingLocalTurn  string
 	nativeToLocalTurn map[string]string
@@ -65,6 +71,17 @@ type pendingApproval struct {
 	kind         pendingKind
 	// form is an elicitation's form; nil for a URL elicitation.
 	form *elicitation.Form
+	// permissions is what a permissions request asks for, granted as is.
+	permissions json.RawMessage
+	// amendments are a command approval's extra options, which also add a
+	// lasting rule, keyed by option id.
+	amendments map[string]amendment
+}
+
+// amendment is a command approval option that approves and adds a rule.
+type amendment struct {
+	reply    any
+	decision provider.ApprovalDecision
 }
 
 // pendingKind is what a server request asks, which decides its reply format.
@@ -76,6 +93,9 @@ const (
 	// pendingElicitation is an MCP server's elicitation, answered with an
 	// action and, for a form, content.
 	pendingElicitation
+	// pendingPermissions asks for more sandbox access, answered with the
+	// permissions granted and for how long.
+	pendingPermissions
 )
 
 // reply builds the server-request response for the user's answer.
@@ -93,7 +113,10 @@ func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[strin
 		}
 		return reply, action.Decision(), nil
 	}
-	// Approval options are named after the decisions they make.
+	if chosen, ok := p.amendments[input.OptionID]; ok {
+		return map[string]any{"decision": chosen.reply}, chosen.decision, nil
+	}
+	// The other options are named after the decisions they make.
 	decision := input.Decision
 	if input.OptionID != "" {
 		decision = provider.ApprovalDecision(input.OptionID)
@@ -103,6 +126,9 @@ func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[strin
 	default:
 		decision = provider.ApprovalDecisionCancel
 	}
+	if p.kind == pendingPermissions {
+		return permissionsReply(p.permissions, decision), decision, nil
+	}
 	return map[string]any{"decision": decision}, decision, nil
 }
 
@@ -111,6 +137,8 @@ func (p *pendingApproval) cancelReply() map[string]any {
 	switch p.kind {
 	case pendingElicitation:
 		return map[string]any{"action": elicitation.ActionCancel, "content": nil}
+	case pendingPermissions:
+		return permissionsReply(p.permissions, provider.ApprovalDecisionCancel)
 	default:
 		return map[string]any{"decision": "cancel"}
 	}
@@ -120,6 +148,7 @@ type optionsState struct {
 	selectedModel  string
 	selectedEffort string
 	selectedTier   string
+	permissions    string
 	callbacks      provider.OptionsSessionCallbacks
 }
 
@@ -131,30 +160,36 @@ type Instance struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	rpc    *rpcClient
+	// requestNonce is random per instance; see requestID.
+	requestNonce string
+	process      *procgroup.Process
+	rpc          *rpcClient
 
 	sessionsByLocal  map[string]*sessionState
 	localByNative    map[string]string
 	pendingApprovals map[string]*pendingApproval
 	models           []appModel
 	options          map[string]*optionsState
+	// pendingLoginID is the browser or device-code sign-in in progress.
+	pendingLoginID string
+	// requestSummaries is set when the user's Codex configuration leaves
+	// reasoning summaries to the model catalog, whose default is none.
+	requestSummaries bool
 
 	processDone     chan struct{}
 	processErr      error
 	closing         bool
 	transportClosed bool
-	// reaped/killedTree fence process-group cleanup. Once Wait has reaped the
-	// leader its pid must never be signalled later by Close, because the OS may
-	// recycle it for an unrelated process. A wrapper that exits before its real
-	// app-server child is cleaned up once from waitProcess instead.
-	reaped     bool
-	killedTree bool
-	closeOnce  sync.Once
-	closeErr   error
+	closeOnce       sync.Once
+	closeErr        error
 }
+
+// stopGrace is how long app-server gets to exit on its own once stdin
+// closes; it ends the commands it runs then, which a kill would orphan.
+const stopGrace = 5 * time.Second
+
+// drainTimeout bounds reading what an exited app-server wrote last.
+const drainTimeout = 2 * time.Second
 
 func (*Instance) ReplaysClientMessageIDs() bool { return true }
 
@@ -184,26 +219,16 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			command.Env = append(command.Env, key+"="+value)
 		}
 	}
-	procgroup.Configure(command)
-	stdin, err := command.StdinPipe()
+	process, err := procgroup.Start(command)
 	if err != nil {
-		return nil, fmt.Errorf("open Codex app-server stdin: %w", err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open Codex app-server stdout: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
 		return nil, fmt.Errorf("start %s: %w", filepath.Base(config.Command[0]), err)
 	}
 
 	h := &Instance{
-		emit:   emit,
-		logger: slog.Default().With("component", "codex-app-server", "providerInstance", spec.InstanceID),
-		cmd:    command, stdin: stdin, stdout: stdout,
+		emit:             emit,
+		logger:           slog.Default().With("component", "codex-app-server", "providerInstance", spec.InstanceID),
+		process:          process,
+		requestNonce:     rand.Text()[:8],
 		sessionsByLocal:  make(map[string]*sessionState),
 		localByNative:    make(map[string]string),
 		pendingApprovals: make(map[string]*pendingApproval),
@@ -211,13 +236,13 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		processDone:      make(chan struct{}),
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
-	h.rpc = newRPCClient(stdout, stdin)
+	h.rpc = newRPCClient(process.Stdout(), process.Stdin())
 	h.rpc.onNotification = h.handleNotification
 	h.rpc.onRequest = h.handleServerRequest
 	h.rpc.onClose = h.handleTransportClosed
 	h.info = provider.InstanceInfo{
 		InstanceID: spec.InstanceID, Name: spec.Name, Driver: DriverKind,
-		PID: command.Process.Pid, Status: provider.InstanceStatusConfigured,
+		PID: process.Pid(), Status: provider.InstanceStatusConfigured,
 		StartedAt: startedAt,
 		Capabilities: provider.Capabilities{
 			SessionList: true, SessionDelete: true, SessionClose: true,
@@ -265,6 +290,12 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	if err := h.refreshModels(ctx); err != nil {
 		h.logger.Debug("list models", "error", err)
 	}
+	var effective configReadResponse
+	if err := h.rpc.call(ctx, "config/read", map[string]any{}, &effective); err != nil {
+		h.logger.Debug("read config", "error", err)
+	} else {
+		h.requestSummaries = effective.Config.ModelReasoningSummary == nil
+	}
 	return h, nil
 }
 
@@ -277,28 +308,26 @@ func (h *Instance) Info() provider.InstanceInfo {
 }
 
 func (h *Instance) waitProcess() {
-	err := h.cmd.Wait()
+	// Let the reader deliver what app-server wrote before exiting, such as
+	// the turn completions, before cleanup is considered complete. Its close
+	// callback settles any turns app-server could no longer complete.
+	h.process.Drain(h.rpc.runDone, drainTimeout)
+	err := h.process.Err()
 	h.mu.Lock()
-	h.reaped = true
 	h.processErr = err
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
-	killed := h.killedTree
-	h.killedTree = true
 	h.mu.Unlock()
-	if !killed {
-		procgroup.Kill(h.cmd)
-	}
-	if err == nil {
-		err = io.EOF
-	}
-	h.rpc.fail(err)
+	h.rpc.fail(firstError(err, io.EOF))
 	h.cancel()
-	// Let the reader finish delivering its terminal notifications before
-	// process cleanup is considered complete. Its close callback settles any
-	// turns for which app-server could no longer send a completion.
-	<-h.rpc.runDone
 	close(h.processDone)
+}
+
+func firstError(err, fallback error) error {
+	if err != nil {
+		return err
+	}
+	return fallback
 }
 
 func (h *Instance) handleTransportClosed(err error) {
@@ -307,10 +336,6 @@ func (h *Instance) handleTransportClosed(err error) {
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
 	closing := h.closing
-	shouldKill := !h.reaped && !h.killedTree
-	if shouldKill {
-		h.killedTree = true
-	}
 	var activeTurns []provider.RuntimeEvent
 	for _, session := range h.sessionsByLocal {
 		if nativeTurn := session.activeNativeTurn; nativeTurn != "" {
@@ -334,9 +359,8 @@ func (h *Instance) handleTransportClosed(err error) {
 		session.streamed = make(map[string]streamedItem)
 	}
 	h.mu.Unlock()
-	if shouldKill {
-		procgroup.Kill(h.cmd)
-	}
+	// Without a transport the process is useless; a malformed stream ends it.
+	h.process.Kill()
 	h.cancel()
 	h.cancelPendingApprovals()
 	for _, event := range activeTurns {
@@ -349,18 +373,10 @@ func (h *Instance) Close() error {
 		h.mu.Lock()
 		intentional := h.info.Status != provider.InstanceStatusExited
 		h.closing = intentional
-		shouldKill := !h.reaped && !h.killedTree
-		if shouldKill {
-			h.killedTree = true
-		}
 		h.mu.Unlock()
 		h.cancelPendingApprovals()
 		h.cancel()
-		_ = h.stdin.Close()
-		_ = h.stdout.Close()
-		if shouldKill {
-			procgroup.Kill(h.cmd)
-		}
+		h.process.Stop(stopGrace)
 		<-h.processDone
 		h.mu.Lock()
 		if !intentional {

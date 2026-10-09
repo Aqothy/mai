@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type InstanceID string
@@ -244,6 +245,20 @@ func PromptPreviewTitle(prompt string) string {
 		return string(runes[:120])
 	}
 	return title
+}
+
+// TruncateUTF8 cuts text to at most limit bytes without splitting a rune.
+// Adapters use it to bound tool output, since every update re-emits a tool's
+// whole snapshot.
+func TruncateUTF8(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := max(limit, 0)
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 // ModelSelection is WHAT a provider instance runs (model + provider-shaped
@@ -481,6 +496,14 @@ type ForkSessionInput struct {
 	// Providers that keep a fork loaded apply them when creating it.
 	ModelSelection   *ModelSelection         `json:"-"`
 	ConfigSelections []ConfigOptionSelection `json:"-"`
+}
+
+// RenameSessionInput names the native session behind a thread after the
+// thread, so the name the user chose in maiD shows in the provider's own
+// tools too.
+type RenameSessionInput struct {
+	ProviderSessionID string `json:"-"`
+	Title             string `json:"title"`
 }
 
 type ForkSessionResult struct {

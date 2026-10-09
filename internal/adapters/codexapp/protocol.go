@@ -27,6 +27,21 @@ type threadStartResponse struct {
 	ServiceTier     string    `json:"serviceTier,omitempty"`
 	Cwd             string    `json:"cwd,omitempty"`
 	ReasoningEffort string    `json:"reasoningEffort,omitempty"`
+	// ApprovalPolicy is an AskForApproval: a string or a granular object.
+	ApprovalPolicy json.RawMessage `json:"approvalPolicy,omitempty"`
+	Sandbox        struct {
+		Type string `json:"type"`
+	} `json:"sandbox"`
+}
+
+// configReadResponse is the part of config/read's effective configuration
+// the adapter consumes.
+type configReadResponse struct {
+	Config struct {
+		ApprovalPolicy        json.RawMessage `json:"approval_policy"`
+		SandboxMode           *string         `json:"sandbox_mode"`
+		ModelReasoningSummary *string         `json:"model_reasoning_summary"`
+	} `json:"config"`
 }
 
 type threadListResponse struct {
@@ -140,6 +155,7 @@ type appItem struct {
 	Changes []appFileUpdateChange `json:"changes,omitempty"`
 
 	Server       string             `json:"server,omitempty"`
+	Name         string             `json:"name,omitempty"`
 	Tool         string             `json:"tool,omitempty"`
 	Namespace    *string            `json:"namespace,omitempty"`
 	Result       json.RawMessage    `json:"result,omitempty"`
@@ -157,6 +173,13 @@ type appItem struct {
 	Query  string        `json:"query,omitempty"`
 	Action *appWebAction `json:"action,omitempty"`
 	Path   string        `json:"path,omitempty"`
+
+	// Fragments is a hookPrompt's text, added to the prompt by hooks.
+	Fragments []struct {
+		Text string `json:"text"`
+	} `json:"fragments,omitempty"`
+	// Output is a functionCallOutput's body: text or content items.
+	Output json.RawMessage `json:"output,omitempty"`
 
 	RevisedPrompt *string `json:"revisedPrompt,omitempty"`
 	SavedPath     *string `json:"savedPath,omitempty"`
