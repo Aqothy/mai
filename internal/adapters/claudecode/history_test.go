@@ -15,6 +15,7 @@ import (
 //   - a branch the user rewound away from is gone;
 //   - parallel tool calls, written as sibling lines, are all kept;
 //   - the Task tools' results make the plan;
+//   - a background command completes in its turn when its task ends;
 //   - a steer the CLI folded in (only a queued_command attachment) joins its
 //     turn, while commands the CLI queues itself do not;
 //   - the interrupt marker ends its turn as interrupted;
@@ -39,8 +40,10 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 		`{"type":"user","uuid":"p2","parentUuid":"p1","timestamp":"2026-08-21T10:00:04Z","toolUseResult":{"task":{"id":"7","subject":"Write the test"}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tc","content":"created"}]}}`,
 		`{"type":"assistant","uuid":"p3","parentUuid":"p2","timestamp":"2026-08-21T10:00:04Z","message":{"id":"mq","role":"assistant","content":[{"type":"tool_use","id":"tu","name":"TaskUpdate","input":{"taskId":"7","status":"in_progress"}}]}}`,
 		`{"type":"user","uuid":"p4","parentUuid":"p3","timestamp":"2026-08-21T10:00:04Z","toolUseResult":{"success":true,"taskId":"7"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu","content":"updated"}]}}`,
-		`{"type":"attachment","uuid":"s1","parentUuid":"p4","timestamp":"2026-08-21T10:00:05Z","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"prompt":"also add a test"}}`,
-		`{"type":"attachment","uuid":"n1","parentUuid":"s1","timestamp":"2026-08-21T10:00:05Z","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>done</task-notification>"}}`,
+		`{"type":"assistant","uuid":"g1","parentUuid":"p4","timestamp":"2026-08-21T10:00:04Z","message":{"id":"mb","role":"assistant","content":[{"type":"tool_use","id":"bg","name":"Bash","input":{"command":"make test","run_in_background":true}}]}}`,
+		`{"type":"user","uuid":"g2","parentUuid":"g1","timestamp":"2026-08-21T10:00:04Z","toolUseResult":{"backgroundTaskId":"t9"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bg","content":"Command running in background"}]}}`,
+		`{"type":"attachment","uuid":"s1","parentUuid":"g2","timestamp":"2026-08-21T10:00:05Z","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"prompt":"also add a test"}}`,
+		`{"type":"attachment","uuid":"n1","parentUuid":"s1","timestamp":"2026-08-21T10:00:05Z","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>\n<task-id>t9</task-id>\n<tool-use-id>bg</tool-use-id>\n<status>completed</status>\n<summary>Background command &quot;make test&quot; completed</summary>\n</task-notification>"}}`,
 		`{"type":"user","uuid":"i1","parentUuid":"n1","timestamp":"2026-08-21T10:00:06Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
 		`{"type":"user","uuid":"c1","parentUuid":"i1","timestamp":"2026-08-21T10:00:07Z","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>sonnet</command-args>"}}`,
 		`{"type":"user","uuid":"o1","parentUuid":"c1","timestamp":"2026-08-21T10:00:07Z","message":{"role":"user","content":"<local-command-stdout>Set model to Sonnet</local-command-stdout>"}}`,
@@ -66,6 +69,7 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 	states := map[string]provider.RuntimeTurnState{}
 	var failure, compactionTurn, title, text string
 	var plan []provider.PlanEntry
+	var background string
 	tools := 0
 	for _, event := range replayEventsFromTranscript("thread", transcript) {
 		switch {
@@ -80,6 +84,8 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 			prompts[event.TurnID] = append(prompts[event.TurnID], event.Payload.Detail)
 		case event.Payload.ItemType == provider.ItemKindContextCompaction:
 			compactionTurn = event.TurnID
+		case event.Type == provider.RuntimeEventItemCompleted && event.ItemID == "bg":
+			background = event.TurnID + " " + event.Payload.ToolCall.Output
 		case event.Type == provider.RuntimeEventItemCompleted && event.Payload.ItemType == provider.ItemKindCommandExecution:
 			tools++
 		case event.Type == provider.RuntimeEventContentDelta:
@@ -110,6 +116,9 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 	}
 	if text != "The build passed." {
 		t.Errorf("assistant text = %q, want only the current conversation's", text)
+	}
+	if background != `u2 Background command "make test" completed` {
+		t.Errorf("background command = %q", background)
 	}
 	if !slices.Equal(plan, []provider.PlanEntry{{Content: "Write the test", Status: provider.PlanEntryStatusInProgress}}) {
 		t.Errorf("plan = %#v", plan)

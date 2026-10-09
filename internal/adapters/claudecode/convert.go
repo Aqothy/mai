@@ -3,6 +3,8 @@ package claudecode
 import (
 	"encoding/json"
 	"fmt"
+	"html"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -141,11 +143,54 @@ func (s *toolState) applyResult(block contentBlock, result json.RawMessage) prov
 		s.call.Output = boundedOutput(output)
 	}
 	s.call.Attachments = append(s.call.Attachments, attachments...)
-	s.completed = true
 	if !block.IsError && len(s.call.Changes) == 1 {
 		applyFileResult(&s.call.Changes[0], result)
 	}
+	// A tool that started a background task (a Bash command run in the
+	// background, an async agent) runs on until the task's notification.
+	var launch struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+		IsAsync          bool   `json:"isAsync"`
+	}
+	if !block.IsError && json.Unmarshal(result, &launch) == nil && (launch.BackgroundTaskID != "" || launch.IsAsync) {
+		return provider.ItemStatusInProgress
+	}
 	return status
+}
+
+// taskNotification is the end of a background task, which the CLI reports
+// live as system/task_notification and records in the transcript as a
+// <task-notification> message.
+type taskNotification struct {
+	ToolUseID string `json:"tool_use_id"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary"`
+}
+
+var taskNotificationPattern = regexp.MustCompile(`(?s)<tool-use-id>(.*?)</tool-use-id>.*?<status>(.*?)</status>(?:.*?<summary>(.*?)</summary>)?`)
+
+// parseTaskNotification reads a <task-notification> message.
+func parseTaskNotification(text string) (taskNotification, bool) {
+	match := taskNotificationPattern.FindStringSubmatch(text)
+	if match == nil {
+		return taskNotification{}, false
+	}
+	return taskNotification{ToolUseID: match[1], Status: match[2], Summary: html.UnescapeString(match[3])}, true
+}
+
+// finish ends the background task of a tool: its summary becomes the output.
+func (s *toolState) finish(notification taskNotification) provider.ItemStatus {
+	if summary := strings.TrimSpace(notification.Summary); summary != "" {
+		s.call.Output = boundedOutput(summary)
+	}
+	switch notification.Status {
+	case "completed":
+		return provider.ItemStatusCompleted
+	case "failed":
+		return provider.ItemStatusFailed
+	default:
+		return provider.ItemStatusInterrupted
+	}
 }
 
 // fileEditResult is the structured result of Edit and Write.

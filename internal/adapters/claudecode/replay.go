@@ -36,6 +36,14 @@ func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provi
 				r.emit(provider.RuntimeEventItemCompleted, itemID, "completed", r.at(line.Timestamp), provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: provider.ItemStatusCompleted, Title: "Compacted context"})
 			}
 		case "attachment":
+			// A background task that ended during a turn is queued as its
+			// notification.
+			if line.Attachment != nil && line.Attachment.CommandMode == "task-notification" {
+				prompt, _ := promptContent(userAPIMessage{Content: line.Attachment.Prompt}.blocks())
+				if notification, ok := parseTaskNotification(prompt); ok {
+					r.finishBackground(notification, line.Timestamp)
+				}
+			}
 			// A steer the CLI folded into a running query joins that turn,
 			// as it did live.
 			if text, attachments, ok := steeredPrompt(line.Attachment); ok {
@@ -130,6 +138,24 @@ func (r *replay) endTurn(at time.Time) {
 	r.turn = ""
 }
 
+// toolEvent emits an event of a tool item in the turn that started it.
+func (r *replay) toolEvent(tool *replayTool, itemID string, eventType provider.RuntimeEventType, status provider.ItemStatus, at time.Time) {
+	call := tool.state.call
+	r.events = append(r.events, provider.RuntimeEvent{
+		EventID: replayEventID(tool.turnID, itemID, string(eventType)), Type: eventType,
+		Provider: DriverKind, ThreadID: r.threadID, TurnID: tool.turnID, ItemID: itemID, CreatedAt: at,
+		Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: status, Title: tool.state.title, ToolCall: &call},
+	})
+}
+
+// finishBackground completes the tool whose background task ended.
+func (r *replay) finishBackground(notification taskNotification, stamp string) {
+	if tool := r.tools[notification.ToolUseID]; tool != nil {
+		delete(r.tools, notification.ToolUseID)
+		r.toolEvent(tool, notification.ToolUseID, provider.RuntimeEventItemCompleted, tool.state.finish(notification), r.at(stamp))
+	}
+}
+
 func (r *replay) userMessage(id, text string, attachments []provider.Attachment, at time.Time) {
 	r.emit(provider.RuntimeEventItemCompleted, "user:"+id, "user", at.Add(time.Nanosecond), provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachments})
 }
@@ -162,15 +188,23 @@ func (r *replay) user(line transcriptLine) {
 			continue
 		}
 		status := tool.state.applyResult(block, line.ToolUseResult)
-		call := tool.state.call
-		r.events = append(r.events, provider.RuntimeEvent{
-			EventID: replayEventID(tool.turnID, block.ToolUseID, "completed"), Type: provider.RuntimeEventItemCompleted,
-			Provider: DriverKind, ThreadID: r.threadID, TurnID: tool.turnID, ItemID: block.ToolUseID, CreatedAt: r.at(line.Timestamp),
-			Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: status, Title: tool.state.title, ToolCall: &call},
-		})
+		if status == provider.ItemStatusInProgress {
+			// A background task runs on until its notification.
+			r.tools[block.ToolUseID] = tool
+			r.toolEvent(tool, block.ToolUseID, provider.RuntimeEventItemUpdated, status, r.at(line.Timestamp))
+			continue
+		}
+		r.toolEvent(tool, block.ToolUseID, provider.RuntimeEventItemCompleted, status, r.at(line.Timestamp))
 	}
 	if hasToolResult {
 		return
+	}
+	// A background task that ended while the CLI was idle wakes it with its
+	// notification.
+	if content, _ := promptContent(blocks, text); content != "" {
+		if notification, ok := parseTaskNotification(content); ok {
+			r.finishBackground(notification, line.Timestamp)
+		}
 	}
 	prompt := classifyUserLine(line, blocks, text)
 	switch prompt.kind {

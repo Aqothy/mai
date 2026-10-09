@@ -190,13 +190,21 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	h.mu.Lock()
 	closing := proc.closing
 	var endedTurn string
+	var background []string
 	if session.proc == proc {
 		session.proc = nil
 		endedTurn = session.activeLocalTurn
 		session.endTurnLocked()
 		session.resetStreamStateLocked()
+		for toolUseID := range session.background {
+			background = append(background, toolUseID)
+		}
 	}
 	h.mu.Unlock()
+	// Background tasks end with the CLI that runs them.
+	for _, toolUseID := range background {
+		h.finishBackground(session, taskNotification{ToolUseID: toolUseID, Status: "stopped"})
+	}
 	proc.client.fail(firstError(proc.process.Err(), io.EOF))
 	h.cancelApprovalsForClient(proc.client)
 	// The process is gone, so no result will end its turn. Settle it here on

@@ -79,6 +79,9 @@ type claudeSession struct {
 	compactionItem string
 	// tasks is the plan the CLI keeps with its Task tools.
 	tasks taskPlan
+	// background holds the tools still running as background tasks, by
+	// tool use id.
+	background map[string]backgroundTool
 	// title is the session title last published (see publishTitle).
 	title string
 
@@ -99,7 +102,13 @@ type toolState struct {
 	input       json.RawMessage
 	partialJSON string
 	fingerprint string
-	completed   bool
+}
+
+// backgroundTool is a tool item that runs on as a background task after its
+// turn, until the task's notification.
+type backgroundTool struct {
+	state *toolState
+	turn  string
 }
 
 type pendingApproval struct {
@@ -312,6 +321,7 @@ func newClaudeSession(localID, nativeID, cwd string) *claudeSession {
 		openBlocks:      make(map[int]string),
 		streamedText:    make(map[string]string),
 		seenAssistant:   make(map[string]bool),
+		background:      make(map[string]backgroundTool),
 	}
 }
 

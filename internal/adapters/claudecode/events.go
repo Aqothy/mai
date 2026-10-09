@@ -98,6 +98,11 @@ func (h *Instance) handleSystem(session *claudeSession, message sdkMessage) {
 		}
 	case "compact_boundary":
 		h.compaction(session, provider.ItemStatusCompleted, "")
+	case "task_notification":
+		var notification taskNotification
+		if json.Unmarshal(message.Raw, &notification) == nil {
+			h.finishBackground(session, notification)
+		}
 	case "api_retry":
 		var retry apiRetry
 		if json.Unmarshal(message.Raw, &retry) == nil {
@@ -189,6 +194,24 @@ func (h *Instance) clearConversation(session *claudeSession, message sdkMessage)
 	h.mu.Unlock()
 	itemID := "reset:" + trimmedOrDefault(message.UUID, newSessionUUID())
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: session.localThreadID, TurnID: turn, ItemID: itemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: provider.ItemStatusCompleted, Title: "Cleared context"}})
+}
+
+// finishBackground completes the item of a tool whose background task ended,
+// in the turn that started it.
+func (h *Instance) finishBackground(session *claudeSession, notification taskNotification) {
+	h.mu.Lock()
+	tool, running := session.background[notification.ToolUseID]
+	delete(session.background, notification.ToolUseID)
+	var status provider.ItemStatus
+	var call provider.ToolCall
+	if running {
+		status = tool.state.finish(notification)
+		call = tool.state.call
+	}
+	h.mu.Unlock()
+	if running {
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: session.localThreadID, TurnID: tool.turn, ItemID: notification.ToolUseID, Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: status, Title: tool.state.title, ToolCall: &call}})
+	}
 }
 
 func (h *Instance) emitWarning(session *claudeSession, message string) {
@@ -472,11 +495,16 @@ func (h *Instance) handleUserMessage(session *claudeSession, message sdkMessage)
 			continue
 		}
 		status := state.applyResult(block, message.ToolUseResult)
+		eventType := provider.RuntimeEventItemCompleted
+		if status == provider.ItemStatusInProgress {
+			session.background[block.ToolUseID] = backgroundTool{state: state, turn: turn}
+			eventType = provider.RuntimeEventItemUpdated
+		}
 		call := state.call
 		kind := state.itemKind
 		title := state.title
 		h.mu.Unlock()
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemCompleted, ThreadID: session.localThreadID, TurnID: turn, ItemID: block.ToolUseID, Payload: provider.RuntimeEventPayload{ItemType: kind, ItemStatus: status, Title: title, ToolCall: &call}})
+		h.emitEvent(provider.RuntimeEvent{Type: eventType, ThreadID: session.localThreadID, TurnID: turn, ItemID: block.ToolUseID, Payload: provider.RuntimeEventPayload{ItemType: kind, ItemStatus: status, Title: title, ToolCall: &call}})
 	}
 }
 

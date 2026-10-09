@@ -214,6 +214,19 @@ func fakeCLIMain() {
 				emitResult(zeroUsage)
 				continue
 			}
+			if strings.Contains(text, "BACKGROUND") {
+				// Two commands run in the background; the first finishes and
+				// wakes the CLI, the second outlives the session.
+				for _, id := range []string{"toolu_bg1", "toolu_bg2"} {
+					fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_" + id, "role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": id, "name": "Bash", "input": map[string]any{"command": "sleep 60", "run_in_background": true}}}}})
+					fakeWrite(map[string]any{"type": "user", "session_id": sessionID, "tool_use_result": map[string]any{"backgroundTaskId": "task-" + id}, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id, "content": "Command running in background"}}}})
+				}
+				emitResult(nil)
+				fakeWrite(map[string]any{"type": "system", "subtype": "task_notification", "task_id": "task-toolu_bg1", "tool_use_id": "toolu_bg1", "status": "completed", "summary": "Background command completed (exit code 0)", "session_id": sessionID})
+				emitText("The first command finished")
+				emitResult(nil)
+				continue
+			}
 			if strings.Contains(text, "BLOCKED") {
 				fakeWrite(map[string]any{"type": "system", "subtype": "informational", "level": "warning", "prevent_continuation": true, "content": "Prompt blocked by hook", "session_id": sessionID})
 				emitResult(zeroUsage)
@@ -586,6 +599,53 @@ func TestThreadFollowsTheCLIReports(t *testing.T) {
 	result, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-r", Cwd: cwd})
 	if err != nil || result.Session.ProviderSessionID != "22222222-2222-4222-8222-222222222222" {
 		t.Fatalf("session after /clear = %q, %v", result.Session.ProviderSessionID, err)
+	}
+}
+
+// A command run in the background shows as running in the turn that started
+// it until its task ends, then completes there with the task's summary; one
+// still running when the CLI stops ends interrupted.
+func TestBackgroundTaskRunsUntilItsNotification(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-bg", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-bg", TurnID: "turn-bg", Input: "BACKGROUND"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	type step struct {
+		item, turn, event string
+		status            provider.ItemStatus
+		output            string
+	}
+	var steps []step
+	record := func(event provider.RuntimeEvent) {
+		if strings.HasPrefix(event.ItemID, "toolu_bg") && event.Type != provider.RuntimeEventItemStarted {
+			steps = append(steps, step{event.ItemID, event.TurnID, string(event.Type), event.Payload.ItemStatus, event.Payload.ToolCall.Output})
+		}
+	}
+	// The wake-up turn's completion comes last.
+	for completions := 0; completions < 2; {
+		event := waitForEvent(t, events, func(provider.RuntimeEvent) bool { return true })
+		record(event)
+		if event.Type == provider.RuntimeEventTurnCompleted {
+			completions++
+		}
+	}
+	if err := instance.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-bg"}); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	for len(events) > 0 {
+		record(<-events)
+	}
+	want := []step{
+		{"toolu_bg1", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Command running in background"},
+		{"toolu_bg2", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Command running in background"},
+		{"toolu_bg1", "turn-bg", "item.completed", provider.ItemStatusCompleted, "Background command completed (exit code 0)"},
+		{"toolu_bg2", "turn-bg", "item.completed", provider.ItemStatusInterrupted, "Command running in background"},
+	}
+	if !slices.Equal(steps, want) {
+		t.Fatalf("background steps = %+v", steps)
 	}
 }
 
