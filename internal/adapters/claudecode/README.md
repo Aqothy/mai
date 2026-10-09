@@ -128,8 +128,10 @@ never surfaced.
 - **AskUserQuestion** → provider-neutral user-input request; answers go back in
   `updatedInput.answers` keyed by question text.
 - **MCP elicitation** → `internal/adapters/elicitation`.
-- **ExitPlanMode** → user-input request: "Approve plan" or "Keep planning",
-  with an optional typed answer sent to the model as the deny message.
+- **ExitPlanMode** → user-input request whose message is the plan: "Approve
+  plan" or "Keep planning", with an optional typed answer sent to the model as
+  the deny message. Either answer resolves the request as accepted, so the chat
+  keeps it.
 - `control_cancel_request` resolves the request as cancelled.
 
 ### Sessions on disk

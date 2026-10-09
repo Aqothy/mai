@@ -236,25 +236,29 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 }
 
 // ExitPlanMode's review approves the plan, or keeps planning and hands the
-// user's typed feedback to the model as the deny message.
+// user's typed feedback to the model as the deny message. An answer resolves
+// the question as accepted so the chat keeps it; declining stays a decline.
 func TestPlanReviewResponse(t *testing.T) {
 	pending := &pendingApproval{input: json.RawMessage(`{"plan":"Do it"}`), reviewsPlan: true}
 	tests := []struct {
-		name    string
-		answer  []string
-		want    map[string]any
-		wantErr bool
+		name         string
+		decision     provider.ApprovalDecision
+		answer       []string
+		want         map[string]any
+		wantDecision provider.ApprovalDecision
+		wantErr      bool
 	}{
-		{"approve", []string{planApprove}, map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(`{"plan":"Do it"}`)}, false},
-		{"keep planning", []string{planKeepPlanning}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning."}, false},
-		{"feedback", []string{"Add tests first"}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning. Their feedback on the plan: Add tests first"}, false},
-		{"approve with feedback", []string{planApprove, "Add tests first"}, nil, true},
+		{"approve", provider.ApprovalDecisionAccept, []string{planApprove}, map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(`{"plan":"Do it"}`)}, provider.ApprovalDecisionAccept, false},
+		{"keep planning", provider.ApprovalDecisionAccept, []string{planKeepPlanning}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning."}, provider.ApprovalDecisionAccept, false},
+		{"feedback", provider.ApprovalDecisionAccept, []string{"Add tests first"}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning. Their feedback on the plan: Add tests first"}, provider.ApprovalDecisionAccept, false},
+		{"approve with feedback", provider.ApprovalDecisionAccept, []string{planApprove, "Add tests first"}, nil, "", true},
+		{"decline", provider.ApprovalDecisionDecline, nil, map[string]any{"behavior": "deny", "message": "The user declined this action."}, provider.ApprovalDecisionDecline, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{planReviewQuestionID: tt.answer}})
-			if (err != nil) != tt.wantErr || !reflect.DeepEqual(payload, tt.want) {
-				t.Fatalf("payload = %#v, err = %v; want %#v", payload, err, tt.want)
+			payload, decision, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: tt.decision, Answers: map[string][]string{planReviewQuestionID: tt.answer}})
+			if (err != nil) != tt.wantErr || !reflect.DeepEqual(payload, tt.want) || decision != tt.wantDecision {
+				t.Fatalf("payload = %#v, decision = %q, err = %v; want %#v, %q", payload, decision, err, tt.want, tt.wantDecision)
 			}
 		})
 	}

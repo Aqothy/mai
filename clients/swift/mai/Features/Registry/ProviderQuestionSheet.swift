@@ -20,7 +20,7 @@ struct ProviderQuestionSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(model.request.message)
+                    Text(model.messageText)
                         .textSelection(.enabled)
                 }
                 Section {

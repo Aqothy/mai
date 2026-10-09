@@ -239,6 +239,16 @@ func fakeCLIMain() {
 				emitResult(zeroUsage)
 				continue
 			}
+			if strings.Contains(text, "PLAN") {
+				// ExitPlanMode streams its plan as input JSON, then asks.
+				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "tool_use", "id": "toolu_plan", "name": "ExitPlanMode", "input": map[string]any{}}}})
+				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "input_json_delta", "partial_json": `{"plan":"1. Write hello.txt"}`}}})
+				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_stop", "index": 0}})
+				fakeWrite(map[string]any{"type": "control_request", "request_id": "plan-1", "request": map[string]any{
+					"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "tool_use_id": "toolu_plan", "input": map[string]any{"plan": "1. Write hello.txt"},
+				}})
+				continue
+			}
 			if strings.Contains(text, "SLOW") {
 				slowTurn = true
 				fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
@@ -441,6 +451,31 @@ func startSlowTurn(t *testing.T) (*Instance, chan provider.RuntimeEvent) {
 
 // A steer the CLI folds into the running query is answered by that query's
 // single result, which must end the turn rather than wait for another.
+// The user sees the plan they review: it is the review question's message
+// and, once streamed in, the "Proposed plan" item's output.
+func TestPlanReviewShowsThePlan(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "PLAN"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	var output string
+	review := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		if event.ItemID == "toolu_plan" && event.Payload.ToolCall != nil {
+			output = event.Payload.ToolCall.Output
+		}
+		return event.Type == provider.RuntimeEventRequestOpened
+	})
+	if output != "1. Write hello.txt" {
+		t.Fatalf("plan item output when the review opened = %q, want the plan", output)
+	}
+	if review.Payload.UserInput == nil || review.Payload.UserInput.Message != "1. Write hello.txt" {
+		t.Fatalf("review question = %+v, want the plan as its message", review.Payload.UserInput)
+	}
+}
+
 func TestFoldedSteerEndsWithTheRunningQuery(t *testing.T) {
 	instance, events := startSlowTurn(t)
 	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "FOLD this in", Steer: true}); err != nil {

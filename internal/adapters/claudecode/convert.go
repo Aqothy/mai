@@ -527,9 +527,12 @@ const (
 
 // planReviewInput asks the user to approve Claude's plan or keep planning,
 // with a typed answer telling Claude what to change, like the CLI's prompt.
-func planReviewInput() provider.UserInputRequest {
+// The plan is the question's message: the user reviews it where they answer.
+func planReviewInput(rawInput json.RawMessage) provider.UserInputRequest {
+	var input toolInput
+	_ = json.Unmarshal(rawInput, &input)
 	return provider.UserInputRequest{
-		Message: "Claude has a plan ready.",
+		Message: trimmedOrDefault(input.Plan, "Claude has a plan ready."),
 		Questions: []provider.Question{{
 			ID:             planReviewQuestionID,
 			Kind:           provider.QuestionKindChoice,
@@ -546,7 +549,9 @@ func planReviewInput() provider.UserInputRequest {
 }
 
 // planReviewResponse approves the plan, or denies ExitPlanMode with the
-// user's typed feedback as the message the model reads.
+// user's typed feedback as the message the model reads. Either way the user
+// answered the question, so the request resolves as accepted and the chat
+// keeps the answer.
 func planReviewResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
 	if input.Decision != provider.ApprovalDecisionAccept {
 		payload, resolved := permissionResponse(pending, string(input.Decision))
@@ -570,7 +575,7 @@ func planReviewResponse(pending *pendingApproval, input provider.RespondToReques
 	if feedback != "" {
 		message = "The user wants to keep planning. Their feedback on the plan: " + feedback
 	}
-	return map[string]any{"behavior": "deny", "message": message}, provider.ApprovalDecisionDecline, nil
+	return map[string]any{"behavior": "deny", "message": message}, provider.ApprovalDecisionAccept, nil
 }
 
 // permissionResponse builds the PermissionResult payload for a decision and

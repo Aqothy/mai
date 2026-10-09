@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -337,7 +338,9 @@ func (h *Instance) refreshToolInput(session *claudeSession, turn, itemID string,
 	state.fingerprint = fingerprint
 	// ProviderKind is the tool's full name; Name is shortened for MCP tools.
 	rebuilt := newToolState(state.call.ProviderKind, input)
-	rebuilt.call.Output = state.call.Output
+	// A result already recorded wins; otherwise keep what the input itself
+	// shows (ExitPlanMode's plan).
+	rebuilt.call.Output = cmp.Or(state.call.Output, rebuilt.call.Output)
 	rebuilt.call.Error = state.call.Error
 	state.call = rebuilt.call
 	state.title = rebuilt.title
@@ -608,7 +611,7 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		userInput, options = &input, nil
 	case "ExitPlanMode":
 		pending.reviewsPlan = true
-		input := planReviewInput()
+		input := planReviewInput(request.Input)
 		userInput, options = &input, nil
 	}
 	h.mu.Lock()

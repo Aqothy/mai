@@ -38,6 +38,15 @@ final class ChatQuestionModel {
 
     var questions: [Question] { request.questions ?? [] }
 
+    /// The request's message with inline Markdown rendered and its line
+    /// breaks kept: a plan under review is a Markdown document.
+    var messageText: AttributedString {
+        (try? AttributedString(
+            markdown: request.message,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(request.message)
+    }
+
     /// The http(s) URL a URL-mode request asks to open, if valid.
     var url: URL? {
         guard let raw = request.url, let url = URL(string: raw),

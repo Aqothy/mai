@@ -25,7 +25,7 @@ struct ChatQuestionRow: View {
         VStack(alignment: .leading) {
             Label("Question", systemImage: "questionmark.bubble")
                 .bold()
-            Text(model.request.message)
+            Text(model.messageText)
                 .textSelection(.enabled)
 
             if approval.approvalStatus == .pending {
