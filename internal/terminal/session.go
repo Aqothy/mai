@@ -22,13 +22,16 @@ const (
 	outputBatchSize         = 64 * 1024
 	outputBatchMaximumDelay = 8 * time.Millisecond
 	outputReadQueueSize     = 32
+	// inputQueueSize bounds input waiting for a program that is not reading
+	// stdin. Each item is one client write (a keystroke or a paste).
+	inputQueueSize = 256
 	// attachScrollbackBytes bounds the attach model's retained scrollback.
 	attachScrollbackBytes = 2 * 1024 * 1024
 )
 
 // Session is one live PTY run. All mutating operations are serialized on mu;
-// PTY writes use a dedicated mutex so a blocked write cannot deadlock resize
-// or termination.
+// PTY writes happen on the run's own writer goroutine so a program that stops
+// reading stdin cannot block callers, resize, or termination.
 type Session struct {
 	TerminalID string
 	RunID      string
@@ -48,7 +51,7 @@ type Session struct {
 	// attach state has been released.
 	attachVT vtscreen.SnapshotScreen
 
-	writeMu sync.Mutex
+	input chan []byte
 
 	// detector derives shared agent state from the same output stream the
 	// clients render. It lives outside mu; its own lock serializes it.
@@ -103,6 +106,7 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		columns:    spec.Columns,
 		rows:       spec.Rows,
 		events:     events,
+		input:      make(chan []byte, inputQueueSize),
 		done:       make(chan struct{}),
 	}
 
@@ -143,7 +147,23 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		},
 	})
 	go s.readLoop()
+	go s.writeLoop()
 	return s, nil
+}
+
+// writeLoop is the sole PTY writer. A write blocked on a full PTY buffer ends
+// when the run exits and the PTY closes.
+func (s *Session) writeLoop() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case data := <-s.input:
+			if _, err := s.ptyFile.Write(data); err != nil {
+				return
+			}
+		}
+	}
 }
 
 // readLoop batches the small reads commonly produced by a PTY before sending
@@ -339,22 +359,21 @@ func (s *Session) Release() {
 	s.mu.Unlock()
 }
 
-// Write sends input bytes to the shell.
+// Write queues input for the PTY without blocking. Input beyond the queue is
+// dropped with ErrInputQueueFull rather than stalling the caller.
 func (s *Session) Write(data []byte) error {
 	s.mu.Lock()
-	if s.status != StatusRunning {
-		s.mu.Unlock()
+	running := s.status == StatusRunning
+	s.mu.Unlock()
+	if !running {
 		return ErrNotRunning
 	}
-	f := s.ptyFile
-	s.mu.Unlock()
-
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("terminal write: %w", err)
+	select {
+	case s.input <- data:
+		return nil
+	default:
+		return ErrInputQueueFull
 	}
-	return nil
 }
 
 // Resize applies a changed grid size to a running PTY and its passive models.

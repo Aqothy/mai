@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -1068,5 +1070,39 @@ func TestRPCSubscribeThreadSnapshotHasNoLiveGap(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for live boundary event")
+	}
+}
+
+// TestRPCSlowCallDoesNotBlockConnection keeps one call hanging on a registry
+// fetch, as a slow provider start would, and uses the same connection
+// meanwhile: other calls and terminal input must not queue behind it.
+func TestRPCSlowCallDoesNotBlockConnection(t *testing.T) {
+	useQuietTestShell(t)
+	fetching, release := make(chan struct{}, 1), make(chan struct{})
+	registryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetching <- struct{}{}
+		<-release
+		_, _ = w.Write([]byte(testACPRegistry))
+	}))
+	defer registryServer.Close()
+	defer close(release)
+	s := newTestServer(t)
+	defer s.Close()
+	s.acpRegistry = &acpRegistry{url: registryServer.URL, client: registryServer.Client(), dataDir: t.TempDir(), npm: "npm"}
+	client := newRecordingClient(t, s)
+
+	slow := make(chan error, 1)
+	go func() { slow <- client.callErr(wire.MethodACPRegistryList, nil, nil) }()
+	<-fetching
+
+	var list []provider.InstanceInfo
+	client.call(t, wire.MethodProviderList, nil, &list)
+	created := createTestTerminal(t, client)
+	client.writeTerminal(t, created.Terminal.TerminalID, created.RunID, "printf 'NOT-BLOCKED-%d\\n' $((6*7))\n")
+	client.waitForOutput(t, "NOT-BLOCKED-42")
+	select {
+	case err := <-slow:
+		t.Fatalf("registry list returned before its fetch was released: %v", err)
+	default:
 	}
 }

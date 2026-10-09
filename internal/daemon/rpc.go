@@ -23,7 +23,23 @@ var nextRPCClientID atomic.Uint64
 
 const (
 	rpcOutboundQueueSize = 1024
+	// rpcConcurrentCalls bounds the calls one connection runs at once; a
+	// further call waits in the connection's queue for a free slot.
+	rpcConcurrentCalls = 32
 )
+
+// orderedRPCCalls run one at a time in wire order: the order of commands and
+// subscriptions is the client's intent. They are all quick. Every other call
+// runs concurrently so a slow provider, registry, or terminal operation
+// cannot hold up the connection. Notifications (terminal input, resize,
+// detach) are always handled in wire order.
+var orderedRPCCalls = map[string]bool{
+	wire.MethodOrchestrationDispatchCommand:     true,
+	wire.MethodOrchestrationSubscribeThread:     true,
+	wire.MethodOrchestrationUnsubscribeThread:   true,
+	wire.MethodOrchestrationSubscribeThreadList: true,
+	wire.MethodTerminalSubscribeList:            true,
+}
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
 // attachments are the big case). Outbound frames are unaffected.
@@ -37,6 +53,7 @@ type rpcClient struct {
 	outbound chan rpcOutbound
 	done     chan struct{}
 	closed   atomic.Bool
+	calls    chan struct{} // slots for concurrently running calls
 
 	subscriptionsMu        sync.Mutex
 	threadSubscriptions    map[orchestration.ThreadID]struct{}
@@ -179,6 +196,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 	client := &rpcClient{
 		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
+		calls:                 make(chan struct{}, rpcConcurrentCalls),
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
 		terminalSubscriptions: make(map[string]string),
 	}
@@ -376,6 +394,15 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		h.server.logger.Debug("RPC completed", attrs...)
 	}()
+	if req.IsCall() && !orderedRPCCalls[req.Method] {
+		select {
+		case h.client.calls <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { <-h.client.calls }()
+		jsonrpc2.Async(ctx)
+	}
 	switch req.Method {
 	case wire.MethodOrchestrationDispatchCommand:
 		if !req.IsCall() {

@@ -6,6 +6,8 @@ package daemon
 
 import (
 	"bytes"
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,4 +239,29 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 
 func containsBytes(data []byte, marker string) bool {
 	return bytes.Contains(data, []byte(marker))
+}
+
+// TestTerminalInputToProgramNotReadingDoesNotBlockConnection pastes more than
+// the PTY buffer holds into a program that never reads stdin. The input must
+// not stall the connection: a later delete still completes promptly.
+func TestTerminalInputToProgramNotReadingDoesNotBlockConnection(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+
+	created := createTestTerminal(t, client)
+	terminalID := created.Terminal.TerminalID
+	client.writeTerminal(t, terminalID, created.RunID, "printf 'SLEEPING-%d\\n' $((5+5)); exec sleep 600\n")
+	client.waitForOutput(t, "SLEEPING-10")
+	paste := strings.Repeat(strings.Repeat("x", 63)+"\n", 16)
+	for range 256 {
+		client.writeTerminal(t, terminalID, created.RunID, paste)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.conn.Call(ctx, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}).Await(ctx, nil); err != nil {
+		t.Fatalf("terminal.delete behind unread input: %v", err)
+	}
 }

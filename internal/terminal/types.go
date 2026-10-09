@@ -36,6 +36,7 @@ var (
 	ErrInvalidCwd        = errors.New("terminal cwd is not an existing directory")
 	ErrInvalidDimensions = errors.New("terminal dimensions out of range")
 	ErrNotRunning        = errors.New("terminal is not running")
+	ErrInputQueueFull    = errors.New("terminal input dropped: the program is not reading input")
 	ErrAlreadyExists     = errors.New("terminal session already exists; use relaunch")
 	ErrAlreadyRunning    = errors.New("terminal already has a live run")
 	ErrServiceClosed     = errors.New("terminal service is closed")
