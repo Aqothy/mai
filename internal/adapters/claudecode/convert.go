@@ -146,13 +146,15 @@ func (s *toolState) applyResult(block contentBlock, result json.RawMessage) prov
 	if !block.IsError && len(s.call.Changes) == 1 {
 		applyFileResult(&s.call.Changes[0], result)
 	}
-	// A tool that started a background task (a Bash command run in the
-	// background, an async agent) runs on until the task's notification.
+	// A tool that started a background task runs on until the task's
+	// notification. The SDK's tool output types say which did: Bash with a
+	// backgroundTaskId (run in the background, backgrounded by the user or on
+	// timeout), Agent and Workflow with a launched status.
 	var launch struct {
 		BackgroundTaskID string `json:"backgroundTaskId"`
-		IsAsync          bool   `json:"isAsync"`
+		Status           string `json:"status"`
 	}
-	if !block.IsError && json.Unmarshal(result, &launch) == nil && (launch.BackgroundTaskID != "" || launch.IsAsync) {
+	if !block.IsError && json.Unmarshal(result, &launch) == nil && (launch.BackgroundTaskID != "" || launch.Status == "async_launched" || launch.Status == "remote_launched") {
 		return provider.ItemStatusInProgress
 	}
 	return status

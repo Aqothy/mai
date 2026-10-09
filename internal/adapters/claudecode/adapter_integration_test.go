@@ -215,11 +215,18 @@ func fakeCLIMain() {
 				continue
 			}
 			if strings.Contains(text, "BACKGROUND") {
-				// Two commands run in the background; the first finishes and
-				// wakes the CLI, the second outlives the session.
-				for _, id := range []string{"toolu_bg1", "toolu_bg2"} {
-					fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_" + id, "role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": id, "name": "Bash", "input": map[string]any{"command": "sleep 60", "run_in_background": true}}}}})
-					fakeWrite(map[string]any{"type": "user", "session_id": sessionID, "tool_use_result": map[string]any{"backgroundTaskId": "task-" + id}, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id, "content": "Command running in background"}}}})
+				// A command and an agent run in the background; the command
+				// finishes and wakes the CLI, the agent outlives the session.
+				launches := []struct {
+					id, tool string
+					result   map[string]any
+				}{
+					{"toolu_bg1", "Bash", map[string]any{"backgroundTaskId": "task-1"}},
+					{"toolu_bg2", "Agent", map[string]any{"status": "async_launched", "agentId": "agent-2"}},
+				}
+				for _, launch := range launches {
+					fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_" + launch.id, "role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": launch.id, "name": launch.tool, "input": map[string]any{"run_in_background": true}}}}})
+					fakeWrite(map[string]any{"type": "user", "session_id": sessionID, "tool_use_result": launch.result, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": launch.id, "content": "Running in background"}}}})
 				}
 				emitResult(nil)
 				fakeWrite(map[string]any{"type": "system", "subtype": "task_notification", "task_id": "task-toolu_bg1", "tool_use_id": "toolu_bg1", "status": "completed", "summary": "Background command completed (exit code 0)", "session_id": sessionID})
@@ -602,9 +609,9 @@ func TestThreadFollowsTheCLIReports(t *testing.T) {
 	}
 }
 
-// A command run in the background shows as running in the turn that started
-// it until its task ends, then completes there with the task's summary; one
-// still running when the CLI stops ends interrupted.
+// A command or agent run in the background shows as running in the turn that
+// started it until its task ends, then completes there with the task's
+// summary; one still running when the CLI stops ends interrupted.
 func TestBackgroundTaskRunsUntilItsNotification(t *testing.T) {
 	instance, events, _ := openTestInstance(t)
 	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-bg", Cwd: t.TempDir()}); err != nil {
@@ -639,10 +646,10 @@ func TestBackgroundTaskRunsUntilItsNotification(t *testing.T) {
 		record(<-events)
 	}
 	want := []step{
-		{"toolu_bg1", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Command running in background"},
-		{"toolu_bg2", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Command running in background"},
+		{"toolu_bg1", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Running in background"},
+		{"toolu_bg2", "turn-bg", "item.updated", provider.ItemStatusInProgress, "Running in background"},
 		{"toolu_bg1", "turn-bg", "item.completed", provider.ItemStatusCompleted, "Background command completed (exit code 0)"},
-		{"toolu_bg2", "turn-bg", "item.completed", provider.ItemStatusInterrupted, "Command running in background"},
+		{"toolu_bg2", "turn-bg", "item.completed", provider.ItemStatusInterrupted, "Running in background"},
 	}
 	if !slices.Equal(steps, want) {
 		t.Fatalf("background steps = %+v", steps)

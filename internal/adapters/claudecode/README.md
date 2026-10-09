@@ -100,7 +100,7 @@ The CLI runs with `--replay-user-messages`, so it echoes each written message
 | `input_json_delta` | re-parsed partial input, `item.updated` with the complete snapshot |
 | `assistant` (per block) | flush checkpoint: missing text suffix, `item.completed`; tools that never streamed. A message already shown (resent after `/compact`) and the CLI's API-error message are skipped |
 | `user` `tool_result` | `item.completed`; Edit/Write take the CLI's `structuredPatch` (line-numbered hunks) and Write's create/update from `tool_use_result` |
-| `tool_use_result` with `backgroundTaskId` / `isAsync` | the tool stays running (`item.updated`) until `system/task_notification` completes it in its turn; in replay the `<task-notification>` message does |
+| `tool_use_result` with `backgroundTaskId` (Bash) or `status: async_launched`/`remote_launched` (Agent, Workflow) | the tool stays running (`item.updated`) until `system/task_notification` completes it in its turn; in replay the `<task-notification>` message does |
 | `TodoWrite` input; `TaskCreate`/`TaskUpdate`/`TaskList` results | `turn.plan.updated` (no timeline item) |
 | `result` | `thread.token-usage.updated` (live context from the last `usage.iterations` entry, window of the session's model, cost); a local command's zero usage keeps the meter; then `turn.completed` |
 | `system/init` | adopt the CLI's session id; permission mode and model (e.g. after `/model`) → `config.options.updated` |
