@@ -146,6 +146,19 @@ func cloneTurns(turns []Turn) []Turn {
 	return cloned
 }
 
+func cloneQueuedPrompts(prompts []QueuedPrompt) []QueuedPrompt {
+	if prompts == nil {
+		return nil
+	}
+	cloned := make([]QueuedPrompt, len(prompts))
+	for index, prompt := range prompts {
+		prompt.Attachments = cloneAttachments(prompt.Attachments)
+		prompt.Annotations = append([]provider.PromptAnnotation(nil), prompt.Annotations...)
+		cloned[index] = prompt
+	}
+	return cloned
+}
+
 // clonePtr copies the pointed-to value so the clone shares no mutable state.
 func clonePtr[T any](value *T) *T {
 	if value == nil {

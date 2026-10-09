@@ -464,10 +464,7 @@ func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInpu
 	if err != nil {
 		return provider.ForkSessionResult{}, err
 	}
-	forkID, err := newSessionUUID()
-	if err != nil {
-		return provider.ForkSessionResult{}, err
-	}
+	forkID := newSessionUUID()
 	targetPath := filepath.Join(filepath.Dir(sourcePath), forkID+".jsonl")
 	source, err := os.Open(sourcePath)
 	if err != nil {

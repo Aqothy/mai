@@ -431,8 +431,13 @@ type PromptAnnotation struct {
 }
 
 type SendTurnInput struct {
-	ThreadID       string             `json:"threadId"`
-	TurnID         string             `json:"turnId,omitempty"`
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId,omitempty"`
+	// Steer adds the input to the running turn TurnID instead of starting
+	// TurnID. A steer fails when that turn is no longer running at the
+	// provider, or when the provider cannot steer; it never starts a turn in
+	// its place. Orchestration then sends the input as the next turn.
+	Steer          bool               `json:"steer,omitempty"`
 	Input          string             `json:"input,omitempty"`
 	Attachments    []Attachment       `json:"attachments,omitempty"`
 	Annotations    []PromptAnnotation `json:"annotations,omitempty"`

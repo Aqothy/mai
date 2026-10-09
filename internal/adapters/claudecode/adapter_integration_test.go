@@ -46,6 +46,7 @@ func fakeCLIMain() {
 		fmt.Fprintln(launches, strings.Join(os.Args[1:], " "))
 		_ = launches.Close()
 	}
+	replayUserMessages := slices.Contains(os.Args, "--replay-user-messages")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	initSent := false
@@ -72,6 +73,19 @@ func fakeCLIMain() {
 			result[key] = value
 		}
 		fakeWrite(result)
+	}
+	// echo acknowledges a written message the way the CLI does when it takes
+	// one into a query, at its start or folded in at a tool boundary.
+	echo := func(message map[string]any) {
+		if uuid, _ := message["uuid"].(string); replayUserMessages && uuid != "" {
+			fakeWrite(map[string]any{"type": "user", "isReplay": true, "uuid": uuid, "session_id": sessionID, "parent_tool_use_id": nil, "message": message["message"]})
+		}
+	}
+	emitText := func(text string) {
+		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
+		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": text}}})
+		fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_text", "role": "assistant", "content": []map[string]any{{"type": "text", "text": text}}}})
+		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_stop", "index": 0}})
 	}
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -132,6 +146,31 @@ func fakeCLIMain() {
 						}
 					}
 				}
+			}
+			if slowTurn {
+				slowTurn = false
+				if strings.Contains(text, "FOLD") {
+					// Folded in at a tool boundary: one result answers both.
+					echo(message)
+					emitResult(nil)
+					continue
+				}
+				// The running query ends before a boundary, so the message
+				// runs as one more query with its own result.
+				emitResult(nil)
+				echo(message)
+				emitText("Later reply")
+				emitResult(nil)
+				continue
+			}
+			echo(message)
+			if strings.Contains(text, "WAKE") {
+				emitText("Started a background task")
+				emitResult(nil)
+				// The task finishing wakes the CLI with no message written.
+				emitText("Background task finished")
+				emitResult(nil)
+				continue
 			}
 			if strings.Contains(text, "SIGNED_OUT") {
 				fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "error": "authentication_failed", "message": map[string]any{"id": "msg_err", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Invalid API key · Please run /login"}}}})
@@ -316,6 +355,107 @@ func TestTurnLifecycleWithApproval(t *testing.T) {
 	})
 	if turnDone.Payload.TurnState != provider.RuntimeTurnCompleted {
 		t.Fatalf("turn completion = %#v", turnDone.Payload)
+	}
+}
+
+// startSlowTurn starts turn-1 on a fake CLI that keeps it running until the
+// next written message.
+func startSlowTurn(t *testing.T) (*Instance, chan provider.RuntimeEvent) {
+	t.Helper()
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "SLOW work"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventContentDelta && event.TurnID == "turn-1"
+	})
+	return instance, events
+}
+
+// A steer the CLI folds into the running query is answered by that query's
+// single result, which must end the turn rather than wait for another.
+func TestFoldedSteerEndsWithTheRunningQuery(t *testing.T) {
+	instance, events := startSlowTurn(t)
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "FOLD this in", Steer: true}); err != nil {
+		t.Fatalf("steer: %v", err)
+	}
+	done := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if done.TurnID != "turn-1" || done.Payload.TurnState != provider.RuntimeTurnCompleted {
+		t.Fatalf("completion = %#v, want turn-1 completed", done)
+	}
+	// The turn is over, so a late steer fails and orchestration sends the
+	// message as the next turn instead.
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "late", Steer: true}); err == nil {
+		t.Fatal("steer after the turn ended succeeded, want an error")
+	}
+}
+
+// A steer the CLI could not fold in runs as one more query after the running
+// one's result. Both results belong to the one turn: it ends after the reply.
+func TestUnfoldedSteerKeepsTheTurnOpenForItsQuery(t *testing.T) {
+	instance, events := startSlowTurn(t)
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "after this", Steer: true}); err != nil {
+		t.Fatalf("steer: %v", err)
+	}
+	reply := ""
+	done := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		if event.Type == provider.RuntimeEventContentDelta && event.TurnID == "turn-1" {
+			reply += event.Payload.Delta
+		}
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if done.TurnID != "turn-1" || !strings.Contains(reply, "Later reply") {
+		t.Fatalf("completion = %#v after reply %q, want turn-1 to end after the steer's reply", done, reply)
+	}
+}
+
+// Output the CLI produces on its own gets a turn of its own, so it is never
+// attributed to no turn or to the user's next one.
+func TestCLIStartedOutputGetsItsOwnTurn(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "WAKE later"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-1"
+	})
+	started := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnStarted
+	})
+	if started.TurnID == "" || started.TurnID == "turn-1" {
+		t.Fatalf("CLI-started turn id = %q, want a fresh one", started.TurnID)
+	}
+	delta := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventContentDelta
+	})
+	done := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if delta.TurnID != started.TurnID || done.TurnID != started.TurnID {
+		t.Fatalf("delta turn %q, completion turn %q, want both %q", delta.TurnID, done.TurnID, started.TurnID)
+	}
+}
+
+// Closing the instance (a provider restart) kills the CLI mid-turn. No result
+// will arrive, so the turn must still settle instead of running forever.
+func TestClosingMidTurnInterruptsTheTurn(t *testing.T) {
+	instance, events := startSlowTurn(t)
+	if err := instance.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	done := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventTurnCompleted
+	})
+	if done.TurnID != "turn-1" || done.Payload.TurnState != provider.RuntimeTurnInterrupted {
+		t.Fatalf("completion = %#v, want turn-1 interrupted", done)
 	}
 }
 

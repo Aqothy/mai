@@ -22,6 +22,9 @@ const (
 	CommandThreadTurnStart       CommandType = "thread.turn.start"
 	CommandThreadTurnRetry       CommandType = "thread.turn.retry"
 	CommandThreadTurnInterrupt   CommandType = "thread.turn.interrupt"
+	CommandThreadPromptSteer     CommandType = "thread.prompt.steer"
+	CommandThreadPromptRemove    CommandType = "thread.prompt.remove"
+	CommandThreadQueueResume     CommandType = "thread.queue.resume"
 	CommandThreadApprovalRespond CommandType = "thread.approval.respond"
 	CommandThreadSessionPrepare  CommandType = "thread.session.prepare"
 	CommandThreadSessionStop     CommandType = "thread.session.stop"
@@ -29,23 +32,25 @@ const (
 )
 
 type Command struct {
-	Type                  string                           `json:"type"`
-	CommandID             CommandID                        `json:"commandId,omitempty"`
-	ThreadID              ThreadID                         `json:"threadId,omitempty"`
-	TurnID                TurnID                           `json:"turnId,omitempty"`
-	Title                 string                           `json:"title,omitempty"`
-	ProviderInstanceID    provider.InstanceID              `json:"providerInstanceId,omitempty"`
-	Cwd                   string                           `json:"cwd,omitempty"`
-	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
-	ModelSelection        *provider.ModelSelection         `json:"modelSelection,omitempty"`
-	Message               *CommandMessage                  `json:"message,omitempty"`
-	RequestID             ApprovalID                       `json:"requestId,omitempty"`
-	Decision              provider.ApprovalDecision        `json:"decision,omitempty"`
-	OptionID              string                           `json:"optionId,omitempty"`
-	Answers               map[string][]string              `json:"answers,omitempty"`
-	Value                 any                              `json:"value,omitempty"`
-	ConfigSelections      []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
-	CreatedAt             time.Time                        `json:"createdAt,omitzero"`
+	Type                  string                   `json:"type"`
+	CommandID             CommandID                `json:"commandId,omitempty"`
+	ThreadID              ThreadID                 `json:"threadId,omitempty"`
+	TurnID                TurnID                   `json:"turnId,omitempty"`
+	Title                 string                   `json:"title,omitempty"`
+	ProviderInstanceID    provider.InstanceID      `json:"providerInstanceId,omitempty"`
+	Cwd                   string                   `json:"cwd,omitempty"`
+	AdditionalDirectories []string                 `json:"additionalDirectories,omitempty"`
+	ModelSelection        *provider.ModelSelection `json:"modelSelection,omitempty"`
+	Message               *CommandMessage          `json:"message,omitempty"`
+	// MessageID names the queued prompt thread.prompt.steer/remove act on.
+	MessageID        MessageID                        `json:"messageId,omitempty"`
+	RequestID        ApprovalID                       `json:"requestId,omitempty"`
+	Decision         provider.ApprovalDecision        `json:"decision,omitempty"`
+	OptionID         string                           `json:"optionId,omitempty"`
+	Answers          map[string][]string              `json:"answers,omitempty"`
+	Value            any                              `json:"value,omitempty"`
+	ConfigSelections []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
+	CreatedAt        time.Time                        `json:"createdAt,omitzero"`
 }
 
 // CommandMessage is the prompt a client sends with thread.start/thread.turn.start.

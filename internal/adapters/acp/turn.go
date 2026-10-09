@@ -59,19 +59,18 @@ type promptCollector struct {
 	settledPermissionKeys    map[string]struct{}
 }
 
-// promptJoinsCollector reports whether a prompt with turnID steers the
-// collector's live turn (rather than starting a new one). Cancelled and
-// completing turns never accept new prompts.
-func promptJoinsCollector(collector *promptCollector, turnID string) bool {
-	return collector != nil && !collector.cancelled && !collector.completing && !promptStartsNewTurn(collector, turnID)
-}
-
-func promptStartsNewTurn(collector *promptCollector, turnID string) bool {
-	return collector != nil && turnID != "" && collector.turnID != "" && collector.turnID != turnID
+// collectorAcceptsSteer reports whether a steer of turnID can join the
+// collector's live turn. Cancelled and completing turns never accept new
+// prompts: their turn is over, only its completion is still travelling.
+func collectorAcceptsSteer(collector *promptCollector, turnID string) bool {
+	return collector != nil && !collector.cancelled && !collector.completing && collector.turnID == turnID
 }
 
 // SendTurn returns once a prompt is dispatched or queued; lifecycle and content
-// arrive asynchronously through runtime events.
+// arrive asynchronously through runtime events. A new turn's prompt waits
+// behind a previous prompt the agent has not settled yet (a cancelled one
+// still draining); a steer joins the live turn and cancels its in-flight
+// prompt, since agents process one session prompt at a time.
 func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
 	if input.ThreadID == "" {
 		return fmt.Errorf("provider turn requires threadId")
@@ -99,12 +98,13 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		return closeErr
 	}
 	prev := session.collector
-	joins := promptJoinsCollector(prev, input.TurnID)
 	collector := prev
 	turnID := input.TurnID
-	if joins {
-		turnID = collector.turnID
-		collector.threadID = input.ThreadID
+	if input.Steer {
+		if !collectorAcceptsSteer(prev, turnID) {
+			h.mu.Unlock()
+			return fmt.Errorf("thread %q has no running turn %q to steer", input.ThreadID, turnID)
+		}
 	} else {
 		if turnID == "" {
 			turnID = newID()
@@ -126,7 +126,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	}
 
 	stream.queued = append(stream.queued, rec)
-	steering := joins && stream.active != nil && stream.active.collector == collector
+	steering := input.Steer && stream.active != nil && stream.active.collector == collector
 	var permissionCancels []context.CancelFunc
 	if steering {
 		for _, pending := range collector.pendingPermissionCancels {
@@ -600,12 +600,10 @@ func shouldStampActiveTurn(eventType provider.RuntimeEventType) bool {
 // cancellationTargetsLocked lists the session's cancellation targets: the
 // in-flight prompt's collector and the registered one.
 //
-// They are usually the same object. They diverge because a prompt refuses to
-// join a cancelled or completing collector even when the turn id matches
-// (promptJoinsCollector): after an interrupt, the agent has not settled yet, so
-// stream.active still holds the cancelled prompt while a re-prompt — which the
-// engine steers onto the SAME turn id — registers a fresh collector. A later
-// interrupt must reach both. h.mu must be held.
+// They are usually the same object. They diverge after an interrupt: the
+// agent has not settled yet, so stream.active still holds the cancelled
+// prompt while the next turn's prompt registers a fresh collector behind it.
+// A later interrupt must reach both. h.mu must be held.
 func cancellationTargetsLocked(session *acpSession) []*promptCollector {
 	var targets []*promptCollector
 	if session.stream != nil && session.stream.active != nil && session.stream.active.collector != nil {

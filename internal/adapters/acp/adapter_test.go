@@ -1060,10 +1060,10 @@ func TestPermissionRequestAfterTurnCancellationResolvesOnCancelledTurn(t *testin
 	}
 }
 
-// promptJoinsCollector decides whether SendTurn steers the live turn or
-// starts a fresh one. Cancelled turns, completing turns (turn.completed
-// emission underway) and different turn ids must all start a fresh collector.
-func TestPromptJoinsCollectorClassification(t *testing.T) {
+// collectorAcceptsSteer decides whether a steer joins the live turn. Cancelled
+// turns, completing turns (turn.completed emission underway) and other turns
+// must reject it so orchestration sends the prompt as the next turn instead.
+func TestCollectorAcceptsSteerClassification(t *testing.T) {
 	cases := []struct {
 		name      string
 		collector *promptCollector
@@ -1072,14 +1072,13 @@ func TestPromptJoinsCollectorClassification(t *testing.T) {
 	}{
 		{"nil collector", nil, "turn-1", false},
 		{"live same turn", &promptCollector{turnID: "turn-1"}, "turn-1", true},
-		{"live empty turn id", &promptCollector{turnID: "turn-1"}, "", true},
 		{"different turn id", &promptCollector{turnID: "turn-1"}, "turn-2", false},
 		{"cancelled turn", &promptCollector{turnID: "turn-1", cancelled: true}, "turn-1", false},
 		{"completing turn", &promptCollector{turnID: "turn-1", completing: true}, "turn-1", false},
 	}
 	for _, tc := range cases {
-		if got := promptJoinsCollector(tc.collector, tc.turnID); got != tc.want {
-			t.Errorf("%s: promptJoinsCollector = %v, want %v", tc.name, got, tc.want)
+		if got := collectorAcceptsSteer(tc.collector, tc.turnID); got != tc.want {
+			t.Errorf("%s: collectorAcceptsSteer = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
@@ -2122,7 +2121,7 @@ func TestSteeringPreservesEveryQueuedPrompt(t *testing.T) {
 	bindStreamingSession(h)
 
 	for _, input := range []string{"first", "steer one", "steer two"} {
-		if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: input}); err != nil {
+		if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: input, Steer: input != "first"}); err != nil {
 			t.Fatalf("SendTurn(%q): %v", input, err)
 		}
 		if input == "first" {
@@ -2203,7 +2202,7 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 		t.Fatalf("tool start = %#v, want command_execution on turn-1", started)
 	}
 
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer", Steer: true}); err != nil {
 		t.Fatalf("steering SendTurn: %v", err)
 	}
 	waitFor(t, cancelCalls, "steering prompt did not send session/cancel")
@@ -2243,13 +2242,13 @@ func TestSteeringPromptCancelsInFlightPromptAndSettlesAbandonedTools(t *testing.
 	waitForNoActiveCollector(t, h, "sess")
 }
 
-// Regression (client-visible flicker): a steer can land in the window where
-// the previous turn's last prompt settled but its turn.completed emission is
-// still in progress. The engine still sees the turn as running (turn.completed
-// is travelling hub->ingestion->engine), so the steer reuses the active turn id.
-// The steer must not emit its turn.started until the old turn's completion has
-// been emitted — before the fix the two emissions raced across goroutines.
-func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
+// Regression (client-visible flicker): the next turn can be sent in the
+// window where the previous turn's last prompt settled but its turn.completed
+// emission is still in progress. A steer of the completing turn is refused
+// (orchestration sends it as the next turn), and the next turn must not emit
+// its turn.started until the old turn's completion has been emitted — before
+// the fix the two emissions raced across goroutines.
+func TestNextTurnDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 	agent := &fakeWireAgent{} // every prompt resolves immediately with end_turn
 	h := newWireTestHandle(t, agent)
 
@@ -2288,13 +2287,17 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 	}
 	waitFor(t, completing, "first turn never reached its completion emission")
 
-	// Steer lands while turn-1's completion emission is still in progress.
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
-		t.Fatalf("steering SendTurn: %v", err)
+	// The steer and the next turn land while turn-1's completion emission is
+	// still in progress.
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer", Steer: true}); err == nil {
+		t.Fatal("steer of a completing turn succeeded, want an error so orchestration sends it as the next turn")
+	}
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-2", Input: "next"}); err != nil {
+		t.Fatalf("next SendTurn: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
 	if got := snapshot(); len(got) != 2 {
-		t.Fatalf("lifecycle during completion window = %#v, want the steer's turn.started deferred until the completion is emitted", got)
+		t.Fatalf("lifecycle during completion window = %#v, want the next turn.started deferred until the completion is emitted", got)
 	}
 
 	close(release)
@@ -2305,8 +2308,8 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 			want := []lifecycleEvent{
 				{provider.RuntimeEventTurnStarted, "turn-1"},
 				{provider.RuntimeEventTurnCompleted, "turn-1"},
-				{provider.RuntimeEventTurnStarted, "turn-1"},
-				{provider.RuntimeEventTurnCompleted, "turn-1"},
+				{provider.RuntimeEventTurnStarted, "turn-2"},
+				{provider.RuntimeEventTurnCompleted, "turn-2"},
 			}
 			for i := range want {
 				if got[i] != want[i] {
@@ -2317,7 +2320,7 @@ func TestSteerDuringTurnCompletionChainsStartAfterCompletion(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for steered turn lifecycle; got %#v", snapshot())
+			t.Fatalf("timed out waiting for next turn lifecycle; got %#v", snapshot())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -2423,7 +2426,7 @@ func TestInterruptWhileSteeringWaitsForHandoffSkipsDispatch(t *testing.T) {
 	waitFor(t, firstPromptStarted, "first prompt did not start")
 	// Steer while the first prompt is in flight, then interrupt while the
 	// steer is still waiting for the cancelled prompt to settle.
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer"}); err != nil {
+	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "steer", Steer: true}); err != nil {
 		t.Fatalf("steering SendTurn: %v", err)
 	}
 	waitFor(t, cancelCalls, "steering prompt did not send session/cancel")

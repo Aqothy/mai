@@ -60,11 +60,18 @@ type claudeSession struct {
 
 	proc *sessionProcess
 
-	// Claude Code has no native turn ids: a turn spans one queued user
-	// message up to its result line. The daemon's turn ids are authoritative;
-	// queuedTurns preserves FIFO order for messages sent while a turn runs.
+	// Claude Code has no native turn ids, so one turn id at a time stands for
+	// the CLI's work: from the message that starts it to the result that ends
+	// it. The CLI folds a message written mid-turn into the running query at
+	// its next tool boundary and echoes it (--replay-user-messages); a message
+	// it could not fold runs as one more query with its own result. So a
+	// result that arrives while a written message is still unechoed does not
+	// end the turn: the next result does.
 	activeLocalTurn string
-	queuedTurns     []string
+	// cliStartedTurn marks an activeLocalTurn the CLI began on its own, when
+	// a background task or agent finishing woke it.
+	cliStartedTurn bool
+	unechoedInput  map[string]bool
 
 	// Streaming state for the in-flight assistant message.
 	toolStates   map[string]*toolState

@@ -138,12 +138,13 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		h.mu.Unlock()
 		return fmt.Errorf("Codex thread %q is not bound", input.ThreadID)
 	}
-	if session.pendingLocalTurn != "" {
-		h.mu.Unlock()
-		return fmt.Errorf("Codex thread %q already has an active turn", input.ThreadID)
-	}
-	activeNativeTurn := session.activeNativeTurn
-	if activeNativeTurn != "" {
+	if input.Steer {
+		// app-server rejects an expectedTurnId that is no longer running.
+		nativeTurn := session.localToNativeTurn[input.TurnID]
+		if nativeTurn == "" {
+			h.mu.Unlock()
+			return fmt.Errorf("Codex thread %q has no turn %q to steer", input.ThreadID, input.TurnID)
+		}
 		nativeThread := session.nativeThreadID
 		skills := append([]provider.Skill(nil), session.skills...)
 		h.mu.Unlock()
@@ -156,16 +157,20 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		}
 		if err := h.rpc.call(ctx, "turn/steer", map[string]any{
 			"threadId":            nativeThread,
-			"expectedTurnId":      activeNativeTurn,
+			"expectedTurnId":      nativeTurn,
 			"clientUserMessageId": clientMessageID,
 			"input":               turnInput,
 		}, &response); err != nil {
 			return err
 		}
-		if response.TurnID != activeNativeTurn {
-			return fmt.Errorf("turn/steer returned unexpected turn id %q (active %q)", response.TurnID, activeNativeTurn)
+		if response.TurnID != nativeTurn {
+			return fmt.Errorf("turn/steer returned unexpected turn id %q (active %q)", response.TurnID, nativeTurn)
 		}
 		return nil
+	}
+	if session.pendingLocalTurn != "" {
+		h.mu.Unlock()
+		return fmt.Errorf("Codex thread %q already has an active turn", input.ThreadID)
 	}
 	session.pendingLocalTurn = input.TurnID
 	nativeThread := session.nativeThreadID

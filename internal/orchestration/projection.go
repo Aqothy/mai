@@ -74,6 +74,69 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadSkillsUpdated(event)
 	case EventThreadTokenUsageUpdated:
 		p.applyThreadTokenUsageUpdated(event)
+	case EventThreadPromptQueued:
+		p.applyThreadPromptQueued(event)
+	case EventThreadPromptRemoved:
+		p.applyThreadPromptRemoved(event)
+	case EventThreadPromptSteerRequested:
+		p.applyThreadPromptSteerRequested(event)
+	case EventThreadPromptSteerFailed:
+		p.applyThreadPromptSteerFailed(event)
+	case EventThreadQueueResumed:
+		if thread := p.ensureThread(event); thread != nil {
+			thread.QueueHeld = false
+		}
+	}
+}
+
+func (p *Projection) applyThreadPromptQueued(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	payload := event.Payload
+	thread.QueuedPrompts = append(thread.QueuedPrompts, QueuedPrompt{MessageID: payload.MessageID, Text: payload.Text, Attachments: payload.Attachments, Annotations: payload.Annotations, CreatedAt: firstTime(payload.CreatedAt, event.OccurredAt)})
+	thread.QueueHeld = false // sending again is the user picking the thread back up
+}
+
+func (p *Projection) applyThreadPromptRemoved(event Event) {
+	if thread := p.ensureThread(event); thread != nil {
+		removeQueuedPrompt(thread, event.Payload.MessageID)
+	}
+}
+
+// applyThreadPromptSteerRequested moves the prompt to the front: if the turn
+// ends before the provider takes it, it goes first.
+func (p *Projection) applyThreadPromptSteerRequested(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	prompt := thread.queuedPrompt(event.Payload.MessageID)
+	if prompt == nil {
+		return
+	}
+	steering := *prompt
+	steering.Steering = true
+	removeQueuedPrompt(thread, steering.MessageID)
+	thread.QueuedPrompts = slices.Insert(thread.QueuedPrompts, 0, steering)
+}
+
+func (p *Projection) applyThreadPromptSteerFailed(event Event) {
+	thread := p.ensureThread(event)
+	if thread == nil {
+		return
+	}
+	if prompt := thread.queuedPrompt(event.Payload.MessageID); prompt != nil {
+		prompt.Steering = false
+	}
+}
+
+func removeQueuedPrompt(thread *Thread, messageID MessageID) {
+	thread.QueuedPrompts = slices.DeleteFunc(thread.QueuedPrompts, func(prompt QueuedPrompt) bool { return prompt.MessageID == messageID })
+	if len(thread.QueuedPrompts) == 0 {
+		thread.QueuedPrompts = nil
+		thread.QueueHeld = false
 	}
 }
 
@@ -277,6 +340,7 @@ func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBindi
 	case SessionStatusError:
 		thread.LatestTurn.State = TurnStateError
 		thread.LatestTurn.Error = session.LastError
+		thread.QueueHeld = len(thread.QueuedPrompts) > 0
 	case SessionStatusInterrupted, SessionStatusStopped:
 		thread.LatestTurn.State = TurnStateInterrupted
 	default:
@@ -291,6 +355,8 @@ func (p *Projection) applyThreadMessageSent(event Event) {
 		return
 	}
 	message := Message{ID: event.Payload.MessageID, Role: event.Payload.Role, Text: event.Payload.Text, Attachments: event.Payload.Attachments, Annotations: event.Payload.Annotations, TurnID: event.Payload.TurnID, CreatedAt: firstTime(event.Payload.CreatedAt, event.OccurredAt), UpdatedAt: firstTime(event.Payload.UpdatedAt, event.OccurredAt)}
+	// A sent prompt leaves the queue: it is queued or in the timeline, never both.
+	removeQueuedPrompt(thread, message.ID)
 	if existing := thread.Timeline.Message(message.ID); existing != nil {
 		existing.Text += message.Text
 		existing.Attachments = append(existing.Attachments, message.Attachments...)
@@ -318,13 +384,11 @@ func (p *Projection) applyThreadTurnStartRequested(event Event) {
 	if turnID == "" {
 		turnID = TurnID(event.EventID)
 	}
-	// A turn.start for the already-running turn is steering: the same logical
-	// turn keeps going, so its RequestedAt/StartedAt must survive.
 	if thread.LatestTurn == nil || thread.LatestTurn.ID != turnID {
 		replaceLatestTurn(thread, Turn{ID: turnID, State: TurnStateRunning, RequestedAt: now, StartedAt: &now})
 	}
-	// A server-requeued start moves an already-recorded steering message onto a
-	// fresh turn after the old turn won the completion race.
+	thread.QueueHeld = false // a retry picks the thread back up
+	// A retry moves the failed turn's message onto the fresh turn.
 	if event.Payload.MessageID != "" {
 		if message := thread.Timeline.Message(event.Payload.MessageID); message != nil {
 			message.TurnID = turnID
@@ -356,6 +420,7 @@ func (p *Projection) applyThreadTurnInterruptRequested(event Event) {
 	if thread.LatestTurn != nil {
 		thread.LatestTurn.InterruptRequested = true
 	}
+	thread.QueueHeld = len(thread.QueuedPrompts) > 0
 }
 
 func (p *Projection) applyThreadTurnInterruptConfirmed(event Event) {

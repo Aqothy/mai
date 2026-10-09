@@ -287,6 +287,12 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 		return e.dispatchThreadTurnRetry(command)
 	case CommandThreadTurnInterrupt:
 		return e.dispatchThreadTurnInterrupt(command)
+	case CommandThreadPromptSteer:
+		return e.dispatchThreadPromptSteer(command)
+	case CommandThreadPromptRemove:
+		return e.dispatchThreadPromptRemove(command)
+	case CommandThreadQueueResume:
+		return e.dispatchThreadQueueResume(command)
 	case CommandThreadApprovalRespond:
 		return e.dispatchApprovalRespond(command)
 	case CommandThreadSessionPrepare:
@@ -472,8 +478,9 @@ type ThreadSessionView struct {
 }
 
 // ThreadProviderView is the bounded state needed to start or resume provider
-// work. It deliberately excludes the timeline except for the addressed prompt,
-// avoiding an O(thread size) clone on every session/turn start.
+// work. It deliberately excludes the timeline except for the addressed prompt
+// (a timeline message or a queued prompt), avoiding an O(thread size) clone on
+// every session/turn start.
 type ThreadProviderView struct {
 	ID                    ThreadID
 	ReplayHistoryPending  bool
@@ -557,13 +564,16 @@ func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadPro
 		Session:               cloneSessionPtr(thread.Session),
 		LatestTurn:            cloneTurnPtr(thread.LatestTurn),
 	}
-	if messageID != "" {
-		if message := thread.Timeline.Message(messageID); message != nil {
-			clone := *message
-			clone.Attachments = cloneAttachments(message.Attachments)
-			clone.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
-			view.Message = &clone
-		}
+	if messageID == "" {
+		return view, true
+	}
+	if message := thread.Timeline.Message(messageID); message != nil {
+		clone := *message
+		clone.Attachments = cloneAttachments(message.Attachments)
+		clone.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
+		view.Message = &clone
+	} else if prompt := thread.queuedPrompt(messageID); prompt != nil {
+		view.Message = &Message{ID: prompt.MessageID, Role: MessageRoleUser, Text: prompt.Text, Attachments: cloneAttachments(prompt.Attachments), Annotations: append([]provider.PromptAnnotation(nil), prompt.Annotations...), CreatedAt: prompt.CreatedAt, UpdatedAt: prompt.CreatedAt}
 	}
 	return view, true
 }
@@ -693,7 +703,6 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 	if messageID == "" {
 		messageID = MessageID(newID("msg"))
 	}
-	turnID := TurnID(newID("turn"))
 	title := command.Title
 	if title == "" {
 		title = strings.Join(strings.Fields(command.Message.Text), " ")
@@ -723,15 +732,10 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 			ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID,
 			ModelSelection: modelSelection, Cwd: cwd, AdditionalDirectories: additionalDirectories, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
 		}})
-		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
-			ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text,
-			Attachments: command.Message.Attachments, Annotations: command.Message.Annotations, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt,
-		}})
-		started := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
-			ThreadID: command.ThreadID, Title: title, MessageID: messageID, TurnID: turnID,
+		started := appendPromptTurn(appendEvent, threadEvent(command, "", ActorKindClient, EventPayload{}), commandPrompt(command, messageID), EventPayload{
 			ProviderInstanceID: command.ProviderInstanceID, ModelSelection: modelSelection,
 			ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
-		}})
+		})
 		sequence = started.Sequence
 		return nil
 	})
@@ -784,6 +788,9 @@ func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, erro
 	})
 }
 
+// dispatchThreadTurnStart sends the prompt as the next turn, or queues it
+// when the thread is busy: a turn is running or stopping, the session is
+// preparing, or earlier prompts are still waiting.
 func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error) {
 	if command.ThreadID == "" {
 		return DispatchResult{}, fmt.Errorf("thread.turn.start requires threadId")
@@ -805,34 +812,113 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 		if thread == nil {
 			return fmt.Errorf("thread %q not found", command.ThreadID)
 		}
-		if sessionPreparing(*thread) {
-			return fmt.Errorf("cannot start a turn while thread %q is preparing its provider session", command.ThreadID)
-		}
-		if thread.ReplayHistoryPending {
+		if thread.ReplayHistoryPending && !sessionPreparing(*thread) {
 			return fmt.Errorf("cannot start a turn on restored thread %q before preparing its provider session", command.ThreadID)
 		}
-		active := activeTurnID(*thread)
-		steering := active != ""
-		turnID := active
-		if turnID == "" {
-			turnID = TurnID(newID("turn"))
+		if thread.Timeline.Message(messageID) != nil || thread.queuedPrompt(messageID) != nil {
+			return fmt.Errorf("message %q was already sent to thread %q", messageID, command.ThreadID)
 		}
 		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
-		if steering {
-			if err := selectionChange.validateSteering(*thread); err != nil {
-				return err
-			}
-			selectionChange = providerSelectionChange{}
+		prompt := commandPrompt(command, messageID)
+		header := threadEvent(command, "", ActorKindClient, EventPayload{})
+		if canStartTurn(*thread) && len(thread.QueuedPrompts) == 0 {
+			sequence = appendPromptTurn(appendEvent, header, prompt, EventPayload{ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}).Sequence
+			return nil
 		}
-		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text, Attachments: command.Message.Attachments, Annotations: command.Message.Annotations, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt}})
-		turnEvent := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: command.Title, MessageID: messageID, TurnID: turnID, Steering: steering, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}})
-		sequence = turnEvent.Sequence
+		// A queued prompt is sent with the thread's selection at the time.
+		if selectionChange.specified && selectionChange.changes(*thread) {
+			return fmt.Errorf("cannot change provider/model selection while thread %q is busy", command.ThreadID)
+		}
+		header.Type = EventThreadPromptQueued
+		header.Payload = EventPayload{ThreadID: command.ThreadID, MessageID: prompt.MessageID, Text: prompt.Text, Attachments: prompt.Attachments, Annotations: prompt.Annotations, CreatedAt: prompt.CreatedAt}
+		sequence = appendEvent(header).Sequence
 		return nil
 	})
 	if err != nil {
 		return DispatchResult{}, err
 	}
 	return DispatchResult{Sequence: sequence}, nil
+}
+
+// dispatchThreadPromptSteer adds a queued prompt to the running turn. The
+// prompt stays queued, marked steering, until the provider takes it.
+func (e *Engine) dispatchThreadPromptSteer(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		prompt := thread.queuedPrompt(command.MessageID)
+		if prompt == nil {
+			return Event{}, fmt.Errorf("prompt %q is not queued on thread %q", command.MessageID, command.ThreadID)
+		}
+		if prompt.Steering {
+			return Event{}, fmt.Errorf("prompt %q is already being steered", command.MessageID)
+		}
+		turnID := activeTurnID(*thread)
+		if turnID == "" {
+			return Event{}, fmt.Errorf("thread %q has no running turn to steer", command.ThreadID)
+		}
+		return threadEvent(command, EventThreadPromptSteerRequested, ActorKindClient, EventPayload{MessageID: command.MessageID, TurnID: turnID}), nil
+	})
+}
+
+func (e *Engine) dispatchThreadPromptRemove(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		prompt := thread.queuedPrompt(command.MessageID)
+		if prompt == nil {
+			return Event{}, fmt.Errorf("prompt %q is not queued on thread %q", command.MessageID, command.ThreadID)
+		}
+		if prompt.Steering {
+			return Event{}, fmt.Errorf("prompt %q is being steered into the running turn", command.MessageID)
+		}
+		return threadEvent(command, EventThreadPromptRemoved, ActorKindClient, EventPayload{MessageID: command.MessageID}), nil
+	})
+}
+
+func (e *Engine) dispatchThreadQueueResume(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		if !thread.QueueHeld {
+			return Event{}, fmt.Errorf("the queue of thread %q is not paused", command.ThreadID)
+		}
+		return threadEvent(command, EventThreadQueueResumed, ActorKindClient, EventPayload{}), nil
+	})
+}
+
+func commandPrompt(command Command, messageID MessageID) QueuedPrompt {
+	return QueuedPrompt{MessageID: messageID, Text: command.Message.Text, Attachments: command.Message.Attachments, Annotations: command.Message.Annotations, CreatedAt: command.CreatedAt}
+}
+
+// appendPromptTurn records prompt as the user message of a new turn. header
+// carries the shared event origin; start is the turn start's payload.
+func appendPromptTurn(appendEvent func(Event) Event, header Event, prompt QueuedPrompt, start EventPayload) Event {
+	threadID := header.Payload.ThreadID
+	turnID := TurnID(newID("turn"))
+	message := header
+	message.Type = EventThreadMessageSent
+	message.Payload = EventPayload{ThreadID: threadID, MessageID: prompt.MessageID, Role: MessageRoleUser, Text: prompt.Text, Attachments: prompt.Attachments, Annotations: prompt.Annotations, TurnID: turnID, CreatedAt: prompt.CreatedAt, UpdatedAt: prompt.CreatedAt}
+	appendEvent(message)
+	turn := header
+	turn.Type = EventThreadTurnStartRequested
+	start.ThreadID, start.MessageID, start.TurnID = threadID, prompt.MessageID, turnID
+	turn.Payload = start
+	return appendEvent(turn)
+}
+
+// sendQueuedPromptsLocked is the queue's one dispatch rule. Every write ends
+// here, so a thread that can take a turn never keeps a prompt waiting: its
+// first queued prompt starts the next turn.
+func (e *Engine) sendQueuedPromptsLocked(appended []Event, appendEvent func(Event) Event) {
+	var threadIDs []ThreadID
+	for _, event := range appended {
+		if !slices.Contains(threadIDs, event.ThreadID()) {
+			threadIDs = append(threadIDs, event.ThreadID())
+		}
+	}
+	for _, threadID := range threadIDs {
+		thread := e.projection.liveThread(threadID)
+		if thread == nil || len(thread.QueuedPrompts) == 0 || thread.QueueHeld || thread.QueuedPrompts[0].Steering || !canStartTurn(*thread) {
+			continue
+		}
+		header := Event{OccurredAt: appended[len(appended)-1].OccurredAt, Actor: ActorKindServer, Payload: EventPayload{ThreadID: threadID}}
+		appendPromptTurn(appendEvent, header, thread.QueuedPrompts[0], EventPayload{})
+	}
 }
 
 // dispatchThreadTurnRetry starts a fresh turn with the existing user message
@@ -1052,7 +1138,7 @@ func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) er
 	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return fn(func(event Event) Event {
+	appendEvent := func(event Event) Event {
 		mutated = true
 		sequenced := normalizeEvent(e.stamp(event))
 		appended = append(appended, sequenced)
@@ -1061,7 +1147,12 @@ func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) er
 			hook(sequenced)
 		}
 		return sequenced
-	})
+	}
+	err := fn(appendEvent)
+	if len(appended) > 0 {
+		e.sendQueuedPromptsLocked(appended, appendEvent)
+	}
+	return err
 }
 
 func (e *Engine) listenersLocked() []func(Event) {

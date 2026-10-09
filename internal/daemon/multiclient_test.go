@@ -429,15 +429,17 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 		t.Fatal("approved turn never streamed the agent's post-approval output")
 	}
 
-	// Mid-turn steer from the other client: B parks a prompt on thread two. Both
-	// clients must observe it running before A steers, so this cannot degrade into
-	// two ordinary sequential turns if the fake agent happens to run quickly.
+	// Mid-turn steer across clients: B parks a prompt on thread two, A queues a
+	// follow-up behind it, and B steers that into the running turn. The blocked
+	// turn only ends once the steer reaches the agent and is answered.
 	baseReceipt := b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer-base", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer-base", Text: "block"}})
 	for _, client := range []*recordingClient{a, b} {
 		client.waitThread(t, threadTwo, "base turn running before steer", sessionStatusAfter(baseReceipt.Sequence, orchestration.SessionStatusRunning))
 	}
-	steerReceipt := a.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer", Text: "stream 5 16"}})
+	a.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-multi-steer-queue", ThreadID: threadTwo, Message: &orchestration.CommandMessage{MessageID: "msg-multi-steer", Text: "stream 5 16"}})
+	steerReceipt := b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadPromptSteer, CommandID: "cmd-multi-steer", ThreadID: threadTwo, MessageID: "msg-multi-steer"})
 	for _, client := range []*recordingClient{a, b} {
+		client.waitThread(t, threadTwo, "steer answered by the agent", assistantMessageAfter(steerReceipt.Sequence))
 		client.waitThread(t, threadTwo, "steered turn settle", sessionStatusAfter(steerReceipt.Sequence, orchestration.SessionStatusReady))
 	}
 

@@ -203,44 +203,169 @@ func TestEngineIdempotentThreadCreateByThreadID(t *testing.T) {
 	}
 }
 
-// While a turn is active the thread's provider/model selection is pinned: a
-// metadata change of either is rejected, and a turn.start becomes steering on
-// the same turn (keeping its timing) that may not change the selection either.
-func TestEngineActiveTurnPinsSelectionAndAcceptsSteering(t *testing.T) {
+// A prompt sent while the thread is busy (a turn running, or being stopped)
+// is queued, not sent into that turn: the selection stays pinned, and once
+// the turn settles the engine sends the queued prompts as the next turns, in
+// order. Sending into a stopping turn used to drop the prompt silently.
+func TestEngineQueuesPromptsWhileBusyAndSendsThemInOrder(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
-	threadID := ThreadID("thread-active-turn")
+	threadID := ThreadID("thread-queue")
 	selection := &provider.ModelSelection{Model: "fast", Options: json.RawMessage(`{"effort":"low"}`)}
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-active-turn", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", ModelSelection: selection})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-active", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}})
-	active, _ := engine.Thread(threadID)
-	activeTurn := *active.LatestTurn
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-queue", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex", ModelSelection: selection})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}})
+	thread, _ := engine.Thread(threadID)
+	firstTurn := thread.LatestTurn.ID
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: firstTurn, Binding: &SessionBinding{ProviderInstanceID: "codex"}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
 
 	for name, command := range map[string]Command{
-		"meta provider":  {Type: CommandThreadMetaUpdate, ProviderInstanceID: "other"},
-		"meta model":     {Type: CommandThreadMetaUpdate, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow", Options: selection.Options}},
-		"steer provider": {Type: CommandThreadTurnStart, ProviderInstanceID: "other", Message: &CommandMessage{Text: "switch provider"}},
-		"steer model":    {Type: CommandThreadTurnStart, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow"}, Message: &CommandMessage{Text: "switch model"}},
+		"meta provider":   {Type: CommandThreadMetaUpdate, ProviderInstanceID: "other"},
+		"meta model":      {Type: CommandThreadMetaUpdate, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow", Options: selection.Options}},
+		"queued provider": {Type: CommandThreadTurnStart, ProviderInstanceID: "other", Message: &CommandMessage{Text: "switch provider"}},
+		"queued model":    {Type: CommandThreadTurnStart, ProviderInstanceID: "codex", ModelSelection: &provider.ModelSelection{Model: "slow"}, Message: &CommandMessage{Text: "switch model"}},
+		"duplicate":       {Type: CommandThreadTurnStart, Message: &CommandMessage{MessageID: "msg-1", Text: "hello again"}},
 	} {
 		command.CommandID, command.ThreadID = CommandID("reject-"+name), threadID
 		if _, err := engine.Dispatch(context.Background(), command); err == nil {
 			t.Fatalf("%s during active turn err = nil, want rejection", name)
 		}
 	}
-	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "rename-active", ThreadID: threadID, Title: "Renamed", ProviderInstanceID: "codex"})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "steer-active", ThreadID: threadID, ProviderInstanceID: "codex", Message: &CommandMessage{MessageID: "msg-2", Text: "actually, do this too"}, CreatedAt: time.Now().Add(time.Minute)})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnInterrupt, CommandID: "stop-1", ThreadID: threadID})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-2", ThreadID: threadID, ProviderInstanceID: "codex", Message: &CommandMessage{MessageID: "msg-2", Text: "sent while stopping"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-3", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-3", Text: "third"}})
 
+	thread, _ = engine.Thread(threadID)
+	if queued := queuedMessageIDs(thread); !slices.Equal(queued, []MessageID{"msg-2", "msg-3"}) || len(thread.Timeline.Messages()) != 1 || thread.LatestTurn.ID != firstTurn {
+		t.Fatalf("queue = %v, messages = %d, latest turn = %q; want msg-2, msg-3 queued behind the running %q", queued, len(thread.Timeline.Messages()), thread.LatestTurn.ID, firstTurn)
+	}
+
+	for index, want := range []MessageID{"msg-2", "msg-3"} {
+		thread, _ = engine.Thread(threadID)
+		if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: thread.LatestTurn.ID, TurnState: provider.RuntimeTurnInterrupted}); err != nil {
+			t.Fatalf("settle %d: %v", index, err)
+		}
+		thread, _ = engine.Thread(threadID)
+		messages := thread.Timeline.Messages()
+		sent := messages[len(messages)-1]
+		if sent.ID != want || sent.TurnID != thread.LatestTurn.ID || thread.LatestTurn.State != TurnStateRunning || thread.Session.ActiveTurnID != thread.LatestTurn.ID {
+			t.Fatalf("after settle %d: last message %q on %q, latest turn %#v; want %q starting the running turn", index, sent.ID, sent.TurnID, thread.LatestTurn, want)
+		}
+	}
+	if thread.QueuedPrompts != nil || !selectionEqual(thread.ModelSelection, selection) {
+		t.Fatalf("queue = %v, selection = %#v; want empty with the original selection", thread.QueuedPrompts, thread.ModelSelection)
+	}
+}
+
+// Steering moves a queued prompt ahead of the others and holds the queue
+// until the provider takes it: it can't be removed meanwhile, a turn that
+// settles first does not skip it, and a refused steer is sent first. Removing
+// a prompt mid-send used to hide it while still sending it.
+func TestEngineSteeringHoldsThePromptUntilTheProviderTakesIt(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	threadID := ThreadID("thread-steer")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-steer", ThreadID: threadID, ProviderInstanceID: "codex"})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}})
 	thread, _ := engine.Thread(threadID)
-	if thread.Title != "Renamed" || thread.ProviderInstanceID != "codex" || !selectionEqual(thread.ModelSelection, selection) {
-		t.Fatalf("thread = %q/%q/%#v, want renamed with the original selection", thread.Title, thread.ProviderInstanceID, thread.ModelSelection)
+	firstTurn := thread.LatestTurn.ID
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: firstTurn, Binding: &SessionBinding{ProviderInstanceID: "codex"}}); err != nil {
+		t.Fatalf("bind: %v", err)
 	}
-	steered := thread.LatestTurn
-	if steered.ID != activeTurn.ID || steered.State != TurnStateRunning || !steered.RequestedAt.Equal(activeTurn.RequestedAt) || steered.StartedAt == nil || !steered.StartedAt.Equal(*activeTurn.StartedAt) {
-		t.Fatalf("steered turn = %#v, want %#v still running with its original timing", steered, activeTurn)
+	for _, id := range []MessageID{"msg-2", "msg-3", "msg-4"} {
+		mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: CommandID("queue-" + id), ThreadID: threadID, Message: &CommandMessage{MessageID: string(id), Text: string(id)}})
 	}
-	if messages := thread.Timeline.Messages(); len(messages) != 2 || messages[1].ID != "msg-2" || messages[1].TurnID != activeTurn.ID {
-		t.Fatalf("messages = %#v, want only the compatible steering message, on the active turn", messages)
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptRemove, CommandID: "remove-4", ThreadID: threadID, MessageID: "msg-4"})
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptSteer, CommandID: "steer-3", ThreadID: threadID, MessageID: "msg-3"})
+	for name, command := range map[string]Command{
+		"steer again":     {Type: CommandThreadPromptSteer, MessageID: "msg-3"},
+		"remove steering": {Type: CommandThreadPromptRemove, MessageID: "msg-3"},
+		"remove unknown":  {Type: CommandThreadPromptRemove, MessageID: "msg-4"},
+	} {
+		command.CommandID, command.ThreadID = CommandID("reject-"+name), threadID
+		if _, err := engine.Dispatch(context.Background(), command); err == nil {
+			t.Fatalf("%s err = nil, want rejection", name)
+		}
 	}
+	thread, _ = engine.Thread(threadID)
+	if queued := queuedMessageIDs(thread); !slices.Equal(queued, []MessageID{"msg-3", "msg-2"}) || !thread.QueuedPrompts[0].Steering {
+		t.Fatalf("queue = %v, want steering msg-3 ahead of msg-2", queued)
+	}
+
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: firstTurn, TurnState: provider.RuntimeTurnCompleted}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	if thread, _ = engine.Thread(threadID); thread.LatestTurn.ID != firstTurn {
+		t.Fatalf("latest turn = %#v, want the queue held while msg-3 is being steered", thread.LatestTurn)
+	}
+	mustAppend(t, engine, EventInput{Type: EventThreadPromptSteerFailed, ThreadID: threadID, Payload: EventPayload{MessageID: "msg-3"}})
+	thread, _ = engine.Thread(threadID)
+	messages := thread.Timeline.Messages()
+	if last := messages[len(messages)-1]; last.ID != "msg-3" || last.TurnID != thread.LatestTurn.ID || thread.LatestTurn.ID == firstTurn {
+		t.Fatalf("last message %q on %q, latest turn %q; want the refused steer sent first as a new turn", last.ID, last.TurnID, thread.LatestTurn.ID)
+	}
+	if queued := queuedMessageIDs(thread); !slices.Equal(queued, []MessageID{"msg-2"}) {
+		t.Fatalf("queue = %v, want msg-2 still waiting", queued)
+	}
+}
+
+// A failed turn or a stop holds the waiting prompts instead of running them
+// into the same failure or past the user's stop. Sending again or resuming
+// picks the thread back up, oldest prompt first.
+func TestEngineHoldsTheQueueAfterAFailureOrStopUntilTheUserPicksItUp(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	threadID := ThreadID("thread-held")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-held", ThreadID: threadID, ProviderInstanceID: "codex"})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-1", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-1", Text: "hello"}})
+	thread, _ := engine.Thread(threadID)
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, TurnID: thread.LatestTurn.ID, Binding: &SessionBinding{ProviderInstanceID: "codex"}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	settle := func(state provider.RuntimeTurnState) Thread {
+		t.Helper()
+		thread, _ := engine.Thread(threadID)
+		if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: thread.LatestTurn.ID, TurnState: state}); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		thread, _ = engine.Thread(threadID)
+		return thread
+	}
+	lastMessage := func(thread Thread) MessageID {
+		messages := thread.Timeline.Messages()
+		return messages[len(messages)-1].ID
+	}
+
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "queue-a", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-a", Text: "a"}})
+	if thread = settle(provider.RuntimeTurnFailed); !thread.QueueHeld || lastMessage(thread) != "msg-1" {
+		t.Fatalf("after failure: held %v, last message %q; want msg-a held", thread.QueueHeld, lastMessage(thread))
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "send-b", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-b", Text: "b"}})
+	thread, _ = engine.Thread(threadID)
+	if thread.QueueHeld || lastMessage(thread) != "msg-a" || !slices.Equal(queuedMessageIDs(thread), []MessageID{"msg-b"}) {
+		t.Fatalf("after sending: held %v, last message %q, queue %v; want msg-a running and msg-b waiting", thread.QueueHeld, lastMessage(thread), queuedMessageIDs(thread))
+	}
+
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnInterrupt, CommandID: "stop-a", ThreadID: threadID})
+	if thread = settle(provider.RuntimeTurnInterrupted); !thread.QueueHeld || lastMessage(thread) != "msg-a" {
+		t.Fatalf("after stop: held %v, last message %q; want msg-b held", thread.QueueHeld, lastMessage(thread))
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadQueueResume, CommandID: "resume", ThreadID: threadID})
+	if thread, _ = engine.Thread(threadID); thread.QueueHeld || lastMessage(thread) != "msg-b" || thread.QueuedPrompts != nil {
+		t.Fatalf("after resume: held %v, last message %q; want msg-b sent", thread.QueueHeld, lastMessage(thread))
+	}
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadQueueResume, CommandID: "resume-again", ThreadID: threadID}); err == nil {
+		t.Fatal("resuming a queue that is not paused err = nil, want rejection")
+	}
+}
+
+func queuedMessageIDs(thread Thread) []MessageID {
+	var ids []MessageID
+	for _, prompt := range thread.QueuedPrompts {
+		ids = append(ids, prompt.MessageID)
+	}
+	return ids
 }
 
 // Invalid turn.start commands are rejected at the boundary without touching
@@ -471,7 +596,8 @@ func TestEngineRejectsStaleTurnInterrupt(t *testing.T) {
 }
 
 // Until the provider session binds, preparation blocks every command that
-// would race the provider start; a rename still applies.
+// would race the provider start; a rename still applies, and a prompt waits
+// in the queue until the session is ready.
 func TestEngineRejectsSessionChangesWhilePreparing(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
@@ -482,7 +608,6 @@ func TestEngineRejectsSessionChangesWhilePreparing(t *testing.T) {
 	for name, command := range map[string]Command{
 		"provider switch": {Type: CommandThreadMetaUpdate, ProviderInstanceID: "provider-b"},
 		"model switch":    {Type: CommandThreadMetaUpdate, ModelSelection: &provider.ModelSelection{Model: "model-b"}},
-		"turn start":      {Type: CommandThreadTurnStart, Message: &CommandMessage{Text: "hello"}},
 		"session stop":    {Type: CommandThreadSessionStop},
 		"second prepare":  {Type: CommandThreadSessionPrepare},
 	} {
@@ -492,9 +617,17 @@ func TestEngineRejectsSessionChangesWhilePreparing(t *testing.T) {
 		}
 	}
 	mustDispatch(t, engine, Command{Type: CommandThreadMetaUpdate, CommandID: "rename-during-prepare", ThreadID: threadID, Title: "Renamed"})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "turn-during-prepare", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-during-prepare", Text: "hello"}})
 	thread, _ := engine.Thread(threadID)
-	if thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection.Model != "model-a" || thread.LatestTurn != nil || len(thread.Timeline) != 0 {
-		t.Fatalf("thread after preparation guards = %#v, want renamed with the original selection and no turn", thread)
+	if thread.Title != "Renamed" || thread.ProviderInstanceID != "provider-a" || thread.ModelSelection.Model != "model-a" || thread.LatestTurn != nil || len(thread.Timeline) != 0 || len(thread.QueuedPrompts) != 1 {
+		t.Fatalf("thread after preparation guards = %#v, want renamed with the original selection, no turn and the prompt queued", thread)
+	}
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateBound, Binding: &SessionBinding{ProviderInstanceID: "provider-a"}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	thread, _ = engine.Thread(threadID)
+	if thread.LatestTurn == nil || thread.QueuedPrompts != nil || len(thread.Timeline.Messages()) != 1 || thread.Timeline.Messages()[0].TurnID != thread.LatestTurn.ID {
+		t.Fatalf("thread after the session bound = %#v, want the queued prompt sent as its first turn", thread)
 	}
 }
 

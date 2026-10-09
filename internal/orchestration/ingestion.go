@@ -626,8 +626,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 func (i *ProviderRuntimeIngestion) ingestRuntimeWarning(event provider.RuntimeEvent, createdAt time.Time) {
 	i.completeThreadText(event.ThreadID, createdAt)
 	message := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Runtime warning")
-	item := &Item{ID: firstNonEmpty(string(event.EventID), newID("warning")), Kind: provider.ItemKindWarning, Title: message, Status: provider.ItemStatusCompleted, Payload: marshalEventPayload(map[string]any{"detail": message, "level": "warning"}), TurnID: TurnID(event.TurnID)}
-	i.recordItem(event, item, createdAt)
+	i.recordItem(event, warningItem(firstNonEmpty(string(event.EventID), newID("warning")), TurnID(event.TurnID), message), createdAt)
 }
 
 func (i *ProviderRuntimeIngestion) ingestRuntimeError(event provider.RuntimeEvent, createdAt time.Time) {
@@ -962,6 +961,10 @@ func (i *ProviderRuntimeIngestion) recordSessionUpdate(threadID string, update s
 // errorItem is the failed timeline item that tells clients why work failed.
 func errorItem(id string, turnID TurnID, message string) *Item {
 	return &Item{ID: id, Kind: provider.ItemKindError, Title: message, Status: provider.ItemStatusFailed, Payload: marshalEventPayload(map[string]any{"detail": message}), TurnID: turnID}
+}
+
+func warningItem(id string, turnID TurnID, message string) *Item {
+	return &Item{ID: id, Kind: provider.ItemKindWarning, Title: message, Status: provider.ItemStatusCompleted, Payload: marshalEventPayload(map[string]any{"detail": message, "level": "warning"}), TurnID: turnID}
 }
 
 func reasoningStatusFromTurnState(state provider.RuntimeTurnState) provider.ItemStatus {

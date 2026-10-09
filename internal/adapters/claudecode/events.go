@@ -30,10 +30,20 @@ func (h *Instance) handleMessage(session *claudeSession, proc *sessionProcess, m
 	case "system":
 		h.handleSystem(session, message)
 	case "stream_event":
+		h.beginCLIStartedTurnIfIdle(session)
 		h.handleStreamEvent(session, message)
 	case "assistant":
+		h.beginCLIStartedTurnIfIdle(session)
 		h.handleAssistant(session, message)
 	case "user":
+		if message.IsReplay {
+			// The CLI took a written message into a query. Orchestration
+			// recorded the prompt when it was sent, so only the ack matters.
+			h.mu.Lock()
+			delete(session.unechoedInput, message.UUID)
+			h.mu.Unlock()
+			return
+		}
 		h.handleUserMessage(session, message)
 	case "result":
 		h.handleResult(session, message)
@@ -41,6 +51,22 @@ func (h *Instance) handleMessage(session *claudeSession, proc *sessionProcess, m
 		// rate_limit_event, tool_progress, tool_use_summary, auth_status,
 		// prompt_suggestion, and future kinds are intentionally ignored.
 	}
+}
+
+// beginCLIStartedTurnIfIdle gives output the CLI produced on its own (a
+// background task or agent finishing wakes it) a turn of its own, so its
+// content, approvals and result are attributed like any other turn's.
+func (h *Instance) beginCLIStartedTurnIfIdle(session *claudeSession) {
+	h.mu.Lock()
+	if session.activeLocalTurn != "" {
+		h.mu.Unlock()
+		return
+	}
+	turn := "claude:" + newSessionUUID()
+	session.activeLocalTurn = turn
+	session.cliStartedTurn = true
+	h.mu.Unlock()
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: session.localThreadID, TurnID: turn})
 }
 
 func (h *Instance) handleSystem(session *claudeSession, message sdkMessage) {
@@ -327,9 +353,7 @@ func (h *Instance) settleStreamedText(session *claudeSession, blockType, snapsho
 }
 
 // handleUserMessage carries tool_result blocks back to their tool items.
-// Live user prompt echoes never appear here because maiD records the client
-// prompt before dispatch and the CLI does not replay them without
-// --replay-user-messages.
+// Echoes of written prompts never reach it (handleMessage acks them).
 func (h *Instance) handleUserMessage(session *claudeSession, message sdkMessage) {
 	var api userAPIMessage
 	if json.Unmarshal(message.Message, &api) != nil {
@@ -376,12 +400,13 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 	}
 	h.mu.Lock()
 	turn := session.activeLocalTurn
-	session.activeLocalTurn = ""
-	var nextTurn string
-	if len(session.queuedTurns) > 0 {
-		nextTurn = session.queuedTurns[0]
-		session.queuedTurns = session.queuedTurns[1:]
-		session.activeLocalTurn = nextTurn
+	// Messages written mid-turn that the CLI did not fold in run as one more
+	// query, batched together; its result ends the turn.
+	continues := turn != "" && len(session.unechoedInput) > 0
+	if continues {
+		session.unechoedInput = nil
+	} else {
+		session.endTurnLocked()
 	}
 	session.resetStreamStateLocked()
 	usage := tokenUsageFromResult(result)
@@ -402,12 +427,12 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 	if usage != nil {
 		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadTokenUsage, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TokenUsage: usage}})
 	}
+	if continues {
+		return
+	}
 	state, stopReason, errorMessage := turnStateFromResult(result)
 	payload := provider.RuntimeEventPayload{TurnState: state, StopReason: stopReason, Message: errorMessage}
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: turn, Payload: payload})
-	if nextTurn != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: session.localThreadID, TurnID: nextTurn})
-	}
 }
 
 func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, raw json.RawMessage) {

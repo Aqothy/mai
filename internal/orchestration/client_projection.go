@@ -22,6 +22,7 @@ func projectThreadForClient(thread Thread) Thread {
 	projected.LatestTurn = cloneTurnPtr(thread.LatestTurn)
 	projected.PreviousTurns = cloneTurns(thread.PreviousTurns)
 	projected.Plan = clonePlanPtr(thread.Plan)
+	projected.QueuedPrompts = cloneQueuedPrompts(thread.QueuedPrompts)
 	projected.Timeline = make(Timeline, len(thread.Timeline))
 
 	for index, entry := range thread.Timeline {

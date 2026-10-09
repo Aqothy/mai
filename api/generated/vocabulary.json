@@ -26,7 +26,12 @@
         "thread.slash-commands-updated",
         "thread.skills-updated",
         "thread.token-usage-updated",
-        "thread.history-replay-completed"
+        "thread.history-replay-completed",
+        "thread.prompt-queued",
+        "thread.prompt-removed",
+        "thread.prompt-steer-requested",
+        "thread.prompt-steer-failed",
+        "thread.queue-resumed"
       ]
     },
     {
@@ -39,6 +44,9 @@
         "thread.turn.start",
         "thread.turn.retry",
         "thread.turn.interrupt",
+        "thread.prompt.steer",
+        "thread.prompt.remove",
+        "thread.queue.resume",
         "thread.approval.respond",
         "thread.session.prepare",
         "thread.session.stop",

@@ -21,7 +21,7 @@ internal/adapters/claudecode/
 ├── client.go     streamClient: line reader, control request/response correlation
 ├── adapter.go    Instance, Config, capabilities, per-thread session registry
 ├── session.go    process spawn/teardown, StartSession/SendTurn/Interrupt/Stop,
-│                 SetConfigOption, turn queueing
+│                 SetConfigOption, steering
 ├── events.go     stream-json -> provider.RuntimeEvent mapping, approvals
 ├── convert.go    pure conversions (tool_use -> ToolCall, results, permissions)
 ├── catalog.go    initialize probe, config options, skill discovery, options facet
@@ -52,7 +52,7 @@ process **per conversation**, so:
 - Per-thread spawn (in `spawnProcess`):
   ```
   claude --print --input-format stream-json --output-format stream-json --verbose
-    --include-partial-messages --permission-prompt-tool stdio
+    --include-partial-messages --replay-user-messages --permission-prompt-tool stdio
     --allow-dangerously-skip-permissions        # enables bypass as an OPTION only
     (--session-id <uuid> | --resume <uuid>)     # resume iff transcript exists
     [--model X] [--effort Y] [--permission-mode M] [--add-dir D]...
@@ -64,20 +64,32 @@ process **per conversation**, so:
 
 ### Turn model
 
-Claude has **no native turn ids**. A turn = one queued user message through its
-`result` line. The daemon's TurnID is authoritative:
+Claude has **no native turn ids**, so one daemon turn id at a time stands for
+the CLI's work, from the message that starts it to the `result` that ends it.
+The CLI runs with `--replay-user-messages`, so it echoes each written message
+(`isReplay`, same `uuid`) when it takes it into a query.
 
-- `SendTurn` writes a user message to stdin. If no turn is active, it becomes
-  `activeLocalTurn` and `turn.started` is emitted. If a turn is running, the
-  TurnID is appended to `queuedTurns` (the CLI queues stdin messages and runs
-  them sequentially, emitting one `result` each).
-- `handleResult` completes `activeLocalTurn`, pops the next queued turn, emits
-  its `turn.started`.
-- A `result` with no active local turn (resume handshake) is **ignored** —
-  emitting turn lifecycle there corrupts session state (learned from t3code).
-- `InterruptTurn` sends control `{"subtype":"interrupt","cancel_queued":true}`;
-  the active turn completes via its aborted `result`, queued turns are
-  completed as `cancelled` locally (they never produce results).
+- `SendTurn` writes the user message with a fresh `uuid` and emits
+  `turn.started`. Orchestration starts a turn only when the thread is idle, so
+  a second user turn while one runs is an error.
+- A steer (`SendTurnInput.Steer`) of the running turn writes the message with
+  `"priority":"next"`. The CLI folds it into the running query at the next tool
+  boundary and echoes it; a message it could not fold runs as one more query
+  with its own `result`. So a `result` that arrives while a written message is
+  unechoed keeps the turn open, and the next `result` ends it. A steer of a
+  turn that already ended fails, and orchestration sends the prompt as the
+  next turn instead.
+- Output while no turn is active (a background task or agent finishing wakes
+  the CLI) starts a CLI-started turn with a fresh id, completed by its own
+  `result`. A user `SendTurn` during it ends that turn and continues as the
+  user's.
+- A `result` with no active turn and no output before it (resume handshake) is
+  **ignored** — emitting turn lifecycle there corrupts session state (learned
+  from t3code).
+- `InterruptTurn` sends control `{"subtype":"interrupt","cancel_queued":true}`,
+  which also drops unfolded steers, so the aborted `result` ends the turn.
+- When the process exits with a turn active, the turn completes as
+  interrupted (deliberate stop, restart) or failed (crash).
 - `terminal_reason` containing `aborted` ⇒ `RuntimeTurnInterrupted`, not failed.
 
 ### Event mapping
@@ -171,8 +183,8 @@ munging replaces every non-alphanumeric char with `-` (configDir =
   signal that pid again (OS pid recycling). Copied verbatim from codexapp.
 - Every stream callback fences on `session.proc == proc` so a replaced process
   cannot mutate its successor's state.
-- On unexpected process death: fail the active turn, cancel queued turns and
-  pending approvals (a `request.resolved` must be emitted on every exit path).
+- On process exit: settle the active turn and cancel pending approvals (a
+  `request.resolved` must be emitted on every exit path).
 
 ## Registration
 

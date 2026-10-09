@@ -485,6 +485,9 @@
         "message": {
           "$ref": "#/$defs/CommandMessage"
         },
+        "messageId": {
+          "type": "string"
+        },
         "requestId": {
           "type": "string"
         },
@@ -1421,6 +1424,43 @@
       ],
       "title": "QuestionOption"
     },
+    "QueuedPrompt": {
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "steering": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "messageId",
+        "text",
+        "createdAt"
+      ],
+      "title": "QueuedPrompt"
+    },
     "SessionBinding": {
       "properties": {
         "threadId": {
@@ -1910,6 +1950,15 @@
         },
         "timeline": {
           "$ref": "#/$defs/Timeline"
+        },
+        "queuedPrompts": {
+          "items": {
+            "$ref": "#/$defs/QueuedPrompt"
+          },
+          "type": "array"
+        },
+        "queueHeld": {
+          "type": "boolean"
         },
         "plan": {
           "$ref": "#/$defs/Plan"

@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -69,7 +70,14 @@ type Thread struct {
 	PreviousTurns []Turn `json:"previousTurns,omitempty"`
 	// Timeline is the canonical conversation order. New entries append; updates
 	// mutate their existing entry without moving it.
-	Timeline  Timeline  `json:"timeline"`
+	Timeline Timeline `json:"timeline"`
+	// QueuedPrompts wait, in order, for the thread to take its next turn. A
+	// prompt is either queued or a timeline message, never both.
+	QueuedPrompts []QueuedPrompt `json:"queuedPrompts,omitempty"`
+	// QueueHeld pauses the queue after the user stops a turn or a turn fails,
+	// so waiting prompts don't run into the same stop or failure. Sending,
+	// retrying or resuming releases it. It is only ever set while prompts wait.
+	QueueHeld bool      `json:"queueHeld,omitempty"`
 	Plan      *Plan     `json:"plan,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	// UpdatedAt is the sidebar recency timestamp: the latest user-message time,
@@ -97,6 +105,29 @@ type Message struct {
 	TurnID      TurnID                      `json:"turnId,omitempty"`
 	CreatedAt   time.Time                   `json:"createdAt"`
 	UpdatedAt   time.Time                   `json:"updatedAt"`
+}
+
+// QueuedPrompt is a prompt sent while the thread was busy. The engine sends
+// the first one as soon as the thread can take a turn; until then the user can
+// remove it or steer it into the running turn.
+type QueuedPrompt struct {
+	MessageID   MessageID                   `json:"messageId"`
+	Text        string                      `json:"text"`
+	Attachments []provider.Attachment       `json:"attachments,omitempty"`
+	Annotations []provider.PromptAnnotation `json:"annotations,omitempty"`
+	CreatedAt   time.Time                   `json:"createdAt"`
+	// Steering is set while the prompt is being added to the running turn. A
+	// steering prompt leads the queue and holds it: it either joins the turn
+	// or is sent first once the turn ends.
+	Steering bool `json:"steering,omitempty"`
+}
+
+func (thread *Thread) queuedPrompt(messageID MessageID) *QueuedPrompt {
+	index := slices.IndexFunc(thread.QueuedPrompts, func(prompt QueuedPrompt) bool { return prompt.MessageID == messageID })
+	if index < 0 {
+		return nil
+	}
+	return &thread.QueuedPrompts[index]
 }
 
 type Approval struct {

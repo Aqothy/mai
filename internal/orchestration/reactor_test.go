@@ -22,6 +22,7 @@ type fakeProviderRuntime struct {
 	historyUnavailable bool
 	startErr           error
 	sendInputs         []provider.SendTurnInput
+	steerErr           error
 	interruptCalls     int
 	interruptErr       error
 	releaseCalls       int
@@ -86,12 +87,16 @@ func (f *fakeProviderRuntime) StartSession(ctx context.Context, _ string, input 
 func (f *fakeProviderRuntime) SendTurn(_ context.Context, input provider.SendTurnInput) error {
 	f.mu.Lock()
 	f.sendInputs = append(f.sendInputs, input)
+	var err error
+	if input.Steer {
+		err = f.steerErr
+	}
 	f.mu.Unlock()
 	select {
 	case f.sendSignal <- struct{}{}:
 	default:
 	}
-	return nil
+	return err
 }
 func (f *fakeProviderRuntime) InterruptTurn(context.Context, provider.InterruptTurnInput) error {
 	f.mu.Lock()
@@ -532,46 +537,60 @@ func TestReactorRestoresConfirmedConfigOptionsAfterSessionStop(t *testing.T) {
 	}
 }
 
-func TestReactorRequeuesSteerWhenTurnSettlesBeforeDispatch(t *testing.T) {
+// A steer the provider refuses (Codex will not steer a compact turn) must not
+// fail the turn the provider is still running: the prompt stays queued, is
+// sent first when the turn ends, and a steer it accepts joins the running
+// turn's timeline.
+func TestReactorRefusedSteerKeepsTheTurnRunningAndTheMessageQueued(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	fake := newFakeProviderRuntime()
+	fake.steerErr = errors.New("cannot steer a compact turn")
 	reactor := newTestReactor(engine, fake)
-	threadID := ThreadID("thread-steer-settle-race")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-steer-settle-race", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
+	threadID := ThreadID("thread-refused-steer")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-refused-steer", ThreadID: threadID, Title: "Thread", ProviderInstanceID: "codex"})
 	mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ThreadID: threadID, ProviderInstanceID: "codex", Status: SessionStatusReady}}})
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "first-turn-before-steer-race", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-first-turn-before-steer-race", Text: "first"}})
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first turn was not dispatched")
-	}
-
-	blockDispatch := make(chan struct{})
-	reactor.mu.Lock()
-	reactor.threadTails[threadID] = blockDispatch
-	reactor.mu.Unlock()
-	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "steer-settle-race", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-steer-settle-race", Text: "do not lose this"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "first", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-first", Text: "first"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "refused", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-refused", Text: "do not lose this"}})
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: "accepted", ThreadID: threadID, Message: &CommandMessage{MessageID: "msg-accepted", Text: "join the turn"}})
 	thread, _ := engine.Thread(threadID)
-	oldTurnID := thread.LatestTurn.ID
-	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: oldTurnID, TurnState: provider.RuntimeTurnCompleted}); err != nil {
-		t.Fatalf("settle old turn: %v", err)
-	}
-	close(blockDispatch)
+	runningTurn := thread.LatestTurn.ID
 
-	select {
-	case <-fake.sendSignal:
-	case <-time.After(2 * time.Second):
-		t.Fatal("accepted steer was not delivered after the old turn settled")
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptSteer, CommandID: "steer-refused", ThreadID: threadID, MessageID: "msg-refused"})
+	waitForReactorIdle(t, reactor, threadID)
+	thread, _ = engine.Thread(threadID)
+	if thread.LatestTurn.ID != runningTurn || thread.LatestTurn.State != TurnStateRunning || thread.Session.Status != SessionStatusRunning {
+		t.Fatalf("turn %#v, session %q after a refused steer; want %q still running", thread.LatestTurn, thread.Session.Status, runningTurn)
 	}
-	sent := fake.lastSendInput()
-	if sent.Input != "do not lose this" || sent.TurnID == "" || sent.TurnID == string(oldTurnID) {
-		t.Fatalf("requeued send = %#v, want the accepted message on a fresh turn", sent)
+	if queued := queuedMessageIDs(thread); !slices.Equal(queued, []MessageID{"msg-refused", "msg-accepted"}) || thread.QueuedPrompts[0].Steering {
+		t.Fatalf("queue = %#v, want the refused steer back at the front, no longer steering", thread.QueuedPrompts)
+	}
+	if !slices.ContainsFunc(thread.Timeline, func(entry TimelineEntry) bool {
+		return entry.Item != nil && entry.Item.Kind == provider.ItemKindWarning && strings.Contains(entry.Item.Title, "cannot steer a compact turn")
+	}) {
+		t.Fatal("timeline has no warning explaining the refused steer")
+	}
+
+	fake.mu.Lock()
+	fake.steerErr = nil
+	fake.mu.Unlock()
+	mustDispatch(t, engine, Command{Type: CommandThreadPromptSteer, CommandID: "steer-accepted", ThreadID: threadID, MessageID: "msg-accepted"})
+	waitForReactorIdle(t, reactor, threadID)
+	if sent := fake.lastSendInput(); !sent.Steer || sent.TurnID != string(runningTurn) || sent.Input != "join the turn" {
+		t.Fatalf("steer input = %#v, want a steer of %q", sent, runningTurn)
 	}
 	thread, _ = engine.Thread(threadID)
-	if thread.LatestTurn == nil || string(thread.LatestTurn.ID) != sent.TurnID || thread.Timeline.Messages()[len(thread.Timeline.Messages())-1].TurnID != thread.LatestTurn.ID {
-		t.Fatalf("thread after requeue = %#v, want message and latest turn on %q", thread, sent.TurnID)
+	if message := thread.Timeline.Message("msg-accepted"); message == nil || message.TurnID != runningTurn || slices.Contains(queuedMessageIDs(thread), "msg-accepted") {
+		t.Fatalf("accepted steer message = %#v, queue = %v; want it in the timeline on %q", message, queuedMessageIDs(thread), runningTurn)
 	}
+
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: runningTurn, TurnState: provider.RuntimeTurnCompleted}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	waitFor(t, "refused steer sent as the next turn", func() bool {
+		sent := fake.lastSendInput()
+		return sent.Input == "do not lose this" && !sent.Steer && sent.TurnID != string(runningTurn)
+	})
 }
 
 func TestReactorReleasesProviderSessionWhenMetadataSwitchesProvider(t *testing.T) {

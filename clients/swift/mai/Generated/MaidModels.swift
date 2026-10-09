@@ -1389,6 +1389,7 @@ public struct Command: Codable {
     public var createdAt: Date?
     public var cwd, decision: String?
     public var message: CommandMessage?
+    public var messageID: String?
     public var modelSelection: ModelSelection?
     public var optionID, providerInstanceID, requestID, threadID: String?
     public var title, turnID: String?
@@ -1398,7 +1399,9 @@ public struct Command: Codable {
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, answers
         case commandID = "commandId"
-        case configSelections, createdAt, cwd, decision, message, modelSelection
+        case configSelections, createdAt, cwd, decision, message
+        case messageID = "messageId"
+        case modelSelection
         case optionID = "optionId"
         case providerInstanceID = "providerInstanceId"
         case requestID = "requestId"
@@ -1408,7 +1411,7 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.answers = answers
         self.commandID = commandID
@@ -1417,6 +1420,7 @@ public struct Command: Codable {
         self.cwd = cwd
         self.decision = decision
         self.message = message
+        self.messageID = messageID
         self.modelSelection = modelSelection
         self.optionID = optionID
         self.providerInstanceID = providerInstanceID
@@ -1456,6 +1460,7 @@ public extension Command {
         cwd: String?? = nil,
         decision: String?? = nil,
         message: CommandMessage?? = nil,
+        messageID: String?? = nil,
         modelSelection: ModelSelection?? = nil,
         optionID: String?? = nil,
         providerInstanceID: String?? = nil,
@@ -1475,6 +1480,7 @@ public extension Command {
             cwd: cwd ?? self.cwd,
             decision: decision ?? self.decision,
             message: message ?? self.message,
+            messageID: messageID ?? self.messageID,
             modelSelection: modelSelection ?? self.modelSelection,
             optionID: optionID ?? self.optionID,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
@@ -4699,6 +4705,8 @@ public struct Thread: Codable {
     public var plan: Plan?
     public var previousTurns: [Turn]?
     public var providerInstanceID: String?
+    public var queuedPrompts: [QueuedPrompt]?
+    public var queueHeld: Bool?
     public var session: SessionBinding?
     public var timeline: [TimelineEntry]
     public var title: String
@@ -4707,10 +4715,10 @@ public struct Thread: Codable {
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, createdAt, cwd, id, latestTurn, modelSelection, plan, previousTurns
         case providerInstanceID = "providerInstanceId"
-        case session, timeline, title, updatedAt
+        case queuedPrompts, queueHeld, session, timeline, title, updatedAt
     }
 
-    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, previousTurns: [Turn]?, providerInstanceID: String?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
+    public init(additionalDirectories: [String]?, createdAt: Date, cwd: String?, id: String, latestTurn: Turn?, modelSelection: ModelSelection?, plan: Plan?, previousTurns: [Turn]?, providerInstanceID: String?, queuedPrompts: [QueuedPrompt]?, queueHeld: Bool?, session: SessionBinding?, timeline: [TimelineEntry], title: String, updatedAt: Date) {
         self.additionalDirectories = additionalDirectories
         self.createdAt = createdAt
         self.cwd = cwd
@@ -4720,6 +4728,8 @@ public struct Thread: Codable {
         self.plan = plan
         self.previousTurns = previousTurns
         self.providerInstanceID = providerInstanceID
+        self.queuedPrompts = queuedPrompts
+        self.queueHeld = queueHeld
         self.session = session
         self.timeline = timeline
         self.title = title
@@ -4755,6 +4765,8 @@ public extension Thread {
         plan: Plan?? = nil,
         previousTurns: [Turn]?? = nil,
         providerInstanceID: String?? = nil,
+        queuedPrompts: [QueuedPrompt]?? = nil,
+        queueHeld: Bool?? = nil,
         session: SessionBinding?? = nil,
         timeline: [TimelineEntry]? = nil,
         title: String? = nil,
@@ -4770,6 +4782,8 @@ public extension Thread {
             plan: plan ?? self.plan,
             previousTurns: previousTurns ?? self.previousTurns,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
+            queuedPrompts: queuedPrompts ?? self.queuedPrompts,
+            queueHeld: queueHeld ?? self.queueHeld,
             session: session ?? self.session,
             timeline: timeline ?? self.timeline,
             title: title ?? self.title,
@@ -4851,6 +4865,76 @@ public extension Turn {
             state: state ?? self.state,
             stopReason: stopReason ?? self.stopReason,
             turnID: turnID ?? self.turnID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - QueuedPrompt
+public struct QueuedPrompt: Codable {
+    public var annotations: [PromptAnnotation]?
+    public var attachments: [Attachment]?
+    public var createdAt: Date
+    public var messageID: String
+    public var steering: Bool?
+    public var text: String
+
+    public enum CodingKeys: String, CodingKey {
+        case annotations, attachments, createdAt
+        case messageID = "messageId"
+        case steering, text
+    }
+
+    public init(annotations: [PromptAnnotation]?, attachments: [Attachment]?, createdAt: Date, messageID: String, steering: Bool?, text: String) {
+        self.annotations = annotations
+        self.attachments = attachments
+        self.createdAt = createdAt
+        self.messageID = messageID
+        self.steering = steering
+        self.text = text
+    }
+}
+
+// MARK: QueuedPrompt convenience initializers and mutators
+
+public extension QueuedPrompt {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(QueuedPrompt.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        annotations: [PromptAnnotation]?? = nil,
+        attachments: [Attachment]?? = nil,
+        createdAt: Date? = nil,
+        messageID: String? = nil,
+        steering: Bool?? = nil,
+        text: String? = nil
+    ) -> QueuedPrompt {
+        return QueuedPrompt(
+            annotations: annotations ?? self.annotations,
+            attachments: attachments ?? self.attachments,
+            createdAt: createdAt ?? self.createdAt,
+            messageID: messageID ?? self.messageID,
+            steering: steering ?? self.steering,
+            text: text ?? self.text
         )
     }
 

@@ -35,11 +35,7 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 	}
 	resuming := nativeID != ""
 	if nativeID == "" {
-		generated, err := newSessionUUID()
-		if err != nil {
-			return provider.StartSessionResult{}, fmt.Errorf("generate Claude Code session id: %w", err)
-		}
-		nativeID = generated
+		nativeID = newSessionUUID()
 	}
 
 	session := newClaudeSession(input.ThreadID, nativeID, input.Cwd)
@@ -112,6 +108,9 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, resume bool) error {
 	extra := []string{
 		"--include-partial-messages",
+		// Echoes each written message when the CLI takes it into a query,
+		// which is how a steer is known to have joined the running turn.
+		"--replay-user-messages",
 		"--permission-prompt-tool", "stdio",
 		// Enables bypassPermissions as a selectable mode without turning it
 		// on: the mode still has to be chosen explicitly by the user.
@@ -197,15 +196,11 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	killed := proc.killedTree
 	proc.killedTree = true
 	closing := proc.closing
-	current := session.proc == proc
-	var failedTurn string
-	var cancelledTurns []string
-	if current {
+	var endedTurn string
+	if session.proc == proc {
 		session.proc = nil
-		failedTurn = session.activeLocalTurn
-		cancelledTurns = append(cancelledTurns, session.queuedTurns...)
-		session.activeLocalTurn = ""
-		session.queuedTurns = nil
+		endedTurn = session.activeLocalTurn
+		session.endTurnLocked()
 		session.resetStreamStateLocked()
 	}
 	h.mu.Unlock()
@@ -213,20 +208,21 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 		procgroup.Kill(proc.cmd)
 	}
 	proc.client.fail(firstError(err, io.EOF))
-	close(proc.done)
 	h.cancelApprovalsForClient(proc.client)
-	if !current || closing {
-		return
+	// The process is gone, so no result will end its turn. Settle it here on
+	// every exit path, deliberate stops included, before stopProcess returns.
+	if endedTurn != "" {
+		payload := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted}
+		if !closing {
+			payload = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly"}
+		}
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: endedTurn, Payload: payload})
 	}
-	if failedTurn != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: failedTurn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly"}})
-	}
-	for _, turn := range cancelledTurns {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}})
-	}
+	close(proc.done)
 }
 
-// stopProcess tears down a session's CLI process if one is running.
+// stopProcess tears down a session's CLI process if one is running and
+// returns once waitProcess has retired it.
 func (h *Instance) stopProcess(session *claudeSession) {
 	h.mu.Lock()
 	proc := session.proc
@@ -234,7 +230,6 @@ func (h *Instance) stopProcess(session *claudeSession) {
 		h.mu.Unlock()
 		return
 	}
-	session.proc = nil
 	proc.closing = true
 	shouldKill := !proc.reaped && !proc.killedTree
 	if shouldKill {
@@ -248,21 +243,24 @@ func (h *Instance) stopProcess(session *claudeSession) {
 	<-proc.done
 }
 
+// SendTurn writes one user message to the session's CLI. A new turn starts
+// when the CLI is idle, or replaces a turn the CLI started on its own; a steer
+// joins the running turn and the CLI picks the boundary.
 func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
 	session, err := h.sessionForLocal(input.ThreadID)
 	if err != nil {
 		return err
 	}
 	h.mu.Lock()
-	if session.activeLocalTurn == input.TurnID || containsString(session.queuedTurns, input.TurnID) {
+	if err := sendConflictLocked(session, input); err != nil {
 		h.mu.Unlock()
-		return fmt.Errorf("Claude Code turn %q is already running", input.TurnID)
+		return err
 	}
 	proc := session.proc
 	model := session.model
 	// Effort is a launch flag with no in-session control message: an idle
 	// process launched with another effort is relaunched for this turn.
-	relaunch := proc != nil && proc.effort != session.effort && session.activeLocalTurn == "" && len(session.queuedTurns) == 0
+	relaunch := proc != nil && proc.effort != session.effort && session.activeLocalTurn == ""
 	h.mu.Unlock()
 	if relaunch {
 		h.stopProcess(session)
@@ -279,7 +277,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 			return fmt.Errorf("Claude Code process for thread %q exited during start", input.ThreadID)
 		}
 	}
-	if input.ModelSelection != nil && input.ModelSelection.Model != "" && input.ModelSelection.Model != model {
+	if !input.Steer && input.ModelSelection != nil && input.ModelSelection.Model != "" && input.ModelSelection.Model != model {
 		if err := h.applyModel(ctx, session, input.ModelSelection.Model); err != nil {
 			return err
 		}
@@ -288,17 +286,41 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if err != nil {
 		return err
 	}
+	uuid := newSessionUUID()
+
 	h.mu.Lock()
-	starts := session.activeLocalTurn == ""
-	if starts {
+	// The turn can end, or the CLI can start one, while the process spawns.
+	if err := sendConflictLocked(session, input); err != nil {
+		h.mu.Unlock()
+		return err
+	}
+	// Once the turn is recorded, waitProcess ends it if the process exits; a
+	// process that already exited would leave it running.
+	if session.proc != proc {
+		h.mu.Unlock()
+		return fmt.Errorf("Claude Code process for thread %q exited during send", input.ThreadID)
+	}
+	busy := session.activeLocalTurn != ""
+	replaced := ""
+	if busy {
+		if session.unechoedInput == nil {
+			session.unechoedInput = make(map[string]bool)
+		}
+		session.unechoedInput[uuid] = true
+		if !input.Steer {
+			replaced = session.activeLocalTurn // the CLI's own turn ends where the user's begins
+		}
+	}
+	if !input.Steer {
 		session.activeLocalTurn = input.TurnID
-	} else {
-		session.queuedTurns = append(session.queuedTurns, input.TurnID)
+		session.cliStartedTurn = false
 	}
 	nativeID := session.nativeSessionID
 	h.mu.Unlock()
+
 	message := map[string]any{
 		"type":               "user",
+		"uuid":               uuid,
 		"session_id":         nativeID,
 		"parent_tool_use_id": nil,
 		"message": map[string]any{
@@ -306,17 +328,32 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 			"content": content,
 		},
 	}
+	if busy {
+		// The CLI is mid-query: the message waits for its next boundary.
+		message["priority"] = "next"
+	}
+	// A failed write means the process is exiting; waitProcess ends the turn.
 	if err := proc.client.send(message); err != nil {
-		h.mu.Lock()
-		if session.activeLocalTurn == input.TurnID {
-			session.activeLocalTurn = ""
-		}
-		session.queuedTurns = removeString(session.queuedTurns, input.TurnID)
-		h.mu.Unlock()
 		return err
 	}
-	if starts {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: input.ThreadID, TurnID: input.TurnID})
+	if input.Steer {
+		return nil
+	}
+	if replaced != "" {
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: replaced, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted}})
+	}
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: input.ThreadID, TurnID: input.TurnID})
+	return nil
+}
+
+// sendConflictLocked rejects a steer whose turn is no longer running and a
+// new turn while the user's previous one still runs.
+func sendConflictLocked(session *claudeSession, input provider.SendTurnInput) error {
+	switch {
+	case input.Steer && session.activeLocalTurn != input.TurnID:
+		return fmt.Errorf("Claude Code thread %q has no running turn %q to steer", session.localThreadID, input.TurnID)
+	case !input.Steer && session.activeLocalTurn != "" && !session.cliStartedTurn:
+		return fmt.Errorf("Claude Code thread %q already has a running turn", session.localThreadID)
 	}
 	return nil
 }
@@ -329,23 +366,14 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 	h.mu.Lock()
 	proc := session.proc
 	active := session.activeLocalTurn
+	// cancel_queued drops the steers the CLI has not folded in yet, so the
+	// aborted result ends the turn instead of waiting for their query.
+	session.unechoedInput = nil
 	h.mu.Unlock()
 	if proc == nil || active == "" {
 		return fmt.Errorf("Claude Code thread %q has no active turn", input.ThreadID)
 	}
-	if err := proc.client.control(ctx, map[string]any{"subtype": "interrupt", "cancel_queued": true}, nil); err != nil {
-		return err
-	}
-	// The interrupted active turn completes through its result line; queued
-	// messages were cancelled by the interrupt and never produce results.
-	h.mu.Lock()
-	cancelled := session.queuedTurns
-	session.queuedTurns = nil
-	h.mu.Unlock()
-	for _, turn := range cancelled {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: turn, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}})
-	}
-	return nil
+	return proc.client.control(ctx, map[string]any{"subtype": "interrupt", "cancel_queued": true}, nil)
 }
 
 func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionInput) error {
@@ -483,6 +511,12 @@ func (h *Instance) providerSessionLocked(session *claudeSession) provider.Sessio
 	}
 }
 
+func (s *claudeSession) endTurnLocked() {
+	s.activeLocalTurn = ""
+	s.cliStartedTurn = false
+	s.unechoedInput = nil
+}
+
 func (s *claudeSession) resetStreamStateLocked() {
 	s.toolStates = make(map[string]*toolState)
 	s.openBlocks = make(map[int]string)
@@ -530,34 +564,14 @@ func validPermissionMode(mode string) bool {
 	}
 }
 
-func newSessionUUID() (string, error) {
+// newSessionUUID returns a random version 4 UUID; crypto/rand.Read never fails.
+func newSessionUUID() string {
 	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
+	_, _ = rand.Read(raw[:])
 	raw[6] = (raw[6] & 0x0f) | 0x40
 	raw[8] = (raw[8] & 0x3f) | 0x80
 	encoded := hex.EncodeToString(raw[:])
-	return strings.Join([]string{encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32]}, "-"), nil
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(values []string, target string) []string {
-	result := values[:0]
-	for _, value := range values {
-		if value != target {
-			result = append(result, value)
-		}
-	}
-	return result
+	return strings.Join([]string{encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32]}, "-")
 }
 
 // probeTimeout bounds the OpenInstance handshake when the caller supplied no

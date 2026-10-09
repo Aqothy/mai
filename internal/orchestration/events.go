@@ -33,6 +33,11 @@ const (
 	EventThreadSkillsUpdated             EventType = "thread.skills-updated"
 	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
 	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
+	EventThreadPromptQueued              EventType = "thread.prompt-queued"
+	EventThreadPromptRemoved             EventType = "thread.prompt-removed"
+	EventThreadPromptSteerRequested      EventType = "thread.prompt-steer-requested"
+	EventThreadPromptSteerFailed         EventType = "thread.prompt-steer-failed"
+	EventThreadQueueResumed              EventType = "thread.queue-resumed"
 )
 
 type ActorKind string
@@ -86,20 +91,17 @@ type EventPayload struct {
 	// StopReason says why a completed turn ended early, carried on
 	// session-status-set settle events so clients can surface
 	// latestTurn.stopReason.
-	StopReason provider.StopReason `json:"stopReason,omitempty"`
-	// Steering records that a turn-start command was accepted against an
-	// already-running turn. It is internal reactor metadata, not a wire field.
-	Steering  bool                      `json:"-"`
-	CreatedAt time.Time                 `json:"createdAt,omitzero"`
-	UpdatedAt time.Time                 `json:"updatedAt,omitzero"`
-	RequestID ApprovalID                `json:"requestId,omitempty"`
-	Decision  provider.ApprovalDecision `json:"decision,omitempty"`
-	OptionID  string                    `json:"optionId,omitempty"`
-	Answers   map[string][]string       `json:"answers,omitempty"`
-	Value     any                       `json:"value,omitempty"`
-	Item      *Item                     `json:"item,omitempty"`
-	Plan      *Plan                     `json:"plan,omitempty"`
-	Approval  *ApprovalEvent            `json:"approval,omitempty"`
+	StopReason provider.StopReason       `json:"stopReason,omitempty"`
+	CreatedAt  time.Time                 `json:"createdAt,omitzero"`
+	UpdatedAt  time.Time                 `json:"updatedAt,omitzero"`
+	RequestID  ApprovalID                `json:"requestId,omitempty"`
+	Decision   provider.ApprovalDecision `json:"decision,omitempty"`
+	OptionID   string                    `json:"optionId,omitempty"`
+	Answers    map[string][]string       `json:"answers,omitempty"`
+	Value      any                       `json:"value,omitempty"`
+	Item       *Item                     `json:"item,omitempty"`
+	Plan       *Plan                     `json:"plan,omitempty"`
+	Approval   *ApprovalEvent            `json:"approval,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so clients clear state.
 	ConfigOptions    []provider.ConfigOption          `json:"configOptions,omitzero"`

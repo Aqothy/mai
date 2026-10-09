@@ -31,6 +31,14 @@ func sessionPreparing(thread Thread) bool {
 	return thread.Session != nil && thread.Session.Status == SessionStatusStarting && thread.Session.ActiveTurnID == ""
 }
 
+// canStartTurn reports whether the thread can take a new turn now. A running
+// turn (stopping included) or a preparing or stopping session keeps new
+// prompts queued until it settles.
+func canStartTurn(thread Thread) bool {
+	return !thread.ReplayHistoryPending && !sessionPreparing(thread) && activeTurnID(thread) == "" &&
+		(thread.Session == nil || !thread.Session.StopRequested)
+}
+
 func validateMetaDirectoriesChange(thread Thread, cwd string, additionalDirectories []string, changesAdditionalDirectories bool) error {
 	if !providerSessionActive(thread.Session) {
 		return nil

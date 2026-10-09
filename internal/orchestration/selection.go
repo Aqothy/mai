@@ -68,30 +68,6 @@ func (change providerSelectionChange) validateMetaUpdate(thread Thread) error {
 	return fmt.Errorf("cannot change provider/model selection while turn %q is active", turnID)
 }
 
-func (change providerSelectionChange) validateSteering(thread Thread) error {
-	if !change.specified {
-		return nil
-	}
-	turnID := activeTurnID(thread)
-	if change.ProviderInstanceID != "" && change.ProviderInstanceID != thread.ProviderInstanceID {
-		return fmt.Errorf("cannot change provider instance while turn %q is active", turnID)
-	}
-	if change.ModelSelection == nil {
-		return nil
-	}
-	currentModel, currentOptions := "", ""
-	if thread.ModelSelection != nil {
-		currentModel, currentOptions = thread.ModelSelection.Model, string(thread.ModelSelection.Options)
-	}
-	if change.ModelSelection.Model != "" && change.ModelSelection.Model != currentModel {
-		return fmt.Errorf("cannot change model while turn %q is active", turnID)
-	}
-	if len(change.ModelSelection.Options) != 0 && string(change.ModelSelection.Options) != currentOptions {
-		return fmt.Errorf("cannot change model options while turn %q is active", turnID)
-	}
-	return nil
-}
-
 func selectionEqual(a, b *provider.ModelSelection) bool {
 	if a == nil {
 		a = &provider.ModelSelection{}

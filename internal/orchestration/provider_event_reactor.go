@@ -70,6 +70,8 @@ func (r *ProviderEventReactor) handle(event Event) {
 		r.enqueueThread(event, func() { r.handleSessionPrepare(event) })
 	case EventThreadTurnStartRequested:
 		r.enqueueThread(event, func() { r.handleTurnStart(event) })
+	case EventThreadPromptSteerRequested:
+		r.enqueueThread(event, func() { r.handleSteer(event) })
 	case EventThreadTurnInterruptRequested:
 		r.enqueueThread(event, func() { r.handleInterrupt(event) })
 	case EventThreadSessionStopRequested:
@@ -215,9 +217,6 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 		return
 	}
 	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
-		if r.requeueSettledTurnStart(event, view) {
-			return
-		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
 		return
 	}
@@ -233,9 +232,6 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// Prebind: the engine derives a "starting" binding for the turn from the
 	// live thread — or drops the update if the turn was interrupted first.
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, TurnID: turnID}) {
-		if current, ok := r.engine.ProviderView(threadID, event.Payload.MessageID); ok && r.requeueSettledTurnStart(event, current) {
-			return
-		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, nil)
 		return
 	}
@@ -253,9 +249,6 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// drops the update, and the interrupt is confirmed instead of dispatching.
 	binding := bindingFromProviderSession(providerInstanceID, providerSession)
 	if !r.recordSessionUpdate(threadID, sessionUpdate{Kind: sessionUpdateBound, Binding: &binding, TurnID: turnID}) {
-		if current, ok := r.engine.ProviderView(threadID, event.Payload.MessageID); ok && r.requeueSettledTurnStart(event, current) {
-			return
-		}
 		r.confirmInterruptBeforeTurnDispatch(threadID, turnID, &binding)
 		return
 	}
@@ -267,15 +260,49 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	// failure is handled here.
 	sendCtx, sendCancel := r.providerRPCContext()
 	defer sendCancel()
-	presentation := &provider.PromptPresentation{MessageID: string(view.Message.ID)}
-	if len(view.Message.Annotations) > 0 {
-		text := view.Message.Text
-		presentation.Text = &text
-		presentation.Annotations = append([]provider.PromptAnnotation(nil), view.Message.Annotations...)
-	}
-	if err := r.provider.SendTurn(sendCtx, provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Input: promptTextWithAnnotations(view.Message.Text, view.Message.Annotations), Attachments: view.Message.Attachments, Annotations: view.Message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}); err != nil {
+	if err := r.provider.SendTurn(sendCtx, sendTurnInput(view, turnID, false)); err != nil {
 		r.failThread(threadID, turnID, err.Error())
 	}
+}
+
+// handleSteer adds a queued prompt to the running turn. A refused steer never
+// fails that turn, which the provider is still running: the prompt stays
+// queued and is sent first once the turn ends.
+func (r *ProviderEventReactor) handleSteer(event Event) {
+	threadID := event.ThreadID()
+	turnID := event.Payload.TurnID
+	view, ok := r.engine.ProviderView(threadID, event.Payload.MessageID)
+	if !ok || view.Message == nil {
+		return
+	}
+	steerFailed := func() {
+		r.record(EventInput{Type: EventThreadPromptSteerFailed, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: view.Message.ID}})
+	}
+	if !turnStillRunningOf(view.Session, view.LatestTurn, turnID) {
+		steerFailed()
+		return
+	}
+	ctx, cancel := r.providerRPCContext()
+	defer cancel()
+	if err := r.provider.SendTurn(ctx, sendTurnInput(view, turnID, true)); err != nil {
+		steerFailed()
+		r.appendWarningItem(threadID, turnID, fmt.Sprintf("Couldn't add your message to the running turn: %v. It will be sent as the next turn.", err))
+		return
+	}
+	message := view.Message
+	r.record(EventInput{Type: EventThreadMessageSent, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{MessageID: message.ID, Role: MessageRoleUser, Text: message.Text, Attachments: message.Attachments, Annotations: message.Annotations, TurnID: turnID, CreatedAt: message.CreatedAt, UpdatedAt: message.CreatedAt}})
+}
+
+// sendTurnInput is the provider request for view.Message on turnID.
+func sendTurnInput(view ThreadProviderView, turnID TurnID, steer bool) provider.SendTurnInput {
+	message := view.Message
+	presentation := &provider.PromptPresentation{MessageID: string(message.ID)}
+	if len(message.Annotations) > 0 {
+		text := message.Text
+		presentation.Text = &text
+		presentation.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
+	}
+	return provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Steer: steer, Input: promptTextWithAnnotations(message.Text, message.Annotations), Attachments: message.Attachments, Annotations: message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}
 }
 
 func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotation) string {
@@ -311,37 +338,6 @@ func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotat
 		prompt.WriteString(text)
 	}
 	return prompt.String()
-}
-
-// requeueSettledTurnStart closes the narrow steering race where the command was
-// accepted while a turn was running, but that turn settled before its provider
-// handler reached dispatch. The message is already in the projection, so a
-// single replacement start event moves it onto a fresh turn; the per-thread
-// reactor chain then handles that event normally. Interrupts are not requeued.
-func (r *ProviderEventReactor) requeueSettledTurnStart(event Event, view ThreadProviderView) bool {
-	turn := view.LatestTurn
-	if !event.Payload.Steering || turn == nil || turn.ID != event.Payload.TurnID || turn.CompletedAt == nil || turn.InterruptRequested {
-		return false
-	}
-	if view.Message == nil {
-		return false
-	}
-	now := time.Now()
-	result, err := r.engine.AppendEvent(context.Background(), EventInput{
-		Type:       EventThreadTurnStartRequested,
-		ThreadID:   view.ID,
-		Actor:      ActorKindServer,
-		OccurredAt: now,
-		Payload: EventPayload{
-			MessageID: event.Payload.MessageID,
-			TurnID:    TurnID(newID("turn")),
-		},
-	})
-	if err != nil {
-		log.Printf("orchestration: requeue settled turn start for thread %q: %v", view.ID, err)
-		return false
-	}
-	return result.Sequence != 0
 }
 
 // bindingFromProviderSession extracts the identity fields of a provider
@@ -467,6 +463,10 @@ func (r *ProviderEventReactor) failThread(threadID ThreadID, turnID TurnID, mess
 
 func (r *ProviderEventReactor) appendErrorItem(threadID ThreadID, turnID TurnID, message string) {
 	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: errorItem(newID("error"), turnID, message)}})
+}
+
+func (r *ProviderEventReactor) appendWarningItem(threadID ThreadID, turnID TurnID, message string) {
+	r.record(EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, OccurredAt: time.Now(), Payload: EventPayload{Item: warningItem(newID("warning"), turnID, message)}})
 }
 
 func (r *ProviderEventReactor) record(input EventInput) {

@@ -85,7 +85,8 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 //   - a bound update for a turn that is no longer running (an interrupt won the
 //     race with session start);
 //   - a turn-started update for the already-running turn (duplicate of the
-//     optimistic projection state).
+//     optimistic projection state), for another turn while one runs, or for
+//     a turn that already settled.
 func deriveSessionStatus(thread *Thread, update sessionUpdate, occurredAt time.Time) (*SessionBinding, bool) {
 	switch update.Kind {
 	case sessionUpdateBound:
@@ -151,7 +152,7 @@ func deriveSessionTurnStarted(thread *Thread, update sessionUpdate, occurredAt t
 	if thread.Session == nil || thread.Session.Status == SessionStatusStopped {
 		return nil, false
 	}
-	if sessionTurnConflicts(thread, update.TurnID) {
+	if turnStartConflicts(thread, update.TurnID) {
 		return nil, false
 	}
 	if thread.Session.Status == SessionStatusRunning && thread.Session.ActiveTurnID == update.TurnID {
@@ -270,6 +271,20 @@ func sessionTurnConflicts(thread *Thread, turnID TurnID) bool {
 		return thread.LatestTurn.ID != turnID
 	}
 	return false
+}
+
+// turnStartConflicts reports whether a provider's turn start is stale: it
+// names a turn other than the running one, or the latest turn after it
+// settled. An idle thread accepts a new turn, which is how a provider starts
+// a turn on its own (Claude Code woken by a finished background task).
+func turnStartConflicts(thread *Thread, turnID TurnID) bool {
+	if turnID == "" {
+		return false
+	}
+	if active := activeTurnID(*thread); active != "" {
+		return active != turnID
+	}
+	return thread.LatestTurn != nil && thread.LatestTurn.ID == turnID
 }
 
 // turnStillRunningOf reports whether turnID is still the running,

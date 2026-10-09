@@ -29,8 +29,11 @@ type sdkMessage struct {
 	Response        json.RawMessage `json:"response,omitempty"`
 	// Error is set on an assistant message the API failed to produce, e.g.
 	// "authentication_failed".
-	Error string          `json:"error,omitempty"`
-	Raw   json.RawMessage `json:"-"`
+	Error string `json:"error,omitempty"`
+	// IsReplay marks a user line that echoes a message the host wrote, sent
+	// when the CLI takes it into a query (--replay-user-messages).
+	IsReplay bool            `json:"isReplay,omitempty"`
+	Raw      json.RawMessage `json:"-"`
 }
 
 // apiMessage is the Anthropic API message carried by assistant/user lines.

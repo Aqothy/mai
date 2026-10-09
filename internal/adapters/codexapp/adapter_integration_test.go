@@ -37,7 +37,7 @@ func TestInstanceUsesDistinctClientMessageIDsForSteering(t *testing.T) {
 	}
 	for index, input := range []provider.SendTurnInput{
 		{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello", ClientMessageID: "client-start"},
-		{ThreadID: "local-thread", TurnID: "local-turn", Input: "one more detail", ClientMessageID: "client-steer"},
+		{ThreadID: "local-thread", TurnID: "local-turn", Input: "one more detail", ClientMessageID: "client-steer", Steer: true},
 	} {
 		if err := instance.SendTurn(testContext(t), input); err != nil {
 			t.Fatalf("send %d: %v", index, err)
@@ -62,7 +62,7 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "hello"}); err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
-	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "one more detail"}); err != nil {
+	if err := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: "one more detail", Steer: true}); err != nil {
 		t.Fatalf("steer turn: %v", err)
 	}
 

@@ -30,6 +30,11 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadSkillsUpdated = "thread.skills-updated"
     case threadTokenUsageUpdated = "thread.token-usage-updated"
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
+    case threadPromptQueued = "thread.prompt-queued"
+    case threadPromptRemoved = "thread.prompt-removed"
+    case threadPromptSteerRequested = "thread.prompt-steer-requested"
+    case threadPromptSteerFailed = "thread.prompt-steer-failed"
+    case threadQueueResumed = "thread.queue-resumed"
 }
 
 /// Type discriminator of a client command sent to orchestration.dispatchCommand.
@@ -40,6 +45,9 @@ public enum MaidCommandType: String, Codable, Sendable, CaseIterable {
     case threadTurnStart = "thread.turn.start"
     case threadTurnRetry = "thread.turn.retry"
     case threadTurnInterrupt = "thread.turn.interrupt"
+    case threadPromptSteer = "thread.prompt.steer"
+    case threadPromptRemove = "thread.prompt.remove"
+    case threadQueueResume = "thread.queue.resume"
     case threadApprovalRespond = "thread.approval.respond"
     case threadSessionPrepare = "thread.session.prepare"
     case threadSessionStop = "thread.session.stop"
