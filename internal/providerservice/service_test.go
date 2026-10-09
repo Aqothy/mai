@@ -888,7 +888,9 @@ func TestStartSessionClearsStoredResumeCursorWhenReboundSessionReturnsNone(t *te
 	}
 }
 
-func TestStopSessionDropsStoredResumeCursorSoNextTurnStartsFresh(t *testing.T) {
+// Stopping a session ends the provider process but not the thread's agent
+// context: the next turn resumes the same native session.
+func TestStopSessionKeepsNativeSessionForNextTurn(t *testing.T) {
 	adapter := &fakeAdapter{configure: resumableSessions}
 	s := startedRoute(t, adapter)
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
@@ -896,8 +898,8 @@ func TestStopSessionDropsStoredResumeCursorSoNextTurnStartsFresh(t *testing.T) {
 	}
 	mustStartSession(t, s, "thread-1", provider.StartSessionInput{ProviderInstanceID: "codex"})
 
-	if got := string(adapter.instance(0).lastStartInput().ResumeCursor); got != "" {
-		t.Fatalf("resume cursor passed after stop = %s, want empty (stop unbinds; the next turn starts a fresh session)", got)
+	if got := adapter.instance(0).lastStartInput().ProviderSessionID; got != "sess-1" {
+		t.Fatalf("provider session after stop = %q, want sess-1 resumed", got)
 	}
 }
 

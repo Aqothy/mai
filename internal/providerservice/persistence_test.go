@@ -24,8 +24,9 @@ func openRouteStore(t *testing.T) *store.SQLite {
 }
 
 // Routes are written through as sessions bind, without the one-shot replay
-// intent, and stopping a session deletes its durable route. What is stored is
-// read back by the restored-route tests below.
+// intent, and stopping a session keeps its durable route so a restart still
+// restores the thread. What is stored is read back by the restored-route
+// tests below.
 func TestRouteWriteThroughPersistence(t *testing.T) {
 	st := openRouteStore(t)
 	adapter := &fakeAdapter{configure: resumableSessions}
@@ -47,8 +48,8 @@ func TestRouteWriteThroughPersistence(t *testing.T) {
 	if err := s.StopSession(context.Background(), provider.StopSessionInput{ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	if routes, err := st.LoadRoutes(); err != nil || len(routes) != 0 {
-		t.Fatalf("routes after stop = %+v (%v), want the durable route deleted", routes, err)
+	if routes, err := st.LoadRoutes(); err != nil || routes["thread-1"].ProviderSessionID != "sess-1" {
+		t.Fatalf("routes after stop = %+v (%v), want sess-1 kept", routes, err)
 	}
 }
 

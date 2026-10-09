@@ -840,11 +840,6 @@ func TestRPCProviderSessionManagement(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "bound to thread") {
 		t.Fatalf("provider.closeSession bound session err = %v, want rejection", err)
 	}
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadSessionStop, CommandID: "cmd-stop-mgmt", ThreadID: threadID})
-	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
-		return event.Type == orchestration.EventThreadSessionStatusSet && event.Payload.Session != nil && event.Payload.Session.Status == orchestration.SessionStatusStopped
-	})
-	client.call(t, wire.MethodProviderCloseSession, wire.ProviderSessionParams{InstanceID: "codex", SessionID: "sess-1"}, &ignored)
 }
 
 // TestRPCSessionMetadataProjectionsReachClient locks in the projections real

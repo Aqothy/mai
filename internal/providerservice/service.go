@@ -1257,20 +1257,11 @@ func (s *Service) updateRouteStartInput(threadID string, instanceID provider.Ins
 }
 
 func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInput) error {
-	err := s.withThreadInstance(ctx, input.ThreadID, false, "stop session", func(instance ProviderInstance) error {
+	// The route outlives the stop: the native session is still the thread's
+	// agent context, so the next turn and a daemon restart resume it.
+	return s.withThreadInstance(ctx, input.ThreadID, false, "stop session", func(instance ProviderInstance) error {
 		return instance.StopSession(ctx, input)
 	})
-	if err != nil {
-		return err
-	}
-	// Stop unbinds the thread's provider session: drop the route so the next
-	// turn's StartSession cannot auto-fill the stored resume cursor and reload
-	// the stopped session — the contract is that the next turn starts fresh.
-	s.mu.Lock()
-	delete(s.threadRoutes, input.ThreadID)
-	s.mu.Unlock()
-	s.persistThreadRoute(input.ThreadID)
-	return nil
 }
 
 func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error {
