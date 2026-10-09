@@ -7,7 +7,9 @@ import (
 
 func supportedRegion(spec string) bool {
 	switch spec {
-	case "osc_title", "osc_progress", "whole_recent", "after_last_prompt_marker", "prompt_box_body", "after_last_horizontal_rule":
+	case "osc_title", "osc_progress", "whole_recent", "after_last_prompt_marker", "before_current_prompt_marker",
+		"whole_recent_without_current_prompt_marker", "prompt_box_body", "last_non_empty_above_prompt_box",
+		"after_last_horizontal_rule":
 		return true
 	}
 	for _, name := range []string{"bottom_non_empty_lines", "bottom_lines", "top_non_empty_lines"} {
@@ -39,8 +41,14 @@ func regionText(in Input, spec string) (string, bool) {
 		return content, true
 	case "after_last_prompt_marker":
 		return afterLastPromptMarker(content), true
+	case "before_current_prompt_marker":
+		return beforeCurrentPromptMarker(content), true
+	case "whole_recent_without_current_prompt_marker":
+		return wholeRecentWithoutCurrentPromptMarker(content), true
 	case "prompt_box_body":
 		return promptBoxBody(content), true
+	case "last_non_empty_above_prompt_box":
+		return lastNonEmptyLine(abovePromptBox(content)), true
 	case "after_last_horizontal_rule":
 		return afterLastHorizontalRule(content), true
 	}
@@ -167,8 +175,50 @@ func afterLastPromptMarker(content string) string {
 	return content
 }
 
+// beforeCurrentPromptMarker returns everything above the current Codex prompt
+// line, or the whole content when there is none.
+func beforeCurrentPromptMarker(content string) string {
+	lines := splitLines(content)
+	index, ok := currentCodexPromptIndex(lines)
+	if !ok {
+		return content
+	}
+	return content[:lineStartOffset(content, lines, index)]
+}
+
+// wholeRecentWithoutCurrentPromptMarker is the whole content while no current
+// Codex prompt line is on screen, and empty otherwise.
+func wholeRecentWithoutCurrentPromptMarker(content string) string {
+	if _, ok := currentCodexPromptIndex(splitLines(content)); ok {
+		return ""
+	}
+	return content
+}
+
+// currentCodexPromptIndex finds the last prompt line, unless output blocks
+// were printed below it (then it is an old prompt in the transcript).
+func currentCodexPromptIndex(lines []string) (int, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !codexPromptLine(lines[i]) {
+			continue
+		}
+		for _, line := range lines[i+1:] {
+			if codexBlockMarkerLine(line) {
+				return 0, false
+			}
+		}
+		return i, true
+	}
+	return 0, false
+}
+
 func codexPromptLine(line string) bool {
 	return line == "›" || strings.HasPrefix(line, "› ")
+}
+
+func codexBlockMarkerLine(line string) bool {
+	return strings.HasPrefix(line, "•") || strings.HasPrefix(line, "■") ||
+		strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "✓")
 }
 
 // promptBoxBody returns the text inside the bottom bordered prompt box: the
@@ -192,6 +242,27 @@ func promptBoxBody(content string) string {
 		start = end
 	}
 	return content[start:end]
+}
+
+// abovePromptBox returns everything above the bottom prompt box's top
+// border, or the whole content when no box is on screen.
+func abovePromptBox(content string) string {
+	lines := splitLines(content)
+	top, ok := promptBoxTopBorderIndex(lines)
+	if !ok {
+		return content
+	}
+	return content[:lineStartOffset(content, lines, top)]
+}
+
+func lastNonEmptyLine(content string) string {
+	lines := splitLines(content)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
 }
 
 func promptBoxTopBorderIndex(lines []string) (int, bool) {

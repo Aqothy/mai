@@ -5,43 +5,6 @@ import (
 	"strings"
 )
 
-// executableLabels maps foreground command basenames to canonical agent
-// labels. The set mirrors the agents the embedded manifests cover, plus
-// their common install aliases.
-var executableLabels = map[string]string{
-	"pi":              "pi",
-	"claude":          "claude",
-	"claude-code":     "claude",
-	"codex":           "codex",
-	"gemini":          "gemini",
-	"cursor-agent":    "cursor",
-	"cursor":          "cursor",
-	"devin":           "devin",
-	"agy":             "agy",
-	"antigravity":     "agy",
-	"antigravity-cli": "agy",
-	"cline":           "cline",
-	"opencode":        "opencode",
-	"copilot":         "copilot",
-	"github-copilot":  "copilot",
-	"ghcs":            "copilot",
-	"kimi":            "kimi",
-	"kiro":            "kiro",
-	"kiro-cli":        "kiro",
-	"droid":           "droid",
-	"amp":             "amp",
-	"amp-local":       "amp",
-	"grok":            "grok",
-	"grok-build":      "grok",
-	"hermes":          "hermes",
-	"hermes-agent":    "hermes",
-	"kilo":            "kilo",
-	"kilo-code":       "kilo",
-	"qodercli":        "qodercli",
-	"qoder":           "qodercli",
-	"maki":            "maki",
-}
-
 // scriptInterpreters are runtimes whose script argument names the real
 // program, covering npm-style installs such as `node /usr/local/bin/claude`
 // and Python entry points. Version-suffixed Python binaries are normalized
@@ -58,14 +21,15 @@ var scriptInterpreters = map[string]struct{}{
 }
 
 // IdentifyCommand maps one process's command tokens (argv split on
-// whitespace) to a canonical agent label. The first token is the executable;
-// for a script interpreter the first non-flag argument names the program.
+// whitespace) to a canonical agent label: the id of the manifest whose id or
+// alias names the executable. The first token is the executable; for a
+// script interpreter the first non-flag argument names the program.
 func IdentifyCommand(argv []string) (string, bool) {
 	if len(argv) == 0 {
 		return "", false
 	}
 	name := normalizeExecutable(argv[0])
-	if label, ok := executableLabels[name]; ok {
+	if label, ok := manifestLabel(name); ok {
 		return label, true
 	}
 	if _, ok := scriptInterpreters[name]; !ok {
@@ -75,7 +39,7 @@ func IdentifyCommand(argv []string) (string, bool) {
 		if strings.HasPrefix(arg, "-") {
 			continue
 		}
-		if label, ok := executableLabels[normalizeExecutable(arg)]; ok {
+		if label, ok := manifestLabel(normalizeExecutable(arg)); ok {
 			return label, true
 		}
 		return "", false
@@ -101,6 +65,13 @@ func IdentifyGroup(leaderPID int, processes []GroupProcess) (string, bool) {
 		if label, ok := IdentifyCommand(p.Argv); ok {
 			return label, true
 		}
+	}
+	return "", false
+}
+
+func manifestLabel(executable string) (string, bool) {
+	if m, ok := manifestsByLabel[executable]; ok {
+		return m.label, true
 	}
 	return "", false
 }

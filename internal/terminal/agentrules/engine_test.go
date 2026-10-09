@@ -64,6 +64,12 @@ func TestClaudeOSCStates(t *testing.T) {
 	if d := Detect("claude", Input{OSCTitle: "✳ Claude Code"}); d.State != StateIdle {
 		t.Fatalf("static ✳ title: %+v", d)
 	}
+	// Claude Code 2.1.228+ animates half-circle frames while its prompt box
+	// stays on screen; the box alone reads idle.
+	promptBox := "────────────\n❯ \n────────────\n"
+	if d := Detect("claude", Input{OSCTitle: "◐ refactor the reducer", Screen: promptBox}); d.State != StateWorking {
+		t.Fatalf("half-circle title over the prompt box: %+v", d)
+	}
 	if d := Detect("claude", Input{OSCProgress: "4;0;"}); d.State != StateIdle {
 		t.Fatalf("cleared progress: %+v", d)
 	}

@@ -17,6 +17,7 @@ func TestIdentifyCommand(t *testing.T) {
 		{"python versioned wrapper", []string{"python3.12", "/usr/local/bin/hermes"}, "hermes", true},
 		{"alias resolves to canonical label", []string{"cursor-agent"}, "cursor", true},
 		{"kiro cli alias", []string{"kiro-cli"}, "kiro", true},
+		{"manifest without a hand-listed executable", []string{"qwen"}, "qwen", true},
 		{"node running something else", []string{"node", "/srv/app/server.js"}, "", false},
 		{"plain tool", []string{"vim", "README.md"}, "", false},
 		{"empty argv", nil, "", false},
