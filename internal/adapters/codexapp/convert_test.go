@@ -413,22 +413,3 @@ func TestProviderFileChangesAreUnifiedDiffs(t *testing.T) {
 		t.Fatalf("changes = %#v", changes)
 	}
 }
-
-// /compact and /review run Codex's own operations; anything else is a prompt.
-func TestBuiltinCommand(t *testing.T) {
-	cases := []struct {
-		input, method, target string
-	}{
-		{"/compact", "thread/compact/start", ""},
-		{"/review", "review/start", `{"type":"uncommittedChanges"}`},
-		{" /review main ", "review/start", `{"branch":"main","type":"baseBranch"}`},
-		{"please /review", "", ""},
-	}
-	for _, test := range cases {
-		method, params, ok := builtinCommand(provider.SendTurnInput{Input: test.input}, "thread")
-		target, _ := json.Marshal(params["target"])
-		if method != test.method || ok != (test.method != "") || test.target != "" && string(target) != test.target {
-			t.Errorf("builtinCommand(%q) = %q %s %v", test.input, method, target, ok)
-		}
-	}
-}

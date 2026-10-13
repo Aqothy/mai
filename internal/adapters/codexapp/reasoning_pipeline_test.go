@@ -32,9 +32,7 @@ func TestReasoningLiveAndReloadTimelineAgree(t *testing.T) {
 		localByNative:   map[string]string{},
 	}
 	h.bindSessionLocked(newSessionState(threadID, threadID, "/tmp"))
-	if err := h.emitTurnStarted(threadID, turnID); err != nil {
-		t.Fatal(err)
-	}
+	h.emitTurnStarted(threadID, turnID)
 	first := appItem{Type: "reasoning", ID: "thought-1", Summary: []string{"**Planning**\n\nOne café 👩🏽‍💻", "**Checking**"}, ReasoningContent: []string{"Detail α", "Detail β"}}
 	second := appItem{Type: "reasoning", ID: "thought-2", Summary: []string{"Recovered without deltas"}}
 	tool := appItem{Type: "commandExecution", ID: "tool-1", Status: "completed", Command: "echo fixture"}

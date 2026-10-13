@@ -606,8 +606,36 @@ func TestMalformedTransportSettlesTurnAndStopsProcess(t *testing.T) {
 	case <-testContext(t).Done():
 		t.Fatal("unusable app-server process was left running")
 	}
-	if err := instance.emitTurnStarted("native-thread", "unacknowledged-turn"); err == nil {
-		t.Fatal("late turn/start response reactivated a closed transport")
+}
+
+// A turn waiting for Codex ends once when app-server dies first: during its
+// turn/start, or after /compact returned but before the compaction's turn
+// started. Either SendTurn reports the failure or the turn fails, never both.
+func TestPendingTurnEndsOnceOnDisconnect(t *testing.T) {
+	for _, input := range []string{"hello", "/compact"} {
+		t.Run(input, func(t *testing.T) {
+			events := make(chan provider.RuntimeEvent, 32)
+			instance := openFakeInstance(t, "exit-before-turn", func(event provider.RuntimeEvent) { events <- event })
+			if _, err := instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", Cwd: "/tmp"}); err != nil {
+				t.Fatal(err)
+			}
+			sendErr := instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: input})
+			select {
+			case <-instance.processDone:
+			case <-testContext(t).Done():
+				t.Fatal("provider did not exit")
+			}
+			var failures int
+			for len(events) > 0 {
+				event := <-events
+				if event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "local-turn" && event.Payload.TurnState == provider.RuntimeTurnFailed {
+					failures++
+				}
+			}
+			if (sendErr != nil) == (failures == 1) || failures > 1 {
+				t.Fatalf("SendTurn error %v and %d turn failures, want exactly one outcome", sendErr, failures)
+			}
+		})
 	}
 }
 
@@ -631,6 +659,160 @@ func TestCompletedTurnIsNotFailedOnProcessExit(t *testing.T) {
 	if len(completions) != 1 || completions[0].Payload.TurnState != provider.RuntimeTurnCompleted {
 		t.Fatalf("completed turn was lost or failed again on exit: %#v", completions)
 	}
+}
+
+// Slash commands run Codex's own operations. A goal change ends the turn it
+// was sent on, whether or not the goal then starts a turn of its own, and that
+// turn stays Codex's; goal and shell commands sent during a turn join it, and
+// the commands that would replace it are refused.
+func TestSlashCommandsRunCodexOperations(t *testing.T) {
+	thread := openFakeThread(t, "commands")
+
+	thread.send("local-goal", "/goal ship it", false)
+	if got := thread.report("local-goal", turnEvent(provider.RuntimeEventTurnCompleted, "local-goal")); got != "Goal active: ship it" {
+		t.Fatalf("goal report = %q", got)
+	}
+	thread.wait(turnEvent(provider.RuntimeEventTurnStarted, "goal-turn"))
+
+	thread.send("goal-turn", "/goal pause", true)
+	if got := thread.report("goal-turn", turnEvent(provider.RuntimeEventItemCompleted, "goal-turn")); got != "Goal paused: ship it" {
+		t.Fatalf("pause report = %q", got)
+	}
+	if err := thread.sendErr("goal-turn", "/compact", true); err == nil || !strings.Contains(err.Error(), "can't run while Codex is working") {
+		t.Fatalf("steered /compact err = %v, want it refused", err)
+	}
+	thread.send("goal-turn", "/shell pwd", true)
+	shell := thread.wait(turnEvent(provider.RuntimeEventItemStarted, "goal-turn"))
+	if shell.Payload.ToolCall == nil || shell.Payload.ToolCall.Command != "pwd" {
+		t.Fatalf("shell command item = %#v", shell.Payload)
+	}
+	thread.wait(turnEvent(provider.RuntimeEventTurnCompleted, "goal-turn"))
+
+	thread.send("local-show", "/goal", false)
+	if got := thread.report("local-show", turnEvent(provider.RuntimeEventTurnCompleted, "local-show")); got != "Goal paused: ship it" {
+		t.Fatalf("show report = %q", got)
+	}
+	// This objective starts no turn, so only its update ends the turn.
+	thread.send("local-replace", "/goal next aim", false)
+	if got := thread.report("local-replace", turnEvent(provider.RuntimeEventTurnCompleted, "local-replace")); got != "Goal active: next aim" {
+		t.Fatalf("replace report = %q", got)
+	}
+	thread.send("local-clear", "/goal clear", false)
+	if got := thread.report("local-clear", turnEvent(provider.RuntimeEventTurnCompleted, "local-clear")); got != "Goal cleared." {
+		t.Fatalf("clear report = %q", got)
+	}
+
+	for _, command := range []struct{ turn, text string }{
+		{"local-shell", "/shell ls"},
+		{"local-review", " /review look for races "},
+		{"local-branch", "/review --base main"},
+		{"local-compact", "/compact"},
+	} {
+		thread.send(command.turn, command.text, false)
+		thread.wait(turnEvent(provider.RuntimeEventTurnCompleted, command.turn))
+	}
+	// Like `codex review`, a review needs a target or instructions.
+	if err := thread.sendErr("local-bare", "/review", false); err == nil || !strings.Contains(err.Error(), "Specify --uncommitted") {
+		t.Fatalf("bare /review err = %v", err)
+	}
+}
+
+// Codex runs turns of its own, such as a goal continuing. A turn the user
+// sends meanwhile joins it, as Codex steers turn/start input into a running
+// turn, and that turn continues as the user's: it shows the rest of Codex's
+// work and ends when Codex's turn does. Input Codex refuses fails the user's
+// turn and leaves Codex's running as its own.
+func TestUserTurnContinuesCodexOwnTurn(t *testing.T) {
+	thread := openFakeThread(t, "handoff")
+	thread.send("local-goal", "/goal ship it", false)
+	thread.wait(turnEvent(provider.RuntimeEventTurnStarted, "goal-turn"))
+
+	thread.send("local-refused", "too long", false)
+	refused := thread.wait(turnEvent(provider.RuntimeEventTurnCompleted, "local-refused"))
+	if refused.Payload.TurnState != provider.RuntimeTurnFailed || !strings.Contains(refused.Payload.Message, "input too large") {
+		t.Fatalf("refused turn = %#v", refused.Payload)
+	}
+	thread.wait(turnEvent(provider.RuntimeEventTurnStarted, "goal-turn"))
+
+	thread.send("local-turn", "hello", false)
+	reply := thread.report("local-turn", turnEvent(provider.RuntimeEventTurnCompleted, "local-turn"))
+	if reply != "hi" {
+		t.Fatalf("reply in the user's turn = %q, want Codex's turn shown as it", reply)
+	}
+
+	// The goal continues with another turn; pausing it joins that one. The
+	// turn may end before the pause's report is read, which then follows.
+	thread.wait(turnEvent(provider.RuntimeEventTurnStarted, "goal-turn-2"))
+	thread.send("local-pause", "/goal pause", false)
+	ended := false
+	var report string
+	thread.wait(func(event provider.RuntimeEvent) bool {
+		switch {
+		case event.TurnID != "local-pause":
+		case event.Type == provider.RuntimeEventContentDelta:
+			report += event.Payload.Delta
+		case event.Type == provider.RuntimeEventTurnCompleted:
+			ended = true
+		}
+		return ended && report != ""
+	})
+	if report != "Goal paused: ship it" {
+		t.Fatalf("pause report = %q", report)
+	}
+}
+
+// fakeThread drives one thread of a fake app-server.
+type fakeThread struct {
+	t        *testing.T
+	instance *Instance
+	events   chan provider.RuntimeEvent
+}
+
+func openFakeThread(t *testing.T, scenario string) *fakeThread {
+	t.Helper()
+	thread := &fakeThread{t: t, events: make(chan provider.RuntimeEvent, 64)}
+	thread.instance = openFakeInstance(t, scenario, func(event provider.RuntimeEvent) { thread.events <- event })
+	if _, err := thread.instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", Cwd: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+	return thread
+}
+
+func (f *fakeThread) sendErr(turn, text string, steer bool) error {
+	return f.instance.SendTurn(testContext(f.t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: turn, ClientMessageID: "client-" + turn + "-" + text, Input: text, Steer: steer})
+}
+
+func (f *fakeThread) send(turn, text string, steer bool) {
+	f.t.Helper()
+	if err := f.sendErr(turn, text, steer); err != nil {
+		f.t.Fatalf("send %q: %v", text, err)
+	}
+}
+
+func (f *fakeThread) wait(match func(provider.RuntimeEvent) bool) provider.RuntimeEvent {
+	f.t.Helper()
+	return waitForRuntimeEvent(f.t, f.events, match)
+}
+
+// report returns the text turn showed before the event matching until, and
+// fails if another turn starts meanwhile.
+func (f *fakeThread) report(turn string, until func(provider.RuntimeEvent) bool) string {
+	f.t.Helper()
+	var text strings.Builder
+	f.wait(func(event provider.RuntimeEvent) bool {
+		if event.Type == provider.RuntimeEventTurnStarted && event.TurnID != turn && !until(event) {
+			f.t.Fatalf("turn %q started while waiting on %q", event.TurnID, turn)
+		}
+		if event.Type == provider.RuntimeEventContentDelta && event.TurnID == turn {
+			text.WriteString(event.Payload.Delta)
+		}
+		return until(event)
+	})
+	return text.String()
+}
+
+func turnEvent(eventType provider.RuntimeEventType, turn string) func(provider.RuntimeEvent) bool {
+	return func(event provider.RuntimeEvent) bool { return event.Type == eventType && event.TurnID == turn }
 }
 
 func openFakeInstance(t *testing.T, scenario string, emit provider.RuntimeEventListener) *Instance {
@@ -730,6 +912,7 @@ func runFakeAppServer(scenario string) error {
 	loggedIn := false
 	interrupted := false
 	turnStarted := false
+	var goal map[string]any
 	for scanner.Scan() {
 		message, err := decodeFakeMessage(scanner.Bytes())
 		if err != nil {
@@ -923,6 +1106,38 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "turn/start":
+			if scenario == "exit-before-turn" {
+				return nil
+			}
+			if scenario == "handoff" && strings.Contains(fakeMessageJSON(message), "too long") {
+				if err := writeFakeError(encoder, message["id"], -32600, "input too large"); err != nil {
+					return err
+				}
+				continue
+			}
+			if scenario == "handoff" {
+				// The input joins the goal's running turn, which replies and
+				// ends; the goal then continues with another.
+				if err := validateTurnStart(message, "client-local-turn-hello"); err != nil {
+					return err
+				}
+				if err := writeFakeResult(encoder, message["id"], map[string]any{"turn": fakeTurn("goal-turn", "inProgress")}); err != nil {
+					return err
+				}
+				for _, notification := range []struct {
+					method string
+					params map[string]any
+				}{
+					{"item/completed", map[string]any{"threadId": "native-thread", "turnId": "goal-turn", "item": map[string]any{"type": "agentMessage", "id": "reply", "text": "hi"}}},
+					{"turn/completed", map[string]any{"threadId": "native-thread", "turn": fakeTurn("goal-turn", "completed")}},
+					{"turn/started", map[string]any{"threadId": "native-thread", "turn": fakeTurn("goal-turn-2", "inProgress")}},
+				} {
+					if err := writeFakeNotification(encoder, notification.method, notification.params); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			clientID := "local-turn"
 			if scenario == "message-identities" {
 				clientID = "client-start"
@@ -1115,6 +1330,147 @@ func runFakeAppServer(scenario string) error {
 			}
 			if err := writeFakeResult(encoder, message["id"], map[string]any{"data": []any{}, "nextCursor": nil, "backwardsCursor": nil}); err != nil {
 				return err
+			}
+		case "thread/goal/get":
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" {
+				return fmt.Errorf("invalid thread/goal/get params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"goal": goal}); err != nil {
+				return err
+			}
+		case "thread/goal/clear":
+			var params struct {
+				ThreadID string `json:"threadId"`
+				Origin   string `json:"origin"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.Origin != "user" {
+				return fmt.Errorf("invalid thread/goal/clear params: %s", fakeMessageJSON(message))
+			}
+			cleared := goal != nil
+			goal = nil
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"cleared": cleared}); err != nil {
+				return err
+			}
+			if cleared {
+				if err := writeFakeNotification(encoder, "thread/goal/cleared", map[string]any{"threadId": "native-thread"}); err != nil {
+					return err
+				}
+			}
+		case "thread/goal/set":
+			var params struct {
+				ThreadID  string  `json:"threadId"`
+				Origin    string  `json:"origin"`
+				Objective *string `json:"objective"`
+				Status    string  `json:"status"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.Origin != "user" {
+				return fmt.Errorf("invalid thread/goal/set params: %s", fakeMessageJSON(message))
+			}
+			switch {
+			case params.Objective != nil && goal != nil:
+				return fmt.Errorf("a new objective updated the old goal in place: %s", fakeMessageJSON(message))
+			case params.Objective != nil:
+				goal = map[string]any{"threadId": "native-thread", "objective": *params.Objective, "tokenBudget": nil, "tokensUsed": 0, "timeUsedSeconds": 0, "createdAt": 1, "updatedAt": 1}
+			case goal == nil:
+				return fmt.Errorf("goal status set without a goal: %s", fakeMessageJSON(message))
+			}
+			goal["status"] = params.Status
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"goal": goal}); err != nil {
+				return err
+			}
+			// Codex reports the change, then an active goal on an idle
+			// thread may start a turn to work on it.
+			if err := writeFakeNotification(encoder, "thread/goal/updated", map[string]any{"threadId": "native-thread", "turnId": nil, "goal": goal}); err != nil {
+				return err
+			}
+			if params.Objective != nil && *params.Objective == "ship it" {
+				if err := writeFakeNotification(encoder, "turn/started", map[string]any{"threadId": "native-thread", "turn": fakeTurn("goal-turn", "inProgress")}); err != nil {
+					return err
+				}
+			}
+			if scenario == "handoff" && params.Status == "paused" {
+				// Pausing stops further turns; the running one finishes.
+				if err := writeFakeNotification(encoder, "turn/completed", map[string]any{"threadId": "native-thread", "turn": fakeTurn("goal-turn-2", "completed")}); err != nil {
+					return err
+				}
+			}
+		case "thread/shellCommand":
+			var params struct {
+				ThreadID string `json:"threadId"`
+				Command  string `json:"command"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" {
+				return fmt.Errorf("invalid thread/shellCommand params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{}); err != nil {
+				return err
+			}
+			// A shell command joins the active turn, or runs as its own.
+			turn := "shell-turn"
+			switch params.Command {
+			case "pwd":
+				turn = "goal-turn"
+			case "ls":
+				if err := writeFakeNotification(encoder, "turn/started", map[string]any{"threadId": "native-thread", "turn": fakeTurn(turn, "inProgress")}); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unexpected shell command: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeNotification(encoder, "item/started", map[string]any{"threadId": "native-thread", "turnId": turn, "item": map[string]any{
+				"type": "commandExecution", "id": "shell-" + params.Command, "command": params.Command, "cwd": "/tmp", "status": "inProgress", "source": "userShell",
+			}}); err != nil {
+				return err
+			}
+			if err := writeFakeNotification(encoder, "turn/completed", map[string]any{"threadId": "native-thread", "turn": fakeTurn(turn, "completed")}); err != nil {
+				return err
+			}
+		case "review/start":
+			var params struct {
+				ThreadID string            `json:"threadId"`
+				Target   map[string]string `json:"target"`
+				Delivery string            `json:"delivery"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.Delivery != "inline" {
+				return fmt.Errorf("invalid review/start params: %s", fakeMessageJSON(message))
+			}
+			turn := ""
+			switch {
+			case params.Target["type"] == "custom" && params.Target["instructions"] == "look for races":
+				turn = "review-custom"
+			case params.Target["type"] == "baseBranch" && params.Target["branch"] == "main":
+				turn = "review-branch"
+			default:
+				return fmt.Errorf("unexpected review target: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{"turn": fakeTurn(turn, "inProgress"), "reviewThreadId": "native-thread"}); err != nil {
+				return err
+			}
+			for _, method := range []string{"turn/started", "turn/completed"} {
+				if err := writeFakeNotification(encoder, method, map[string]any{"threadId": "native-thread", "turn": fakeTurn(turn, "completed")}); err != nil {
+					return err
+				}
+			}
+		case "thread/compact/start":
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" {
+				return fmt.Errorf("invalid thread/compact/start params: %s", fakeMessageJSON(message))
+			}
+			if err := writeFakeResult(encoder, message["id"], map[string]any{}); err != nil {
+				return err
+			}
+			if scenario == "exit-before-turn" {
+				return nil
+			}
+			for _, method := range []string{"turn/started", "turn/completed"} {
+				if err := writeFakeNotification(encoder, method, map[string]any{"threadId": "native-thread", "turn": fakeTurn("compact-turn", "completed")}); err != nil {
+					return err
+				}
 			}
 		case "thread/unsubscribe":
 			if scenario == "stop-active" && !interrupted {

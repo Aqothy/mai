@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/adapters/elicitation"
@@ -42,7 +43,7 @@ type sessionState struct {
 	skills             []provider.Skill
 	configOptions      []provider.ConfigOption
 
-	pendingLocalTurn  string
+	pending           *pendingTurn
 	nativeToLocalTurn map[string]string
 	localToNativeTurn map[string]string
 	startedTurns      map[string]bool
@@ -162,8 +163,10 @@ type Instance struct {
 	cancel context.CancelFunc
 	// requestNonce is random per instance; see requestID.
 	requestNonce string
-	process      *procgroup.Process
-	rpc          *rpcClient
+	// localIDs numbers the reports the adapter makes itself.
+	localIDs atomic.Uint64
+	process  *procgroup.Process
+	rpc      *rpcClient
 
 	sessionsByLocal  map[string]*sessionState
 	localByNative    map[string]string
@@ -335,26 +338,26 @@ func (h *Instance) handleTransportClosed(err error) {
 	h.transportClosed = true
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
-	closing := h.closing
-	var activeTurns []provider.RuntimeEvent
+	outcome := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Codex app-server disconnected unexpectedly"}
+	if err != nil {
+		outcome.Message += ": " + err.Error()
+	}
+	if h.closing {
+		outcome = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}
+	}
+	// Running turns end, and so do pending ones: taking a pending turn makes
+	// this its outcome, and a request still in flight then fails without
+	// reporting it again (releaseTurn).
+	type localTurn struct{ thread, turn string }
+	var ended []localTurn
 	for _, session := range h.sessionsByLocal {
 		if nativeTurn := session.activeNativeTurn; nativeTurn != "" {
-			state := provider.RuntimeTurnFailed
-			message := "Codex app-server disconnected unexpectedly"
-			if err != nil {
-				message += ": " + err.Error()
-			}
-			if closing {
-				state, message = provider.RuntimeTurnCancelled, ""
-			}
-			activeTurns = append(activeTurns, provider.RuntimeEvent{
-				Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID,
-				TurnID:  h.resolveTurnLocked(session, nativeTurn),
-				Payload: provider.RuntimeEventPayload{TurnState: state, Message: message},
-			})
+			ended = append(ended, localTurn{session.localThreadID, h.resolveTurnLocked(session, nativeTurn)})
 		}
-		// A pending turn/start is released by rpc.fail and its caller records
-		// the dispatch error. Only already-started turns need an async outcome.
+		if session.pending != nil {
+			ended = append(ended, localTurn{session.localThreadID, session.pending.id})
+			session.pending = nil
+		}
 		session.activeNativeTurn = ""
 		session.streamed = make(map[string]streamedItem)
 	}
@@ -363,8 +366,8 @@ func (h *Instance) handleTransportClosed(err error) {
 	h.process.Kill()
 	h.cancel()
 	h.cancelPendingApprovals()
-	for _, event := range activeTurns {
-		h.emitEvent(event)
+	for _, turn := range ended {
+		h.endTurn(turn.thread, turn.turn, outcome)
 	}
 }
 

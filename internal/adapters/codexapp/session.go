@@ -144,30 +144,42 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 	if clientMessageID == "" {
 		clientMessageID = input.TurnID
 	}
+	command, args, isCommand := parseCommand(input)
+	var turnInput []appUserInput
+	if !isCommand {
+		// Converted first, so input Codex could never take claims no turn.
+		var err error
+		if turnInput, err = userInputsFromTurn(input, h.threadSkills(input.ThreadID)); err != nil {
+			return err
+		}
+	}
 	h.mu.Lock()
 	session := h.sessionsByLocal[input.ThreadID]
 	if session == nil {
 		h.mu.Unlock()
 		return fmt.Errorf("Codex thread %q is not bound", input.ThreadID)
 	}
+	send := turnSend{localThread: input.ThreadID, turn: input.TurnID, nativeThread: session.nativeThreadID, cwd: session.cwd, args: args}
 	if input.Steer {
 		nativeTurn := session.localToNativeTurn[input.TurnID]
 		if nativeTurn == "" || nativeTurn != session.activeNativeTurn {
 			h.mu.Unlock()
 			return fmt.Errorf("Codex thread %q turn %q: %w", input.ThreadID, input.TurnID, provider.ErrTurnNotRunning)
 		}
-		nativeThread := session.nativeThreadID
-		skills := append([]provider.Skill(nil), session.skills...)
 		h.mu.Unlock()
-		turnInput, err := userInputsFromTurn(input, skills)
-		if err != nil {
-			return err
+		send.placement = steered
+		if isCommand {
+			if !command.joinsTurn {
+				// As in the Codex TUI, which disables these during a task.
+				return fmt.Errorf("/%s can't run while Codex is working; send it once the turn ends", command.Name)
+			}
+			return command.run(h, ctx, send)
 		}
 		var response struct {
 			TurnID string `json:"turnId"`
 		}
 		if err := h.rpc.call(ctx, "turn/steer", map[string]any{
-			"threadId":            nativeThread,
+			"threadId":            send.nativeThread,
 			"expectedTurnId":      nativeTurn,
 			"clientUserMessageId": clientMessageID,
 			"input":               turnInput,
@@ -179,30 +191,31 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		}
 		return nil
 	}
-	if session.pendingLocalTurn != "" {
+	if session.pending != nil {
 		h.mu.Unlock()
 		return fmt.Errorf("Codex thread %q already has an active turn", input.ThreadID)
 	}
-	session.pendingLocalTurn = input.TurnID
-	nativeThread := session.nativeThreadID
+	awaits, joins := awaitsCodexTurn, true
+	if isCommand {
+		awaits, joins = awaitsCommand, command.joinsTurn
+	}
+	if beginTurnLocked(session, input.TurnID, awaits, joins) {
+		send.placement = tookOver
+	}
 	model := session.model
 	effort := session.effort
 	serviceTier := session.serviceTier
 	permissions, permissionsChanged := session.permissions, session.permissionsChanged
 	requestSummaries := h.requestSummaries
-	skills := append([]provider.Skill(nil), session.skills...)
 	h.mu.Unlock()
-	turnInput, err := userInputsFromTurn(input, skills)
-	if err != nil {
-		h.mu.Lock()
-		if current := h.sessionsByLocal[input.ThreadID]; current != nil && current.pendingLocalTurn == input.TurnID {
-			current.pendingLocalTurn = ""
-		}
-		h.mu.Unlock()
-		return err
+	if send.placement == tookOver {
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: input.ThreadID, TurnID: input.TurnID})
+	}
+	if isCommand {
+		return command.run(h, ctx, send)
 	}
 	params := map[string]any{
-		"threadId":            nativeThread,
+		"threadId":            send.nativeThread,
 		"clientUserMessageId": clientMessageID,
 		"input":               turnInput,
 	}
@@ -226,33 +239,17 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		// would leave reasoning items empty.
 		params["summary"] = "auto"
 	}
-	release := func() {
-		h.mu.Lock()
-		if current := h.sessionsByLocal[input.ThreadID]; current != nil && current.pendingLocalTurn == input.TurnID {
-			current.pendingLocalTurn = ""
-		}
-		h.mu.Unlock()
-	}
-	method, request := "turn/start", params
-	if command, commandParams, ok := builtinCommand(input, nativeThread); ok {
-		method, request = command, commandParams
-	}
+	// turn/start starts a turn, or steers the input into the one running.
 	var response struct {
 		Turn appTurn `json:"turn"`
 	}
-	if err := h.rpc.call(ctx, method, request, &response); err != nil {
-		release()
-		return err
-	}
-	if method == "thread/compact/start" {
-		// Compaction runs as a turn its turn/started notification starts.
-		return nil
+	if err := h.rpc.call(ctx, "turn/start", params, &response); err != nil {
+		return h.refuse(send, err)
 	}
 	if response.Turn.ID == "" {
-		release()
-		return fmt.Errorf("%s returned an empty turn id", method)
+		return h.refuse(send, fmt.Errorf("turn/start returned an empty turn id"))
 	}
-	if permissionsChanged && method == "turn/start" {
+	if permissionsChanged {
 		// turn/start settings stay for the rest of the thread.
 		h.mu.Lock()
 		if session.permissions == permissions {
@@ -260,7 +257,19 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		}
 		h.mu.Unlock()
 	}
-	return h.emitTurnStarted(nativeThread, response.Turn.ID)
+	if send.placement == ownTurn {
+		h.adoptTurn(send.localThread, send.turn, response.Turn.ID)
+	}
+	return nil
+}
+
+func (h *Instance) threadSkills(localThread string) []provider.Skill {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if session := h.sessionsByLocal[localThread]; session != nil {
+		return append([]provider.Skill(nil), session.skills...)
+	}
+	return nil
 }
 
 func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error {
@@ -456,33 +465,6 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 		return provider.ForkSessionResult{}, fmt.Errorf("thread/fork returned an empty thread id")
 	}
 	return provider.ForkSessionResult{Summary: sessionSummaryFromThread(response.Thread)}, nil
-}
-
-// slashCommands are the app-server operations offered as slash commands.
-var slashCommands = []provider.SlashCommand{
-	{Name: "compact", Description: "Summarize the conversation to free up context"},
-	{Name: "review", Description: "Review uncommitted changes, or the changes against a base branch", HasInput: true, InputHint: "[base branch]"},
-}
-
-// builtinCommand maps a prompt that is one of slashCommands to its
-// app-server request.
-func builtinCommand(input provider.SendTurnInput, threadID string) (string, map[string]any, bool) {
-	if len(input.Attachments) > 0 {
-		return "", nil, false
-	}
-	name, args, _ := strings.Cut(strings.TrimSpace(input.Input), " ")
-	args = strings.TrimSpace(args)
-	switch {
-	case name == "/compact" && args == "":
-		return "thread/compact/start", map[string]any{"threadId": threadID}, true
-	case name == "/review":
-		target := map[string]any{"type": "uncommittedChanges"}
-		if args != "" {
-			target = map[string]any{"type": "baseBranch", "branch": args}
-		}
-		return "review/start", map[string]any{"threadId": threadID, "target": target, "delivery": "inline"}, true
-	}
-	return "", nil, false
 }
 
 // listTurns pages a thread's turns, oldest first, with their items.

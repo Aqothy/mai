@@ -30,6 +30,11 @@ type ProviderInstance interface {
 	// SendTurn dispatches a turn. It is asynchronous: the turn lifecycle
 	// (turn.started/turn.completed) and all content are reported through runtime
 	// events, so SendTurn returns once the turn is accepted/dispatched.
+	//
+	// A provider can run a turn it started on its own (Claude Code woken by a
+	// background task, a Codex goal continuing). A turn sent while one runs
+	// joins it: the adapter reports the provider's turn as the sent turn from
+	// then on, and ends the sent turn when the provider's turn ends.
 	SendTurn(ctx context.Context, input provider.SendTurnInput) error
 	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
