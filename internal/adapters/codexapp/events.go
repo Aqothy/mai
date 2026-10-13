@@ -73,10 +73,21 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			TurnID   *string `json:"turnId"`
 			Goal     appGoal `json:"goal"`
 		}
+		if json.Unmarshal(raw, &notification) != nil {
+			return
+		}
+		h.emitGoal(notification.ThreadID, &notification.Goal)
 		// thread/goal/set reports its change without a turn; changes a turn
 		// makes carry its id.
-		if json.Unmarshal(raw, &notification) == nil && notification.TurnID == nil {
+		if notification.TurnID == nil {
 			h.finishGoalChange(notification.ThreadID, notification.Goal)
+		}
+	case "thread/goal/cleared":
+		var notification struct {
+			ThreadID string `json:"threadId"`
+		}
+		if json.Unmarshal(raw, &notification) == nil {
+			h.emitGoal(notification.ThreadID, nil)
 		}
 	case "serverRequest/resolved":
 		h.resolveServerRequest(raw)
@@ -441,6 +452,17 @@ func (h *Instance) emitPlan(raw json.RawMessage) {
 	}
 	entries := planEntriesFromApp(steps)
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnPlanUpdated, ThreadID: local, TurnID: turn, Payload: provider.RuntimeEventPayload{PlanEntries: entries}})
+}
+
+// emitGoal reports a native thread's goal, or that it has none.
+func (h *Instance) emitGoal(nativeThread string, goal *appGoal) {
+	local, _, ok := h.resolveIDs(nativeThread, "")
+	if !ok {
+		return
+	}
+	if event, ok := goalEvent(local, goal); ok {
+		h.emitEvent(event)
+	}
 }
 
 func (h *Instance) emitTokenUsage(raw json.RawMessage) {

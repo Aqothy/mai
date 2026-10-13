@@ -108,6 +108,7 @@ struct ThreadSession {
             .threadItemUpserted,
             .threadPlanUpdated,
             .threadTokenUsageUpdated,
+            .threadGoalUpdated,
             .threadSlashCommandsUpdated:
             false
         default:

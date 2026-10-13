@@ -33,6 +33,7 @@ var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
 	"AuthKind":                   {"../../internal/provider", "AuthKind"},
 	"ItemKind":                   {"../../internal/provider", "ItemKind"},
 	"ItemStatus":                 {"../../internal/provider", "ItemStatus"},
+	"GoalStatus":                 {"../../internal/provider", "GoalStatus"},
 	"ToolAction":                 {"../../internal/provider", "ToolAction"},
 	"FileChangeKind":             {"../../internal/provider", "FileChangeKind"},
 	"ConfigOptionType":           {"../../internal/provider", "ConfigOptionType"},

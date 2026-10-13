@@ -35,6 +35,7 @@ const (
 	EventThreadSlashCommandsUpdated      EventType = "thread.slash-commands-updated"
 	EventThreadSkillsUpdated             EventType = "thread.skills-updated"
 	EventThreadTokenUsageUpdated         EventType = "thread.token-usage-updated"
+	EventThreadGoalUpdated               EventType = "thread.goal-updated"
 	EventThreadHistoryReplayCompleted    EventType = "thread.history-replay-completed"
 	EventThreadPromptQueued              EventType = "thread.prompt-queued"
 	EventThreadPromptRemoved             EventType = "thread.prompt-removed"
@@ -117,6 +118,8 @@ type EventPayload struct {
 	SlashCommands    []provider.SlashCommand          `json:"slashCommands,omitzero"`
 	Skills           []provider.Skill                 `json:"skills,omitzero"`
 	TokenUsage       *provider.TokenUsage             `json:"tokenUsage,omitempty"`
+	// Goal is the thread's goal on goal-updated; nil means it has none.
+	Goal *provider.Goal `json:"goal,omitempty"`
 	// ReplayedTurns are the settled turns restored by a history replay. Clients
 	// receive them through the snapshot that replaces the coalesced replay.
 	ReplayedTurns []Turn `json:"-"`

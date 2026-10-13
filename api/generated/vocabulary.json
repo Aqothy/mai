@@ -27,6 +27,7 @@
         "thread.slash-commands-updated",
         "thread.skills-updated",
         "thread.token-usage-updated",
+        "thread.goal-updated",
         "thread.history-replay-completed",
         "thread.prompt-queued",
         "thread.prompt-removed",
@@ -221,6 +222,18 @@
         "failed",
         "interrupted",
         "declined"
+      ]
+    },
+    {
+      "name": "GoalStatus",
+      "description": "Status of the goal a provider pursues over its turns.",
+      "values": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
       ]
     },
     {

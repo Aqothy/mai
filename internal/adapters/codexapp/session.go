@@ -99,6 +99,17 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		response.Thread.Turns = turns
 	}
 	skills, _ := h.listSkills(ctx, []string{input.Cwd})
+	var goal *provider.RuntimeEvent
+	if nativeID != "" {
+		// A resumed thread may have a goal; it is only reported as it
+		// changes, so read it once here.
+		current, err := h.currentGoal(ctx, nativeID)
+		if err != nil {
+			h.logger.Warn("read Codex thread goal", "thread", nativeID, "error", err)
+		} else if event, ok := goalEvent(input.ThreadID, current); ok {
+			goal = &event
+		}
+	}
 	h.mu.Lock()
 	permissions := permissionsFor(response.ApprovalPolicy, response.Sandbox.Type)
 	options := append(configOptionsFromModels(h.models, model, effort, serviceTier), permissionsOption(permissions))
@@ -130,11 +141,17 @@ func (h *Instance) StartSession(ctx context.Context, input provider.StartSession
 		EventID: provider.RuntimeEventID("codex:meta:" + input.ThreadID + ":start"), Type: provider.RuntimeEventThreadMetadataUpdate,
 		Provider: DriverKind, ThreadID: input.ThreadID, Payload: provider.RuntimeEventPayload{SlashCommands: slashCommands},
 	}
+	setup := []provider.RuntimeEvent{metadata}
+	if goal != nil {
+		setup = append(setup, *goal)
+	}
 	if input.ReplayHistory {
 		// Same-thread setup events ride the replay batch, never the live sink.
-		result.Replay = append(replayEvents(input.ThreadID, response.Thread), metadata)
+		result.Replay = append(replayEvents(input.ThreadID, response.Thread), setup...)
 	} else {
-		h.emitEvent(metadata)
+		for _, event := range setup {
+			h.emitEvent(event)
+		}
 	}
 	return result, nil
 }

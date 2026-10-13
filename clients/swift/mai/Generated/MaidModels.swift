@@ -2186,6 +2186,7 @@ public struct EventPayload: Codable {
     public var configOptions: [ConfigOption]?
     public var createdAt: Date?
     public var cwd, decision, delivery, deliveryError: String?
+    public var goal: Goal?
     public var item: Item?
     public var itemID, messageID: String?
     public var modelSelection: ModelSelection?
@@ -2203,7 +2204,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
-        case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, delivery, deliveryError, item
+        case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, delivery, deliveryError, goal, item
         case itemID = "itemId"
         case messageID = "messageId"
         case modelSelection
@@ -2218,7 +2219,7 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, item: Item?, itemID: String?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, goal: Goal?, item: Item?, itemID: String?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.annotations = annotations
         self.answers = answers
@@ -2230,6 +2231,7 @@ public struct EventPayload: Codable {
         self.decision = decision
         self.delivery = delivery
         self.deliveryError = deliveryError
+        self.goal = goal
         self.item = item
         self.itemID = itemID
         self.messageID = messageID
@@ -2284,6 +2286,7 @@ public extension EventPayload {
         decision: String?? = nil,
         delivery: String?? = nil,
         deliveryError: String?? = nil,
+        goal: Goal?? = nil,
         item: Item?? = nil,
         itemID: String?? = nil,
         messageID: String?? = nil,
@@ -2318,6 +2321,7 @@ public extension EventPayload {
             decision: decision ?? self.decision,
             delivery: delivery ?? self.delivery,
             deliveryError: deliveryError ?? self.deliveryError,
+            goal: goal ?? self.goal,
             item: item ?? self.item,
             itemID: itemID ?? self.itemID,
             messageID: messageID ?? self.messageID,
@@ -2339,6 +2343,65 @@ public extension EventPayload {
             turnID: turnID ?? self.turnID,
             updatedAt: updatedAt ?? self.updatedAt,
             value: value ?? self.value
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Goal
+public struct Goal: Codable {
+    public var objective, status: String
+    public var timeUsedSeconds: Int
+    public var tokenBudget: Int?
+    public var tokensUsed: Int
+
+    public init(objective: String, status: String, timeUsedSeconds: Int, tokenBudget: Int?, tokensUsed: Int) {
+        self.objective = objective
+        self.status = status
+        self.timeUsedSeconds = timeUsedSeconds
+        self.tokenBudget = tokenBudget
+        self.tokensUsed = tokensUsed
+    }
+}
+
+// MARK: Goal convenience initializers and mutators
+
+public extension Goal {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Goal.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        objective: String? = nil,
+        status: String? = nil,
+        timeUsedSeconds: Int? = nil,
+        tokenBudget: Int?? = nil,
+        tokensUsed: Int? = nil
+    ) -> Goal {
+        return Goal(
+            objective: objective ?? self.objective,
+            status: status ?? self.status,
+            timeUsedSeconds: timeUsedSeconds ?? self.timeUsedSeconds,
+            tokenBudget: tokenBudget ?? self.tokenBudget,
+            tokensUsed: tokensUsed ?? self.tokensUsed
         )
     }
 
@@ -2978,7 +3041,9 @@ public struct SessionBinding: Codable {
     public var activeTurnID: String?
     public var additionalDirectories: [String]?
     public var configOptions: [ConfigOption]?
-    public var cwd, driver, lastError: String?
+    public var cwd, driver: String?
+    public var goal: Goal?
+    public var lastError: String?
     public var providerInstanceID: String
     public var providerName: String?
     public var skills: [Skill]?
@@ -2991,19 +3056,20 @@ public struct SessionBinding: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case activeTurnID = "activeTurnId"
-        case additionalDirectories, configOptions, cwd, driver, lastError
+        case additionalDirectories, configOptions, cwd, driver, goal, lastError
         case providerInstanceID = "providerInstanceId"
         case providerName, skills, slashCommands, status, stopRequested
         case threadID = "threadId"
         case tokenUsage, updatedAt
     }
 
-    public init(activeTurnID: String?, additionalDirectories: [String]?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, lastError: String?, providerInstanceID: String, providerName: String?, skills: [Skill]?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
+    public init(activeTurnID: String?, additionalDirectories: [String]?, configOptions: [ConfigOption]?, cwd: String?, driver: String?, goal: Goal?, lastError: String?, providerInstanceID: String, providerName: String?, skills: [Skill]?, slashCommands: [SlashCommand]?, status: String, stopRequested: Bool?, threadID: String, tokenUsage: TokenUsage?, updatedAt: Date) {
         self.activeTurnID = activeTurnID
         self.additionalDirectories = additionalDirectories
         self.configOptions = configOptions
         self.cwd = cwd
         self.driver = driver
+        self.goal = goal
         self.lastError = lastError
         self.providerInstanceID = providerInstanceID
         self.providerName = providerName
@@ -3041,6 +3107,7 @@ public extension SessionBinding {
         configOptions: [ConfigOption]?? = nil,
         cwd: String?? = nil,
         driver: String?? = nil,
+        goal: Goal?? = nil,
         lastError: String?? = nil,
         providerInstanceID: String? = nil,
         providerName: String?? = nil,
@@ -3058,6 +3125,7 @@ public extension SessionBinding {
             configOptions: configOptions ?? self.configOptions,
             cwd: cwd ?? self.cwd,
             driver: driver ?? self.driver,
+            goal: goal ?? self.goal,
             lastError: lastError ?? self.lastError,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             providerName: providerName ?? self.providerName,

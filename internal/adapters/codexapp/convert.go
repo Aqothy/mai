@@ -1074,3 +1074,28 @@ func stringValue(value *string) string {
 	}
 	return *value
 }
+
+// goalStatuses maps v2 ThreadGoalStatus onto the provider-neutral statuses.
+var goalStatuses = map[string]provider.GoalStatus{
+	"active":        provider.GoalActive,
+	"paused":        provider.GoalPaused,
+	"blocked":       provider.GoalBlocked,
+	"usageLimited":  provider.GoalUsageLimited,
+	"budgetLimited": provider.GoalBudgetLimited,
+	"complete":      provider.GoalComplete,
+}
+
+// goalEvent reports the thread's goal, or that it has none when goal is nil.
+// It reports nothing for a status this adapter doesn't know.
+func goalEvent(localThread string, goal *appGoal) (provider.RuntimeEvent, bool) {
+	event := provider.RuntimeEvent{Type: provider.RuntimeEventThreadGoalUpdated, Provider: DriverKind, ThreadID: localThread}
+	if goal == nil {
+		return event, true
+	}
+	status, ok := goalStatuses[goal.Status]
+	if !ok {
+		return provider.RuntimeEvent{}, false
+	}
+	event.Payload.Goal = &provider.Goal{Objective: goal.Objective, Status: status, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, TimeUsedSeconds: goal.TimeUsedSeconds}
+	return event, true
+}

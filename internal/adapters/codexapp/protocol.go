@@ -46,10 +46,11 @@ type configReadResponse struct {
 
 // appGoal is a thread's goal (v2 ThreadGoal).
 type appGoal struct {
-	Objective   string `json:"objective"`
-	Status      string `json:"status"`
-	TokenBudget *int64 `json:"tokenBudget"`
-	TokensUsed  int64  `json:"tokensUsed"`
+	Objective       string `json:"objective"`
+	Status          string `json:"status"`
+	TokenBudget     *int64 `json:"tokenBudget"`
+	TokensUsed      int64  `json:"tokensUsed"`
+	TimeUsedSeconds int64  `json:"timeUsedSeconds"`
 }
 
 type threadListResponse struct {

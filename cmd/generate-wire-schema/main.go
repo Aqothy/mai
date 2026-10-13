@@ -58,6 +58,7 @@ type contract struct {
 	CommandCompletion                wire.CommandCompletion                `json:"commandCompletion"`
 	Skill                            wire.Skill                            `json:"skill"`
 	TokenUsage                       wire.TokenUsage                       `json:"tokenUsage"`
+	Goal                             wire.Goal                             `json:"goal"`
 	ApprovalOption                   wire.ApprovalOption                   `json:"approvalOption"`
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`

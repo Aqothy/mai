@@ -262,6 +262,12 @@ enum ThreadEventReducer {
             session.updatedAt = occurredAt
             thread.session = session
 
+        case .threadGoalUpdated:
+            var session = ensureSession(thread, event)
+            session.goal = payload.goal
+            session.updatedAt = occurredAt
+            thread.session = session
+
         case .threadPromptQueued:
             guard let id = payload.messageID else { break }
             let prompt = QueuedPrompt(
@@ -349,6 +355,7 @@ enum ThreadEventReducer {
             configOptions: nil,
             cwd: thread.cwd,
             driver: nil,
+            goal: nil,
             lastError: nil,
             providerInstanceID: event.payload.providerInstanceID
                 ?? thread.providerInstanceID ?? "",

@@ -261,6 +261,31 @@ type TokenUsage struct {
 	Currency   string  `json:"currency,omitempty"`
 }
 
+// Goal is an objective the provider keeps working toward over turns of its
+// own until it is met, such as one set with a /goal command.
+type Goal struct {
+	Objective   string     `json:"objective"`
+	Status      GoalStatus `json:"status"`
+	TokensUsed  int64      `json:"tokensUsed"`
+	TokenBudget *int64     `json:"tokenBudget,omitempty"`
+	// TimeUsedSeconds is the time spent on the goal when it was reported.
+	TimeUsedSeconds int64 `json:"timeUsedSeconds"`
+}
+
+type GoalStatus string
+
+const (
+	GoalActive GoalStatus = "active"
+	GoalPaused GoalStatus = "paused"
+	// GoalBlocked: the provider stopped because it can't make progress.
+	GoalBlocked GoalStatus = "blocked"
+	// GoalUsageLimited: the account's usage limit stopped the goal.
+	GoalUsageLimited GoalStatus = "usage_limited"
+	// GoalBudgetLimited: the goal spent its token budget unmet.
+	GoalBudgetLimited GoalStatus = "budget_limited"
+	GoalComplete      GoalStatus = "complete"
+)
+
 type SessionSummary struct {
 	SessionID             string   `json:"sessionId"`
 	Title                 string   `json:"title,omitempty"`
@@ -640,6 +665,10 @@ type RuntimeEventType string
 const (
 	RuntimeEventThreadMetadataUpdate RuntimeEventType = "thread.metadata.updated"
 	RuntimeEventThreadTokenUsage     RuntimeEventType = "thread.token-usage.updated"
+	// RuntimeEventThreadGoalUpdated reports the thread's goal: Payload.Goal,
+	// or no goal when it is nil. Adapters emit it whenever the goal changes
+	// and when a session starts on a thread that may have one.
+	RuntimeEventThreadGoalUpdated    RuntimeEventType = "thread.goal.updated"
 	RuntimeEventTurnStarted          RuntimeEventType = "turn.started"
 	RuntimeEventTurnCompleted        RuntimeEventType = "turn.completed"
 	RuntimeEventTurnPlanUpdated      RuntimeEventType = "turn.plan.updated"
@@ -860,6 +889,7 @@ type RuntimeEventPayload struct {
 	Skills        []Skill        `json:"skills,omitzero"`
 	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
 	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
+	Goal          *Goal          `json:"goal,omitempty"`
 }
 
 // RuntimeEvent is the canonical provider-neutral event emitted by adapters.

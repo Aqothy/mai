@@ -74,6 +74,12 @@ func (p *Projection) Apply(event Event) {
 		p.applyThreadSkillsUpdated(event)
 	case EventThreadTokenUsageUpdated:
 		p.applyThreadTokenUsageUpdated(event)
+	case EventThreadGoalUpdated:
+		if thread := p.ensureThread(event); thread != nil {
+			session := ensureSessionBinding(thread, event)
+			session.Goal = cloneGoal(event.Payload.Goal)
+			session.UpdatedAt = event.OccurredAt
+		}
 	case EventThreadPromptQueued:
 		p.applyThreadPromptQueued(event)
 	case EventThreadPromptRemoved:

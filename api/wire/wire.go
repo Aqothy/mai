@@ -91,6 +91,7 @@ type ProviderCompleteCommandParams = provider.CompleteCommandInput
 type CommandCompletion = provider.CommandCompletion
 type Skill = provider.Skill
 type TokenUsage = provider.TokenUsage
+type Goal = provider.Goal
 type ApprovalOption = provider.ApprovalOption
 
 // ProviderStartParams starts a configured provider. Config is adapter-owned

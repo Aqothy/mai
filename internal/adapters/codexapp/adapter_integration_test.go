@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -768,6 +769,34 @@ func TestCommandCompletions(t *testing.T) {
 	}
 }
 
+// A thread's goal is reported when its session resumes, inside the replay,
+// and then each time it changes, cleared included.
+func TestGoalIsReportedAsItChanges(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 64)
+	instance := openFakeInstance(t, "goal-resume", func(event provider.RuntimeEvent) { events <- event })
+	result, err := instance.StartSession(testContext(t), provider.StartSessionInput{ThreadID: "local-thread", ProviderSessionID: "native-thread", Cwd: "/tmp", ReplayHistory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	isGoal := func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventThreadGoalUpdated }
+	index := slices.IndexFunc(result.Replay, isGoal)
+	budget := int64(100)
+	want := &provider.Goal{Objective: "carry on", Status: provider.GoalBudgetLimited, TokensUsed: 150, TokenBudget: &budget, TimeUsedSeconds: 60}
+	if index < 0 || !reflect.DeepEqual(result.Replay[index].Payload.Goal, want) || result.Replay[index].ThreadID != "local-thread" {
+		t.Fatalf("replay goal = %#v, want %#v", result.Replay, want)
+	}
+	thread := &fakeThread{t: t, instance: instance, events: events}
+
+	thread.send("local-clear", "/goal clear", false)
+	if cleared := thread.wait(isGoal); cleared.Payload.Goal != nil {
+		t.Fatalf("cleared goal = %#v, want none", cleared.Payload.Goal)
+	}
+	thread.send("local-set", "/goal next aim", false)
+	if set := thread.wait(isGoal); set.Payload.Goal == nil || set.Payload.Goal.Objective != "next aim" || set.Payload.Goal.Status != provider.GoalActive {
+		t.Fatalf("set goal = %#v", set.Payload.Goal)
+	}
+}
+
 // Codex runs turns of its own, such as a goal continuing. A turn the user
 // sends meanwhile joins it, as Codex steers turn/start input into a running
 // turn, and that turn continues as the user's: it shows the rest of Codex's
@@ -964,6 +993,9 @@ func runFakeAppServer(scenario string) error {
 	interrupted := false
 	turnStarted := false
 	var goal map[string]any
+	if scenario == "goal-resume" {
+		goal = map[string]any{"threadId": "native-thread", "objective": "carry on", "status": "budgetLimited", "tokenBudget": 100, "tokensUsed": 150, "timeUsedSeconds": 60, "createdAt": 1, "updatedAt": 1}
+	}
 	for scanner.Scan() {
 		message, err := decodeFakeMessage(scanner.Bytes())
 		if err != nil {

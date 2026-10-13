@@ -904,6 +904,9 @@
         },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
+        },
+        "goal": {
+          "$ref": "#/$defs/Goal"
         }
       },
       "additionalProperties": false,
@@ -990,6 +993,34 @@
         "itemId"
       ],
       "title": "GetItemDetailInput"
+    },
+    "Goal": {
+      "properties": {
+        "objective": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tokensUsed": {
+          "type": "integer"
+        },
+        "tokenBudget": {
+          "type": "integer"
+        },
+        "timeUsedSeconds": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "objective",
+        "status",
+        "tokensUsed",
+        "timeUsedSeconds"
+      ],
+      "title": "Goal"
     },
     "InstanceInfo": {
       "properties": {
@@ -1653,6 +1684,9 @@
         },
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
+        },
+        "goal": {
+          "$ref": "#/$defs/Goal"
         },
         "lastError": {
           "type": "string"
@@ -2795,6 +2829,9 @@
         "tokenUsage": {
           "$ref": "#/$defs/TokenUsage"
         },
+        "goal": {
+          "$ref": "#/$defs/Goal"
+        },
         "approvalOption": {
           "$ref": "#/$defs/ApprovalOption"
         },
@@ -2952,6 +2989,7 @@
         "commandCompletion",
         "skill",
         "tokenUsage",
+        "goal",
         "approvalOption",
         "providerStartParams",
         "acpRegistryStartParams",

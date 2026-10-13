@@ -381,6 +381,7 @@ func TestIngestionSessionScopedUpdatesBeforeBindingSurviveSessionStatusSet(t *te
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-config", Type: provider.RuntimeEventConfigOptionsUpdated, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{ConfigOptions: []provider.ConfigOption{{ID: "model", Category: provider.ConfigOptionCategoryModel, CurrentValue: "fast"}}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-slash", Type: provider.RuntimeEventThreadMetadataUpdate, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{SlashCommands: []provider.SlashCommand{{Name: "compact"}}}})
 	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-usage", Type: provider.RuntimeEventThreadTokenUsage, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{TokenUsage: &provider.TokenUsage{UsedTokens: 42, MaxTokens: 100}}})
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-prebinding-goal", Type: provider.RuntimeEventThreadGoalUpdated, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now(), Payload: provider.RuntimeEventPayload{Goal: &provider.Goal{Objective: "ship it", Status: provider.GoalPaused}}})
 
 	// The reactor binds sessions through bound UPDATES; the engine merges the
 	// provider identity over the live session, so metadata that arrived
@@ -400,6 +401,15 @@ func TestIngestionSessionScopedUpdatesBeforeBindingSurviveSessionStatusSet(t *te
 	}
 	if thread.Session.TokenUsage == nil || thread.Session.TokenUsage.UsedTokens != 42 {
 		t.Fatalf("token usage after session status set = %#v, want preserved usage", thread.Session.TokenUsage)
+	}
+	if goal := thread.Session.Goal; goal == nil || goal.Objective != "ship it" || goal.Status != provider.GoalPaused {
+		t.Fatalf("goal after session status set = %#v, want preserved paused goal", goal)
+	}
+
+	// A goal update without a goal clears it.
+	ingestion.Ingest(provider.RuntimeEvent{EventID: "evt-goal-cleared", Type: provider.RuntimeEventThreadGoalUpdated, Provider: "test", ThreadID: string(threadID), CreatedAt: time.Now()})
+	if thread, _ := engine.Thread(threadID); thread.Session.Goal != nil {
+		t.Fatalf("goal after clear = %#v, want none", thread.Session.Goal)
 	}
 }
 

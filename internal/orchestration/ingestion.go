@@ -212,6 +212,8 @@ func (i *ProviderRuntimeIngestion) ingest(event provider.RuntimeEvent) {
 		i.ingestThreadMetadata(event, createdAt)
 	case provider.RuntimeEventThreadTokenUsage:
 		i.ingestTokenUsage(event, createdAt)
+	case provider.RuntimeEventThreadGoalUpdated:
+		i.record(EventInput{Type: EventThreadGoalUpdated, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Goal: cloneGoal(event.Payload.Goal)}})
 	case provider.RuntimeEventTurnStarted:
 		i.ingestTurnStarted(event, createdAt)
 	case provider.RuntimeEventTurnCompleted:

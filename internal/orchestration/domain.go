@@ -180,8 +180,10 @@ type SessionBinding struct {
 	SlashCommands []provider.SlashCommand `json:"slashCommands,omitzero"`
 	Skills        []provider.Skill        `json:"skills,omitzero"`
 	TokenUsage    *provider.TokenUsage    `json:"tokenUsage,omitempty"`
-	LastError     string                  `json:"lastError,omitempty"`
-	UpdatedAt     time.Time               `json:"updatedAt"`
+	// Goal is the goal the provider pursues in this session, if any.
+	Goal      *provider.Goal `json:"goal,omitempty"`
+	LastError string         `json:"lastError,omitempty"`
+	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
 // Item is one entry in a thread's non-message timeline (tool calls, reasoning,

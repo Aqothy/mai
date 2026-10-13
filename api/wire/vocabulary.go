@@ -41,6 +41,7 @@ var Vocabularies = []VocabularyDefinition{
 			string(orchestration.EventThreadSlashCommandsUpdated),
 			string(orchestration.EventThreadSkillsUpdated),
 			string(orchestration.EventThreadTokenUsageUpdated),
+			string(orchestration.EventThreadGoalUpdated),
 			string(orchestration.EventThreadHistoryReplayCompleted),
 			string(orchestration.EventThreadPromptQueued),
 			string(orchestration.EventThreadPromptRemoved),
@@ -233,6 +234,18 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.ItemStatusFailed),
 			string(provider.ItemStatusInterrupted),
 			string(provider.ItemStatusDeclined),
+		},
+	},
+	{
+		Name:        "GoalStatus",
+		Description: "Status of the goal a provider pursues over its turns.",
+		Values: []string{
+			string(provider.GoalActive),
+			string(provider.GoalPaused),
+			string(provider.GoalBlocked),
+			string(provider.GoalUsageLimited),
+			string(provider.GoalBudgetLimited),
+			string(provider.GoalComplete),
 		},
 	},
 	{

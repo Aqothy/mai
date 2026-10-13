@@ -122,6 +122,7 @@ func cloneSessionPtr(value *SessionBinding) *SessionBinding {
 	clone.SlashCommands = slices.Clone(value.SlashCommands)
 	clone.Skills = slices.Clone(value.Skills)
 	clone.TokenUsage = clonePtr(value.TokenUsage)
+	clone.Goal = cloneGoal(value.Goal)
 	return &clone
 }
 
@@ -173,4 +174,13 @@ func firstTime(value time.Time, fallback time.Time) time.Time {
 		return fallback
 	}
 	return value
+}
+
+func cloneGoal(goal *provider.Goal) *provider.Goal {
+	if goal == nil {
+		return nil
+	}
+	clone := *goal
+	clone.TokenBudget = clonePtr(goal.TokenBudget)
+	return &clone
 }

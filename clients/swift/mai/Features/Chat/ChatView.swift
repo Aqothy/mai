@@ -400,6 +400,10 @@ private struct ChatComposerStack: View {
                 ChatTurnStopNoticeView(reason: reason)
             }
 
+            if chatModel != nil, let goal = state.session?.goal {
+                ChatGoalStatusView(goal: goal)
+            }
+
             if chatModel == nil {
                 HStack(spacing: 16) {
                     DraftSessionControlsView(model: draftModel)

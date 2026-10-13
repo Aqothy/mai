@@ -30,6 +30,7 @@ public enum MaidEventType: String, Codable, Sendable, CaseIterable {
     case threadSlashCommandsUpdated = "thread.slash-commands-updated"
     case threadSkillsUpdated = "thread.skills-updated"
     case threadTokenUsageUpdated = "thread.token-usage-updated"
+    case threadGoalUpdated = "thread.goal-updated"
     case threadHistoryReplayCompleted = "thread.history-replay-completed"
     case threadPromptQueued = "thread.prompt-queued"
     case threadPromptRemoved = "thread.prompt-removed"
@@ -188,6 +189,16 @@ public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case failed = "failed"
     case interrupted = "interrupted"
     case declined = "declined"
+}
+
+/// Status of the goal a provider pursues over its turns.
+public enum MaidGoalStatus: String, Codable, Sendable, CaseIterable {
+    case active = "active"
+    case paused = "paused"
+    case blocked = "blocked"
+    case usageLimited = "usage_limited"
+    case budgetLimited = "budget_limited"
+    case complete = "complete"
 }
 
 /// Action a provider explicitly stated for a tool call; absent when it stated none.
