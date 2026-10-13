@@ -42,6 +42,11 @@ type Command struct {
 	AdditionalDirectories []string                 `json:"additionalDirectories,omitempty"`
 	ModelSelection        *provider.ModelSelection `json:"modelSelection,omitempty"`
 	Message               *CommandMessage          `json:"message,omitempty"`
+	// Steer has thread.turn.start send the prompt now instead of queueing it
+	// behind a busy thread: steered into the running turn, or as the next
+	// turn when idle, ahead of a held queue. A thread with no turn to steer
+	// into (one preparing or stopping) still queues it.
+	Steer bool `json:"steer,omitempty"`
 	// MessageID names the queued prompt thread.prompt.send/remove act on, or
 	// the message thread.turn.retry sends again.
 	MessageID MessageID `json:"messageId,omitempty"`

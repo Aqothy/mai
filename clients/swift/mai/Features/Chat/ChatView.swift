@@ -439,12 +439,12 @@ private struct ChatComposerStack: View {
                 commands: state.slashCommands,
                 skills: state.skills,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
-            ) {
+            ) { mode in
                 if let chatModel {
                     // Sending is explicit intent to see the new turn, even
                     // after the reader scrolled away or expanded content.
                     scrollState.requestScrollToBottom(animated: true)
-                    Task { await chatModel.send() }
+                    Task { await chatModel.send(mode) }
                 } else {
                     Task { await draftModel.send() }
                 }

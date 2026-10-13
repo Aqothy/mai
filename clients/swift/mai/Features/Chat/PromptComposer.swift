@@ -29,7 +29,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     let commands: [SlashCommand]
     let skills: [Skill]
     let submitLabel: String
-    let send: () -> Void
+    let send: (PromptSendMode) -> Void
     let stop: () -> Void
     let removeAttachment: (UUID) -> Void
     let removeAnnotation: (String) -> Void
@@ -50,7 +50,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         commands: [SlashCommand] = [],
         skills: [Skill] = [],
         submitLabel: String,
-        send: @escaping () -> Void,
+        send: @escaping (PromptSendMode) -> Void,
         stop: @escaping () -> Void = {},
         removeAttachment: @escaping (UUID) -> Void = { _ in },
         removeAnnotation: @escaping (String) -> Void = { _ in },
@@ -123,43 +123,7 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
 
                 trailingControls
 
-                Button {
-                    if showsStop {
-                        stop()
-                    } else {
-                        #if os(iOS)
-                            // Dismiss the software keyboard before sending;
-                            // macOS has no software keyboard, so nothing to do.
-                            UIApplication.shared.sendAction(
-                                #selector(UIResponder.resignFirstResponder),
-                                to: nil,
-                                from: nil,
-                                for: nil
-                            )
-                        #endif
-                        send()
-                    }
-                } label: {
-                    Group {
-                        if isSending || isStopping {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Label(
-                                showsStop ? "Stop generation" : submitLabel,
-                                systemImage: showsStop ? "stop.fill" : "arrow.up"
-                            )
-                            .labelStyle(.iconOnly)
-                        }
-                    }
-                    .font(.body.bold())
-                    .frame(width: 36, height: 36)
-                    .background(sendButtonBackground, in: .circle)
-                    .foregroundStyle(sendButtonForeground)
-                    .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .disabled(showsStop ? isStopping : !canSend)
+                sendButton
             }
             .frame(height: 36)
             .fixedSize(horizontal: verticalSizeClass == .compact, vertical: false)
@@ -204,9 +168,107 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
     }
 
     /// While a turn is running the button stops it, unless there is a draft to
-    /// send — sending mid-turn queues the prompt instead.
+    /// send — sending mid-turn queues or steers the prompt instead.
     private var showsStop: Bool {
         isRunning && !canSend
+    }
+
+    /// Queueing and steering only differ while a turn runs.
+    private var offersSendModes: Bool {
+        isRunning && canSend
+    }
+
+    @ViewBuilder
+    private var sendButton: some View {
+        #if os(iOS)
+            if offersSendModes {
+                // A tap sends the standard way; a long press offers both.
+                Menu {
+                    Button("Steer", systemImage: "arrow.triangle.branch") {
+                        tapSend(.steer)
+                    }
+                    Button("Queue", systemImage: "text.append") {
+                        tapSend(.queue)
+                    }
+                } label: {
+                    sendButtonLabel
+                } primaryAction: {
+                    tapSend(.standard)
+                }
+                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+            } else {
+                plainSendButton
+            }
+        #else
+            plainSendButton
+                .help(offersSendModes ? sendModesHelp : "")
+        #endif
+    }
+
+    private var plainSendButton: some View {
+        Button {
+            if showsStop {
+                stop()
+            } else {
+                tapSend(.standard)
+            }
+        } label: {
+            sendButtonLabel
+        }
+        .buttonStyle(.plain)
+        .disabled(showsStop ? isStopping : !canSend)
+    }
+
+    private var sendButtonLabel: some View {
+        Group {
+            if isSending || isStopping {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Label(
+                    showsStop ? "Stop generation" : sendLabel,
+                    systemImage: showsStop ? "stop.fill" : "arrow.up"
+                )
+                .labelStyle(.iconOnly)
+            }
+        }
+        .font(.body.bold())
+        .frame(width: 36, height: 36)
+        .background(sendButtonBackground, in: .circle)
+        .foregroundStyle(sendButtonForeground)
+        .contentShape(.circle)
+    }
+
+    private var sendLabel: String {
+        guard offersSendModes else { return submitLabel }
+        return switch PromptSendMode.standard {
+        case .queue: "Queue"
+        case .steer: "Steer"
+        }
+    }
+
+    #if os(macOS)
+        private var sendModesHelp: String {
+            switch PromptSendMode.standard {
+            case .queue: "Queue (Return) · Steer (Command-Return)"
+            case .steer: "Steer (Return) · Queue (Command-Return)"
+            }
+        }
+    #endif
+
+    private func tapSend(_ mode: PromptSendMode) {
+        #if os(iOS)
+            // Dismiss the software keyboard before sending; macOS has no
+            // software keyboard, so nothing to do.
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder),
+                to: nil,
+                from: nil,
+                for: nil
+            )
+        #endif
+        send(mode)
     }
 
     // High-contrast fill that inverts with the color scheme, so the button
@@ -262,9 +324,9 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
         promptCompletion?.dismiss() ?? false
     }
 
-    private func submitPrompt() {
+    private func submitPrompt(_ mode: PromptSendMode) {
         guard isEnabled, canSend, !isSending, !isStopping else { return }
-        send()
+        send(mode)
     }
 
     private func applyCursorRequest(_ request: PromptCompletionCursorRequest?) {
@@ -299,7 +361,7 @@ private struct DraftPromptEditor: View {
     let moveCompletionSelection: (Int) -> Bool
     let selectCompletion: () -> Bool
     let dismissCompletion: () -> Bool
-    let submitPrompt: () -> Void
+    let submitPrompt: (PromptSendMode) -> Void
 
     @FocusState private var isFocused: Bool
 
@@ -360,7 +422,11 @@ private struct DraftPromptEditor: View {
                     ) ? .handled : .ignored
                 }
                 if keyPress.key == .return, modifiers.isEmpty {
-                    if !selectCompletion() { submitPrompt() }
+                    if !selectCompletion() { submitPrompt(.standard) }
+                    return .handled
+                }
+                if keyPress.key == .return, modifiers == .command {
+                    submitPrompt(PromptSendMode.standard.alternate)
                     return .handled
                 }
             #endif
@@ -625,7 +691,7 @@ struct ComposerAddMenu: View {
                 )
             ],
             submitLabel: "Send",
-            send: {}
+            send: { _ in }
         ) {
             ComposerAddMenu(
                 isImageAttachmentAvailable: true,

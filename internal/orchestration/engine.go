@@ -814,7 +814,8 @@ func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, erro
 
 // dispatchThreadTurnStart sends the prompt as the next turn, or queues it
 // when the thread is busy: a turn is running or stopping, the session is
-// preparing, or earlier prompts are still waiting.
+// preparing, or earlier prompts are still waiting. A steer sends it now
+// where it can (see Command.Steer).
 func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error) {
 	if command.ThreadID == "" {
 		return DispatchResult{}, fmt.Errorf("thread.turn.start requires threadId")
@@ -845,13 +846,19 @@ func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error
 		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
 		prompt := commandPrompt(command, messageID)
 		header := threadEvent(command, "", ActorKindClient, EventPayload{})
-		if canStartTurn(*thread) && len(thread.QueuedPrompts) == 0 {
+		if canStartTurn(*thread) && (len(thread.QueuedPrompts) == 0 || command.Steer) {
 			sequence = appendPromptTurn(appendEvent, header, prompt, EventPayload{ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}).Sequence
 			return nil
 		}
-		// A queued prompt is sent with the thread's selection at the time.
+		// A queued or steered prompt goes with the thread's selection.
 		if selectionChange.specified && selectionChange.changes(*thread) {
 			return fmt.Errorf("cannot change provider/model selection while thread %q is busy", command.ThreadID)
+		}
+		if command.Steer {
+			if turnID, err := steerableTurn(*thread); err == nil {
+				sequence = appendPromptSteer(appendEvent, header, prompt, turnID).Sequence
+				return nil
+			}
 		}
 		header.Type = EventThreadPromptQueued
 		header.Payload = EventPayload{ThreadID: command.ThreadID, MessageID: prompt.MessageID, Text: prompt.Text, Attachments: prompt.Attachments, Annotations: prompt.Annotations, CreatedAt: prompt.CreatedAt}
@@ -882,11 +889,7 @@ func (e *Engine) dispatchThreadPromptSend(command Command) (DispatchResult, erro
 		if err != nil {
 			return Event{}, err
 		}
-		message := header
-		message.Type = EventThreadMessageSent
-		message.Payload = EventPayload{ThreadID: command.ThreadID, MessageID: prompt.MessageID, Role: MessageRoleUser, Text: prompt.Text, Attachments: prompt.Attachments, Annotations: prompt.Annotations, TurnID: turnID, CreatedAt: prompt.CreatedAt, UpdatedAt: prompt.CreatedAt}
-		appendEvent(message)
-		return appendEvent(threadEvent(command, EventThreadMessageSteerRequested, ActorKindClient, EventPayload{MessageID: prompt.MessageID, TurnID: turnID})), nil
+		return appendPromptSteer(appendEvent, header, prompt, turnID), nil
 	})
 }
 
@@ -951,6 +954,19 @@ func appendPromptTurn(appendEvent func(Event) Event, header Event, prompt Queued
 	start.ThreadID, start.MessageID, start.TurnID = threadID, prompt.MessageID, turnID
 	turn.Payload = start
 	return appendEvent(turn)
+}
+
+// appendPromptSteer records prompt as a user message of the running turn
+// turnID and asks the provider to steer it in.
+func appendPromptSteer(appendEvent func(Event) Event, header Event, prompt QueuedPrompt, turnID TurnID) Event {
+	message := header
+	message.Type = EventThreadMessageSent
+	message.Payload = EventPayload{ThreadID: header.Payload.ThreadID, MessageID: prompt.MessageID, Role: MessageRoleUser, Text: prompt.Text, Attachments: prompt.Attachments, Annotations: prompt.Annotations, TurnID: turnID, CreatedAt: prompt.CreatedAt, UpdatedAt: prompt.CreatedAt}
+	appendEvent(message)
+	steer := header
+	steer.Type = EventThreadMessageSteerRequested
+	steer.Payload = EventPayload{ThreadID: header.Payload.ThreadID, MessageID: prompt.MessageID, TurnID: turnID}
+	return appendEvent(steer)
 }
 
 // startNextTurnLocked is the one rule that starts a turn on its own. Every

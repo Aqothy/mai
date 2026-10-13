@@ -505,6 +505,9 @@
         "message": {
           "$ref": "#/$defs/CommandMessage"
         },
+        "steer": {
+          "type": "boolean"
+        },
         "messageId": {
           "type": "string"
         },

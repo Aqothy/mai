@@ -634,13 +634,15 @@ final class ThreadStore {
         await subscriptionTasks[threadID]?.task.value
     }
 
-    /// Sends a prompt. The daemon starts a turn with it, or queues it while
-    /// the chat is busy and sends it once the running turn ends.
+    /// Sends a prompt. The daemon starts a turn with it, or, while the chat
+    /// is busy, queues it for when the running turn ends or steers it into
+    /// that turn.
     func submitTurn(
         threadID: String,
         text: String,
         attachments: [Attachment] = [],
-        annotations: [PromptAnnotation] = []
+        annotations: [PromptAnnotation] = [],
+        mode: PromptSendMode
     ) async throws {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
@@ -653,13 +655,13 @@ final class ThreadStore {
                 messageID: UUID().uuidString,
                 text: text
             ))
-        _ = try await rpc.dispatchCommand(
-            command(
-                type: MaidCommandType.threadTurnStart.rawValue,
-                threadID: threadID,
-                message: message
-            )
+        var start = command(
+            type: MaidCommandType.threadTurnStart.rawValue,
+            threadID: threadID,
+            message: message
         )
+        start.steer = mode == .steer ? true : nil
+        _ = try await rpc.dispatchCommand(start)
     }
 
     /// Uploads each attachment's data on its own and lists the attachment by

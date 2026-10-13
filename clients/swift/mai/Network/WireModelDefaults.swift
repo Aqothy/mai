@@ -55,6 +55,7 @@ extension Command {
             optionID: optionID,
             providerInstanceID: providerInstanceID,
             requestID: requestID,
+            steer: nil,
             threadID: threadID,
             title: title,
             turnID: turnID,

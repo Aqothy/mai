@@ -147,7 +147,7 @@ final class ChatPromptModel {
         }
     }
 
-    func send() async {
+    func send(_ mode: PromptSendMode) async {
         let submittedDraft = text
         let submittedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachments
@@ -168,7 +168,8 @@ final class ChatPromptModel {
                 threadID: threadID,
                 text: submittedText,
                 attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
-                annotations: submittedAnnotations.map(\.promptAnnotation)
+                annotations: submittedAnnotations.map(\.promptAnnotation),
+                mode: mode
             )
             promptCompletion.clearMentionedFiles()
             if text == submittedDraft,

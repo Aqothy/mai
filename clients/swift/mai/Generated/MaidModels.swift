@@ -1441,8 +1441,9 @@ public struct Command: Codable {
     public var message: CommandMessage?
     public var messageID: String?
     public var modelSelection: ModelSelection?
-    public var optionID, providerInstanceID, requestID, threadID: String?
-    public var title, turnID: String?
+    public var optionID, providerInstanceID, requestID: String?
+    public var steer: Bool?
+    public var threadID, title, turnID: String?
     public var type: String
     public var value: JSONAny?
 
@@ -1457,13 +1458,14 @@ public struct Command: Codable {
         case optionID = "optionId"
         case providerInstanceID = "providerInstanceId"
         case requestID = "requestId"
+        case steer
         case threadID = "threadId"
         case title
         case turnID = "turnId"
         case type, value
     }
 
-    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, steer: Bool?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.answers = answers
         self.commandID = commandID
@@ -1478,6 +1480,7 @@ public struct Command: Codable {
         self.optionID = optionID
         self.providerInstanceID = providerInstanceID
         self.requestID = requestID
+        self.steer = steer
         self.threadID = threadID
         self.title = title
         self.turnID = turnID
@@ -1519,6 +1522,7 @@ public extension Command {
         optionID: String?? = nil,
         providerInstanceID: String?? = nil,
         requestID: String?? = nil,
+        steer: Bool?? = nil,
         threadID: String?? = nil,
         title: String?? = nil,
         turnID: String?? = nil,
@@ -1540,6 +1544,7 @@ public extension Command {
             optionID: optionID ?? self.optionID,
             providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             requestID: requestID ?? self.requestID,
+            steer: steer ?? self.steer,
             threadID: threadID ?? self.threadID,
             title: title ?? self.title,
             turnID: turnID ?? self.turnID,

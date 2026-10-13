@@ -1321,7 +1321,7 @@ private struct MockChatComposerBar: View {
             isSending: false,
             isRunning: isRunning,
             submitLabel: "Send",
-            send: send,
+            send: { _ in send() },
             stop: stop,
             leadingControls: {
                 ComposerAddMenu(

@@ -293,6 +293,39 @@ func TestEngineSendNowSteersAndRetryResendsTheSameMessage(t *testing.T) {
 	}
 }
 
+// A steered prompt is sent now where it can be: into the running turn, ahead
+// of prompts already waiting, or as the next turn ahead of a held queue. A
+// stopping turn takes no input, so there it waits in the queue.
+func TestEngineSteeredPromptIsSentNowWhereItCanBe(t *testing.T) {
+	engine, threadID, runningTurn := startBoundTurn(t, "thread-steer")
+	send := func(id MessageID, steer bool) {
+		t.Helper()
+		mustDispatch(t, engine, Command{Type: CommandThreadTurnStart, CommandID: CommandID("send-" + id), ThreadID: threadID, Steer: steer, Message: &CommandMessage{MessageID: string(id), Text: string(id)}})
+	}
+	send("msg-queued", false)
+	send("msg-steered", true)
+	thread, _ := engine.Thread(threadID)
+	if steered := thread.Timeline.Message("msg-steered"); steered == nil || steered.TurnID != runningTurn || steered.Delivery != MessageSending || !slices.Equal(queuedMessageIDs(thread), []MessageID{"msg-queued"}) {
+		t.Fatalf("steer while running: message %#v, queue %v; want it sending on %q ahead of msg-queued", steered, queuedMessageIDs(thread), runningTurn)
+	}
+
+	mustDispatch(t, engine, Command{Type: CommandThreadTurnInterrupt, CommandID: "stop", ThreadID: threadID})
+	send("msg-while-stopping", true)
+	if thread, _ = engine.Thread(threadID); !slices.Equal(queuedMessageIDs(thread), []MessageID{"msg-queued", "msg-while-stopping"}) {
+		t.Fatalf("steer while stopping: queue %v, want it queued", queuedMessageIDs(thread))
+	}
+
+	if _, err := engine.updateSession(context.Background(), sessionUpdate{threadID: threadID, Kind: sessionUpdateTurnSettled, TurnID: runningTurn, TurnState: provider.RuntimeTurnFailed}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	send("msg-after-failure", true)
+	thread, _ = engine.Thread(threadID)
+	started := thread.Timeline.Message("msg-after-failure")
+	if started == nil || started.TurnID != thread.LatestTurn.ID || thread.LatestTurn.ID == runningTurn || thread.LatestTurn.State != TurnStateRunning || !slices.Equal(queuedMessageIDs(thread), []MessageID{"msg-queued", "msg-while-stopping"}) {
+		t.Fatalf("steer while idle with a held queue: message %#v, latest turn %#v, queue %v; want it starting a new turn ahead of the queue", started, thread.LatestTurn, queuedMessageIDs(thread))
+	}
+}
+
 // A failed turn or a stop holds the waiting prompts instead of running them
 // into the same failure or past the user's stop. Sending again picks the
 // thread back up, oldest prompt first; sending a held prompt starts it.

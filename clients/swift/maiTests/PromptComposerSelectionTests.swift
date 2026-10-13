@@ -27,7 +27,7 @@
                     canSend: true,
                     isSending: false,
                     submitLabel: "Send",
-                    send: {}
+                    send: { _ in }
                 ) {
                     EmptyView()
                 } trailingControls: {

@@ -739,13 +739,13 @@ struct ThreadStoreTests {
         let originalID = try #require(annotations.annotations.first?.id)
         #expect(model.canSend)
         rpc.turnFailuresRemaining = 1
-        await model.send()
+        await model.send(.standard)
         #expect(annotations.annotations.first?.id == originalID)
         #expect(model.errorMessage != nil)
         #expect(!model.isSending)
 
         rpc.shouldBlockTurnDispatch = true
-        let sending = Task { await model.send() }
+        let sending = Task { await model.send(.standard) }
         await waitUntil { rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 2 }
         #expect(model.isSending)
         annotations.beginComment(quote: "New quote", messageID: "message-b", role: "assistant")
@@ -812,7 +812,7 @@ struct ThreadStoreTests {
         #expect(ChatPromptModel(store: store, draftStore: drafts, threadID: "a").attachments.isEmpty)
         returnedA.text = "Accepted 雪"
         rpc.shouldBlockTurnDispatch = true
-        let sending = Task { await returnedA.send() }
+        let sending = Task { await returnedA.send(.standard) }
         await waitUntil { rpc.dispatchedCommands.contains { $0.type == "thread.turn.start" } }
         annotations.show(threadID: "b", draftStore: drafts)
         rpc.resumeTurnDispatches()
