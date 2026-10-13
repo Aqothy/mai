@@ -131,6 +131,11 @@ func fakeCLIMain() {
 					"account":                 map[string]any{"email": "fake@example.com", "subscriptionType": "Claude Max", "apiProvider": "firstParty"},
 					"current_permission_mode": "default",
 				})
+			case "stop_task":
+				// The CLI ends a stopped task with its notification.
+				respond(map[string]any{})
+				taskID, _ := request["task_id"].(string)
+				fakeWrite(map[string]any{"type": "system", "subtype": "task_notification", "task_id": taskID, "tool_use_id": strings.TrimPrefix(taskID, "task-"), "status": "stopped", "summary": "Agent stopped", "session_id": sessionID})
 			case "interrupt":
 				respond(map[string]any{})
 				if slowTurn {
@@ -226,6 +231,7 @@ func fakeCLIMain() {
 				}
 				for _, launch := range launches {
 					fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_" + launch.id, "role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": launch.id, "name": launch.tool, "input": map[string]any{"run_in_background": true}}}}})
+					fakeWrite(map[string]any{"type": "system", "subtype": "task_started", "task_id": "task-" + launch.id, "tool_use_id": launch.id, "description": launch.tool, "session_id": sessionID})
 					fakeWrite(map[string]any{"type": "user", "session_id": sessionID, "tool_use_result": launch.result, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": launch.id, "content": "Running in background"}}}})
 				}
 				emitResult(nil)
@@ -688,6 +694,40 @@ func TestBackgroundTaskRunsUntilItsNotification(t *testing.T) {
 	}
 	if !slices.Equal(steps, want) {
 		t.Fatalf("background steps = %+v", steps)
+	}
+}
+
+// Stopping a background item sends stop_task for its task; the task's
+// notification ends the item as interrupted in its turn.
+func TestStopItemStopsItsBackgroundTask(t *testing.T) {
+	instance, events, _ := openTestInstance(t)
+	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-bg", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-bg", TurnID: "turn-bg", Input: "BACKGROUND"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	launched := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.ItemID == "toolu_bg2" && event.Type == provider.RuntimeEventItemUpdated
+	})
+	if !launched.Payload.ToolCall.Background {
+		t.Fatalf("launched agent = %+v, want a background tool", launched.Payload.ToolCall)
+	}
+	// The wake-up turn ends after the first command finished on its own.
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventTurnCompleted })
+	waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventTurnCompleted })
+
+	if err := instance.StopItem(context.Background(), provider.StopItemInput{ThreadID: "thread-bg", ItemID: "toolu_bg2"}); err != nil {
+		t.Fatalf("StopItem: %v", err)
+	}
+	stopped := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.ItemID == "toolu_bg2" && event.Type == provider.RuntimeEventItemCompleted
+	})
+	if stopped.TurnID != "turn-bg" || stopped.Payload.ItemStatus != provider.ItemStatusInterrupted || stopped.Payload.ToolCall.Output != "Agent stopped" {
+		t.Fatalf("stopped item = %+v (turn %q)", stopped.Payload, stopped.TurnID)
+	}
+	if err := instance.StopItem(context.Background(), provider.StopItemInput{ThreadID: "thread-bg", ItemID: "toolu_bg2"}); err == nil {
+		t.Fatal("StopItem on a stopped task err = nil, want rejection")
 	}
 }
 

@@ -610,6 +610,48 @@ private struct ChatUndeliveredMessageRow: View {
     }
 }
 
+/// Stops a background task, such as a command run in the background. Sending
+/// the stop does not end the task; the item's own update does, which removes
+/// the button, so a stop that did not take can be sent again.
+private struct ChatStopBackgroundItemButton: View {
+    let itemID: String
+    let threadID: String
+    let store: ThreadStore
+
+    @State private var isStopping = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(isStopping ? "Stopping…" : "Stop", systemImage: "stop.circle") {
+                Task { await stop() }
+            }
+            .disabled(isStopping || store.connectionState != .connected)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            }
+        }
+        .font(.caption)
+        .buttonStyle(.borderless)
+    }
+
+    private func stop() async {
+        isStopping = true
+        defer { isStopping = false }
+        do {
+            try await store.stopItem(threadID: threadID, itemID: itemID)
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 /// The provider a sign-in sheet opened for. Capturing it keeps the sheet up
 /// once sign-in succeeds and the provider no longer reports signed out.
 private struct ChatSignInTarget: Identifiable {
@@ -2575,21 +2617,27 @@ private struct ChatActivityItemRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isFileChangeStep || hasExpandableContent {
-                Button {
-                    if opensDiffDirectly {
-                        Task { await openDiff() }
-                    } else {
-                        scrollState.noteContentExpansion()
-                        isExpanded.toggle()
+            HStack(spacing: 8) {
+                if isFileChangeStep || hasExpandableContent {
+                    Button {
+                        if opensDiffDirectly {
+                            Task { await openDiff() }
+                        } else {
+                            scrollState.noteContentExpansion()
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        lineLabel
+                            .contentShape(.rect)
                     }
-                } label: {
+                    .buttonStyle(.plain)
+                } else {
                     lineLabel
-                        .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-            } else {
-                lineLabel
+
+                if item.isRunningInBackground {
+                    ChatStopBackgroundItemButton(itemID: item.id, threadID: threadID, store: store)
+                }
             }
 
             if isExpanded, hasExpandableContent || detailErrorMessage != nil {
@@ -2781,7 +2829,9 @@ private struct ChatActivityItemRow: View {
         switch item.itemStatus {
         case .failed, .interrupted, .declined:
             item.itemStatus.map { ChatTimelineText.humanized($0.rawValue) }
-        case .completed, .inProgress, nil:
+        case .inProgress:
+            item.isRunningInBackground ? "Running in background" : nil
+        case .completed, nil:
             nil
         }
     }

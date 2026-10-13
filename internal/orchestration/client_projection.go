@@ -122,6 +122,7 @@ func summarizeToolCall(call *provider.ToolCall) *ToolCallSummary {
 		AttachmentCount:      len(call.Attachments),
 		ExitCode:             clonePtr(call.ExitCode),
 		DurationMilliseconds: clonePtr(call.DurationMilliseconds),
+		Background:           call.Background,
 	}
 	summary.Name, summary.Truncated = boundedPreview(call.Name, maxToolSummaryFieldRunes, summary.Truncated)
 	summary.Namespace, summary.Truncated = boundedPreview(call.Namespace, maxToolSummaryFieldRunes, summary.Truncated)

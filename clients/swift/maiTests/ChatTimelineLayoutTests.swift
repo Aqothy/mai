@@ -221,6 +221,20 @@ struct ChatTimelineLayoutTests {
             ("resolved approval folds",
              [approvalEntry(requestID: "r1", status: .resolved, turnID: "turn-1")],
              nil, [], ["turnActivity"]),
+            ("running background task outlives its turn's fold",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              itemEntry(id: "bg", kind: .commandExecution, turnID: "turn-1", status: .inProgress, background: true),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1")],
+             nil, [], ["message", "turnActivity", "group", "message"]),
+            ("finished background task folds",
+             [userMessageEntry(id: "m1", turnID: "turn-1"),
+              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
+              itemEntry(id: "bg", kind: .commandExecution, turnID: "turn-1", status: .interrupted, background: true),
+              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
+              assistantMessageEntry(id: "m2", turnID: "turn-1")],
+             nil, [], ["message", "turnActivity", "message"]),
         ]
         for testCase in cases {
             let result = rows(testCase.timeline, streaming: testCase.streaming, expanded: testCase.expanded)
@@ -234,6 +248,8 @@ struct ChatTimelineLayoutTests {
         let previous = rows(cases[6].timeline, streaming: "turn-2")
         #expect(turnActivity(previous[1])?.isRunning == false)
         #expect(turnActivity(previous[4])?.isRunning == true)
+        let background = rows(cases[12].timeline, streaming: nil)
+        #expect(activityGroup(background[2])?.items.map(\.id) == ["bg"])
     }
 
     /// Retry moves the failed turn's prompt onto the new turn, so that turn
@@ -484,6 +500,7 @@ func itemEntry(
     kind: MaidItemKind,
     turnID: String?,
     status: MaidItemStatus = .completed,
+    background: Bool = false,
     createdAt: Date = Date(timeIntervalSince1970: 0),
     updatedAt: Date = Date(timeIntervalSince1970: 0)
 ) -> TimelineEntry {
@@ -493,6 +510,7 @@ func itemEntry(
             id: id,
             kind: kind,
             status: status,
+            background: background,
             turnID: turnID,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -531,6 +549,7 @@ private func makeItem(
     id: String,
     kind: MaidItemKind,
     status: MaidItemStatus = .completed,
+    background: Bool = false,
     action: MaidToolAction? = nil,
     toolName: String? = nil,
     namespace: String? = nil,
@@ -550,12 +569,13 @@ private func makeItem(
         textDelta: nil,
         title: title,
         toolCall: nil,
-        toolCallSummary: action == nil && toolName == nil
+        toolCallSummary: action == nil && toolName == nil && !background
             ? nil
             : ToolCallSummary(
                 action: action?.rawValue,
                 attachmentCount: nil,
                 attachments: nil,
+                background: background ? true : nil,
                 changeCount: nil,
                 changes: nil,
                 commandPreview: nil,

@@ -102,6 +102,9 @@ type toolState struct {
 	input       json.RawMessage
 	partialJSON string
 	fingerprint string
+	// taskID is the CLI task the tool started (system/task_started), which
+	// stop_task names.
+	taskID string
 }
 
 // backgroundTool is a tool item that runs on as a background task after its

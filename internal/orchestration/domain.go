@@ -234,7 +234,10 @@ type ToolCallSummary struct {
 	AttachmentCount      int                     `json:"attachmentCount,omitempty"`
 	ExitCode             *int                    `json:"exitCode,omitempty"`
 	DurationMilliseconds *int64                  `json:"durationMilliseconds,omitempty"`
-	Truncated            bool                    `json:"truncated,omitempty"`
+	// Background mirrors ToolCall.Background: while the item runs, clients
+	// offer to stop it (thread.item.stop).
+	Background bool `json:"background,omitempty"`
+	Truncated  bool `json:"truncated,omitempty"`
 }
 
 // FileChangeSummary deliberately excludes diff/oldText/newText.

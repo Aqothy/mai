@@ -20,6 +20,7 @@ const (
 	EventThreadTurnInterruptRequested    EventType = "thread.turn-interrupt-requested"
 	EventThreadTurnInterruptConfirmed    EventType = "thread.turn-interrupt-confirmed"
 	EventThreadTurnInterruptFailed       EventType = "thread.turn-interrupt-failed"
+	EventThreadItemStopRequested         EventType = "thread.item-stop-requested"
 	EventThreadApprovalResponseRequested EventType = "thread.approval-response-requested"
 	EventThreadSessionPrepareRequested   EventType = "thread.session-prepare-requested"
 	EventThreadSessionStopRequested      EventType = "thread.session-stop-requested"
@@ -105,6 +106,7 @@ type EventPayload struct {
 	OptionID   string                    `json:"optionId,omitempty"`
 	Answers    map[string][]string       `json:"answers,omitempty"`
 	Value      any                       `json:"value,omitempty"`
+	ItemID     string                    `json:"itemId,omitempty"`
 	Item       *Item                     `json:"item,omitempty"`
 	Plan       *Plan                     `json:"plan,omitempty"`
 	Approval   *ApprovalEvent            `json:"approval,omitempty"`

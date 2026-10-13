@@ -1437,7 +1437,7 @@ public struct Command: Codable {
     public var commandID: String?
     public var configSelections: [ConfigOptionSelection]?
     public var createdAt: Date?
-    public var cwd, decision: String?
+    public var cwd, decision, itemID: String?
     public var message: CommandMessage?
     public var messageID: String?
     public var modelSelection: ModelSelection?
@@ -1449,7 +1449,9 @@ public struct Command: Codable {
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, answers
         case commandID = "commandId"
-        case configSelections, createdAt, cwd, decision, message
+        case configSelections, createdAt, cwd, decision
+        case itemID = "itemId"
+        case message
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -1461,7 +1463,7 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.answers = answers
         self.commandID = commandID
@@ -1469,6 +1471,7 @@ public struct Command: Codable {
         self.createdAt = createdAt
         self.cwd = cwd
         self.decision = decision
+        self.itemID = itemID
         self.message = message
         self.messageID = messageID
         self.modelSelection = modelSelection
@@ -1509,6 +1512,7 @@ public extension Command {
         createdAt: Date?? = nil,
         cwd: String?? = nil,
         decision: String?? = nil,
+        itemID: String?? = nil,
         message: CommandMessage?? = nil,
         messageID: String?? = nil,
         modelSelection: ModelSelection?? = nil,
@@ -1529,6 +1533,7 @@ public extension Command {
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             decision: decision ?? self.decision,
+            itemID: itemID ?? self.itemID,
             message: message ?? self.message,
             messageID: messageID ?? self.messageID,
             modelSelection: modelSelection ?? self.modelSelection,
@@ -2131,7 +2136,7 @@ public struct EventPayload: Codable {
     public var createdAt: Date?
     public var cwd, decision, delivery, deliveryError: String?
     public var item: Item?
-    public var messageID: String?
+    public var itemID, messageID: String?
     public var modelSelection: ModelSelection?
     public var optionID: String?
     public var plan: Plan?
@@ -2148,6 +2153,7 @@ public struct EventPayload: Codable {
 
     public enum CodingKeys: String, CodingKey {
         case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, delivery, deliveryError, item
+        case itemID = "itemId"
         case messageID = "messageId"
         case modelSelection
         case optionID = "optionId"
@@ -2161,7 +2167,7 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, item: Item?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, item: Item?, itemID: String?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
         self.additionalDirectories = additionalDirectories
         self.annotations = annotations
         self.answers = answers
@@ -2174,6 +2180,7 @@ public struct EventPayload: Codable {
         self.delivery = delivery
         self.deliveryError = deliveryError
         self.item = item
+        self.itemID = itemID
         self.messageID = messageID
         self.modelSelection = modelSelection
         self.optionID = optionID
@@ -2227,6 +2234,7 @@ public extension EventPayload {
         delivery: String?? = nil,
         deliveryError: String?? = nil,
         item: Item?? = nil,
+        itemID: String?? = nil,
         messageID: String?? = nil,
         modelSelection: ModelSelection?? = nil,
         optionID: String?? = nil,
@@ -2260,6 +2268,7 @@ public extension EventPayload {
             delivery: delivery ?? self.delivery,
             deliveryError: deliveryError ?? self.deliveryError,
             item: item ?? self.item,
+            itemID: itemID ?? self.itemID,
             messageID: messageID ?? self.messageID,
             modelSelection: modelSelection ?? self.modelSelection,
             optionID: optionID ?? self.optionID,
@@ -2391,6 +2400,7 @@ public extension Item {
 public struct ToolCall: Codable {
     public var action: String?
     public var attachments: [Attachment]?
+    public var background: Bool?
     public var changes: [FileChange]?
     public var command, cwd: String?
     public var durationMilliseconds: Int?
@@ -2400,9 +2410,10 @@ public struct ToolCall: Codable {
     public var name, namespace, output, outputFormat: String?
     public var providerKind, query: String?
 
-    public init(action: String?, attachments: [Attachment]?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, outputFormat: String?, providerKind: String?, query: String?) {
+    public init(action: String?, attachments: [Attachment]?, background: Bool?, changes: [FileChange]?, command: String?, cwd: String?, durationMilliseconds: Int?, error: String?, exitCode: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, output: String?, outputFormat: String?, providerKind: String?, query: String?) {
         self.action = action
         self.attachments = attachments
+        self.background = background
         self.changes = changes
         self.command = command
         self.cwd = cwd
@@ -2440,6 +2451,7 @@ public extension ToolCall {
     func with(
         action: String?? = nil,
         attachments: [Attachment]?? = nil,
+        background: Bool?? = nil,
         changes: [FileChange]?? = nil,
         command: String?? = nil,
         cwd: String?? = nil,
@@ -2457,6 +2469,7 @@ public extension ToolCall {
         return ToolCall(
             action: action ?? self.action,
             attachments: attachments ?? self.attachments,
+            background: background ?? self.background,
             changes: changes ?? self.changes,
             command: command ?? self.command,
             cwd: cwd ?? self.cwd,
@@ -2596,6 +2609,7 @@ public struct ToolCallSummary: Codable {
     public var action: String?
     public var attachmentCount: Int?
     public var attachments: [ToolAttachmentSummary]?
+    public var background: Bool?
     public var changeCount: Int?
     public var changes: [FileChangeSummary]?
     public var commandPreview, cwd: String?
@@ -2607,10 +2621,11 @@ public struct ToolCallSummary: Codable {
     public var providerKind, queryPreview: String?
     public var truncated: Bool?
 
-    public init(action: String?, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputFormat: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
+    public init(action: String?, attachmentCount: Int?, attachments: [ToolAttachmentSummary]?, background: Bool?, changeCount: Int?, changes: [FileChangeSummary]?, commandPreview: String?, cwd: String?, durationMilliseconds: Int?, errorPreview: String?, exitCode: Int?, locationCount: Int?, locations: [ToolLocation]?, name: String?, namespace: String?, outputFormat: String?, outputPreview: String?, providerKind: String?, queryPreview: String?, truncated: Bool?) {
         self.action = action
         self.attachmentCount = attachmentCount
         self.attachments = attachments
+        self.background = background
         self.changeCount = changeCount
         self.changes = changes
         self.commandPreview = commandPreview
@@ -2652,6 +2667,7 @@ public extension ToolCallSummary {
         action: String?? = nil,
         attachmentCount: Int?? = nil,
         attachments: [ToolAttachmentSummary]?? = nil,
+        background: Bool?? = nil,
         changeCount: Int?? = nil,
         changes: [FileChangeSummary]?? = nil,
         commandPreview: String?? = nil,
@@ -2673,6 +2689,7 @@ public extension ToolCallSummary {
             action: action ?? self.action,
             attachmentCount: attachmentCount ?? self.attachmentCount,
             attachments: attachments ?? self.attachments,
+            background: background ?? self.background,
             changeCount: changeCount ?? self.changeCount,
             changes: changes ?? self.changes,
             commandPreview: commandPreview ?? self.commandPreview,

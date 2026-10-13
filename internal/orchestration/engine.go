@@ -287,6 +287,8 @@ func (e *Engine) dispatch(command Command) (DispatchResult, error) {
 		return e.dispatchThreadTurnRetry(command)
 	case CommandThreadTurnInterrupt:
 		return e.dispatchThreadTurnInterrupt(command)
+	case CommandThreadItemStop:
+		return e.dispatchThreadItemStop(command)
 	case CommandThreadPromptSend:
 		return e.dispatchThreadPromptSend(command)
 	case CommandThreadPromptRemove:
@@ -1039,6 +1041,18 @@ func (e *Engine) dispatchThreadTurnInterrupt(command Command) (DispatchResult, e
 			turnID = active
 		}
 		return threadEvent(command, EventThreadTurnInterruptRequested, ActorKindClient, EventPayload{TurnID: turnID}), nil
+	})
+}
+
+// dispatchThreadItemStop accepts a stop only for a running item its provider
+// marked Background, the items it can stop.
+func (e *Engine) dispatchThreadItemStop(command Command) (DispatchResult, error) {
+	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
+		item := thread.Timeline.Item(command.ItemID)
+		if item == nil || item.ToolCall == nil || !item.ToolCall.Background || item.Status != provider.ItemStatusInProgress {
+			return Event{}, fmt.Errorf("item %q is not a running background task in thread %q", command.ItemID, command.ThreadID)
+		}
+		return threadEvent(command, EventThreadItemStopRequested, ActorKindClient, EventPayload{ItemID: command.ItemID}), nil
 	})
 }
 

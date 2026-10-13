@@ -508,6 +508,9 @@
         "messageId": {
           "type": "string"
         },
+        "itemId": {
+          "type": "string"
+        },
         "requestId": {
           "type": "string"
         },
@@ -828,6 +831,9 @@
           "type": "object"
         },
         "value": true,
+        "itemId": {
+          "type": "string"
+        },
         "item": {
           "$ref": "#/$defs/Item"
         },
@@ -2347,6 +2353,9 @@
         },
         "durationMilliseconds": {
           "type": "integer"
+        },
+        "background": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -2417,6 +2426,9 @@
         },
         "durationMilliseconds": {
           "type": "integer"
+        },
+        "background": {
+          "type": "boolean"
         },
         "truncated": {
           "type": "boolean"

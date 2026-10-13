@@ -26,6 +26,8 @@ type fakeProviderRuntime struct {
 	steerErr           error
 	interruptCalls     int
 	interruptErr       error
+	stopItemInputs     []provider.StopItemInput
+	stopItemErr        error
 	releaseCalls       int
 	releaseInputs      []provider.StopSessionInput
 	stopSignal         chan struct{}
@@ -107,6 +109,12 @@ func (f *fakeProviderRuntime) InterruptTurn(context.Context, provider.InterruptT
 	err := f.interruptErr
 	f.mu.Unlock()
 	return err
+}
+func (f *fakeProviderRuntime) StopItem(_ context.Context, input provider.StopItemInput) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopItemInputs = append(f.stopItemInputs, input)
+	return f.stopItemErr
 }
 func (f *fakeProviderRuntime) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
 	if _, ok := ctx.Deadline(); !ok {
@@ -920,6 +928,45 @@ func TestReactorForwardsConfigOptionWithDerivedCategory(t *testing.T) {
 	fake.mu.Unlock()
 	if input.ThreadID != string(threadID) || input.OptionID != "model" || input.Value != "slow" || input.Category != provider.ConfigOptionCategoryModel {
 		t.Fatalf("config option input = %#v, want thread/model/slow with model category", input)
+	}
+}
+
+// Only a running item its provider marked Background reaches the provider,
+// and a provider that refuses the stop leaves the reason in the thread.
+func TestReactorStopsOnlyRunningBackgroundItems(t *testing.T) {
+	engine := NewEngine()
+	defer engine.Close()
+	fake := newFakeProviderRuntime()
+	fake.stopItemErr = errors.New("task already ended")
+	reactor := newTestReactor(engine, fake)
+	threadID := ThreadID("thread-background")
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "create-background", ThreadID: threadID, ProviderInstanceID: "claude-code"})
+	upsert := func(id string, status provider.ItemStatus, background bool) {
+		item := &Item{ID: id, Kind: provider.ItemKindCommandExecution, Status: status, TurnID: "turn-1", ToolCall: &provider.ToolCall{Name: "Bash", Background: background}}
+		mustAppend(t, engine, EventInput{Type: EventThreadItemUpserted, ThreadID: threadID, Payload: EventPayload{Item: item}})
+	}
+	upsert("background", provider.ItemStatusInProgress, true)
+	upsert("foreground", provider.ItemStatusInProgress, false)
+	upsert("ended", provider.ItemStatusInterrupted, true)
+
+	for _, itemID := range []string{"foreground", "ended", "missing"} {
+		if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadItemStop, CommandID: CommandID("stop-" + itemID), ThreadID: threadID, ItemID: itemID}); err == nil {
+			t.Fatalf("stop %q err = nil, want rejection", itemID)
+		}
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadItemStop, CommandID: "stop-background", ThreadID: threadID, ItemID: "background"})
+	waitForReactorIdle(t, reactor, threadID)
+
+	fake.mu.Lock()
+	inputs := slices.Clone(fake.stopItemInputs)
+	fake.mu.Unlock()
+	if want := []provider.StopItemInput{{ThreadID: string(threadID), ItemID: "background"}}; !slices.Equal(inputs, want) {
+		t.Fatalf("StopItem inputs = %#v, want %#v", inputs, want)
+	}
+	thread, _ := engine.Thread(threadID)
+	items := thread.Timeline.Items()
+	if last := items[len(items)-1]; last.Kind != provider.ItemKindError || last.Title != "task already ended" {
+		t.Fatalf("last item = %#v, want the provider's refusal as an error", last)
 	}
 }
 

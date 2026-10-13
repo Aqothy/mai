@@ -515,6 +515,7 @@ private func makeToolCall(command: String) -> ToolCall {
     ToolCall(
         action: nil,
         attachments: nil,
+        background: nil,
         changes: nil,
         command: command,
         cwd: nil,
@@ -533,7 +534,7 @@ private func makeToolCall(command: String) -> ToolCall {
 
 private func makeToolCallSummary(commandPreview: String) -> ToolCallSummary {
     ToolCallSummary(
-        action: nil, attachmentCount: nil, attachments: nil, changeCount: nil,
+        action: nil, attachmentCount: nil, attachments: nil, background: nil, changeCount: nil,
         changes: nil, commandPreview: commandPreview, cwd: nil, durationMilliseconds: nil, errorPreview: nil,
         exitCode: nil, locationCount: nil, locations: nil, name: nil, namespace: nil, outputFormat: nil, outputPreview: nil,
         providerKind: nil, queryPreview: nil, truncated: nil

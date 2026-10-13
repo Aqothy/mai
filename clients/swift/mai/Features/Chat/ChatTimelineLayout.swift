@@ -21,7 +21,8 @@ import Foundation
 ///   intermediate assistant segments — behind a single `ChatTurnActivity`
 ///   header row ("Worked for 42s") until the user expands that section.
 /// - The running turn's content is always visible.
-/// - Warnings, errors, pending approvals, and undelivered messages never fold.
+/// - Warnings, errors, pending approvals, undelivered messages, and running
+///   background tasks never fold.
 nonisolated enum ChatTimelineLayout {
     /// Emits rows from an already projected timeline. Keeping these sections
     /// as the List input prevents a live view from retaining the generated
@@ -198,7 +199,15 @@ nonisolated enum ChatTimelineLayout {
             case .reasoning:
                 section.blocks.append(Block(row: .thought(item), isFoldable: true))
             default:
-                if var group = section.blocks.last?.activityGroup {
+                // A background task can outlive its turn; while it runs it
+                // stays in view on its own row, where it can be stopped.
+                if item.isRunningInBackground {
+                    section.blocks.append(
+                        Block(row: .activityGroup(ChatActivityGroup(items: [item])), isFoldable: false)
+                    )
+                } else if section.blocks.last?.isFoldable == true,
+                    var group = section.blocks.last?.activityGroup
+                {
                     group.items.append(item)
                     section.blocks[section.blocks.count - 1] =
                         Block(row: .activityGroup(group), isFoldable: true)
@@ -517,6 +526,13 @@ nonisolated enum ChatActivityVerb: Equatable {
             return name
         }
         return leading ? text.prefix(1).uppercased() + text.dropFirst() : text
+    }
+}
+
+extension Item {
+    /// A background task its provider can stop, still running.
+    nonisolated var isRunningInBackground: Bool {
+        itemStatus == .inProgress && toolCallSummary?.background == true
     }
 }
 

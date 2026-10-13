@@ -99,6 +99,19 @@ func (h *Instance) handleSystem(session *claudeSession, message sdkMessage) {
 		}
 	case "compact_boundary":
 		h.compaction(session, provider.ItemStatusCompleted, "")
+	case "task_started":
+		// Every task registers while the tool that starts it still runs.
+		var started struct {
+			TaskID    string `json:"task_id"`
+			ToolUseID string `json:"tool_use_id"`
+		}
+		if json.Unmarshal(message.Raw, &started) == nil {
+			h.mu.Lock()
+			if state := session.toolStates[started.ToolUseID]; state != nil {
+				state.taskID = started.TaskID
+			}
+			h.mu.Unlock()
+		}
 	case "task_notification":
 		var notification taskNotification
 		if json.Unmarshal(message.Raw, &notification) == nil {

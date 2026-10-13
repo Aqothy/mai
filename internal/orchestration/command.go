@@ -22,6 +22,7 @@ const (
 	CommandThreadTurnStart       CommandType = "thread.turn.start"
 	CommandThreadTurnRetry       CommandType = "thread.turn.retry"
 	CommandThreadTurnInterrupt   CommandType = "thread.turn.interrupt"
+	CommandThreadItemStop        CommandType = "thread.item.stop"
 	CommandThreadPromptSend      CommandType = "thread.prompt.send"
 	CommandThreadPromptRemove    CommandType = "thread.prompt.remove"
 	CommandThreadApprovalRespond CommandType = "thread.approval.respond"
@@ -43,7 +44,9 @@ type Command struct {
 	Message               *CommandMessage          `json:"message,omitempty"`
 	// MessageID names the queued prompt thread.prompt.send/remove act on, or
 	// the message thread.turn.retry sends again.
-	MessageID        MessageID                        `json:"messageId,omitempty"`
+	MessageID MessageID `json:"messageId,omitempty"`
+	// ItemID names the running background item thread.item.stop stops.
+	ItemID           string                           `json:"itemId,omitempty"`
 	RequestID        ApprovalID                       `json:"requestId,omitempty"`
 	Decision         provider.ApprovalDecision        `json:"decision,omitempty"`
 	OptionID         string                           `json:"optionId,omitempty"`

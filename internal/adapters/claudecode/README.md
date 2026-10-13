@@ -100,7 +100,7 @@ The CLI runs with `--replay-user-messages`, so it echoes each written message
 | `input_json_delta` | re-parsed partial input, `item.updated` with the complete snapshot |
 | `assistant` (per block) | flush checkpoint: missing text suffix, `item.completed`; tools that never streamed. A message already shown (resent after `/compact`) and the CLI's API-error message are skipped |
 | `user` `tool_result` | `item.completed`; Edit/Write take the CLI's `structuredPatch` (line-numbered hunks) and Write's create/update from `tool_use_result` |
-| `tool_use_result` with `backgroundTaskId` (Bash) or `status: async_launched`/`remote_launched` (Agent, Workflow) | the tool stays running (`item.updated`) until `system/task_notification` completes it in its turn; in replay the `<task-notification>` message does |
+| `tool_use_result` with `backgroundTaskId` (Bash) or `status: async_launched`/`remote_launched` (Agent, Workflow) | the tool stays running (`item.updated`, `toolCall.background`) until `system/task_notification` completes it in its turn; in replay the `<task-notification>` message does. `system/task_started` names the tool's task, so `StopItem` can send `stop_task` for it (the CLI answers with a `stopped` notification) |
 | `TodoWrite` input; `TaskCreate`/`TaskUpdate`/`TaskList` results | `turn.plan.updated` (no timeline item) |
 | `result` | `thread.token-usage.updated` (live context from the last `usage.iterations` entry, window of the session's model, cost); a local command's zero usage keeps the meter; then `turn.completed` |
 | `system/init` | adopt the CLI's session id; permission mode and model (e.g. after `/model`) → `config.options.updated` |
@@ -193,9 +193,14 @@ signed out.
 
 ## Known gaps
 
-Need contract or client work: stopping a background task (`stop_task`),
-subagent narration as nested items, hook lifecycle events, file rewind,
-forking from a chosen message, and the cost/compacting/retry details the client does not show yet.
+The host does not declare `perTaskStopAffordance`, so interrupting a turn
+also stops its background agents (the CLI's fail-closed default).
+`background_tasks_changed` is not read: its level signal carries no status
+or summary, and the edge events plus process exit settle every task.
+
+Need contract or client work: subagent narration as nested items, hook
+lifecycle events, file rewind, forking from a chosen message, and the
+cost/compacting/retry details the client does not show yet.
 Audio and embedded-resource attachments are not part of the SDK prompt
 surface; `resource_link` attachments are skipped since the CLI reads `@path`
 in the prompt text.

@@ -155,6 +155,7 @@ func (s *toolState) applyResult(block contentBlock, result json.RawMessage) prov
 		Status           string `json:"status"`
 	}
 	if !block.IsError && json.Unmarshal(result, &launch) == nil && (launch.BackgroundTaskID != "" || launch.Status == "async_launched" || launch.Status == "remote_launched") {
+		s.call.Background = true
 		return provider.ItemStatusInProgress
 	}
 	return status

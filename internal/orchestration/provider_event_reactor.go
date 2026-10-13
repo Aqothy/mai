@@ -18,6 +18,7 @@ type ProviderRuntime interface {
 	StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, error)
 	SendTurn(ctx context.Context, input provider.SendTurnInput) error
 	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
+	StopItem(ctx context.Context, input provider.StopItemInput) error
 	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
 	StopSession(ctx context.Context, input provider.StopSessionInput) error
 	ReleaseSession(ctx context.Context, input provider.StopSessionInput) error
@@ -81,6 +82,8 @@ func (r *ProviderEventReactor) handle(event Event) {
 		r.enqueueThread(event, func() { r.handleSteer(event) })
 	case EventThreadTurnInterruptRequested:
 		r.enqueueThread(event, func() { r.handleInterrupt(event) })
+	case EventThreadItemStopRequested:
+		r.enqueueThread(event, func() { r.handleItemStop(event) })
 	case EventThreadSessionStopRequested:
 		r.enqueueThread(event, func() { r.handleStop(event) })
 	case EventThreadConfigOptionSetRequested:
@@ -418,6 +421,17 @@ func (r *ProviderEventReactor) handleInterrupt(event Event) {
 	if err := r.provider.InterruptTurn(ctx, provider.InterruptTurnInput{ThreadID: string(threadID), TurnID: string(event.Payload.TurnID)}); err != nil {
 		r.record(EventInput{Type: EventThreadTurnInterruptFailed, ThreadID: threadID, Actor: ActorKindServer, Payload: EventPayload{TurnID: event.Payload.TurnID}})
 		r.appendErrorItem(threadID, event.Payload.TurnID, err.Error())
+	}
+}
+
+// handleItemStop asks the provider to stop a background item. The provider
+// settles the item itself; a refusal shows as an error.
+func (r *ProviderEventReactor) handleItemStop(event Event) {
+	threadID := event.ThreadID()
+	ctx, cancel := r.providerRPCContext()
+	defer cancel()
+	if err := r.provider.StopItem(ctx, provider.StopItemInput{ThreadID: string(threadID), ItemID: event.Payload.ItemID}); err != nil {
+		r.appendErrorItem(threadID, "", err.Error())
 	}
 }
 

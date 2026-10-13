@@ -67,6 +67,13 @@ type SessionRenamer interface {
 	RenameSession(ctx context.Context, input provider.RenameSessionInput) error
 }
 
+// ItemStopper is optional, for providers that can stop an item running on
+// its own, such as a background task a tool started, without interrupting
+// the turn. Adapters mark such items with ToolCall.Background.
+type ItemStopper interface {
+	StopItem(ctx context.Context, input provider.StopItemInput) error
+}
+
 // ClientMessageIdentityProvider can return the exact dispatch identity in
 // native history. Providers without it retain their ordinary text replay.
 type ClientMessageIdentityProvider interface {
@@ -1261,6 +1268,18 @@ func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInp
 	// agent context, so the next turn and a daemon restart resume it.
 	return s.withThreadInstance(ctx, input.ThreadID, false, "stop session", func(instance ProviderInstance) error {
 		return instance.StopSession(ctx, input)
+	})
+}
+
+// StopItem never restores a session on a restarted provider: the item's task
+// ended with the process that ran it.
+func (s *Service) StopItem(ctx context.Context, input provider.StopItemInput) error {
+	return s.withThreadInstance(ctx, input.ThreadID, false, "stop item", func(instance ProviderInstance) error {
+		stopper, ok := instance.(ItemStopper)
+		if !ok {
+			return fmt.Errorf("provider instance %q cannot stop items", instance.Info().InstanceID)
+		}
+		return stopper.StopItem(ctx, input)
 	})
 }
 

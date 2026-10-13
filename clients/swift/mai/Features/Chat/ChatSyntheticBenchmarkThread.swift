@@ -202,6 +202,7 @@
                 action: nil,
                 attachmentCount: nil,
                 attachments: nil,
+                background: nil,
                 changeCount: nil,
                 changes: nil,
                 commandPreview: "swift build --target module\(turn) --step \(step)",

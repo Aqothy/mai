@@ -360,6 +360,24 @@ func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTu
 	return proc.client.control(ctx, map[string]any{"subtype": "interrupt", "cancel_queued": true}, nil)
 }
 
+// StopItem stops the background task a tool started (stop_task). The task's
+// notification then ends the tool's item as interrupted.
+func (h *Instance) StopItem(ctx context.Context, input provider.StopItemInput) error {
+	session, err := h.sessionForLocal(input.ThreadID)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	proc := session.proc
+	tool, running := session.background[input.ItemID]
+	h.mu.Unlock()
+	// The process exiting ends its tasks before waitProcess settles them.
+	if proc == nil || !running {
+		return fmt.Errorf("Claude Code item %q is not a running background task", input.ItemID)
+	}
+	return proc.client.control(ctx, map[string]any{"subtype": "stop_task", "task_id": tool.state.taskID}, nil)
+}
+
 func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionInput) error {
 	h.mu.Lock()
 	session := h.sessionsByLocal[input.ThreadID]

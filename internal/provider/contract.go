@@ -502,6 +502,14 @@ type StopSessionInput struct {
 	ThreadID string `json:"threadId"`
 }
 
+// StopItemInput stops an item that runs on its own, apart from its turn: a
+// tool whose ToolCall.Background is set. The provider then settles the item
+// through its usual events.
+type StopItemInput struct {
+	ThreadID string `json:"threadId"`
+	ItemID   string `json:"itemId"`
+}
+
 // ForkSessionInput forks the whole native session. Codex app-server also
 // accepts a last-turn boundary; it is deliberately not exposed until a client
 // surface exists to choose one.
@@ -747,6 +755,10 @@ type ToolCall struct {
 	Attachments          []Attachment   `json:"attachments,omitempty"`
 	ExitCode             *int           `json:"exitCode,omitempty"`
 	DurationMilliseconds *int64         `json:"durationMilliseconds,omitempty"`
+	// Background says the tool runs on as a background task after its
+	// result, so its item stays in progress, possibly past its turn, until
+	// the task ends. Adapters set it only for tasks they can stop (StopItem).
+	Background bool `json:"background,omitempty"`
 }
 
 // OutputFormat says how to render tool output. Empty means plain text, such

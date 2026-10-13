@@ -719,6 +719,14 @@ final class ThreadStore {
         )
     }
 
+    /// Stops a background item, such as a command a tool left running. The
+    /// provider then settles the item through the thread's events.
+    func stopItem(threadID: String, itemID: String) async throws {
+        var stop = command(type: MaidCommandType.threadItemStop.rawValue, threadID: threadID)
+        stop.itemID = itemID
+        _ = try await rpc.dispatchCommand(stop)
+    }
+
     func setThreadConfigOption(
         threadID: String,
         optionID: String,
