@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -714,6 +715,56 @@ func TestSlashCommandsRunCodexOperations(t *testing.T) {
 	// Like `codex review`, a review needs a target or instructions.
 	if err := thread.sendErr("local-bare", "/review", false); err == nil || !strings.Contains(err.Error(), "Specify --uncommitted") {
 		t.Fatalf("bare /review err = %v", err)
+	}
+}
+
+// /review suggests the Codex CLI's targets, then a repository's branches or
+// commits for the target picked; /goal suggests its controls.
+func TestCommandCompletions(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first change"},
+		{"branch", "feature/login"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "second change"},
+	} {
+		if output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, output)
+		}
+	}
+	instance := &Instance{}
+	labels := func(command, input string) []string {
+		completions, err := instance.CompleteCommand(testContext(t), provider.CompleteCommandInput{Command: command, Input: input, Cwd: repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var labels []string
+		for _, completion := range completions {
+			labels = append(labels, completion.Label+" => "+completion.Input)
+		}
+		return labels
+	}
+	for _, test := range []struct {
+		command, input string
+		want           []string
+	}{
+		{"review", "", []string{"Against a base branch => --base ", "Uncommitted changes => --uncommitted", "A commit => --commit "}},
+		{"review", "--u", []string{"Uncommitted changes => --uncommitted"}},
+		// The current branch is not a base to review against.
+		{"review", "--base ", []string{"feature/login => --base feature/login"}},
+		{"review", "--base main", nil},
+		{"review", "look for races", nil},
+		{"goal", "p", []string{"Pause the goal => pause"}},
+		{"goal", "polish the docs", nil},
+		{"shell", "", nil},
+	} {
+		if got := labels(test.command, test.input); !slices.Equal(got, test.want) {
+			t.Errorf("/%s %q completions = %q, want %q", test.command, test.input, got, test.want)
+		}
+	}
+	commits := labels("review", "--commit sec")
+	if len(commits) != 1 || !strings.HasPrefix(commits[0], "second change => --commit ") {
+		t.Errorf("commit completions = %q", commits)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +75,30 @@ func newForkRPCProvider() *optionsRPCProvider {
 			LoadReplay:    true,
 		},
 	}}
+}
+
+// provider.completeCommand asks the thread's provider, in the thread's
+// workspace, and always answers an array.
+func TestRPCCompleteCommandAsksTheThreadsProvider(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	cwd := t.TempDir()
+	installForkRPCProvider(t, s, newForkRPCProvider(), cwd)
+	client := newRecordingClient(t, s)
+
+	var completions []wire.CommandCompletion
+	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "review", Input: "--base "}, &completions)
+	if want := []wire.CommandCompletion{{Input: "--base main", Label: "main", Description: cwd}}; !slices.Equal(completions, want) {
+		t.Fatalf("completions = %#v, want %#v", completions, want)
+	}
+	var none json.RawMessage
+	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "goal"}, &none)
+	if string(none) != "[]" {
+		t.Fatalf("no completions = %s, want []", none)
+	}
+	if err := client.callErr(wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "missing", Command: "review"}, &none); err == nil {
+		t.Fatal("completion for an unknown thread succeeded")
+	}
 }
 
 func TestForkProviderThreadPreflightsPersistenceAndActiveTurn(t *testing.T) {
@@ -373,6 +398,14 @@ type optionsRPCProvider struct {
 	forkSummary  provider.SessionSummary
 	deleted      chan string
 	starts       []provider.StartSessionInput
+}
+
+// CompleteCommand suggests input for /review only, in the thread's workspace.
+func (p *optionsRPCProvider) CompleteCommand(_ context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
+	if input.Command != "review" {
+		return nil, nil
+	}
+	return []provider.CommandCompletion{{Input: "--base main", Label: "main", Description: input.Cwd}}, nil
 }
 
 func (p *optionsRPCProvider) Info() provider.InstanceInfo { return p.info }

@@ -2,12 +2,18 @@ enum PromptCompletionKind: String, CaseIterable, Hashable {
     case workspaceFile
     case slashCommand
     case skill
+    /// The input of a slash command its provider completes, such as what
+    /// `/review` should review.
+    case commandInput
 
-    var trigger: Character {
+    /// The character that starts a token of this kind; command input
+    /// follows its command instead.
+    var trigger: Character? {
         switch self {
         case .workspaceFile: "@"
         case .slashCommand: "/"
         case .skill: "$"
+        case .commandInput: nil
         }
     }
 
@@ -30,6 +36,7 @@ struct PromptCompletionEdit: Equatable {
 struct PromptCompletionInsertionContext: Equatable {
     let kind: PromptCompletionKind
 
+    private let trigger: Character
     private let prefix: String
     private let suffix: String
 
@@ -58,6 +65,7 @@ struct PromptCompletionInsertionContext: Equatable {
 
         return PromptCompletionInsertionContext(
             kind: kind,
+            trigger: text[triggerIndex],
             prefix: String(text[..<triggerIndex]),
             suffix: String(text[cursorIndex...])
         )
@@ -84,7 +92,7 @@ struct PromptCompletionInsertionContext: Equatable {
             suffix.first.map { !$0.isWhitespace }
             ?? appendsTrailingSpace
         let separator = needsSeparator ? " " : ""
-        let replacement = "\(kind.trigger)\(value)\(separator)"
+        let replacement = "\(trigger)\(value)\(separator)"
 
         var updatedText = text
         updatedText.replaceSubrange(
@@ -101,7 +109,7 @@ struct PromptCompletionInsertionContext: Equatable {
         guard text.hasPrefix(prefix), text.hasSuffix(suffix) else { return nil }
 
         let trigger = text.index(text.startIndex, offsetBy: prefix.count)
-        guard trigger < text.endIndex, text[trigger] == kind.trigger else {
+        guard trigger < text.endIndex, text[trigger] == self.trigger else {
             return nil
         }
 

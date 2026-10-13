@@ -1790,6 +1790,57 @@ public extension ModelSelection {
     }
 }
 
+// MARK: - CommandCompletion
+public struct CommandCompletion: Codable {
+    public var description: String?
+    public var input, label: String
+
+    public init(description: String?, input: String, label: String) {
+        self.description = description
+        self.input = input
+        self.label = label
+    }
+}
+
+// MARK: CommandCompletion convenience initializers and mutators
+
+public extension CommandCompletion {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CommandCompletion.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        description: String?? = nil,
+        input: String? = nil,
+        label: String? = nil
+    ) -> CommandCompletion {
+        return CommandCompletion(
+            description: description ?? self.description,
+            input: input ?? self.input,
+            label: label ?? self.label
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ConfigChoice
 public struct ConfigChoice: Codable {
     public var description, group, groupLabel, label: String?
@@ -3093,12 +3144,14 @@ public extension Skill {
 
 // MARK: - SlashCommand
 public struct SlashCommand: Codable {
+    public var completes: Bool?
     public var description: String?
     public var hasInput: Bool?
     public var inputHint: String?
     public var name: String
 
-    public init(description: String?, hasInput: Bool?, inputHint: String?, name: String) {
+    public init(completes: Bool?, description: String?, hasInput: Bool?, inputHint: String?, name: String) {
+        self.completes = completes
         self.description = description
         self.hasInput = hasInput
         self.inputHint = inputHint
@@ -3125,12 +3178,14 @@ public extension SlashCommand {
     }
 
     func with(
+        completes: Bool?? = nil,
         description: String?? = nil,
         hasInput: Bool?? = nil,
         inputHint: String?? = nil,
         name: String? = nil
     ) -> SlashCommand {
         return SlashCommand(
+            completes: completes ?? self.completes,
             description: description ?? self.description,
             hasInput: hasInput ?? self.hasInput,
             inputHint: inputHint ?? self.inputHint,
@@ -3435,6 +3490,61 @@ public extension ProviderAuthenticateParams {
             instanceID: instanceID ?? self.instanceID,
             methodID: methodID ?? self.methodID,
             secret: secret ?? self.secret
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - CompleteCommandInput
+public struct CompleteCommandInput: Codable {
+    public var command, input, threadID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case command, input
+        case threadID = "threadId"
+    }
+
+    public init(command: String, input: String, threadID: String) {
+        self.command = command
+        self.input = input
+        self.threadID = threadID
+    }
+}
+
+// MARK: CompleteCommandInput convenience initializers and mutators
+
+public extension CompleteCommandInput {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CompleteCommandInput.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        command: String? = nil,
+        input: String? = nil,
+        threadID: String? = nil
+    ) -> CompleteCommandInput {
+        return CompleteCommandInput(
+            command: command ?? self.command,
+            input: input ?? self.input,
+            threadID: threadID ?? self.threadID
         )
     }
 

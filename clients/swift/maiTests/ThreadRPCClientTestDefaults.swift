@@ -50,5 +50,6 @@ extension ThreadRPCClient {
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
         throw unavailable
     }
+    func completeCommand(_ input: CompleteCommandInput) async throws -> [CommandCompletion] { [] }
     func dispatchCommand(_ command: Command) async throws -> DispatchResult { throw unavailable }
 }

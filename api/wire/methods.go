@@ -40,6 +40,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderCloseSession, Params: "ProviderSessionParams", ResultNull: true},
 	{Name: MethodProviderForkThread, Params: "ProviderForkThreadParams", Result: "ProviderImportSessionResult"},
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
+	{Name: MethodProviderCompleteCommand, Params: "ProviderCompleteCommandParams", Result: "CommandCompletion", ResultArray: true},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderQuestionAnswer, Params: "ProviderQuestionAnswerParams", ResultNull: true},
 	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachSnapshot"},

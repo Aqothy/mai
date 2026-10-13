@@ -548,6 +548,26 @@
       ],
       "title": "Command"
     },
+    "CommandCompletion": {
+      "properties": {
+        "input": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "input",
+        "label"
+      ],
+      "title": "CommandCompletion"
+    },
     "CommandMessage": {
       "properties": {
         "messageId": {
@@ -575,6 +595,27 @@
         "text"
       ],
       "title": "CommandMessage"
+    },
+    "CompleteCommandInput": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "threadId",
+        "command",
+        "input"
+      ],
+      "title": "CompleteCommandInput"
     },
     "ConfigChoice": {
       "properties": {
@@ -1701,6 +1742,9 @@
         },
         "inputHint": {
           "type": "string"
+        },
+        "completes": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -2739,6 +2783,12 @@
         "slashCommand": {
           "$ref": "#/$defs/SlashCommand"
         },
+        "providerCompleteCommandParams": {
+          "$ref": "#/$defs/CompleteCommandInput"
+        },
+        "commandCompletion": {
+          "$ref": "#/$defs/CommandCompletion"
+        },
         "skill": {
           "$ref": "#/$defs/Skill"
         },
@@ -2898,6 +2948,8 @@
         "configChoice",
         "configOptionSelection",
         "slashCommand",
+        "providerCompleteCommandParams",
+        "commandCompletion",
         "skill",
         "tokenUsage",
         "approvalOption",

@@ -23,6 +23,7 @@ nonisolated public enum MaidRPCMethod {
     public static let providerCloseSession = "provider.closeSession"
     public static let providerForkThread = "provider.forkThread"
     public static let providerOptionsGet = "provider.options.get"
+    public static let providerCompleteCommand = "provider.completeCommand"
     public static let providerOptionsSet = "provider.options.set"
     public static let providerQuestionAnswer = "provider.question.answer"
     public static let terminalCreate = "terminal.create"

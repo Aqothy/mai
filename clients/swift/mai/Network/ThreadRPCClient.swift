@@ -31,6 +31,7 @@ protocol ThreadRPCClient: RPCTransportClient {
         _ input: WorkspaceBrowseDirectoriesParams
     ) async throws -> WorkspaceBrowseDirectoriesResult
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult
+    func completeCommand(_ input: CompleteCommandInput) async throws -> [CommandCompletion]
     func dispatchCommand(_ command: Command) async throws -> DispatchResult
 }
 
@@ -166,6 +167,10 @@ extension RPCClient: ThreadRPCClient {
 
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
         try await call(MaidRPCMethod.workspaceSearchFiles, params: input)
+    }
+
+    func completeCommand(_ input: CompleteCommandInput) async throws -> [CommandCompletion] {
+        try await call(MaidRPCMethod.providerCompleteCommand, params: input)
     }
 
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {

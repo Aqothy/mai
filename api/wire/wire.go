@@ -40,6 +40,7 @@ const (
 	MethodProviderOptionsInvalidated = "provider.options.invalidated"
 	MethodProviderQuestionAsked      = "provider.question.asked"
 	MethodProviderQuestionAnswer     = "provider.question.answer"
+	MethodProviderCompleteCommand    = "provider.completeCommand"
 )
 
 // EmptyParams is the params object sent to methods that take no arguments.
@@ -86,6 +87,8 @@ type ConfigOption = provider.ConfigOption
 type ConfigChoice = provider.ConfigChoice
 type ConfigOptionSelection = provider.ConfigOptionSelection
 type SlashCommand = provider.SlashCommand
+type ProviderCompleteCommandParams = provider.CompleteCommandInput
+type CommandCompletion = provider.CommandCompletion
 type Skill = provider.Skill
 type TokenUsage = provider.TokenUsage
 type ApprovalOption = provider.ApprovalOption

@@ -220,6 +220,27 @@ type SlashCommand struct {
 	Description string `json:"description,omitempty"`
 	HasInput    bool   `json:"hasInput,omitempty"`
 	InputHint   string `json:"inputHint,omitempty"`
+	// Completes says the provider suggests the command's input as it is
+	// typed (provider.completeCommand), such as what a review should cover.
+	Completes bool `json:"completes,omitempty"`
+}
+
+// CompleteCommandInput asks for suggestions for what follows a slash
+// command, given what has been typed after its name.
+type CompleteCommandInput struct {
+	ThreadID string `json:"threadId"`
+	Command  string `json:"command"`
+	Input    string `json:"input"`
+	// Cwd is the thread's workspace, which the daemon resolves.
+	Cwd string `json:"-"`
+}
+
+// CommandCompletion is one suggestion for a slash command's input.
+type CommandCompletion struct {
+	// Input replaces everything typed after the command's name.
+	Input       string `json:"input"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // Skill is a provider-advertised, cwd-scoped prompt capability. A selected

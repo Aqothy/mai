@@ -54,6 +54,8 @@ type contract struct {
 	ConfigChoice                     wire.ConfigChoice                     `json:"configChoice"`
 	ConfigOptionSelection            wire.ConfigOptionSelection            `json:"configOptionSelection"`
 	SlashCommand                     wire.SlashCommand                     `json:"slashCommand"`
+	ProviderCompleteCommandParams    wire.ProviderCompleteCommandParams    `json:"providerCompleteCommandParams"`
+	CommandCompletion                wire.CommandCompletion                `json:"commandCompletion"`
 	Skill                            wire.Skill                            `json:"skill"`
 	TokenUsage                       wire.TokenUsage                       `json:"tokenUsage"`
 	ApprovalOption                   wire.ApprovalOption                   `json:"approvalOption"`

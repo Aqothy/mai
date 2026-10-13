@@ -200,6 +200,10 @@ extension SlashCommand {
     init(description: String?, hasInput: Bool?, name: String) {
         self.init(description: description, hasInput: hasInput, inputHint: nil, name: name)
     }
+
+    init(description: String?, hasInput: Bool?, inputHint: String?, name: String) {
+        self.init(completes: nil, description: description, hasInput: hasInput, inputHint: inputHint, name: name)
+    }
 }
 
 extension Thread {

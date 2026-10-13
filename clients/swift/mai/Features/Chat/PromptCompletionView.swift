@@ -39,9 +39,6 @@ struct PromptCompletionView: View {
         .glassSurface(in: .rect(cornerRadius: 16), isShadowed: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
-        .task(id: model.searchKey) {
-            await model.search()
-        }
     }
 
     private var panelHeight: CGFloat {
@@ -232,13 +229,14 @@ extension PromptCompletionKind {
         case .workspaceFile: "Files"
         case .slashCommand: "Commands"
         case .skill: "Skills"
+        case .commandInput: "Options"
         }
     }
 
     fileprivate var systemImage: String {
         switch self {
         case .workspaceFile: "doc.text.magnifyingglass"
-        case .slashCommand: "slash.circle"
+        case .slashCommand, .commandInput: "slash.circle"
         case .skill: "sparkles"
         }
     }
@@ -246,7 +244,7 @@ extension PromptCompletionKind {
     fileprivate var emptySystemImage: String {
         switch self {
         case .workspaceFile: "doc.text.magnifyingglass"
-        case .slashCommand: "slash.circle"
+        case .slashCommand, .commandInput: "slash.circle"
         case .skill: "sparkles"
         }
     }

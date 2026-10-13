@@ -17,6 +17,8 @@ type command struct {
 	// others replace that turn, so they can't be steered into one.
 	joinsTurn bool
 	run       func(h *Instance, ctx context.Context, send turnSend) error
+	// complete, if set, suggests the command's input.
+	complete func(ctx context.Context, cwd, input string) []provider.CommandCompletion
 }
 
 // turnSend is a prompt or command the user sent on a turn.
@@ -35,11 +37,11 @@ var commands = []command{
 	{SlashCommand: provider.SlashCommand{Name: "compact", Description: "Summarize the conversation to free up context"}, run: (*Instance).runCompact},
 	{
 		SlashCommand: provider.SlashCommand{Name: "review", Description: "Review uncommitted changes, a branch's changes or a commit, or with your instructions", HasInput: true, InputHint: "<target or instructions>"},
-		run:          (*Instance).runReview,
+		run:          (*Instance).runReview, complete: completeReview,
 	},
 	{
 		SlashCommand: provider.SlashCommand{Name: "goal", Description: "Set a goal Codex keeps working toward, or show, pause, resume or clear it", HasInput: true, InputHint: goalUsage},
-		joinsTurn:    true, run: (*Instance).runGoal,
+		joinsTurn:    true, run: (*Instance).runGoal, complete: completeGoal,
 	},
 	{SlashCommand: provider.SlashCommand{Name: "shell", Description: "Run a shell command outside the sandbox", HasInput: true, InputHint: "<command>"}, joinsTurn: true, run: (*Instance).runShell},
 }
@@ -49,9 +51,20 @@ var slashCommands = func() []provider.SlashCommand {
 	list := make([]provider.SlashCommand, len(commands))
 	for index, command := range commands {
 		list[index] = command.SlashCommand
+		list[index].Completes = command.complete != nil
 	}
 	return list
 }()
+
+// CompleteCommand suggests input for a command that completes.
+func (h *Instance) CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
+	for _, command := range commands {
+		if command.Name == input.Command && command.complete != nil {
+			return command.complete(ctx, input.Cwd, input.Input), nil
+		}
+	}
+	return nil, nil
+}
 
 // parseCommand finds the command a prompt runs, and its arguments. Text after
 // a command that takes no input makes the prompt an ordinary one.
@@ -223,6 +236,28 @@ func (h *Instance) currentGoal(ctx context.Context, nativeThread string) (*appGo
 		return nil, err
 	}
 	return response.Goal, nil
+}
+
+// completeGoal suggests the goal controls; anything else is an objective.
+func completeGoal(_ context.Context, _, input string) []provider.CommandCompletion {
+	return matching(input, []provider.CommandCompletion{
+		{Input: "pause", Label: "Pause the goal"},
+		{Input: "resume", Label: "Resume the goal"},
+		{Input: "clear", Label: "Clear the goal"},
+	})
+}
+
+// matching keeps the completions whose input or label starts with what was
+// typed.
+func matching(input string, completions []provider.CommandCompletion) []provider.CommandCompletion {
+	typed := strings.ToLower(strings.TrimSpace(input))
+	var kept []provider.CommandCompletion
+	for _, completion := range completions {
+		if strings.HasPrefix(strings.ToLower(completion.Input), typed) || strings.HasPrefix(strings.ToLower(completion.Label), typed) {
+			kept = append(kept, completion)
+		}
+	}
+	return kept
 }
 
 // goalReport describes a goal with the Codex TUI's status labels.

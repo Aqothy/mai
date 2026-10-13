@@ -72,6 +72,12 @@ type SessionRenamer interface {
 	RenameSession(ctx context.Context, input provider.RenameSessionInput) error
 }
 
+// CommandCompleter is optional, for providers that suggest what follows a
+// slash command (SlashCommand.Completes).
+type CommandCompleter interface {
+	CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error)
+}
+
 // ItemStopper is optional, for providers that can stop an item running on
 // its own, such as a background task a tool started, without interrupting
 // the turn. Adapters mark such items with ToolCall.Background.
@@ -1286,6 +1292,22 @@ func (s *Service) StopItem(ctx context.Context, input provider.StopItemInput) er
 		}
 		return stopper.StopItem(ctx, input)
 	})
+}
+
+// CompleteCommand suggests input for a slash command of the thread's
+// provider; a provider without suggestions has none.
+func (s *Service) CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
+	var completions []provider.CommandCompletion
+	err := s.withThreadInstance(ctx, input.ThreadID, false, "complete command", func(instance ProviderInstance) error {
+		completer, ok := instance.(CommandCompleter)
+		if !ok {
+			return nil
+		}
+		var err error
+		completions, err = completer.CompleteCommand(ctx, input)
+		return err
+	})
+	return completions, err
 }
 
 func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error {

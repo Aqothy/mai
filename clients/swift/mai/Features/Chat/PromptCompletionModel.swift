@@ -18,6 +18,7 @@ struct PromptCompletionCatalogKey: Equatable {
         let description: String?
         let hasInput: Bool?
         let inputHint: String?
+        let completes: Bool?
     }
 
     private struct SkillKey: Equatable {
@@ -38,7 +39,8 @@ struct PromptCompletionCatalogKey: Equatable {
                 name: $0.name,
                 description: $0.description,
                 hasInput: $0.hasInput,
-                inputHint: $0.inputHint
+                inputHint: $0.inputHint,
+                completes: $0.completes
             )
         }
         self.skills = skills.map {
@@ -73,8 +75,11 @@ final class PromptCompletionModel {
         case failed
     }
 
+    /// What to load: workspace files, or the suggestions for a command's
+    /// input when `command` is set.
     struct SearchKey: Equatable {
         let scope: WorkspaceFileSearchScope
+        let command: String?
         let query: String
         let retryCount: Int
         let presentationID: Int
@@ -97,8 +102,10 @@ final class PromptCompletionModel {
     private(set) var mentionedFilePaths: Set<String> = []
 
     private let store: ThreadStore
-    private var context: PromptCompletionInsertionContext?
+    private var presentation: Presentation?
     private var commands: [PromptCompletionMatch] = []
+    /// Commands whose provider suggests their input.
+    private var completingCommands: Set<String> = []
     private var skills: [PromptCompletionMatch] = []
     private var latestText = ""
     private var latestCursorOffset: Int?
@@ -112,8 +119,10 @@ final class PromptCompletionModel {
     }
 
     var isPresented: Bool {
-        guard context != nil, let kind else { return false }
-        return completionIsAvailable(for: kind)
+        guard presentation != nil, let kind, completionIsAvailable(for: kind) else { return false }
+        // Typed input with nothing to suggest, such as review instructions,
+        // shows no panel.
+        return kind != .commandInput || !matches.isEmpty
     }
 
     var isFileCompletionAvailable: Bool {
@@ -121,9 +130,19 @@ final class PromptCompletionModel {
     }
 
     var searchKey: SearchKey? {
-        guard kind == .workspaceFile, isPresented else { return nil }
+        guard let presentation, let kind, completionIsAvailable(for: kind) else { return nil }
+        let command: String?
+        switch presentation {
+        case .token where kind == .workspaceFile:
+            command = nil
+        case .commandInput(let context):
+            command = context.command
+        case .token:
+            return nil
+        }
         return SearchKey(
             scope: scope,
+            command: command,
             query: query,
             retryCount: retryCount,
             presentationID: presentationID
@@ -143,6 +162,7 @@ final class PromptCompletionModel {
 
     func updateCatalog(commands: [SlashCommand], skills: [Skill]) {
         self.commands = commands.map(Self.commandMatch)
+        completingCommands = Set(commands.filter { $0.completes == true }.map(\.name))
         self.skills = skills.filter(\.enabled).map(Self.skillMatch)
         reevaluateLatestInput()
     }
@@ -161,7 +181,7 @@ final class PromptCompletionModel {
         }
         suppressedInput = nil
 
-        if let context,
+        if case .token(let context) = presentation,
             let query = context.query(in: text, cursorOffset: cursorOffset),
             completionIsAvailable(for: context.kind)
         {
@@ -169,30 +189,45 @@ final class PromptCompletionModel {
             return
         }
 
-        guard
-            let context = PromptCompletionInsertionContext.detect(
-                in: text,
-                cursorOffset: cursorOffset
-            ), completionIsAvailable(for: context.kind)
-        else {
-            clearPresentation()
+        if let context = PromptCompletionInsertionContext.detect(
+            in: text,
+            cursorOffset: cursorOffset
+        ), completionIsAvailable(for: context.kind) {
+            present(
+                .token(context),
+                kind: context.kind,
+                query: context.query(in: text, cursorOffset: cursorOffset) ?? ""
+            )
             return
         }
 
-        self.context = context
-        kind = context.kind
-        retryCount = 0
-        presentationID += 1
-        setQuery(
-            context.query(in: text, cursorOffset: cursorOffset) ?? "",
-            kind: context.kind,
-            resetsResults: true
-        )
+        if let context = CommandInputContext.detect(
+            in: text,
+            cursorOffset: cursorOffset,
+            commands: completingCommands
+        ), completionIsAvailable(for: .commandInput) {
+            let input = context.input(in: text)
+            if presentation == .commandInput(context) {
+                setQuery(input, kind: .commandInput)
+            } else {
+                present(.commandInput(context), kind: .commandInput, query: input)
+            }
+            return
+        }
+
+        clearPresentation()
     }
 
     func edit(selecting match: PromptCompletionMatch, in text: String) -> PromptCompletionEdit? {
-        guard matches.contains(match),
-            let context,
+        guard matches.contains(match), let presentation else { return nil }
+        let context: PromptCompletionInsertionContext
+        switch presentation {
+        case .token(let tokenContext):
+            context = tokenContext
+        case .commandInput(let commandContext):
+            return edit(selecting: match, after: commandContext)
+        }
+        guard
             let edit = context.edit(
                 replacingWith: match.insertionValue,
                 appendsTrailingSpace: match.appendsTrailingSpace,
@@ -204,6 +239,12 @@ final class PromptCompletionModel {
             mentionedFilePaths.insert(match.insertionValue)
         }
         requestCursor(for: edit)
+        if match.kind == .slashCommand, completingCommands.contains(match.insertionValue) {
+            // A command with options shows them next, as the Codex app does.
+            clearPresentation()
+            update(text: edit.text, cursorOffset: edit.cursorOffset)
+            return edit
+        }
         latestText = edit.text
         latestCursorOffset = edit.cursorOffset
         // TextField can publish the inserted text before its new selection.
@@ -258,7 +299,7 @@ final class PromptCompletionModel {
 
     @discardableResult
     func dismiss() -> Bool {
-        guard context != nil else { return false }
+        guard presentation != nil else { return false }
         if let latestCursorOffset {
             suppressedInput = .dismissed(
                 text: latestText,
@@ -290,6 +331,10 @@ final class PromptCompletionModel {
         clearMatches(phase: .loading)
 
         do {
+            if let command = requestedKey.command {
+                try await loadCommandInput(command, for: requestedKey)
+                return
+            }
             if !requestedKey.query.isEmpty {
                 try await Task.sleep(for: Self.searchDebounce)
             }
@@ -321,6 +366,50 @@ final class PromptCompletionModel {
         }
     }
 
+    /// Replaces a command's input with a suggestion. Input that ends in a
+    /// space goes on, so what follows is offered next (a branch after
+    /// `--base `); any other input is complete.
+    private func edit(
+        selecting match: PromptCompletionMatch,
+        after context: CommandInputContext
+    ) -> PromptCompletionEdit {
+        let edit = context.edit(replacingWith: match.insertionValue)
+        requestCursor(for: edit)
+        if match.insertionValue.last?.isWhitespace == true {
+            update(text: edit.text, cursorOffset: edit.cursorOffset)
+        } else {
+            latestText = edit.text
+            latestCursorOffset = edit.cursorOffset
+            suppressedInput = .completed(text: edit.text)
+            clearPresentation()
+        }
+        return edit
+    }
+
+    private func loadCommandInput(_ command: String, for requestedKey: SearchKey) async throws {
+        guard case .thread(let threadID) = requestedKey.scope else { return }
+        let completions = try await store.completeCommand(
+            CompleteCommandInput(command: command, input: requestedKey.query, threadID: threadID)
+        )
+        try Task.checkCancellation()
+        guard searchKey == requestedKey else { return }
+        matches = completions.map(Self.commandInputMatch)
+        selectedMatchID = matches.first?.id
+        phase = .results
+    }
+
+    private func present(
+        _ presentation: Presentation,
+        kind: PromptCompletionKind,
+        query: String
+    ) {
+        self.presentation = presentation
+        self.kind = kind
+        retryCount = 0
+        presentationID += 1
+        setQuery(query, kind: kind, resetsResults: true)
+    }
+
     private func reevaluateLatestInput() {
         guard latestCursorOffset != nil else {
             if let kind, !completionIsAvailable(for: kind) {
@@ -342,7 +431,7 @@ final class PromptCompletionModel {
         self.kind = kind
 
         switch kind {
-        case .workspaceFile:
+        case .workspaceFile, .commandInput:
             if changed || resetsResults {
                 clearMatches(phase: .loading)
             }
@@ -380,6 +469,9 @@ final class PromptCompletionModel {
             !commands.isEmpty
         case .skill:
             !skills.isEmpty
+        case .commandInput:
+            // Suggestions come from the thread's provider.
+            if case .thread = scope { isFileCompletionAvailable } else { false }
         }
     }
 
@@ -393,7 +485,7 @@ final class PromptCompletionModel {
     }
 
     private func clearPresentation() {
-        context = nil
+        presentation = nil
         kind = nil
         query = ""
         clearMatches(phase: .idle)
@@ -432,6 +524,19 @@ final class PromptCompletionModel {
         )
     }
 
+    private static func commandInputMatch(_ completion: CommandCompletion) -> PromptCompletionMatch {
+        PromptCompletionMatch(
+            id: "input:\(completion.input)",
+            kind: .commandInput,
+            insertionValue: completion.input,
+            title: completion.label,
+            subtitle: completion.description,
+            inputHint: nil,
+            systemImage: "arrow.turn.down.right",
+            appendsTrailingSpace: false
+        )
+    }
+
     private static func skillMatch(_ skill: Skill) -> PromptCompletionMatch {
         let description =
             skill.shortDescription?.isEmpty == false
@@ -461,6 +566,43 @@ final class PromptCompletionModel {
             end = next
         }
         return String(value[..<end])
+    }
+
+    /// What the panel completes: a token (`@file`, `/command`, `$skill`) or
+    /// the input after a command its provider completes.
+    private enum Presentation: Equatable {
+        case token(PromptCompletionInsertionContext)
+        case commandInput(CommandInputContext)
+    }
+
+    /// The input after a leading `/command ` whose provider suggests it.
+    private struct CommandInputContext: Equatable {
+        let command: String
+        /// The `/command ` text before the input.
+        let prefix: String
+
+        static func detect(
+            in text: String,
+            cursorOffset: Int,
+            commands: Set<String>
+        ) -> CommandInputContext? {
+            guard text.first == "/", let end = text.firstIndex(where: \.isWhitespace) else {
+                return nil
+            }
+            let command = String(text[text.index(after: text.startIndex)..<end])
+            let prefix = String(text[...end])
+            guard commands.contains(command), cursorOffset >= prefix.count else { return nil }
+            return CommandInputContext(command: command, prefix: prefix)
+        }
+
+        func input(in text: String) -> String {
+            String(text.dropFirst(prefix.count))
+        }
+
+        func edit(replacingWith input: String) -> PromptCompletionEdit {
+            let text = prefix + input
+            return PromptCompletionEdit(text: text, cursorOffset: text.count)
+        }
     }
 
     private enum SuppressedInput {

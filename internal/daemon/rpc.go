@@ -738,6 +738,12 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.server.browseWorkspaceDirectories(params)
+	case wire.MethodProviderCompleteCommand:
+		var params wire.ProviderCompleteCommandParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.completeCommand(ctx, params)
 	case wire.MethodWorkspaceSearchFiles:
 		var params wire.WorkspaceSearchFilesParams
 		if err := decodeRPCParams(req, &params); err != nil {

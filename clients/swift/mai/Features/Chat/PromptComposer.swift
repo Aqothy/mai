@@ -186,6 +186,11 @@ struct PromptComposer<LeadingControls: View, TrailingControls: View>: View {
             updatePromptCompletion(text: text, selection: nil)
             applyCursorRequest(promptCompletion?.cursorRequest)
         }
+        // Here rather than on the panel: command suggestions decide whether
+        // the panel shows at all.
+        .task(id: promptCompletion?.searchKey) {
+            await promptCompletion?.search()
+        }
     }
 
     /// The editor only ever receives a selection valid for the text it shows.
