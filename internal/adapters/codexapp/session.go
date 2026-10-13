@@ -201,6 +201,9 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 			"clientUserMessageId": clientMessageID,
 			"input":               turnInput,
 		}, &response); err != nil {
+			if steerMissedTurn(err) {
+				return fmt.Errorf("Codex thread %q turn %q: %w: %w", input.ThreadID, input.TurnID, provider.ErrTurnNotRunning, err)
+			}
 			return err
 		}
 		if response.TurnID != nativeTurn {

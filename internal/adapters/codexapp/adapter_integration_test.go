@@ -49,6 +49,23 @@ func TestInstanceUsesDistinctClientMessageIDsForSteering(t *testing.T) {
 	}
 }
 
+// Codex can end a turn before the adapter reads its turn/completed. A steer
+// it refuses for that is a steer that missed its turn, which orchestration
+// sends as the next turn; a turn that can't take input refuses the steer.
+func TestSteerRefusedByAnEndedTurnMissedIt(t *testing.T) {
+	instance := openFakeInstance(t, "steer-race", func(provider.RuntimeEvent) {})
+	startFakeTurn(t, instance)
+	steer := func(text string) error {
+		return instance.SendTurn(testContext(t), provider.SendTurnInput{ThreadID: "local-thread", TurnID: "local-turn", Input: text, Steer: true})
+	}
+	if err := steer("too late"); !errors.Is(err, provider.ErrTurnNotRunning) {
+		t.Fatalf("steer into an ended turn err = %v, want ErrTurnNotRunning", err)
+	}
+	if err := steer("into a review"); err == nil || errors.Is(err, provider.ErrTurnNotRunning) || !strings.Contains(err.Error(), "cannot steer a review turn") {
+		t.Fatalf("steer into a review err = %v, want the refusal", err)
+	}
+}
+
 func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	events := make(chan provider.RuntimeEvent, 32)
 	instance := openFakeInstance(t, "lifecycle", func(event provider.RuntimeEvent) { events <- event })
@@ -1346,6 +1363,26 @@ func runFakeAppServer(scenario string) error {
 				return err
 			}
 		case "turn/steer":
+			if scenario == "steer-race" {
+				// The turn ended at Codex before its turn/completed was sent,
+				// or a review runs that can't take input.
+				var params struct {
+					Input []struct {
+						Text string `json:"text"`
+					} `json:"input"`
+				}
+				if err := decodeFakeParams(message, &params); err != nil || len(params.Input) != 1 {
+					return fmt.Errorf("invalid turn/steer params: %s", fakeMessageJSON(message))
+				}
+				refusal := &rpcError{Code: -32600, Message: "no active turn to steer"}
+				if params.Input[0].Text == "into a review" {
+					refusal = &rpcError{Code: -32600, Message: "cannot steer a review turn", Data: json.RawMessage(`{"message":"cannot steer a review turn","codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}`)}
+				}
+				if err := encoder.Encode(map[string]any{"id": message["id"], "error": refusal}); err != nil {
+					return err
+				}
+				break
+			}
 			clientID := "local-turn"
 			if scenario == "message-identities" {
 				clientID = "client-steer"

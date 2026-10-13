@@ -229,6 +229,16 @@ func (c *rpcClient) fail(err error) {
 	})
 }
 
+// steerMissedTurn reports whether turn/steer was refused because the turn
+// it named had already ended at Codex, before its turn/completed was read:
+// app-server answers invalid_request ("no active turn to steer", or another
+// turn is active). A running turn that can't be steered, a review or a
+// compaction, is refused with codexErrorInfo data instead.
+func steerMissedTurn(err error) bool {
+	var rpcErr *rpcError
+	return errors.As(err, &rpcErr) && rpcErr.Code == -32600 && len(rpcErr.Data) == 0
+}
+
 func isRPCMethodNotFound(err error) bool {
 	var rpcErr *rpcError
 	return errors.As(err, &rpcErr) && rpcErr.Code == -32601
