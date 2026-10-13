@@ -271,14 +271,6 @@ final class ThreadStore {
         rebuildProviderCaches()
     }
 
-    func providerSupportsConfigOptions(_ providerID: String) -> Bool {
-        providerInfo(for: providerID)?.capabilities.configOptions == true
-    }
-
-    func providerSupportsSkills(_ providerID: String) -> Bool {
-        providerInfo(for: providerID)?.capabilities.skills == true
-    }
-
     func providerSupportsAdditionalDirectories(_ providerID: String) -> Bool {
         providerInfo(for: providerID)?.capabilities.additionalDirectories == true
     }

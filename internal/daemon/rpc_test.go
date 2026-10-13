@@ -224,7 +224,6 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		instances[instanceID] = &optionsRPCProvider{
 			info: provider.InstanceInfo{
 				InstanceID: instanceID, Name: string(instanceID), Status: provider.InstanceStatusInitialized,
-				Capabilities: provider.Capabilities{ConfigOptions: true},
 			},
 			sessions:  make(map[string][]provider.ConfigOption),
 			callbacks: make(map[string]provider.OptionsSessionCallbacks),

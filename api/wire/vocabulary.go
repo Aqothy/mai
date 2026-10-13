@@ -322,14 +322,6 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
-		Name:        "ModelSwitchSupport",
-		Description: "Whether a provider can change the active model for a thread.",
-		Values: []string{
-			string(provider.ModelSwitchUnsupported),
-			string(provider.ModelSwitchInSession),
-		},
-	},
-	{
 		Name:        "TerminalStatus",
 		Description: "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
 		Values: []string{

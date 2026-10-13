@@ -1227,7 +1227,7 @@ func (s *Service) OpenOptionsSession(ctx context.Context, instanceID provider.In
 		return provider.OptionsSession{}, err
 	}
 	optionsProvider, ok := instance.(OptionsSessionProvider)
-	if !ok || !instance.Info().Capabilities.ConfigOptions {
+	if !ok {
 		return provider.OptionsSession{}, fmt.Errorf("provider instance %q does not support config options", instanceID)
 	}
 	return optionsProvider.OpenOptionsSession(ctx, cwd, callbacks)
@@ -1239,7 +1239,7 @@ func (s *Service) SetOptionsSessionValue(ctx context.Context, instanceID provide
 		return nil, err
 	}
 	optionsProvider, ok := instance.(OptionsSessionProvider)
-	if !ok || !instance.Info().Capabilities.ConfigOptions {
+	if !ok {
 		return nil, fmt.Errorf("provider instance %q does not support config options", instanceID)
 	}
 	return optionsProvider.SetOptionsSessionValue(ctx, handle, optionID, value)

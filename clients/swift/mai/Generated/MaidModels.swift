@@ -1246,29 +1246,24 @@ public extension AuthMethod {
 
 // MARK: - Capabilities
 public struct Capabilities: Codable {
-    public var additionalDirectories, auth, configOptions, fork: Bool?
-    public var loadReplay, logout: Bool?
+    public var additionalDirectories, auth, fork, loadReplay: Bool?
+    public var logout: Bool?
     public var mcp: MCPCapabilities?
-    public var modelSwitch: String?
     public var promptContent: PromptContentCapabilities?
     public var resume, sessionClose, sessionDelete, sessionList: Bool?
-    public var skills: Bool?
 
-    public init(additionalDirectories: Bool?, auth: Bool?, configOptions: Bool?, fork: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, modelSwitch: String?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?, skills: Bool?) {
+    public init(additionalDirectories: Bool?, auth: Bool?, fork: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?) {
         self.additionalDirectories = additionalDirectories
         self.auth = auth
-        self.configOptions = configOptions
         self.fork = fork
         self.loadReplay = loadReplay
         self.logout = logout
         self.mcp = mcp
-        self.modelSwitch = modelSwitch
         self.promptContent = promptContent
         self.resume = resume
         self.sessionClose = sessionClose
         self.sessionDelete = sessionDelete
         self.sessionList = sessionList
-        self.skills = skills
     }
 }
 
@@ -1293,34 +1288,28 @@ public extension Capabilities {
     func with(
         additionalDirectories: Bool?? = nil,
         auth: Bool?? = nil,
-        configOptions: Bool?? = nil,
         fork: Bool?? = nil,
         loadReplay: Bool?? = nil,
         logout: Bool?? = nil,
         mcp: MCPCapabilities?? = nil,
-        modelSwitch: String?? = nil,
         promptContent: PromptContentCapabilities?? = nil,
         resume: Bool?? = nil,
         sessionClose: Bool?? = nil,
         sessionDelete: Bool?? = nil,
-        sessionList: Bool?? = nil,
-        skills: Bool?? = nil
+        sessionList: Bool?? = nil
     ) -> Capabilities {
         return Capabilities(
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             auth: auth ?? self.auth,
-            configOptions: configOptions ?? self.configOptions,
             fork: fork ?? self.fork,
             loadReplay: loadReplay ?? self.loadReplay,
             logout: logout ?? self.logout,
             mcp: mcp ?? self.mcp,
-            modelSwitch: modelSwitch ?? self.modelSwitch,
             promptContent: promptContent ?? self.promptContent,
             resume: resume ?? self.resume,
             sessionClose: sessionClose ?? self.sessionClose,
             sessionDelete: sessionDelete ?? self.sessionDelete,
-            sessionList: sessionList ?? self.sessionList,
-            skills: skills ?? self.skills
+            sessionList: sessionList ?? self.sessionList
         )
     }
 

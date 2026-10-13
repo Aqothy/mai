@@ -249,13 +249,12 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		StartedAt: startedAt,
 		Capabilities: provider.Capabilities{
 			SessionList: true, SessionDelete: true, SessionClose: true,
-			LoadReplay: true, Resume: true, Fork: true, Skills: true,
-			Auth: true, Logout: true, ConfigOptions: true,
+			LoadReplay: true, Resume: true, Fork: true,
+			Auth: true, Logout: true,
 			// Stable app-server UserInput supports text, image, localImage,
 			// audio, localAudio, skill, and mention. It has no embedded-resource
 			// prompt variant, so do not advertise ACP-style embedded context.
 			PromptContent: provider.PromptContentCapabilities{Image: true, Audio: true},
-			ModelSwitch:   provider.ModelSwitchInSession,
 		},
 		Auth: provider.Auth{Status: provider.AuthStatusUnknown},
 	}

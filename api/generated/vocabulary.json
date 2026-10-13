@@ -310,14 +310,6 @@
       ]
     },
     {
-      "name": "ModelSwitchSupport",
-      "description": "Whether a provider can change the active model for a thread.",
-      "values": [
-        "unsupported",
-        "in-session"
-      ]
-    },
-    {
       "name": "TerminalStatus",
       "description": "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
       "values": [

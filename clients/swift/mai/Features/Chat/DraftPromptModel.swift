@@ -281,13 +281,6 @@ final class DraftPromptModel {
                 return
             }
 
-            guard store.providerSupportsConfigOptions(providerID)
-                || store.providerSupportsSkills(providerID)
-            else {
-                optionsPhase = .live
-                return
-            }
-
             let result = try await store.getProviderOptions(providerID: providerID, cwd: requestedCwd)
             try Task.checkCancellation()
             guard selectionMatches(providerID: requestedProviderID, cwd: requestedCwd) else {

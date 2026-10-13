@@ -62,15 +62,6 @@ const (
 	InstanceStatusExited      InstanceStatus = "exited"
 )
 
-// ModelSwitchSupport describes whether/how a provider can change the active
-// model for a thread.
-type ModelSwitchSupport string
-
-const (
-	ModelSwitchUnsupported ModelSwitchSupport = "unsupported"
-	ModelSwitchInSession   ModelSwitchSupport = "in-session"
-)
-
 // PromptContentCapabilities reports which non-text content blocks a provider
 // accepts in a turn prompt.
 type PromptContentCapabilities struct {
@@ -108,12 +99,9 @@ type Capabilities struct {
 	// Fork is intentionally provider-specific. Stable Codex app-server exposes
 	// it; ACP's similarly named operation remains experimental and is not used.
 	Fork          bool                      `json:"fork,omitempty"`
-	Skills        bool                      `json:"skills,omitempty"`
 	Auth          bool                      `json:"auth,omitempty"`
 	Logout        bool                      `json:"logout,omitempty"`
 	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
-	ModelSwitch   ModelSwitchSupport        `json:"modelSwitch,omitempty"`
-	ConfigOptions bool                      `json:"configOptions,omitempty"`
 	MCP           MCPCapabilities           `json:"mcp,omitzero"`
 }
 

@@ -1120,20 +1120,17 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             capabilities: Capabilities(
                 additionalDirectories: nil,
                 auth: nil,
-                configOptions: true,
                 fork: nil,
                 loadReplay: nil,
                 logout: nil,
                 mcp: nil,
-                modelSwitch: nil,
                 promptContent: supportsImages
                     ? PromptContentCapabilities(audio: nil, embeddedContext: nil, image: true)
                     : nil,
                 resume: nil,
                 sessionClose: nil,
                 sessionDelete: nil,
-                sessionList: nil,
-                skills: nil
+                sessionList: nil
             ),
             driver: "mock",
             initializedAt: .now,

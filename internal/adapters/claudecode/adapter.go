@@ -206,8 +206,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			LoadReplay:            true,
 			Resume:                true,
 			Fork:                  true,
-			Skills:                true,
-			ConfigOptions:         true,
 			AdditionalDirectories: true,
 			Auth:                  true,
 			Logout:                true,
@@ -215,7 +213,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			// and embedded-resource blocks are not part of the SDK prompt
 			// surface, so they are not advertised.
 			PromptContent: provider.PromptContentCapabilities{Image: true},
-			ModelSwitch:   provider.ModelSwitchInSession,
 		},
 		Auth: provider.Auth{Status: provider.AuthStatusUnknown, Methods: claudeAuthMethods()},
 	}

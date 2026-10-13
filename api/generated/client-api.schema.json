@@ -444,9 +444,6 @@
         "fork": {
           "type": "boolean"
         },
-        "skills": {
-          "type": "boolean"
-        },
         "auth": {
           "type": "boolean"
         },
@@ -455,12 +452,6 @@
         },
         "promptContent": {
           "$ref": "#/$defs/PromptContentCapabilities"
-        },
-        "modelSwitch": {
-          "type": "string"
-        },
-        "configOptions": {
-          "type": "boolean"
         },
         "mcp": {
           "$ref": "#/$defs/MCPCapabilities"
