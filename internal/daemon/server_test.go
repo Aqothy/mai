@@ -71,6 +71,45 @@ func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
 	t.Fatalf("thread after restart = %#v, want replaced provider turn settled as error", thread)
 }
 
+// The replaced process's own cancellation of its permission request is
+// dropped with its other non-terminal events, so the settled turn must cancel
+// the card; otherwise it stays pending and answering it fails at the provider.
+func TestProviderRestartCancelsPendingApprovalOfReplacedProcess(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	startFakeACPAgent(t, s, "codex")
+
+	client := newRecordingClient(t, s)
+	threadID := orchestration.ThreadID("thread-restart-cancels-approval")
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-restart-approval", ThreadID: threadID, Title: "Restart approval", ProviderInstanceID: "codex", Cwd: t.TempDir()})
+	client.subscribeThread(t, threadID)
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-restart-approval", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-restart-approval", Text: "permission"}})
+	opened := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
+		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
+	})
+	requestID := opened.Payload.Approval.RequestID
+	if entry, _ := s.orchestration.ThreadListEntry(threadID); !entry.HasPendingApprovals {
+		t.Fatalf("thread list entry = %#v, want a pending approval", entry)
+	}
+
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", fakeACPAgentCommand()), true); err != nil {
+		t.Fatalf("provider restart: %v", err)
+	}
+
+	resolved := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
+		return event.Type == orchestration.EventThreadApprovalResolved && event.Payload.Approval != nil && event.Payload.Approval.RequestID == requestID
+	})
+	if !resolved.Payload.Approval.Cancelled || resolved.Payload.Approval.Decision != provider.ApprovalDecisionCancel {
+		t.Fatalf("resolved = %#v, want the approval cancelled", resolved.Payload.Approval)
+	}
+	if entry, _ := s.orchestration.ThreadListEntry(threadID); entry.HasPendingApprovals {
+		t.Fatalf("thread list entry = %#v, want no pending approvals", entry)
+	}
+	if _, err := client.dispatchErr(orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-respond-restart-approval", ThreadID: threadID, RequestID: orchestration.ApprovalID(requestID), Decision: provider.ApprovalDecisionAccept}); err == nil || !strings.Contains(err.Error(), "already resolved") {
+		t.Fatalf("answering the cancelled approval: err = %v, want it rejected as already resolved", err)
+	}
+}
+
 // TestProviderCloseKillsWrappedAgentProcessTree guards against orphaning the
 // real agent when the configured command is a wrapper (npx/npm exec): killing
 // only the direct child would leak the agent process it spawned. The fake agent

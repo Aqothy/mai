@@ -86,6 +86,10 @@ type Thread struct {
 	// UpdatedAt is the sidebar recency timestamp: the latest user-message time,
 	// or CreatedAt before the first user message.
 	UpdatedAt time.Time `json:"updatedAt"`
+	// pendingApprovals are the timeline's pending approvals, oldest first, so
+	// the sidebar badge and the session lifecycle never scan the timeline.
+	// Only the projection's approval opened/resolved handlers change it.
+	pendingApprovals []*Approval
 }
 
 type Turn struct {

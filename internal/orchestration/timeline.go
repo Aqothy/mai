@@ -41,8 +41,9 @@ func (t *Timeline) AppendItem(item Item) {
 	*t = append(*t, TimelineEntry{Kind: TimelineEntryItem, Item: &item})
 }
 
-func (t *Timeline) AppendApproval(approval Approval) {
+func (t *Timeline) AppendApproval(approval Approval) *Approval {
 	*t = append(*t, TimelineEntry{Kind: TimelineEntryApproval, Approval: &approval})
+	return &approval
 }
 
 // Messages is a typed view for deciders. Conversation clients should iterate

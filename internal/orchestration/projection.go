@@ -535,6 +535,9 @@ func (p *Projection) applyThreadApprovalOpened(event Event) {
 	}
 	approval := event.Payload.Approval
 	if existing := thread.Timeline.Approval(approval.RequestID); existing != nil {
+		if existing.Status != ApprovalStatusPending {
+			thread.pendingApprovals = append(thread.pendingApprovals, existing)
+		}
 		existing.TurnID = approval.TurnID
 		existing.Args = append(json.RawMessage(nil), approval.Args...)
 		existing.Options = approval.Options
@@ -547,7 +550,7 @@ func (p *Projection) applyThreadApprovalOpened(event Event) {
 		return
 	}
 	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Args: append(json.RawMessage(nil), approval.Args...), Options: approval.Options, UserInput: approval.UserInput, Status: ApprovalStatusPending, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
-	thread.Timeline.AppendApproval(value)
+	thread.pendingApprovals = append(thread.pendingApprovals, thread.Timeline.AppendApproval(value))
 }
 
 func (p *Projection) applyThreadApprovalResolved(event Event) {
@@ -557,6 +560,7 @@ func (p *Projection) applyThreadApprovalResolved(event Event) {
 	}
 	approval := event.Payload.Approval
 	if existing := thread.Timeline.Approval(approval.RequestID); existing != nil {
+		thread.pendingApprovals = slices.DeleteFunc(thread.pendingApprovals, func(pending *Approval) bool { return pending == existing })
 		existing.Status = ApprovalStatusResolved
 		existing.Decision = approval.Decision
 		existing.OptionID = approval.OptionID
@@ -742,12 +746,5 @@ func ThreadMetadataMayChange(event Event) bool {
 }
 
 func threadListEntryFromThread(thread Thread) ThreadListEntry {
-	pendingApprovals := false
-	for _, entry := range thread.Timeline {
-		if approval := entry.Approval; approval != nil && approval.Status == ApprovalStatusPending {
-			pendingApprovals = true
-			break
-		}
-	}
-	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: pendingApprovals}
+	return ThreadListEntry{ID: thread.ID, Title: thread.Title, ProviderInstanceID: thread.ProviderInstanceID, ModelSelection: cloneModelSelection(thread.ModelSelection), Cwd: thread.Cwd, AdditionalDirectories: append([]string(nil), thread.AdditionalDirectories...), LatestTurn: cloneTurnPtr(thread.LatestTurn), CreatedAt: thread.CreatedAt, UpdatedAt: thread.UpdatedAt, Session: cloneSessionPtr(thread.Session), HasPendingApprovals: len(thread.pendingApprovals) > 0}
 }

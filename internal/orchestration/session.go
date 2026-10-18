@@ -68,9 +68,29 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 			historyReplayFailed: update.historyReplayFailed,
 		})
 		sequence = appended.Sequence
+		cancelOrphanedApprovals(thread, update.occurredAt, appendEvent)
 		return nil
 	})
 	return DispatchResult{Sequence: sequence}, err
+}
+
+// cancelOrphanedApprovals resolves as cancelled the pending approvals nobody
+// can answer anymore: those of a turn that stopped running, and all of them
+// once the session stopped. The provider's own resolution can be lost (a
+// replaced provider process's events are dropped), so the session lifecycle
+// settles them instead of leaving the card answerable.
+func cancelOrphanedApprovals(thread *Thread, occurredAt time.Time, appendEvent func(Event) Event) {
+	stopped := thread.Session.Status == SessionStatusStopped
+	running := activeTurnIDOf(thread.Session, thread.LatestTurn)
+	var orphaned []ApprovalEvent
+	for _, approval := range thread.pendingApprovals {
+		if stopped || approval.TurnID != "" && approval.TurnID != running {
+			orphaned = append(orphaned, ApprovalEvent{RequestID: approval.RequestID, TurnID: approval.TurnID, Decision: provider.ApprovalDecisionCancel, Cancelled: true})
+		}
+	}
+	for index := range orphaned {
+		appendEvent(Event{Type: EventThreadApprovalResolved, OccurredAt: occurredAt, Actor: ActorKindServer, Payload: EventPayload{ThreadID: thread.ID, Approval: &orphaned[index]}})
+	}
 }
 
 // deriveSessionStatus derives the complete SessionBinding for a session update
