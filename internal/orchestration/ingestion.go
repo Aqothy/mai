@@ -667,13 +667,11 @@ func (i *ProviderRuntimeIngestion) eventFromStaleProviderInstance(event provider
 		if view.Session.ProviderInstanceID != event.ProviderInstanceID {
 			return true
 		}
-		// StartSession may emit metadata before it returns the replacement
-		// generation to the reactor. Keep both generations admissible during that
-		// short prebind window; the materialized binding below closes the fence.
-		if view.Session.Status == SessionStatusStarting {
-			return false
-		}
-		return event.Generation != 0 && view.Session.ProviderGeneration != 0 && event.Generation != view.Session.ProviderGeneration
+		// Generations only grow, and a process newer than the binding only has
+		// this thread's session because the provider service started it there
+		// (StartSession before it returns, or a send restoring the session after
+		// a restart). Only events of an older process are stale.
+		return event.Generation != 0 && view.Session.ProviderGeneration != 0 && event.Generation < view.Session.ProviderGeneration
 	}
 	return view.ProviderInstanceID != "" && view.ProviderInstanceID != event.ProviderInstanceID
 }

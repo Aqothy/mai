@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -69,6 +70,50 @@ func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
 	}
 	thread, _ := s.orchestration.ThreadListEntry(threadID)
 	t.Fatalf("thread after restart = %#v, want replaced provider turn settled as error", thread)
+}
+
+// A restart between a turn's session start and its send moves the session to
+// the replacement, whose events must reach the turn although the thread is
+// still bound to the replaced process's generation.
+func TestProviderRestartBetweenSessionStartAndSendCompletesTurn(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	startFakeACPAgent(t, s, "codex")
+
+	threadID := orchestration.ThreadID("thread-restart-before-send")
+	// Listeners run before the engine answers the reactor's bound update, so
+	// this restart lands after StartSession returned and before SendTurn.
+	var once sync.Once
+	stop := s.orchestration.OnEvent(func(event orchestration.Event) {
+		session := event.Payload.Session
+		if event.Type != orchestration.EventThreadSessionStatusSet || event.ThreadID() != threadID || session == nil || session.ProviderGeneration == 0 || session.Status != orchestration.SessionStatusRunning {
+			return
+		}
+		once.Do(func() {
+			if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", fakeACPAgentCommand()), true); err != nil {
+				t.Errorf("provider restart: %v", err)
+			}
+		})
+	})
+	defer stop()
+
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-restart-before-send", ThreadID: threadID, Title: "Restart before send", ProviderInstanceID: "codex", Cwd: t.TempDir()}); err != nil {
+		t.Fatalf("thread.create: %v", err)
+	}
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-restart-before-send", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-restart-before-send", Text: "hello"}}); err != nil {
+		t.Fatalf("thread.turn.start: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		entry, _ := s.orchestration.ThreadListEntry(threadID)
+		if entry.LatestTurn != nil && entry.LatestTurn.State == orchestration.TurnStateCompleted {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	entry, _ := s.orchestration.ThreadListEntry(threadID)
+	t.Fatalf("session = %+v, latest turn = %+v; want the turn completed by the replacement", entry.Session, entry.LatestTurn)
 }
 
 // The replaced process's own cancellation of its permission request is
