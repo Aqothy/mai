@@ -135,8 +135,11 @@ type Service struct {
 	manifestInstanceIDs  map[provider.InstanceID]struct{}
 	pendingManifestSpecs map[provider.InstanceID]provider.InstanceSpec
 	threadRoutes         map[string]threadRoute
-	startLocks           map[provider.InstanceID]*sync.RWMutex
-	openInstance         InstanceFactory
+	// startLocks serialize an instance's launches (held across the launch);
+	// session starts read-lock only to look up the instance, so they wait for
+	// an in-flight launch but never hold up the next one.
+	startLocks   map[provider.InstanceID]*sync.RWMutex
+	openInstance InstanceFactory
 
 	activeEventGenerations map[provider.InstanceID]uint64
 	nextEventGeneration    uint64
@@ -982,12 +985,21 @@ func (s *Service) StartSession(ctx context.Context, threadID string, input provi
 	if route := s.routeForThread(threadID); route.InstanceID != "" && route.InstanceID != input.ProviderInstanceID {
 		_ = s.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: threadID})
 	}
-	lock := s.startLock(input.ProviderInstanceID)
-	lock.RLock()
-	defer lock.RUnlock()
+	for {
+		result, generation, err := s.startSessionOnCurrentInstance(ctx, threadID, input)
+		if generation == 0 || !s.instanceReplaced(input.ProviderInstanceID, generation) {
+			return result, err
+		}
+		// A restart replaced the instance during the start, so the session
+		// would live in a dying process. Start it again on the replacement,
+		// which resumes the native session the route now holds.
+	}
+}
 
-	result, _, _, err := s.startSessionOnCurrentInstance(ctx, threadID, input)
-	return result, err
+func (s *Service) instanceReplaced(instanceID provider.InstanceID, generation uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeEventGenerations[instanceID] != generation
 }
 
 // Provider switching drops the old route before best-effort StopSession. A
@@ -1030,13 +1042,21 @@ func (s *Service) ReleaseSession(ctx context.Context, input provider.StopSession
 	return nil
 }
 
-func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, ProviderInstance, uint64, error) {
+// startSessionOnCurrentInstance starts the thread's session on the instance's
+// current process and binds the route to that process's generation, which it
+// returns once the instance is found (also on error). It waits for an
+// in-flight launch of the instance, so a new session starts on the
+// replacement, but never holds the start lock across the provider call.
+func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, uint64, error) {
+	lock := s.startLock(input.ProviderInstanceID)
+	lock.RLock()
 	instance, generation, err := s.instanceWithGeneration(input.ProviderInstanceID)
+	lock.RUnlock()
 	if err != nil {
-		return provider.StartSessionResult{}, nil, 0, err
+		return provider.StartSessionResult{}, 0, err
 	}
 	if len(input.AdditionalDirectories) > 0 && !instance.Info().Capabilities.AdditionalDirectories {
-		return provider.StartSessionResult{}, nil, 0, fmt.Errorf("provider does not support additional directories")
+		return provider.StartSessionResult{}, generation, fmt.Errorf("provider does not support additional directories")
 	}
 	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
 		if input.ProviderSessionID == "" {
@@ -1068,12 +1088,12 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 		var err error
 		prompts, err = s.promptStore.LoadPrompts(input.ProviderInstanceID, input.ProviderSessionID)
 		if err != nil {
-			return provider.StartSessionResult{}, nil, 0, err
+			return provider.StartSessionResult{}, generation, err
 		}
 	}
 	result, err := instance.StartSession(ctx, input)
 	if err != nil {
-		return provider.StartSessionResult{}, nil, 0, err
+		return provider.StartSessionResult{}, generation, err
 	}
 	info := instance.Info()
 	if result.Session.ProviderSessionID == input.ProviderSessionID {
@@ -1097,13 +1117,13 @@ func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID st
 		result.Session.ThreadID = threadID
 	}
 	if err := s.bindThreadSession(threadID, input.ProviderInstanceID, generation, result.Session.ProviderSessionID, result.Session.ResumeCursor, input); err != nil {
-		return provider.StartSessionResult{}, nil, 0, err
+		return provider.StartSessionResult{}, generation, err
 	}
-	return result, instance, generation, nil
+	return result, generation, nil
 }
 
 func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, "send", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
 		var err error
 		input, err = s.preparePromptPresentation(instance, input)
 		if err != nil {
@@ -1113,7 +1133,12 @@ func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) er
 	})
 }
 
-func (s *Service) withThreadInstance(ctx context.Context, threadID string, recoverStale bool, action string, operation func(ProviderInstance) error) error {
+// withThreadInstance runs operation on the thread's instance without holding
+// the start lock, so a restart neither waits for nor blocks it. An operation
+// that races a restart runs against the replaced process, like one issued just
+// before it. With recoverStale, a route bound to a replaced process first
+// starts its session again on the current one.
+func (s *Service) withThreadInstance(ctx context.Context, threadID string, recoverStale bool, operation func(ProviderInstance) error) error {
 	if threadID == "" {
 		return fmt.Errorf("provider thread route requires threadId")
 	}
@@ -1122,75 +1147,37 @@ func (s *Service) withThreadInstance(ctx context.Context, threadID string, recov
 		if route.InstanceID == "" {
 			return fmt.Errorf("thread %q has no provider session route", threadID)
 		}
-		lock := s.startLock(route.InstanceID)
-		lockedInstanceID := route.InstanceID
-
-		lock.RLock()
-		instance, generation, err := s.instanceWithGeneration(lockedInstanceID)
+		instance, generation, err := s.instanceWithGeneration(route.InstanceID)
 		if err != nil {
-			lock.RUnlock()
 			return err
-		}
-		route = s.routeForThread(threadID)
-		if route.InstanceID == "" {
-			lock.RUnlock()
-			return fmt.Errorf("thread %q has no provider session route", threadID)
-		}
-		if route.InstanceID != lockedInstanceID {
-			lock.RUnlock()
-			return fmt.Errorf("thread %q provider session route changed during %s", threadID, action)
 		}
 		if !recoverStale || route.Generation == 0 || route.Generation == generation {
-			err = operation(instance)
-			lock.RUnlock()
+			return operation(instance)
+		}
+		startInput := cloneStartSessionInput(route.StartInput)
+		if startInput.ThreadID == "" {
+			startInput.ThreadID = threadID
+		}
+		if startInput.ProviderInstanceID == "" {
+			startInput.ProviderInstanceID = route.InstanceID
+		}
+		if len(startInput.ResumeCursor) == 0 && len(route.ResumeCursor) > 0 {
+			startInput.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
+		}
+		if _, _, err := s.startSessionOnCurrentInstance(ctx, threadID, startInput); err != nil {
 			return err
 		}
-		lock.RUnlock()
-
-		lock.Lock()
-		route = s.routeForThread(threadID)
-		if route.InstanceID == "" {
-			lock.Unlock()
-			return fmt.Errorf("thread %q has no provider session route", threadID)
-		}
-		if route.InstanceID != lockedInstanceID {
-			lock.Unlock()
-			return fmt.Errorf("thread %q provider session route changed during %s", threadID, action)
-		}
-		_, generation, err = s.instanceWithGeneration(lockedInstanceID)
-		if err != nil {
-			lock.Unlock()
-			return err
-		}
-		if route.Generation != 0 && route.Generation != generation {
-			startInput := cloneStartSessionInput(route.StartInput)
-			if startInput.ThreadID == "" {
-				startInput.ThreadID = threadID
-			}
-			if startInput.ProviderInstanceID == "" {
-				startInput.ProviderInstanceID = route.InstanceID
-			}
-			if len(startInput.ResumeCursor) == 0 && len(route.ResumeCursor) > 0 {
-				startInput.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
-			}
-			_, _, _, err = s.startSessionOnCurrentInstance(ctx, threadID, startInput)
-			if err != nil {
-				lock.Unlock()
-				return err
-			}
-		}
-		lock.Unlock()
 	}
 }
 
 func (s *Service) InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, "interrupt", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
 		return instance.InterruptTurn(ctx, input)
 	})
 }
 
 func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, "set config option", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
 		if err := instance.SetConfigOption(ctx, input); err != nil {
 			return err
 		}
@@ -1258,9 +1245,8 @@ func (s *Service) CloseOptionsSession(ctx context.Context, instanceID provider.I
 }
 
 // updateRouteStartInput persists a successful live-session preference for a
-// future generation recovery. Callers invoke it inside withThreadInstance's
-// generation read lock, making the provider mutation and recovery state one
-// atomic operation relative to StartInstance.
+// future generation recovery. The reactor serializes a thread's operations,
+// so no recovery of the same thread reads the route in between.
 func (s *Service) updateRouteStartInput(threadID string, instanceID provider.InstanceID, update func(*provider.StartSessionInput)) {
 	s.mu.Lock()
 	route, ok := s.threadRoutes[threadID]
@@ -1277,7 +1263,7 @@ func (s *Service) updateRouteStartInput(threadID string, instanceID provider.Ins
 func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInput) error {
 	// The route outlives the stop: the native session is still the thread's
 	// agent context, so the next turn and a daemon restart resume it.
-	return s.withThreadInstance(ctx, input.ThreadID, false, "stop session", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
 		return instance.StopSession(ctx, input)
 	})
 }
@@ -1285,7 +1271,7 @@ func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInp
 // StopItem never restores a session on a restarted provider: the item's task
 // ended with the process that ran it.
 func (s *Service) StopItem(ctx context.Context, input provider.StopItemInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, false, "stop item", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
 		stopper, ok := instance.(ItemStopper)
 		if !ok {
 			return fmt.Errorf("provider instance %q cannot stop items", instance.Info().InstanceID)
@@ -1298,7 +1284,7 @@ func (s *Service) StopItem(ctx context.Context, input provider.StopItemInput) er
 // provider; a provider without suggestions has none.
 func (s *Service) CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
 	var completions []provider.CommandCompletion
-	err := s.withThreadInstance(ctx, input.ThreadID, false, "complete command", func(instance ProviderInstance) error {
+	err := s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
 		completer, ok := instance.(CommandCompleter)
 		if !ok {
 			return nil
@@ -1311,7 +1297,7 @@ func (s *Service) CompleteCommand(ctx context.Context, input provider.CompleteCo
 }
 
 func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, "respond to request", func(instance ProviderInstance) error {
+	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
 		return instance.RespondToRequest(ctx, input)
 	})
 }

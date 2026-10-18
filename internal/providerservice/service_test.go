@@ -674,6 +674,105 @@ func TestStartSessionWaitsForInFlightRestartBeforeBindingAndSending(t *testing.T
 	}
 }
 
+// A restart must not wait for a slow session start, and while it launches the
+// replacement, other threads keep operating on the running process. The slow
+// start, whose process was replaced under it, ends on the replacement.
+func TestRestartNeitherWaitsForSessionStartsNorBlocksOtherThreads(t *testing.T) {
+	launchEntered, launchRelease := make(chan struct{}), make(chan struct{})
+	startEntered, startRelease := make(chan struct{}), make(chan struct{})
+	adapter := &fakeAdapter{beforeLaunch: blockRestart(launchEntered, launchRelease, nil), configure: func(instance *fakeProviderInstance) {
+		replaced := instance.info.PID == 1
+		instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
+			if replaced && input.ThreadID == "thread-1" {
+				close(startEntered)
+				<-startRelease
+			}
+			cursor := input.ResumeCursor
+			if len(cursor) == 0 {
+				cursor = json.RawMessage(`{"sessionId":"sess-` + input.ThreadID + `"}`)
+			}
+			return provider.Session{ProviderSessionID: "sess-" + input.ThreadID, ThreadID: input.ThreadID, ResumeCursor: cursor}, nil
+		}
+	}}
+	s := newFakeService(t, adapter)
+	mustStartInstance(t, s, fakeSpec("codex"), false)
+	mustStartSession(t, s, "thread-2", provider.StartSessionInput{ProviderInstanceID: "codex"})
+
+	type started struct {
+		result provider.StartSessionResult
+		err    error
+	}
+	slowStart := make(chan started, 1)
+	go func() {
+		result, err := s.StartSession(context.Background(), "thread-1", provider.StartSessionInput{ThreadID: "thread-1", ProviderInstanceID: "codex"})
+		slowStart <- started{result, err}
+	}()
+	waitClosed(t, startEntered, "thread-1's session start did not reach the provider")
+
+	restartDone := make(chan error, 1)
+	go func() {
+		_, err := s.StartInstance(context.Background(), fakeSpec("codex"), true)
+		restartDone <- err
+	}()
+	waitClosed(t, launchEntered, "restart waited for another thread's session start")
+
+	interrupted := make(chan error, 1)
+	go func() {
+		interrupted <- s.InterruptTurn(context.Background(), provider.InterruptTurnInput{ThreadID: "thread-2", TurnID: "turn-2"})
+	}()
+	select {
+	case err := <-interrupted:
+		if err != nil {
+			t.Fatalf("InterruptTurn during restart: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("InterruptTurn on another thread was blocked by the restart")
+	}
+	if got := adapter.instance(0).operationCount("InterruptTurn"); got != 1 {
+		t.Fatalf("running process interrupts = %d, want 1", got)
+	}
+
+	close(launchRelease)
+	if err := <-restartDone; err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	close(startRelease)
+	slow := <-slowStart
+	if slow.err != nil {
+		t.Fatalf("StartSession across restart: %v", slow.err)
+	}
+	// The caller binds the thread to this generation, and ingestion admits
+	// only its events, so it must be the one the replacement's events carry.
+	adapter.emit(1, provider.RuntimeEvent{Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: "thread-1", CreatedAt: time.Now()})
+	select {
+	case event := <-s.Events():
+		if slow.result.Session.Generation != event.Generation {
+			t.Fatalf("session generation = %d, want the replacement's %d", slow.result.Session.Generation, event.Generation)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the replacement's event never arrived")
+	}
+	if err := s.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", Input: "hello"}); err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	replacement := adapter.instance(1)
+	if replacement.startInputCount() != 1 || replacement.sendTurnCount() != 1 || adapter.instance(0).sendTurnCount() != 0 {
+		t.Fatalf("replacement starts=%d sends=%d, replaced sends=%d; want the session started once on the replacement and the turn sent there", replacement.startInputCount(), replacement.sendTurnCount(), adapter.instance(0).sendTurnCount())
+	}
+	if got := string(replacement.lastStartInput().ResumeCursor); got != `{"sessionId":"sess-thread-1"}` {
+		t.Fatalf("replacement resume cursor = %s, want the session the replaced process started", got)
+	}
+}
+
+func waitClosed(t *testing.T, ch <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal(failure)
+	}
+}
+
 func TestSendTurnDoesNotSerializeConcurrentTurnsForSameInstance(t *testing.T) {
 	adapter := &fakeAdapter{}
 	s := startedRoute(t, adapter)
