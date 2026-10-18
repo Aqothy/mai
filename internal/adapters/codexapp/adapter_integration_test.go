@@ -359,15 +359,15 @@ func TestInstanceApprovalResponseUsesStableDecision(t *testing.T) {
 	if opened.RequestID != "approval-1" || opened.Payload.RequestType != provider.RuntimeRequestCommandExecution {
 		t.Fatalf("approval opened = %#v", opened)
 	}
-	// Options use the provider-neutral (ACP) permission kinds.
-	kinds := map[string]string{}
-	for _, option := range opened.Payload.Options {
-		kinds[option.ID] = option.Kind
+	// Each action is named after the Codex decision it sends.
+	decisions := map[string]provider.ApprovalDecision{}
+	for _, action := range opened.Payload.Request.Actions {
+		decisions[action.ID] = action.Decision
 	}
-	if kinds["accept"] != "allow_once" || kinds["acceptForSession"] != "allow_always" || kinds["decline"] != "reject_once" {
-		t.Fatalf("approval option kinds = %v", kinds)
+	if decisions["accept"] != provider.ApprovalDecisionAccept || decisions["acceptForSession"] != provider.ApprovalDecisionAcceptForSession || decisions["decline"] != provider.ApprovalDecisionDecline {
+		t.Fatalf("approval action decisions = %v", decisions)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptForSession"}); err != nil {
+	if err := answerRequest(t, instance, opened, "acceptForSession", nil); err != nil {
 		t.Fatalf("respond to approval: %v", err)
 	}
 	resolved := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -424,10 +424,10 @@ func TestInstanceGrantsRequestedPermissions(t *testing.T) {
 	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventRequestOpened
 	})
-	if opened.Payload.Detail != "Codex asks for network access" || opened.Payload.RequestType != provider.RuntimeRequestCommandExecution || len(opened.Payload.Options) != 3 {
+	if opened.Payload.Request.Message != "Codex asks for network access" || opened.Payload.RequestType != provider.RuntimeRequestCommandExecution || len(opened.Payload.Request.Actions) != 3 {
 		t.Fatalf("permissions request = %#v", opened.Payload)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptForSession"}); err != nil {
+	if err := answerRequest(t, instance, opened, "session", nil); err != nil {
 		t.Fatalf("respond: %v", err)
 	}
 	waitForAcceptedReply(t, events)
@@ -442,11 +442,11 @@ func TestInstanceApprovalOffersProposedRule(t *testing.T) {
 	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventRequestOpened
 	})
-	index := slices.IndexFunc(opened.Payload.Options, func(option provider.ApprovalOption) bool { return option.ID == "acceptWithExecpolicyAmendment" })
-	if index < 0 || opened.Payload.Options[index].Name != "Always allow commands that start with `echo hello`" {
-		t.Fatalf("options = %#v", opened.Payload.Options)
+	rule, ok := opened.Payload.Request.Action("acceptWithExecpolicyAmendment")
+	if !ok || rule.Label != "Always allow commands that start with `echo hello`" {
+		t.Fatalf("actions = %#v", opened.Payload.Request.Actions)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, OptionID: "acceptWithExecpolicyAmendment"}); err != nil {
+	if err := answerRequest(t, instance, opened, "acceptWithExecpolicyAmendment", nil); err != nil {
 		t.Fatalf("respond: %v", err)
 	}
 	waitForAcceptedReply(t, events)
@@ -478,6 +478,17 @@ func TestTurnFailureShowsOnce(t *testing.T) {
 
 // waitForAcceptedReply waits for the fake app-server to complete the turn,
 // which it does only after receiving the reply it expects.
+// answerRequest responds with one of the opened request's own actions, as
+// the engine does.
+func answerRequest(t *testing.T, instance *Instance, opened provider.RuntimeEvent, actionID string, answers map[string][]string) error {
+	t.Helper()
+	action, ok := opened.Payload.Request.Action(actionID)
+	if !ok {
+		t.Fatalf("request %s offers no action %q: %#v", opened.RequestID, actionID, opened.Payload.Request)
+	}
+	return instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: opened.ThreadID, RequestID: opened.RequestID, Action: action, Answers: answers})
+}
+
 func waitForAcceptedReply(t *testing.T, events <-chan provider.RuntimeEvent) {
 	t.Helper()
 	completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -498,10 +509,10 @@ func TestInstanceAnswersMCPElicitation(t *testing.T) {
 	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventRequestOpened
 	})
-	if opened.Payload.UserInput == nil || len(opened.Payload.UserInput.Questions) != 1 {
+	if opened.Payload.Request == nil || len(opened.Payload.Request.Questions) != 1 {
 		t.Fatalf("elicitation opened = %#v", opened.Payload)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"confirmed": {"true"}}}); err != nil {
+	if err := answerRequest(t, instance, opened, "accept", map[string][]string{"confirmed": {"true"}}); err != nil {
 		t.Fatalf("respond to elicitation: %v", err)
 	}
 	resolved := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -524,20 +535,20 @@ func TestInstanceAsksMCPToolApprovalAsPermission(t *testing.T) {
 	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventRequestOpened
 	})
-	if opened.Payload.UserInput != nil {
-		t.Fatalf("tool approval opened as a question: %#v", opened.Payload.UserInput)
+	if len(opened.Payload.Request.Questions) != 0 {
+		t.Fatalf("tool approval asks questions: %#v", opened.Payload.Request.Questions)
 	}
-	var options []string
-	for _, option := range opened.Payload.Options {
-		options = append(options, option.ID+"="+option.Name)
+	var actions []string
+	for _, action := range opened.Payload.Request.Actions {
+		actions = append(actions, action.ID+"="+action.Label)
 	}
-	if want := []string{"accept=Allow", "persist:session=Allow for this session", "persist:always=Always allow", "decline=Decline"}; !slices.Equal(options, want) {
-		t.Fatalf("options = %v, want %v", options, want)
+	if want := []string{"accept=Allow", "persist:session=Allow for this session", "persist:always=Always allow", "decline=Decline"}; !slices.Equal(actions, want) {
+		t.Fatalf("actions = %v, want %v", actions, want)
 	}
 	if !strings.Contains(string(opened.Payload.Args), `run tool \"search\"?`) {
 		t.Fatalf("args = %s, want the request's message", opened.Payload.Args)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAcceptForSession, OptionID: "persist:session"}); err != nil {
+	if err := answerRequest(t, instance, opened, "persist:session", nil); err != nil {
 		t.Fatalf("respond to tool approval: %v", err)
 	}
 	resolved := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -582,7 +593,7 @@ func TestInstanceServerResolvedNotificationClearsApproval(t *testing.T) {
 	if !resolved.Payload.Cancelled {
 		t.Fatalf("server-resolved approval was not marked cancelled: %#v", resolved.Payload)
 	}
-	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
+	if err := answerRequest(t, instance, opened, "accept", nil); err == nil {
 		t.Fatal("responding to a server-resolved approval unexpectedly succeeded")
 	}
 }

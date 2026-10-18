@@ -491,9 +491,17 @@ func (r *ProviderEventReactor) handleApprovalResponse(event Event) {
 	}
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
-	// The decision was validated (and defaulted) by the engine's decider before
-	// the event was appended, so it passes through as-is.
-	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Decision: event.Payload.Decision, OptionID: event.Payload.OptionID, Answers: event.Payload.Answers}); err != nil {
+	// The engine checked the action against the request before appending the
+	// response; it is gone only if the provider reopened the request with
+	// other actions since, and then the answer no longer applies.
+	if view.Approval.Request == nil {
+		return
+	}
+	action, ok := view.Approval.Request.Action(event.Payload.ActionID)
+	if !ok {
+		return
+	}
+	if err := r.provider.RespondToRequest(ctx, provider.RespondToRequestInput{ThreadID: string(threadID), RequestID: view.Approval.RequestID, Action: action, Answers: event.Payload.Answers}); err != nil {
 		r.appendErrorItem(threadID, view.Approval.TurnID, err.Error())
 	}
 }

@@ -160,11 +160,8 @@
           "type": "string"
         },
         "args": true,
-        "options": {
-          "items": {
-            "$ref": "#/$defs/ApprovalOption"
-          },
-          "type": "array"
+        "request": {
+          "$ref": "#/$defs/Request"
         },
         "status": {
           "type": "string"
@@ -172,11 +169,8 @@
         "decision": {
           "type": "string"
         },
-        "optionId": {
+        "actionId": {
           "type": "string"
-        },
-        "userInput": {
-          "$ref": "#/$defs/UserInputRequest"
         },
         "answers": {
           "additionalProperties": {
@@ -218,26 +212,17 @@
           "type": "string"
         },
         "args": true,
-        "options": {
-          "items": {
-            "$ref": "#/$defs/ApprovalOption"
-          },
-          "type": "array"
-        },
-        "detail": {
-          "type": "string"
+        "request": {
+          "$ref": "#/$defs/Request"
         },
         "decision": {
           "type": "string"
         },
-        "optionId": {
+        "actionId": {
           "type": "string"
         },
         "cancelled": {
           "type": "boolean"
-        },
-        "userInput": {
-          "$ref": "#/$defs/UserInputRequest"
         },
         "answers": {
           "additionalProperties": {
@@ -255,26 +240,6 @@
         "requestId"
       ],
       "title": "ApprovalEvent"
-    },
-    "ApprovalOption": {
-      "properties": {
-        "optionId": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "optionId",
-        "name"
-      ],
-      "title": "ApprovalOption"
     },
     "Attachment": {
       "properties": {
@@ -508,10 +473,7 @@
         "requestId": {
           "type": "string"
         },
-        "decision": {
-          "type": "string"
-        },
-        "optionId": {
+        "actionId": {
           "type": "string"
         },
         "answers": {
@@ -522,6 +484,9 @@
             "type": "array"
           },
           "type": "object"
+        },
+        "optionId": {
+          "type": "string"
         },
         "value": true,
         "configSelections": {
@@ -851,6 +816,9 @@
           "type": "string"
         },
         "decision": {
+          "type": "string"
+        },
+        "actionId": {
           "type": "string"
         },
         "optionId": {
@@ -1453,7 +1421,7 @@
           "type": "string"
         },
         "request": {
-          "$ref": "#/$defs/UserInputRequest"
+          "$ref": "#/$defs/Request"
         }
       },
       "additionalProperties": false,
@@ -1470,7 +1438,7 @@
         "requestId": {
           "type": "string"
         },
-        "decision": {
+        "actionId": {
           "type": "string"
         },
         "answers": {
@@ -1487,7 +1455,7 @@
       "type": "object",
       "required": [
         "requestId",
-        "decision"
+        "actionId"
       ],
       "title": "ProviderQuestionAnswerParams"
     },
@@ -1625,6 +1593,58 @@
         "createdAt"
       ],
       "title": "QueuedPrompt"
+    },
+    "Request": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/Question"
+          },
+          "type": "array"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/RequestAction"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "actions"
+      ],
+      "title": "Request"
+    },
+    "RequestAction": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "submit": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "decision"
+      ],
+      "title": "RequestAction"
     },
     "SessionBinding": {
       "properties": {
@@ -2565,28 +2585,6 @@
       ],
       "title": "Turn"
     },
-    "UserInputRequest": {
-      "properties": {
-        "message": {
-          "type": "string"
-        },
-        "questions": {
-          "items": {
-            "$ref": "#/$defs/Question"
-          },
-          "type": "array"
-        },
-        "url": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "message"
-      ],
-      "title": "UserInputRequest"
-    },
     "WorkspaceBrowseDirectoriesParams": {
       "properties": {
         "path": {
@@ -2826,8 +2824,8 @@
         "goal": {
           "$ref": "#/$defs/Goal"
         },
-        "approvalOption": {
-          "$ref": "#/$defs/ApprovalOption"
+        "requestAction": {
+          "$ref": "#/$defs/RequestAction"
         },
         "providerStartParams": {
           "$ref": "#/$defs/ProviderStartParams"
@@ -2984,7 +2982,7 @@
         "skill",
         "tokenUsage",
         "goal",
-        "approvalOption",
+        "requestAction",
         "providerStartParams",
         "acpRegistryStartParams",
         "providerAuthenticateParams",

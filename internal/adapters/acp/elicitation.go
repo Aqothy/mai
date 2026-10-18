@@ -27,12 +27,12 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		return schema.CreateElicitationResponse{}, acp.InvalidParamsError(err)
 	}
 	_ = json.Unmarshal(params, &raw)
-	input, form, err := elicitation.Parse(req.Message, req.Mode, stringValue(req.URL), raw.RequestedSchema)
+	asked, form, err := elicitation.Parse(req.Message, req.Mode, stringValue(req.URL), raw.RequestedSchema)
 	if err != nil {
 		return schema.CreateElicitationResponse{}, acp.InvalidParamsError(err)
 	}
 	if req.SessionID == nil {
-		return h.askDuringSignIn(ctx, input, form), nil
+		return h.askDuringSignIn(ctx, asked, form), nil
 	}
 	sessionID := string(*req.SessionID)
 	// Like permission requests, re-enter the session's ordered stream first so
@@ -44,10 +44,14 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 	}
 	state := h.permissionRequestState(sessionID)
 	requestID := "elicitation:" + state.threadID + ":" + newID()
-	requestCtx, cancel, pending := h.beginPermissionRequest(ctx, sessionID, requestID, nil)
+	requestCtx, cancel, pending := h.beginPermissionRequest(ctx, sessionID, requestID)
 	defer cancel()
 	defer h.endPermissionRequest(sessionID, requestID, pending)
-	pending.form = form
+	pending.elicitation, pending.form = true, form
+	payload := provider.RuntimeEventPayload{Request: &asked}
+	if form.Confirms() {
+		payload.Args = append(json.RawMessage(nil), params...)
+	}
 	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Provider:  DriverKind,
@@ -56,20 +60,18 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		Type:      provider.RuntimeEventRequestOpened,
 		RequestID: requestID,
 		CreatedAt: time.Now(),
-		Payload:   elicitation.RequestPayload(input, form, params),
+		Payload:   payload,
 	})
 
-	response := approvalResponse{decision: provider.ApprovalDecisionCancel}
+	var response approvalResponse
 	select {
 	case response = <-pending.ch:
 	case <-requestCtx.Done():
 	}
-	action := elicitation.ActionFor(response.decision)
-	response.decision = action.Decision()
-	if action != elicitation.ActionAccept {
-		response.answers = nil
+	if response.action.ID == "" {
+		response = approvalResponse{action: provider.RequestAction{Decision: provider.ApprovalDecisionCancel}, elicited: elicitation.ActionCancel}
 	}
-	resp := elicitationResponse(action, response.content)
+	resp := elicitationResponse(response.elicited, response.content)
 	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Provider:  DriverKind,
@@ -79,8 +81,9 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		RequestID: requestID,
 		CreatedAt: time.Now(),
 		Payload: provider.RuntimeEventPayload{
-			Decision:  response.decision,
-			Cancelled: action == elicitation.ActionCancel,
+			Decision:  response.action.Decision,
+			ActionID:  response.action.ID,
+			Cancelled: response.elicited == elicitation.ActionCancel,
 			Answers:   response.answers,
 		},
 	})
@@ -90,7 +93,7 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 // askDuringSignIn shows a request-scoped elicitation (one with no session,
 // e.g. while authenticate runs) through the sign-in in progress. With no
 // sign-in to ask on, nobody can answer it, so it is cancelled.
-func (h *Instance) askDuringSignIn(ctx context.Context, input provider.UserInputRequest, form *elicitation.Form) schema.CreateElicitationResponse {
+func (h *Instance) askDuringSignIn(ctx context.Context, asked provider.Request, form *elicitation.Form) schema.CreateElicitationResponse {
 	h.mu.Lock()
 	ask := h.signInAsk
 	h.mu.Unlock()
@@ -98,18 +101,15 @@ func (h *Instance) askDuringSignIn(ctx context.Context, input provider.UserInput
 	if ask == nil {
 		return cancelled
 	}
-	answer, err := ask(ctx, input)
+	answer, err := ask(ctx, asked)
 	if err != nil {
 		return cancelled
 	}
-	action := elicitation.ActionFor(answer.Decision)
-	var content map[string]any
-	if action == elicitation.ActionAccept && form != nil {
-		if content, err = form.Content(answer.Answers); err != nil {
-			return cancelled
-		}
+	elicited, content, err := elicitation.Answer(form, answer.Action, answer.Answers)
+	if err != nil {
+		return cancelled
 	}
-	return elicitationResponse(action, content)
+	return elicitationResponse(elicited, content)
 }
 
 func elicitationResponse(action elicitation.Action, content map[string]any) schema.CreateElicitationResponse {

@@ -130,7 +130,7 @@ type Instance struct {
 	sessionsByThread map[string]string
 
 	// signInAsk answers request-scoped elicitations while authenticate runs.
-	signInAsk func(context.Context, provider.UserInputRequest) (provider.UserInputAnswer, error)
+	signInAsk func(context.Context, provider.Request) (provider.RequestAnswer, error)
 
 	runtimeEventListener provider.RuntimeEventListener
 	once                 sync.Once

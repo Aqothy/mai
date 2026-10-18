@@ -92,7 +92,7 @@ type CommandCompletion = provider.CommandCompletion
 type Skill = provider.Skill
 type TokenUsage = provider.TokenUsage
 type Goal = provider.Goal
-type ApprovalOption = provider.ApprovalOption
+type RequestAction = provider.RequestAction
 
 // ProviderStartParams starts a configured provider. Config is adapter-owned
 // JSON and is intentionally unconstrained by the shared contract.
@@ -132,15 +132,17 @@ type ACPCustomAgentAddParams struct {
 // outside any thread. It goes to the client whose sign-in is running, which
 // answers it with provider.question.answer before the sign-in can finish.
 type ProviderQuestion struct {
-	InstanceID provider.InstanceID       `json:"instanceId"`
-	RequestID  string                    `json:"requestId"`
-	Request    provider.UserInputRequest `json:"request"`
+	InstanceID provider.InstanceID `json:"instanceId"`
+	RequestID  string              `json:"requestId"`
+	Request    provider.Request    `json:"request"`
 }
 
+// ProviderQuestionAnswerParams answers a ProviderQuestion with one of its
+// request's actions, and Answers its questions when the action submits them.
 type ProviderQuestionAnswerParams struct {
-	RequestID string                    `json:"requestId"`
-	Decision  provider.ApprovalDecision `json:"decision"`
-	Answers   map[string][]string       `json:"answers,omitempty"`
+	RequestID string              `json:"requestId"`
+	ActionID  string              `json:"actionId"`
+	Answers   map[string][]string `json:"answers,omitempty"`
 }
 
 type ProviderAuthenticateParams struct {

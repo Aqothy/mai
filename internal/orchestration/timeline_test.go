@@ -79,7 +79,6 @@ func (p *Projection) Thread(id ThreadID) (Thread, bool) {
 		if entry.Approval != nil {
 			approval := *entry.Approval
 			approval.Args = cloneRawMessage(entry.Approval.Args)
-			approval.Options = append([]provider.ApprovalOption(nil), entry.Approval.Options...)
 			clone.Timeline[i].Approval = &approval
 		}
 	}

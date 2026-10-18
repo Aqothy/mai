@@ -261,7 +261,10 @@ func setupApprovalThread(t *testing.T, engine *Engine, threadID ThreadID, withSe
 	if withSession {
 		mustAppend(t, engine, EventInput{Type: EventThreadSessionStatusSet, ThreadID: threadID, Payload: EventPayload{Session: &SessionBinding{ProviderInstanceID: "codex", Status: SessionStatusRunning, ActiveTurnID: "turn-approval"}}})
 	}
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1", TurnID: "turn-approval", Options: []provider.ApprovalOption{{ID: "allow"}, {ID: "reject"}}}}})
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: "approval-1", TurnID: "turn-approval", Request: &provider.Request{Actions: []provider.RequestAction{
+		{ID: "allow", Decision: provider.ApprovalDecisionAccept},
+		{ID: "reject", Decision: provider.ApprovalDecisionDecline},
+	}}}}})
 }
 
 func waitForReactorIdle(t *testing.T, reactor *ProviderEventReactor, threadID ThreadID) {
@@ -984,8 +987,7 @@ func TestReactorApprovalResponseFailureCreatesTurnScopedError(t *testing.T) {
 		CommandID: "respond-failed-approval",
 		ThreadID:  threadID,
 		RequestID: "approval-1",
-		Decision:  provider.ApprovalDecisionDecline,
-		OptionID:  "reject",
+		ActionID:  "reject",
 	}); err != nil {
 		t.Fatalf("thread.approval.respond: %v", err)
 	}
@@ -1010,7 +1012,7 @@ func TestReactorDoesNotForwardApprovalResponseWithoutSession(t *testing.T) {
 	threadID := ThreadID("thread-sessionless-approval")
 	setupApprovalThread(t, engine, threadID, false)
 
-	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "respond-sessionless-approval", ThreadID: threadID, RequestID: "approval-1", Decision: provider.ApprovalDecisionAccept, OptionID: "allow"})
+	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "respond-sessionless-approval", ThreadID: threadID, RequestID: "approval-1", ActionID: "allow"})
 	waitForReactorIdle(t, reactor, threadID)
 	if calls := fake.respondCallCount(); calls != 0 {
 		t.Fatalf("RespondToRequest calls = %d, want none without a provider session", calls)

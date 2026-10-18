@@ -797,7 +797,7 @@ func TestPermissionOpenWaitsForPriorSessionUpdates(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("approval was not published after the prior update drained")
 	}
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Action: provider.RequestAction{ID: "allow", Decision: provider.ApprovalDecisionAccept}}); err != nil {
 		t.Fatalf("RespondToRequest: %v", err)
 	}
 	resp := waitFor(t, permissionDone, "permission response did not complete")
@@ -837,7 +837,7 @@ func TestTerminalToolUpdateCancelsPendingPermission(t *testing.T) {
 		close(handled)
 	}()
 	<-terminalPublished
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Action: provider.RequestAction{ID: "allow", Decision: provider.ApprovalDecisionAccept}}); err == nil {
 		t.Fatal("RespondToRequest accepted approval after the terminal tool event was published")
 	}
 	close(releaseTerminal)
@@ -878,7 +878,7 @@ func TestTerminalToolUpdateOverridesQueuedApproval(t *testing.T) {
 
 	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	requestID := <-opened
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Action: provider.RequestAction{ID: "allow", Decision: provider.ApprovalDecisionAccept}}); err != nil {
 		t.Fatalf("RespondToRequest before terminal update: %v", err)
 	}
 	handled := make(chan struct{})
@@ -910,7 +910,7 @@ func TestPermissionCancelsWhenToolSettledBeforeRequestRegistration(t *testing.T)
 
 	done := requestPermissionAsync(context.Background(), h, "tool_1")
 	requestID := <-opened
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Action: provider.RequestAction{ID: "allow", Decision: provider.ApprovalDecisionAccept}}); err == nil {
 		t.Fatal("RespondToRequest accepted an approval for an already-settled tool")
 	}
 	close(releaseOpened)
@@ -945,7 +945,7 @@ func TestPermissionAnswerableAfterToolCallIDReusedInSameTurn(t *testing.T) {
 		t.Fatalf("re-opened permission auto-resolved as %#v, want it to wait for the client", resp.Outcome)
 	case <-time.After(50 * time.Millisecond):
 	}
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Action: provider.RequestAction{ID: "allow", Decision: provider.ApprovalDecisionAccept}}); err != nil {
 		t.Fatalf("RespondToRequest for re-opened permission: %v", err)
 	}
 	resp := waitFor(t, done, "re-opened permission was not resolved by the client answer")
@@ -988,37 +988,35 @@ func TestDuplicatePermissionRequestKeepsCancelRegistration(t *testing.T) {
 	}
 }
 
-func TestRespondToRequestSelectsExplicitOptionOrDecisionFallback(t *testing.T) {
-	h, opened := newPermissionTestInstance()
-	request := func(toolCallID string, options []schema.PermissionOption) (string, <-chan schema.RequestPermissionResponse) {
-		t.Helper()
-		done := make(chan schema.RequestPermissionResponse, 1)
-		go func() {
-			resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: schema.ToolCallId(toolCallID)}, Options: options})
-			done <- resp
-		}()
-		return <-opened, done
+// The agent's options are the request's actions, deciding by their kind; the
+// chosen one is the option the agent gets, and the resolution records it.
+func TestPermissionOptionsAreTheRequestsActions(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 4)
+	h := newInstance(func(event provider.RuntimeEvent) { events <- event })
+	bindTestSession(h, "thread-1", "sess").collector = &promptCollector{threadID: "thread-1", turnID: "turn-1"}
+	done := make(chan schema.RequestPermissionResponse, 1)
+	go func() {
+		resp, _ := h.requestPermission(context.Background(), schema.RequestPermissionRequest{SessionID: "sess", ToolCall: schema.ToolCallUpdate{ToolCallID: "tool_1"}, Options: permissionOptionsWithAllowAlways()})
+		done <- resp
+	}()
+	opened := waitFor(t, events, "permission request was not opened")
+	var actions []string
+	for _, action := range opened.Payload.Request.Actions {
+		actions = append(actions, action.ID+"="+string(action.Decision))
 	}
-
-	requestID, done := request("tool_1", permissionOptionsWithAllowAlways())
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "no-such-option"}); err == nil {
-		t.Fatal("RespondToRequest with unknown optionId err = nil, want rejection while request stays pending")
+	if want := []string{"allow-once=accept", "allow-always=acceptForSession", "reject=decline"}; !slices.Equal(actions, want) {
+		t.Fatalf("actions = %v, want %v", actions, want)
 	}
-	// The accept decision alone would map to allow-once; the explicitly
-	// selected option must win over the kind-based mapping.
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "allow-always"}); err != nil {
+	always, _ := opened.Payload.Request.Action("allow-always")
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: opened.RequestID, Action: always}); err != nil {
 		t.Fatalf("RespondToRequest: %v", err)
 	}
 	if resp := <-done; selectedOption(resp) != "allow-always" {
 		t.Fatalf("permission outcome = %#v, want selected allow-always", resp.Outcome)
 	}
-
-	requestID, done = request("tool_2", permissionOptions())
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: requestID, Decision: provider.ApprovalDecisionDecline}); err != nil {
-		t.Fatalf("RespondToRequest with decision fallback: %v", err)
-	}
-	if resp := <-done; selectedOption(resp) != "reject" {
-		t.Fatalf("permission outcome = %#v, want decline mapped to reject", resp.Outcome)
+	resolved := waitFor(t, events, "permission request was not resolved")
+	if resolved.Payload.ActionID != "allow-always" || resolved.Payload.Decision != provider.ApprovalDecisionAcceptForSession {
+		t.Fatalf("resolution = %#v, want allow-always for the session", resolved.Payload)
 	}
 }
 

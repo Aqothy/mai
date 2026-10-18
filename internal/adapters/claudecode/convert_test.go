@@ -176,30 +176,27 @@ func TestPermissionResponseDecisions(t *testing.T) {
 		input:       json.RawMessage(`{"command":"echo hi"}`),
 		suggestions: []json.RawMessage{json.RawMessage(`{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"echo *"}],"behavior":"allow","destination":"localSettings"}`)},
 	}
-	payload, decision := permissionResponse(pending, "accept")
-	if decision != provider.ApprovalDecisionAccept || payload["behavior"] != "allow" {
-		t.Fatalf("accept payload = %#v decision = %q", payload, decision)
+	payload := permissionResponse(pending, "accept")
+	if payload["behavior"] != "allow" {
+		t.Fatalf("accept payload = %#v", payload)
 	}
-	payload, decision = permissionResponse(pending, "acceptForSession")
-	if decision != provider.ApprovalDecisionAcceptForSession {
-		t.Fatalf("decision = %q", decision)
-	}
+	payload = permissionResponse(pending, "acceptForSession")
 	updates := payload["updatedPermissions"].([]map[string]any)
 	if len(updates) != 1 || updates[0]["destination"] != "session" {
 		t.Fatalf("updates = %#v, want session destination (never persisted to settings files)", updates)
 	}
-	payload, decision = permissionResponse(pending, "decline")
-	if decision != provider.ApprovalDecisionDecline || payload["behavior"] != "deny" {
+	payload = permissionResponse(pending, "decline")
+	if payload["behavior"] != "deny" || payload["interrupt"] == true {
 		t.Fatalf("decline payload = %#v", payload)
 	}
-	payload, decision = permissionResponse(pending, "cancel")
-	if decision != provider.ApprovalDecisionCancel || payload["interrupt"] != true {
+	payload = permissionResponse(pending, "cancel")
+	if payload["interrupt"] != true {
 		t.Fatalf("cancel payload = %#v", payload)
 	}
 
 	// Without CLI suggestions there is no rule to approve: the CLI ignores a
 	// made-up whole-tool rule, so none is sent.
-	payload, _ = permissionResponse(&pendingApproval{input: json.RawMessage(`{}`)}, "acceptForSession")
+	payload = permissionResponse(&pendingApproval{input: json.RawMessage(`{}`)}, "acceptForSession")
 	if updates := payload["updatedPermissions"].([]map[string]any); len(updates) != 0 {
 		t.Fatalf("updates = %#v, want none", updates)
 	}
@@ -219,8 +216,7 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 	}
 	pending := &pendingApproval{input: input, question: &question}
 	respond := func(answers map[string][]string) (map[string]any, error) {
-		payload, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: answers})
-		return payload, err
+		return approvalResponse(pending, provider.RespondToRequestInput{Action: question.request().Actions[0], Answers: answers})
 	}
 	if _, err := respond(map[string][]string{"Which one?": {"B"}}); err == nil {
 		t.Fatal("an unanswered question was sent")
@@ -236,29 +232,29 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 }
 
 // ExitPlanMode's review approves the plan, or keeps planning and hands the
-// user's typed feedback to the model as the deny message. An answer resolves
-// the question as accepted so the chat keeps it; declining stays a decline.
+// user's typed feedback, if any, to the model as the deny message.
 func TestPlanReviewResponse(t *testing.T) {
 	pending := &pendingApproval{input: json.RawMessage(`{"plan":"Do it"}`), reviewsPlan: true}
+	review := planReviewRequest(pending.input)
 	tests := []struct {
-		name         string
-		decision     provider.ApprovalDecision
-		answer       []string
-		want         map[string]any
-		wantDecision provider.ApprovalDecision
-		wantErr      bool
+		name     string
+		action   string
+		feedback []string
+		want     map[string]any
 	}{
-		{"approve", provider.ApprovalDecisionAccept, []string{planApprove}, map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(`{"plan":"Do it"}`)}, provider.ApprovalDecisionAccept, false},
-		{"keep planning", provider.ApprovalDecisionAccept, []string{planKeepPlanning}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning."}, provider.ApprovalDecisionAccept, false},
-		{"feedback", provider.ApprovalDecisionAccept, []string{"Add tests first"}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning. Their feedback on the plan: Add tests first"}, provider.ApprovalDecisionAccept, false},
-		{"approve with feedback", provider.ApprovalDecisionAccept, []string{planApprove, "Add tests first"}, nil, "", true},
-		{"decline", provider.ApprovalDecisionDecline, nil, map[string]any{"behavior": "deny", "message": "The user declined this action."}, provider.ApprovalDecisionDecline, false},
+		{"approve", planApprove, nil, map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(`{"plan":"Do it"}`)}},
+		{"keep planning", planKeepPlanning, nil, map[string]any{"behavior": "deny", "message": "The user wants to keep planning."}},
+		{"feedback", planKeepPlanning, []string{"Add tests first"}, map[string]any{"behavior": "deny", "message": "The user wants to keep planning. Their feedback on the plan: Add tests first"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload, decision, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: tt.decision, Answers: map[string][]string{planReviewQuestionID: tt.answer}})
-			if (err != nil) != tt.wantErr || !reflect.DeepEqual(payload, tt.want) || decision != tt.wantDecision {
-				t.Fatalf("payload = %#v, decision = %q, err = %v; want %#v, %q", payload, decision, err, tt.want, tt.wantDecision)
+			action, ok := review.Action(tt.action)
+			if !ok {
+				t.Fatalf("the review offers no %q action", tt.action)
+			}
+			payload, err := approvalResponse(pending, provider.RespondToRequestInput{Action: action, Answers: map[string][]string{planFeedbackQuestionID: tt.feedback}})
+			if err != nil || !reflect.DeepEqual(payload, tt.want) {
+				t.Fatalf("payload = %#v, err = %v; want %#v", payload, err, tt.want)
 			}
 		})
 	}
@@ -266,19 +262,26 @@ func TestPlanReviewResponse(t *testing.T) {
 
 // An MCP server's elicitation is answered with the SDK's {action, content}.
 func TestElicitationResponse(t *testing.T) {
-	_, form, err := elicitation.Parse("Name?", "", "", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+	request, form, err := elicitation.Parse("Name?", "", "", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	pending := &pendingApproval{isElicitation: true, form: form}
-	if _, _, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept}); err == nil {
+	respond := func(actionID string, answers map[string][]string) (map[string]any, error) {
+		action, ok := request.Action(actionID)
+		if !ok {
+			t.Fatalf("the form offers no %q action", actionID)
+		}
+		return approvalResponse(pending, provider.RespondToRequestInput{Action: action, Answers: answers})
+	}
+	if _, err := respond("accept", nil); err == nil {
 		t.Fatal("a missing required answer was sent")
 	}
-	payload, decision, err := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"name": {"maiD"}}})
-	if err != nil || decision != provider.ApprovalDecisionAccept || !reflect.DeepEqual(payload, map[string]any{"action": elicitation.ActionAccept, "content": map[string]any{"name": "maiD"}}) {
-		t.Fatalf("payload = %#v, %v, %v", payload, decision, err)
+	payload, err := respond("accept", map[string][]string{"name": {"maiD"}})
+	if err != nil || !reflect.DeepEqual(payload, map[string]any{"action": elicitation.ActionAccept, "content": map[string]any{"name": "maiD"}}) {
+		t.Fatalf("payload = %#v, %v", payload, err)
 	}
-	if payload, _, _ := approvalResponse(pending, provider.RespondToRequestInput{Decision: provider.ApprovalDecisionDecline}); payload["action"] != elicitation.ActionDecline {
+	if payload, _ := respond("decline", nil); payload["action"] != elicitation.ActionDecline {
 		t.Fatalf("decline payload = %#v", payload)
 	}
 }

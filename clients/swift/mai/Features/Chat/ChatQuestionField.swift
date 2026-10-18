@@ -3,7 +3,7 @@ import SwiftUI
 /// One question of an agent's form: options to pick from, or a value to enter.
 struct ChatQuestionField: View {
     let question: Question
-    let model: ChatQuestionModel
+    let model: ChatRequestModel
 
     var body: some View {
         VStack(alignment: .leading) {

@@ -28,7 +28,6 @@ extension Command {
         configSelections: [ConfigOptionSelection]?,
         createdAt: Date?,
         cwd: String?,
-        decision: String?,
         message: CommandMessage?,
         modelSelection: ModelSelection?,
         optionID: String?,
@@ -41,13 +40,13 @@ extension Command {
         value: JSONAny?
     ) {
         self.init(
+            actionID: nil,
             additionalDirectories: nil,
             answers: nil,
             commandID: commandID,
             configSelections: configSelections,
             createdAt: createdAt,
             cwd: cwd,
-            decision: decision,
             itemID: nil,
             message: message,
             messageID: nil,
@@ -100,6 +99,7 @@ extension EventPayload {
         value: JSONAny?
     ) {
         self.init(
+            actionID: nil,
             additionalDirectories: nil,
             annotations: nil,
             answers: nil,

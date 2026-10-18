@@ -45,9 +45,9 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 	}
 
 	request := waitFor(t, opened, "elicitation was not surfaced")
-	input := request.Payload.UserInput
+	input := request.Payload.Request
 	if input == nil || input.Message != "How should I refactor?" {
-		t.Fatalf("request = %#v, want a user-input request with the message", request.Payload)
+		t.Fatalf("request = %#v, want a request with the message", request.Payload)
 	}
 	var kinds []string
 	for _, question := range input.Questions {
@@ -59,7 +59,7 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 
 	answer := func(count string) error {
 		return h.RespondToRequest(context.Background(), provider.RespondToRequestInput{
-			ThreadID: "thread-1", RequestID: request.RequestID, Decision: provider.ApprovalDecisionAccept,
+			ThreadID: "thread-1", RequestID: request.RequestID, Action: input.Actions[0],
 			Answers: map[string][]string{"strategy": {"balanced"}, "count": {count}, "confirm": {"false"}, "tags": {"a", "b"}},
 		})
 	}
@@ -101,7 +101,8 @@ func TestElicitationOutsideTurnIsAnswerable(t *testing.T) {
 	}})
 
 	request := waitFor(t, opened, "question outside a turn was not shown")
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: request.RequestID, Decision: provider.ApprovalDecisionDecline}); err != nil {
+	decline, _ := request.Payload.Request.Action("decline")
+	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: request.RequestID, Action: decline}); err != nil {
 		t.Fatalf("RespondToRequest: %v", err)
 	}
 	if reply := waitFor(t, agent.responses, "agent got no reply"); string(reply.Result) != `{"action":"decline"}` {

@@ -3,15 +3,20 @@ import Testing
 
 @testable import mai
 
-struct ChatQuestionModelTests {
-    private func request(_ json: String) throws -> UserInputRequest {
-        try newJSONDecoder().decode(UserInputRequest.self, from: Data(json.utf8))
+struct ChatRequestModelTests {
+    private static let submit = RequestAction(decision: MaidApprovalDecision.accept.rawValue, id: "accept", label: "Submit", submit: true)
+
+    /// The request in the JSON, answered by one action that submits.
+    private func request(_ json: String) throws -> Request {
+        var request = try newJSONDecoder().decode(Request.self, from: Data(json.utf8))
+        request.actions = [Self.submit]
+        return request
     }
 
     @Test
     func defaultsPrefillAndAnswersKeepOptionOrder() throws {
-        let model = ChatQuestionModel(request: try request("""
-            {"message":"Configure","questions":[
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Configure","questions":[
               {"id":"tags","kind":"choice","multiSelect":true,"default":["b"],
                "options":[{"value":"a","label":"A"},{"value":"b","label":"B"},{"value":"c","label":"C"}]},
               {"id":"name","kind":"text","default":["maiD"]}
@@ -22,19 +27,19 @@ struct ChatQuestionModelTests {
         model.toggle(tags.options![2], in: tags)
         model.toggle(tags.options![0], in: tags)
         #expect(model.answers == ["tags": ["a", "b", "c"], "name": ["maiD"]])
-        #expect(model.canSubmit)
+        #expect(model.canChoose(Self.submit))
     }
 
     @Test
     func requiredAndNumericAnswersBlockSubmit() throws {
-        let model = ChatQuestionModel(request: try request("""
-            {"message":"Count","questions":[{"id":"count","kind":"integer","required":true}]}
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Count","questions":[{"id":"count","kind":"integer","required":true}]}
             """), send: { _, _ in })
         let count = model.questions[0]
         #expect(model.validationMessage(for: count) != nil)
 
         model.setTextAnswer("2.5", for: count)
-        #expect(!model.canSubmit)
+        #expect(!model.canChoose(Self.submit))
 
         model.setTextAnswer(" 3 ", for: count)
         #expect(model.validationMessage(for: count) == nil)
@@ -43,8 +48,8 @@ struct ChatQuestionModelTests {
 
     @Test
     func typedAnswerReplacesSingleChoice() throws {
-        let model = ChatQuestionModel(request: try request("""
-            {"message":"Pick","questions":[{"id":"q","kind":"choice","allowsFreeText":true,"required":true,
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Pick","questions":[{"id":"q","kind":"choice","allowsFreeText":true,"required":true,
               "options":[{"value":"A","label":"A"},{"value":"B","label":"B"}]}]}
             """), send: { _, _ in })
         let question = model.questions[0]
@@ -58,8 +63,8 @@ struct ChatQuestionModelTests {
 
     @Test
     func submittedAnswersShowOptionLabels() throws {
-        let model = ChatQuestionModel(request: try request("""
-            {"message":"Pick","questions":[
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Pick","questions":[
               {"id":"color","kind":"choice","title":"Color","options":[{"value":"b","label":"Blue"}]},
               {"id":"note","kind":"text"}
             ]}
@@ -71,7 +76,7 @@ struct ChatQuestionModelTests {
 
     @Test
     func urlRequestsOnlyAcceptWebLinks() throws {
-        #expect(ChatQuestionModel(request: try request(#"{"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
-        #expect(ChatQuestionModel(request: try request(#"{"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)
+        #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
+        #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)
     }
 }

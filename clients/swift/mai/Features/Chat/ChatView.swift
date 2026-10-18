@@ -2275,14 +2275,11 @@ private struct ChatTimelineRow: View {
             case .notice(let item):
                 ChatNoticeRow(item: item)
             case .approval(let approval):
-                Group {
-                    if let request = approval.userInput {
-                        ChatQuestionRow(approval: approval, request: request, threadID: threadID, store: store)
-                    } else {
-                        ChatApprovalRow(approval: approval, threadID: threadID, store: store)
-                    }
-                }
-                .padding(.vertical, 10)
+                ChatRequestRow(approval: approval, threadID: threadID, store: store)
+                    // A request reopened after its resolution is a new one
+                    // to answer, with fresh form state.
+                    .id(approval.status)
+                    .padding(.vertical, 10)
             }
         }
     }
@@ -3023,104 +3020,6 @@ private struct ChatMessageRow: View {
     }
 }
 
-private struct ChatApprovalRow: View {
-    let approval: Approval
-    let threadID: String
-    let store: ThreadStore
-
-    @State private var isResponding = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            Label("Permission needed", systemImage: "hand.raised")
-                .bold()
-
-            if let args = approval.args {
-                Text(ChatTimelineText.encoded(args.value))
-                    .font(.callout.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            if approval.approvalStatus == .pending {
-                HStack {
-                    if let options = approval.options, !options.isEmpty {
-                        ForEach(options, id: \.optionID) { option in
-                            Button(option.name) {
-                                respond(
-                                    decision: decision(for: option),
-                                    optionID: option.optionID
-                                )
-                            }
-                            .disabled(isResponding)
-                        }
-                    } else {
-                        Button("Decline", role: .destructive) {
-                            respond(decision: .decline, optionID: nil)
-                        }
-                        .disabled(isResponding)
-
-                        Button("Allow") {
-                            respond(decision: .accept, optionID: nil)
-                        }
-                        .disabled(isResponding)
-                    }
-                }
-            } else {
-                Text(resolutionLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-        .padding()
-        .background(.orange.opacity(0.12), in: .rect(cornerRadius: 14))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var resolutionLabel: String {
-        switch approval.decision.flatMap(MaidApprovalDecision.init(rawValue:)) {
-        case .accept: "Allowed"
-        case .acceptForSession: "Allowed for this session"
-        case .decline: "Declined"
-        case .cancel: "Cancelled"
-        case nil: "Resolved"
-        }
-    }
-
-    private func decision(for option: ApprovalOption) -> MaidApprovalDecision {
-        switch option.kind {
-        case "allow_always": .acceptForSession
-        case "reject_once", "reject_always": .decline
-        default: .accept
-        }
-    }
-
-    private func respond(decision: MaidApprovalDecision, optionID: String?) {
-        guard !isResponding else { return }
-        isResponding = true
-        errorMessage = nil
-        Task {
-            defer { isResponding = false }
-            do {
-                try await store.respondToApproval(
-                    threadID: threadID,
-                    requestID: approval.requestID,
-                    decision: decision,
-                    optionID: optionID
-                )
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-}
-
 struct ChatPlanRow: View {
     let plan: Plan
 
@@ -3153,7 +3052,7 @@ struct ChatPlanRow: View {
     }
 }
 
-private enum ChatTimelineText {
+enum ChatTimelineText {
     static func humanized(_ value: String) -> String {
         value.replacing("_", with: " ").replacing("-", with: " ").capitalized
     }

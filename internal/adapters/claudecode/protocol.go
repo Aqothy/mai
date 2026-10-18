@@ -314,8 +314,11 @@ type askUserQuestion struct {
 
 // userInput presents the questions as a provider-neutral request, keyed by
 // question text as the answers are.
-func (q askUserQuestion) userInput() provider.UserInputRequest {
-	request := provider.UserInputRequest{Message: "Claude has a question."}
+func (q askUserQuestion) request() provider.Request {
+	request := provider.Request{Message: "Claude has a question.", Actions: []provider.RequestAction{
+		{ID: "accept", Label: "Submit", Decision: provider.ApprovalDecisionAccept, Submit: true},
+		{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline},
+	}}
 	if len(q.Questions) > 1 {
 		request.Message = "Claude has questions."
 	}

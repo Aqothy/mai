@@ -1,18 +1,18 @@
 import Foundation
 import Observation
 
-/// Form state for an agent question (a user-input request): typed answers,
-/// choice selections, and the response sent back through `send`.
+/// Form state for an agent's request: typed answers, choice selections, and
+/// the action chosen, sent back through `send`.
 @Observable
-final class ChatQuestionModel {
+final class ChatRequestModel {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    /// Delivers a response: the approval command for a question in a chat,
+    /// Delivers a response: the approval command for a request in a chat,
     /// or the sign-in answer for one asked while signing in.
-    typealias Send = (MaidApprovalDecision, [String: [String]]?) async throws -> Void
+    typealias Send = (RequestAction, [String: [String]]?) async throws -> Void
 
-    let request: UserInputRequest
+    let request: Request
     @ObservationIgnored private let send: Send
     private(set) var isResponding = false
     private(set) var errorMessage: String?
@@ -23,7 +23,7 @@ final class ChatQuestionModel {
     /// Selected option values for choice questions.
     private(set) var choiceAnswers: [String: Set<String>] = [:]
 
-    init(request: UserInputRequest, send: @escaping Send) {
+    init(request: Request, send: @escaping Send) {
         self.request = request
         self.send = send
         for question in request.questions ?? [] {
@@ -40,11 +40,12 @@ final class ChatQuestionModel {
 
     /// The request's message with inline Markdown rendered and its line
     /// breaks kept: a plan under review is a Markdown document.
-    var messageText: AttributedString {
-        (try? AttributedString(
-            markdown: request.message,
+    var messageText: AttributedString? {
+        guard let message = request.message, !message.isEmpty else { return nil }
+        return (try? AttributedString(
+            markdown: message,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(request.message)
+        )) ?? AttributedString(message)
     }
 
     /// The http(s) URL a URL-mode request asks to open, if valid.
@@ -60,8 +61,10 @@ final class ChatQuestionModel {
         url?.host()?.split(separator: ".").contains { $0.hasPrefix("xn--") } == true
     }
 
-    var canSubmit: Bool {
-        !isResponding && questions.allSatisfy { validationMessage(for: $0) == nil }
+    /// Whether the action can be chosen now: one that submits needs every
+    /// answer valid.
+    func canChoose(_ action: RequestAction) -> Bool {
+        !isResponding && (action.submit != true || questions.allSatisfy { validationMessage(for: $0) == nil })
     }
 
     func isSelected(_ option: QuestionOption, in question: Question) -> Bool {
@@ -145,19 +148,20 @@ final class ChatQuestionModel {
         }
     }
 
-    func submit() async {
-        await respond(.accept, answers: answers)
-    }
-
-    func respond(_ decision: MaidApprovalDecision, answers: [String: [String]]? = nil) async {
-        guard !isResponding else { return }
+    /// Sends the action, with the answers when it submits them. Reports
+    /// whether it was sent. Once sent, the request takes no other answer.
+    @discardableResult
+    func choose(_ action: RequestAction) async -> Bool {
+        guard canChoose(action) else { return false }
         isResponding = true
         errorMessage = nil
-        defer { isResponding = false }
         do {
-            try await send(decision, answers)
+            try await send(action, action.submit == true ? answers : nil)
+            return true
         } catch {
+            isResponding = false
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

@@ -273,13 +273,13 @@ struct ThreadEventReducerTests {
 
         thread.apply(
             makeEvent(.threadApprovalResolved, payload: makePayload(
-                approval: makeApprovalEvent(requestID: "req-1", turnID: "turn-1", decision: .accept, optionID: "allow-once")
+                approval: makeApprovalEvent(requestID: "req-1", turnID: "turn-1", decision: .accept, actionID: "allow-once")
             ))
         )
         #expect(thread.timeline.count == 1)
         #expect(thread.timeline[0].approval?.approvalStatus == .resolved)
         #expect(thread.timeline[0].approval?.decision == MaidApprovalDecision.accept.rawValue)
-        #expect(thread.timeline[0].approval?.optionID == "allow-once")
+        #expect(thread.timeline[0].approval?.actionID == "allow-once")
     }
 
     @Test
@@ -289,16 +289,14 @@ struct ThreadEventReducerTests {
             makeEvent(.threadApprovalOpened, payload: makePayload(approval: makeApprovalEvent(requestID: "req-1")))
         )
 
-        thread.apply(
-            makeEvent(.threadApprovalResponseRequested, payload: makePayload(
-                decision: MaidApprovalDecision.decline.rawValue, optionID: "reject", requestID: "req-1"
-            ))
-        )
+        var response = makePayload(decision: MaidApprovalDecision.decline.rawValue, requestID: "req-1")
+        response.actionID = "reject"
+        thread.apply(makeEvent(.threadApprovalResponseRequested, payload: response))
 
         // Still pending: the provider's resolve event is authoritative.
         #expect(thread.timeline[0].approval?.approvalStatus == .pending)
         #expect(thread.timeline[0].approval?.decision == MaidApprovalDecision.decline.rawValue)
-        #expect(thread.timeline[0].approval?.optionID == "reject")
+        #expect(thread.timeline[0].approval?.actionID == "reject")
     }
 
     // MARK: Session metadata
@@ -545,20 +543,18 @@ private func makeApprovalEvent(
     requestID: String,
     turnID: String? = nil,
     decision: MaidApprovalDecision? = nil,
-    optionID: String? = nil
+    actionID: String? = nil
 ) -> ApprovalEvent {
     ApprovalEvent(
+        actionID: actionID,
         answers: nil,
         args: nil,
         cancelled: nil,
         decision: decision?.rawValue,
-        detail: nil,
-        optionID: optionID,
-        options: nil,
+        request: nil,
         requestID: requestID,
         requestType: nil,
-        turnID: turnID,
-        userInput: nil
+        turnID: turnID
     )
 }
 

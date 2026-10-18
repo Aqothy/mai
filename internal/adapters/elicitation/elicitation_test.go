@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
-
-	"github.com/Aqothy/maiD/internal/provider"
 )
 
 // Every MCP enum form becomes options with the right labels, and answers are
@@ -48,8 +46,5 @@ func TestURLModeOnlyAcceptsWebLinks(t *testing.T) {
 	request, form, err := Parse("Open", "url", "https://example.com/auth", nil)
 	if err != nil || form != nil || request.URL != "https://example.com/auth" || request.Questions != nil {
 		t.Fatalf("request = %#v, form = %v, err = %v", request, form, err)
-	}
-	if ActionFor(provider.ApprovalDecisionAcceptForSession) != ActionCancel {
-		t.Fatal("a session-wide grant must not answer an elicitation")
 	}
 }

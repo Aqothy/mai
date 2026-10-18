@@ -150,7 +150,7 @@ func TestProviderRestartCancelsPendingApprovalOfReplacedProcess(t *testing.T) {
 	if entry, _ := s.orchestration.ThreadListEntry(threadID); entry.HasPendingApprovals {
 		t.Fatalf("thread list entry = %#v, want no pending approvals", entry)
 	}
-	if _, err := client.dispatchErr(orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-respond-restart-approval", ThreadID: threadID, RequestID: orchestration.ApprovalID(requestID), Decision: provider.ApprovalDecisionAccept}); err == nil || !strings.Contains(err.Error(), "already resolved") {
+	if _, err := client.dispatchErr(orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-respond-restart-approval", ThreadID: threadID, RequestID: orchestration.ApprovalID(requestID), ActionID: "allow"}); err == nil || !strings.Contains(err.Error(), "already resolved") {
 		t.Fatalf("answering the cancelled approval: err = %v, want it rejected as already resolved", err)
 	}
 }

@@ -143,53 +143,13 @@ func stringPtr(value string) *string {
 	return &value
 }
 
-func permissionResponseForDecision(options []schema.PermissionOption, decision provider.ApprovalDecision) schema.RequestPermissionResponse {
-	var preferred []schema.PermissionOptionKind
-	switch decision {
-	case provider.ApprovalDecisionAccept:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindAllowOnce, schema.PermissionOptionKindAllowAlways}
-	case provider.ApprovalDecisionAcceptForSession:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindAllowAlways, schema.PermissionOptionKindAllowOnce}
-	case provider.ApprovalDecisionDecline:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindRejectOnce, schema.PermissionOptionKindRejectAlways}
-	default:
+// permissionResponseFor answers with the option the user chose, or as
+// cancelled when the request ended without one.
+func permissionResponseFor(response approvalResponse) schema.RequestPermissionResponse {
+	if response.action.ID == "" {
 		return cancelledPermissionResponse()
 	}
-	if option, ok := choosePermissionOption(options, preferred); ok {
-		return selectedPermissionResponse(option.OptionID)
-	}
-	return cancelledPermissionResponse()
-}
-
-// permissionResponseForApproval answers with the client's exact option
-// selection when one was made (RespondToRequest already validated it against
-// the offered options); otherwise it maps the coarse decision onto the
-// agent's options by kind.
-func permissionResponseForApproval(options []schema.PermissionOption, response approvalResponse) schema.RequestPermissionResponse {
-	if response.optionID != "" {
-		return selectedPermissionResponse(schema.PermissionOptionId(response.optionID))
-	}
-	return permissionResponseForDecision(options, response.decision)
-}
-
-func hasPermissionOption(options []schema.PermissionOption, optionID string) bool {
-	for _, option := range options {
-		if string(option.OptionID) == optionID {
-			return true
-		}
-	}
-	return false
-}
-
-func choosePermissionOption(options []schema.PermissionOption, preferred []schema.PermissionOptionKind) (schema.PermissionOption, bool) {
-	for _, kind := range preferred {
-		for _, option := range options {
-			if option.Kind == kind {
-				return option, true
-			}
-		}
-	}
-	return schema.PermissionOption{}, false
+	return selectedPermissionResponse(schema.PermissionOptionId(response.action.ID))
 }
 
 func selectedPermissionResponse(optionID schema.PermissionOptionId) schema.RequestPermissionResponse {
@@ -207,12 +167,27 @@ func selectedPermissionOptionID(resp schema.RequestPermissionResponse) (schema.P
 	return *resp.Outcome.OptionID, true
 }
 
-func permissionOptionsFromACP(options []schema.PermissionOption) []provider.ApprovalOption {
-	converted := make([]provider.ApprovalOption, 0, len(options))
+// permissionRequestFromACP offers the agent's options as the request's
+// actions, deciding by their ACP kind.
+func permissionRequestFromACP(message string, options []schema.PermissionOption) provider.Request {
+	request := provider.Request{Message: message, Actions: make([]provider.RequestAction, 0, len(options))}
 	for _, option := range options {
-		converted = append(converted, provider.ApprovalOption{ID: string(option.OptionID), Name: option.Name, Kind: string(option.Kind)})
+		request.Actions = append(request.Actions, provider.RequestAction{ID: string(option.OptionID), Label: option.Name, Decision: permissionDecision(option.Kind)})
 	}
-	return converted
+	return request
+}
+
+func permissionDecision(kind schema.PermissionOptionKind) provider.ApprovalDecision {
+	switch kind {
+	case schema.PermissionOptionKindAllowAlways:
+		return provider.ApprovalDecisionAcceptForSession
+	case schema.PermissionOptionKindAllowOnce:
+		return provider.ApprovalDecisionAccept
+	case schema.PermissionOptionKindRejectAlways, schema.PermissionOptionKindRejectOnce:
+		return provider.ApprovalDecisionDecline
+	default:
+		return provider.ApprovalDecisionCancel
+	}
 }
 
 func permissionRequestID(threadID string, toolCallID string) string {
@@ -232,16 +207,8 @@ func permissionDecisionFromResponse(options []schema.PermissionOption, resp sche
 		return provider.ApprovalDecisionCancel, ""
 	}
 	for _, option := range options {
-		if option.OptionID != optionID {
-			continue
-		}
-		switch option.Kind {
-		case schema.PermissionOptionKindAllowAlways:
-			return provider.ApprovalDecisionAcceptForSession, string(optionID)
-		case schema.PermissionOptionKindAllowOnce:
-			return provider.ApprovalDecisionAccept, string(optionID)
-		case schema.PermissionOptionKindRejectAlways, schema.PermissionOptionKindRejectOnce:
-			return provider.ApprovalDecisionDecline, string(optionID)
+		if option.OptionID == optionID {
+			return permissionDecision(option.Kind), string(optionID)
 		}
 	}
 	return provider.ApprovalDecisionCancel, ""

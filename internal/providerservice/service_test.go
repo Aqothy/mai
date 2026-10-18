@@ -1015,7 +1015,7 @@ func TestThreadScopedOperationsRecoverStaleRouteBeforeAdapterCall(t *testing.T) 
 			return s.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "model", Value: "fast"})
 		}, "SetConfigOption"},
 		{"respond to request", func(s *Service) error {
-			return s.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: "req-1", Decision: provider.ApprovalDecisionAccept})
+			return s.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: "req-1", Action: provider.RequestAction{ID: "accept", Decision: provider.ApprovalDecisionAccept}})
 		}, "RespondToRequest"},
 	}
 

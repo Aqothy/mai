@@ -59,7 +59,7 @@ type contract struct {
 	Skill                            wire.Skill                            `json:"skill"`
 	TokenUsage                       wire.TokenUsage                       `json:"tokenUsage"`
 	Goal                             wire.Goal                             `json:"goal"`
-	ApprovalOption                   wire.ApprovalOption                   `json:"approvalOption"`
+	RequestAction                    wire.RequestAction                    `json:"requestAction"`
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`

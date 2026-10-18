@@ -195,17 +195,16 @@ func TestTickerDoesNotFlushThreadDuringHistoryReplay(t *testing.T) {
 
 func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
 	tests := []struct {
-		name       string
-		decision   provider.ApprovalDecision
-		resolution string
-		want       provider.ApprovalDecision
-		wantOption string
+		name     string
+		decision provider.ApprovalDecision
+		actionID string
+		want     provider.ApprovalDecision
 	}{
-		{"accept", provider.ApprovalDecisionAccept, `{"optionId":"allow"}`, provider.ApprovalDecisionAccept, "allow"},
-		{"accept for session", provider.ApprovalDecisionAcceptForSession, `{"optionId":"session"}`, provider.ApprovalDecisionAcceptForSession, "session"},
-		{"decline", provider.ApprovalDecisionDecline, `{"optionId":"reject"}`, provider.ApprovalDecisionDecline, "reject"},
-		{"empty defaults to cancel", "", "", provider.ApprovalDecisionCancel, ""},
-		{"unknown defaults to cancel", "unknown", `not-json`, provider.ApprovalDecisionCancel, ""},
+		{"accept", provider.ApprovalDecisionAccept, "allow", provider.ApprovalDecisionAccept},
+		{"accept for session", provider.ApprovalDecisionAcceptForSession, "session", provider.ApprovalDecisionAcceptForSession},
+		{"decline", provider.ApprovalDecisionDecline, "reject", provider.ApprovalDecisionDecline},
+		{"empty defaults to cancel", "", "", provider.ApprovalDecisionCancel},
+		{"unknown defaults to cancel", "unknown", "", provider.ApprovalDecisionCancel},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,10 +223,14 @@ func TestIngestionProjectsProviderApprovalResolution(t *testing.T) {
 				}
 				return thread.Timeline[0].Approval
 			}
-			opened := request(provider.RuntimeEventRequestOpened, provider.RuntimeEventPayload{Options: []provider.ApprovalOption{{ID: "allow"}, {ID: "session"}, {ID: "reject"}}})
-			resolved := request(provider.RuntimeEventRequestResolved, provider.RuntimeEventPayload{Decision: tt.decision, Resolution: json.RawMessage(tt.resolution)})
-			if resolved.Status != ApprovalStatusResolved || resolved.Decision != tt.want || resolved.OptionID != tt.wantOption || !resolved.CreatedAt.Equal(opened.CreatedAt) {
-				t.Fatalf("resolved approval = %#v, want decision=%q option=%q resolved in place", resolved, tt.want, tt.wantOption)
+			opened := request(provider.RuntimeEventRequestOpened, provider.RuntimeEventPayload{Request: &provider.Request{Actions: []provider.RequestAction{
+				{ID: "allow", Decision: provider.ApprovalDecisionAccept},
+				{ID: "session", Decision: provider.ApprovalDecisionAcceptForSession},
+				{ID: "reject", Decision: provider.ApprovalDecisionDecline},
+			}}})
+			resolved := request(provider.RuntimeEventRequestResolved, provider.RuntimeEventPayload{Decision: tt.decision, ActionID: tt.actionID})
+			if resolved.Status != ApprovalStatusResolved || resolved.Decision != tt.want || resolved.ActionID != tt.actionID || !resolved.CreatedAt.Equal(opened.CreatedAt) {
+				t.Fatalf("resolved approval = %#v, want decision=%q action=%q resolved in place", resolved, tt.want, tt.actionID)
 			}
 		})
 	}

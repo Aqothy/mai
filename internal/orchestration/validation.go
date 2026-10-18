@@ -59,41 +59,30 @@ func validateTurnStartBoundary(command Command) error {
 	return nil
 }
 
-func validateApprovalDecision(commandType string, decision provider.ApprovalDecision) error {
-	switch decision {
-	case provider.ApprovalDecisionAccept, provider.ApprovalDecisionAcceptForSession, provider.ApprovalDecisionDecline, provider.ApprovalDecisionCancel:
-		return nil
-	default:
-		return fmt.Errorf("%s decision %q is not supported", commandType, decision)
-	}
-}
-
-func validateApprovalResponse(commandType string, thread Thread, requestID ApprovalID, decision provider.ApprovalDecision, optionID string, answers map[string][]string) error {
+// validateApprovalResponse finds the action a response chose among the
+// pending request's own. Only an action that submits takes answers.
+func validateApprovalResponse(commandType string, thread Thread, requestID ApprovalID, actionID string, answers map[string][]string) (provider.RequestAction, error) {
 	approval := thread.Timeline.Approval(string(requestID))
-	if approval == nil {
-		return fmt.Errorf("%s request %q is not pending", commandType, requestID)
+	if approval == nil || approval.Request == nil {
+		return provider.RequestAction{}, fmt.Errorf("%s request %q is not pending", commandType, requestID)
 	}
 	if approval.Status != ApprovalStatusPending {
-		return fmt.Errorf("%s request %q is already resolved", commandType, requestID)
+		return provider.RequestAction{}, fmt.Errorf("%s request %q is already resolved", commandType, requestID)
 	}
-	if approval.UserInput != nil {
-		if decision == provider.ApprovalDecisionAcceptForSession || optionID != "" {
-			return fmt.Errorf("%s request %q is a question; answer it with accept, decline or cancel", commandType, requestID)
-		}
-		return nil
+	// The first answer wins until the provider resolves or reopens the
+	// request: a second one, from another client or a repeated tap, would
+	// reach a provider that has already moved on.
+	if approval.ActionID != "" {
+		return provider.RequestAction{}, fmt.Errorf("%s request %q is already answered", commandType, requestID)
 	}
-	if len(answers) > 0 {
-		return fmt.Errorf("%s request %q is not a question and takes no answers", commandType, requestID)
+	action, ok := approval.Request.Action(actionID)
+	if !ok {
+		return provider.RequestAction{}, fmt.Errorf("%s actionId %q was not offered for request %q", commandType, actionID, requestID)
 	}
-	if optionID == "" {
-		return nil
+	if len(answers) > 0 && !action.Submit {
+		return provider.RequestAction{}, fmt.Errorf("%s action %q of request %q takes no answers", commandType, actionID, requestID)
 	}
-	for _, option := range approval.Options {
-		if option.ID == optionID {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s optionId %q was not offered for request %q", commandType, optionID, requestID)
+	return action, nil
 }
 
 // validateCommandMessage checks a client prompt: it must say something, and

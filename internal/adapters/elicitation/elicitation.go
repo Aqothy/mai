@@ -1,7 +1,7 @@
 // Package elicitation converts MCP-style elicitations into provider-neutral
-// user-input requests and converts the user's answers back. ACP agents,
-// Claude Code (for MCP servers) and Codex app-server all ask with the same
-// shape: a message plus either a flat form schema or a URL to open.
+// requests and converts the user's answers back. ACP agents, Claude Code (for
+// MCP servers) and Codex app-server all ask with the same shape: a message
+// plus either a flat form schema or a URL to open.
 package elicitation
 
 import (
@@ -24,27 +24,31 @@ const (
 	ActionCancel  Action = "cancel"
 )
 
-// ActionFor maps the user's decision to a response action.
-func ActionFor(decision provider.ApprovalDecision) Action {
-	switch decision {
-	case provider.ApprovalDecisionAccept:
-		return ActionAccept
-	case provider.ApprovalDecisionDecline:
-		return ActionDecline
-	default:
-		return ActionCancel
-	}
-}
+// The request actions answering an elicitation. Accepting is named after
+// what it does: submitting a form, opening a link, allowing what a form
+// with no fields confirms.
+var (
+	submit   = provider.RequestAction{ID: string(ActionAccept), Label: "Submit", Decision: provider.ApprovalDecisionAccept, Submit: true}
+	openLink = provider.RequestAction{ID: string(ActionAccept), Label: "Open Link", Decision: provider.ApprovalDecisionAccept}
+	allow    = provider.RequestAction{ID: string(ActionAccept), Label: "Allow", Decision: provider.ApprovalDecisionAccept}
+	decline  = provider.RequestAction{ID: string(ActionDecline), Label: "Decline", Decision: provider.ApprovalDecisionDecline}
+	dismiss  = provider.RequestAction{ID: string(ActionCancel), Label: "Dismiss", Decision: provider.ApprovalDecisionCancel}
+)
 
-// Decision is the decision an action records on the request.
-func (a Action) Decision() provider.ApprovalDecision {
-	switch a {
-	case ActionAccept:
-		return provider.ApprovalDecisionAccept
-	case ActionDecline:
-		return provider.ApprovalDecisionDecline
+// Answer converts the action the user chose into the response action and,
+// for a submitted form, its content.
+func Answer(form *Form, action provider.RequestAction, answers map[string][]string) (Action, map[string]any, error) {
+	switch action.ID {
+	case string(ActionAccept):
+		if !action.Submit {
+			return ActionAccept, nil, nil
+		}
+		content, err := form.Content(answers)
+		return ActionAccept, content, err
+	case string(ActionDecline):
+		return ActionDecline, nil, nil
 	default:
-		return provider.ApprovalDecisionCancel
+		return ActionCancel, nil, nil
 	}
 }
 
@@ -89,27 +93,14 @@ type titledOption struct {
 	Description string `json:"description"`
 }
 
-// RequestPayload is how a parsed elicitation opens. A form that asks for
-// nothing only asks yes or no: MCP servers confirm actions this way, and
-// Codex asks every MCP tool approval this way (codex-rs/core/src/
-// mcp_tool_call.rs, build_mcp_tool_approval_elicitation_request). It opens as
-// a permission request whose args are the raw request, like other approvals,
-// offering Allow, then the harness's ways to keep allowing (remember), then
-// Decline. Anything else opens as questions.
-func RequestPayload(request provider.UserInputRequest, form *Form, raw json.RawMessage, remember ...provider.ApprovalOption) provider.RuntimeEventPayload {
-	if !form.Confirms() {
-		return provider.RuntimeEventPayload{UserInput: &request}
-	}
-	options := []provider.ApprovalOption{{ID: string(ActionAccept), Name: "Allow", Kind: "allow_once"}}
-	options = append(options, remember...)
-	options = append(options, provider.ApprovalOption{ID: string(ActionDecline), Name: "Decline", Kind: "reject_once"})
-	return provider.RuntimeEventPayload{Args: append(json.RawMessage(nil), raw...), Options: options}
-}
-
-// Parse converts an elicitation into a user-input request. Form mode returns
-// the form needed to convert answers; URL mode accepts only http(s) URLs.
-func Parse(message, mode, rawURL string, requestedSchema json.RawMessage) (provider.UserInputRequest, *Form, error) {
-	request := provider.UserInputRequest{Message: message}
+// Parse converts an elicitation into a request. Form mode returns the form
+// needed to convert answers; URL mode accepts only http(s) URLs. A form that
+// asks for nothing only asks yes or no: MCP servers confirm actions this way,
+// and Codex asks every MCP tool approval this way (codex-rs/core/src/
+// mcp_tool_call.rs, build_mcp_tool_approval_elicitation_request). It offers
+// Allow, then the harness's ways to keep allowing (remember), then Decline.
+func Parse(message, mode, rawURL string, requestedSchema json.RawMessage, remember ...provider.RequestAction) (provider.Request, *Form, error) {
+	request := provider.Request{Message: message}
 	switch mode {
 	case "url":
 		target, err := url.Parse(rawURL)
@@ -117,11 +108,16 @@ func Parse(message, mode, rawURL string, requestedSchema json.RawMessage) (provi
 			return request, nil, fmt.Errorf("elicitation URL must be an http(s) URL")
 		}
 		request.URL = target.String()
+		request.Actions = []provider.RequestAction{openLink, decline, dismiss}
 		return request, nil, nil
 	case "form", "":
 		form, err := parseForm(requestedSchema)
 		if err != nil {
 			return request, nil, err
+		}
+		if len(form.order) == 0 {
+			request.Actions = append(append([]provider.RequestAction{allow}, remember...), decline)
+			return request, form, nil
 		}
 		for _, id := range form.order {
 			question, err := form.question(id)
@@ -130,6 +126,7 @@ func Parse(message, mode, rawURL string, requestedSchema json.RawMessage) (provi
 			}
 			request.Questions = append(request.Questions, question)
 		}
+		request.Actions = []provider.RequestAction{submit, decline, dismiss}
 		return request, form, nil
 	default:
 		return request, nil, fmt.Errorf("elicitation mode %q is not supported", mode)

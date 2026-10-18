@@ -597,11 +597,10 @@ func TestRPCUnsubscribeThreadStopsNotifications(t *testing.T) {
 	expectNotification(false, "after unsubscribe")
 }
 
-// TestRPCOrchestrationApprovalRespondHonorsExplicitOption sends an accept
-// decision together with an explicit optionId for a reject option. The
-// fake agent echoes the option it received, proving the selected option —
-// not the kind-mapped decision — reaches the agent.
-func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
+// The client answers with one of the request's actions; the fake agent
+// echoes the option it received, and the resolution records the action and
+// the decision its kind means.
+func TestRPCOrchestrationApprovalRespondSendsTheChosenAction(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	startFakeACPAgent(t, s, "codex")
@@ -616,15 +615,13 @@ func TestRPCOrchestrationApprovalRespondHonorsExplicitOption(t *testing.T) {
 	approvalEvent := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalOpened && event.Payload.Approval != nil
 	})
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), Decision: provider.ApprovalDecisionAccept, OptionID: "reject"})
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-approval-option", ThreadID: threadID, RequestID: orchestration.ApprovalID(approvalEvent.Payload.Approval.RequestID), ActionID: "reject"})
 
 	resolved := client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadApprovalResolved && event.Payload.Approval != nil
 	})
-	// The resolved decision derives from the option the agent actually
-	// received, so the accept decision must come back as decline.
-	if resolved.Payload.Approval.OptionID != "reject" || resolved.Payload.Approval.Decision != provider.ApprovalDecisionDecline {
-		t.Fatalf("resolved = %#v, want the explicitly selected reject option", resolved.Payload.Approval)
+	if resolved.Payload.Approval.ActionID != "reject" || resolved.Payload.Approval.Decision != provider.ApprovalDecisionDecline {
+		t.Fatalf("resolved = %#v, want the reject action, declined", resolved.Payload.Approval)
 	}
 	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
 		return event.Type == orchestration.EventThreadMessageSent && strings.Contains(event.Payload.Text, "perm:reject")
@@ -746,7 +743,10 @@ func TestRPCProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 		t.Fatalf("question = %+v", question)
 	}
 
-	client.call(t, wire.MethodProviderQuestionAnswer, wire.ProviderQuestionAnswerParams{RequestID: question.RequestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"code": {"1234"}}}, nil)
+	if err := client.callErr(wire.MethodProviderQuestionAnswer, wire.ProviderQuestionAnswerParams{RequestID: question.RequestID, ActionID: "approve", Answers: map[string][]string{"code": {"1234"}}}, nil); err == nil {
+		t.Fatal("an answer with an action the question doesn't offer was accepted")
+	}
+	client.call(t, wire.MethodProviderQuestionAnswer, wire.ProviderQuestionAnswerParams{RequestID: question.RequestID, ActionID: "accept", Answers: map[string][]string{"code": {"1234"}}}, nil)
 	if err := <-signedIn; err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}

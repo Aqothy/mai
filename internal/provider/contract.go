@@ -138,14 +138,14 @@ type AuthenticateInput struct {
 	Secret   string `json:"secret,omitempty"`
 	// Ask shows the user a question the agent asks while signing in, outside
 	// any thread, and waits for the answer. Nil when nobody can answer.
-	Ask func(context.Context, UserInputRequest) (UserInputAnswer, error) `json:"-"`
+	Ask func(context.Context, Request) (RequestAnswer, error) `json:"-"`
 }
 
-// UserInputAnswer is the user's response to a UserInputRequest; Answers is
-// set when Decision is accept, keyed by Question.ID.
-type UserInputAnswer struct {
-	Decision ApprovalDecision    `json:"decision"`
-	Answers  map[string][]string `json:"answers,omitempty"`
+// RequestAnswer is the action the user chose on a Request and, for an
+// action that submits, the answers to its questions.
+type RequestAnswer struct {
+	Action  RequestAction
+	Answers map[string][]string
 }
 
 // AuthChallenge describes a browser or device-code login that continues after
@@ -583,36 +583,49 @@ const (
 	ApprovalDecisionCancel           ApprovalDecision = "cancel"
 )
 
-type ApprovalOption struct {
-	ID   string `json:"optionId"`
-	Name string `json:"name"`
-	// Kind uses ACP's permission option kinds for every provider: allow_once,
-	// allow_always, reject_once or reject_always.
-	Kind string `json:"kind,omitempty"`
-}
-
 type RespondToRequestInput struct {
-	ThreadID  string           `json:"threadId"`
-	RequestID string           `json:"requestId"`
-	Decision  ApprovalDecision `json:"decision"`
-	// OptionID selects one of the request's advertised ApprovalOptions exactly.
-	// When set it takes precedence over Decision, which then only serves as the
-	// fallback for providers without option-level responses.
-	OptionID string `json:"optionId,omitempty"`
-	// Answers answers a user-input request when Decision is accept, keyed by
+	ThreadID  string `json:"threadId"`
+	RequestID string `json:"requestId"`
+	// Action is the one the user chose, among the request's own.
+	Action RequestAction `json:"action"`
+	// Answers answers the request's questions when Action submits, keyed by
 	// Question.ID. Choice questions answer with option values; other kinds
 	// with one entered value.
 	Answers map[string][]string `json:"answers,omitempty"`
 }
 
-// UserInputRequest is a question an agent asks the user, as opposed to a
-// permission request. It either asks Questions (a form) or asks for consent to
-// open URL in the browser (for out-of-band flows such as OAuth). Accepting a
-// URL request only means the user agreed to open it.
-type UserInputRequest struct {
-	Message   string     `json:"message"`
-	Questions []Question `json:"questions,omitempty"`
-	URL       string     `json:"url,omitempty"`
+// Request is what an agent asks the user, in one shape for every kind: a
+// permission, a question or form, a yes or no, a link to open, a plan to
+// review, a sign-in step. The actions are the only ways to answer it; an
+// action that submits sends the answers to its questions, which are checked
+// only then. A URL request asks for consent to open URL in the browser (for
+// out-of-band flows such as OAuth); accepting it only means the user agreed
+// to open it.
+type Request struct {
+	Message   string          `json:"message,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	Questions []Question      `json:"questions,omitempty"`
+	Actions   []RequestAction `json:"actions"`
+}
+
+// RequestAction is one way to answer a Request. Decision is what choosing it
+// means for the request's lifecycle and history; the adapter answers its
+// provider by ID.
+type RequestAction struct {
+	ID       string           `json:"id"`
+	Label    string           `json:"label"`
+	Decision ApprovalDecision `json:"decision"`
+	Submit   bool             `json:"submit,omitempty"`
+}
+
+// Action returns the request's action with the given ID.
+func (r Request) Action(id string) (RequestAction, bool) {
+	for _, action := range r.Actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return RequestAction{}, false
 }
 
 type QuestionKind string
@@ -858,18 +871,18 @@ type RuntimeEventPayload struct {
 	// Detail is free-form context for the event. On an ItemCompleted event for
 	// a reasoning item it carries the provider's full reasoning text, which
 	// ingestion treats as authoritative over the streamed deltas.
-	Detail     string           `json:"detail,omitempty"`
-	Message    string           `json:"message,omitempty"`
-	Title      string           `json:"title,omitempty"`
-	Options    []ApprovalOption `json:"options,omitempty"`
-	Cancelled  bool             `json:"cancelled,omitempty"`
-	Args       json.RawMessage  `json:"args,omitempty"`
-	Resolution json.RawMessage  `json:"resolution,omitempty"`
-	ToolCall   *ToolCall        `json:"toolCall,omitempty"`
-	// UserInput makes a request.opened a question instead of a permission
-	// request; Answers is set on its request.resolved when the user answered.
-	UserInput *UserInputRequest   `json:"userInput,omitempty"`
-	Answers   map[string][]string `json:"answers,omitempty"`
+	Detail    string          `json:"detail,omitempty"`
+	Message   string          `json:"message,omitempty"`
+	Title     string          `json:"title,omitempty"`
+	Cancelled bool            `json:"cancelled,omitempty"`
+	Args      json.RawMessage `json:"args,omitempty"`
+	ToolCall  *ToolCall       `json:"toolCall,omitempty"`
+	// Request is what a request.opened asks. Its request.resolved carries the
+	// chosen ActionID (empty when the request ended without the user, such
+	// as on cancellation) and the Answers it submitted.
+	Request  *Request            `json:"request,omitempty"`
+	ActionID string              `json:"actionId,omitempty"`
+	Answers  map[string][]string `json:"answers,omitempty"`
 	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
 	// empty update (non-nil []) must still serialize so consumers clear state.
 	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`

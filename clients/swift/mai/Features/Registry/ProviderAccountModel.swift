@@ -72,8 +72,8 @@ final class ProviderAccountModel {
         store.providerQuestion
     }
 
-    func answerQuestion(_ decision: MaidApprovalDecision, answers: [String: [String]]?) async throws {
-        try await store.answerProviderQuestion(decision, answers: answers)
+    func answerQuestion(_ action: RequestAction, answers: [String: [String]]?) async throws {
+        try await store.answerProviderQuestion(action, answers: answers)
     }
 
     var isErrorPresented: Bool {

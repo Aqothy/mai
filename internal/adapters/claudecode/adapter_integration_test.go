@@ -409,10 +409,10 @@ func TestTurnLifecycleWithApproval(t *testing.T) {
 	opened := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventRequestOpened
 	})
-	if opened.Payload.RequestType != provider.RuntimeRequestCommandExecution || len(opened.Payload.Options) != 3 {
+	if opened.Payload.RequestType != provider.RuntimeRequestCommandExecution || len(opened.Payload.Request.Actions) != 3 {
 		t.Fatalf("approval = %#v", opened.Payload)
 	}
-	if err := instance.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+	if err := answerRequest(instance, opened, "accept"); err != nil {
 		t.Fatalf("RespondToRequest: %v", err)
 	}
 	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -477,8 +477,8 @@ func TestPlanReviewShowsThePlan(t *testing.T) {
 	if output != "1. Write hello.txt" {
 		t.Fatalf("plan item output when the review opened = %q, want the plan", output)
 	}
-	if review.Payload.UserInput == nil || review.Payload.UserInput.Message != "1. Write hello.txt" {
-		t.Fatalf("review question = %+v, want the plan as its message", review.Payload.UserInput)
+	if review.Payload.Request == nil || review.Payload.Request.Message != "1. Write hello.txt" {
+		t.Fatalf("review request = %+v, want the plan as its message", review.Payload.Request)
 	}
 }
 
@@ -589,13 +589,13 @@ func TestThreadFollowsTheCLIReports(t *testing.T) {
 	}
 	opened := waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventRequestOpened })
 	var offered []string
-	for _, option := range opened.Payload.Options {
-		offered = append(offered, option.ID)
+	for _, action := range opened.Payload.Request.Actions {
+		offered = append(offered, action.ID)
 	}
 	if !slices.Equal(offered, []string{"accept", "decline"}) {
-		t.Fatalf("options = %q", offered)
+		t.Fatalf("actions = %q", offered)
 	}
-	if err := instance.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-r", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAccept}); err != nil {
+	if err := answerRequest(instance, opened, "accept"); err != nil {
 		t.Fatal(err)
 	}
 	waitForEvent(t, events, func(event provider.RuntimeEvent) bool { return event.Type == provider.RuntimeEventTurnCompleted })
@@ -979,4 +979,14 @@ func TestTranscriptSessionManagement(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("transcript still exists: %v", err)
 	}
+}
+
+// answerRequest responds with one of the opened request's own actions, as
+// the engine does.
+func answerRequest(instance *Instance, opened provider.RuntimeEvent, actionID string) error {
+	action, ok := opened.Payload.Request.Action(actionID)
+	if !ok {
+		return fmt.Errorf("request %s offers no action %q", opened.RequestID, actionID)
+	}
+	return instance.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: opened.ThreadID, RequestID: opened.RequestID, Action: action})
 }

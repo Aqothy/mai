@@ -16,9 +16,6 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 	if input.ThreadID == "" || input.RequestID == "" {
 		return fmt.Errorf("provider approval response requires threadId and requestId")
 	}
-	if input.Decision == "" {
-		input.Decision = provider.ApprovalDecisionCancel
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var pending *pendingPermission
@@ -28,16 +25,16 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 	if pending == nil {
 		return fmt.Errorf("unknown pending approval request %s", input.RequestID)
 	}
-	if input.OptionID != "" && !hasPermissionOption(pending.options, input.OptionID) {
-		return fmt.Errorf("approval option %q was not offered for request %s", input.OptionID, input.RequestID)
-	}
-	response := approvalResponse{decision: input.Decision, optionID: input.OptionID}
-	if pending.form != nil && input.Decision == provider.ApprovalDecisionAccept {
-		content, err := pending.form.Content(input.Answers)
+	response := approvalResponse{action: input.Action}
+	if pending.elicitation {
+		elicited, content, err := elicitation.Answer(pending.form, input.Action, input.Answers)
 		if err != nil {
 			return err
 		}
-		response.answers, response.content = input.Answers, content
+		response.elicited, response.content = elicited, content
+		if input.Action.Submit {
+			response.answers = input.Answers
+		}
 	}
 	select {
 	case pending.ch <- response:
@@ -78,7 +75,7 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 		return resp, nil
 	}
 
-	permissionCtx, cancelPermission, pending := h.beginPermissionRequest(ctx, sessionID, requestID, req.Options)
+	permissionCtx, cancelPermission, pending := h.beginPermissionRequest(ctx, sessionID, requestID)
 	defer cancelPermission()
 	defer h.endPermissionRequest(sessionID, requestID, pending)
 	h.recordPermissionRequest(req, state, requestID)
@@ -89,41 +86,39 @@ func (h *Instance) requestPermission(ctx context.Context, req schema.RequestPerm
 		settled := pending.settled
 		h.mu.Unlock()
 		if settled {
-			response = approvalResponse{decision: provider.ApprovalDecisionCancel}
+			response = approvalResponse{}
 		}
 	case <-permissionCtx.Done():
-		response.decision = provider.ApprovalDecisionCancel
 	}
-	resp := permissionResponseForApproval(req.Options, response)
+	resp := permissionResponseFor(response)
 	h.recordPermissionResolved(req, state, requestID, resp)
 	return resp, nil
 }
 
-// pendingPermission is an in-flight session/request_permission awaiting the
-// client's answer. It keeps the agent's offered options so RespondToRequest
-// can validate an explicit optionId before it is relayed, and its own cancel
+// pendingPermission is an in-flight session/request_permission or
+// elicitation/create awaiting the client's answer. It keeps its own cancel
 // func so cancel registrations stay owned by the request that created them
 // (a duplicate request for the same key must not be unregistered by the
 // first request's cleanup).
 type pendingPermission struct {
-	ch      chan approvalResponse
-	options []schema.PermissionOption
-	// form is set for a form elicitation, to validate and convert answers.
-	form    *elicitation.Form
-	settled bool
-	cancel  context.CancelFunc
+	ch chan approvalResponse
+	// elicitation is set for elicitation/create, and form for one in form
+	// mode, to validate and convert answers.
+	elicitation bool
+	form        *elicitation.Form
+	settled     bool
+	cancel      context.CancelFunc
 }
 
-// approvalResponse is the client's answer to a permission request: an exact
-// option selection when the client picked one, otherwise just the coarse
-// decision to be mapped onto the agent's options by kind.
+// approvalResponse is the client's answer: the action it chose, zero when
+// the request ended without one. For an elicitation, elicited is the
+// response action, and answers and content the submitted form, as entered
+// and converted to the types the form asked for.
 type approvalResponse struct {
-	decision provider.ApprovalDecision
-	optionID string
-	// answers and content answer an accepted form elicitation: as submitted,
-	// and converted to the types the form asked for.
-	answers map[string][]string
-	content map[string]any
+	action   provider.RequestAction
+	elicited elicitation.Action
+	answers  map[string][]string
+	content  map[string]any
 }
 
 type permissionState struct {
@@ -146,9 +141,9 @@ func (h *Instance) permissionRequestState(sessionID string) permissionState {
 	return permissionState{threadID: collector.threadID, turnID: collector.turnID, cancelled: collector.cancelled}
 }
 
-func (h *Instance) beginPermissionRequest(ctx context.Context, sessionID string, requestID string, options []schema.PermissionOption) (context.Context, context.CancelFunc, *pendingPermission) {
+func (h *Instance) beginPermissionRequest(ctx context.Context, sessionID string, requestID string) (context.Context, context.CancelFunc, *pendingPermission) {
 	permissionCtx, cancel := context.WithCancel(ctx)
-	pending := &pendingPermission{ch: make(chan approvalResponse, 1), options: options, cancel: cancel}
+	pending := &pendingPermission{ch: make(chan approvalResponse, 1), cancel: cancel}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	session := h.sessionLocked(sessionID)
@@ -226,6 +221,7 @@ func (h *Instance) endPermissionRequest(sessionID string, requestID string, pend
 }
 
 func (h *Instance) recordPermissionRequest(req schema.RequestPermissionRequest, state permissionState, requestID string) {
+	asked := permissionRequestFromACP(toolCallTitle(req.ToolCall), req.Options)
 	update := provider.RuntimeEvent{
 		EventID:   provider.RuntimeEventID(newID()),
 		Provider:  DriverKind,
@@ -236,9 +232,8 @@ func (h *Instance) recordPermissionRequest(req schema.RequestPermissionRequest, 
 		CreatedAt: time.Now(),
 		Payload: provider.RuntimeEventPayload{
 			RequestType: permissionRequestType(req.ToolCall),
-			Detail:      toolCallTitle(req.ToolCall),
 			Args:        marshalRaw(req.ToolCall),
-			Options:     permissionOptionsFromACP(req.Options),
+			Request:     &asked,
 		},
 	}
 	h.emitRuntimeEventForSession(string(req.SessionID), update)
@@ -257,7 +252,7 @@ func (h *Instance) recordPermissionResolved(req schema.RequestPermissionRequest,
 		Payload: provider.RuntimeEventPayload{
 			RequestType: permissionRequestType(req.ToolCall),
 			Decision:    decision,
-			Resolution:  marshalRaw(map[string]string{"optionId": optionID}),
+			ActionID:    optionID,
 			Cancelled:   resp.Outcome.Outcome == schema.RequestPermissionOutcomeOutcomeCancelled,
 		},
 	}

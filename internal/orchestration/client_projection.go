@@ -44,7 +44,6 @@ func projectThreadForClient(thread Thread) Thread {
 		if entry.Approval != nil {
 			approval := *entry.Approval
 			approval.Args = cloneRawMessage(entry.Approval.Args)
-			approval.Options = append([]provider.ApprovalOption(nil), entry.Approval.Options...)
 			approval.Answers = maps.Clone(entry.Approval.Answers)
 			projectedEntry.Approval = &approval
 		}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,15 +75,9 @@ type pendingApproval struct {
 	form *elicitation.Form
 	// permissions is what a permissions request asks for, granted as is.
 	permissions json.RawMessage
-	// amendments are the options that approve and keep approving (a command
-	// rule, a remembered MCP tool approval), keyed by option id.
-	amendments map[string]amendment
-}
-
-// amendment is an option that approves and keeps approving.
-type amendment struct {
-	reply    map[string]any
-	decision provider.ApprovalDecision
+	// amendments are the replies of a command approval's actions that also
+	// add a lasting rule, by action ID.
+	amendments map[string]map[string]any
 }
 
 // pendingKind is what a server request asks, which decides its reply format.
@@ -100,37 +95,30 @@ const (
 )
 
 // reply builds the server-request response for the user's answer.
-func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
-	if chosen, ok := p.amendments[input.OptionID]; ok {
-		return chosen.reply, chosen.decision, nil
+func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[string]any, error) {
+	if reply, ok := p.amendments[input.Action.ID]; ok {
+		return reply, nil
 	}
 	switch p.kind {
 	case pendingElicitation:
-		action := elicitation.ActionFor(input.Decision)
+		if mode, ok := strings.CutPrefix(input.Action.ID, rememberActionPrefix); ok {
+			return map[string]any{"action": elicitation.ActionAccept, "content": nil, "_meta": map[string]any{"persist": mode}}, nil
+		}
+		action, content, err := elicitation.Answer(p.form, input.Action, input.Answers)
+		if err != nil {
+			return nil, err
+		}
 		reply := map[string]any{"action": action, "content": nil}
-		if action == elicitation.ActionAccept && p.form != nil {
-			content, err := p.form.Content(input.Answers)
-			if err != nil {
-				return nil, "", err
-			}
+		if content != nil {
 			reply["content"] = content
 		}
-		return reply, action.Decision(), nil
-	}
-	// The other options are named after the decisions they make.
-	decision := input.Decision
-	if input.OptionID != "" {
-		decision = provider.ApprovalDecision(input.OptionID)
-	}
-	switch decision {
-	case provider.ApprovalDecisionAccept, provider.ApprovalDecisionAcceptForSession, provider.ApprovalDecisionDecline:
+		return reply, nil
+	case pendingPermissions:
+		return permissionsReply(p.permissions, input.Action.Decision), nil
 	default:
-		decision = provider.ApprovalDecisionCancel
+		// The other actions are named after Codex's own decisions.
+		return map[string]any{"decision": input.Action.ID}, nil
 	}
-	if p.kind == pendingPermissions {
-		return permissionsReply(p.permissions, decision), decision, nil
-	}
-	return map[string]any{"decision": decision}, decision, nil
 }
 
 // cancelReply answers the request as cancelled, in its own format.

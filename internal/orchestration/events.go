@@ -104,6 +104,7 @@ type EventPayload struct {
 	UpdatedAt  time.Time                 `json:"updatedAt,omitzero"`
 	RequestID  ApprovalID                `json:"requestId,omitempty"`
 	Decision   provider.ApprovalDecision `json:"decision,omitempty"`
+	ActionID   string                    `json:"actionId,omitempty"`
 	OptionID   string                    `json:"optionId,omitempty"`
 	Answers    map[string][]string       `json:"answers,omitempty"`
 	Value      any                       `json:"value,omitempty"`
@@ -172,12 +173,10 @@ type ApprovalEvent struct {
 	TurnID      TurnID                      `json:"turnId,omitempty"`
 	RequestType provider.RuntimeRequestType `json:"requestType,omitempty"`
 	Args        json.RawMessage             `json:"args,omitempty"`
-	Options     []provider.ApprovalOption   `json:"options,omitempty"`
-	Detail      string                      `json:"detail,omitempty"`
+	Request     *provider.Request           `json:"request,omitempty"`
 	Decision    provider.ApprovalDecision   `json:"decision,omitempty"`
-	OptionID    string                      `json:"optionId,omitempty"`
+	ActionID    string                      `json:"actionId,omitempty"`
 	Cancelled   bool                        `json:"cancelled,omitempty"`
-	UserInput   *provider.UserInputRequest  `json:"userInput,omitempty"`
 	Answers     map[string][]string         `json:"answers,omitempty"`
 }
 

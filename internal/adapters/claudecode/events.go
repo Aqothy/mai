@@ -602,16 +602,14 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 		suggestions:      request.PermissionSuggestions,
 		client:           proc.client,
 	}
-	detail := approvalDetail(request)
 	// Like the CLI, offer a lasting approval only with a rule to approve:
 	// its suggestions, unless it says this request must not get one.
-	options := []provider.ApprovalOption{{ID: "accept", Name: "Allow once", Kind: "allow_once"}}
+	asked := provider.Request{Message: approvalDetail(request), Actions: []provider.RequestAction{{ID: "accept", Label: "Allow once", Decision: provider.ApprovalDecisionAccept}}}
 	if len(request.PermissionSuggestions) > 0 && !request.SuppressAlwaysAllowRule {
-		options = append(options, provider.ApprovalOption{ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"})
+		asked.Actions = append(asked.Actions, provider.RequestAction{ID: "acceptForSession", Label: "Allow for session", Decision: provider.ApprovalDecisionAcceptForSession})
 	}
-	options = append(options, provider.ApprovalOption{ID: "decline", Name: "Decline", Kind: "reject_once"})
+	asked.Actions = append(asked.Actions, provider.RequestAction{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline})
 	pending.requestType = approvalRequestType(request.ToolName)
-	var userInput *provider.UserInputRequest
 	switch request.ToolName {
 	case "AskUserQuestion":
 		var question askUserQuestion
@@ -620,23 +618,21 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 			return
 		}
 		pending.question = &question
-		input := question.userInput()
-		userInput, options = &input, nil
+		asked = question.request()
 	case "ExitPlanMode":
 		pending.reviewsPlan = true
-		input := planReviewInput(request.Input)
-		userInput, options = &input, nil
+		asked = planReviewRequest(request.Input)
 	}
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, ItemID: request.ToolUseID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options, UserInput: userInput}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, ItemID: request.ToolUseID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Args: append(json.RawMessage(nil), raw...), Request: &asked}})
 }
 
 // openElicitation surfaces an MCP server's elicitation as questions, or as a
 // permission request when it only asks yes or no.
 func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, raw json.RawMessage, turn string) {
-	input, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema)
+	asked, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema)
 	if err != nil {
 		// The user never saw it, so it was neither accepted nor declined.
 		_ = proc.client.respondControl(requestID, map[string]any{"action": elicitation.ActionCancel})
@@ -654,7 +650,11 @@ func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess,
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, RequestID: pending.requestID, Payload: elicitation.RequestPayload(input, form, raw)})
+	payload := provider.RuntimeEventPayload{Request: &asked}
+	if form.Confirms() {
+		payload.Args = append(json.RawMessage(nil), raw...)
+	}
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, RequestID: pending.requestID, Payload: payload})
 }
 
 func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {
@@ -666,7 +666,7 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 	}
 	// Build the reply before claiming the request: an invalid answer must
 	// leave the question answerable.
-	payload, resolved, err := approvalResponse(pending, input)
+	payload, err := approvalResponse(pending, input)
 	if err != nil {
 		return err
 	}
@@ -685,11 +685,11 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 		h.mu.Unlock()
 		return err
 	}
-	answers := input.Answers
-	if resolved != provider.ApprovalDecisionAccept {
-		answers = nil
+	var answers map[string][]string
+	if input.Action.Submit {
+		answers = input.Answers
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: resolved, Answers: answers}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: input.Action.Decision, ActionID: input.Action.ID, Answers: answers}})
 	return nil
 }
 

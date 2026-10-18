@@ -421,7 +421,7 @@ func TestRPCTwoClientsConvergeAcrossSimultaneousAndCrossClientActions(t *testing
 	}
 	a.waitThread(t, threadOne, "approval opened", approvalOpened)
 	b.waitThread(t, threadOne, "approval opened", approvalOpened)
-	b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-multi-approve", ThreadID: threadOne, RequestID: requestID, Decision: provider.ApprovalDecisionAccept})
+	b.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadApprovalRespond, CommandID: "cmd-multi-approve", ThreadID: threadOne, RequestID: requestID, ActionID: "allow"})
 	for _, client := range []*recordingClient{a, b} {
 		client.waitThread(t, threadOne, "approval resolved", func(events []orchestration.Event) bool {
 			return hasEvent(events, func(event orchestration.Event) bool {

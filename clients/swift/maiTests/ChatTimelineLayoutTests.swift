@@ -527,17 +527,16 @@ private func approvalEntry(
 ) -> TimelineEntry {
     TimelineEntry(
         approval: Approval(
+            actionID: nil,
             answers: nil,
             args: nil,
             createdAt: Date(timeIntervalSince1970: 0),
             decision: nil,
-            optionID: nil,
-            options: nil,
+            request: nil,
             requestID: requestID,
             status: status.rawValue,
             turnID: turnID,
-            updatedAt: Date(timeIntervalSince1970: 0),
-            userInput: nil
+            updatedAt: Date(timeIntervalSince1970: 0)
         ),
         item: nil,
         kind: MaidTimelineEntryKind.approval.rawValue,

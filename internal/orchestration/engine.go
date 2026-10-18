@@ -540,7 +540,6 @@ func (e *Engine) ApprovalView(threadID ThreadID, requestID ApprovalID) (ThreadAp
 	if approval := thread.Timeline.Approval(string(requestID)); approval != nil {
 		clone := *approval
 		clone.Args = cloneRawMessage(approval.Args)
-		clone.Options = append([]provider.ApprovalOption(nil), approval.Options...)
 		view.Approval = &clone
 	}
 	return view, true
@@ -1023,21 +1022,15 @@ func (e *Engine) dispatchThreadTurnRetry(command Command) (DispatchResult, error
 }
 
 func (e *Engine) dispatchApprovalRespond(command Command) (DispatchResult, error) {
-	if command.ThreadID == "" || command.RequestID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.approval.respond requires threadId and requestId")
-	}
-	decision := command.Decision
-	if decision == "" {
-		decision = provider.ApprovalDecisionCancel
-	}
-	if err := validateApprovalDecision(command.Type, decision); err != nil {
-		return DispatchResult{}, err
+	if command.ThreadID == "" || command.RequestID == "" || command.ActionID == "" {
+		return DispatchResult{}, fmt.Errorf("thread.approval.respond requires threadId, requestId and actionId")
 	}
 	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateApprovalResponse(command.Type, *thread, command.RequestID, decision, command.OptionID, command.Answers); err != nil {
+		action, err := validateApprovalResponse(command.Type, *thread, command.RequestID, command.ActionID, command.Answers)
+		if err != nil {
 			return Event{}, err
 		}
-		event := threadEvent(command, EventThreadApprovalResponseRequested, ActorKindClient, EventPayload{RequestID: command.RequestID, Decision: decision, OptionID: command.OptionID, Answers: command.Answers})
+		event := threadEvent(command, EventThreadApprovalResponseRequested, ActorKindClient, EventPayload{RequestID: command.RequestID, ActionID: action.ID, Decision: action.Decision, Answers: command.Answers})
 		event.Metadata = EventMetadata{RequestID: string(command.RequestID)}
 		return event, nil
 	})

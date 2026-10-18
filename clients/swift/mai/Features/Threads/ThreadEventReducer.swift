@@ -208,15 +208,14 @@ enum ThreadEventReducer {
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == update.requestID }),
                var approval = thread.timeline[index].approval {
                 note(index)
-                // Reopening restores the request's arguments and options; a
+                // Reopening restores the request and its arguments; a
                 // resolution leaves them as they were.
                 if !resolved {
                     approval.args = update.args
-                    approval.options = update.options
-                    approval.userInput = update.userInput
+                    approval.request = update.request
                 }
                 approval.decision = resolved ? update.decision : nil
-                approval.optionID = resolved ? update.optionID : nil
+                approval.actionID = resolved ? update.actionID : nil
                 approval.answers = resolved ? update.answers : nil
                 approval.status = status.rawValue
                 if let turnID = update.turnID { approval.turnID = turnID }
@@ -224,7 +223,7 @@ enum ThreadEventReducer {
                 thread.timeline[index].approval = approval
             } else {
                 note(thread.timeline.count)
-                let approval = Approval(answers: resolved ? update.answers : nil, args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, optionID: resolved ? update.optionID : nil, options: resolved ? nil : update.options, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt, userInput: resolved ? nil : update.userInput)
+                let approval = Approval(actionID: resolved ? update.actionID : nil, answers: resolved ? update.answers : nil, args: update.args, createdAt: occurredAt, decision: resolved ? update.decision : nil, request: update.request, requestID: update.requestID, status: status.rawValue, turnID: update.turnID, updatedAt: occurredAt)
                 thread.timeline.append(TimelineEntry(approval: approval, item: nil, kind: MaidTimelineEntryKind.approval.rawValue, message: nil))
             }
 
@@ -233,7 +232,7 @@ enum ThreadEventReducer {
             if let index = thread.timeline.lastIndex(where: { $0.approval?.requestID == requestID }) {
                 note(index)
                 thread.timeline[index].approval?.decision = payload.decision
-                thread.timeline[index].approval?.optionID = payload.optionID
+                thread.timeline[index].approval?.actionID = payload.actionID
                 thread.timeline[index].approval?.updatedAt = occurredAt
             }
 

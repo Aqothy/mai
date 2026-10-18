@@ -51,11 +51,14 @@ type Command struct {
 	// the message thread.turn.retry sends again.
 	MessageID MessageID `json:"messageId,omitempty"`
 	// ItemID names the running background item thread.item.stop stops.
-	ItemID           string                           `json:"itemId,omitempty"`
-	RequestID        ApprovalID                       `json:"requestId,omitempty"`
-	Decision         provider.ApprovalDecision        `json:"decision,omitempty"`
+	ItemID    string     `json:"itemId,omitempty"`
+	RequestID ApprovalID `json:"requestId,omitempty"`
+	// ActionID answers thread.approval.respond with one of the request's
+	// actions, and Answers its questions when the action submits them.
+	ActionID string              `json:"actionId,omitempty"`
+	Answers  map[string][]string `json:"answers,omitempty"`
+	// OptionID names the config option thread.config-option.set sets.
 	OptionID         string                           `json:"optionId,omitempty"`
-	Answers          map[string][]string              `json:"answers,omitempty"`
 	Value            any                              `json:"value,omitempty"`
 	ConfigSelections []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
 	CreatedAt        time.Time                        `json:"createdAt,omitzero"`

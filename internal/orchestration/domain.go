@@ -145,20 +145,22 @@ func (thread *Thread) queuedPrompt(messageID MessageID) *QueuedPrompt {
 	return &thread.QueuedPrompts[index]
 }
 
+// Approval is a request the agent made of the user: what it asks, and once
+// answered, the action chosen, its decision and the answers it submitted.
+// Request is nil only for one resolved before it was seen to open; it is
+// never modified once opened (a reopen replaces it), so it is shared, not
+// cloned.
 type Approval struct {
 	RequestID string                    `json:"requestId"`
 	TurnID    TurnID                    `json:"turnId,omitempty"`
 	Args      json.RawMessage           `json:"args,omitempty"`
-	Options   []provider.ApprovalOption `json:"options,omitempty"`
+	Request   *provider.Request         `json:"request,omitempty"`
 	Status    ApprovalStatus            `json:"status"`
 	Decision  provider.ApprovalDecision `json:"decision,omitempty"`
-	OptionID  string                    `json:"optionId,omitempty"`
-	// UserInput is set when the agent asks the user a question rather than
-	// for permission; Answers holds what the user submitted.
-	UserInput *provider.UserInputRequest `json:"userInput,omitempty"`
-	Answers   map[string][]string        `json:"answers,omitempty"`
-	CreatedAt time.Time                  `json:"createdAt"`
-	UpdatedAt time.Time                  `json:"updatedAt"`
+	ActionID  string                    `json:"actionId,omitempty"`
+	Answers   map[string][]string       `json:"answers,omitempty"`
+	CreatedAt time.Time                 `json:"createdAt"`
+	UpdatedAt time.Time                 `json:"updatedAt"`
 }
 
 // SessionBinding is orchestration's view of the provider session for a thread.

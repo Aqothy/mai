@@ -82,7 +82,7 @@ type rpcClient struct {
 	// questions are the sign-in questions this client was asked and has not
 	// answered, by request ID.
 	questionsMu sync.Mutex
-	questions   map[string]chan provider.UserInputAnswer
+	questions   map[string]pendingQuestion
 
 	optionsLifecycleMu   sync.Mutex
 	optionsMu            sync.Mutex
@@ -262,7 +262,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
 		terminalSubscriptions: make(map[string]terminalAttachment),
 		uploads:               make(map[string]string),
-		questions:             make(map[string]chan provider.UserInputAnswer),
+		questions:             make(map[string]pendingQuestion),
 	}
 	client.logger = s.logger.With("client", client.id)
 	s.rpcMu.Lock()
@@ -494,11 +494,17 @@ func (c *rpcClient) takeUploads(attachments []provider.Attachment) error {
 
 // ask sends this client a question an agent asks during its sign-in and
 // waits for the answer, until the sign-in ends or the client goes away.
-func (c *rpcClient) ask(ctx context.Context, instanceID provider.InstanceID, request provider.UserInputRequest) (provider.UserInputAnswer, error) {
+// pendingQuestion is a sign-in question awaiting the client's answer.
+type pendingQuestion struct {
+	request provider.Request
+	answer  chan provider.RequestAnswer
+}
+
+func (c *rpcClient) ask(ctx context.Context, instanceID provider.InstanceID, request provider.Request) (provider.RequestAnswer, error) {
 	requestID := fmt.Sprintf("%s-question-%d", c.id, nextQuestionID.Add(1))
-	answer := make(chan provider.UserInputAnswer, 1)
+	answer := make(chan provider.RequestAnswer, 1)
 	c.questionsMu.Lock()
-	c.questions[requestID] = answer
+	c.questions[requestID] = pendingQuestion{request: request, answer: answer}
 	c.questionsMu.Unlock()
 	defer func() {
 		c.questionsMu.Lock()
@@ -510,9 +516,9 @@ func (c *rpcClient) ask(ctx context.Context, instanceID provider.InstanceID, req
 	case response := <-answer:
 		return response, nil
 	case <-ctx.Done():
-		return provider.UserInputAnswer{}, ctx.Err()
+		return provider.RequestAnswer{}, ctx.Err()
 	case <-c.done:
-		return provider.UserInputAnswer{}, fmt.Errorf("client disconnected")
+		return provider.RequestAnswer{}, fmt.Errorf("client disconnected")
 	}
 }
 
@@ -675,7 +681,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		return h.server.authenticateProvider(ctx, params.InstanceID, provider.AuthenticateInput{
 			MethodID: params.MethodID,
 			Secret:   params.Secret,
-			Ask: func(ctx context.Context, request provider.UserInputRequest) (provider.UserInputAnswer, error) {
+			Ask: func(ctx context.Context, request provider.Request) (provider.RequestAnswer, error) {
 				return h.client.ask(ctx, params.InstanceID, request)
 			},
 		})
@@ -685,13 +691,20 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		h.client.questionsMu.Lock()
-		answer, ok := h.client.questions[params.RequestID]
-		delete(h.client.questions, params.RequestID)
-		h.client.questionsMu.Unlock()
+		defer h.client.questionsMu.Unlock()
+		pending, ok := h.client.questions[params.RequestID]
 		if !ok {
 			return nil, fmt.Errorf("%w: question %q is not pending", jsonrpc2.ErrInvalidParams, params.RequestID)
 		}
-		answer <- provider.UserInputAnswer{Decision: params.Decision, Answers: params.Answers}
+		action, ok := pending.request.Action(params.ActionID)
+		if !ok {
+			return nil, fmt.Errorf("%w: action %q was not offered for question %q", jsonrpc2.ErrInvalidParams, params.ActionID, params.RequestID)
+		}
+		if len(params.Answers) > 0 && !action.Submit {
+			return nil, fmt.Errorf("%w: action %q of question %q takes no answers", jsonrpc2.ErrInvalidParams, params.ActionID, params.RequestID)
+		}
+		delete(h.client.questions, params.RequestID)
+		pending.answer <- provider.RequestAnswer{Action: action, Answers: params.Answers}
 		return nil, nil
 	case wire.MethodProviderLogout:
 		var params wire.ProviderInstanceParams

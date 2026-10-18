@@ -571,12 +571,12 @@ func (i *ProviderRuntimeIngestion) ingestPlanUpdated(event provider.RuntimeEvent
 
 func (i *ProviderRuntimeIngestion) ingestRequestOpened(event provider.RuntimeEvent, createdAt time.Time) {
 	i.completeTurnText(event, createdAt)
-	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Args: append(json.RawMessage(nil), event.Payload.Args...), Options: event.Payload.Options, Detail: event.Payload.Detail, UserInput: event.Payload.UserInput}
+	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Args: append(json.RawMessage(nil), event.Payload.Args...), Request: event.Payload.Request}
 	i.record(EventInput{Type: EventThreadApprovalOpened, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Approval: approval}})
 }
 
 func (i *ProviderRuntimeIngestion) ingestRequestResolved(event provider.RuntimeEvent, createdAt time.Time) {
-	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Decision: approvalDecisionOrCancel(event.Payload.Decision), OptionID: optionIDFromResolution(event.Payload.Resolution), Detail: event.Payload.Detail, Cancelled: event.Payload.Cancelled, Answers: event.Payload.Answers}
+	approval := &ApprovalEvent{RequestID: event.RequestID, TurnID: TurnID(event.TurnID), RequestType: event.Payload.RequestType, Decision: approvalDecisionOrCancel(event.Payload.Decision), ActionID: event.Payload.ActionID, Cancelled: event.Payload.Cancelled, Answers: event.Payload.Answers}
 	i.record(EventInput{Type: EventThreadApprovalResolved, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{Approval: approval}})
 }
 
@@ -994,17 +994,6 @@ func approvalDecisionOrCancel(decision provider.ApprovalDecision) provider.Appro
 	default:
 		return provider.ApprovalDecisionCancel
 	}
-}
-
-func optionIDFromResolution(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var payload struct {
-		OptionID string `json:"optionId"`
-	}
-	_ = json.Unmarshal(raw, &payload)
-	return payload.OptionID
 }
 
 func firstNonEmpty(values ...string) string {

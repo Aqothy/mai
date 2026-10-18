@@ -320,38 +320,36 @@ public extension ACPRegistryStartParams {
 
 // MARK: - Approval
 public struct Approval: Codable {
+    public var actionID: String?
     public var answers: [String: [String]]?
     public var args: JSONAny?
     public var createdAt: Date
-    public var decision, optionID: String?
-    public var options: [ApprovalOption]?
+    public var decision: String?
+    public var request: Request?
     public var requestID, status: String
     public var turnID: String?
     public var updatedAt: Date
-    public var userInput: UserInputRequest?
 
     public enum CodingKeys: String, CodingKey {
-        case answers, args, createdAt, decision
-        case optionID = "optionId"
-        case options
+        case actionID = "actionId"
+        case answers, args, createdAt, decision, request
         case requestID = "requestId"
         case status
         case turnID = "turnId"
-        case updatedAt, userInput
+        case updatedAt
     }
 
-    public init(answers: [String: [String]]?, args: JSONAny?, createdAt: Date, decision: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, status: String, turnID: String?, updatedAt: Date, userInput: UserInputRequest?) {
+    public init(actionID: String?, answers: [String: [String]]?, args: JSONAny?, createdAt: Date, decision: String?, request: Request?, requestID: String, status: String, turnID: String?, updatedAt: Date) {
+        self.actionID = actionID
         self.answers = answers
         self.args = args
         self.createdAt = createdAt
         self.decision = decision
-        self.optionID = optionID
-        self.options = options
+        self.request = request
         self.requestID = requestID
         self.status = status
         self.turnID = turnID
         self.updatedAt = updatedAt
-        self.userInput = userInput
     }
 }
 
@@ -374,30 +372,28 @@ public extension Approval {
     }
 
     func with(
+        actionID: String?? = nil,
         answers: [String: [String]]?? = nil,
         args: JSONAny?? = nil,
         createdAt: Date? = nil,
         decision: String?? = nil,
-        optionID: String?? = nil,
-        options: [ApprovalOption]?? = nil,
+        request: Request?? = nil,
         requestID: String? = nil,
         status: String? = nil,
         turnID: String?? = nil,
-        updatedAt: Date? = nil,
-        userInput: UserInputRequest?? = nil
+        updatedAt: Date? = nil
     ) -> Approval {
         return Approval(
+            actionID: actionID ?? self.actionID,
             answers: answers ?? self.answers,
             args: args ?? self.args,
             createdAt: createdAt ?? self.createdAt,
             decision: decision ?? self.decision,
-            optionID: optionID ?? self.optionID,
-            options: options ?? self.options,
+            request: request ?? self.request,
             requestID: requestID ?? self.requestID,
             status: status ?? self.status,
             turnID: turnID ?? self.turnID,
-            updatedAt: updatedAt ?? self.updatedAt,
-            userInput: userInput ?? self.userInput
+            updatedAt: updatedAt ?? self.updatedAt
         )
     }
 
@@ -410,80 +406,26 @@ public extension Approval {
     }
 }
 
-// MARK: - ApprovalOption
-public struct ApprovalOption: Codable {
-    public var kind: String?
-    public var name, optionID: String
-
-    public enum CodingKeys: String, CodingKey {
-        case kind, name
-        case optionID = "optionId"
-    }
-
-    public init(kind: String?, name: String, optionID: String) {
-        self.kind = kind
-        self.name = name
-        self.optionID = optionID
-    }
-}
-
-// MARK: ApprovalOption convenience initializers and mutators
-
-public extension ApprovalOption {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(ApprovalOption.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        kind: String?? = nil,
-        name: String? = nil,
-        optionID: String? = nil
-    ) -> ApprovalOption {
-        return ApprovalOption(
-            kind: kind ?? self.kind,
-            name: name ?? self.name,
-            optionID: optionID ?? self.optionID
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-// MARK: - UserInputRequest
-public struct UserInputRequest: Codable {
-    public var message: String
+// MARK: - Request
+public struct Request: Codable {
+    public var actions: [RequestAction]
+    public var message: String?
     public var questions: [Question]?
     public var url: String?
 
-    public init(message: String, questions: [Question]?, url: String?) {
+    public init(actions: [RequestAction], message: String?, questions: [Question]?, url: String?) {
+        self.actions = actions
         self.message = message
         self.questions = questions
         self.url = url
     }
 }
 
-// MARK: UserInputRequest convenience initializers and mutators
+// MARK: Request convenience initializers and mutators
 
-public extension UserInputRequest {
+public extension Request {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(UserInputRequest.self, from: data)
+        self = try newJSONDecoder().decode(Request.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -498,14 +440,70 @@ public extension UserInputRequest {
     }
 
     func with(
-        message: String? = nil,
+        actions: [RequestAction]? = nil,
+        message: String?? = nil,
         questions: [Question]?? = nil,
         url: String?? = nil
-    ) -> UserInputRequest {
-        return UserInputRequest(
+    ) -> Request {
+        return Request(
+            actions: actions ?? self.actions,
             message: message ?? self.message,
             questions: questions ?? self.questions,
             url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - RequestAction
+public struct RequestAction: Codable {
+    public var decision, id, label: String
+    public var submit: Bool?
+
+    public init(decision: String, id: String, label: String, submit: Bool?) {
+        self.decision = decision
+        self.id = id
+        self.label = label
+        self.submit = submit
+    }
+}
+
+// MARK: RequestAction convenience initializers and mutators
+
+public extension RequestAction {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(RequestAction.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        decision: String? = nil,
+        id: String? = nil,
+        label: String? = nil,
+        submit: Bool?? = nil
+    ) -> RequestAction {
+        return RequestAction(
+            decision: decision ?? self.decision,
+            id: id ?? self.id,
+            label: label ?? self.label,
+            submit: submit ?? self.submit
         )
     }
 
@@ -654,37 +652,33 @@ public extension QuestionOption {
 
 // MARK: - ApprovalEvent
 public struct ApprovalEvent: Codable {
+    public var actionID: String?
     public var answers: [String: [String]]?
     public var args: JSONAny?
     public var cancelled: Bool?
-    public var decision, detail, optionID: String?
-    public var options: [ApprovalOption]?
+    public var decision: String?
+    public var request: Request?
     public var requestID: String
     public var requestType, turnID: String?
-    public var userInput: UserInputRequest?
 
     public enum CodingKeys: String, CodingKey {
-        case answers, args, cancelled, decision, detail
-        case optionID = "optionId"
-        case options
+        case actionID = "actionId"
+        case answers, args, cancelled, decision, request
         case requestID = "requestId"
         case requestType
         case turnID = "turnId"
-        case userInput
     }
 
-    public init(answers: [String: [String]]?, args: JSONAny?, cancelled: Bool?, decision: String?, detail: String?, optionID: String?, options: [ApprovalOption]?, requestID: String, requestType: String?, turnID: String?, userInput: UserInputRequest?) {
+    public init(actionID: String?, answers: [String: [String]]?, args: JSONAny?, cancelled: Bool?, decision: String?, request: Request?, requestID: String, requestType: String?, turnID: String?) {
+        self.actionID = actionID
         self.answers = answers
         self.args = args
         self.cancelled = cancelled
         self.decision = decision
-        self.detail = detail
-        self.optionID = optionID
-        self.options = options
+        self.request = request
         self.requestID = requestID
         self.requestType = requestType
         self.turnID = turnID
-        self.userInput = userInput
     }
 }
 
@@ -707,30 +701,26 @@ public extension ApprovalEvent {
     }
 
     func with(
+        actionID: String?? = nil,
         answers: [String: [String]]?? = nil,
         args: JSONAny?? = nil,
         cancelled: Bool?? = nil,
         decision: String?? = nil,
-        detail: String?? = nil,
-        optionID: String?? = nil,
-        options: [ApprovalOption]?? = nil,
+        request: Request?? = nil,
         requestID: String? = nil,
         requestType: String?? = nil,
-        turnID: String?? = nil,
-        userInput: UserInputRequest?? = nil
+        turnID: String?? = nil
     ) -> ApprovalEvent {
         return ApprovalEvent(
+            actionID: actionID ?? self.actionID,
             answers: answers ?? self.answers,
             args: args ?? self.args,
             cancelled: cancelled ?? self.cancelled,
             decision: decision ?? self.decision,
-            detail: detail ?? self.detail,
-            optionID: optionID ?? self.optionID,
-            options: options ?? self.options,
+            request: request ?? self.request,
             requestID: requestID ?? self.requestID,
             requestType: requestType ?? self.requestType,
-            turnID: turnID ?? self.turnID,
-            userInput: userInput ?? self.userInput
+            turnID: turnID ?? self.turnID
         )
     }
 
@@ -1421,12 +1411,13 @@ public extension PromptContentCapabilities {
 
 // MARK: - Command
 public struct Command: Codable {
+    public var actionID: String?
     public var additionalDirectories: [String]?
     public var answers: [String: [String]]?
     public var commandID: String?
     public var configSelections: [ConfigOptionSelection]?
     public var createdAt: Date?
-    public var cwd, decision, itemID: String?
+    public var cwd, itemID: String?
     public var message: CommandMessage?
     public var messageID: String?
     public var modelSelection: ModelSelection?
@@ -1437,9 +1428,10 @@ public struct Command: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
+        case actionID = "actionId"
         case additionalDirectories, answers
         case commandID = "commandId"
-        case configSelections, createdAt, cwd, decision
+        case configSelections, createdAt, cwd
         case itemID = "itemId"
         case message
         case messageID = "messageId"
@@ -1454,14 +1446,14 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, decision: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, steer: Bool?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(actionID: String?, additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, steer: Bool?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+        self.actionID = actionID
         self.additionalDirectories = additionalDirectories
         self.answers = answers
         self.commandID = commandID
         self.configSelections = configSelections
         self.createdAt = createdAt
         self.cwd = cwd
-        self.decision = decision
         self.itemID = itemID
         self.message = message
         self.messageID = messageID
@@ -1497,13 +1489,13 @@ public extension Command {
     }
 
     func with(
+        actionID: String?? = nil,
         additionalDirectories: [String]?? = nil,
         answers: [String: [String]]?? = nil,
         commandID: String?? = nil,
         configSelections: [ConfigOptionSelection]?? = nil,
         createdAt: Date?? = nil,
         cwd: String?? = nil,
-        decision: String?? = nil,
         itemID: String?? = nil,
         message: CommandMessage?? = nil,
         messageID: String?? = nil,
@@ -1519,13 +1511,13 @@ public extension Command {
         value: JSONAny?? = nil
     ) -> Command {
         return Command(
+            actionID: actionID ?? self.actionID,
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             answers: answers ?? self.answers,
             commandID: commandID ?? self.commandID,
             configSelections: configSelections ?? self.configSelections,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
-            decision: decision ?? self.decision,
             itemID: itemID ?? self.itemID,
             message: message ?? self.message,
             messageID: messageID ?? self.messageID,
@@ -2172,6 +2164,7 @@ public extension EventMetadata {
 
 // MARK: - EventPayload
 public struct EventPayload: Codable {
+    public var actionID: String?
     public var additionalDirectories: [String]?
     public var annotations: [PromptAnnotation]?
     public var answers: [String: [String]]?
@@ -2198,6 +2191,7 @@ public struct EventPayload: Codable {
     public var value: JSONAny?
 
     public enum CodingKeys: String, CodingKey {
+        case actionID = "actionId"
         case additionalDirectories, annotations, answers, approval, attachments, configOptions, createdAt, cwd, decision, delivery, deliveryError, goal, item
         case itemID = "itemId"
         case messageID = "messageId"
@@ -2213,7 +2207,8 @@ public struct EventPayload: Codable {
         case updatedAt, value
     }
 
-    public init(additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, goal: Goal?, item: Item?, itemID: String?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+    public init(actionID: String?, additionalDirectories: [String]?, annotations: [PromptAnnotation]?, answers: [String: [String]]?, approval: ApprovalEvent?, attachments: [Attachment]?, configOptions: [ConfigOption]?, createdAt: Date?, cwd: String?, decision: String?, delivery: String?, deliveryError: String?, goal: Goal?, item: Item?, itemID: String?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, plan: Plan?, providerInstanceID: String?, requestID: String?, role: String?, session: SessionBinding?, sessionCleared: Bool?, skills: [Skill]?, slashCommands: [SlashCommand]?, stopReason: String?, text: String?, threadID: String?, title: String?, tokenUsage: TokenUsage?, turnID: String?, updatedAt: Date?, value: JSONAny?) {
+        self.actionID = actionID
         self.additionalDirectories = additionalDirectories
         self.annotations = annotations
         self.answers = answers
@@ -2269,6 +2264,7 @@ public extension EventPayload {
     }
 
     func with(
+        actionID: String?? = nil,
         additionalDirectories: [String]?? = nil,
         annotations: [PromptAnnotation]?? = nil,
         answers: [String: [String]]?? = nil,
@@ -2304,6 +2300,7 @@ public extension EventPayload {
         value: JSONAny?? = nil
     ) -> EventPayload {
         return EventPayload(
+            actionID: actionID ?? self.actionID,
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             annotations: annotations ?? self.annotations,
             answers: answers ?? self.answers,
@@ -4157,7 +4154,7 @@ public extension ProviderOptionsSetParams {
 // MARK: - ProviderQuestion
 public struct ProviderQuestion: Codable {
     public var instanceID: String
-    public var request: UserInputRequest
+    public var request: Request
     public var requestID: String
 
     public enum CodingKeys: String, CodingKey {
@@ -4166,7 +4163,7 @@ public struct ProviderQuestion: Codable {
         case requestID = "requestId"
     }
 
-    public init(instanceID: String, request: UserInputRequest, requestID: String) {
+    public init(instanceID: String, request: Request, requestID: String) {
         self.instanceID = instanceID
         self.request = request
         self.requestID = requestID
@@ -4193,7 +4190,7 @@ public extension ProviderQuestion {
 
     func with(
         instanceID: String? = nil,
-        request: UserInputRequest? = nil,
+        request: Request? = nil,
         requestID: String? = nil
     ) -> ProviderQuestion {
         return ProviderQuestion(
@@ -4214,17 +4211,19 @@ public extension ProviderQuestion {
 
 // MARK: - ProviderQuestionAnswerParams
 public struct ProviderQuestionAnswerParams: Codable {
+    public var actionID: String
     public var answers: [String: [String]]?
-    public var decision, requestID: String
+    public var requestID: String
 
     public enum CodingKeys: String, CodingKey {
-        case answers, decision
+        case actionID = "actionId"
+        case answers
         case requestID = "requestId"
     }
 
-    public init(answers: [String: [String]]?, decision: String, requestID: String) {
+    public init(actionID: String, answers: [String: [String]]?, requestID: String) {
+        self.actionID = actionID
         self.answers = answers
-        self.decision = decision
         self.requestID = requestID
     }
 }
@@ -4248,13 +4247,13 @@ public extension ProviderQuestionAnswerParams {
     }
 
     func with(
+        actionID: String? = nil,
         answers: [String: [String]]?? = nil,
-        decision: String? = nil,
         requestID: String? = nil
     ) -> ProviderQuestionAnswerParams {
         return ProviderQuestionAnswerParams(
+            actionID: actionID ?? self.actionID,
             answers: answers ?? self.answers,
-            decision: decision ?? self.decision,
             requestID: requestID ?? self.requestID
         )
     }

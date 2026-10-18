@@ -344,14 +344,14 @@ final class ThreadStore {
     }
 
     func answerProviderQuestion(
-        _ decision: MaidApprovalDecision,
+        _ action: RequestAction,
         answers: [String: [String]]?
     ) async throws {
         guard let question = providerQuestion else { return }
         try await rpc.answerProviderQuestion(
             ProviderQuestionAnswerParams(
+                actionID: action.id,
                 answers: answers,
-                decision: decision.rawValue,
                 requestID: question.requestID
             ))
         if providerQuestion?.requestID == question.requestID {
@@ -752,16 +752,11 @@ final class ThreadStore {
     func respondToApproval(
         threadID: String,
         requestID: String,
-        decision: MaidApprovalDecision,
-        optionID: String?,
-        answers: [String: [String]]? = nil
+        actionID: String,
+        answers: [String: [String]]?
     ) async throws {
-        var response = command(
-            type: MaidCommandType.threadApprovalRespond.rawValue,
-            threadID: threadID,
-            optionID: optionID
-        )
-        response.decision = decision.rawValue
+        var response = command(type: MaidCommandType.threadApprovalRespond.rawValue, threadID: threadID)
+        response.actionID = actionID
         response.requestID = requestID
         response.answers = answers
         _ = try await rpc.dispatchCommand(response)
@@ -1081,7 +1076,6 @@ final class ThreadStore {
             configSelections: nil,
             createdAt: now(),
             cwd: nil,
-            decision: nil,
             message: message,
             modelSelection: nil,
             optionID: optionID,

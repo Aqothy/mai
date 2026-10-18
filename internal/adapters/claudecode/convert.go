@@ -461,53 +461,44 @@ func approvalDetail(request controlRequestBody) string {
 }
 
 // approvalResponse builds the control response for a pending request: a
-// permission decision, AskUserQuestion answers, or an MCP elicitation result.
-func approvalResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+// permission decision, AskUserQuestion answers, a plan review, or an MCP
+// elicitation result.
+func approvalResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, error) {
 	switch {
 	case pending.isElicitation:
-		action := elicitation.ActionFor(input.Decision)
+		action, content, err := elicitation.Answer(pending.form, input.Action, input.Answers)
+		if err != nil {
+			return nil, err
+		}
 		response := map[string]any{"action": action}
-		if action == elicitation.ActionAccept && pending.form != nil {
-			content, err := pending.form.Content(input.Answers)
-			if err != nil {
-				return nil, "", err
-			}
+		if content != nil {
 			response["content"] = content
 		}
-		return response, action.Decision(), nil
+		return response, nil
 	case pending.question != nil:
 		return questionResponse(pending, input)
 	case pending.reviewsPlan:
-		return planReviewResponse(pending, input)
+		return planReviewResponse(pending, input), nil
 	default:
-		decision := string(input.Decision)
-		if input.OptionID != "" {
-			decision = input.OptionID
-		}
-		payload, resolved := permissionResponse(pending, decision)
-		return payload, resolved, nil
+		return permissionResponse(pending, input.Action.ID), nil
 	}
 }
 
 // questionResponse answers AskUserQuestion through updatedInput.answers, keyed
-// by question text, with several selections joined by ", ". Declining or
-// dismissing tells the model without interrupting the turn.
-func questionResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
-	switch input.Decision {
-	case provider.ApprovalDecisionAccept:
-	case provider.ApprovalDecisionDecline:
-		return map[string]any{"behavior": "deny", "message": "The user declined to answer."}, provider.ApprovalDecisionDecline, nil
-	default:
-		return map[string]any{"behavior": "deny", "message": "The user dismissed the question without answering."}, provider.ApprovalDecisionCancel, nil
+// by question text, with several selections joined by ", ". Declining tells
+// the model without interrupting the turn.
+func questionResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, error) {
+	if !input.Action.Submit {
+		return map[string]any{"behavior": "deny", "message": "The user declined to answer."}, nil
 	}
 	answers := make(map[string]string, len(pending.question.Questions))
 	for _, question := range pending.question.Questions {
 		values := slices.DeleteFunc(slices.Clone(input.Answers[question.Question]), func(value string) bool { return strings.TrimSpace(value) == "" })
 		if len(values) == 0 {
-			return nil, "", fmt.Errorf("%q needs an answer", question.Question)
+			return nil, fmt.Errorf("%q needs an answer", question.Question)
 		}
 		if !question.MultiSelect && len(values) > 1 {
-			return nil, "", fmt.Errorf("%q takes a single answer", question.Question)
+			return nil, fmt.Errorf("%q takes a single answer", question.Question)
 		}
 		answers[question.Question] = strings.Join(values, ", ")
 	}
@@ -517,84 +508,66 @@ func questionResponse(pending *pendingApproval, input provider.RespondToRequestI
 		updated = map[string]any{}
 	}
 	updated["answers"] = answers
-	return map[string]any{"behavior": "allow", "updatedInput": updated}, provider.ApprovalDecisionAccept, nil
+	return map[string]any{"behavior": "allow", "updatedInput": updated}, nil
 }
 
 const (
-	planReviewQuestionID = "plan"
-	planApprove          = "approve"
-	planKeepPlanning     = "keep-planning"
+	planFeedbackQuestionID = "feedback"
+	planApprove            = "approve"
+	planKeepPlanning       = "keep-planning"
 )
 
-// planReviewInput asks the user to approve Claude's plan or keep planning,
-// with a typed answer telling Claude what to change, like the CLI's prompt.
-// The plan is the question's message: the user reviews it where they answer.
-func planReviewInput(rawInput json.RawMessage) provider.UserInputRequest {
+// planReviewRequest asks the user to approve Claude's plan or keep planning,
+// optionally telling Claude what to change, like the CLI's prompt. The plan
+// is the message: the user reviews it where they answer.
+func planReviewRequest(rawInput json.RawMessage) provider.Request {
 	var input toolInput
 	_ = json.Unmarshal(rawInput, &input)
-	return provider.UserInputRequest{
+	return provider.Request{
 		Message: trimmedOrDefault(input.Plan, "Claude has a plan ready."),
 		Questions: []provider.Question{{
-			ID:             planReviewQuestionID,
-			Kind:           provider.QuestionKindChoice,
-			Title:          "Approve this plan?",
-			Description:    "To keep planning, you can tell Claude what to change.",
-			Required:       true,
-			AllowsFreeText: true,
-			Options: []provider.QuestionOption{
-				{Value: planApprove, Label: "Approve plan"},
-				{Value: planKeepPlanning, Label: "Keep planning"},
-			},
+			ID:          planFeedbackQuestionID,
+			Kind:        provider.QuestionKindText,
+			Title:       "What should change?",
+			Description: "To keep planning, you can tell Claude what to change.",
 		}},
+		Actions: []provider.RequestAction{
+			{ID: planApprove, Label: "Approve plan", Decision: provider.ApprovalDecisionAccept},
+			{ID: planKeepPlanning, Label: "Keep planning", Decision: provider.ApprovalDecisionDecline, Submit: true},
+		},
 	}
 }
 
 // planReviewResponse approves the plan, or denies ExitPlanMode with the
-// user's typed feedback as the message the model reads. Either way the user
-// answered the question, so the request resolves as accepted and the chat
-// keeps the answer.
-func planReviewResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
-	if input.Decision != provider.ApprovalDecisionAccept {
-		payload, resolved := permissionResponse(pending, string(input.Decision))
-		return payload, resolved, nil
+// user's feedback, if any, as the message the model reads.
+func planReviewResponse(pending *pendingApproval, input provider.RespondToRequestInput) map[string]any {
+	if input.Action.ID == planApprove {
+		return permissionResponse(pending, "accept")
 	}
-	values := input.Answers[planReviewQuestionID]
-	if slices.Contains(values, planApprove) {
-		if len(values) > 1 {
-			return nil, "", fmt.Errorf("approve the plan or say what to change, not both")
-		}
-		payload, resolved := permissionResponse(pending, "accept")
-		return payload, resolved, nil
-	}
-	if len(values) == 0 {
-		return nil, "", fmt.Errorf("approve the plan or keep planning")
-	}
-	feedback := strings.Join(slices.DeleteFunc(slices.Clone(values), func(value string) bool {
-		return value == planKeepPlanning || strings.TrimSpace(value) == ""
-	}), "\n")
+	feedback := strings.TrimSpace(strings.Join(input.Answers[planFeedbackQuestionID], "\n"))
 	message := "The user wants to keep planning."
 	if feedback != "" {
 		message = "The user wants to keep planning. Their feedback on the plan: " + feedback
 	}
-	return map[string]any{"behavior": "deny", "message": message}, provider.ApprovalDecisionAccept, nil
+	return map[string]any{"behavior": "deny", "message": message}
 }
 
-// permissionResponse builds the PermissionResult payload for a decision and
-// reports the decision that should be echoed on request.resolved.
-func permissionResponse(pending *pendingApproval, decision string) (map[string]any, provider.ApprovalDecision) {
-	switch decision {
+// permissionResponse builds the PermissionResult payload for an action, or
+// for a cancellation.
+func permissionResponse(pending *pendingApproval, actionID string) map[string]any {
+	switch actionID {
 	case "accept":
-		return map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(pending.input)}, provider.ApprovalDecisionAccept
+		return map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(pending.input)}
 	case "acceptForSession":
 		return map[string]any{
 			"behavior":           "allow",
 			"updatedInput":       json.RawMessage(pending.input),
 			"updatedPermissions": sessionScopedPermissions(pending),
-		}, provider.ApprovalDecisionAcceptForSession
+		}
 	case "decline":
-		return map[string]any{"behavior": "deny", "message": "The user declined this action."}, provider.ApprovalDecisionDecline
+		return map[string]any{"behavior": "deny", "message": "The user declined this action."}
 	default:
-		return map[string]any{"behavior": "deny", "message": "The user cancelled this request.", "interrupt": true}, provider.ApprovalDecisionCancel
+		return map[string]any{"behavior": "deny", "message": "The user cancelled this request.", "interrupt": true}
 	}
 }
 

@@ -7,24 +7,26 @@ extension ProviderQuestion: Identifiable {
 /// A question the agent asks while the user signs in, before any chat exists
 /// to show it in. Answering, declining, or dismissing it lets sign-in go on.
 struct ProviderQuestionSheet: View {
-    @State private var model: ChatQuestionModel
+    @State private var model: ChatRequestModel
 
     init(question: ProviderQuestion, account: ProviderAccountModel) {
         _model = State(
-            initialValue: ChatQuestionModel(request: question.request) { decision, answers in
-                try await account.answerQuestion(decision, answers: answers)
+            initialValue: ChatRequestModel(request: question.request) { action, answers in
+                try await account.answerQuestion(action, answers: answers)
             })
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Text(model.messageText)
-                        .textSelection(.enabled)
+                if let messageText = model.messageText {
+                    Section {
+                        Text(messageText)
+                            .textSelection(.enabled)
+                    }
                 }
                 Section {
-                    ChatQuestionForm(model: model)
+                    ChatRequestForm(model: model)
                     if let errorMessage = model.errorMessage {
                         Text(errorMessage)
                             .font(.caption)

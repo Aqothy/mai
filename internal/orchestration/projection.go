@@ -472,7 +472,7 @@ func (p *Projection) applyThreadApprovalResponseRequested(event Event) {
 	}
 	if approval := thread.Timeline.Approval(string(event.Payload.RequestID)); approval != nil {
 		approval.Decision = event.Payload.Decision
-		approval.OptionID = event.Payload.OptionID
+		approval.ActionID = event.Payload.ActionID
 		approval.UpdatedAt = event.OccurredAt
 	}
 }
@@ -540,16 +540,15 @@ func (p *Projection) applyThreadApprovalOpened(event Event) {
 		}
 		existing.TurnID = approval.TurnID
 		existing.Args = append(json.RawMessage(nil), approval.Args...)
-		existing.Options = approval.Options
-		existing.UserInput = approval.UserInput
+		existing.Request = approval.Request
 		existing.Status = ApprovalStatusPending
 		existing.Decision = ""
-		existing.OptionID = ""
+		existing.ActionID = ""
 		existing.Answers = nil
 		existing.UpdatedAt = event.OccurredAt
 		return
 	}
-	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Args: append(json.RawMessage(nil), approval.Args...), Options: approval.Options, UserInput: approval.UserInput, Status: ApprovalStatusPending, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
+	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Args: append(json.RawMessage(nil), approval.Args...), Request: approval.Request, Status: ApprovalStatusPending, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
 	thread.pendingApprovals = append(thread.pendingApprovals, thread.Timeline.AppendApproval(value))
 }
 
@@ -563,12 +562,12 @@ func (p *Projection) applyThreadApprovalResolved(event Event) {
 		thread.pendingApprovals = slices.DeleteFunc(thread.pendingApprovals, func(pending *Approval) bool { return pending == existing })
 		existing.Status = ApprovalStatusResolved
 		existing.Decision = approval.Decision
-		existing.OptionID = approval.OptionID
+		existing.ActionID = approval.ActionID
 		existing.Answers = approval.Answers
 		existing.UpdatedAt = event.OccurredAt
 		return
 	}
-	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Status: ApprovalStatusResolved, Decision: approval.Decision, OptionID: approval.OptionID, Answers: approval.Answers, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
+	value := Approval{RequestID: approval.RequestID, TurnID: approval.TurnID, Status: ApprovalStatusResolved, Decision: approval.Decision, ActionID: approval.ActionID, Answers: approval.Answers, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt}
 	thread.Timeline.AppendApproval(value)
 }
 

@@ -538,39 +538,33 @@ func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw js
 	if method == "item/fileChange/requestApproval" {
 		requestType = provider.RuntimeRequestFileChange
 	}
-	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: requestID, localThread: local, localTurn: turn, requestType: requestType, kind: pendingApprovalRequest, amendments: make(map[string]amendment)}
-	options := []provider.ApprovalOption{{ID: "accept", Name: "Allow once", Kind: "allow_once"}, {ID: "acceptForSession", Name: "Allow for session", Kind: "allow_always"}}
-	// Like the Codex TUI, offer each proposed rule as its own option.
-	if prefix := strings.Join(request.ProposedExecpolicyAmendment, " "); prefix != "" && !strings.ContainsAny(prefix, "\r\n") {
-		pending.amendments["acceptWithExecpolicyAmendment"] = amendment{
-			reply:    map[string]any{"decision": map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": request.ProposedExecpolicyAmendment}}},
-			decision: provider.ApprovalDecisionAcceptForSession,
-		}
-		options = append(options, provider.ApprovalOption{ID: "acceptWithExecpolicyAmendment", Name: fmt.Sprintf("Always allow commands that start with `%s`", prefix), Kind: "allow_always"})
-	}
-	for index, proposed := range request.ProposedNetworkPolicyAmendments {
-		optionID := fmt.Sprintf("networkPolicyAmendment:%d", index)
-		option := provider.ApprovalOption{ID: optionID, Name: "Always allow " + proposed.Host, Kind: "allow_always"}
-		decision := provider.ApprovalDecisionAcceptForSession
-		if proposed.Action == "deny" {
-			option = provider.ApprovalOption{ID: optionID, Name: "Always block " + proposed.Host, Kind: "reject_always"}
-			decision = provider.ApprovalDecisionDecline
-		}
-		pending.amendments[optionID] = amendment{
-			reply:    map[string]any{"decision": map[string]any{"applyNetworkPolicyAmendment": map[string]any{"network_policy_amendment": proposed}}},
-			decision: decision,
-		}
-		options = append(options, option)
-	}
-	options = append(options, provider.ApprovalOption{ID: "decline", Name: "Decline", Kind: "reject_once"})
-	h.mu.Lock()
-	h.pendingApprovals[requestID] = pending
-	h.mu.Unlock()
+	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: requestID, localThread: local, localTurn: turn, requestType: requestType, kind: pendingApprovalRequest, amendments: make(map[string]map[string]any)}
 	detail := strings.TrimSpace(request.Reason)
 	if detail == "" {
 		detail = strings.TrimSpace(request.Command)
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options}})
+	asked := provider.Request{Message: detail, Actions: []provider.RequestAction{
+		{ID: "accept", Label: "Allow once", Decision: provider.ApprovalDecisionAccept},
+		{ID: "acceptForSession", Label: "Allow for session", Decision: provider.ApprovalDecisionAcceptForSession},
+	}}
+	// Like the Codex TUI, offer each proposed rule as its own action.
+	if prefix := strings.Join(request.ProposedExecpolicyAmendment, " "); prefix != "" && !strings.ContainsAny(prefix, "\r\n") {
+		pending.amendments["acceptWithExecpolicyAmendment"] = map[string]any{"decision": map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": request.ProposedExecpolicyAmendment}}}
+		asked.Actions = append(asked.Actions, provider.RequestAction{ID: "acceptWithExecpolicyAmendment", Label: fmt.Sprintf("Always allow commands that start with `%s`", prefix), Decision: provider.ApprovalDecisionAcceptForSession})
+	}
+	for index, proposed := range request.ProposedNetworkPolicyAmendments {
+		action := provider.RequestAction{ID: fmt.Sprintf("networkPolicyAmendment:%d", index), Label: "Always allow " + proposed.Host, Decision: provider.ApprovalDecisionAcceptForSession}
+		if proposed.Action == "deny" {
+			action.Label, action.Decision = "Always block "+proposed.Host, provider.ApprovalDecisionDecline
+		}
+		pending.amendments[action.ID] = map[string]any{"decision": map[string]any{"applyNetworkPolicyAmendment": map[string]any{"network_policy_amendment": proposed}}}
+		asked.Actions = append(asked.Actions, action)
+	}
+	asked.Actions = append(asked.Actions, provider.RequestAction{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline})
+	h.mu.Lock()
+	h.pendingApprovals[requestID] = pending
+	h.mu.Unlock()
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Args: append(json.RawMessage(nil), raw...), Request: &asked}})
 }
 
 // openElicitation surfaces an MCP server's elicitation as questions, or as a
@@ -592,32 +586,37 @@ func (h *Instance) openElicitation(id json.RawMessage, raw json.RawMessage) {
 		_ = h.rpc.respondError(id, -32602, "invalid elicitation request")
 		return
 	}
-	input, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema)
+	asked, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema, rememberActions(request.Meta.Persist)...)
 	local, turn, ok := h.resolveIDs(request.ThreadID, request.TurnID)
 	if err != nil || !ok {
 		// The user never saw it, so it was neither accepted nor declined.
 		_ = h.rpc.respond(id, map[string]any{"action": elicitation.ActionCancel, "content": nil})
 		return
 	}
-	var remember []provider.ApprovalOption
-	var amendments map[string]amendment
-	if form.Confirms() {
-		remember, amendments = rememberOptions(request.Meta.Persist)
-	}
-	payload := elicitation.RequestPayload(input, form, raw, remember...)
-	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id), localThread: local, localTurn: turn, kind: pendingElicitation, form: form, amendments: amendments}
+	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id), localThread: local, localTurn: turn, kind: pendingElicitation, form: form}
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
+	payload := provider.RuntimeEventPayload{Request: &asked}
+	if form.Confirms() {
+		// What it confirms, an MCP tool call's server, tool and arguments
+		// above all, is only in the raw request.
+		payload.Args = append(json.RawMessage(nil), raw...)
+	}
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, RequestID: pending.requestID, Payload: payload})
 }
 
-// rememberOptions are the ways Codex offers to keep allowing what an
+// rememberActionPrefix starts the ID of an action that keeps allowing what
+// an elicitation confirms; the rest is Codex's persist mode.
+const rememberActionPrefix = "persist:"
+
+// rememberActions are the ways Codex offers to keep allowing what an
 // elicitation confirms, MCP tool calls above all: _meta.persist names
 // "session", "always" or both, and the chosen one goes back as the
 // response's _meta.persist (codex-rs/protocol/src/mcp_approval_meta.rs,
-// read by parse_mcp_tool_approval_elicitation_response).
-func rememberOptions(persist json.RawMessage) ([]provider.ApprovalOption, map[string]amendment) {
+// read by parse_mcp_tool_approval_elicitation_response). They apply only to
+// a form that asks for nothing.
+func rememberActions(persist json.RawMessage) []provider.RequestAction {
 	var modes []string
 	var mode string
 	if json.Unmarshal(persist, &mode) == nil {
@@ -625,20 +624,13 @@ func rememberOptions(persist json.RawMessage) ([]provider.ApprovalOption, map[st
 	} else {
 		_ = json.Unmarshal(persist, &modes)
 	}
-	var options []provider.ApprovalOption
-	amendments := make(map[string]amendment)
-	for _, offer := range []struct{ mode, name string }{{"session", "Allow for this session"}, {"always", "Always allow"}} {
-		if !slices.Contains(modes, offer.mode) {
-			continue
-		}
-		optionID := "persist:" + offer.mode
-		options = append(options, provider.ApprovalOption{ID: optionID, Name: offer.name, Kind: "allow_always"})
-		amendments[optionID] = amendment{
-			reply:    map[string]any{"action": elicitation.ActionAccept, "content": nil, "_meta": map[string]any{"persist": offer.mode}},
-			decision: provider.ApprovalDecisionAcceptForSession,
+	var actions []provider.RequestAction
+	for _, offer := range []struct{ mode, label string }{{"session", "Allow for this session"}, {"always", "Always allow"}} {
+		if slices.Contains(modes, offer.mode) {
+			actions = append(actions, provider.RequestAction{ID: rememberActionPrefix + offer.mode, Label: offer.label, Decision: provider.ApprovalDecisionAcceptForSession})
 		}
 	}
-	return options, amendments
+	return actions
 }
 
 // openPermissionsRequest surfaces a request for more sandbox access as a
@@ -667,12 +659,12 @@ func (h *Instance) openPermissionsRequest(id json.RawMessage, raw json.RawMessag
 	if request.Reason != nil && strings.TrimSpace(*request.Reason) != "" {
 		detail = strings.TrimSpace(*request.Reason)
 	}
-	options := []provider.ApprovalOption{
-		{ID: string(provider.ApprovalDecisionAccept), Name: "Allow for this turn", Kind: "allow_once"},
-		{ID: string(provider.ApprovalDecisionAcceptForSession), Name: "Allow for this session", Kind: "allow_always"},
-		{ID: string(provider.ApprovalDecisionDecline), Name: "Decline", Kind: "reject_once"},
-	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options}})
+	asked := provider.Request{Message: detail, Actions: []provider.RequestAction{
+		{ID: "turn", Label: "Allow for this turn", Decision: provider.ApprovalDecisionAccept},
+		{ID: "session", Label: "Allow for this session", Decision: provider.ApprovalDecisionAcceptForSession},
+		{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline},
+	}}
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Args: append(json.RawMessage(nil), raw...), Request: &asked}})
 }
 
 func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {
@@ -684,7 +676,7 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 	}
 	// Build the reply before claiming the request: an invalid answer must
 	// leave the question answerable.
-	reply, decision, err := pending.reply(input)
+	reply, err := pending.reply(input)
 	if err != nil {
 		return err
 	}
@@ -703,11 +695,11 @@ func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToR
 		h.mu.Unlock()
 		return err
 	}
-	answers := input.Answers
-	if decision != provider.ApprovalDecisionAccept {
-		answers = nil
+	var answers map[string][]string
+	if input.Action.Submit {
+		answers = input.Answers
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: decision, Answers: answers}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: input.Action.Decision, ActionID: input.Action.ID, Answers: answers}})
 	return nil
 }
 

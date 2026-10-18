@@ -435,38 +435,40 @@ func TestEngineConfigOptionSetRequiresThreadWithActiveSession(t *testing.T) {
 	mustDispatch(t, engine, Command{Type: CommandThreadConfigOptionSet, CommandID: "cmd-config-option-forward", ThreadID: threadID, OptionID: "provider-option", Value: false})
 }
 
-func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *testing.T) {
+func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedAction(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	events := observeEvents(t, engine)
-	threadID := ThreadID("thread-approval-option-validation")
+	threadID := ThreadID("thread-approval-action-validation")
 	requestID := ApprovalID("approval-1")
-	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-option-validation", ThreadID: threadID, Title: "Thread"})
-	approval := &ApprovalEvent{RequestID: string(requestID), Options: []provider.ApprovalOption{{ID: "allow", Name: "Allow"}, {ID: "reject", Name: "Reject"}}}
+	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-action-validation", ThreadID: threadID, Title: "Thread"})
+	approval := &ApprovalEvent{RequestID: string(requestID), Request: &provider.Request{Actions: []provider.RequestAction{
+		{ID: "allow", Label: "Allow", Decision: provider.ApprovalDecisionAccept},
+		{ID: "reject", Label: "Reject", Decision: provider.ApprovalDecisionDecline},
+	}}}
 	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: approval}})
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-invalid-approval-decision", ThreadID: threadID, RequestID: requestID, Decision: "approve"}); err == nil {
-		t.Fatal("thread.approval.respond invalid decision err = nil, want rejection")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-unknown-approval-response", ThreadID: threadID, RequestID: "missing", Decision: provider.ApprovalDecisionAccept}); err == nil {
-		t.Fatal("thread.approval.respond unknown request err = nil, want rejection")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-bad-approval-option", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "allow-typo"}); err == nil {
-		t.Fatal("thread.approval.respond unoffered optionId err = nil, want rejection")
-	}
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-answers-to-permission", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, Answers: map[string][]string{"q": {"a"}}}); err == nil {
-		t.Fatal("thread.approval.respond answers to a permission request err = nil, want rejection")
+	for name, command := range map[string]Command{
+		"no action":               {RequestID: requestID},
+		"unknown request":         {RequestID: "missing", ActionID: "allow"},
+		"unoffered action":        {RequestID: requestID, ActionID: "allow-typo"},
+		"answers to a permission": {RequestID: requestID, ActionID: "allow", Answers: map[string][]string{"q": {"a"}}},
+	} {
+		command.Type, command.CommandID, command.ThreadID = CommandThreadApprovalRespond, CommandID("cmd-"+name), threadID
+		if _, err := engine.Dispatch(context.Background(), command); err == nil {
+			t.Fatalf("thread.approval.respond with %s err = nil, want rejection", name)
+		}
 	}
 	if recorded := events.matching("", 0); len(recorded) != 2 {
 		t.Fatalf("events after rejected approval responses = %#v, want only create/open", recorded)
 	}
 	thread, ok := engine.Thread(threadID)
-	if !ok || len(thread.Timeline.Approvals()) != 1 || thread.Timeline.Approvals()[0].Decision != "" || thread.Timeline.Approvals()[0].OptionID != "" {
+	if !ok || len(thread.Timeline.Approvals()) != 1 || thread.Timeline.Approvals()[0].Decision != "" || thread.Timeline.Approvals()[0].ActionID != "" {
 		t.Fatalf("approval after rejected responses = %#v, want no dirty response", thread.Timeline.Approvals())
 	}
 
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalResolved, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), Decision: provider.ApprovalDecisionAccept, OptionID: "allow"}}})
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-stale-approval-response", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept}); err == nil {
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalResolved, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), Decision: provider.ApprovalDecisionAccept, ActionID: "allow"}}})
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-stale-approval-response", ThreadID: threadID, RequestID: requestID, ActionID: "allow"}); err == nil {
 		t.Fatal("thread.approval.respond resolved request err = nil, want rejection")
 	}
 	if recorded := events.matching("", 0); len(recorded) != 3 {
@@ -474,25 +476,42 @@ func TestEngineRejectsApprovalRespondForUnknownResolvedOrUnofferedOption(t *test
 	}
 }
 
-// A question is answered with accept plus answers, never with a permission
-// option or a session-wide grant.
-func TestEngineQuestionApprovalCarriesAnswers(t *testing.T) {
+// Only an action that submits carries answers, and the response records the
+// decision of the action chosen.
+func TestEngineApprovalResponseTakesTheActionsDecisionAndAnswers(t *testing.T) {
 	engine := NewEngine()
 	defer engine.Close()
 	events := observeEvents(t, engine)
 	threadID := ThreadID("thread-question")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-question", ThreadID: threadID, Title: "Thread"})
-	question := &ApprovalEvent{RequestID: "question-1", UserInput: &provider.UserInputRequest{Message: "Color?", Questions: []provider.Question{{ID: "color", Kind: provider.QuestionKindText}}}}
+	question := &ApprovalEvent{RequestID: "question-1", Request: &provider.Request{
+		Message:   "Color?",
+		Questions: []provider.Question{{ID: "color", Kind: provider.QuestionKindText}},
+		Actions: []provider.RequestAction{
+			{ID: "submit", Label: "Submit", Decision: provider.ApprovalDecisionAccept, Submit: true},
+			{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline},
+		},
+	}}
 	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: question}})
 
-	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-question-session", ThreadID: threadID, RequestID: "question-1", Decision: provider.ApprovalDecisionAcceptForSession}); err == nil {
-		t.Fatal("acceptForSession on a question err = nil, want rejection")
-	}
 	answers := map[string][]string{"color": {"blue"}}
-	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-question-answer", ThreadID: threadID, RequestID: "question-1", Decision: provider.ApprovalDecisionAccept, Answers: answers})
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-decline-with-answers", ThreadID: threadID, RequestID: "question-1", ActionID: "decline", Answers: answers}); err == nil {
+		t.Fatal("answers with an action that doesn't submit err = nil, want rejection")
+	}
+	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-question-answer", ThreadID: threadID, RequestID: "question-1", ActionID: "submit", Answers: answers})
 	recorded := events.matching(threadID, 0)
-	if response := recorded[len(recorded)-1]; response.Type != EventThreadApprovalResponseRequested || !maps.EqualFunc(response.Payload.Answers, answers, slices.Equal) {
-		t.Fatalf("response event = %#v, want the answers forwarded", response)
+	response := recorded[len(recorded)-1]
+	if response.Type != EventThreadApprovalResponseRequested || response.Payload.ActionID != "submit" || response.Payload.Decision != provider.ApprovalDecisionAccept || !maps.EqualFunc(response.Payload.Answers, answers, slices.Equal) {
+		t.Fatalf("response event = %#v, want the submit action's decision and the answers forwarded", response)
+	}
+
+	// Another client's answer, sent before the provider resolves the request,
+	// must not reach the provider as a second response.
+	if _, err := engine.Dispatch(context.Background(), Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-second-answer", ThreadID: threadID, RequestID: "question-1", ActionID: "decline"}); err == nil {
+		t.Fatal("second answer while the first is pending err = nil, want rejection")
+	}
+	if after := events.matching(threadID, 0); len(after) != len(recorded) {
+		t.Fatalf("events after a second answer = %#v, want none appended", after[len(recorded):])
 	}
 }
 
@@ -507,26 +526,30 @@ func TestApprovalReopenAfterResolutionIsAnswerable(t *testing.T) {
 	threadID := ThreadID("thread-approval-reopen")
 	requestID := ApprovalID("approval-1")
 	mustDispatch(t, engine, Command{Type: CommandThreadCreate, CommandID: "cmd-create-approval-reopen", ThreadID: threadID, Title: "Thread"})
-	options := []provider.ApprovalOption{{ID: "allow", Name: "Allow"}, {ID: "reject", Name: "Reject"}}
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), TurnID: "turn-1", Options: options}}})
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalResolved, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), Decision: provider.ApprovalDecisionDecline, OptionID: "reject"}}})
+	request := func(suffix string) *provider.Request {
+		return &provider.Request{Actions: []provider.RequestAction{
+			{ID: "allow" + suffix, Label: "Allow", Decision: provider.ApprovalDecisionAccept},
+			{ID: "reject" + suffix, Label: "Reject", Decision: provider.ApprovalDecisionDecline},
+		}}
+	}
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), TurnID: "turn-1", Request: request("")}}})
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalResolved, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), Decision: provider.ApprovalDecisionDecline, ActionID: "reject"}}})
 
 	// The agent retried the tool call: the same request id opens again with
-	// fresh options.
-	reopenedOptions := []provider.ApprovalOption{{ID: "allow-2", Name: "Allow"}, {ID: "reject-2", Name: "Reject"}}
-	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), TurnID: "turn-1", Options: reopenedOptions}}})
+	// fresh actions.
+	mustAppend(t, engine, EventInput{Type: EventThreadApprovalOpened, ThreadID: threadID, Payload: EventPayload{Approval: &ApprovalEvent{RequestID: string(requestID), TurnID: "turn-1", Request: request("-2")}}})
 	thread, ok := engine.Thread(threadID)
 	if !ok || len(thread.Timeline.Approvals()) != 1 {
 		t.Fatalf("approvals after reopen = %#v, want the single reopened request", thread.Timeline.Approvals())
 	}
 	reopened := thread.Timeline.Approvals()[0]
-	if reopened.Status != ApprovalStatusPending || reopened.Decision != "" || reopened.OptionID != "" {
+	if reopened.Status != ApprovalStatusPending || reopened.Decision != "" || reopened.ActionID != "" {
 		t.Fatalf("reopened approval = %#v, want pending with cleared response", reopened)
 	}
-	if len(reopened.Options) != 2 || reopened.Options[0].ID != "allow-2" {
-		t.Fatalf("reopened approval options = %#v, want the fresh request's options", reopened.Options)
+	if reopened.Request == nil || len(reopened.Request.Actions) != 2 || reopened.Request.Actions[0].ID != "allow-2" {
+		t.Fatalf("reopened approval request = %#v, want the fresh request's actions", reopened.Request)
 	}
-	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-respond-approval-reopen", ThreadID: threadID, RequestID: requestID, Decision: provider.ApprovalDecisionAccept, OptionID: "allow-2"})
+	mustDispatch(t, engine, Command{Type: CommandThreadApprovalRespond, CommandID: "cmd-respond-approval-reopen", ThreadID: threadID, RequestID: requestID, ActionID: "allow-2"})
 }
 
 func TestTimelinePreservesFirstAppearanceAcrossUpserts(t *testing.T) {
