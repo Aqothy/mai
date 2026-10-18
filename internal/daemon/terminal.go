@@ -133,7 +133,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		updatedAt:  now,
 	}
 	entry.operations.Lock()
-	undoSubscribe := client.subscribeTerminal(terminalID, params.AttachmentID)
+	undoSubscribe := client.subscribeTerminal(terminalID, params.AttachmentID, params.Columns, params.Rows)
 	// Register the entry (and with it the output subscription) before the
 	// shell starts so no early output is lost; the client buffers stream items
 	// until this call returns its snapshot.
@@ -218,7 +218,7 @@ func (s *Server) startCommandTerminal(title string, command provider.TerminalCom
 // attachTerminal registers the calling client as another stream listener and
 // returns the authoritative snapshot. Subscription happens before snapshot
 // capture, so live output above the snapshot sequence can be buffered by the
-// client without loss. The latest resize wins, matching ordinary PTY behavior.
+// client without loss. The attaching view becomes the one sizing the PTY.
 func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachParams) (wire.TerminalAttachSnapshot, error) {
 	rt := s.terminals
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
@@ -238,13 +238,13 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
 	}
 
-	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows)
 	// Resize before capturing the snapshot: the attach model reflows to the
 	// caller's grid first, so the native snapshot paints current state at
 	// exactly the grid the client renders — the mis-wrap class raw replay
 	// suffered cannot occur. The snapshot's grid matching the request also
 	// keeps the client from immediately re-sending the same resize.
-	if err := session.Resize(params.Columns, params.Rows); err != nil {
+	if err := s.sizeTerminal(entry, session); err != nil {
 		undoSubscribe()
 		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
@@ -277,7 +277,7 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	if !ok {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
-	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows)
 	entry.onExit = nil
 	session, err := rt.service.Relaunch(params.TerminalID, terminal.SpawnSpec{
 		Cwd:     entry.cwd,
@@ -333,8 +333,56 @@ func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachPar
 	}
 	defer entry.operations.Unlock()
 	if client.detachTerminal(params.TerminalID, params.AttachmentID) {
-		s.refreshTerminalAttachment(params.TerminalID)
+		s.refreshTerminalAttachment(entry)
 	}
+}
+
+// refreshTerminalAttachment re-derives, after an attachment went away,
+// whether any connected client remains attached to the terminal's live run
+// and which one sizes it. Callers hold entry.operations.
+func (s *Server) refreshTerminalAttachment(entry *terminalEntry) {
+	session, err := s.terminals.service.Get(entry.terminalID)
+	if err != nil {
+		return
+	}
+	session.SetAttached(len(s.terminalSubscribers(entry.terminalID)) > 0)
+	if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
+		s.logger.Warn("terminal resize failed", "terminal", entry.terminalID, "error", err)
+	}
+}
+
+// latestTerminalView is the connection whose view of the terminal was used
+// most recently (attached to or typed into): the view in use. Callers hold
+// entry.operations.
+func (s *Server) latestTerminalView(terminalID string) (*rpcClient, terminalAttachment) {
+	var latestClient *rpcClient
+	var latest terminalAttachment
+	for _, client := range s.terminalSubscribers(terminalID) {
+		if attachment, ok := client.terminalAttachment(terminalID); ok && attachment.lastUsed > latest.lastUsed {
+			latestClient, latest = client, attachment
+		}
+	}
+	return latestClient, latest
+}
+
+// sizeTerminal gives the PTY the grid of the view in use. One PTY has one
+// size, and the view someone is typing into is the one that must not garble;
+// this is tmux's default window-size "latest". A view's own resize therefore
+// applies only while it is the latest. With nobody attached the size stays.
+// Callers hold entry.operations.
+func (s *Server) sizeTerminal(entry *terminalEntry, session *terminal.Session) error {
+	client, latest := s.latestTerminalView(entry.terminalID)
+	if client == nil {
+		return nil
+	}
+	if columns, rows := session.Size(); columns == latest.columns && rows == latest.rows {
+		return nil
+	}
+	if err := session.Resize(latest.columns, latest.rows); err != nil {
+		return err
+	}
+	s.logger.Info("terminal resized", "terminal", entry.terminalID, "columns", latest.columns, "rows", latest.rows)
+	return nil
 }
 
 func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.Session) (wire.TerminalAttachSnapshot, error) {
@@ -583,15 +631,30 @@ func (s *Server) publishTerminalStreamItem(terminalID string, item wire.Terminal
 	}
 }
 
-// writeTerminal accepts input from any client currently attached to this run.
-// Stale-run and unattached input is dropped silently as a routine lifecycle
-// race rather than surfaced as a repeating alert.
+// writeTerminal accepts input from clients attached to this run: everything
+// from the view in use, and only typing from the others. Stale-run and
+// unattached input is dropped silently as a routine lifecycle race rather
+// than surfaced as a repeating alert.
 func (s *Server) writeTerminal(client *rpcClient, params wire.TerminalWriteParams) error {
 	session, entry, ok := s.terminalSessionForSubscriber(client, params.TerminalID, params.RunID)
 	if !ok {
 		return nil
 	}
 	defer entry.operations.Unlock()
+	// Only the view in use writes freely: its terminal alone answers the
+	// program's queries, and its mouse reports match the PTY's grid. Any
+	// other view's terminal answers the same queries, so what it sends on
+	// its own is dropped; typing or pasting there makes it the view in use,
+	// sized before the program reads the input.
+	if latest, _ := s.latestTerminalView(params.TerminalID); latest != client {
+		if !terminal.IsUserInput(params.Data) {
+			return nil
+		}
+		client.useTerminal(params.TerminalID)
+		if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
+			s.logger.Warn("terminal resize failed", "terminal", params.TerminalID, "error", err)
+		}
+	}
 	if err := session.Write(params.Data); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
 		s.logger.Warn("terminal write failed", "terminal", params.TerminalID, "error", err)
 	}
@@ -604,12 +667,15 @@ func (s *Server) resizeTerminal(client *rpcClient, params wire.TerminalResizePar
 		return nil
 	}
 	defer entry.operations.Unlock()
-	err := session.Resize(params.Columns, params.Rows)
-	if err != nil && !errors.Is(err, terminal.ErrNotRunning) {
+	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
+		s.logger.Warn("terminal resize rejected", "terminal", params.TerminalID, "client", client.id, "error", err)
+		return nil
+	}
+	if !client.resizeTerminalAttachment(params.TerminalID, params.Columns, params.Rows) {
+		return nil
+	}
+	if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
 		s.logger.Warn("terminal resize failed", "terminal", params.TerminalID, "error", err)
-	} else if err == nil {
-		s.logger.Info("terminal resized", "terminal", params.TerminalID, "client", client.id,
-			"columns", params.Columns, "rows", params.Rows)
 	}
 	return nil
 }

@@ -98,6 +98,52 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	t.Fatal("attached-client resize was not applied")
 }
 
+// One PTY has one size, so it takes the grid of the client in use: the one
+// that attached or typed most recently. Another client's resize is kept for
+// when that client is used again instead of garbling the one being typed on,
+// and what its terminal answers on its own never reaches the program.
+func TestTerminalSizeFollowsTheClientInUse(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	url := newWSTestServer(t, s)
+	laptop := dialRecordingClient(t, url)
+	phone := dialRecordingClient(t, url)
+	printSize := func(c *recordingClient, terminalID, runID, label string) {
+		c.writeTerminal(t, terminalID, runID, "printf '"+label+"-%s\\n' \"$(stty size)\"\n")
+	}
+
+	snapshot := createTestTerminal(t, laptop)
+	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
+	phone.mustAttachTerminal(t, terminalID, 41, 32)
+	laptop.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 120, Rows: 40})
+
+	// Typing on the laptop takes the PTY back to the laptop's latest grid.
+	printSize(laptop, terminalID, runID, "LAPTOP")
+	laptop.waitForOutput(t, "LAPTOP-40 120")
+
+	// The phone's keyboard showing resizes its view while the laptop is in
+	// use, and its terminal answers a query the laptop's already answered;
+	// the laptop keeps its size until someone types on the phone.
+	phone.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 41, Rows: 20})
+	phone.writeTerminal(t, terminalID, runID, "\x1b[?62;22c")
+	printSize(laptop, terminalID, runID, "STILL")
+	laptop.waitForOutput(t, "STILL-40 120")
+	printSize(phone, terminalID, runID, "PHONE")
+	phone.waitForOutput(t, "PHONE-20 41")
+
+	// When the phone leaves, the PTY goes back to the laptop.
+	phone.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
+	waitUntil(t, "PTY back at the laptop's grid", func() bool {
+		session, err := s.terminals.service.Get(terminalID)
+		if err != nil {
+			return false
+		}
+		columns, rows := session.Size()
+		return columns == 120 && rows == 40
+	})
+}
+
 func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)

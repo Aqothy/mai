@@ -22,6 +22,7 @@ import (
 var (
 	nextRPCClientID atomic.Uint64
 	nextQuestionID  atomic.Uint64
+	nextTerminalUse atomic.Uint64
 )
 
 const (
@@ -68,7 +69,7 @@ type rpcClient struct {
 
 	subscriptionsMu        sync.Mutex
 	threadSubscriptions    map[orchestration.ThreadID]struct{}
-	terminalSubscriptions  map[string]string // terminal ID -> attachment ID
+	terminalSubscriptions  map[string]terminalAttachment // by terminal ID
 	threadListSubscribed   bool
 	terminalListSubscribed bool
 
@@ -96,6 +97,15 @@ type clientOptionsSession struct {
 	cwd                string
 	configOptions      []provider.ConfigOption
 	skills             []provider.Skill
+}
+
+// terminalAttachment is the view one connection has open on a terminal.
+type terminalAttachment struct {
+	id            string
+	columns, rows uint16
+	// lastUsed orders a terminal's attachments by when each was last attached
+	// or typed into; the latest one sizes the PTY.
+	lastUsed uint64
 }
 
 type rpcOutbound struct {
@@ -250,7 +260,7 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
 		calls:                 make(chan struct{}, rpcConcurrentCalls),
 		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
-		terminalSubscriptions: make(map[string]string),
+		terminalSubscriptions: make(map[string]terminalAttachment),
 		uploads:               make(map[string]string),
 		questions:             make(map[string]chan provider.UserInputAnswer),
 	}
@@ -281,21 +291,16 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	go s.closeClientOptionsSessions(client)
 	// Terminal subscriptions live on the connection and disappear with it;
 	// shells remain alive in the terminal service. Each subscribed session
-	// still needs its attachment count refreshed so detached agent runs can
-	// report Done.
+	// still needs its attachments re-derived so detached agent runs can
+	// report Done and the PTY takes the size of a view still open.
 	for _, terminalID := range client.terminalSubscriptionIDs() {
-		s.refreshTerminalAttachment(terminalID)
+		entry, ok := s.terminals.lockEntry(terminalID)
+		if !ok {
+			continue
+		}
+		s.refreshTerminalAttachment(entry)
+		entry.operations.Unlock()
 	}
-}
-
-// refreshTerminalAttachment re-derives whether any connected client remains
-// attached to the terminal's live run.
-func (s *Server) refreshTerminalAttachment(terminalID string) {
-	session, err := s.terminals.service.Get(terminalID)
-	if err != nil {
-		return
-	}
-	session.SetAttached(len(s.terminalSubscribers(terminalID)) > 0)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -375,18 +380,20 @@ func (c *rpcClient) subscribedTerminalList() bool {
 	return c.terminalListSubscribed
 }
 
-// subscribeTerminal makes attachmentID this connection's listener for the
-// terminal, replacing any earlier attachment. The returned undo restores the
+// subscribeTerminal makes attachmentID, rendering at the given grid, this
+// connection's listener for the terminal, replacing any earlier attachment.
+// Attaching counts as using the terminal. The returned undo restores the
 // previous listener, so a failed attach leaves the subscription as it found it.
-func (c *rpcClient) subscribeTerminal(terminalID, attachmentID string) (undo func()) {
+func (c *rpcClient) subscribeTerminal(terminalID, attachmentID string, columns, rows uint16) (undo func()) {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 	previous, existed := c.terminalSubscriptions[terminalID]
-	c.terminalSubscriptions[terminalID] = attachmentID
+	attachment := terminalAttachment{id: attachmentID, columns: columns, rows: rows, lastUsed: nextTerminalUse.Add(1)}
+	c.terminalSubscriptions[terminalID] = attachment
 	return func() {
 		c.subscriptionsMu.Lock()
 		defer c.subscriptionsMu.Unlock()
-		if c.terminalSubscriptions[terminalID] != attachmentID {
+		if c.terminalSubscriptions[terminalID] != attachment {
 			return
 		}
 		if existed {
@@ -402,11 +409,42 @@ func (c *rpcClient) subscribeTerminal(terminalID, attachmentID string) (undo fun
 func (c *rpcClient) detachTerminal(terminalID, attachmentID string) bool {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
-	if current, ok := c.terminalSubscriptions[terminalID]; !ok || current != attachmentID {
+	if current, ok := c.terminalSubscriptions[terminalID]; !ok || current.id != attachmentID {
 		return false
 	}
 	delete(c.terminalSubscriptions, terminalID)
 	return true
+}
+
+func (c *rpcClient) terminalAttachment(terminalID string) (terminalAttachment, bool) {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	attachment, ok := c.terminalSubscriptions[terminalID]
+	return attachment, ok
+}
+
+// resizeTerminalAttachment records the grid this connection's view now
+// renders at.
+func (c *rpcClient) resizeTerminalAttachment(terminalID string, columns, rows uint16) bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	attachment, ok := c.terminalSubscriptions[terminalID]
+	if !ok {
+		return false
+	}
+	attachment.columns, attachment.rows = columns, rows
+	c.terminalSubscriptions[terminalID] = attachment
+	return true
+}
+
+// useTerminal marks this connection's view as the latest one used.
+func (c *rpcClient) useTerminal(terminalID string) {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	if attachment, ok := c.terminalSubscriptions[terminalID]; ok {
+		attachment.lastUsed = nextTerminalUse.Add(1)
+		c.terminalSubscriptions[terminalID] = attachment
+	}
 }
 
 func (c *rpcClient) unsubscribeTerminal(terminalID string) {
