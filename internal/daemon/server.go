@@ -59,6 +59,8 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
+	pingInterval time.Duration
+
 	rpcMu                   sync.Mutex
 	rpcClients              map[string]*rpcClient
 	historyReplayCoalescing map[orchestration.ThreadID]struct{}
@@ -79,6 +81,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		logger:                  logger,
+		pingInterval:            rpcPingInterval,
 		rpcClients:              make(map[string]*rpcClient),
 		historyReplayCoalescing: make(map[orchestration.ThreadID]struct{}),
 		ctx:                     ctx,

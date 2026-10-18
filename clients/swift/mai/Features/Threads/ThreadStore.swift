@@ -91,9 +91,7 @@ final class ThreadStore {
     private(set) var selectedThreadTitle: String?
 
     var connectionState: ConnectionState { connection.state }
-    var reconnectAttempt: Int { connection.reconnectAttempt }
     var nextReconnectAt: Date? { connection.nextReconnectAt }
-    var automaticReconnectsExhausted: Bool { connection.automaticReconnectsExhausted }
 
     var selectedThread: Thread? {
         _ = selectedSessionGeneration

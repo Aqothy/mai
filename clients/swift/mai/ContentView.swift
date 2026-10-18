@@ -55,7 +55,10 @@ struct MaiApp: App {
                 await ChatCodeHighlighter.shared.warmUp()
             }
             .onChange(of: scenePhase) {
-                if scenePhase != .active {
+                if scenePhase == .active {
+                    guard !usesSyntheticBenchmarkStore else { return }
+                    connection.resume()
+                } else {
                     threadDraftStore.flushPendingSave()
                 }
             }

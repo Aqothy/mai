@@ -959,6 +959,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     func disconnect() {}
 
+    func checkConnection() {}
+
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
         let index = fileSearchInputs.count
         fileSearchInputs.append(input)

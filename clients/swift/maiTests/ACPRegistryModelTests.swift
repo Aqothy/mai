@@ -146,6 +146,7 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
 
     func connect() {}
     func disconnect() {}
+    func checkConnection() {}
 
     func subscribeThreadList() async throws -> ThreadListStreamItem {
         ThreadListStreamItem(

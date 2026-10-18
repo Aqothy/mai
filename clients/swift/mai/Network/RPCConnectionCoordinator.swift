@@ -6,6 +6,7 @@ protocol RPCTransportClient: AnyObject {
 
     func connect()
     func disconnect()
+    func checkConnection()
 }
 
 /// Owns the app's one WebSocket lifecycle. Feature stores register the
@@ -16,8 +17,8 @@ final class RPCConnectionCoordinator {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
     nonisolated deinit {}
 
-    static let maximumReconnectAttempts = 5
     static let connectAttemptTimeout: Duration = .seconds(15)
+    private static let maximumReconnectDelay: Double = 30
 
     enum State {
         case disconnected
@@ -33,14 +34,8 @@ final class RPCConnectionCoordinator {
     }
 
     private(set) var state: State
-    private(set) var reconnectAttempt = 0
+    private var reconnectAttempt = 0
     private(set) var nextReconnectAt: Date?
-
-    var automaticReconnectsExhausted: Bool {
-        state == .disconnected
-            && reconnectAttempt >= Self.maximumReconnectAttempts
-            && nextReconnectAt == nil
-    }
 
     private let rpc: any RPCTransportClient
     private var participants: [Participant] = []
@@ -129,8 +124,8 @@ final class RPCConnectionCoordinator {
             }
             // The connection counts as recovered only once every feature has
             // restored its subscriptions on it. One that a restore drops (a
-            // snapshot the transport refuses) keeps counting toward the retry
-            // limit instead of reconnecting forever.
+            // snapshot the transport refuses) keeps its backoff growing
+            // instead of reconnecting at the fastest rate.
             guard connectionID == id, state == .connected else { return }
             reconnectAttempt = 0
         } catch {
@@ -145,6 +140,20 @@ final class RPCConnectionCoordinator {
         nextReconnectAt = nil
         Task { [weak self] in
             await self?.start()
+        }
+    }
+
+    /// Called when the app returns to the foreground. A socket that sat
+    /// through a suspension can be dead without knowing it, and a pending
+    /// reconnect shouldn't make the user wait out its backoff.
+    func resume() {
+        switch state {
+        case .connected:
+            rpc.checkConnection()
+        case .disconnected:
+            retry()
+        case .connecting:
+            break
         }
     }
 
@@ -176,14 +185,10 @@ final class RPCConnectionCoordinator {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
-        guard reconnectAttempt < Self.maximumReconnectAttempts else {
-            nextReconnectAt = nil
-            return
-        }
 
         let attempt = reconnectAttempt + 1
-        let baseDelay = min(pow(2, Double(reconnectAttempt)), 30)
-        let delay = min(baseDelay * Double.random(in: 0.8...1.2), 30)
+        let baseDelay = min(pow(2, Double(reconnectAttempt)), Self.maximumReconnectDelay)
+        let delay = min(baseDelay * Double.random(in: 0.8...1.2), Self.maximumReconnectDelay)
         nextReconnectAt = Date().addingTimeInterval(delay)
 
         reconnectTask = Task { [weak self] in

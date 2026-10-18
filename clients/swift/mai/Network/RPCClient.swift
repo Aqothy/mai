@@ -5,6 +5,14 @@ final class RPCClient {
     nonisolated deinit {}
 
     private static let notificationQueueLimit = 1_024
+    /// How often the socket is pinged and how long a pong may take. A link
+    /// that went half-open (a network change, a suspension, a stalled proxy)
+    /// otherwise looks connected while every call hangs; the daemon pings on
+    /// the same cadence and drops the connection from its side too.
+    private static let pingInterval: Duration = .seconds(15)
+    /// A probe answers whether the socket survived a suspension, so it can't
+    /// wait as long as the periodic ping: the user is looking at the screen.
+    private static let probeTimeout: Duration = .seconds(5)
 
     var onNotification: ((String, Data) -> Void)?
     var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)?
@@ -18,6 +26,7 @@ final class RPCClient {
     private var pendingRequests: [Int: CheckedContinuation<Data, any Error>] = [:]
     private var notifyContinuation: AsyncStream<String>.Continuation?
     private var notifyTask: Task<Void, Never>?
+    private var pingTask: Task<Void, Never>?
 
     private static var configuredEndpoint: URL {
         if let value = Bundle.main.object(forInfoDictionaryKey: "MAI_RPC_URL") as? String,
@@ -40,6 +49,17 @@ final class RPCClient {
 
         receiveTask = Task { [weak self] in
             await self?.receiveMessages(from: socket)
+        }
+        pingTask = Task { [weak self] in
+            while true {
+                do {
+                    try await Task.sleep(for: Self.pingInterval)
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                await ping(socket, timeout: Self.pingInterval)
+            }
         }
 
         // One consumer drains notifications sequentially so fire-and-forget
@@ -64,6 +84,37 @@ final class RPCClient {
     func disconnect() {
         guard let socket = webSocket else { return }
         finishConnection(socket, error: nil)
+    }
+
+    /// Pings the socket now and closes it, through `onDisconnect`, when the
+    /// pong doesn't come back soon.
+    func checkConnection() {
+        guard let socket = webSocket else { return }
+        Task { [weak self] in
+            await self?.ping(socket, timeout: Self.probeTimeout)
+        }
+    }
+
+    private func ping(_ socket: URLSessionWebSocketTask, timeout: Duration) async {
+        // A half-open link never calls the pong handler, so the deadline
+        // closes the socket, which then fails the ping.
+        let deadline = Task { [weak self] in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch {
+                return
+            }
+            self?.finishConnection(socket, error: RPCError("maiD stopped responding"))
+        }
+        let answered = await withCheckedContinuation { continuation in
+            socket.sendPing { error in
+                continuation.resume(returning: error == nil)
+            }
+        }
+        deadline.cancel()
+        if !answered {
+            finishConnection(socket, error: RPCError("maiD stopped responding"))
+        }
     }
 
     func call<Params: Encodable, Result: Decodable>(
@@ -252,6 +303,8 @@ final class RPCClient {
         notifyContinuation?.finish()
         notifyTask = nil
         notifyContinuation = nil
+        pingTask?.cancel()
+        pingTask = nil
         receiveTask?.cancel()
         socket.cancel(with: .goingAway, reason: nil)
         webSocket = nil

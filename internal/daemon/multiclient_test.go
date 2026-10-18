@@ -598,3 +598,34 @@ func TestRPCSlowClientOverflowClosesAndFallsBackToSnapshot(t *testing.T) {
 		t.Fatalf("fallback snapshot sequence = %d, want at least %d", recoveredItem.Snapshot.SnapshotSequence, turnReceipt.Sequence)
 	}
 }
+
+// A client whose link goes silent stops answering pings and is dropped, while
+// a client that keeps reading on the same daemon stays connected.
+func TestRPCClientThatStopsAnsweringPingsIsDropped(t *testing.T) {
+	s := newTestServer(t)
+	defer s.Close()
+	s.pingInterval = 50 * time.Millisecond
+	url := newWSTestServer(t, s)
+	connected := func() int {
+		s.rpcMu.Lock()
+		defer s.rpcMu.Unlock()
+		return len(s.rpcClients)
+	}
+
+	live := dialRecordingClient(t, url)
+	// The silent client never reads, so it never answers a ping: the daemon's
+	// view of a phone that dropped off the network.
+	silent, _, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil {
+		t.Fatalf("silent client dial: %v", err)
+	}
+	defer silent.CloseNow()
+	waitUntil(t, "both clients registered", func() bool { return connected() == 2 })
+
+	waitUntil(t, "silent client dropped", func() bool { return connected() == 1 })
+	var providers []provider.InstanceInfo
+	live.call(t, wire.MethodProviderList, nil, &providers)
+	if got := connected(); got != 1 {
+		t.Fatalf("connected clients = %d after the live client's call, want 1", got)
+	}
+}

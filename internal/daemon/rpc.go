@@ -48,6 +48,14 @@ var orderedRPCCalls = map[string]bool{
 // attachments are the big case). Outbound frames are unaffected.
 const maxInboundMessageBytes = 32 << 20
 
+// rpcPingInterval is how often the daemon pings each client, and how long it
+// waits for the pong. TCP can't tell a half-open link (a phone that changed
+// networks, a suspended app, a stalled proxy) from an idle one, so without a
+// ping the daemon keeps a dead client's subscriptions and blocks on writes to
+// it forever. Closing on a missed pong also bounds how late a request still
+// buffered on that link can arrive.
+const rpcPingInterval = 15 * time.Second
+
 type rpcClient struct {
 	id     string
 	conn   *jsonrpc2.Connection
@@ -199,9 +207,39 @@ func (s *Server) WebSocketHandler() http.HandlerFunc {
 				return &rpcHandler{server: s, client: client}
 			},
 		})
+		pingCtx, stopPinging := context.WithCancel(context.Background())
+		// Bind ran inside NewConnection, so client is set.
+		go s.keepAlive(pingCtx, ws, client.logger)
 		_ = conn.Wait()
+		stopPinging()
 		if client != nil {
 			s.disconnectRPCClient(client)
+		}
+	}
+}
+
+// keepAlive closes the socket once a ping goes unanswered for one ping
+// interval. Closing the socket itself, not the JSON-RPC connection,
+// also fails writes blocked on the dead link, which the connection's own
+// Close would wait for.
+func (s *Server) keepAlive(ctx context.Context, ws *websocket.Conn, logger *slog.Logger) {
+	ticker := time.NewTicker(s.pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, s.pingInterval)
+		err := ws.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Info("client stopped answering pings; closing connection", "error", err)
+			}
+			_ = ws.CloseNow()
+			return
 		}
 	}
 }
