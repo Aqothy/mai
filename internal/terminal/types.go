@@ -52,12 +52,6 @@ const (
 	StreamItemStatus StreamItemKind = "status"
 )
 
-// GhosttySnapshotFormat identifies the exact native snapshot contract shared
-// by the daemon and client binary. GHOSTSNP v1 is intentionally not stable
-// across arbitrary Ghostty revisions, so compatibility is pinned to the core
-// commit used by both builds.
-const GhosttySnapshotFormat = "ghostty-gsn-v1-7a9c369cf5da72d41946f683c48b0466a210cb7e"
-
 const (
 	minColumns = 2
 	maxColumns = 500

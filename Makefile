@@ -42,6 +42,9 @@ sync-agent-manifests: ghostty-vt
 
 $(GHOSTTY_VT_STAMP): tools/ghostty-vt/CMakeLists.txt
 	cmake -S tools/ghostty-vt -B $(GHOSTTY_VT_BUILD) -DCMAKE_BUILD_TYPE=Release
+	# Ghostty's CMake runs zig only when its outputs are missing (the custom
+	# command lists no sources), so a pin change would keep the old library.
+	rm -rf $(GHOSTTY_VT_BUILD)/_deps/ghostty-src/zig-out
 	cmake --build $(GHOSTTY_VT_BUILD)
 	# Go's build cache does not hash linked static-library contents. A Ghostty
 	# pin change must force cgo packages to relink instead of reusing the old VT.

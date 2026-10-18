@@ -42,8 +42,10 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	if attach.RunID != snapshot.RunID {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
 	}
-	if attach.SnapshotFormat != terminal.GhosttySnapshotFormat {
-		t.Fatalf("snapshot format = %q, want %q", attach.SnapshotFormat, terminal.GhosttySnapshotFormat)
+	// The Ghostty commit pinned in tools/ghostty-vt/CMakeLists.txt.
+	const wantFormat = "ghostty-gsn-v1-81598385d608dda4946093d6d6a234d204a2f225"
+	if attach.SnapshotFormat != wantFormat {
+		t.Fatalf("snapshot format = %q, want %q", attach.SnapshotFormat, wantFormat)
 	}
 	if !containsBytes(attach.Snapshot, "HISTORY-88") {
 		t.Fatal("attach snapshot missing output produced before attach")

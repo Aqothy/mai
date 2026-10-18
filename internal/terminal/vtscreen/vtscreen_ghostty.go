@@ -1,6 +1,12 @@
 package vtscreen
 
-import libghostty "go.mitchellh.com/libghostty"
+import (
+	"errors"
+	"fmt"
+	"sync"
+
+	libghostty "go.mitchellh.com/libghostty"
+)
 
 // The detector never renders, so pixel dimensions are stable dummy values.
 const (
@@ -58,6 +64,22 @@ func NewSnapshot(columns, rows uint16, maxScrollbackBytes uint) (SnapshotScreen,
 	}
 	return &ghosttyScreen{term: term, formatter: formatter}, nil
 }
+
+// SnapshotFormat names the GHOSTSNP contract of the linked libghostty-vt.
+// GHOSTSNP v1 isn't stable across Ghostty commits (ghostty snapshot.h), so a
+// client may decode a snapshot only if its library reports the same commit.
+// The commit comes from the build's -Dlib-version-string
+// (tools/ghostty-vt/CMakeLists.txt).
+var SnapshotFormat = sync.OnceValues(func() (string, error) {
+	info, err := libghostty.GetBuildInfo()
+	if err != nil {
+		return "", fmt.Errorf("libghostty-vt build info: %w", err)
+	}
+	if info.VersionBuild == "" {
+		return "", errors.New("libghostty-vt was built without its commit in -Dlib-version-string")
+	}
+	return "ghostty-gsn-v1-" + info.VersionBuild, nil
+})
 
 type ghosttyScreen struct {
 	term      *libghostty.Terminal
