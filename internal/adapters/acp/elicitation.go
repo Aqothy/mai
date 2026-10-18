@@ -1,7 +1,8 @@
 // Elicitation for the ACP adapter: elicitation/create asks the user for
-// structured input (a form) or for consent to open a URL. Requests are surfaced
-// as provider-neutral user-input requests and answered through
-// RespondToRequest, sharing the permission request lifecycle.
+// structured input (a form), a yes or no (a form with no fields), or consent
+// to open a URL. Requests are surfaced as provider-neutral user-input or
+// permission requests and answered through RespondToRequest, sharing the
+// permission request lifecycle.
 package acp
 
 import (
@@ -55,7 +56,7 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 		Type:      provider.RuntimeEventRequestOpened,
 		RequestID: requestID,
 		CreatedAt: time.Now(),
-		Payload:   provider.RuntimeEventPayload{UserInput: &input},
+		Payload:   elicitation.RequestPayload(input, form, params),
 	})
 
 	response := approvalResponse{decision: provider.ApprovalDecisionCancel}

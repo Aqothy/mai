@@ -590,7 +590,7 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 	turn := session.activeLocalTurn
 	h.mu.Unlock()
 	if request.Subtype == "elicitation" {
-		h.openElicitation(session, proc, requestID, request, turn)
+		h.openElicitation(session, proc, requestID, request, raw, turn)
 		return
 	}
 	pending := &pendingApproval{
@@ -633,8 +633,9 @@ func (h *Instance) handleControlRequest(session *claudeSession, proc *sessionPro
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, ItemID: request.ToolUseID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options, UserInput: userInput}})
 }
 
-// openElicitation surfaces an MCP server's elicitation as a user-input request.
-func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, turn string) {
+// openElicitation surfaces an MCP server's elicitation as questions, or as a
+// permission request when it only asks yes or no.
+func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess, requestID string, request controlRequestBody, raw json.RawMessage, turn string) {
 	input, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema)
 	if err != nil {
 		// The user never saw it, so it was neither accepted nor declined.
@@ -653,7 +654,7 @@ func (h *Instance) openElicitation(session *claudeSession, proc *sessionProcess,
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{UserInput: &input}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: session.localThreadID, TurnID: turn, RequestID: pending.requestID, Payload: elicitation.RequestPayload(input, form, raw)})
 }
 
 func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {

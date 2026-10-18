@@ -74,14 +74,14 @@ type pendingApproval struct {
 	form *elicitation.Form
 	// permissions is what a permissions request asks for, granted as is.
 	permissions json.RawMessage
-	// amendments are a command approval's extra options, which also add a
-	// lasting rule, keyed by option id.
+	// amendments are the options that approve and keep approving (a command
+	// rule, a remembered MCP tool approval), keyed by option id.
 	amendments map[string]amendment
 }
 
-// amendment is a command approval option that approves and adds a rule.
+// amendment is an option that approves and keeps approving.
 type amendment struct {
-	reply    any
+	reply    map[string]any
 	decision provider.ApprovalDecision
 }
 
@@ -101,6 +101,9 @@ const (
 
 // reply builds the server-request response for the user's answer.
 func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[string]any, provider.ApprovalDecision, error) {
+	if chosen, ok := p.amendments[input.OptionID]; ok {
+		return chosen.reply, chosen.decision, nil
+	}
 	switch p.kind {
 	case pendingElicitation:
 		action := elicitation.ActionFor(input.Decision)
@@ -113,9 +116,6 @@ func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[strin
 			reply["content"] = content
 		}
 		return reply, action.Decision(), nil
-	}
-	if chosen, ok := p.amendments[input.OptionID]; ok {
-		return map[string]any{"decision": chosen.reply}, chosen.decision, nil
 	}
 	// The other options are named after the decisions they make.
 	decision := input.Decision

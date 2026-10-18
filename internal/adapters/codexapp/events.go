@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -542,7 +543,7 @@ func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw js
 	// Like the Codex TUI, offer each proposed rule as its own option.
 	if prefix := strings.Join(request.ProposedExecpolicyAmendment, " "); prefix != "" && !strings.ContainsAny(prefix, "\r\n") {
 		pending.amendments["acceptWithExecpolicyAmendment"] = amendment{
-			reply:    map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": request.ProposedExecpolicyAmendment}},
+			reply:    map[string]any{"decision": map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": request.ProposedExecpolicyAmendment}}},
 			decision: provider.ApprovalDecisionAcceptForSession,
 		}
 		options = append(options, provider.ApprovalOption{ID: "acceptWithExecpolicyAmendment", Name: fmt.Sprintf("Always allow commands that start with `%s`", prefix), Kind: "allow_always"})
@@ -556,7 +557,7 @@ func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw js
 			decision = provider.ApprovalDecisionDecline
 		}
 		pending.amendments[optionID] = amendment{
-			reply:    map[string]any{"applyNetworkPolicyAmendment": map[string]any{"network_policy_amendment": proposed}},
+			reply:    map[string]any{"decision": map[string]any{"applyNetworkPolicyAmendment": map[string]any{"network_policy_amendment": proposed}}},
 			decision: decision,
 		}
 		options = append(options, option)
@@ -572,8 +573,9 @@ func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw js
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Detail: detail, Args: append(json.RawMessage(nil), raw...), Options: options}})
 }
 
-// openElicitation surfaces an MCP server's elicitation as a user-input request.
-// Only the stable form and URL modes are shown; others are cancelled.
+// openElicitation surfaces an MCP server's elicitation as questions, or as a
+// permission request when it only asks yes or no. Only the MCP form and URL
+// modes are shown; Codex's own modes are cancelled.
 func (h *Instance) openElicitation(id json.RawMessage, raw json.RawMessage) {
 	var request struct {
 		ThreadID        string          `json:"threadId"`
@@ -582,6 +584,9 @@ func (h *Instance) openElicitation(id json.RawMessage, raw json.RawMessage) {
 		Message         string          `json:"message"`
 		URL             string          `json:"url"`
 		RequestedSchema json.RawMessage `json:"requestedSchema"`
+		Meta            struct {
+			Persist json.RawMessage `json:"persist"`
+		} `json:"_meta"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
 		_ = h.rpc.respondError(id, -32602, "invalid elicitation request")
@@ -594,11 +599,46 @@ func (h *Instance) openElicitation(id json.RawMessage, raw json.RawMessage) {
 		_ = h.rpc.respond(id, map[string]any{"action": elicitation.ActionCancel, "content": nil})
 		return
 	}
-	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id), localThread: local, localTurn: turn, kind: pendingElicitation, form: form}
+	var remember []provider.ApprovalOption
+	var amendments map[string]amendment
+	if form.Confirms() {
+		remember, amendments = rememberOptions(request.Meta.Persist)
+	}
+	payload := elicitation.RequestPayload(input, form, raw, remember...)
+	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id), localThread: local, localTurn: turn, kind: pendingElicitation, form: form, amendments: amendments}
 	h.mu.Lock()
 	h.pendingApprovals[pending.requestID] = pending
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{UserInput: &input}})
+	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, RequestID: pending.requestID, Payload: payload})
+}
+
+// rememberOptions are the ways Codex offers to keep allowing what an
+// elicitation confirms, MCP tool calls above all: _meta.persist names
+// "session", "always" or both, and the chosen one goes back as the
+// response's _meta.persist (codex-rs/protocol/src/mcp_approval_meta.rs,
+// read by parse_mcp_tool_approval_elicitation_response).
+func rememberOptions(persist json.RawMessage) ([]provider.ApprovalOption, map[string]amendment) {
+	var modes []string
+	var mode string
+	if json.Unmarshal(persist, &mode) == nil {
+		modes = []string{mode}
+	} else {
+		_ = json.Unmarshal(persist, &modes)
+	}
+	var options []provider.ApprovalOption
+	amendments := make(map[string]amendment)
+	for _, offer := range []struct{ mode, name string }{{"session", "Allow for this session"}, {"always", "Always allow"}} {
+		if !slices.Contains(modes, offer.mode) {
+			continue
+		}
+		optionID := "persist:" + offer.mode
+		options = append(options, provider.ApprovalOption{ID: optionID, Name: offer.name, Kind: "allow_always"})
+		amendments[optionID] = amendment{
+			reply:    map[string]any{"action": elicitation.ActionAccept, "content": nil, "_meta": map[string]any{"persist": offer.mode}},
+			decision: provider.ApprovalDecisionAcceptForSession,
+		}
+	}
+	return options, amendments
 }
 
 // openPermissionsRequest surfaces a request for more sandbox access as a

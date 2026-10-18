@@ -55,6 +55,12 @@ type Form struct {
 	required   []string
 }
 
+// Confirms reports whether the form asks for nothing, only yes or no. A URL
+// elicitation has no form.
+func (f *Form) Confirms() bool {
+	return f != nil && len(f.order) == 0
+}
+
 type property struct {
 	Type        string          `json:"type"`
 	Title       string          `json:"title"`
@@ -81,6 +87,23 @@ type titledOption struct {
 	Const       string `json:"const"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+}
+
+// RequestPayload is how a parsed elicitation opens. A form that asks for
+// nothing only asks yes or no: MCP servers confirm actions this way, and
+// Codex asks every MCP tool approval this way (codex-rs/core/src/
+// mcp_tool_call.rs, build_mcp_tool_approval_elicitation_request). It opens as
+// a permission request whose args are the raw request, like other approvals,
+// offering Allow, then the harness's ways to keep allowing (remember), then
+// Decline. Anything else opens as questions.
+func RequestPayload(request provider.UserInputRequest, form *Form, raw json.RawMessage, remember ...provider.ApprovalOption) provider.RuntimeEventPayload {
+	if !form.Confirms() {
+		return provider.RuntimeEventPayload{UserInput: &request}
+	}
+	options := []provider.ApprovalOption{{ID: string(ActionAccept), Name: "Allow", Kind: "allow_once"}}
+	options = append(options, remember...)
+	options = append(options, provider.ApprovalOption{ID: string(ActionDecline), Name: "Decline", Kind: "reject_once"})
+	return provider.RuntimeEventPayload{Args: append(json.RawMessage(nil), raw...), Options: options}
 }
 
 // Parse converts an elicitation into a user-input request. Form mode returns

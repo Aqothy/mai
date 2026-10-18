@@ -513,6 +513,42 @@ func TestInstanceAnswersMCPElicitation(t *testing.T) {
 	waitForAcceptedReply(t, events)
 }
 
+// An MCP tool approval asks for nothing but yes or no, so it is a permission
+// request rather than a question, offering the ways to keep allowing that
+// Codex lists; the chosen one goes back in the response's _meta.
+func TestInstanceAsksMCPToolApprovalAsPermission(t *testing.T) {
+	events := make(chan provider.RuntimeEvent, 32)
+	instance := openFakeInstance(t, "mcp-tool-approval", func(event provider.RuntimeEvent) { events <- event })
+	startFakeTurn(t, instance)
+
+	opened := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestOpened
+	})
+	if opened.Payload.UserInput != nil {
+		t.Fatalf("tool approval opened as a question: %#v", opened.Payload.UserInput)
+	}
+	var options []string
+	for _, option := range opened.Payload.Options {
+		options = append(options, option.ID+"="+option.Name)
+	}
+	if want := []string{"accept=Allow", "persist:session=Allow for this session", "persist:always=Always allow", "decline=Decline"}; !slices.Equal(options, want) {
+		t.Fatalf("options = %v, want %v", options, want)
+	}
+	if !strings.Contains(string(opened.Payload.Args), `run tool \"search\"?`) {
+		t.Fatalf("args = %s, want the request's message", opened.Payload.Args)
+	}
+	if err := instance.RespondToRequest(testContext(t), provider.RespondToRequestInput{ThreadID: "local-thread", RequestID: opened.RequestID, Decision: provider.ApprovalDecisionAcceptForSession, OptionID: "persist:session"}); err != nil {
+		t.Fatalf("respond to tool approval: %v", err)
+	}
+	resolved := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
+		return event.Type == provider.RuntimeEventRequestResolved
+	})
+	if resolved.Payload.Decision != provider.ApprovalDecisionAcceptForSession {
+		t.Fatalf("tool approval resolved payload = %#v", resolved.Payload)
+	}
+	waitForAcceptedReply(t, events)
+}
+
 func TestStopSessionResolvesPendingApproval(t *testing.T) {
 	events := make(chan provider.RuntimeEvent, 32)
 	instance := openFakeInstance(t, "approval-stop", func(event provider.RuntimeEvent) { events <- event })
@@ -1349,6 +1385,18 @@ func runFakeAppServer(scenario string) error {
 					return err
 				}
 			}
+			if scenario == "mcp-tool-approval" {
+				// Codex's MCP tool approval: a form asking for nothing, with
+				// its approval kind and remember options only in _meta.
+				if err := writeFakeRequest(encoder, json.RawMessage("76"), "mcpServer/elicitation/request", map[string]any{
+					"threadId": "native-thread", "turnId": "native-turn", "serverName": "docs", "mode": "form",
+					"message":         `Allow the docs MCP server to run tool "search"?`,
+					"_meta":           map[string]any{"codex_approval_kind": "mcp_tool_call", "persist": []string{"session", "always"}},
+					"requestedSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+				}); err != nil {
+					return err
+				}
+			}
 			if scenario == "elicitation" {
 				if err := writeFakeRequest(encoder, json.RawMessage("78"), "mcpServer/elicitation/request", map[string]any{
 					"threadId": "native-thread", "turnId": "native-turn", "serverName": "codex_apps", "mode": "form",
@@ -1605,6 +1653,15 @@ func runFakeAppServer(scenario string) error {
 			if string(message["id"]) == "79" {
 				if got := string(message["result"]); got != `{"permissions":{"fileSystem":null,"network":{"enabled":true}},"scope":"session"}` {
 					return fmt.Errorf("invalid permissions response: %s", fakeMessageJSON(message))
+				}
+				if err := writeFakeTurnCompleted(encoder); err != nil {
+					return err
+				}
+				continue
+			}
+			if string(message["id"]) == "76" {
+				if got := string(message["result"]); got != `{"_meta":{"persist":"session"},"action":"accept","content":null}` {
+					return fmt.Errorf("invalid tool approval response: %s", fakeMessageJSON(message))
 				}
 				if err := writeFakeTurnCompleted(encoder); err != nil {
 					return err
