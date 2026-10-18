@@ -77,8 +77,9 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 // from the live projection thread. It must run inside the engine's locked
 // write region. ok=false means the update is stale against current state and
 // is dropped — no event is appended:
-//   - a turn-settled/turn-scoped-error update for a turn that is not the
-//     thread's current/latest turn (out-of-order/late terminal event);
+//   - a turn-settled/turn-scoped-error update for a turn that is not running
+//     (out-of-order/late terminal event, including one for the latest turn
+//     after it settled);
 //   - a turn-started/turn-settled/error update arriving after the session was
 //     stopped (a late settle never resurrects a Stopped session — bound updates
 //     are explicit rebind intents and do apply);
@@ -257,20 +258,18 @@ func overlaySessionIdentity(session *SessionBinding, binding *SessionBinding) {
 	}
 }
 
-// sessionTurnConflicts reports whether a turn-scoped session update targets a
-// turn other than the thread's current/latest turn (an out-of-order/stale
-// terminal event).
+// sessionTurnConflicts reports whether a turn-scoped session update is a
+// stale terminal event: it names a turn other than the running one, or no
+// turn is running, so the latest turn already settled and must keep its
+// outcome.
 func sessionTurnConflicts(thread *Thread, turnID TurnID) bool {
 	if turnID == "" {
 		return false
 	}
-	if thread.Session != nil && thread.Session.ActiveTurnID != "" {
-		return thread.Session.ActiveTurnID != turnID
+	if active := activeTurnIDOf(thread.Session, thread.LatestTurn); active != "" {
+		return active != turnID
 	}
-	if thread.LatestTurn != nil && thread.LatestTurn.ID != "" {
-		return thread.LatestTurn.ID != turnID
-	}
-	return false
+	return thread.LatestTurn != nil
 }
 
 // turnStartConflicts reports whether a provider's turn start is stale: it

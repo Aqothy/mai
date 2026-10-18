@@ -559,6 +559,7 @@ func TestIngestionTurnCompletionAfterStopPreservesStoppedSession(t *testing.T) {
 // flush that turn's buffered text and free its buffers (otherwise the text is
 // lost and the turns map leaks), and neither a stale settle nor a stale runtime
 // error may touch the current turn, whether it is running or already settled.
+// Once the current turn settled, its own late error or settle is stale too.
 func TestIngestionStaleTerminalEventsForOldTurn(t *testing.T) {
 	pinFlushInterval(t, time.Hour)
 	engine := NewEngine()
@@ -619,6 +620,10 @@ func TestIngestionStaleTerminalEventsForOldTurn(t *testing.T) {
 	ingest(provider.RuntimeEventTurnCompleted, newTurn, provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted})
 	ingest(provider.RuntimeEventTurnCompleted, oldTurn, provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled})
 	assertCurrent("stale settle after the current turn completed", SessionStatusReady, newTurn, TurnStateCompleted)
+
+	ingest(provider.RuntimeEventRuntimeError, newTurn, provider.RuntimeEventPayload{Message: "late boom"})
+	ingest(provider.RuntimeEventTurnCompleted, newTurn, provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "late failure"})
+	assertCurrent("late terminal events for the settled current turn", SessionStatusReady, newTurn, TurnStateCompleted)
 }
 
 // When a NEWER turn settles, buffered streams of the thread's OLDER turns are
