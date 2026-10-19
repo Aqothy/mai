@@ -36,5 +36,5 @@ xcuserdata/
 buildServer.json
 Local.xcconfig
 
-# Native libghostty-vt build tree (make ghostty-vt)
+# Downloaded libghostty-vt (make ghostty-vt)
 build/

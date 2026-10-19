@@ -3,15 +3,24 @@
 CLIENT_GEN_STAMP := tools/client-gen/node_modules/.package-lock.json
 
 # The daemon links a static libghostty-vt (each terminal run's model: it
-# answers the program's queries and exports attach snapshots). Building the library once needs cmake and zig
-# (`brew install cmake zig`); the produced daemon binary is statically
-# linked and needs nothing installed at runtime.
+# answers the program's queries and exports attach snapshots): the macOS
+# slice of Ghostty's own ghostty-vt.xcframework.zip for the pinned commit, the
+# same file ghost-swiftly pins for the app. The commit is `ghosttyCommit` in
+# internal/terminal/vtscreen and must be the one the Go binding builds
+# against; the zip's SHA-256 is below. To move the pin, run ghost-swiftly's
+# Script/bump-ghostty.sh <commit> (it checks Ghostty's signature), copy its
+# commit and checksum to both places, and update go.mitchellh.com/libghostty
+# to a version that builds against that commit. The produced daemon binary is
+# statically linked and needs nothing installed at runtime.
 #
 # Any direct `go build`/`go test` (including gopls) needs
 # PKG_CONFIG_PATH=$(GHOSTTY_VT_PKG_CONFIG) in its environment.
-GHOSTTY_VT_BUILD := build/ghostty-vt
-GHOSTTY_VT_STAMP := $(GHOSTTY_VT_BUILD)/.built
-GHOSTTY_VT_PKG_CONFIG := $(CURDIR)/$(GHOSTTY_VT_BUILD)/_deps/ghostty-src/zig-out/share/pkgconfig
+GHOSTTY_VT_COMMIT := $(shell sed -n 's/^const ghosttyCommit = "\(.*\)"$$/\1/p' internal/terminal/vtscreen/vtscreen_ghostty.go)
+GHOSTTY_VT_SHA256 := 06d88f611c9496f9d6e285156ddd515a6d9420383e024f279ec904a46ff1c659
+GHOSTTY_VT_DIR := build/ghostty-vt
+GHOSTTY_VT_STAMP := $(GHOSTTY_VT_DIR)/.$(GHOSTTY_VT_COMMIT)
+GHOSTTY_VT_PKG_CONFIG := $(CURDIR)/$(GHOSTTY_VT_DIR)/pkgconfig
+GHOSTTY_VT_SLICE := $(CURDIR)/$(GHOSTTY_VT_DIR)/ghostty-vt.xcframework/macos-arm64_x86_64
 
 .PHONY: client-gen-setup generate build run ghostty-vt test fff-verify
 
@@ -34,12 +43,20 @@ test: ghostty-vt
 
 ghostty-vt: $(GHOSTTY_VT_STAMP)
 
-$(GHOSTTY_VT_STAMP): tools/ghostty-vt/CMakeLists.txt
-	cmake -S tools/ghostty-vt -B $(GHOSTTY_VT_BUILD) -DCMAKE_BUILD_TYPE=Release
-	# Ghostty's CMake runs zig only when its outputs are missing (the custom
-	# command lists no sources), so a pin change would keep the old library.
-	rm -rf $(GHOSTTY_VT_BUILD)/_deps/ghostty-src/zig-out
-	cmake --build $(GHOSTTY_VT_BUILD)
+$(GHOSTTY_VT_STAMP):
+	@go mod download go.mitchellh.com/libghostty
+	@binding="$$(go list -m -f '{{.Dir}}' go.mitchellh.com/libghostty)/CMakeLists.txt"; \
+	grep -q 'GIT_TAG $(GHOSTTY_VT_COMMIT)$$' "$$binding" || { \
+		echo "go.mitchellh.com/libghostty doesn't build against Ghostty $(GHOSTTY_VT_COMMIT) ($$binding)" >&2; exit 1; }
+	rm -rf $(GHOSTTY_VT_DIR)
+	mkdir -p $(GHOSTTY_VT_DIR)/pkgconfig
+	curl -fsSL -o $(GHOSTTY_VT_DIR)/ghostty-vt.xcframework.zip \
+		https://tip.files.ghostty.org/$(GHOSTTY_VT_COMMIT)/ghostty-vt.xcframework.zip
+	echo '$(GHOSTTY_VT_SHA256)  $(GHOSTTY_VT_DIR)/ghostty-vt.xcframework.zip' | shasum -a 256 -c
+	unzip -q $(GHOSTTY_VT_DIR)/ghostty-vt.xcframework.zip -d $(GHOSTTY_VT_DIR)
+	printf '%s\n' 'Name: libghostty-vt-static' 'Description: Ghostty VT library' 'Version: $(GHOSTTY_VT_COMMIT)' \
+		'Cflags: -I$(GHOSTTY_VT_SLICE)/Headers' 'Libs: $(GHOSTTY_VT_SLICE)/libghostty-vt.a' \
+		> $(GHOSTTY_VT_DIR)/pkgconfig/libghostty-vt-static.pc
 	# Go's build cache does not hash linked static-library contents. A Ghostty
 	# pin change must force cgo packages to relink instead of reusing the old VT.
 	go clean -cache

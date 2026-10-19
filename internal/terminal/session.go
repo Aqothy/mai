@@ -376,15 +376,11 @@ func (s *Session) Snapshot() (Snapshot, error) {
 	if s.vt == nil {
 		return snapshot, ErrNotRunning
 	}
-	format, err := vtscreen.SnapshotFormat()
-	if err != nil {
-		return snapshot, err
-	}
 	data, err := s.vt.Snapshot()
 	if err != nil {
 		return snapshot, fmt.Errorf("terminal snapshot encode: %w", err)
 	}
-	snapshot.SnapshotFormat = format
+	snapshot.SnapshotFormat = vtscreen.SnapshotFormat
 	snapshot.Data = data
 	return snapshot, nil
 }

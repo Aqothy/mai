@@ -5,20 +5,14 @@
 // never answer the program, so every query gets exactly one reply.
 //
 // The package links a static libghostty-vt through cgo; `make ghostty-vt`
-// builds the pinned library and `make build`/`make test` point pkg-config
-// at it.
+// downloads Ghostty's build of the pinned commit and `make build`/`make test`
+// point pkg-config at it.
 //
 // The caller serializes all access, and effects run inside Feed under the
 // caller's lock, so they must not block.
 package vtscreen
 
-import (
-	"errors"
-	"fmt"
-	"sync"
-
-	libghostty "go.mitchellh.com/libghostty"
-)
+import libghostty "go.mitchellh.com/libghostty"
 
 const (
 	// Pixel sizes for size reports (CSI 14/16 t). The daemon doesn't know
@@ -210,21 +204,16 @@ func programStatus(status libghostty.ProgramStatus) ProgramStatus {
 	}
 }
 
+// ghosttyCommit is the Ghostty commit whose libghostty-vt the daemon links:
+// `make ghostty-vt` downloads Ghostty's own build of it, checked against the
+// Makefile's checksum, and requires the Go binding to build against the same
+// commit. Ghostty's build doesn't stamp its commit into the library.
+const ghosttyCommit = "81598385d608dda4946093d6d6a234d204a2f225"
+
 // SnapshotFormat names the GHOSTSNP contract of the linked libghostty-vt.
 // GHOSTSNP v1 isn't stable across Ghostty commits (ghostty snapshot.h), so a
-// client may decode a snapshot only if its library reports the same commit.
-// The commit comes from the build's -Dlib-version-string
-// (tools/ghostty-vt/CMakeLists.txt).
-var SnapshotFormat = sync.OnceValues(func() (string, error) {
-	info, err := libghostty.GetBuildInfo()
-	if err != nil {
-		return "", fmt.Errorf("libghostty-vt build info: %w", err)
-	}
-	if info.VersionBuild == "" {
-		return "", errors.New("libghostty-vt was built without its commit in -Dlib-version-string")
-	}
-	return "ghostty-gsn-v1-" + info.VersionBuild, nil
-})
+// client may decode a snapshot only if its library is from the same commit.
+const SnapshotFormat = "ghostty-gsn-v1-" + ghosttyCommit
 
 // Feed parses program output. Malformed input never stops the stream, as a
 // real terminal tolerates it.
