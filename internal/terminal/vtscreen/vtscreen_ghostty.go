@@ -33,9 +33,6 @@ const (
 	attachContinuationMaxBytes = 64 * 1024
 )
 
-// ErrUnavailable reports use of a closed screen.
-var ErrUnavailable = errors.New("terminal screen is closed")
-
 // RGB is one color.
 type RGB struct{ R, G, B uint8 }
 
@@ -108,7 +105,6 @@ type Screen struct {
 	columns uint16
 	rows    uint16
 	dark    bool
-	closed  bool
 }
 
 // New creates a run's terminal with Ghostty.app's defaults (grapheme
@@ -233,17 +229,11 @@ var SnapshotFormat = sync.OnceValues(func() (string, error) {
 // Feed parses program output. Malformed input never stops the stream, as a
 // real terminal tolerates it.
 func (s *Screen) Feed(data []byte) {
-	if s.closed {
-		return
-	}
 	_, _ = s.term.Write(data)
 }
 
 // Resize reflows the terminal to a new grid.
 func (s *Screen) Resize(columns, rows uint16) error {
-	if s.closed {
-		return ErrUnavailable
-	}
 	if err := s.term.Resize(columns, rows, cellWidthPx, cellHeightPx); err != nil {
 		return err
 	}
@@ -254,9 +244,6 @@ func (s *Screen) Resize(columns, rows uint16) error {
 // SetAppearance makes the terminal answer with a view's theme. A program's
 // own color changes (OSC 4/10/11) still win until it resets them.
 func (s *Screen) SetAppearance(appearance Appearance) error {
-	if s.closed {
-		return ErrUnavailable
-	}
 	foreground := libghostty.ColorRGB(appearance.Foreground)
 	background := libghostty.ColorRGB(appearance.Background)
 	palette := libghostty.DefaultPalette()
@@ -278,17 +265,11 @@ func (s *Screen) SetAppearance(appearance Appearance) error {
 
 // Snapshot exports the terminal's complete native model.
 func (s *Screen) Snapshot() ([]byte, error) {
-	if s.closed {
-		return nil, ErrUnavailable
-	}
 	return s.term.Snapshot()
 }
 
-// Close releases the terminal's native resources.
+// Close releases the terminal's native resources. The screen can't be used
+// after.
 func (s *Screen) Close() {
-	if s.closed {
-		return
-	}
-	s.closed = true
 	s.term.Close()
 }
