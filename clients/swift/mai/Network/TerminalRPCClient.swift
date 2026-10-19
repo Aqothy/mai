@@ -3,7 +3,8 @@ import Foundation
 /// Terminal RPC surface. Thread and terminal stores keep separate domain
 /// protocols while sharing one RPCClient and connection lifecycle.
 protocol TerminalRPCClient: RPCTransportClient {
-    var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)? { get set }
+    /// Receives terminal output off the main actor, in arrival order.
+    var onTerminalStreamItem: (@Sendable (TerminalStreamMessage) -> Void)? { get set }
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)? { get set }
 
     /// Returns the full snapshot and registers this connection for

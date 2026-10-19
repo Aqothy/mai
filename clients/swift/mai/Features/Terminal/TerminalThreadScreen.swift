@@ -41,12 +41,12 @@ struct TerminalThreadScreen: View {
         Group {
             if let attachment {
                 TerminalThreadView(
-                    controller: attachment.controller,
+                    attachment: attachment,
                     title: summary?.displayTitle ?? String(localized: "Terminal")
                 )
-                // Each attachment renders through its own Ghostty session;
-                // switching terminals must rebuild the surface rather than
-                // feed a new byte stream into an old grid.
+                // Each attachment renders its own terminal; switching
+                // terminals must rebuild the view rather than draw another
+                // terminal in the old one.
                 .id(ObjectIdentifier(attachment))
                 .overlay(alignment: .center) {
                     ZStack {
@@ -72,7 +72,6 @@ struct TerminalThreadScreen: View {
                     TerminalActionsToolbar(
                         isRunning: attachment.phase == .running,
                         canRelaunch: canRelaunch(attachment.phase),
-                        controller: attachment.controller,
                         rename: {
                             renameTitle = summary?.title ?? ""
                             isRenamePresented = true
@@ -172,7 +171,6 @@ struct TerminalThreadScreen: View {
 private struct TerminalActionsToolbar: ToolbarContent {
     let isRunning: Bool
     let canRelaunch: Bool
-    let controller: TerminalSessionController
     let rename: () -> Void
     let relaunch: () -> Void
     let terminate: () -> Void
@@ -185,7 +183,7 @@ private struct TerminalActionsToolbar: ToolbarContent {
                 if canRelaunch {
                     Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
                 }
-                TerminalTextSizeMenu(controller: controller)
+                TerminalTextSizeMenu()
                 if isRunning {
                     Button("Terminate", systemImage: "stop.circle", role: .destructive, action: terminate)
                 }
@@ -196,27 +194,23 @@ private struct TerminalActionsToolbar: ToolbarContent {
     }
 }
 
-/// Text-size controls: the persisted preference applies to future terminals
-/// and to the current surface through its configuration.
+/// Text-size controls: the persisted preference, which every terminal view
+/// configures its font from.
 private struct TerminalTextSizeMenu: View {
-    let controller: TerminalSessionController
     @State private var settings = TerminalSettings.shared
 
     var body: some View {
         Menu("Text Size", systemImage: "textformat.size") {
             Button("Larger", systemImage: "plus.magnifyingglass") {
                 settings.increaseFontSize()
-                controller.setFontSize(settings.fontSize)
             }
             .disabled(!settings.canIncrease)
             Button("Smaller", systemImage: "minus.magnifyingglass") {
                 settings.decreaseFontSize()
-                controller.setFontSize(settings.fontSize)
             }
             .disabled(!settings.canDecrease)
             Button("Reset", systemImage: "arrow.counterclockwise") {
                 settings.resetFontSize()
-                controller.setFontSize(settings.fontSize)
             }
         }
         .accessibilityLabel("Terminal text size")

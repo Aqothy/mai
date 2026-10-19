@@ -44,7 +44,7 @@ struct ThreadListFilter: Equatable {
             (projectCwd == nil || terminal.cwd == projectCwd)
                 && (query.isEmpty
                     || terminal.displayTitle.localizedStandardContains(query)
-                    || terminal.observedTitle?.localizedStandardContains(query) == true)
+                    || terminal.programTitle?.localizedStandardContains(query) == true)
         }
     }
 

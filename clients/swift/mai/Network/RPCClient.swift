@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 final class RPCClient {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -15,7 +16,14 @@ final class RPCClient {
     private static let probeTimeout: Duration = .seconds(5)
 
     var onNotification: ((String, Data) -> Void)?
-    var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)?
+    /// Receives terminal output off the main actor, in arrival order.
+    var onTerminalStreamItem: (@Sendable (TerminalStreamMessage) -> Void)? {
+        get { terminalSink.handler }
+        set { terminalSink.handler = newValue }
+    }
+
+    /// The receive loop reads the terminal handler off the main actor.
+    private let terminalSink = TerminalSink()
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
@@ -47,8 +55,15 @@ final class RPCClient {
         webSocket = socket
         socket.resume()
 
+        let terminalSink = terminalSink
         receiveTask = Task { [weak self] in
-            await self?.receiveMessages(from: socket)
+            await Self.receiveMessages(
+                from: socket,
+                terminalSink: terminalSink,
+                route: { [weak self] envelope, data in self?.route(envelope, data: data) },
+                finish: { [weak self] failure in
+                    self?.finishConnection(socket, error: failure.map { RPCError($0.message) })
+                })
         }
         pingTask = Task { [weak self] in
             while true {
@@ -235,7 +250,16 @@ final class RPCClient {
         }
     }
 
-    private func receiveMessages(from socket: URLSessionWebSocketTask) async {
+    /// Receives off the main actor. Terminal output goes straight to
+    /// `terminalSink` and never touches the main actor; everything else is
+    /// routed there in arrival order.
+    @concurrent
+    private nonisolated static func receiveMessages(
+        from socket: URLSessionWebSocketTask,
+        terminalSink: TerminalSink,
+        route: @escaping @MainActor (Envelope, Data) -> Void,
+        finish: @escaping @MainActor (ReceiveFailure?) -> Void
+    ) async {
         do {
             while !Task.isCancelled {
                 let message = try await socket.receive()
@@ -245,27 +269,44 @@ final class RPCClient {
                 case .string(let text):
                     data = Data(text.utf8)
                 case .data:
-                    throw RPCError("maiD sent a binary WebSocket frame")
+                    throw ReceiveFailure(message: "maiD sent a binary WebSocket frame")
                 @unknown default:
-                    throw RPCError("maiD sent an unknown WebSocket frame")
+                    throw ReceiveFailure(message: "maiD sent an unknown WebSocket frame")
                 }
 
-                let envelope = try await Self.decode(Envelope.self, from: data)
-                route(envelope, data: data)
+                let envelope = try WireJSON.makeDecoder().decode(Envelope.self, from: data)
+                if let item = envelope.params, let handler = terminalSink.handler {
+                    handler(item)
+                } else {
+                    await route(envelope, data)
+                }
             }
+            await finish(nil)
         } catch is CancellationError {
-            finishConnection(socket, error: nil)
+            await finish(nil)
+        } catch let failure as ReceiveFailure {
+            await finish(failure)
         } catch {
-            finishConnection(socket, error: error)
+            await finish(ReceiveFailure(message: error.localizedDescription))
+        }
+    }
+
+    nonisolated private struct ReceiveFailure: Error {
+        let message: String
+    }
+
+    nonisolated private final class TerminalSink: Sendable {
+        private let value = Mutex<(@Sendable (TerminalStreamMessage) -> Void)?>(nil)
+
+        var handler: (@Sendable (TerminalStreamMessage) -> Void)? {
+            get { value.withLock { $0 } }
+            set { value.withLock { $0 = newValue } }
         }
     }
 
     private func route(_ envelope: Envelope, data: Data) {
         if let id = envelope.id {
             pendingRequests.removeValue(forKey: id)?.resume(returning: data)
-        } else if envelope.method == MaidRPCMethod.terminalSubscribe,
-                  let item = envelope.params {
-            onTerminalStreamItem?(item)
         } else if envelope.method == MaidRPCMethod.terminalSubscribeList {
             // List updates are low-frequency lifecycle changes; decoding
             // inline keeps them ordered with the surrounding stream.

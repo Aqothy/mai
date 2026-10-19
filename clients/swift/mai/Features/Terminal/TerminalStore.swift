@@ -1,9 +1,10 @@
 import Foundation
+import Synchronization
 
 /// Owns terminal domain state and this window's active attachment. Connection
 /// lifecycle is shared with ThreadStore through RPCConnectionCoordinator. Raw
-/// output bytes flow straight from the transport to the attachment's session
-/// controller and never enter observation.
+/// output bytes flow straight from the transport to the attachment's feed and
+/// never enter observation.
 @Observable
 final class TerminalStore {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -15,9 +16,13 @@ final class TerminalStore {
     private(set) var hasLoadedTerminalList = false
 
     /// The one attachment currently rendering a terminal, if any.
-    private(set) var activeAttachment: TerminalAttachment?
+    private(set) var activeAttachment: TerminalAttachment? {
+        didSet { streamRouter.setFeed(activeAttachment?.feed) }
+    }
 
     @ObservationIgnored let rpc: any TerminalRPCClient
+    /// Sends output to the active attachment without the main actor.
+    @ObservationIgnored private let streamRouter = TerminalStreamRouter()
     @ObservationIgnored private let connection: RPCConnectionCoordinator
     @ObservationIgnored private var isAwaitingListSnapshot = false
     @ObservationIgnored private var bufferedListItems: [TerminalListStreamItem] = []
@@ -32,8 +37,9 @@ final class TerminalStore {
         self.rpc = rpc
         self.connection = connection
 
-        rpc.onTerminalStreamItem = { [weak self] item in
-            self?.receiveStreamItem(item)
+        let streamRouter = streamRouter
+        rpc.onTerminalStreamItem = { item in
+            streamRouter.route(item)
         }
         rpc.onTerminalListItem = { [weak self] item in
             self?.receiveListItem(item)
@@ -228,10 +234,6 @@ final class TerminalStore {
 
     // MARK: - Transport events
 
-    private func receiveStreamItem(_ item: TerminalStreamMessage) {
-        activeAttachment?.receive(item)
-    }
-
     private func connectionDidConnect() {
         guard activeAttachment?.phase == .disconnected else { return }
         activeAttachment?.reattachAfterReconnect()
@@ -242,5 +244,19 @@ final class TerminalStore {
         isAwaitingListSnapshot = false
         bufferedListItems.removeAll(keepingCapacity: true)
         activeAttachment?.connectionLost()
+    }
+}
+
+/// Hands terminal output from the transport to the active attachment's feed,
+/// from any thread, so output never waits for the main actor.
+nonisolated final class TerminalStreamRouter: Sendable {
+    private let feed = Mutex<TerminalFeed?>(nil)
+
+    func setFeed(_ feed: TerminalFeed?) {
+        self.feed.withLock { $0 = feed }
+    }
+
+    func route(_ item: TerminalStreamMessage) {
+        feed.withLock { $0 }?.enqueue(item)
     }
 }
