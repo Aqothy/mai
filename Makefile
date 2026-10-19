@@ -2,8 +2,8 @@
 
 CLIENT_GEN_STAMP := tools/client-gen/node_modules/.package-lock.json
 
-# The daemon links a static libghostty-vt (terminal model for attach and
-# agent detection). Building the library once needs cmake and zig
+# The daemon links a static libghostty-vt (each terminal run's model: it
+# answers the program's queries and exports attach snapshots). Building the library once needs cmake and zig
 # (`brew install cmake zig`); the produced daemon binary is statically
 # linked and needs nothing installed at runtime.
 #
@@ -13,7 +13,7 @@ GHOSTTY_VT_BUILD := build/ghostty-vt
 GHOSTTY_VT_STAMP := $(GHOSTTY_VT_BUILD)/.built
 GHOSTTY_VT_PKG_CONFIG := $(CURDIR)/$(GHOSTTY_VT_BUILD)/_deps/ghostty-src/zig-out/share/pkgconfig
 
-.PHONY: client-gen-setup generate build run ghostty-vt test fff-verify sync-agent-manifests
+.PHONY: client-gen-setup generate build run ghostty-vt test fff-verify
 
 client-gen-setup: $(CLIENT_GEN_STAMP)
 
@@ -33,12 +33,6 @@ test: ghostty-vt
 	PKG_CONFIG_PATH=$(GHOSTTY_VT_PKG_CONFIG) go test ./...
 
 ghostty-vt: $(GHOSTTY_VT_STAMP)
-
-# Mirrors Herdr's agent-detection manifests (HERDR_REF: branch, tag or commit;
-# default: Herdr's default branch), then checks that the engine compiles every rule.
-sync-agent-manifests: ghostty-vt
-	tools/herdr-manifests/sync.sh $(HERDR_REF)
-	PKG_CONFIG_PATH=$(GHOSTTY_VT_PKG_CONFIG) go test ./internal/terminal/...
 
 $(GHOSTTY_VT_STAMP): tools/ghostty-vt/CMakeLists.txt
 	cmake -S tools/ghostty-vt -B $(GHOSTTY_VT_BUILD) -DCMAKE_BUILD_TYPE=Release

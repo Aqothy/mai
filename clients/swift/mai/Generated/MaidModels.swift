@@ -4433,17 +4433,20 @@ public extension SubscribeThreadInput {
 
 // MARK: - TerminalAttachParams
 public struct TerminalAttachParams: Codable {
+    public var appearance: TerminalAppearance
     public var attachmentID: String
     public var columns, rows: Int
     public var terminalID: String
 
     public enum CodingKeys: String, CodingKey {
+        case appearance
         case attachmentID = "attachmentId"
         case columns, rows
         case terminalID = "terminalId"
     }
 
-    public init(attachmentID: String, columns: Int, rows: Int, terminalID: String) {
+    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, rows: Int, terminalID: String) {
+        self.appearance = appearance
         self.attachmentID = attachmentID
         self.columns = columns
         self.rows = rows
@@ -4470,16 +4473,72 @@ public extension TerminalAttachParams {
     }
 
     func with(
+        appearance: TerminalAppearance? = nil,
         attachmentID: String? = nil,
         columns: Int? = nil,
         rows: Int? = nil,
         terminalID: String? = nil
     ) -> TerminalAttachParams {
         return TerminalAttachParams(
+            appearance: appearance ?? self.appearance,
             attachmentID: attachmentID ?? self.attachmentID,
             columns: columns ?? self.columns,
             rows: rows ?? self.rows,
             terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalAppearance
+public struct TerminalAppearance: Codable {
+    public var background, colorScheme, foreground: String
+    public var palette: [String]?
+
+    public init(background: String, colorScheme: String, foreground: String, palette: [String]?) {
+        self.background = background
+        self.colorScheme = colorScheme
+        self.foreground = foreground
+        self.palette = palette
+    }
+}
+
+// MARK: TerminalAppearance convenience initializers and mutators
+
+public extension TerminalAppearance {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalAppearance.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        background: String? = nil,
+        colorScheme: String? = nil,
+        foreground: String? = nil,
+        palette: [String]?? = nil
+    ) -> TerminalAppearance {
+        return TerminalAppearance(
+            background: background ?? self.background,
+            colorScheme: colorScheme ?? self.colorScheme,
+            foreground: foreground ?? self.foreground,
+            palette: palette ?? self.palette
         )
     }
 
@@ -4566,30 +4625,27 @@ public extension TerminalAttachSnapshot {
 
 // MARK: - TerminalSummary
 public struct TerminalSummary: Codable {
-    public var agentActivity: String?
-    public var agentActivityUpdatedAt: Date?
-    public var agentKind: String?
     public var createdAt: Date
     public var cwd: String
     public var exitCode: Int?
-    public var observedTitle: String?
+    public var programStatus: TerminalProgramStatus?
+    public var programTitle, pwd: String?
     public var status, terminalID, title: String
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case agentActivity, agentActivityUpdatedAt, agentKind, createdAt, cwd, exitCode, observedTitle, status
+        case createdAt, cwd, exitCode, programStatus, programTitle, pwd, status
         case terminalID = "terminalId"
         case title, updatedAt
     }
 
-    public init(agentActivity: String?, agentActivityUpdatedAt: Date?, agentKind: String?, createdAt: Date, cwd: String, exitCode: Int?, observedTitle: String?, status: String, terminalID: String, title: String, updatedAt: Date) {
-        self.agentActivity = agentActivity
-        self.agentActivityUpdatedAt = agentActivityUpdatedAt
-        self.agentKind = agentKind
+    public init(createdAt: Date, cwd: String, exitCode: Int?, programStatus: TerminalProgramStatus?, programTitle: String?, pwd: String?, status: String, terminalID: String, title: String, updatedAt: Date) {
         self.createdAt = createdAt
         self.cwd = cwd
         self.exitCode = exitCode
-        self.observedTitle = observedTitle
+        self.programStatus = programStatus
+        self.programTitle = programTitle
+        self.pwd = pwd
         self.status = status
         self.terminalID = terminalID
         self.title = title
@@ -4616,26 +4672,24 @@ public extension TerminalSummary {
     }
 
     func with(
-        agentActivity: String?? = nil,
-        agentActivityUpdatedAt: Date?? = nil,
-        agentKind: String?? = nil,
         createdAt: Date? = nil,
         cwd: String? = nil,
         exitCode: Int?? = nil,
-        observedTitle: String?? = nil,
+        programStatus: TerminalProgramStatus?? = nil,
+        programTitle: String?? = nil,
+        pwd: String?? = nil,
         status: String? = nil,
         terminalID: String? = nil,
         title: String? = nil,
         updatedAt: Date? = nil
     ) -> TerminalSummary {
         return TerminalSummary(
-            agentActivity: agentActivity ?? self.agentActivity,
-            agentActivityUpdatedAt: agentActivityUpdatedAt ?? self.agentActivityUpdatedAt,
-            agentKind: agentKind ?? self.agentKind,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
             exitCode: exitCode ?? self.exitCode,
-            observedTitle: observedTitle ?? self.observedTitle,
+            programStatus: programStatus ?? self.programStatus,
+            programTitle: programTitle ?? self.programTitle,
+            pwd: pwd ?? self.pwd,
             status: status ?? self.status,
             terminalID: terminalID ?? self.terminalID,
             title: title ?? self.title,
@@ -4652,8 +4706,75 @@ public extension TerminalSummary {
     }
 }
 
+// MARK: - TerminalProgramStatus
+public struct TerminalProgramStatus: Codable {
+    public var app, message, need: String?
+    public var progress: Int?
+    public var state: String
+    public var title: String?
+    public var updatedAt: Date
+
+    public init(app: String?, message: String?, need: String?, progress: Int?, state: String, title: String?, updatedAt: Date) {
+        self.app = app
+        self.message = message
+        self.need = need
+        self.progress = progress
+        self.state = state
+        self.title = title
+        self.updatedAt = updatedAt
+    }
+}
+
+// MARK: TerminalProgramStatus convenience initializers and mutators
+
+public extension TerminalProgramStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalProgramStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        app: String?? = nil,
+        message: String?? = nil,
+        need: String?? = nil,
+        progress: Int?? = nil,
+        state: String? = nil,
+        title: String?? = nil,
+        updatedAt: Date? = nil
+    ) -> TerminalProgramStatus {
+        return TerminalProgramStatus(
+            app: app ?? self.app,
+            message: message ?? self.message,
+            need: need ?? self.need,
+            progress: progress ?? self.progress,
+            state: state ?? self.state,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - TerminalCreateParams
 public struct TerminalCreateParams: Codable {
+    public var appearance: TerminalAppearance
     public var attachmentID: String
     public var columns: Int
     public var cwd: String
@@ -4661,11 +4782,13 @@ public struct TerminalCreateParams: Codable {
     public var title: String?
 
     public enum CodingKeys: String, CodingKey {
+        case appearance
         case attachmentID = "attachmentId"
         case columns, cwd, rows, title
     }
 
-    public init(attachmentID: String, columns: Int, cwd: String, rows: Int, title: String?) {
+    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, cwd: String, rows: Int, title: String?) {
+        self.appearance = appearance
         self.attachmentID = attachmentID
         self.columns = columns
         self.cwd = cwd
@@ -4693,6 +4816,7 @@ public extension TerminalCreateParams {
     }
 
     func with(
+        appearance: TerminalAppearance? = nil,
         attachmentID: String? = nil,
         columns: Int? = nil,
         cwd: String? = nil,
@@ -4700,6 +4824,7 @@ public extension TerminalCreateParams {
         title: String?? = nil
     ) -> TerminalCreateParams {
         return TerminalCreateParams(
+            appearance: appearance ?? self.appearance,
             attachmentID: attachmentID ?? self.attachmentID,
             columns: columns ?? self.columns,
             cwd: cwd ?? self.cwd,
@@ -4933,16 +5058,18 @@ public extension TerminalRenameParams {
 
 // MARK: - TerminalResizeParams
 public struct TerminalResizeParams: Codable {
+    public var appearance: TerminalAppearance
     public var columns, rows: Int
     public var runID, terminalID: String
 
     public enum CodingKeys: String, CodingKey {
-        case columns, rows
+        case appearance, columns, rows
         case runID = "runId"
         case terminalID = "terminalId"
     }
 
-    public init(columns: Int, rows: Int, runID: String, terminalID: String) {
+    public init(appearance: TerminalAppearance, columns: Int, rows: Int, runID: String, terminalID: String) {
+        self.appearance = appearance
         self.columns = columns
         self.rows = rows
         self.runID = runID
@@ -4969,12 +5096,14 @@ public extension TerminalResizeParams {
     }
 
     func with(
+        appearance: TerminalAppearance? = nil,
         columns: Int? = nil,
         rows: Int? = nil,
         runID: String? = nil,
         terminalID: String? = nil
     ) -> TerminalResizeParams {
         return TerminalResizeParams(
+            appearance: appearance ?? self.appearance,
             columns: columns ?? self.columns,
             rows: rows ?? self.rows,
             runID: runID ?? self.runID,
@@ -4993,26 +5122,31 @@ public extension TerminalResizeParams {
 
 // MARK: - TerminalStreamItem
 public struct TerminalStreamItem: Codable {
+    public var columns: Int?
     public var data: String?
     public var exitCode: Int?
     public var kind: String
-    public var message, runID: String?
+    public var message: String?
+    public var rows: Int?
+    public var runID: String?
     public var sequence: Int?
     public var status: String?
     public var terminalID: String
 
     public enum CodingKeys: String, CodingKey {
-        case data, exitCode, kind, message
+        case columns, data, exitCode, kind, message, rows
         case runID = "runId"
         case sequence, status
         case terminalID = "terminalId"
     }
 
-    public init(data: String?, exitCode: Int?, kind: String, message: String?, runID: String?, sequence: Int?, status: String?, terminalID: String) {
+    public init(columns: Int?, data: String?, exitCode: Int?, kind: String, message: String?, rows: Int?, runID: String?, sequence: Int?, status: String?, terminalID: String) {
+        self.columns = columns
         self.data = data
         self.exitCode = exitCode
         self.kind = kind
         self.message = message
+        self.rows = rows
         self.runID = runID
         self.sequence = sequence
         self.status = status
@@ -5039,20 +5173,24 @@ public extension TerminalStreamItem {
     }
 
     func with(
+        columns: Int?? = nil,
         data: String?? = nil,
         exitCode: Int?? = nil,
         kind: String? = nil,
         message: String?? = nil,
+        rows: Int?? = nil,
         runID: String?? = nil,
         sequence: Int?? = nil,
         status: String?? = nil,
         terminalID: String? = nil
     ) -> TerminalStreamItem {
         return TerminalStreamItem(
+            columns: columns ?? self.columns,
             data: data ?? self.data,
             exitCode: exitCode ?? self.exitCode,
             kind: kind ?? self.kind,
             message: message ?? self.message,
+            rows: rows ?? self.rows,
             runID: runID ?? self.runID,
             sequence: sequence ?? self.sequence,
             status: status ?? self.status,

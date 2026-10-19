@@ -12,11 +12,11 @@ import (
 
 const testScrollback = 256 * 1024
 
-func newSnapshotScreen(t *testing.T, columns, rows uint16) SnapshotScreen {
+func newSnapshotScreen(t *testing.T, columns, rows uint16) *Screen {
 	t.Helper()
-	s, err := NewSnapshot(columns, rows, testScrollback)
+	s, err := New(columns, rows, testScrollback, Effects{})
 	if err != nil {
-		t.Fatalf("NewSnapshot: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(s.Close)
 	return s
@@ -24,7 +24,7 @@ func newSnapshotScreen(t *testing.T, columns, rows uint16) SnapshotScreen {
 
 // roundTrip exports the source's native model and decodes it exactly as a
 // compatible Ghostty client would before installing it into a surface.
-func roundTrip(t *testing.T, source SnapshotScreen) SnapshotScreen {
+func roundTrip(t *testing.T, source *Screen) *Screen {
 	t.Helper()
 	snapshot, err := source.Snapshot()
 	if err != nil {
@@ -45,39 +45,35 @@ func roundTrip(t *testing.T, source SnapshotScreen) SnapshotScreen {
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
-	formatter, err := libghostty.NewFormatter(term,
-		libghostty.WithFormatterFormat(libghostty.FormatterFormatPlain),
-		libghostty.WithFormatterTrim(true),
-	)
-	if err != nil {
-		term.Close()
-		t.Fatalf("NewFormatter: %v", err)
-	}
-	fresh := &ghosttyScreen{term: term, formatter: formatter}
+	fresh := &Screen{term: term}
 	t.Cleanup(fresh.Close)
 	return fresh
 }
 
-func mustText(t *testing.T, s Screen) string {
+func mustText(t *testing.T, s *Screen) string {
 	t.Helper()
-	out, err := s.Text()
+	formatter, err := libghostty.NewFormatter(s.term,
+		libghostty.WithFormatterFormat(libghostty.FormatterFormatPlain),
+		libghostty.WithFormatterTrim(true),
+	)
 	if err != nil {
-		t.Fatalf("Text: %v", err)
+		t.Fatalf("NewFormatter: %v", err)
+	}
+	defer formatter.Close()
+	out, err := formatter.FormatString()
+	if err != nil {
+		t.Fatalf("FormatString: %v", err)
 	}
 	return out
 }
 
-func mustCursor(t *testing.T, s SnapshotScreen) (uint16, uint16) {
+func mustCursor(t *testing.T, s *Screen) (uint16, uint16) {
 	t.Helper()
-	ghostty, ok := s.(*ghosttyScreen)
-	if !ok {
-		t.Fatalf("unexpected snapshot screen type %T", s)
-	}
-	x, err := ghostty.term.CursorX()
+	x, err := s.term.CursorX()
 	if err != nil {
 		t.Fatalf("CursorX: %v", err)
 	}
-	y, err := ghostty.term.CursorY()
+	y, err := s.term.CursorY()
 	if err != nil {
 		t.Fatalf("CursorY: %v", err)
 	}

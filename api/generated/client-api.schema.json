@@ -1815,6 +1815,33 @@
       ],
       "title": "SubscribeThreadInput"
     },
+    "TerminalAppearance": {
+      "properties": {
+        "colorScheme": {
+          "type": "string"
+        },
+        "foreground": {
+          "type": "string"
+        },
+        "background": {
+          "type": "string"
+        },
+        "palette": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "colorScheme",
+        "foreground",
+        "background"
+      ],
+      "title": "TerminalAppearance"
+    },
     "TerminalAttachParams": {
       "properties": {
         "terminalId": {
@@ -1828,6 +1855,9 @@
         },
         "attachmentId": {
           "type": "string"
+        },
+        "appearance": {
+          "$ref": "#/$defs/TerminalAppearance"
         }
       },
       "additionalProperties": false,
@@ -1836,7 +1866,8 @@
         "terminalId",
         "columns",
         "rows",
-        "attachmentId"
+        "attachmentId",
+        "appearance"
       ],
       "title": "TerminalAttachParams"
     },
@@ -1894,6 +1925,9 @@
         },
         "attachmentId": {
           "type": "string"
+        },
+        "appearance": {
+          "$ref": "#/$defs/TerminalAppearance"
         }
       },
       "additionalProperties": false,
@@ -1902,7 +1936,8 @@
         "cwd",
         "columns",
         "rows",
-        "attachmentId"
+        "attachmentId",
+        "appearance"
       ],
       "title": "TerminalCreateParams"
     },
@@ -1961,6 +1996,39 @@
       ],
       "title": "TerminalListStreamItem"
     },
+    "TerminalProgramStatus": {
+      "properties": {
+        "state": {
+          "type": "string"
+        },
+        "need": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "integer"
+        },
+        "app": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "state",
+        "updatedAt"
+      ],
+      "title": "TerminalProgramStatus"
+    },
     "TerminalRenameParams": {
       "properties": {
         "terminalId": {
@@ -1991,6 +2059,9 @@
         },
         "rows": {
           "type": "integer"
+        },
+        "appearance": {
+          "$ref": "#/$defs/TerminalAppearance"
         }
       },
       "additionalProperties": false,
@@ -1999,7 +2070,8 @@
         "terminalId",
         "runId",
         "columns",
-        "rows"
+        "rows",
+        "appearance"
       ],
       "title": "TerminalResizeParams"
     },
@@ -2020,6 +2092,12 @@
         "data": {
           "type": "string",
           "contentEncoding": "base64"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
         },
         "status": {
           "type": "string"
@@ -2064,18 +2142,14 @@
           "type": "string",
           "format": "date-time"
         },
-        "observedTitle": {
+        "programTitle": {
           "type": "string"
         },
-        "agentKind": {
+        "pwd": {
           "type": "string"
         },
-        "agentActivity": {
-          "type": "string"
-        },
-        "agentActivityUpdatedAt": {
-          "type": "string",
-          "format": "date-time"
+        "programStatus": {
+          "$ref": "#/$defs/TerminalProgramStatus"
         }
       },
       "additionalProperties": false,

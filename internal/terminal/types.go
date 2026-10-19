@@ -50,6 +50,17 @@ const (
 	StreamItemOutput StreamItemKind = "output"
 	// StreamItemStatus reports a lifecycle status change for a run.
 	StreamItemStatus StreamItemKind = "status"
+	// StreamItemResized reports the run's new grid at its sequence; clients
+	// resize their terminal there and keep parsing.
+	StreamItemResized StreamItemKind = "resized"
+)
+
+// ColorScheme is whether a view's theme is light or dark.
+type ColorScheme string
+
+const (
+	ColorSchemeLight ColorScheme = "light"
+	ColorSchemeDark  ColorScheme = "dark"
 )
 
 const (
@@ -75,11 +86,12 @@ type Events struct {
 	// Output delivers one ordered PTY output chunk. The slice is owned by the
 	// callee.
 	Output func(terminalID, runID string, seq uint64, data []byte)
+	// Resized reports a new grid at its place in the output.
+	Resized func(terminalID, runID string, seq uint64, columns, rows uint16)
 	// Exit reports the end of a run after all output has been delivered.
 	// exitCode is nil when the process could not report one.
 	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
-	// Agent reports a changed semantic agent state. Reports carry only the
-	// normalized title and semantic fields, never screen evidence, and are
-	// already deduplicated by the detector.
-	Agent func(terminalID, runID string, report AgentReport)
+	// ProgramChanged reports a changed title, working directory or program
+	// status; read it with Session.Program.
+	ProgramChanged func(terminalID, runID string)
 }

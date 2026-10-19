@@ -325,7 +325,8 @@
       "description": "Payload discriminator of a terminal.subscribe notification.",
       "values": [
         "output",
-        "status"
+        "status",
+        "resized"
       ]
     },
     {
@@ -338,15 +339,31 @@
       ]
     },
     {
-      "name": "TerminalAgentActivity",
-      "description": "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
+      "name": "TerminalProgramState",
+      "description": "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
       "values": [
-        "none",
         "idle",
         "working",
-        "blocked",
         "done",
-        "unknown"
+        "blocked",
+        "error"
+      ]
+    },
+    {
+      "name": "TerminalProgramNeed",
+      "description": "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
+      "values": [
+        "permission",
+        "answer",
+        "auth"
+      ]
+    },
+    {
+      "name": "TerminalColorScheme",
+      "description": "Whether a terminal view's theme is light or dark.",
+      "values": [
+        "light",
+        "dark"
       ]
     }
   ]

@@ -87,15 +87,39 @@ func (c *recordingClient) waitForStatus(t *testing.T) wire.TerminalStreamItem {
 	return wire.TerminalStreamItem{}
 }
 
+// waitForStreamItem waits for a terminal.subscribe item that matches.
+func (c *recordingClient) waitForStreamItem(t *testing.T, match func(wire.TerminalStreamItem) bool) wire.TerminalStreamItem {
+	t.Helper()
+	var found wire.TerminalStreamItem
+	waitUntil(t, "terminal stream item", func() bool {
+		for _, item := range c.outputItems() {
+			if match(item) {
+				found = item
+				return true
+			}
+		}
+		return false
+	})
+	return found
+}
+
 func createTestTerminal(t *testing.T, c *recordingClient) wire.TerminalAttachSnapshot {
 	t.Helper()
 	var snapshot wire.TerminalAttachSnapshot
 	c.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{
-		Cwd:     t.TempDir(),
-		Columns: 80,
-		Rows:    24,
+		Cwd:        t.TempDir(),
+		Columns:    80,
+		Rows:       24,
+		Appearance: testAppearance,
 	}, &snapshot)
 	return snapshot
+}
+
+// testAppearance is a dark view's theme: Ghostty's default colors.
+var testAppearance = wire.TerminalAppearance{
+	ColorScheme: terminal.ColorSchemeDark,
+	Foreground:  "#ffffff",
+	Background:  "#282c34",
 }
 
 func (c *recordingClient) writeTerminal(t *testing.T, terminalID, runID, data string) {
@@ -105,7 +129,7 @@ func (c *recordingClient) writeTerminal(t *testing.T, terminalID, runID, data st
 
 func (c *recordingClient) attachTerminal(terminalID string, columns, rows uint16) (wire.TerminalAttachSnapshot, error) {
 	var snapshot wire.TerminalAttachSnapshot
-	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: columns, Rows: rows}, &snapshot)
+	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: columns, Rows: rows, Appearance: testAppearance}, &snapshot)
 	return snapshot, err
 }
 
@@ -136,7 +160,7 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	client.writeTerminal(t, terminalID, runID, "printf 'RPC-%d\\n' $((40+2))\n")
 	client.waitForOutput(t, "RPC-42")
 
-	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 111, Rows: 31})
+	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 111, Rows: 31, Appearance: testAppearance})
 	client.writeTerminal(t, terminalID, runID, "printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")
 	client.waitForOutput(t, "SIZE-31x111-END")
 }

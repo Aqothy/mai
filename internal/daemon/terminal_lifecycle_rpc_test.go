@@ -85,7 +85,7 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	second.waitForOutput(t, "SECOND-81")
 
 	// Resizes are shared PTY state: an attached non-creator may resize too.
-	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: attach.RunID, Columns: 96, Rows: 31})
+	second.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: attach.RunID, Columns: 96, Rows: 31, Appearance: testAppearance})
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		session, err := s.terminals.service.Get(terminalID)
@@ -100,11 +100,11 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	t.Fatal("attached-client resize was not applied")
 }
 
-// One PTY has one size, so it takes the grid of the client in use: the one
-// that attached or typed most recently. Another client's resize is kept for
-// when that client is used again instead of garbling the one being typed on,
-// and what its terminal answers on its own never reaches the program.
-func TestTerminalSizeFollowsTheClientInUse(t *testing.T) {
+// One PTY has one size, so it takes the grid of the view that last attached
+// or resized. Typing elsewhere doesn't move it: a view claims the size by
+// resizing before it sends input. Every client resizes at the same point in
+// the output, from the resized stream item.
+func TestTerminalSizeFollowsTheLatestAttachOrResize(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -118,21 +118,24 @@ func TestTerminalSizeFollowsTheClientInUse(t *testing.T) {
 	snapshot := createTestTerminal(t, laptop)
 	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
 	phone.mustAttachTerminal(t, terminalID, 41, 32)
-	laptop.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 120, Rows: 40})
-
-	// Typing on the laptop takes the PTY back to the laptop's latest grid.
+	laptop.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 120, Rows: 40, Appearance: testAppearance})
 	printSize(laptop, terminalID, runID, "LAPTOP")
 	laptop.waitForOutput(t, "LAPTOP-40 120")
 
-	// The phone's keyboard showing resizes its view while the laptop is in
-	// use, and its terminal answers a query the laptop's already answered;
-	// the laptop keeps its size until someone types on the phone.
-	phone.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 41, Rows: 20})
-	phone.writeTerminal(t, terminalID, runID, "\x1b[?62;22c")
-	printSize(laptop, terminalID, runID, "STILL")
-	laptop.waitForOutput(t, "STILL-40 120")
-	printSize(phone, terminalID, runID, "PHONE")
-	phone.waitForOutput(t, "PHONE-20 41")
+	// The phone's input reaches the program without taking the size.
+	printSize(phone, terminalID, runID, "TYPED")
+	phone.waitForOutput(t, "TYPED-40 120")
+
+	// Its resize does, and the laptop resizes at the same sequence.
+	phone.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 41, Rows: 20, Appearance: testAppearance})
+	resized := laptop.waitForStreamItem(t, func(item wire.TerminalStreamItem) bool {
+		return item.Kind == terminal.StreamItemResized && item.Columns == 41 && item.Rows == 20
+	})
+	if resized.RunID != runID || resized.Sequence == 0 {
+		t.Fatalf("resized item = %+v, want run %s with a sequence", resized, runID)
+	}
+	printSize(laptop, terminalID, runID, "PHONE")
+	laptop.waitForOutput(t, "PHONE-20 41")
 
 	// When the phone leaves, the PTY goes back to the laptop.
 	phone.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
@@ -162,7 +165,7 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n")
 	first.waitForOutput(t, "AFTER-BAD-ATTACH-7")
 
-	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 301}, nil); err == nil {
+	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 301, Appearance: testAppearance}, nil); err == nil {
 		t.Fatal("relaunch with invalid dimensions succeeded")
 	}
 	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-RELAUNCH-%d\\n' $((4+4))\n")
@@ -218,7 +221,7 @@ func TestTerminalLateDetachKeepsReplacementAttachment(t *testing.T) {
 	created := createTestTerminal(t, client)
 	terminalID := created.Terminal.TerminalID
 	var reopened wire.TerminalAttachSnapshot
-	client.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24, AttachmentID: "view-2"}, &reopened)
+	client.call(t, wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24, AttachmentID: "view-2", Appearance: testAppearance}, &reopened)
 	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
 
 	client.writeTerminal(t, terminalID, reopened.RunID, "printf 'REOPENED-%d\\n' $((30+3))\n")
@@ -237,7 +240,7 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	client.waitForOutput(t, "OLDRUN-22")
 
 	var relaunched wire.TerminalAttachSnapshot
-	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24}, &relaunched)
+	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: terminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &relaunched)
 	if relaunched.RunID == snapshot.RunID {
 		t.Fatal("relaunch reused the old run id")
 	}

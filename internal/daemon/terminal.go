@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/terminal"
+	"github.com/Aqothy/maiD/internal/terminal/vtscreen"
 )
 
 // terminalRuntime composes the PTY service with RPC concerns: terminal
@@ -122,6 +125,10 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	if err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
+	appearance, err := parseTerminalAppearance(params.Appearance)
+	if err != nil {
+		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+	}
 
 	terminalID := terminal.NewID()
 	now := time.Now().UTC()
@@ -133,7 +140,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		updatedAt:  now,
 	}
 	entry.operations.Lock()
-	undoSubscribe := client.subscribeTerminal(terminalID, params.AttachmentID, params.Columns, params.Rows)
+	undoSubscribe := client.subscribeTerminal(terminalID, params.AttachmentID, params.Columns, params.Rows, appearance)
 	// Register the entry (and with it the output subscription) before the
 	// shell starts so no early output is lost; the client buffers stream items
 	// until this call returns its snapshot.
@@ -167,11 +174,12 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	}
 
 	rt.persist(entry, s.logger)
-	session.SetAttached(true)
+	if err := s.sizeTerminal(entry, session); err != nil {
+		s.logger.Warn("terminal appearance failed", "terminal", terminalID, "error", err)
+	}
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
 		undoSubscribe()
-		session.SetAttached(false)
 		entry.operations.Unlock()
 		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
@@ -224,6 +232,10 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
+	appearance, err := parseTerminalAppearance(params.Appearance)
+	if err != nil {
+		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
@@ -238,7 +250,7 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
 	}
 
-	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows, appearance)
 	// Resize before capturing the snapshot: the attach model reflows to the
 	// caller's grid first, so the native snapshot paints current state at
 	// exactly the grid the client renders — the mis-wrap class raw replay
@@ -246,19 +258,19 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	// keeps the client from immediately re-sending the same resize.
 	if err := s.sizeTerminal(entry, session); err != nil {
 		undoSubscribe()
-		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal attach resize: %w", err)
 	}
-	// A successful attach acknowledges a pending done state, so the row
-	// returns to its live activity once someone has looked at the result.
-	session.SetAttached(true)
+	// Attaching is seeing: finished and failed statuses go away.
+	seen := session.Seen()
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
 		undoSubscribe()
-		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		return wire.TerminalAttachSnapshot{}, err
+	}
+	if seen {
+		s.publishTerminalListUpsert(snapshot.Terminal)
 	}
 	entry.operations.Unlock()
 	s.logger.Info("terminal attached", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
@@ -273,11 +285,15 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
+	appearance, err := parseTerminalAppearance(params.Appearance)
+	if err != nil {
+		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+	}
 	entry, ok := rt.lockEntry(params.TerminalID)
 	if !ok {
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
-	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows)
+	undoSubscribe := client.subscribeTerminal(params.TerminalID, params.AttachmentID, params.Columns, params.Rows, appearance)
 	entry.onExit = nil
 	session, err := rt.service.Relaunch(params.TerminalID, terminal.SpawnSpec{
 		Cwd:     entry.cwd,
@@ -298,8 +314,10 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	entry.updatedAt = time.Now().UTC()
 	rt.mu.Unlock()
 	rt.persist(entry, s.logger)
+	if err := s.sizeTerminal(entry, session); err != nil {
+		s.logger.Warn("terminal appearance failed", "terminal", params.TerminalID, "error", err)
+	}
 
-	session.SetAttached(true)
 	// Existing listeners need one explicit new-run signal even when the fresh
 	// shell has not produced output yet. Their clients reattach for a snapshot;
 	// the caller already awaiting this response buffers and deduplicates it.
@@ -312,7 +330,6 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	snapshot, err := s.terminalAttachSnapshot(entry, session)
 	if err != nil {
 		undoSubscribe()
-		session.SetAttached(len(s.terminalSubscribers(params.TerminalID)) > 0)
 		entry.operations.Unlock()
 		s.publishTerminalListUpsert(s.terminalListSummary(entry))
 		return wire.TerminalAttachSnapshot{}, err
@@ -338,21 +355,20 @@ func (s *Server) detachTerminal(client *rpcClient, params wire.TerminalDetachPar
 }
 
 // refreshTerminalAttachment re-derives, after an attachment went away,
-// whether any connected client remains attached to the terminal's live run
-// and which one sizes it. Callers hold entry.operations.
+// which remaining view sizes the terminal. Callers hold entry.operations.
 func (s *Server) refreshTerminalAttachment(entry *terminalEntry) {
 	session, err := s.terminals.service.Get(entry.terminalID)
 	if err != nil {
 		return
 	}
-	session.SetAttached(len(s.terminalSubscribers(entry.terminalID)) > 0)
 	if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
 		s.logger.Warn("terminal resize failed", "terminal", entry.terminalID, "error", err)
 	}
 }
 
-// latestTerminalView is the connection whose view of the terminal was used
-// most recently (attached to or typed into): the view in use. Callers hold
+// latestTerminalView is the connection whose view last attached or
+// resized: the view that sizes the PTY and whose appearance the program's
+// queries get. Typing claims the size by resizing first. Callers hold
 // entry.operations.
 func (s *Server) latestTerminalView(terminalID string) (*rpcClient, terminalAttachment) {
 	var latestClient *rpcClient
@@ -365,15 +381,18 @@ func (s *Server) latestTerminalView(terminalID string) (*rpcClient, terminalAtta
 	return latestClient, latest
 }
 
-// sizeTerminal gives the PTY the grid of the view in use. One PTY has one
-// size, and the view someone is typing into is the one that must not garble;
-// this is tmux's default window-size "latest". A view's own resize therefore
-// applies only while it is the latest. With nobody attached the size stays.
-// Callers hold entry.operations.
+// sizeTerminal gives the PTY the grid, and the program's queries the
+// appearance, of the latest view. One PTY has one size, and the view someone
+// is typing into is the one that must not garble; this is tmux's default
+// window-size "latest". With nobody attached the size stays. Callers hold
+// entry.operations.
 func (s *Server) sizeTerminal(entry *terminalEntry, session *terminal.Session) error {
 	client, latest := s.latestTerminalView(entry.terminalID)
 	if client == nil {
 		return nil
+	}
+	if err := session.SetAppearance(latest.appearance); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
+		return err
 	}
 	if columns, rows := session.Size(); columns == latest.columns && rows == latest.rows {
 		return nil
@@ -393,7 +412,7 @@ func (s *Server) terminalAttachSnapshot(entry *terminalEntry, session *terminal.
 	summary := s.terminalMetaSummary(entry)
 	summary.Status = snapshot.Status
 	summary.ExitCode = snapshot.ExitCode
-	applyAgentReport(&summary, session.AgentReport())
+	applyProgram(&summary, session.Program())
 	return wire.TerminalAttachSnapshot{
 		Terminal:       summary,
 		RunID:          snapshot.RunID,
@@ -518,29 +537,32 @@ func (s *Server) terminalListSummary(entry *terminalEntry) wire.TerminalSummary 
 		if code, ok := session.ExitCode(); ok {
 			summary.ExitCode = &code
 		}
-		applyAgentReport(&summary, session.AgentReport())
+		applyProgram(&summary, session.Program())
 	}
 	return summary
 }
 
-// applyAgentReport copies the detector's semantic result onto a summary. The
-// report carries only the normalized title and semantic fields; nothing else
-// crosses the wire.
-func applyAgentReport(summary *wire.TerminalSummary, report terminal.AgentReport) {
-	summary.ObservedTitle = report.Title
-	summary.AgentKind = report.Kind
-	summary.AgentActivity = report.Activity
-	if !report.UpdatedAt.IsZero() {
-		at := report.UpdatedAt
-		summary.AgentActivityUpdatedAt = &at
+// applyProgram copies what the program reports about itself onto a summary.
+func applyProgram(summary *wire.TerminalSummary, program terminal.ProgramInfo) {
+	summary.ProgramTitle = program.Title
+	summary.Pwd = program.Pwd
+	if status := program.Status; status != nil {
+		summary.ProgramStatus = &wire.TerminalProgramStatus{
+			State:     status.State,
+			Need:      status.Need,
+			Progress:  status.Progress,
+			App:       status.App,
+			Title:     status.Title,
+			Message:   status.Message,
+			UpdatedAt: status.UpdatedAt,
+		}
 	}
 }
 
-// publishTerminalAgentReport fans one changed semantic agent state out as a
-// terminal-list upsert. The detector already deduplicated the report; a
-// stale run's report is dropped by the run check. Only the terminal fence-
-// free locks are taken so the detector may publish from any context.
-func (s *Server) publishTerminalAgentReport(terminalID, runID string, report terminal.AgentReport) {
+// publishTerminalProgram fans a changed title, working directory or program
+// status out as a terminal-list upsert, so other devices see it without
+// attaching. A stale run's change is dropped by the run check.
+func (s *Server) publishTerminalProgram(terminalID, runID string) {
 	rt := s.terminals
 	rt.mu.Lock()
 	entry, ok := rt.entries[terminalID]
@@ -552,8 +574,6 @@ func (s *Server) publishTerminalAgentReport(terminalID, runID string, report ter
 	if err != nil || session.RunID != runID {
 		return
 	}
-	s.logger.Debug("terminal agent activity", "terminal", terminalID, "run", runID,
-		"agent", report.Kind, "activity", report.Activity)
 	s.publishTerminalListUpsert(s.terminalListSummary(entry))
 }
 
@@ -631,30 +651,17 @@ func (s *Server) publishTerminalStreamItem(terminalID string, item wire.Terminal
 	}
 }
 
-// writeTerminal accepts input from clients attached to this run: everything
-// from the view in use, and only typing from the others. Stale-run and
-// unattached input is dropped silently as a routine lifecycle race rather
-// than surfaced as a repeating alert.
+// writeTerminal accepts input from any view attached to this run. Clients
+// never answer the program (the daemon's terminal does), so everything they
+// send is the user's; a view that types claims the size by resizing first.
+// Stale-run and unattached input is dropped silently as a routine lifecycle
+// race rather than surfaced as a repeating alert.
 func (s *Server) writeTerminal(client *rpcClient, params wire.TerminalWriteParams) error {
 	session, entry, ok := s.terminalSessionForSubscriber(client, params.TerminalID, params.RunID)
 	if !ok {
 		return nil
 	}
 	defer entry.operations.Unlock()
-	// Only the view in use writes freely: its terminal alone answers the
-	// program's queries, and its mouse reports match the PTY's grid. Any
-	// other view's terminal answers the same queries, so what it sends on
-	// its own is dropped; typing or pasting there makes it the view in use,
-	// sized before the program reads the input.
-	if latest, _ := s.latestTerminalView(params.TerminalID); latest != client {
-		if !terminal.IsUserInput(params.Data) {
-			return nil
-		}
-		client.useTerminal(params.TerminalID)
-		if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
-			s.logger.Warn("terminal resize failed", "terminal", params.TerminalID, "error", err)
-		}
-	}
 	if err := session.Write(params.Data); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
 		s.logger.Warn("terminal write failed", "terminal", params.TerminalID, "error", err)
 	}
@@ -667,11 +674,16 @@ func (s *Server) resizeTerminal(client *rpcClient, params wire.TerminalResizePar
 		return nil
 	}
 	defer entry.operations.Unlock()
-	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
+	appearance, err := parseTerminalAppearance(params.Appearance)
+	if err == nil {
+		err = terminal.ValidateSize(params.Columns, params.Rows)
+	}
+	if err != nil {
 		s.logger.Warn("terminal resize rejected", "terminal", params.TerminalID, "client", client.id, "error", err)
 		return nil
 	}
-	if !client.resizeTerminalAttachment(params.TerminalID, params.Columns, params.Rows) {
+	// A resize claims the size.
+	if !client.resizeTerminalAttachment(params.TerminalID, params.Columns, params.Rows, appearance) {
 		return nil
 	}
 	if err := s.sizeTerminal(entry, session); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
@@ -702,7 +714,23 @@ func (s *Server) terminalSessionForSubscriber(client *rpcClient, terminalID, run
 }
 
 func (s *Server) terminalEvents() terminal.Events {
-	return terminal.Events{Output: s.publishTerminalOutput, Exit: s.publishTerminalExit, Agent: s.publishTerminalAgentReport}
+	return terminal.Events{
+		Output:         s.publishTerminalOutput,
+		Resized:        s.publishTerminalResized,
+		Exit:           s.publishTerminalExit,
+		ProgramChanged: s.publishTerminalProgram,
+	}
+}
+
+func (s *Server) publishTerminalResized(terminalID, runID string, seq uint64, columns, rows uint16) {
+	s.publishTerminalStreamItem(terminalID, wire.TerminalStreamItem{
+		Kind:       terminal.StreamItemResized,
+		TerminalID: terminalID,
+		RunID:      runID,
+		Sequence:   seq,
+		Columns:    columns,
+		Rows:       rows,
+	})
 }
 
 func (s *Server) publishTerminalOutput(terminalID, runID string, seq uint64, data []byte) {
@@ -747,4 +775,43 @@ func (s *Server) publishTerminalExit(terminalID, runID string, seq uint64, statu
 		Status:     status,
 		ExitCode:   exitCode,
 	})
+}
+
+// parseTerminalAppearance validates a view's appearance at the RPC boundary.
+func parseTerminalAppearance(appearance wire.TerminalAppearance) (vtscreen.Appearance, error) {
+	var parsed vtscreen.Appearance
+	switch appearance.ColorScheme {
+	case terminal.ColorSchemeDark:
+		parsed.Dark = true
+	case terminal.ColorSchemeLight:
+	default:
+		return parsed, fmt.Errorf("appearance color scheme %q is not light or dark", appearance.ColorScheme)
+	}
+	var err error
+	if parsed.Foreground, err = parseTerminalColor(appearance.Foreground); err != nil {
+		return parsed, err
+	}
+	if parsed.Background, err = parseTerminalColor(appearance.Background); err != nil {
+		return parsed, err
+	}
+	if len(appearance.Palette) > 256 {
+		return parsed, fmt.Errorf("appearance palette has %d colors, over 256", len(appearance.Palette))
+	}
+	parsed.Palette = make([]vtscreen.RGB, len(appearance.Palette))
+	for index, color := range appearance.Palette {
+		if parsed.Palette[index], err = parseTerminalColor(color); err != nil {
+			return parsed, err
+		}
+	}
+	return parsed, nil
+}
+
+// parseTerminalColor reads "#rrggbb".
+func parseTerminalColor(color string) (vtscreen.RGB, error) {
+	hex, ok := strings.CutPrefix(color, "#")
+	value, err := strconv.ParseUint(hex, 16, 32)
+	if !ok || len(hex) != 6 || err != nil {
+		return vtscreen.RGB{}, fmt.Errorf("appearance color %q is not #rrggbb", color)
+	}
+	return vtscreen.RGB{R: uint8(value >> 16), G: uint8(value >> 8), B: uint8(value)}, nil
 }

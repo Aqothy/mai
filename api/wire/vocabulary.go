@@ -338,6 +338,7 @@ var Vocabularies = []VocabularyDefinition{
 		Values: []string{
 			string(terminal.StreamItemOutput),
 			string(terminal.StreamItemStatus),
+			string(terminal.StreamItemResized),
 		},
 	},
 	{
@@ -350,15 +351,31 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
-		Name:        "TerminalAgentActivity",
-		Description: "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
+		Name:        "TerminalProgramState",
+		Description: "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
 		Values: []string{
-			string(terminal.AgentActivityNone),
-			string(terminal.AgentActivityIdle),
-			string(terminal.AgentActivityWorking),
-			string(terminal.AgentActivityBlocked),
-			string(terminal.AgentActivityDone),
-			string(terminal.AgentActivityUnknown),
+			string(terminal.ProgramIdle),
+			string(terminal.ProgramWorking),
+			string(terminal.ProgramDone),
+			string(terminal.ProgramBlocked),
+			string(terminal.ProgramError),
+		},
+	},
+	{
+		Name:        "TerminalProgramNeed",
+		Description: "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
+		Values: []string{
+			string(terminal.ProgramNeedsPermission),
+			string(terminal.ProgramNeedsAnswer),
+			string(terminal.ProgramNeedsAuth),
+		},
+	},
+	{
+		Name:        "TerminalColorScheme",
+		Description: "Whether a terminal view's theme is light or dark.",
+		Values: []string{
+			string(terminal.ColorSchemeLight),
+			string(terminal.ColorSchemeDark),
 		},
 	},
 }

@@ -50,19 +50,14 @@ type TerminalListStreamItem struct {
 type TerminalStatus = terminal.Status
 type TerminalStreamItemKind = terminal.StreamItemKind
 
-// TerminalAgentKind is an open label naming the detected foreground agent
-// ("codex", "claude", ...). Clients must tolerate values they do not know
-// and treat them as display labels, not behavior switches.
-type TerminalAgentKind = terminal.AgentKind
-
-// TerminalAgentActivity is the closed semantic activity vocabulary; see the
-// TerminalAgentActivity vocabulary definition.
-type TerminalAgentActivity = terminal.AgentActivityState
+type TerminalProgramState = terminal.ProgramState
+type TerminalProgramNeed = terminal.ProgramNeed
+type TerminalColorScheme = terminal.ColorScheme
 
 // TerminalSummary describes one terminal thread for lists and snapshots.
 // Fields other than identity/title/cwd reflect the current live run and are
-// not durable. The agent fields are the detector's semantic result only;
-// screen evidence and raw titles never cross the wire.
+// not durable. The program fields are what the running program reports about
+// itself; their text comes from the program and is sanitized, not trusted.
 type TerminalSummary struct {
 	TerminalID string         `json:"terminalId"`
 	Title      string         `json:"title"`
@@ -72,15 +67,44 @@ type TerminalSummary struct {
 	CreatedAt  time.Time      `json:"createdAt"`
 	UpdatedAt  time.Time      `json:"updatedAt"`
 
-	// ObservedTitle is the normalized terminal title (control characters
-	// and spinner frames removed, capped at 128 scalars).
-	ObservedTitle string `json:"observedTitle,omitempty"`
-	// AgentKind names the detected foreground agent; empty when none.
-	AgentKind TerminalAgentKind `json:"agentKind,omitempty"`
-	// AgentActivity is the semantic agent state for the current run.
-	AgentActivity TerminalAgentActivity `json:"agentActivity,omitempty"`
-	// AgentActivityUpdatedAt is when the semantic activity last changed.
-	AgentActivityUpdatedAt *time.Time `json:"agentActivityUpdatedAt,omitempty"`
+	// ProgramTitle is the window title the program set (OSC 0/2), without
+	// control characters or spinner frames, capped at 128 scalars.
+	ProgramTitle string `json:"programTitle,omitempty"`
+	// Pwd is the working directory the shell reported (OSC 7).
+	Pwd string `json:"pwd,omitempty"`
+	// ProgramStatus is the program's most pressing status report (OSC
+	// 7501), if it sends any.
+	ProgramStatus *TerminalProgramStatus `json:"programStatus,omitempty"`
+}
+
+// TerminalProgramStatus is a program's report about what it is doing
+// (the program status protocol, OSC 7501).
+type TerminalProgramStatus struct {
+	State TerminalProgramState `json:"state"`
+	// Need is what a blocked program needs, when it said.
+	Need TerminalProgramNeed `json:"need,omitempty"`
+	// Progress is 0-100; absent when the program gave no percentage.
+	Progress *int `json:"progress,omitempty"`
+	// App names the program for grouping or an icon, not for display.
+	App string `json:"app,omitempty"`
+	// Title labels the report.
+	Title string `json:"title,omitempty"`
+	// Message is one line about what the program is doing.
+	Message   string    `json:"message,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// TerminalAppearance is a view's theme. The daemon answers the program's
+// color and light/dark queries (OSC 10/11/4, CSI ? 996 n) with the
+// appearance of the view that last attached or resized.
+type TerminalAppearance struct {
+	ColorScheme TerminalColorScheme `json:"colorScheme"`
+	// Foreground and Background are "#rrggbb".
+	Foreground string `json:"foreground"`
+	Background string `json:"background"`
+	// Palette overrides the first entries of the 256-color palette, as
+	// "#rrggbb".
+	Palette []string `json:"palette,omitempty"`
 }
 
 // TerminalAttachSnapshot is the authoritative attach point for one run.
@@ -105,17 +129,21 @@ type TerminalStreamItem struct {
 	RunID      string                 `json:"runId,omitempty"`
 	Sequence   uint64                 `json:"sequence,omitempty"`
 	Data       []byte                 `json:"data,omitempty"`
-	Status     TerminalStatus         `json:"status,omitempty"`
-	ExitCode   *int                   `json:"exitCode,omitempty"`
-	Message    string                 `json:"message,omitempty"`
+	// Columns and Rows are the grid of a resized item.
+	Columns  uint16         `json:"columns,omitempty"`
+	Rows     uint16         `json:"rows,omitempty"`
+	Status   TerminalStatus `json:"status,omitempty"`
+	ExitCode *int           `json:"exitCode,omitempty"`
+	Message  string         `json:"message,omitempty"`
 }
 
 type TerminalCreateParams struct {
-	Title        string `json:"title,omitempty"`
-	Cwd          string `json:"cwd"`
-	Columns      uint16 `json:"columns"`
-	Rows         uint16 `json:"rows"`
-	AttachmentID string `json:"attachmentId"`
+	Title        string             `json:"title,omitempty"`
+	Cwd          string             `json:"cwd"`
+	Columns      uint16             `json:"columns"`
+	Rows         uint16             `json:"rows"`
+	AttachmentID string             `json:"attachmentId"`
+	Appearance   TerminalAppearance `json:"appearance"`
 }
 
 type TerminalIDParams struct {
@@ -128,10 +156,11 @@ type TerminalIDParams struct {
 // attachment; a connection has one attachment per terminal, and a newer one
 // replaces the older.
 type TerminalAttachParams struct {
-	TerminalID   string `json:"terminalId"`
-	Columns      uint16 `json:"columns"`
-	Rows         uint16 `json:"rows"`
-	AttachmentID string `json:"attachmentId"`
+	TerminalID   string             `json:"terminalId"`
+	Columns      uint16             `json:"columns"`
+	Rows         uint16             `json:"rows"`
+	AttachmentID string             `json:"attachmentId"`
+	Appearance   TerminalAppearance `json:"appearance"`
 }
 
 // TerminalDetachParams releases control without terminating the shell. A
@@ -155,9 +184,13 @@ type TerminalWriteParams struct {
 	Data       []byte `json:"data"`
 }
 
+// TerminalResizeParams asks for the view's grid. A resize claims the size:
+// the PTY takes the grid of the view that last attached or resized, and the
+// daemon answers queries with that view's appearance.
 type TerminalResizeParams struct {
-	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
-	Columns    uint16 `json:"columns"`
-	Rows       uint16 `json:"rows"`
+	TerminalID string             `json:"terminalId"`
+	RunID      string             `json:"runId"`
+	Columns    uint16             `json:"columns"`
+	Rows       uint16             `json:"rows"`
+	Appearance TerminalAppearance `json:"appearance"`
 }

@@ -271,6 +271,7 @@ public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
 public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable {
     case output = "output"
     case status = "status"
+    case resized = "resized"
 }
 
 /// Payload discriminator of a terminal.subscribeList snapshot or update.
@@ -280,12 +281,24 @@ public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseItera
     case terminalRemoved = "terminal-removed"
 }
 
-/// Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.
-public enum MaidTerminalAgentActivity: String, Codable, Sendable, CaseIterable {
-    case none = "none"
+/// What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.
+public enum MaidTerminalProgramState: String, Codable, Sendable, CaseIterable {
     case idle = "idle"
     case working = "working"
-    case blocked = "blocked"
     case done = "done"
-    case unknown = "unknown"
+    case blocked = "blocked"
+    case error = "error"
+}
+
+/// What a blocked terminal program needs from the user. Unknown future values render like no need given.
+public enum MaidTerminalProgramNeed: String, Codable, Sendable, CaseIterable {
+    case permission = "permission"
+    case answer = "answer"
+    case auth = "auth"
+}
+
+/// Whether a terminal view's theme is light or dark.
+public enum MaidTerminalColorScheme: String, Codable, Sendable, CaseIterable {
+    case light = "light"
+    case dark = "dark"
 }
