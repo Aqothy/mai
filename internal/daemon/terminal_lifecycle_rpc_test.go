@@ -33,12 +33,8 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'HISTORY-%d\\n' $((80+8))\n")
 	first.waitForOutput(t, "HISTORY-88")
 
-	// The attach snapshot reports the grid the attaching client asked for.
 	second := dialRecordingClient(t, url)
 	attach := second.mustAttachTerminal(t, terminalID, 96, 31)
-	if attach.Columns != 96 || attach.Rows != 31 {
-		t.Fatalf("attach grid = %dx%d, want 96x31", attach.Columns, attach.Rows)
-	}
 	if attach.RunID != snapshot.RunID {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
 	}
@@ -100,11 +96,12 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 	t.Fatal("attached-client resize was not applied")
 }
 
-// One PTY has one size, so it takes the grid of the view that last attached
-// or resized. Typing elsewhere doesn't move it: a view claims the size by
-// resizing before it sends input. Every client resizes at the same point in
-// the output, from the resized stream item.
-func TestTerminalSizeFollowsTheLatestAttachOrResize(t *testing.T) {
+// One PTY has one size, held by the view that last created, resized or
+// attached to the terminal while no other view had it open. Opening it on
+// another device leaves the size alone, and so does typing there: a view
+// takes the size by resizing before it sends input. Every client resizes at
+// the same point in the output, from the resized stream item.
+func TestTerminalSizeStaysWithTheViewHoldingIt(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -115,18 +112,20 @@ func TestTerminalSizeFollowsTheLatestAttachOrResize(t *testing.T) {
 		c.writeTerminal(t, terminalID, runID, "printf '"+label+"-%s\\n' \"$(stty size)\"\n")
 	}
 
-	snapshot := createTestTerminal(t, laptop)
-	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
-	phone.mustAttachTerminal(t, terminalID, 41, 32)
-	laptop.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 120, Rows: 40, Appearance: testAppearance})
-	printSize(laptop, terminalID, runID, "LAPTOP")
-	laptop.waitForOutput(t, "LAPTOP-40 120")
+	var created wire.TerminalAttachSnapshot
+	laptop.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{Cwd: t.TempDir(), Columns: 120, Rows: 40, Appearance: testAppearance}, &created)
+	terminalID, runID := created.Terminal.TerminalID, created.RunID
 
-	// The phone's input reaches the program without taking the size.
+	// Opening it on the phone keeps the laptop's grid, which the phone's
+	// snapshot is at; the phone's input reaches the program without taking
+	// the size.
+	if attach := phone.mustAttachTerminal(t, terminalID, 41, 32); attach.Columns != 120 || attach.Rows != 40 {
+		t.Fatalf("phone attach grid = %dx%d, want the laptop's 120x40", attach.Columns, attach.Rows)
+	}
 	printSize(phone, terminalID, runID, "TYPED")
 	phone.waitForOutput(t, "TYPED-40 120")
 
-	// Its resize does, and the laptop resizes at the same sequence.
+	// Its resize takes the size, and the laptop resizes at the same sequence.
 	phone.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 41, Rows: 20, Appearance: testAppearance})
 	resized := laptop.waitForStreamItem(t, func(item wire.TerminalStreamItem) bool {
 		return item.Kind == terminal.StreamItemResized && item.Columns == 41 && item.Rows == 20
@@ -137,16 +136,18 @@ func TestTerminalSizeFollowsTheLatestAttachOrResize(t *testing.T) {
 	printSize(laptop, terminalID, runID, "PHONE")
 	laptop.waitForOutput(t, "PHONE-20 41")
 
-	// When the phone leaves, the PTY goes back to the laptop.
-	phone.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
-	waitUntil(t, "PTY back at the laptop's grid", func() bool {
-		session, err := s.terminals.service.Get(terminalID)
-		if err != nil {
-			return false
-		}
-		columns, rows := session.Size()
-		return columns == 120 && rows == 40
-	})
+	// When the phone leaves, the size stays until a view takes it.
+	phone.call(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID}, nil)
+	printSize(laptop, terminalID, runID, "LEFT")
+	laptop.waitForOutput(t, "LEFT-20 41")
+
+	// A view attaching while no other is open takes the size, even replacing
+	// its own connection's attachment.
+	if attach := laptop.mustAttachTerminal(t, terminalID, 100, 30); attach.Columns != 100 || attach.Rows != 30 {
+		t.Fatalf("laptop reattach grid = %dx%d, want its own 100x30", attach.Columns, attach.Rows)
+	}
+	printSize(laptop, terminalID, runID, "ALONE")
+	laptop.waitForOutput(t, "ALONE-30 100")
 }
 
 func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testing.T) {

@@ -96,7 +96,7 @@ type TerminalProgramStatus struct {
 
 // TerminalAppearance is a view's theme. The daemon answers the program's
 // color and light/dark queries (OSC 10/11/4, CSI ? 996 n) with the
-// appearance of the view that last attached or resized.
+// appearance of the view holding the size (see TerminalResizeParams).
 type TerminalAppearance struct {
 	ColorScheme TerminalColorScheme `json:"colorScheme"`
 	// Foreground and Background are "#rrggbb".
@@ -152,9 +152,11 @@ type TerminalIDParams struct {
 
 // TerminalAttachParams attaches the calling client to a terminal (or, for
 // terminal.relaunch, to a fresh run) with the client's measured grid.
-// AttachmentID is client-generated and names the view that owns the
-// attachment; a connection has one attachment per terminal, and a newer one
-// replaces the older.
+// terminal.relaunch starts the run at that grid. terminal.attach takes the
+// size only when no other connection has the terminal open; otherwise the PTY
+// keeps its grid, which the snapshot reports. AttachmentID is client-generated
+// and names the view that owns the attachment; a connection has one
+// attachment per terminal, and a newer one replaces the older.
 type TerminalAttachParams struct {
 	TerminalID   string             `json:"terminalId"`
 	Columns      uint16             `json:"columns"`
@@ -184,9 +186,10 @@ type TerminalWriteParams struct {
 	Data       []byte `json:"data"`
 }
 
-// TerminalResizeParams asks for the view's grid. A resize claims the size:
-// the PTY takes the grid of the view that last attached or resized, and the
-// daemon answers queries with that view's appearance.
+// TerminalResizeParams asks for the view's grid. A resize takes the size: the
+// PTY takes the view's grid and the daemon answers queries with its
+// appearance until another view takes the size, even after this view
+// detaches.
 type TerminalResizeParams struct {
 	TerminalID string             `json:"terminalId"`
 	RunID      string             `json:"runId"`

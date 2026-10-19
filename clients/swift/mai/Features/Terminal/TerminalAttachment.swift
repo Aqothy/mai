@@ -10,8 +10,9 @@ import SwiftUI
 /// native Ghostty snapshot, then apply only live items whose run matches and
 /// whose sequence is greater than the snapshot's (its `TerminalFeed` does the
 /// ordering, off the main actor). The view draws the daemon's grid, scaled
-/// to fit; attaching and resizing claim the size, and the view resizes before
-/// the input that claims it.
+/// to fit. Creating, relaunching and resizing take the size, and so does
+/// attaching while no other device has the terminal open; the view resizes
+/// before the input that takes it.
 ///
 /// Observable properties change only on lifecycle events; output bytes go
 /// straight to the feed and never enter observation.
@@ -66,9 +67,14 @@ final class TerminalAttachment: TerminalIO {
     @ObservationIgnored var colorScheme: ColorScheme = .dark {
         didSet {
             guard colorScheme != oldValue else { return }
-            // The daemon learns a view's appearance only from its attach and
-            // resizes, so resize to the grid the terminal already has.
-            Task { requestResize(await terminal.grid) }
+            // The daemon answers with the appearance of the view holding the
+            // size, which it learns from that view's resizes: while this view
+            // holds it (draws its own grid), resize to that grid. Otherwise the
+            // resize that takes the size carries the new appearance.
+            Task {
+                let grid = await terminal.grid
+                if grid == preferredGrid { requestResize(grid) }
+            }
         }
     }
 
