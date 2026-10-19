@@ -49,6 +49,10 @@ final class TerminalAttachment: TerminalIO {
     /// Known immediately for attach/relaunch; assigned by the create snapshot.
     private(set) var terminalID: String?
 
+    /// The title the program set, frame by frame: the open terminal shows
+    /// it as it is, while the list shows the daemon's steadier one.
+    private(set) var programTitle = ""
+
     /// The terminal the view draws. Stable for the attachment's lifetime so
     /// SwiftUI updates never recreate the surface.
     @ObservationIgnored let terminal: Terminal
@@ -131,6 +135,12 @@ final class TerminalAttachment: TerminalIO {
                 rows: Int(grid.rows),
                 runID: runID,
                 terminalID: terminalID))
+    }
+
+    func handle(_ event: TerminalEvent) {
+        if case .titleChanged(let title) = event {
+            programTitle = title
+        }
     }
 
     /// The first grid that fits the view starts the attach.
@@ -245,6 +255,8 @@ final class TerminalAttachment: TerminalIO {
         startTask = nil
         awaitingSnapshot = false
         hasInstalledInitialSnapshot = true
+        // The snapshot carries the title without announcing it.
+        programTitle = await terminal.title
         switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
         case .starting, .running, nil: phase = .running
         case .exited: phase = .exited(snapshot.terminal.exitCode)

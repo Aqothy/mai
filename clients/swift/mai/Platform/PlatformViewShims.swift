@@ -12,6 +12,20 @@ extension View {
         #endif
     }
 
+    /// iOS shows a navigation subtitle from iOS 26; macOS always has.
+    @ViewBuilder
+    func navigationSubtitleIfAvailable(_ subtitle: String) -> some View {
+        #if os(iOS)
+            if #available(iOS 26.0, *) {
+                self.navigationSubtitle(subtitle)
+            } else {
+                self
+            }
+        #else
+            self.navigationSubtitle(subtitle)
+        #endif
+    }
+
     /// Interactive keyboard dismissal only exists where a software keyboard
     /// does.
     @ViewBuilder

@@ -25,6 +25,7 @@ struct TerminalThreadView: View {
                 .padding(.bottom)
         }
         .navigationTitle(title)
+        .navigationSubtitleIfAvailable(attachment.programTitle == title ? "" : attachment.programTitle)
         .inlineNavigationBarTitle()
     }
 }
