@@ -25,8 +25,9 @@ const (
 	// inputQueueSize bounds input waiting for a program that is not reading
 	// stdin. Each item is one client write (a keystroke or a paste).
 	inputQueueSize = 256
-	// scrollbackBytes bounds the run terminal's retained scrollback.
-	scrollbackBytes = 2 * 1024 * 1024
+	// scrollbackBytes bounds the run terminal's retained scrollback, which
+	// every attach snapshot carries (about 1 MB at this limit).
+	scrollbackBytes = 10_000_000
 	maxPwdScalars   = 1024
 )
 
