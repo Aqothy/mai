@@ -59,7 +59,14 @@ final class TerminalAttachment: TerminalIO {
 
     /// The view's light or dark appearance, which the daemon answers the
     /// program's color queries with while this view sizes the terminal.
-    @ObservationIgnored var colorScheme: ColorScheme = .dark
+    @ObservationIgnored var colorScheme: ColorScheme = .dark {
+        didSet {
+            guard colorScheme != oldValue else { return }
+            // The daemon learns a view's appearance only from its attach and
+            // resizes, so resize to the grid the terminal already has.
+            Task { requestResize(await terminal.grid) }
+        }
+    }
 
     /// Applies the stream to the terminal, off the main actor.
     @ObservationIgnored nonisolated let feed: TerminalFeed
