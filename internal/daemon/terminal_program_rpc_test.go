@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,5 +96,47 @@ func TestTerminalQueriesGetExactlyOneReply(t *testing.T) {
 				t.Fatalf("replies = %q, want exactly one %q", got, want)
 			}
 		})
+	}
+}
+
+// Agents animate the start of their titles: Claude Code alternates ◐ ◑ and
+// rests on ✳, Codex steps braille frames every 100 ms and blinks "[ ! ]" /
+// "[ . ]" while it needs the user. The list shows the stable text once
+// instead of an update per frame.
+func TestTerminalTitleAnimationsDontChurnTheList(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	url := newWSTestServer(t, s)
+	observer := dialRecordingClient(t, url)
+	subscribeTerminalListSnapshot(t, observer)
+	controller := dialRecordingClient(t, url)
+	created := createTestTerminal(t, controller)
+	terminalID := created.Terminal.TerminalID
+
+	var script strings.Builder
+	for _, title := range []string{
+		"◐ Numbers in words", "◑ Numbers in words", "✳ Numbers in words",
+		"⠋ Spell out 1–200 | maiD", "⠙ Spell out 1–200 | maiD", "Spell out 1–200 | maiD",
+		"[ ! ] Action Required | maiD", "[ . ] Action Required | maiD", "[ ! ] Action Required | maiD",
+		"end",
+	} {
+		script.WriteString(`printf '\033]0;` + title + `\007'; sleep 0.05; `)
+	}
+	controller.writeTerminal(t, terminalID, created.RunID, script.String()+"\n")
+	waitForListUpsert(t, observer, func(summary wire.TerminalSummary) bool {
+		return summary.TerminalID == terminalID && summary.ProgramTitle == "end"
+	})
+
+	var titles []string
+	for _, item := range observer.listItemsSnapshot() {
+		if item.Terminal != nil && item.Terminal.TerminalID == terminalID &&
+			item.Terminal.ProgramTitle != "" && !slices.Contains(titles, item.Terminal.ProgramTitle) {
+			titles = append(titles, item.Terminal.ProgramTitle)
+		}
+	}
+	want := []string{"Numbers in words", "Spell out 1–200 | maiD", "Action Required | maiD", "end"}
+	if !slices.Equal(titles, want) {
+		t.Fatalf("list titles = %q, want %q", titles, want)
 	}
 }

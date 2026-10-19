@@ -1,6 +1,10 @@
 package terminal
 
-import "strings"
+import (
+	"slices"
+	"strings"
+	"unicode"
+)
 
 const (
 	maxTitleScalars      = 128
@@ -31,42 +35,18 @@ func isDirectionControl(r rune) bool {
 }
 
 // normalizeTitle is the window title as the terminal list shows it:
-// display text without the spinner frames and status glyphs agents put in
-// front, so an animating spinner leaves the title unchanged and doesn't
-// churn the list.
+// display text from its first word with a letter or digit. Agents animate
+// what comes before (Claude Code's ✳ ◐ ◑, Codex's braille frames and its
+// "[ ! ]" blink), so an animation leaves the title, and the list, unchanged.
 func normalizeTitle(raw string) string {
 	fields := strings.Fields(displayText(raw, len(raw)))
-	kept := fields[:0]
-	for _, field := range fields {
-		runes := []rune(field)
-		if len(runes) == 1 {
-			if _, marker := spinnerGlyphs[runes[0]]; marker || isBrailleSpinnerRune(runes[0]) {
-				continue
-			}
-		}
-		kept = append(kept, field)
+	first := slices.IndexFunc(fields, func(field string) bool {
+		return strings.IndexFunc(field, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0
+	})
+	if first < 0 {
+		return ""
 	}
-	return capScalars(strings.Join(kept, " "), maxTitleScalars)
-}
-
-// spinnerGlyphs are single-character status markers agents prepend to titles.
-var spinnerGlyphs = map[rune]struct{}{
-	'✳': {},
-	'✶': {},
-	'✻': {},
-	'✽': {},
-	'✢': {},
-	'·': {},
-	'∗': {},
-	'*': {},
-	'◐': {},
-	'◓': {},
-	'◑': {},
-	'◒': {},
-}
-
-func isBrailleSpinnerRune(r rune) bool {
-	return r >= 0x2800 && r <= 0x28FF
+	return capScalars(strings.Join(fields[first:], " "), maxTitleScalars)
 }
 
 // capScalars bounds a string to n Unicode scalars.
