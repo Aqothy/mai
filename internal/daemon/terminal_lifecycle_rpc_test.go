@@ -275,10 +275,10 @@ func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
 	}
 
 	// A later client attaching at a different grid gets the retained final
-	// screen reflowed to its size.
+	// screen at the run's last grid, which its view draws scaled.
 	attach := dialRecordingClient(t, url).mustAttachTerminal(t, terminalID, 100, 30)
-	if attach.Columns != 100 || attach.Rows != 30 {
-		t.Fatalf("attach grid = %dx%d, want 100x30", attach.Columns, attach.Rows)
+	if attach.Columns != 80 || attach.Rows != 24 {
+		t.Fatalf("attach grid = %dx%d, want the run's last 80x24", attach.Columns, attach.Rows)
 	}
 	if attach.Terminal.Status != terminal.StatusExited || attach.Terminal.ExitCode == nil || *attach.Terminal.ExitCode != 4 {
 		t.Fatalf("attach status = %s exit %v, want exited 4", attach.Terminal.Status, attach.Terminal.ExitCode)
@@ -314,5 +314,56 @@ func TestTerminalInputToProgramNotReadingDoesNotBlockConnection(t *testing.T) {
 	defer cancel()
 	if err := client.conn.Call(ctx, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}).Await(ctx, nil); err != nil {
 		t.Fatalf("terminal.delete behind unread input: %v", err)
+	}
+}
+
+// A program can exit while a view resizes its terminal: the run's exit and
+// the resize each wait for what the other holds unless they're ordered.
+func TestTerminalExitDuringResizesFinishes(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	url := newWSTestServer(t, s)
+	client := dialRecordingClient(t, url)
+	for round := range 20 {
+		created := createTestTerminal(t, client)
+		terminalID, runID := created.Terminal.TerminalID, created.RunID
+		stop := make(chan struct{})
+		resized := make(chan struct{})
+		go func() {
+			defer close(resized)
+			for columns := uint16(0); ; columns++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_ = client.conn.Notify(ctx, wire.MethodTerminalResize, wire.TerminalResizeParams{
+					TerminalID: terminalID, RunID: runID, Columns: 80 + columns%2, Rows: 24, Appearance: testAppearance,
+				})
+				cancel()
+			}
+		}()
+		client.writeTerminal(t, terminalID, runID, "exit\n")
+		exited := make(chan struct{})
+		go func() {
+			defer close(exited)
+			for {
+				for _, item := range client.outputItems() {
+					if item.TerminalID == terminalID && item.Kind == terminal.StreamItemStatus {
+						return
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("round %d: the run never reported its exit", round)
+		}
+		close(stop)
+		<-resized
 	}
 }

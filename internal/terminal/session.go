@@ -264,7 +264,6 @@ drainReads:
 	code, hasCode := exitCode(waitErr)
 
 	s.emit.Lock()
-	defer s.emit.Unlock()
 	s.mu.Lock()
 	if s.status == StatusRunning || s.status == StatusStarting {
 		s.status = StatusExited
@@ -287,6 +286,11 @@ drainReads:
 	s.seq++
 	seq := s.seq
 	s.mu.Unlock()
+	// The exit is the run's last item: nothing takes a sequence after the
+	// status leaves running, so it can be reported without emit. Its
+	// listeners take the terminal's lifecycle fence, whose holders resize
+	// through emit.
+	s.emit.Unlock()
 
 	_ = s.ptyFile.Close()
 	close(s.done)
@@ -454,9 +458,8 @@ func (s *Session) Seen() bool {
 
 // Resize applies a changed grid size to a running PTY and its terminal, and
 // publishes it as a stream item at its sequence, so every client resizes at
-// the same point in the output. After a natural exit, the retained terminal
-// can still reflow to an attaching client's grid even though there is no
-// longer a PTY to resize. Unchanged dimensions are not re-applied.
+// the same point in the output. A run that ended keeps its last grid, which
+// views draw scaled. Unchanged dimensions are not re-applied.
 func (s *Session) Resize(columns, rows uint16) error {
 	if err := ValidateSize(columns, rows); err != nil {
 		return err
@@ -464,7 +467,7 @@ func (s *Session) Resize(columns, rows uint16) error {
 	s.emit.Lock()
 	defer s.emit.Unlock()
 	s.mu.Lock()
-	if s.status != StatusRunning && (s.status != StatusExited || s.vt == nil) {
+	if s.status != StatusRunning {
 		s.mu.Unlock()
 		return ErrNotRunning
 	}
@@ -472,11 +475,9 @@ func (s *Session) Resize(columns, rows uint16) error {
 		s.mu.Unlock()
 		return nil
 	}
-	if s.status == StatusRunning {
-		if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
-			s.mu.Unlock()
-			return fmt.Errorf("terminal resize: %w", err)
-		}
+	if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("terminal resize: %w", err)
 	}
 	if err := s.vt.Resize(columns, rows); err != nil {
 		s.mu.Unlock()

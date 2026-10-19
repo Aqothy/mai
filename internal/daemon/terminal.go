@@ -398,6 +398,10 @@ func (s *Server) sizeTerminal(entry *terminalEntry, session *terminal.Session) e
 		return nil
 	}
 	if err := session.Resize(latest.columns, latest.rows); err != nil {
+		// A run that ended keeps its grid.
+		if errors.Is(err, terminal.ErrNotRunning) {
+			return nil
+		}
 		return err
 	}
 	s.logger.Info("terminal resized", "terminal", entry.terminalID, "columns", latest.columns, "rows", latest.rows)

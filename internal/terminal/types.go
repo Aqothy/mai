@@ -88,8 +88,9 @@ type Events struct {
 	Output func(terminalID, runID string, seq uint64, data []byte)
 	// Resized reports a new grid at its place in the output.
 	Resized func(terminalID, runID string, seq uint64, columns, rows uint16)
-	// Exit reports the end of a run after all output has been delivered.
-	// exitCode is nil when the process could not report one.
+	// Exit reports the end of a run after all output has been delivered; no
+	// item follows it. exitCode is nil when the process could not report
+	// one.
 	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
 	// ProgramChanged reports a changed title, working directory or program
 	// status; read it with Session.Program.
