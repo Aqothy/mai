@@ -27,6 +27,9 @@ actor TerminalFeed {
     private var runID: String?
     private var lastSequence = 0
     private var state = State.awaitingSnapshot
+    /// Counts snapshot requests, so an install that a newer request
+    /// overtook while it restored leaves the items to the newer one.
+    private var snapshotRequest = 0
     private var buffered: [TerminalStreamMessage] = []
     private var history: Task<Void, Never>?
 
@@ -65,6 +68,7 @@ actor TerminalFeed {
 
     /// Waits for the next snapshot: items buffer until `install`.
     func expectSnapshot() {
+        snapshotRequest += 1
         state = .awaitingSnapshot
         history?.cancel()
         history = nil
@@ -73,8 +77,12 @@ actor TerminalFeed {
     /// Installs the snapshot (its READY state), applies the buffered items
     /// above it, then restores older history in the background so the
     /// screen shows before history finishes.
+    /// Throws `CancellationError` when a newer snapshot request arrived
+    /// while it restored.
     func install(_ snapshot: TerminalAttachSnapshot, data: Data) async throws {
+        let request = snapshotRequest
         try await terminal.restore(snapshot: data)
+        guard request == snapshotRequest else { throw CancellationError() }
         terminalID = snapshot.terminal.terminalID
         runID = snapshot.runID
         lastSequence = snapshot.sequence

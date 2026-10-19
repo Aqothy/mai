@@ -172,7 +172,6 @@ final class TerminalAttachment: TerminalIO {
         awaitingSnapshot = true
         startTask?.cancel()
         startTask = nil
-        Task { await feed.expectSnapshot() }
         scheduleStart()
     }
 
