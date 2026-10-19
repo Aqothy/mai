@@ -94,5 +94,5 @@ type Events struct {
 	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
 	// ProgramChanged reports a changed title, working directory or program
 	// status; read it with Session.Program.
-	ProgramChanged func(terminalID, runID string)
+	ProgramChanged func(terminalID string)
 }

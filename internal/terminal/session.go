@@ -343,7 +343,7 @@ func (s *Session) publishOutput(data []byte) {
 		s.events.Output(s.TerminalID, s.RunID, seq, data)
 	}
 	if changed && s.events.ProgramChanged != nil {
-		s.events.ProgramChanged(s.TerminalID, s.RunID)
+		s.events.ProgramChanged(s.TerminalID)
 	}
 }
 

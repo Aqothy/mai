@@ -29,6 +29,12 @@ type terminalRuntime struct {
 
 	mu      sync.Mutex
 	entries map[string]*terminalEntry
+	// listMu orders terminal-list publications: each reads a terminal's
+	// current state and enqueues it while holding listMu, so subscribers
+	// receive states in the order they happened. It is taken on the PTY's
+	// event path, so its holders never wait for entry.operations or a
+	// session's output.
+	listMu sync.Mutex
 }
 
 type terminalEntry struct {
@@ -169,7 +175,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		undoSubscribe()
 		rt.persist(entry, s.logger)
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalMetaSummary(entry))
+		s.publishTerminalList(terminalID)
 		return wire.TerminalAttachSnapshot{}, fmt.Errorf("terminal spawn failed: %w", err)
 	}
 
@@ -181,11 +187,11 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	if err != nil {
 		undoSubscribe()
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(entry))
+		s.publishTerminalList(terminalID)
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
-	s.publishTerminalListUpsert(snapshot.Terminal)
+	s.publishTerminalList(terminalID)
 	s.logger.Info("terminal created", "terminal", terminalID, "run", session.RunID, "client", client.id,
 		"columns", params.Columns, "rows", params.Rows)
 	return snapshot, nil
@@ -219,7 +225,7 @@ func (s *Server) startCommandTerminal(title string, command provider.TerminalCom
 	}
 	rt.persist(entry, s.logger)
 	entry.operations.Unlock()
-	s.publishTerminalListUpsert(s.terminalListSummary(entry))
+	s.publishTerminalList(terminalID)
 	return terminalID, nil
 }
 
@@ -270,7 +276,7 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	if seen {
-		s.publishTerminalListUpsert(snapshot.Terminal)
+		s.publishTerminalList(params.TerminalID)
 	}
 	entry.operations.Unlock()
 	s.logger.Info("terminal attached", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
@@ -331,11 +337,11 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalAttachP
 	if err != nil {
 		undoSubscribe()
 		entry.operations.Unlock()
-		s.publishTerminalListUpsert(s.terminalListSummary(entry))
+		s.publishTerminalList(params.TerminalID)
 		return wire.TerminalAttachSnapshot{}, err
 	}
 	entry.operations.Unlock()
-	s.publishTerminalListUpsert(snapshot.Terminal)
+	s.publishTerminalList(params.TerminalID)
 	s.logger.Info("terminal relaunched", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
 		"columns", params.Columns, "rows", params.Rows)
 	return snapshot, nil
@@ -476,9 +482,8 @@ func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.Terminal
 	rt.mu.Unlock()
 	rt.persist(entry, s.logger)
 
-	summary := s.terminalListSummary(entry)
-	s.publishTerminalListUpsert(summary)
-	return summary, nil
+	s.publishTerminalList(params.TerminalID)
+	return s.terminalListSummary(entry), nil
 }
 
 // deleteTerminal terminates any live run and removes the terminal's identity.
@@ -502,7 +507,7 @@ func (s *Server) deleteTerminal(terminalID string) error {
 			s.logger.Warn("delete terminal metadata", "terminal", terminalID, "error", err)
 		}
 	}
-	s.publishTerminalListRemoved(terminalID)
+	s.publishTerminalList(terminalID)
 	s.logger.Info("terminal deleted", "terminal", terminalID)
 	return nil
 }
@@ -564,37 +569,33 @@ func applyProgram(summary *wire.TerminalSummary, program terminal.ProgramInfo) {
 }
 
 // publishTerminalProgram fans a changed title, working directory or program
-// status out as a terminal-list upsert, so other devices see it without
-// attaching. A stale run's change is dropped by the run check.
-func (s *Server) publishTerminalProgram(terminalID, runID string) {
+// status out to the list, so other devices see it without attaching.
+func (s *Server) publishTerminalProgram(terminalID string) {
+	s.publishTerminalList(terminalID)
+}
+
+// publishTerminalList fans a terminal's current list state out to list
+// subscribers: an upsert, or a removal once it's deleted. Reading the state
+// and enqueueing it under listMu means a slower publisher can't overwrite a
+// newer state with an older one.
+func (s *Server) publishTerminalList(terminalID string) {
 	rt := s.terminals
+	rt.listMu.Lock()
+	defer rt.listMu.Unlock()
 	rt.mu.Lock()
 	entry, ok := rt.entries[terminalID]
 	rt.mu.Unlock()
 	if !ok {
+		s.publishTerminalListItem(wire.TerminalListStreamItem{
+			Kind:       wire.TerminalListItemRemoved,
+			TerminalID: terminalID,
+		})
 		return
 	}
-	session, err := rt.service.Get(terminalID)
-	if err != nil || session.RunID != runID {
-		return
-	}
-	s.publishTerminalListUpsert(s.terminalListSummary(entry))
-}
-
-// publishTerminalListUpsert fans one changed summary out to list subscribers.
-// List updates happen only for identity and lifecycle changes, so the normal
-// bounded notify path is sufficient.
-func (s *Server) publishTerminalListUpsert(summary wire.TerminalSummary) {
+	summary := s.terminalListSummary(entry)
 	s.publishTerminalListItem(wire.TerminalListStreamItem{
 		Kind:     wire.TerminalListItemUpserted,
 		Terminal: &summary,
-	})
-}
-
-func (s *Server) publishTerminalListRemoved(terminalID string) {
-	s.publishTerminalListItem(wire.TerminalListStreamItem{
-		Kind:       wire.TerminalListItemRemoved,
-		TerminalID: terminalID,
 	})
 }
 
@@ -760,10 +761,7 @@ func (s *Server) publishTerminalExit(terminalID, runID string, seq uint64, statu
 		entry.operations.Unlock()
 		return
 	}
-	summary := s.terminalListSummary(entry)
-	// Enqueue the run's final list state before releasing the terminal fence,
-	// so a later relaunch/delete update cannot be overtaken by this exit.
-	s.publishTerminalListUpsert(summary)
+	s.publishTerminalList(terminalID)
 	onExit := entry.onExit
 	entry.onExit = nil
 	entry.operations.Unlock()
