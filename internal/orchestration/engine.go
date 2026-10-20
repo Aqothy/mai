@@ -518,9 +518,9 @@ type ThreadProviderView struct {
 	Session               *SessionBinding
 	LatestTurn            *Turn
 	Message               *Message
-	// ForkContext is the conversation a fork still has to hand its session,
-	// in front of Message.
-	ForkContext string
+	// Handoff is the conversation a fork still has to hand the session, in
+	// front of Message.
+	Handoff *ForkHandoff
 }
 
 // ThreadApprovalView is SessionView plus one approval, read under a single lock
@@ -600,7 +600,7 @@ func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadPro
 		clone.Attachments = cloneAttachments(message.Attachments)
 		clone.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
 		view.Message = &clone
-		view.ForkContext = undeliveredForkContext(*thread)
+		view.Handoff = forkHandoff(*thread)
 	}
 	return view, true
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -416,14 +417,16 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 // ForkProviderThread forks a thread. The provider forks its native
 // conversation when it can, and the fork is committed through the ordinary
 // import path, so fork identity, persistence, and duplicate protection are
-// identical to provider-discovered sessions. Otherwise the fork is a draft
-// that hands the conversation to a new session as text.
+// identical to provider-discovered sessions. Otherwise, and for a fork into
+// another agent, the fork is a draft that hands the conversation to a new
+// session as text.
 func (s *Server) ForkProviderThread(ctx context.Context, params wire.ProviderForkThreadParams) (wire.ProviderForkThreadResult, error) {
 	source, err := s.orchestration.ForkSource(params.SourceThreadID, params.ThroughTurnID, params.BeforeTurnID)
 	if err != nil {
 		return wire.ProviderForkThreadResult{}, err
 	}
-	if source.ThroughTurnID != "" {
+	target := cmp.Or(params.ProviderInstanceID, source.ProviderInstanceID)
+	if target == source.ProviderInstanceID && source.ThroughTurnID != "" {
 		switch threadID, err := s.forkNatively(ctx, params.SourceThreadID, source.Title, source.ThroughTurnID); {
 		case err == nil:
 			return wire.ProviderForkThreadResult{ThreadID: threadID}, nil
@@ -431,14 +434,18 @@ func (s *Server) ForkProviderThread(ctx context.Context, params wire.ProviderFor
 			return wire.ProviderForkThreadResult{}, err
 		}
 	}
-	return wire.ProviderForkThreadResult{Draft: &wire.ForkDraft{
+	draft := &wire.ForkDraft{
 		SourceTitle:           source.Title,
-		ProviderInstanceID:    source.ProviderInstanceID,
+		ProviderInstanceID:    target,
 		Cwd:                   source.Cwd,
 		AdditionalDirectories: source.AdditionalDirectories,
-		ConfigSelections:      source.ConfigSelections,
 		ForkContext:           source.Conversation,
-	}}, nil
+	}
+	// Settings belong to the source's agent; another starts with its own.
+	if target == source.ProviderInstanceID {
+		draft.ConfigSelections = source.ConfigSelections
+	}
+	return wire.ProviderForkThreadResult{Draft: draft}, nil
 }
 
 func (s *Server) forkNatively(ctx context.Context, sourceThreadID orchestration.ThreadID, sourceTitle, throughTurnID string) (orchestration.ThreadID, error) {

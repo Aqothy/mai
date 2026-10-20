@@ -158,6 +158,9 @@ type ProviderForkThreadParams struct {
 	SourceThreadID orchestration.ThreadID `json:"sourceThreadId"`
 	ThroughTurnID  orchestration.TurnID   `json:"throughTurnId,omitempty"`
 	BeforeTurnID   orchestration.TurnID   `json:"beforeTurnId,omitempty"`
+	// ProviderInstanceID continues the thread in another agent; empty keeps
+	// the thread's own.
+	ProviderInstanceID provider.InstanceID `json:"providerInstanceId,omitempty"`
 }
 
 // ProviderForkThreadResult is the fork: ThreadID holds the provider's native

@@ -157,6 +157,11 @@ func TestRPCForkThreadForksNativelyThroughATurn(t *testing.T) {
 	if result, input = fork(wire.ProviderForkThreadParams{BeforeTurnID: second}); result.ThreadID == "" || input.ThroughTurnID != "native-"+string(first) {
 		t.Fatalf("fork before the second turn = %+v with %+v, want a native fork through native-%s", result, input, first)
 	}
+	// Another agent gets the conversation as text.
+	if result, input = fork(wire.ProviderForkThreadParams{ThroughTurnID: first, ProviderInstanceID: "other-agent"}); result.ThreadID != "" || input.ProviderSessionID != "none" ||
+		result.Draft == nil || result.Draft.ProviderInstanceID != "other-agent" || result.Draft.ForkContext != "User:\nfirst" || result.Draft.Cwd != cwd {
+		t.Fatalf("fork into another agent = %+v with %+v, want a draft for it with the first turn", result, input)
+	}
 	if result, input = fork(wire.ProviderForkThreadParams{BeforeTurnID: first}); result.ThreadID != "" || input.ProviderSessionID != "none" ||
 		result.Draft == nil || result.Draft.ForkContext != "" || result.Draft.ProviderInstanceID != adapter.info.InstanceID || result.Draft.Cwd != cwd || result.Draft.SourceTitle != "Source" {
 		t.Fatalf("fork before the first turn = %+v with %+v, want a new chat with the source's provider and workspace", result, input)
@@ -1323,44 +1328,67 @@ func waitForTurnSettled(t *testing.T, s *Server, threadID orchestration.ThreadID
 	return orchestration.Turn{}
 }
 
-// The conversation a fork hands its agent goes once: retrying a first prompt
-// the agent received, though its turn failed, doesn't hand it over again.
+// The conversation a fork hands its agent goes to its session exactly once,
+// even when the first prompt fails. An agent that answered before failing
+// had it, so a retry sends the prompt alone; one that failed before
+// answering may or may not have kept it, so a retry hands it to a new
+// session instead.
 func TestRPCForkHandsTheConversationOverOnce(t *testing.T) {
-	s := newTestServer(t)
-	history := t.TempDir()
-	startFakeACPAgent(t, s, "agent", "-history", history)
-	client := newRecordingClient(t, s)
-	client.dispatch(t, orchestration.Command{
-		Type: orchestration.CommandThreadStart, ThreadID: "fork", ProviderInstanceID: "agent", Cwd: t.TempDir(),
-		ForkContext: "User:\nfirst\n\nAssistant:\nhi", Message: &orchestration.CommandMessage{MessageID: "prompt", Text: "fail-first"},
-	})
-	deadline := time.Now().Add(15 * time.Second)
-	var failed *orchestration.Turn
-	for failed == nil || failed.State != orchestration.TurnStateError {
-		if time.Now().After(deadline) {
-			t.Fatalf("first turn = %+v, want it failed", failed)
-		}
-		time.Sleep(10 * time.Millisecond)
-		entry, _ := s.orchestration.ThreadListEntry("fork")
-		failed = entry.LatestTurn
-	}
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnRetry, ThreadID: "fork", MessageID: "prompt"})
-	waitForTurnSettled(t, s, "fork", failed.ID)
+	for _, test := range []struct {
+		script string
+		// sessions is what the agent got, a session's prompts each; true
+		// marks a prompt with the conversation.
+		sessions [][]bool
+	}{
+		{"answer-then-fail-once", [][]bool{{true, false}}},
+		{"fail-once", [][]bool{{true}, {true}}},
+	} {
+		t.Run(test.script, func(t *testing.T) {
+			s := newTestServer(t)
+			history := t.TempDir()
+			startFakeACPAgent(t, s, "agent", "-history", history)
+			client := newRecordingClient(t, s)
+			client.dispatch(t, orchestration.Command{
+				Type: orchestration.CommandThreadStart, ThreadID: "fork", ProviderInstanceID: "agent", Cwd: t.TempDir(),
+				ForkContext: "User:\nfirst\n\nAssistant:\nhi", Message: &orchestration.CommandMessage{MessageID: "prompt", Text: test.script},
+			})
+			deadline := time.Now().Add(15 * time.Second)
+			var failed *orchestration.Turn
+			for failed == nil || failed.State != orchestration.TurnStateError {
+				if time.Now().After(deadline) {
+					t.Fatalf("first turn = %+v, want it failed", failed)
+				}
+				time.Sleep(10 * time.Millisecond)
+				entry, _ := s.orchestration.ThreadListEntry("fork")
+				failed = entry.LatestTurn
+			}
+			client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnRetry, ThreadID: "fork", MessageID: "prompt"})
+			waitForTurnSettled(t, s, "fork", failed.ID)
 
-	sessions, err := filepath.Glob(filepath.Join(history, "*.json"))
-	if err != nil || len(sessions) != 1 {
-		t.Fatalf("agent sessions = %v (%v), want one", sessions, err)
-	}
-	data, err := os.ReadFile(sessions[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var prompts []string
-	if err := json.Unmarshal(data, &prompts); err != nil {
-		t.Fatal(err)
-	}
-	if len(prompts) != 2 || !strings.Contains(prompts[0], "Assistant:\nhi") || prompts[1] != "fail-first" {
-		t.Fatalf("agent got %q, want the conversation with the first try only", prompts)
+			files, err := filepath.Glob(filepath.Join(history, "*.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sessions [][]bool
+			for _, file := range files {
+				data, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var prompts []string
+				if err := json.Unmarshal(data, &prompts); err != nil {
+					t.Fatal(err)
+				}
+				var withConversation []bool
+				for _, prompt := range prompts {
+					withConversation = append(withConversation, strings.Contains(prompt, "Assistant:\nhi"))
+				}
+				sessions = append(sessions, withConversation)
+			}
+			if !reflect.DeepEqual(sessions, test.sessions) {
+				t.Fatalf("agent sessions got prompts %v, want %v (true: with the conversation)", sessions, test.sessions)
+			}
+		})
 	}
 }
 
@@ -1411,6 +1439,12 @@ func TestRPCForkThreadHandsTheConversationToAnAgentWithoutNativeForks(t *testing
 	forkModel := provider.ConfigOptionSelection{OptionID: "model", Value: "test-model-2", Category: provider.ConfigOptionCategoryModel}
 	if !slices.Contains(draft.ConfigSelections, forkModel) {
 		t.Fatalf("draft settings = %+v, want the source's current model %+v", draft.ConfigSelections, forkModel)
+	}
+	// The settings are the source agent's; another agent starts with its own.
+	var other wire.ProviderForkThreadResult
+	client.call(t, wire.MethodProviderForkThread, wire.ProviderForkThreadParams{SourceThreadID: "source", BeforeTurnID: second.ID, ProviderInstanceID: "other-agent"}, &other)
+	if other.Draft == nil || other.Draft.ProviderInstanceID != "other-agent" || other.Draft.ForkContext != conversation || other.Draft.ConfigSelections != nil {
+		t.Fatalf("fork into another agent = %+v, want a draft for it without the source's settings", other)
 	}
 
 	client.dispatch(t, orchestration.Command{

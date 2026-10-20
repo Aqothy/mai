@@ -1307,6 +1307,9 @@
         },
         "beforeTurnId": {
           "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
         }
       },
       "additionalProperties": false,

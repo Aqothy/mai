@@ -263,6 +263,12 @@ func (r *ProviderEventReactor) handleTurnStart(event Event) {
 	ctx, cancel := r.providerRPCContext()
 	defer cancel()
 
+	if view.Handoff != nil && view.Handoff.FreshSession {
+		if err := r.provider.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: string(view.ID)}); err != nil {
+			notDelivered(err.Error())
+			return
+		}
+	}
 	result, err := r.provider.StartSession(ctx, string(view.ID), startSessionInputFromProviderView(view))
 	if err != nil {
 		notDelivered(err.Error())
@@ -338,8 +344,8 @@ func sendTurnInput(view ThreadProviderView, turnID TurnID, steer bool) provider.
 	}
 	input := promptTextWithAnnotations(message.Text, message.Annotations)
 	// A steer joins the running turn, which carries the conversation.
-	if view.ForkContext != "" && !steer {
-		input = provider.PromptWithForkContext(view.ForkContext, input)
+	if view.Handoff != nil && !steer {
+		input = provider.PromptWithForkContext(view.Handoff.Conversation, input)
 	}
 	return provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Steer: steer, Input: input, Attachments: message.Attachments, Annotations: message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}
 }

@@ -219,16 +219,17 @@ final class ChatPromptModel {
         }
     }
 
-    /// Forks this chat at `point`, with `prompt` waiting in the fork's
-    /// composer when editing an earlier prompt.
-    func fork(at point: ChatForkPoint, editing prompt: Message? = nil) async -> ChatFork? {
+    /// Forks this chat at `point`, into another agent when `agentID` names
+    /// one, with `prompt` waiting in the fork's composer when editing an
+    /// earlier prompt.
+    func fork(at point: ChatForkPoint, into agentID: String? = nil, editing prompt: Message? = nil) async -> ChatFork? {
         guard canFork else { return nil }
 
         isForking = true
         defer { isForking = false }
 
         do {
-            let fork = try await store.forkThread(threadID, at: point)
+            let fork = try await store.forkThread(threadID, at: point, into: agentID)
             let composerID =
                 switch fork {
                 case .thread(let forkThreadID): forkThreadID

@@ -541,14 +541,17 @@ final class ThreadStore {
         return sessionsByID[threadID]?.thread?.latestTurn?.error
     }
 
-    /// Forks a chat at `point`. The daemon owns native session identity and
-    /// import deduplication, so a native fork is an already-imported chat and
-    /// the client never synthesizes a second local thread.
-    func forkThread(_ sourceThreadID: String, at point: ChatForkPoint) async throws -> ChatFork {
+    /// Forks a chat at `point`, into another agent when `agentID` names one.
+    /// The daemon owns native session identity and import deduplication, so
+    /// a native fork is an already-imported chat and the client never
+    /// synthesizes a second local thread.
+    func forkThread(_ sourceThreadID: String, at point: ChatForkPoint, into agentID: String? = nil) async throws -> ChatFork {
         guard connectionState == .connected else {
             throw RPCError("Reconnect before forking this chat")
         }
-        var params = ProviderForkThreadParams(beforeTurnID: nil, sourceThreadID: sourceThreadID, throughTurnID: nil)
+        var params = ProviderForkThreadParams(
+            beforeTurnID: nil, providerInstanceID: agentID, sourceThreadID: sourceThreadID, throughTurnID: nil
+        )
         switch point {
         case .latest:
             break

@@ -150,7 +150,13 @@ struct ChatView: View {
         .toolbar {
             if let chatModel, let forkAction {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Fork Chat", systemImage: "arrow.triangle.branch") {
+                    Menu("Fork Chat", systemImage: "arrow.triangle.branch") {
+                        ForEach(forkAction.otherAgents) { agent in
+                            Button("Continue in \(agent.title)") {
+                                forkAction(.latest, into: agent.id)
+                            }
+                        }
+                    } primaryAction: {
                         forkAction(.latest)
                     }
                     .disabled(!chatModel.canFork)
@@ -345,9 +351,10 @@ struct ChatView: View {
     /// Forks the open chat and opens the fork.
     private var forkAction: ChatForkAction? {
         guard let chatModel, let openThread, let openDraft else { return nil }
-        return ChatForkAction { point, prompt in
+        let agentID = store.selectedThread?.providerInstanceID
+        return ChatForkAction(otherAgents: store.availableProviders.filter { $0.id != agentID }) { point, agent, prompt in
             Task {
-                switch await chatModel.fork(at: point, editing: prompt) {
+                switch await chatModel.fork(at: point, into: agent, editing: prompt) {
                 case .thread(let threadID):
                     openThread(threadID)
                 case .draft:

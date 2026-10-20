@@ -87,6 +87,7 @@ func TestHelperProcess(t *testing.T) {
 		cwds:        map[string]string{},
 		parked:      map[string]string{},
 		permissions: map[string]fakePermission{},
+		failed:      map[string]bool{},
 		mode:        "ask",
 		model:       "test-model-1",
 	}
@@ -129,6 +130,7 @@ type fakeACPAgent struct {
 	cwds        map[string]string         // session id -> cwd
 	parked      map[string]string         // session id -> blocked session/prompt request id
 	permissions map[string]fakePermission // permission request id -> prompt to settle
+	failed      map[string]bool           // fail scripts that already failed
 
 	sessionCount, permissionCount int
 	mode, model                   string
@@ -357,7 +359,8 @@ func (a *fakeACPAgent) prompts(sessionID string) []string {
 //	"permission"                    request permission, then echo "perm:<optionId>"
 //	"block [gateDir]"               park until session/cancel; with gateDir, write
 //	                                gateDir/ready and finish with "hi" once gateDir/release exists
-//	"fail-first"                    with -history, fail as the session's first prompt, else "hi"
+//	"fail-once"                     fail the first time the agent gets it, else "hi"
+//	"answer-then-fail-once"         the first time, a "hi" chunk and then fail; else "hi"
 //	anything else                   a single "hi" chunk
 func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string) {
 	fields := strings.Fields(text)
@@ -401,12 +404,15 @@ func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string)
 				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
 			},
 		}})
-	case "fail-first":
-		if len(a.prompts(sessionID)) == 1 {
+	case "fail-once", "answer-then-fail-once":
+		if verb == "answer-then-fail-once" || a.failed[verb] {
+			a.chunk(sessionID, "hi")
+		}
+		if !a.failed[verb] {
+			a.failed[verb] = true
 			a.write(map[string]any{"id": id, "error": map[string]any{"code": -32603, "message": "model failed"}})
 			return
 		}
-		a.chunk(sessionID, "hi")
 		a.result(id, endTurn)
 	case "block":
 		a.parked[sessionID] = string(id)

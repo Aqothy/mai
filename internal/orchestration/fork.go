@@ -189,16 +189,55 @@ func forkContextItem(messageID MessageID, conversation string) *Item {
 
 func forkContextItemID(messageID MessageID) string { return "fork-context:" + string(messageID) }
 
-// undeliveredForkContext is the conversation a fork hands its session until
-// a turn of the thread reaches the provider: the provider then holds it, so
-// a retry or the next message doesn't hand it over twice. t3code likewise
-// counts a handoff the provider accepted as delivered.
-func undeliveredForkContext(thread Thread) string {
-	reached := func(turn Turn) bool { return turn.ProviderTurnID != "" }
-	if thread.LatestTurn != nil && reached(*thread.LatestTurn) || slices.ContainsFunc(thread.PreviousTurns, reached) {
-		return ""
+// ForkHandoff is the conversation a fork still has to hand the thread's
+// agent session, with the next turn the thread starts.
+type ForkHandoff struct {
+	Conversation string
+	// FreshSession: turns reached the agent but failed before it answered,
+	// so its session may or may not hold the conversation. A new session
+	// gets it exactly once.
+	FreshSession bool
+}
+
+// forkHandoff is what the thread's session still needs of the conversation
+// a fork handed the thread: nothing once a turn reached the agent and it
+// answered or the turn didn't fail, as the session then holds it.
+func forkHandoff(thread Thread) *ForkHandoff {
+	conversation := forkContextText(thread.Timeline)
+	if conversation == "" {
+		return nil
 	}
-	return forkContextText(thread.Timeline)
+	turns := thread.PreviousTurns
+	if thread.LatestTurn != nil {
+		turns = append(slices.Clip(turns), *thread.LatestTurn)
+	}
+	handoff := &ForkHandoff{Conversation: conversation}
+	for _, turn := range turns {
+		if turn.ProviderTurnID == "" {
+			continue
+		}
+		if turn.State != TurnStateError || answered(thread.Timeline, turn.ID) {
+			return nil
+		}
+		handoff.FreshSession = true
+	}
+	return handoff
+}
+
+// answered reports whether the agent produced anything in the turn, which
+// it can only have done with the turn's prompt.
+func answered(timeline Timeline, turnID TurnID) bool {
+	return slices.ContainsFunc(timeline, func(entry TimelineEntry) bool {
+		switch {
+		case entry.Message != nil:
+			return entry.Message.TurnID == turnID && entry.Message.Role == MessageRoleAssistant
+		case entry.Item != nil:
+			return entry.Item.TurnID == turnID && entry.Item.Kind != provider.ItemKindError && entry.Item.Kind != provider.ItemKindWarning
+		case entry.Approval != nil:
+			return entry.Approval.TurnID == turnID
+		}
+		return false
+	})
 }
 
 // forkContextText is the conversation a fork handed the thread, if any.

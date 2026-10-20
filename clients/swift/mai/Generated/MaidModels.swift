@@ -3617,18 +3617,20 @@ public extension CompleteCommandInput {
 
 // MARK: - ProviderForkThreadParams
 public struct ProviderForkThreadParams: Codable {
-    public var beforeTurnID: String?
+    public var beforeTurnID, providerInstanceID: String?
     public var sourceThreadID: String
     public var throughTurnID: String?
 
     public enum CodingKeys: String, CodingKey {
         case beforeTurnID = "beforeTurnId"
+        case providerInstanceID = "providerInstanceId"
         case sourceThreadID = "sourceThreadId"
         case throughTurnID = "throughTurnId"
     }
 
-    public init(beforeTurnID: String?, sourceThreadID: String, throughTurnID: String?) {
+    public init(beforeTurnID: String?, providerInstanceID: String?, sourceThreadID: String, throughTurnID: String?) {
         self.beforeTurnID = beforeTurnID
+        self.providerInstanceID = providerInstanceID
         self.sourceThreadID = sourceThreadID
         self.throughTurnID = throughTurnID
     }
@@ -3654,11 +3656,13 @@ public extension ProviderForkThreadParams {
 
     func with(
         beforeTurnID: String?? = nil,
+        providerInstanceID: String?? = nil,
         sourceThreadID: String? = nil,
         throughTurnID: String?? = nil
     ) -> ProviderForkThreadParams {
         return ProviderForkThreadParams(
             beforeTurnID: beforeTurnID ?? self.beforeTurnID,
+            providerInstanceID: providerInstanceID ?? self.providerInstanceID,
             sourceThreadID: sourceThreadID ?? self.sourceThreadID,
             throughTurnID: throughTurnID ?? self.throughTurnID
         )

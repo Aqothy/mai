@@ -19,6 +19,15 @@ struct ChatTurnForkRow: View {
                         chatFork(.before(turnID: fork.turnID), editing: prompt)
                     }
                 }
+                if !chatFork.otherAgents.isEmpty {
+                    Menu("Continue in", systemImage: "arrow.forward.circle") {
+                        ForEach(chatFork.otherAgents) { agent in
+                            Button(agent.title) {
+                                chatFork(.through(turnID: fork.turnID), into: agent.id)
+                            }
+                        }
+                    }
+                }
             } label: {
                 Label("Fork", systemImage: "arrow.triangle.branch")
                     .labelStyle(.iconOnly)
