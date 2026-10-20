@@ -1064,6 +1064,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         resumeAll(&providerOptionSetContinuations)
     }
 
+    func uploadAttachment(_ input: AttachmentUploadParams) async throws {}
+
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
         dispatchedCommands.append(command)
         if command.type == "thread.turn.start" {
