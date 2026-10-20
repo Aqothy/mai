@@ -8,8 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		F30691CA302E5503007A8505 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = F30691C9302E5503007A8505 /* Markdown */; };
-		F32CA7CE30867AFF00A96E45 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F32CA7CD30867AFF00A96E45 /* GhosttyTerminal */; };
-		F32CA7D030867AFF00A96E45 /* GhosttyVT in Frameworks */ = {isa = PBXBuildFile; productRef = F32CA7CF30867AFF00A96E45 /* GhosttyVT */; };
+		F3757FF13086E11400540F7D /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F3757FF03086E11400540F7D /* GhosttyTerminal */; };
+		F3757FF33086E11400540F7D /* GhosttyVT in Frameworks */ = {isa = PBXBuildFile; productRef = F3757FF23086E11400540F7D /* GhosttyVT */; };
 		F38633F5302D118B00319432 /* Highlighter in Frameworks */ = {isa = PBXBuildFile; productRef = F38633F4302D118B00319432 /* Highlighter */; };
 /* End PBXBuildFile section */
 
@@ -63,8 +63,8 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				F30691CA302E5503007A8505 /* Markdown in Frameworks */,
-				F32CA7D030867AFF00A96E45 /* GhosttyVT in Frameworks */,
-				F32CA7CE30867AFF00A96E45 /* GhosttyTerminal in Frameworks */,
+				F3757FF13086E11400540F7D /* GhosttyTerminal in Frameworks */,
+				F3757FF33086E11400540F7D /* GhosttyVT in Frameworks */,
 				F38633F5302D118B00319432 /* Highlighter in Frameworks */,
 			);
 		};
@@ -115,8 +115,8 @@
 			packageProductDependencies = (
 				F38633F4302D118B00319432 /* Highlighter */,
 				F30691C9302E5503007A8505 /* Markdown */,
-				F32CA7CD30867AFF00A96E45 /* GhosttyTerminal */,
-				F32CA7CF30867AFF00A96E45 /* GhosttyVT */,
+				F3757FF03086E11400540F7D /* GhosttyTerminal */,
+				F3757FF23086E11400540F7D /* GhosttyVT */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* mai.app */;
@@ -174,7 +174,7 @@
 			packageReferences = (
 				F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */,
 				F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */,
-				F32CA7CC30867AFF00A96E45 /* XCLocalSwiftPackageReference "../../../ghost-swiftly" */,
+				F3757FEF3086E11400540F7D /* XCRemoteSwiftPackageReference "ghost-swiftly" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -552,13 +552,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F32CA7CC30867AFF00A96E45 /* XCLocalSwiftPackageReference "../../../ghost-swiftly" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../../ghost-swiftly";
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -566,6 +559,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.8.0;
+			};
+		};
+		F3757FEF3086E11400540F7D /* XCRemoteSwiftPackageReference "ghost-swiftly" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Aqothy/ghost-swiftly";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.1;
 			};
 		};
 		F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */ = {
@@ -584,12 +585,14 @@
 			package = F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */;
 			productName = Markdown;
 		};
-		F32CA7CD30867AFF00A96E45 /* GhosttyTerminal */ = {
+		F3757FF03086E11400540F7D /* GhosttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F3757FEF3086E11400540F7D /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
 			productName = GhosttyTerminal;
 		};
-		F32CA7CF30867AFF00A96E45 /* GhosttyVT */ = {
+		F3757FF23086E11400540F7D /* GhosttyVT */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F3757FEF3086E11400540F7D /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
 			productName = GhosttyVT;
 		};
 		F38633F4302D118B00319432 /* Highlighter */ = {

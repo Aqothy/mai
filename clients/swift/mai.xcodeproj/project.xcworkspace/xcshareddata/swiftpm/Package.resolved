@@ -1,6 +1,15 @@
 {
-  "originHash" : "6fb9427be8545d4abded4e8d55117f7cde60ad01ea4189c482b77dcd6da8b5e0",
+  "originHash" : "5c6d7ff6a0e1d8ac8a631adbb5906e39fe221d002cb2f3511c6154ef1a2435fe",
   "pins" : [
+    {
+      "identity" : "ghost-swiftly",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Aqothy/ghost-swiftly",
+      "state" : {
+        "revision" : "3175ae2b9c0b60e185fcb8bccdf08578ba4fec6a",
+        "version" : "0.2.1"
+      }
+    },
     {
       "identity" : "highlighterswift",
       "kind" : "remoteSourceControl",
