@@ -14,7 +14,9 @@ struct DraftPromptView: View {
             .dismissesKeyboardInteractively()
 
             VStack {
-                if model.hasWorkingDirectory {
+                if let fork = model.fork {
+                    DraftForkHeader(sourceTitle: fork.sourceTitle, discard: model.discardFork)
+                } else if model.hasWorkingDirectory {
                     Text("What should we build in \(Text(model.directoryLabel).underline())?")
                         .font(.largeTitle)
                         .multilineTextAlignment(.center)

@@ -47,6 +47,7 @@ extension Command {
             configSelections: configSelections,
             createdAt: createdAt,
             cwd: cwd,
+            forkContext: nil,
             itemID: nil,
             message: message,
             messageID: nil,

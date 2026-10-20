@@ -16,7 +16,7 @@ func (*identityProvider) ReplaysClientMessageIDs() bool { return true }
 
 func newPromptService(t *testing.T, st store.PromptStore, routes store.RouteStore) (*Service, *identityProvider) {
 	t.Helper()
-	instance := &identityProvider{&fakeProviderInstance{info: provider.InstanceInfo{InstanceID: "codex", Driver: "fake", Capabilities: provider.Capabilities{Fork: true}},
+	instance := &identityProvider{&fakeProviderInstance{info: provider.InstanceInfo{InstanceID: "codex", Driver: "fake"},
 		startSession: func(input provider.StartSessionInput) (provider.Session, error) {
 			id := input.ProviderSessionID
 			if id == "" {
@@ -64,7 +64,7 @@ func TestPromptPresentationRestartForkAndDistinctSteering(t *testing.T) {
 	if records[sent[2].ClientMessageID].Presentation.Text != nil {
 		t.Fatal("ordinary conversation text was persisted")
 	}
-	if _, err := s.ForkSession(context.Background(), "source"); err != nil {
+	if _, err := s.ForkSession(context.Background(), "source", "turn-1"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -147,7 +147,7 @@ func TestPromptStorageFailuresDoNotDispatchConsumeReplayOrLeaveNativeFork(t *tes
 			case "fork":
 				var deleted string
 				instance.deleteSess = func(_ context.Context, id string) error { deleted = id; return nil }
-				_, err := s.ForkSession(context.Background(), "source")
+				_, err := s.ForkSession(context.Background(), "source", "turn-1")
 				if !errors.Is(err, failure) || deleted != "native-fork" {
 					t.Fatalf("fork failure cleanup: %v, deleted %q", err, deleted)
 				}

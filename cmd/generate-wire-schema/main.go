@@ -64,6 +64,7 @@ type contract struct {
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`
 	ProviderForkThreadParams         wire.ProviderForkThreadParams         `json:"providerForkThreadParams"`
+	ProviderForkThreadResult         wire.ProviderForkThreadResult         `json:"providerForkThreadResult"`
 	ProviderInstanceParams           wire.ProviderInstanceParams           `json:"providerInstanceParams"`
 	ProviderListSessionsParams       wire.ProviderListSessionsParams       `json:"providerListSessionsParams"`
 	ProviderSessionParams            wire.ProviderSessionParams            `json:"providerSessionParams"`

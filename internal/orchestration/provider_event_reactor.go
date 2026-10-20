@@ -336,7 +336,12 @@ func sendTurnInput(view ThreadProviderView, turnID TurnID, steer bool) provider.
 		presentation.Text = &text
 		presentation.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
 	}
-	return provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Steer: steer, Input: promptTextWithAnnotations(message.Text, message.Annotations), Attachments: message.Attachments, Annotations: message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}
+	input := promptTextWithAnnotations(message.Text, message.Annotations)
+	// A steer joins the running turn, which carries the conversation.
+	if view.ForkContext != "" && !steer {
+		input = provider.PromptWithForkContext(view.ForkContext, input)
+	}
+	return provider.SendTurnInput{ThreadID: string(view.ID), TurnID: string(turnID), Steer: steer, Input: input, Attachments: message.Attachments, Annotations: message.Annotations, ModelSelection: cloneModelSelection(view.ModelSelection), Presentation: presentation}
 }
 
 func promptTextWithAnnotations(text string, annotations []provider.PromptAnnotation) string {

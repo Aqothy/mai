@@ -23,6 +23,7 @@ import Foundation
 /// - The running turn's content is always visible.
 /// - Warnings, errors, pending approvals, undelivered messages, and running
 ///   background tasks never fold.
+/// - A settled turn ends with its fork actions.
 nonisolated enum ChatTimelineLayout {
     /// Emits rows from an already projected timeline. Keeping these sections
     /// as the List input prevents a live view from retaining the generated
@@ -51,21 +52,48 @@ nonisolated enum ChatTimelineLayout {
         }
         var rows: [ChatTimelineRowModel] = []
         var pendingHeader: ChatTimelineRowModel?
+        let prompts = prompts(in: sections)
+        var lastSectionIndexByTurnID: [String: Int] = [:]
         for (index, section) in sections.enumerated() {
+            if let turnID = section.turnID {
+                lastSectionIndexByTurnID[turnID] = index
+            }
+        }
+        for (index, section) in sections.enumerated() {
+            let turn = section.turnID.flatMap { turnsByID[$0] }
             if let header = appendRows(
                 for: section,
                 into: &rows,
                 isRunning: index == runningSectionIndex,
-                turn: section.turnID.flatMap { turnsByID[$0] },
+                turn: turn,
                 isExpanded: expandedSectionIDs.contains(section.id)
             ) {
                 pendingHeader = header
+            }
+            // A turn split by a retry forks after its last section.
+            if let turn, turn.completedAt != nil, lastSectionIndexByTurnID[turn.turnID] == index {
+                rows.append(.turnFork(ChatTurnFork(turnID: turn.turnID, prompt: prompts[turn.turnID])))
             }
         }
         if let pendingHeader {
             rows.append(pendingHeader)
         }
         return rows
+    }
+
+    /// The prompt that started each turn.
+    private static func prompts(in sections: [Section]) -> [String: Message] {
+        var prompts: [String: Message] = [:]
+        for section in sections {
+            for block in section.blocks {
+                guard case .message(let message) = block.row,
+                    message.role == MaidMessageRole.user.rawValue,
+                    let turnID = message.turnID, prompts[turnID] == nil
+                else { continue }
+                prompts[turnID] = message
+            }
+        }
+        return prompts
     }
 
     // MARK: Sections
@@ -196,6 +224,8 @@ nonisolated enum ChatTimelineLayout {
             switch item.itemKind {
             case .warning, .error:
                 section.blocks.append(Block(row: .notice(item), isFoldable: false))
+            case .forkContext:
+                section.blocks.append(Block(row: .forkContext(item), isFoldable: false))
             case .reasoning:
                 section.blocks.append(Block(row: .thought(item), isFoldable: true))
             default:
@@ -369,6 +399,9 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
     case activityGroup(ChatActivityGroup)
     case notice(Item)
     case approval(Approval)
+    /// The conversation a fork handed its agent as text.
+    case forkContext(Item)
+    case turnFork(ChatTurnFork)
 
     var id: String {
         switch self {
@@ -379,6 +412,8 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
         case .activityGroup(let group): group.id
         case .notice(let item): "notice-\(item.id)"
         case .approval(let approval): "approval-\(approval.requestID)"
+        case .forkContext(let item): "fork-context-\(item.id)"
+        case .turnFork(let fork): fork.id
         }
     }
 }

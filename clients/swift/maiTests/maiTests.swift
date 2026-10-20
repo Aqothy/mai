@@ -695,6 +695,68 @@ struct ThreadStoreTests {
         #expect(!model.canSend)
     }
 
+    /// Editing a sent prompt in a new chat brings its text, comments and
+    /// images into the composer of a chat whose agent can't fork, and sends
+    /// them with the conversation the fork hands that agent.
+    @Test
+    func editingAPromptInANewChatCarriesItsCommentsAndImages() async throws {
+        let suiteName = "EditPromptInNewChatTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
+        rpc.supportsImages = true
+        rpc.forkResult = ProviderForkThreadResult(
+            draft: ForkDraft(
+                additionalDirectories: nil, configSelections: nil, cwd: "/tmp/project",
+                forkContext: "User:\nfirst", providerInstanceID: "codex", sourceTitle: "A"
+            ),
+            threadID: nil
+        )
+        rpc.attachmentData["image-1"] =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let drafts = ThreadDraftStore(defaults: defaults)
+        let chat = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
+        let sent = Message(
+            annotations: [
+                PromptAnnotation(id: "comment-1", messageID: "reply-1", note: "Shorter", quote: "a long answer", role: "assistant")
+            ],
+            attachments: [
+                mai.Attachment(
+                    meta: nil, annotations: nil, data: nil, description: nil, id: "image-1",
+                    kind: MaidAttachmentKind.image.rawValue, mimeType: "image/png", name: "shot.png",
+                    resourceMeta: nil, size: nil, title: nil, uri: nil
+                )
+            ],
+            createdAt: .now, delivery: nil, deliveryError: nil, id: "prompt-2", role: "user",
+            text: "Make it shorter", turnID: "turn-2", updatedAt: .now
+        )
+
+        let fork = await chat.fork(at: .before(turnID: "turn-2"), editing: sent)
+        guard case .draft = fork else {
+            Issue.record("fork = \(String(describing: fork)), want a new-chat draft")
+            return
+        }
+        #expect(rpc.forkInputs.map(\.beforeTurnID) == ["turn-2"])
+        let draft = DraftPromptModel(store: store, draftStore: drafts)
+        draft.activate()
+        draft.configureInitialSelection()
+        await waitUntil { !draft.attachments.isEmpty && draft.attachments.allSatisfy { !$0.isProcessing } }
+        #expect(draft.prompt == "Make it shorter")
+        #expect(draft.annotations.map(\.quote) == ["a long answer"])
+        #expect(draft.attachments.map(\.name) == ["shot.png"])
+        #expect(draft.canSend)
+
+        await draft.send()
+        let start = try #require(rpc.dispatchedCommands.first { $0.type == "thread.start" })
+        #expect(start.forkContext == "User:\nfirst")
+        #expect(start.cwd == "/tmp/project")
+        #expect(start.message?.text == "Make it shorter")
+        #expect(start.message?.annotations?.map(\.note) == ["Shorter"])
+        #expect(start.message?.attachments?.map(\.mimeType) == ["image/png"])
+    }
+
     @Test
     func authoritativeThreadListReconcilesAcceptedDraftAfterEdits() async throws {
         let suiteName = "DraftReconnectReconciliationTests-\(UUID().uuidString)"
@@ -901,6 +963,10 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     var prepareFailuresRemaining = 0
     var providerStatus = "initialized"
     var supportsImages = false
+    var forkResult: ProviderForkThreadResult?
+    private(set) var forkInputs: [ProviderForkThreadParams] = []
+    /// Base64 image data by attachment id.
+    var attachmentData: [String: String] = [:]
     var providerOptions = [
         ConfigOption(
             category: "model",
@@ -1066,6 +1132,21 @@ private final class MockThreadRPCClient: ThreadRPCClient {
 
     func uploadAttachment(_ input: AttachmentUploadParams) async throws {}
 
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws -> ProviderForkThreadResult {
+        forkInputs.append(input)
+        guard let forkResult else { throw RPCError("No fork scripted") }
+        return forkResult
+    }
+
+    func getAttachment(_ input: GetAttachmentInput) async throws -> mai.Attachment {
+        guard let data = attachmentData[input.attachmentID] else { throw RPCError("No such attachment") }
+        return mai.Attachment(
+            meta: nil, annotations: nil, data: data, description: nil,
+            id: input.attachmentID, kind: MaidAttachmentKind.image.rawValue, mimeType: "image/png", name: nil,
+            resourceMeta: nil, size: nil, title: nil, uri: nil
+        )
+    }
+
     func dispatchCommand(_ command: Command) async throws -> DispatchResult {
         dispatchedCommands.append(command)
         if command.type == "thread.turn.start" {
@@ -1124,7 +1205,6 @@ private final class MockThreadRPCClient: ThreadRPCClient {
             capabilities: Capabilities(
                 additionalDirectories: nil,
                 auth: nil,
-                fork: nil,
                 loadReplay: nil,
                 logout: nil,
                 mcp: nil,

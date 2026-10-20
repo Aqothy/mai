@@ -65,7 +65,11 @@ type claudeSession struct {
 	// cliStartedTurn marks an activeLocalTurn the CLI began on its own, when
 	// a background task or agent finishing woke it.
 	cliStartedTurn bool
-	unechoedInput  map[string]bool
+	// turnLine is the uuid of one of activeLocalTurn's transcript lines: the
+	// prompt written to start it, or the first message of a turn the CLI
+	// started. A fork through the turn ends at the turn's last line.
+	turnLine      string
+	unechoedInput map[string]bool
 
 	// Streaming state for the in-flight assistant message.
 	toolStates   map[string]*toolState
@@ -205,7 +209,6 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 			SessionClose:          true,
 			LoadReplay:            true,
 			Resume:                true,
-			Fork:                  true,
 			AdditionalDirectories: true,
 			Auth:                  true,
 			Logout:                true,

@@ -95,14 +95,11 @@ type Capabilities struct {
 	Resume bool `json:"resume,omitempty"`
 	// AdditionalDirectories allows a session to expose more workspace roots in
 	// addition to its primary cwd.
-	AdditionalDirectories bool `json:"additionalDirectories,omitempty"`
-	// Fork is intentionally provider-specific. Stable Codex app-server exposes
-	// it; ACP's similarly named operation remains experimental and is not used.
-	Fork          bool                      `json:"fork,omitempty"`
-	Auth          bool                      `json:"auth,omitempty"`
-	Logout        bool                      `json:"logout,omitempty"`
-	PromptContent PromptContentCapabilities `json:"promptContent,omitzero"`
-	MCP           MCPCapabilities           `json:"mcp,omitzero"`
+	AdditionalDirectories bool                      `json:"additionalDirectories,omitempty"`
+	Auth                  bool                      `json:"auth,omitempty"`
+	Logout                bool                      `json:"logout,omitempty"`
+	PromptContent         PromptContentCapabilities `json:"promptContent,omitzero"`
+	MCP                   MCPCapabilities           `json:"mcp,omitzero"`
 }
 
 type AuthStatus string
@@ -544,11 +541,12 @@ type StopItemInput struct {
 	ItemID   string `json:"itemId"`
 }
 
-// ForkSessionInput forks the whole native session. Codex app-server also
-// accepts a last-turn boundary; it is deliberately not exposed until a client
-// surface exists to choose one.
+// ForkSessionInput forks a native session through one of its turns.
 type ForkSessionInput struct {
 	ProviderSessionID string `json:"-"`
+	// ThroughTurnID is the provider's id for the last turn the fork keeps
+	// (RuntimeEventPayload.ProviderTurnID).
+	ThroughTurnID string `json:"-"`
 	// ModelSelection and ConfigSelections are the source session's settings.
 	// Providers that keep a fork loaded apply them when creating it.
 	ModelSelection   *ModelSelection         `json:"-"`
@@ -740,6 +738,9 @@ const (
 	ItemKindImageView         ItemKind = "image_view"
 	ItemKindImageGeneration   ItemKind = "image_generation"
 	ItemKindContextCompaction ItemKind = "context_compaction"
+	// ItemKindForkContext is the conversation a fork handed its session as
+	// text (see PromptWithForkContext).
+	ItemKindForkContext ItemKind = "fork_context"
 )
 
 // ToolAction is a semantic action a provider explicitly states for a tool
@@ -891,6 +892,11 @@ type RuntimeEventPayload struct {
 	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
 	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
 	Goal          *Goal          `json:"goal,omitempty"`
+	// ProviderTurnID names, on a live turn.completed, the turn in the
+	// provider's session (ForkSessionInput.ThroughTurnID); it is empty when
+	// the turn never reached the provider. A replayed turn's TurnID is the
+	// provider's own.
+	ProviderTurnID string `json:"providerTurnId,omitempty"`
 }
 
 // RuntimeEvent is the canonical provider-neutral event emitted by adapters.

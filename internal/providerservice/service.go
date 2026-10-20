@@ -59,9 +59,10 @@ type SessionManager interface {
 	CloseSession(ctx context.Context, sessionID string) error
 }
 
-// SessionForker is optional and is capability-gated. The service supplies the
-// provider-native session id from its private thread route; clients never see
-// that identifier.
+// SessionForker is implemented by providers that fork their own sessions
+// through a turn; a fork of any other provider's thread is handed over as
+// text. The service supplies the provider-native session id from its private
+// thread route; clients never see that identifier.
 type SessionForker interface {
 	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
 }
@@ -815,10 +816,15 @@ func (s *Service) RenameSession(ctx context.Context, threadID, title string) err
 	return renamer.RenameSession(ctx, provider.RenameSessionInput{ProviderSessionID: route.ProviderSessionID, Title: strings.TrimSpace(title)})
 }
 
-// ForkSession forks the provider-owned session bound to sourceThreadID. The
-// returned summary can be committed through the same atomic import path used
-// for sessions discovered by provider.listSessions.
-func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (ForkedSession, error) {
+// ErrNoNativeFork is returned by ForkSession when the provider can't fork its
+// sessions.
+var ErrNoNativeFork = errors.New("provider can't fork its sessions")
+
+// ForkSession forks the provider-owned session bound to sourceThreadID
+// through the provider's turn throughTurnID. The returned summary can be
+// committed through the same atomic import path used for sessions discovered
+// by provider.listSessions.
+func (s *Service) ForkSession(ctx context.Context, sourceThreadID, throughTurnID string) (ForkedSession, error) {
 	if sourceThreadID == "" {
 		return ForkedSession{}, fmt.Errorf("provider session fork requires sourceThreadId")
 	}
@@ -833,12 +839,9 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (Forke
 	if err != nil {
 		return ForkedSession{}, err
 	}
-	if !instance.Info().Capabilities.Fork {
-		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
-	}
 	forker, ok := instance.(SessionForker)
 	if !ok {
-		return ForkedSession{}, fmt.Errorf("provider does not support session fork")
+		return ForkedSession{}, ErrNoNativeFork
 	}
 	source := route.StartInput // routeForThread returned a detached copy.
 	settings := provider.StartSessionInput{
@@ -850,6 +853,7 @@ func (s *Service) ForkSession(ctx context.Context, sourceThreadID string) (Forke
 	defer cancel()
 	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{
 		ProviderSessionID: route.ProviderSessionID,
+		ThroughTurnID:     throughTurnID,
 		ModelSelection:    settings.ModelSelection,
 		ConfigSelections:  settings.ConfigSelections,
 	})

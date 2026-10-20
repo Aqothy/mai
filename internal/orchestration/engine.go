@@ -518,6 +518,9 @@ type ThreadProviderView struct {
 	Session               *SessionBinding
 	LatestTurn            *Turn
 	Message               *Message
+	// ForkContext is the conversation a fork still has to hand its session,
+	// in front of Message.
+	ForkContext string
 }
 
 // ThreadApprovalView is SessionView plus one approval, read under a single lock
@@ -597,6 +600,7 @@ func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadPro
 		clone.Attachments = cloneAttachments(message.Attachments)
 		clone.Annotations = append([]provider.PromptAnnotation(nil), message.Annotations...)
 		view.Message = &clone
+		view.ForkContext = undeliveredForkContext(*thread)
 	}
 	return view, true
 }
@@ -755,6 +759,9 @@ func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
 			ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID,
 			ModelSelection: modelSelection, Cwd: cwd, AdditionalDirectories: additionalDirectories, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
 		}})
+		if command.ForkContext != "" {
+			appendEvent(threadEvent(command, EventThreadItemUpserted, ActorKindClient, EventPayload{Item: forkContextItem(messageID, command.ForkContext)}))
+		}
 		started := appendPromptTurn(appendEvent, threadEvent(command, "", ActorKindClient, EventPayload{}), commandPrompt(command, messageID), EventPayload{
 			ProviderInstanceID: command.ProviderInstanceID, ModelSelection: modelSelection,
 			ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),

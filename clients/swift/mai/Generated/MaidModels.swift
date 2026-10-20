@@ -1236,16 +1236,14 @@ public extension AuthMethod {
 
 // MARK: - Capabilities
 public struct Capabilities: Codable {
-    public var additionalDirectories, auth, fork, loadReplay: Bool?
-    public var logout: Bool?
+    public var additionalDirectories, auth, loadReplay, logout: Bool?
     public var mcp: MCPCapabilities?
     public var promptContent: PromptContentCapabilities?
     public var resume, sessionClose, sessionDelete, sessionList: Bool?
 
-    public init(additionalDirectories: Bool?, auth: Bool?, fork: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?) {
+    public init(additionalDirectories: Bool?, auth: Bool?, loadReplay: Bool?, logout: Bool?, mcp: MCPCapabilities?, promptContent: PromptContentCapabilities?, resume: Bool?, sessionClose: Bool?, sessionDelete: Bool?, sessionList: Bool?) {
         self.additionalDirectories = additionalDirectories
         self.auth = auth
-        self.fork = fork
         self.loadReplay = loadReplay
         self.logout = logout
         self.mcp = mcp
@@ -1278,7 +1276,6 @@ public extension Capabilities {
     func with(
         additionalDirectories: Bool?? = nil,
         auth: Bool?? = nil,
-        fork: Bool?? = nil,
         loadReplay: Bool?? = nil,
         logout: Bool?? = nil,
         mcp: MCPCapabilities?? = nil,
@@ -1291,7 +1288,6 @@ public extension Capabilities {
         return Capabilities(
             additionalDirectories: additionalDirectories ?? self.additionalDirectories,
             auth: auth ?? self.auth,
-            fork: fork ?? self.fork,
             loadReplay: loadReplay ?? self.loadReplay,
             logout: logout ?? self.logout,
             mcp: mcp ?? self.mcp,
@@ -1417,7 +1413,7 @@ public struct Command: Codable {
     public var commandID: String?
     public var configSelections: [ConfigOptionSelection]?
     public var createdAt: Date?
-    public var cwd, itemID: String?
+    public var cwd, forkContext, itemID: String?
     public var message: CommandMessage?
     public var messageID: String?
     public var modelSelection: ModelSelection?
@@ -1431,7 +1427,7 @@ public struct Command: Codable {
         case actionID = "actionId"
         case additionalDirectories, answers
         case commandID = "commandId"
-        case configSelections, createdAt, cwd
+        case configSelections, createdAt, cwd, forkContext
         case itemID = "itemId"
         case message
         case messageID = "messageId"
@@ -1446,7 +1442,7 @@ public struct Command: Codable {
         case type, value
     }
 
-    public init(actionID: String?, additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, steer: Bool?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
+    public init(actionID: String?, additionalDirectories: [String]?, answers: [String: [String]]?, commandID: String?, configSelections: [ConfigOptionSelection]?, createdAt: Date?, cwd: String?, forkContext: String?, itemID: String?, message: CommandMessage?, messageID: String?, modelSelection: ModelSelection?, optionID: String?, providerInstanceID: String?, requestID: String?, steer: Bool?, threadID: String?, title: String?, turnID: String?, type: String, value: JSONAny?) {
         self.actionID = actionID
         self.additionalDirectories = additionalDirectories
         self.answers = answers
@@ -1454,6 +1450,7 @@ public struct Command: Codable {
         self.configSelections = configSelections
         self.createdAt = createdAt
         self.cwd = cwd
+        self.forkContext = forkContext
         self.itemID = itemID
         self.message = message
         self.messageID = messageID
@@ -1496,6 +1493,7 @@ public extension Command {
         configSelections: [ConfigOptionSelection]?? = nil,
         createdAt: Date?? = nil,
         cwd: String?? = nil,
+        forkContext: String?? = nil,
         itemID: String?? = nil,
         message: CommandMessage?? = nil,
         messageID: String?? = nil,
@@ -1518,6 +1516,7 @@ public extension Command {
             configSelections: configSelections ?? self.configSelections,
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
+            forkContext: forkContext ?? self.forkContext,
             itemID: itemID ?? self.itemID,
             message: message ?? self.message,
             messageID: messageID ?? self.messageID,
@@ -3618,14 +3617,20 @@ public extension CompleteCommandInput {
 
 // MARK: - ProviderForkThreadParams
 public struct ProviderForkThreadParams: Codable {
+    public var beforeTurnID: String?
     public var sourceThreadID: String
+    public var throughTurnID: String?
 
     public enum CodingKeys: String, CodingKey {
+        case beforeTurnID = "beforeTurnId"
         case sourceThreadID = "sourceThreadId"
+        case throughTurnID = "throughTurnId"
     }
 
-    public init(sourceThreadID: String) {
+    public init(beforeTurnID: String?, sourceThreadID: String, throughTurnID: String?) {
+        self.beforeTurnID = beforeTurnID
         self.sourceThreadID = sourceThreadID
+        self.throughTurnID = throughTurnID
     }
 }
 
@@ -3648,10 +3653,136 @@ public extension ProviderForkThreadParams {
     }
 
     func with(
-        sourceThreadID: String? = nil
+        beforeTurnID: String?? = nil,
+        sourceThreadID: String? = nil,
+        throughTurnID: String?? = nil
     ) -> ProviderForkThreadParams {
         return ProviderForkThreadParams(
-            sourceThreadID: sourceThreadID ?? self.sourceThreadID
+            beforeTurnID: beforeTurnID ?? self.beforeTurnID,
+            sourceThreadID: sourceThreadID ?? self.sourceThreadID,
+            throughTurnID: throughTurnID ?? self.throughTurnID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProviderForkThreadResult
+public struct ProviderForkThreadResult: Codable {
+    public var draft: ForkDraft?
+    public var threadID: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case draft
+        case threadID = "threadId"
+    }
+
+    public init(draft: ForkDraft?, threadID: String?) {
+        self.draft = draft
+        self.threadID = threadID
+    }
+}
+
+// MARK: ProviderForkThreadResult convenience initializers and mutators
+
+public extension ProviderForkThreadResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProviderForkThreadResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        draft: ForkDraft?? = nil,
+        threadID: String?? = nil
+    ) -> ProviderForkThreadResult {
+        return ProviderForkThreadResult(
+            draft: draft ?? self.draft,
+            threadID: threadID ?? self.threadID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ForkDraft
+public struct ForkDraft: Codable {
+    public var additionalDirectories: [String]?
+    public var configSelections: [ConfigOptionSelection]?
+    public var cwd: String
+    public var forkContext: String?
+    public var providerInstanceID, sourceTitle: String
+
+    public enum CodingKeys: String, CodingKey {
+        case additionalDirectories, configSelections, cwd, forkContext
+        case providerInstanceID = "providerInstanceId"
+        case sourceTitle
+    }
+
+    public init(additionalDirectories: [String]?, configSelections: [ConfigOptionSelection]?, cwd: String, forkContext: String?, providerInstanceID: String, sourceTitle: String) {
+        self.additionalDirectories = additionalDirectories
+        self.configSelections = configSelections
+        self.cwd = cwd
+        self.forkContext = forkContext
+        self.providerInstanceID = providerInstanceID
+        self.sourceTitle = sourceTitle
+    }
+}
+
+// MARK: ForkDraft convenience initializers and mutators
+
+public extension ForkDraft {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ForkDraft.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        additionalDirectories: [String]?? = nil,
+        configSelections: [ConfigOptionSelection]?? = nil,
+        cwd: String? = nil,
+        forkContext: String?? = nil,
+        providerInstanceID: String? = nil,
+        sourceTitle: String? = nil
+    ) -> ForkDraft {
+        return ForkDraft(
+            additionalDirectories: additionalDirectories ?? self.additionalDirectories,
+            configSelections: configSelections ?? self.configSelections,
+            cwd: cwd ?? self.cwd,
+            forkContext: forkContext ?? self.forkContext,
+            providerInstanceID: providerInstanceID ?? self.providerInstanceID,
+            sourceTitle: sourceTitle ?? self.sourceTitle
         )
     }
 

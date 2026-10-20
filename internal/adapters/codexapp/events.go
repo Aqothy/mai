@@ -248,7 +248,7 @@ func (h *Instance) emitTurnCompleted(nativeThread string, turn appTurn) {
 		return
 	}
 	state, _ := turnState(turn.Status)
-	payload := provider.RuntimeEventPayload{TurnState: state}
+	payload := provider.RuntimeEventPayload{TurnState: state, ProviderTurnID: turn.ID}
 	if turn.Error != nil {
 		payload.Message = strings.TrimSpace(turn.Error.Message)
 		if turn.Error.AdditionalDetails != nil {

@@ -406,9 +406,6 @@
         "additionalDirectories": {
           "type": "boolean"
         },
-        "fork": {
-          "type": "boolean"
-        },
         "auth": {
           "type": "boolean"
         },
@@ -494,6 +491,9 @@
             "$ref": "#/$defs/ConfigOptionSelection"
           },
           "type": "array"
+        },
+        "forkContext": {
+          "type": "string"
         },
         "createdAt": {
           "type": "string",
@@ -922,6 +922,42 @@
       ],
       "title": "FileChangeSummary"
     },
+    "ForkDraft": {
+      "properties": {
+        "sourceTitle": {
+          "type": "string"
+        },
+        "providerInstanceId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "configSelections": {
+          "items": {
+            "$ref": "#/$defs/ConfigOptionSelection"
+          },
+          "type": "array"
+        },
+        "forkContext": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "sourceTitle",
+        "providerInstanceId",
+        "cwd"
+      ],
+      "title": "ForkDraft"
+    },
     "GetAttachmentInput": {
       "properties": {
         "threadId": {
@@ -1265,6 +1301,12 @@
       "properties": {
         "sourceThreadId": {
           "type": "string"
+        },
+        "throughTurnId": {
+          "type": "string"
+        },
+        "beforeTurnId": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -1273,6 +1315,19 @@
         "sourceThreadId"
       ],
       "title": "ProviderForkThreadParams"
+    },
+    "ProviderForkThreadResult": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "draft": {
+          "$ref": "#/$defs/ForkDraft"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ProviderForkThreadResult"
     },
     "ProviderImportSessionParams": {
       "properties": {
@@ -2913,6 +2968,9 @@
         "providerForkThreadParams": {
           "$ref": "#/$defs/ProviderForkThreadParams"
         },
+        "providerForkThreadResult": {
+          "$ref": "#/$defs/ProviderForkThreadResult"
+        },
         "providerInstanceParams": {
           "$ref": "#/$defs/ProviderInstanceParams"
         },
@@ -3061,6 +3119,7 @@
         "acpRegistryStartParams",
         "providerAuthenticateParams",
         "providerForkThreadParams",
+        "providerForkThreadResult",
         "providerInstanceParams",
         "providerListSessionsParams",
         "providerSessionParams",

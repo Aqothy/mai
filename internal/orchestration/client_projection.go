@@ -77,6 +77,12 @@ func attachmentsForClient(attachments []provider.Attachment) []provider.Attachme
 }
 
 func projectItemForClient(item Item) Item {
+	if item.Kind == provider.ItemKindForkContext {
+		// A whole conversation: clients fetch it when the user opens it.
+		item.DetailAvailable = true
+		item.Payload = nil
+		return item
+	}
 	// Sparse upserts may omit Kind, but the presence of a complete ToolCall is
 	// sufficient to enforce the compact wire boundary.
 	if !isToolItem(item.Kind) && item.ToolCall == nil {

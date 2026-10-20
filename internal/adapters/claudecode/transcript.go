@@ -1,7 +1,7 @@
 package claudecode
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -114,26 +114,25 @@ func (h *Instance) readTranscript(sessionID string) ([]transcriptLine, error) {
 }
 
 func readTranscriptFile(path string) ([]transcriptLine, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1<<20), maxMessageBytes)
+	return parseTranscript(data), nil
+}
+
+// parseTranscript reads a transcript's lines, skipping any that aren't JSON
+// (the CLI may be writing the last one).
+func parseTranscript(data []byte) []transcriptLine {
 	var lines []transcriptLine
-	for scanner.Scan() {
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
+	for _, raw := range bytes.Split(data, []byte("\n")) {
 		var line transcriptLine
-		if json.Unmarshal(raw, &line) != nil {
+		if len(raw) == 0 || json.Unmarshal(raw, &line) != nil {
 			continue
 		}
 		lines = append(lines, line)
 	}
-	return lines, scanner.Err()
+	return lines
 }
 
 // chained reports whether a line takes part in the uuid/parentUuid chain.

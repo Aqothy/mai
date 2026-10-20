@@ -57,6 +57,9 @@ struct IOSAppContainer: View {
                         openThread: { threadID in
                             store.selectThread(threadID)
                             path.append(.thread(threadID))
+                        },
+                        openDraft: {
+                            path.append(.newChat(workingDirectory: nil))
                         }
                     )
                 }

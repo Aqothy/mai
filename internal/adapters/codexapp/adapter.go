@@ -237,7 +237,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		StartedAt: startedAt,
 		Capabilities: provider.Capabilities{
 			SessionList: true, SessionDelete: true, SessionClose: true,
-			LoadReplay: true, Resume: true, Fork: true,
+			LoadReplay: true, Resume: true,
 			Auth: true, Logout: true,
 			// Stable app-server UserInput supports text, image, localImage,
 			// audio, localAudio, skill, and mention. It has no embedded-resource

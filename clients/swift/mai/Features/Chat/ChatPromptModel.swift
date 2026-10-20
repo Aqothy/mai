@@ -109,13 +109,9 @@ final class ChatPromptModel {
         await store.refreshProvidersAfterFailure()
     }
 
-    var canForkThread: Bool {
-        store.connectionState == .connected
-            && store.threadSupportsFork(threadID)
-            && !store.threadIsRunning(threadID)
-            && !isSending
-            && !isForking
-            && !isRetryingFailedTurn
+    /// A fork keeps the settled turns, so it needs no idle chat.
+    var canFork: Bool {
+        store.connectionState == .connected && !isForking
     }
 
     var isErrorPresented: Bool {
@@ -223,19 +219,44 @@ final class ChatPromptModel {
         }
     }
 
-    func forkThread() async -> String? {
-        guard canForkThread else { return nil }
+    /// Forks this chat at `point`, with `prompt` waiting in the fork's
+    /// composer when editing an earlier prompt.
+    func fork(at point: ChatForkPoint, editing prompt: Message? = nil) async -> ChatFork? {
+        guard canFork else { return nil }
 
         isForking = true
         defer { isForking = false }
 
         do {
-            return try await store.forkThread(threadID)
+            let fork = try await store.forkThread(threadID, at: point)
+            let composerID =
+                switch fork {
+                case .thread(let forkThreadID): forkThreadID
+                case .draft(let draft): draftStore.startForkDraft(draft)
+                }
+            if let prompt {
+                compose(prompt, in: composerID)
+            }
+            return fork
         } catch is CancellationError {
             return nil
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Puts a sent prompt in another chat's composer to edit: its text, its
+    /// comments, and its images, which load from this chat.
+    private func compose(_ prompt: Message, in composerID: String) {
+        draftStore.setText(prompt.text, for: composerID)
+        draftStore.setAnnotations((prompt.annotations ?? []).map(ChatPendingAnnotation.init), for: composerID)
+        let images = (prompt.attachments ?? []).filter { $0.kind == MaidAttachmentKind.image.rawValue }
+        let sourceThreadID = threadID
+        draftStore.attachmentsModel(for: composerID).addSentImages(images) { [store] image in
+            if let data = image.data, !data.isEmpty { return data }
+            guard let attachmentID = image.id else { throw RPCError("“\(image.name ?? "Image")” has no data") }
+            return try await store.attachmentData(threadID: sourceThreadID, attachmentID: attachmentID)
         }
     }
 

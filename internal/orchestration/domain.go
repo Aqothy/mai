@@ -101,6 +101,9 @@ type Turn struct {
 	StopReason         provider.StopReason `json:"stopReason,omitempty"`
 	Error              string              `json:"error,omitempty"`
 	InterruptRequested bool                `json:"interruptRequested,omitempty"`
+	// ProviderTurnID is the provider's id for the turn, set when it settles
+	// if the provider ran it; only such turns can be forked through.
+	ProviderTurnID string `json:"-"`
 }
 
 type Message struct {

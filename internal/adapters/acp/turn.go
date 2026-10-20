@@ -215,6 +215,9 @@ func (h *Instance) settlePrompt(stream *sessionStream, rec *pendingPrompt, resp 
 		// steer replacement, stream abandonment). Emit the start it deferred so
 		// clients always observe a start/completion pair.
 		h.emitTurnLifecycle(sessionID, rec.threadID, rec.turnID, provider.RuntimeEventTurnStarted, provider.RuntimeEventPayload{})
+	} else {
+		// ACP names no turns; the agent had this one's prompt.
+		payload.ProviderTurnID = rec.turnID
 	}
 	h.emitTurnLifecycle(sessionID, rec.threadID, rec.turnID, provider.RuntimeEventTurnCompleted, payload)
 	h.finishSettledTurn(stream, collector, true)

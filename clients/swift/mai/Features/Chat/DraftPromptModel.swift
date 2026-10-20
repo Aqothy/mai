@@ -43,11 +43,16 @@ final class DraftPromptModel {
 
     private var optionsSessionID: String?
     private var optionsLoadAttempt = 0
+    /// The fork draft whose provider, folders and settings were applied, so
+    /// the user's later choices stand.
+    private var appliedForkDraftID: String?
+    /// The forked chat's settings and the user's changes to them; they win
+    /// over the remembered ones for the fork's provider.
+    private var forkConfigValues: [String: JSONAny] = [:]
     private var configUpdates: [ConfigUpdate] = []
     private var configUpdateTask: Task<Void, Never>?
     private var isConfiguringInitialSelection = false
 
-    private let attachmentsModel = ComposerAttachmentsModel()
 
     init(
         store: ThreadStore,
@@ -88,16 +93,62 @@ final class DraftPromptModel {
         store.onProviderOptionsInvalidated = { [weak self] invalidation in
             self?.receiveInvalidation(invalidation)
         }
-        attachmentsModel.canAttachImages = { [weak self] in
-            self?.supportsImageAttachments == true
-        }
-        attachmentsModel.reportError = { [weak self] message in
-            self?.errorMessage = message
-        }
     }
 
     var attachments: [ChatPendingAttachment] {
-        attachmentsModel.attachments
+        draftStore.activeDraftThreadID.map { draftStore.attachmentsModel(for: $0).attachments } ?? []
+    }
+
+    /// Comments on another chat's text, which editing its prompt in this new
+    /// chat carries.
+    var annotations: [ChatPendingAnnotation] {
+        draftStore.activeDraftThreadID.map(draftStore.annotations(for:)) ?? []
+    }
+
+    func removeAnnotation(id: String) {
+        guard let draftID = draftStore.activeDraftThreadID else { return }
+        draftStore.removeAnnotations(ids: [id], for: draftID)
+    }
+
+    /// The new chat's image pipeline, reporting to this model; the draft
+    /// store owns its images, as it does a chat's.
+    private func draftAttachments() -> ComposerAttachmentsModel {
+        let model = draftStore.attachmentsModel(for: ensureLocalDraft())
+        model.canAttachImages = { [weak self] in
+            self?.supportsImageAttachments == true
+        }
+        model.reportError = { [weak self] message in
+            self?.errorMessage = message
+        }
+        return model
+    }
+
+    /// The chat this new chat continues, when its agent can't fork natively.
+    var fork: ForkDraft? {
+        draftStore.activeFork
+    }
+
+    /// Starts the new chat where the forked chat ran: its agent, folders and
+    /// settings.
+    private func applyFork() {
+        guard let fork, let draftID = draftStore.activeDraftThreadID, appliedForkDraftID != draftID else { return }
+        appliedForkDraftID = draftID
+        forkConfigValues = Dictionary(
+            (fork.configSelections ?? []).map { ($0.optionID, $0.value) },
+            uniquingKeysWith: { _, later in later }
+        )
+        guard providerIsAvailable(fork.providerInstanceID) else {
+            errorMessage = "The agent of “\(fork.sourceTitle)” is not available"
+            return
+        }
+        selectedProviderID = fork.providerInstanceID
+        workingDirectory = fork.cwd
+        additionalDirectories = fork.additionalDirectories ?? []
+    }
+
+    func discardFork() {
+        draftStore.discardActiveFork()
+        forkConfigValues = [:]
     }
 
     var providerChoices: [ProviderChoice] {
@@ -146,7 +197,8 @@ final class DraftPromptModel {
             && selectedProviderID != nil
             && !workingDirectory.isEmpty
             && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !attachments.isEmpty)
+                || !attachments.isEmpty
+                || !annotations.isEmpty)
             && (attachments.isEmpty || supportsImageAttachments)
             && attachments.allSatisfy { !$0.isProcessing }
             && !isSending
@@ -186,23 +238,28 @@ final class DraftPromptModel {
         }
     }
 
+    /// Changes when the agents to choose from do, or a fork replaces the draft.
     var catalogSelectionKey: String {
-        providerChoices.map(\.id).joined(separator: ",")
+        let providers = providerChoices.map(\.id).joined(separator: ",")
+        return fork == nil ? providers : "\(providers)|\(draftStore.activeDraftThreadID ?? "")"
     }
 
     var optionsSelectionKey: String {
         "\(connectionState)|\(selectedProviderID ?? "")|\(workingDirectory)|\(optionsLoadAttempt)"
     }
 
-    func ensureLocalDraft() {
-        if draftStore.activeDraftThreadID == nil {
-            draftStore.setActiveDraftThreadID(UUID().uuidString)
-        }
+    @discardableResult
+    func ensureLocalDraft() -> String {
+        if let draftID = draftStore.activeDraftThreadID { return draftID }
+        let draftID = UUID().uuidString
+        draftStore.setActiveDraftThreadID(draftID)
+        return draftID
     }
 
     func configureInitialSelection() {
         if reconcileAcceptedDraft() { return }
-        ensureLocalDraft()
+        // An edited prompt's images may still be loading into the draft.
+        _ = draftAttachments()
         guard !providerChoices.isEmpty else { return }
         isConfiguringInitialSelection = true
         defer {
@@ -217,6 +274,7 @@ final class DraftPromptModel {
                 selectedProviderID = providerChoices.first?.id
             }
         }
+        applyFork()
     }
 
     func selectProvider(id: String) {
@@ -313,6 +371,9 @@ final class DraftPromptModel {
             providerID: providerID,
             optionID: optionID
         )
+        if providerID == fork?.providerInstanceID {
+            forkConfigValues[optionID] = value
+        }
 
         guard let optionsSessionID else { return }
         configUpdates.append(
@@ -326,19 +387,19 @@ final class DraftPromptModel {
     }
 
     func addImages(from urls: [URL]) async {
-        await attachmentsModel.addImages(from: urls)
+        await draftAttachments().addImages(from: urls)
     }
 
     func addPhotos(_ photos: [PhotosPickerItem]) {
-        attachmentsModel.addPhotos(photos)
+        draftAttachments().addPhotos(photos)
     }
 
     func addCameraImage(_ thumbnail: ChatComposerThumbnail) {
-        attachmentsModel.addCameraImage(thumbnail)
+        draftAttachments().addCameraImage(thumbnail)
     }
 
     func removeAttachment(id: UUID) {
-        attachmentsModel.remove(id: id)
+        draftAttachments().remove(id: id)
     }
 
     func showError(_ error: Error) {
@@ -358,6 +419,7 @@ final class DraftPromptModel {
         let requestedAdditionalDirectories = additionalDirectories
         let selections = currentSelections(providerID: requestedProviderID)
         let submittedAttachments = attachments
+        let submittedAnnotations = annotations
         isSending = true
         defer { isSending = false }
 
@@ -385,16 +447,14 @@ final class DraftPromptModel {
                 cwd: requestedCwd,
                 additionalDirectories: requestedAdditionalDirectories,
                 message: CommandMessage(
-                    annotations: nil,
+                    annotations: submittedAnnotations.isEmpty ? nil : submittedAnnotations.map(\.promptAnnotation),
                     attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
                     messageID: UUID().uuidString,
                     text: text
                 ),
-                configSelections: selections
+                configSelections: selections,
+                forkContext: fork?.forkContext
             )
-            // The model outlives this chat; the next new chat must not offer
-            // the sent images again.
-            attachmentsModel.remove(ids: Set(submittedAttachments.map(\.id)))
             promptCompletion.clearMentionedFiles()
             draftStore.removeDraft(for: threadID)
             store.selectThread(threadID)
@@ -555,8 +615,14 @@ final class DraftPromptModel {
         promptCompletion.updateCatalog(commands: [], skills: [])
     }
 
+    private func rememberedValues(providerID: String) -> [String: JSONAny] {
+        let remembered = draftStore.preferences.configValues(providerID: providerID)
+        guard providerID == fork?.providerInstanceID else { return remembered }
+        return remembered.merging(forkConfigValues) { _, fork in fork }
+    }
+
     private func currentSelections(providerID: String) -> [ConfigOptionSelection] {
-        let values = draftStore.preferences.configValues(providerID: providerID)
+        let values = rememberedValues(providerID: providerID)
         let optionsByID = Dictionary(
             configOptions.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -585,10 +651,7 @@ final class DraftPromptModel {
     }
 
     private func validRememberedValue(for option: ConfigOption, providerID: String) -> JSONAny? {
-        guard let value = draftStore.preferences.configValue(
-            providerID: providerID,
-            optionID: option.id
-        ) else { return nil }
+        guard let value = rememberedValues(providerID: providerID)[option.id] else { return nil }
         return configValueIsValid(value, for: option) ? value : nil
     }
 

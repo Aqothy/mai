@@ -29,6 +29,7 @@ type sessionUpdate struct {
 	Kind                sessionUpdateKind
 	Binding             *SessionBinding
 	TurnID              TurnID
+	ProviderTurnID      string
 	TurnState           provider.RuntimeTurnState
 	StopReason          provider.StopReason
 	Error               string
@@ -64,7 +65,7 @@ func (e *Engine) applySessionUpdate(update sessionUpdate) (DispatchResult, error
 			Type:                EventThreadSessionStatusSet,
 			OccurredAt:          update.occurredAt,
 			Actor:               ActorKindServer,
-			Payload:             EventPayload{ThreadID: update.threadID, Session: session, StopReason: update.StopReason},
+			Payload:             EventPayload{ThreadID: update.threadID, Session: session, StopReason: update.StopReason, ProviderTurnID: update.ProviderTurnID},
 			historyReplayFailed: update.historyReplayFailed,
 		})
 		sequence = appended.Sequence

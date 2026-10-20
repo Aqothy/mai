@@ -39,6 +39,9 @@ struct DesktopAppContainer: View {
                     projectFolders: projectFolders,
                     openThread: { threadID in
                         store.selectThread(threadID)
+                    },
+                    openDraft: {
+                        store.selectThread(nil)
                     }
                 )
             }

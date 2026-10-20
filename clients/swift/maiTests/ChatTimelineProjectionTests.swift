@@ -145,6 +145,10 @@ final class ChatTimelineProjectionTests: XCTestCase {
                 return "\(row.id)|\(approval.status)|\(approval.decision ?? "none")"
             case .turnActivity(let activity):
                 return "\(row.id)|\(activity.stepCount)|\(activity.isRunning)"
+            case .forkContext(let item):
+                return "\(row.id)|\(item.updatedAt.timeIntervalSince1970)"
+            case .turnFork(let fork):
+                return "\(row.id)|\(fork.prompt?.id ?? "")"
             }
         }
     }

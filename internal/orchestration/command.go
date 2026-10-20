@@ -61,7 +61,10 @@ type Command struct {
 	OptionID         string                           `json:"optionId,omitempty"`
 	Value            any                              `json:"value,omitempty"`
 	ConfigSelections []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
-	CreatedAt        time.Time                        `json:"createdAt,omitzero"`
+	// ForkContext is the conversation a fork hands thread.start's session in
+	// front of its first prompt, as provider.forkThread wrote it.
+	ForkContext string    `json:"forkContext,omitempty"`
+	CreatedAt   time.Time `json:"createdAt,omitzero"`
 }
 
 // CommandMessage is the prompt a client sends with thread.start/thread.turn.start.

@@ -223,6 +223,7 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.ItemKindImageView),
 			string(provider.ItemKindImageGeneration),
 			string(provider.ItemKindContextCompaction),
+			string(provider.ItemKindForkContext),
 		},
 	},
 	{

@@ -389,6 +389,11 @@ func (h *Instance) handleAssistant(session *claudeSession, message sdkMessage) {
 	duplicate := message.UUID != "" && session.seenAssistant[message.UUID]
 	if message.UUID != "" {
 		session.seenAssistant[message.UUID] = true
+		// A live message's uuid is its transcript line's (the SDK's
+		// resume_session_at takes one).
+		if !duplicate && turn != "" && session.turnLine == "" {
+			session.turnLine = message.UUID
+		}
 	}
 	h.mu.Unlock()
 	// A failed API request comes as an assistant message whose text is the
@@ -530,7 +535,7 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 		return
 	}
 	h.mu.Lock()
-	turn := session.activeLocalTurn
+	turn, line := session.activeLocalTurn, session.turnLine
 	// Messages written mid-turn that the CLI did not fold in run as one more
 	// query, batched together; its result ends the turn.
 	continues := turn != "" && len(session.unechoedInput) > 0
@@ -570,7 +575,7 @@ func (h *Instance) handleResult(session *claudeSession, message sdkMessage) {
 		return
 	}
 	state, stopReason, errorMessage := turnStateFromResult(result)
-	payload := provider.RuntimeEventPayload{TurnState: state, StopReason: stopReason, Message: errorMessage}
+	payload := provider.RuntimeEventPayload{TurnState: state, StopReason: stopReason, Message: errorMessage, ProviderTurnID: line}
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: turn, Payload: payload})
 }
 

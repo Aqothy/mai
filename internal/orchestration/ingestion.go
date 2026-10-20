@@ -317,7 +317,7 @@ func replayedTurns(events []provider.RuntimeEvent) []Turn {
 				continue
 			}
 			completed := event.CreatedAt
-			turn := Turn{ID: TurnID(event.TurnID), State: TurnStateCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &completed, StopReason: event.Payload.StopReason}
+			turn := Turn{ID: TurnID(event.TurnID), ProviderTurnID: event.TurnID, State: TurnStateCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &completed, StopReason: event.Payload.StopReason}
 			switch event.Payload.TurnState {
 			case provider.RuntimeTurnFailed:
 				turn.State = TurnStateError
@@ -517,6 +517,12 @@ func (i *ProviderRuntimeIngestion) ingestUserMessage(event provider.RuntimeEvent
 	i.completeThreadText(event.ThreadID, createdAt)
 	messageID := i.userMessageID(event)
 	text := firstNonEmpty(event.Payload.Detail, event.Payload.Message, event.Payload.Delta)
+	// A fork's session keeps the conversation handed to it in front of its
+	// first prompt; it shows apart from the prompt, as it did when sent.
+	conversation, prompt, forked := provider.SplitForkContext(text)
+	if forked {
+		text = prompt
+	}
 	var annotations []provider.PromptAnnotation
 	if presentation := event.Payload.Presentation; presentation != nil {
 		if presentation.MessageID != "" {
@@ -526,6 +532,9 @@ func (i *ProviderRuntimeIngestion) ingestUserMessage(event provider.RuntimeEvent
 			text = *presentation.Text
 		}
 		annotations = append([]provider.PromptAnnotation(nil), presentation.Annotations...)
+	}
+	if forked {
+		i.recordItem(event, forkContextItem(messageID, conversation), createdAt)
 	}
 	i.record(EventInput{Type: EventThreadMessageSent, ThreadID: ThreadID(event.ThreadID), OccurredAt: createdAt, Payload: EventPayload{MessageID: messageID, Role: MessageRoleUser, Text: text, Attachments: event.Payload.Attachments, Annotations: annotations, TurnID: TurnID(event.TurnID), CreatedAt: createdAt, UpdatedAt: createdAt}})
 }
@@ -619,7 +628,7 @@ func (i *ProviderRuntimeIngestion) ingestTurnCompleted(event provider.RuntimeEve
 		failureMessage := firstNonEmpty(event.Payload.Message, event.Payload.Detail, "Turn failed")
 		i.recordItem(event, errorItem(firstNonEmpty(string(event.EventID), newID("error")), TurnID(event.TurnID), failureMessage), createdAt)
 	}
-	update := sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: TurnID(event.TurnID), TurnState: event.Payload.TurnState, StopReason: event.Payload.StopReason, Error: firstNonEmpty(event.Payload.Message, event.Payload.Detail)}
+	update := sessionUpdate{Kind: sessionUpdateTurnSettled, TurnID: TurnID(event.TurnID), ProviderTurnID: event.Payload.ProviderTurnID, TurnState: event.Payload.TurnState, StopReason: event.Payload.StopReason, Error: firstNonEmpty(event.Payload.Message, event.Payload.Detail)}
 	if i.recordSessionUpdate(event.ThreadID, update, createdAt) {
 		i.settleSiblingTurns(event, createdAt)
 	}

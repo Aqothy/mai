@@ -38,7 +38,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderImportSession, Params: "ProviderImportSessionParams", Result: "ProviderImportSessionResult"},
 	{Name: MethodProviderDeleteSession, Params: "ProviderSessionParams", ResultNull: true},
 	{Name: MethodProviderCloseSession, Params: "ProviderSessionParams", ResultNull: true},
-	{Name: MethodProviderForkThread, Params: "ProviderForkThreadParams", Result: "ProviderImportSessionResult"},
+	{Name: MethodProviderForkThread, Params: "ProviderForkThreadParams", Result: "ProviderForkThreadResult"},
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderCompleteCommand, Params: "ProviderCompleteCommandParams", Result: "CommandCompletion", ResultArray: true},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},

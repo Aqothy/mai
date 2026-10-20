@@ -33,7 +33,7 @@ extension ThreadRPCClient {
     func importProviderSession(_ input: ProviderImportSessionParams) async throws
         -> ProviderImportSessionResult
     { throw unavailable }
-    func forkProviderThread(_ input: ProviderForkThreadParams) async throws -> ProviderImportSessionResult {
+    func forkProviderThread(_ input: ProviderForkThreadParams) async throws -> ProviderForkThreadResult {
         throw unavailable
     }
     func deleteProviderSession(_ input: ProviderSessionParams) async throws { throw unavailable }

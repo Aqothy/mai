@@ -3,7 +3,8 @@ import Observation
 
 /// Persistent per-chat drafts keyed independently from thread subscriptions
 /// and UI state: text, pending annotations, and (for this app session) pending
-/// attachments. `activeDraftThreadID` identifies the one provisional new chat.
+/// attachments. `activeDraftThreadID` identifies the one provisional new chat,
+/// and `activeFork` the chat it continues, if it is a fork.
 @Observable
 final class ThreadDraftStore {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -13,6 +14,7 @@ final class ThreadDraftStore {
 
     private struct StoredDrafts: Codable {
         var activeDraftThreadID: String?
+        var activeFork: ForkDraft?
         var textByThreadID: [String: String]
         var annotationsByThreadID: [String: [ChatPendingAnnotation]]
     }
@@ -21,6 +23,9 @@ final class ThreadDraftStore {
     private static let persistenceDelay = Duration.milliseconds(300)
 
     private(set) var activeDraftThreadID: String?
+    /// The chat the new chat forks, from an agent that can't fork its own
+    /// sessions; it belongs to `activeDraftThreadID`.
+    private(set) var activeFork: ForkDraft?
 
     private var textByThreadID: [String: String]
     private var annotationsByThreadID: [String: [ChatPendingAnnotation]] = [:]
@@ -42,6 +47,7 @@ final class ThreadDraftStore {
             return
         }
         activeDraftThreadID = stored.activeDraftThreadID
+        activeFork = stored.activeFork
         textByThreadID = stored.textByThreadID.filter { !$0.value.isEmpty }
         annotationsByThreadID = stored.annotationsByThreadID.filter { !$0.value.isEmpty }
     }
@@ -87,8 +93,26 @@ final class ThreadDraftStore {
         guard activeDraftThreadID != threadID else { return }
         if let activeDraftThreadID {
             textByThreadID[activeDraftThreadID] = nil
+            annotationsByThreadID[activeDraftThreadID] = nil
+            attachmentsByThreadID[activeDraftThreadID] = nil
         }
         activeDraftThreadID = threadID
+        activeFork = nil
+        saveImmediately()
+    }
+
+    /// Replaces the new chat with a fork of another chat, and names it.
+    func startForkDraft(_ fork: ForkDraft) -> String {
+        let draftID = UUID().uuidString
+        setActiveDraftThreadID(draftID)
+        activeFork = fork
+        saveImmediately()
+        return draftID
+    }
+
+    /// Keeps the new chat, no longer a fork.
+    func discardActiveFork() {
+        activeFork = nil
         saveImmediately()
     }
 
@@ -98,6 +122,7 @@ final class ThreadDraftStore {
         attachmentsByThreadID[threadID] = nil
         if activeDraftThreadID == threadID {
             activeDraftThreadID = nil
+            activeFork = nil
         }
         saveImmediately()
     }
@@ -129,6 +154,7 @@ final class ThreadDraftStore {
     private func save() {
         let stored = StoredDrafts(
             activeDraftThreadID: activeDraftThreadID,
+            activeFork: activeFork,
             textByThreadID: textByThreadID,
             annotationsByThreadID: annotationsByThreadID
         )

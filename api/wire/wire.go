@@ -151,8 +151,34 @@ type ProviderAuthenticateParams struct {
 	Secret     string              `json:"secret,omitempty"`
 }
 
+// ProviderForkThreadParams forks a thread's turns through ThroughTurnID, or
+// up to BeforeTurnID, or, with neither, all of them; only the turns the
+// provider ran to the end are kept.
 type ProviderForkThreadParams struct {
 	SourceThreadID orchestration.ThreadID `json:"sourceThreadId"`
+	ThroughTurnID  orchestration.TurnID   `json:"throughTurnId,omitempty"`
+	BeforeTurnID   orchestration.TurnID   `json:"beforeTurnId,omitempty"`
+}
+
+// ProviderForkThreadResult is the fork: ThreadID holds the provider's native
+// fork, or, when the provider can't make it natively, Draft is a new chat
+// whose thread.start hands the conversation to a new session.
+type ProviderForkThreadResult struct {
+	ThreadID orchestration.ThreadID `json:"threadId,omitempty"`
+	Draft    *ForkDraft             `json:"draft,omitempty"`
+}
+
+// ForkDraft is a new chat with the forked thread's provider, workspace and
+// settings.
+type ForkDraft struct {
+	SourceTitle           string                           `json:"sourceTitle"`
+	ProviderInstanceID    provider.InstanceID              `json:"providerInstanceId"`
+	Cwd                   string                           `json:"cwd"`
+	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
+	ConfigSelections      []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
+	// ForkContext goes in the draft's thread.start; it is empty when the fork
+	// keeps no turns.
+	ForkContext string `json:"forkContext,omitempty"`
 }
 
 type ProviderInstanceParams struct {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
+	"github.com/Aqothy/maiD/internal/store"
 )
 
 func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
@@ -48,21 +51,39 @@ func TestRunWebSocketDoesNotStartAfterServerClosed(t *testing.T) {
 	}
 }
 
-func installForkRPCProvider(t *testing.T, s *Server, adapter *optionsRPCProvider, cwd string) {
+// newForkTestServer serves adapter as its "test" driver, with a "source"
+// thread in cwd bound to adapter's native session "native-source".
+func newForkTestServer(t *testing.T, metadata *store.SQLite, adapter *optionsRPCProvider, cwd string) *Server {
 	t.Helper()
-	s.providerService.Close()
-	s.providerService = providerservice.New(func(context.Context, provider.InstanceSpec, provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
+	s := newServerWithProviders(newLoggerFromEnv(), metadata, func(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
+		if spec.Driver != "test" {
+			return openProviderInstance(ctx, spec, emit)
+		}
+		adapter.mu.Lock()
+		adapter.emit = emit
+		adapter.mu.Unlock()
 		return adapter, nil
 	})
+	t.Cleanup(func() { _ = s.Close() })
 	if _, err := s.providerService.StartInstance(context.Background(), provider.InstanceSpec{InstanceID: adapter.info.InstanceID, Driver: "test", Name: "Fork test"}, false); err != nil {
 		t.Fatalf("start fork provider: %v", err)
 	}
 	if err := s.providerService.RegisterImportedSession("source", adapter.info.InstanceID, "native-source", provider.StartSessionInput{ThreadID: "source", ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd}); err != nil {
 		t.Fatalf("register source route: %v", err)
 	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: "source", Cwd: cwd}); err != nil {
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: "source", Title: "Source", ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd}); err != nil {
 		t.Fatalf("create source thread: %v", err)
 	}
+	return s
+}
+
+func newForkTestStore(t *testing.T) *store.SQLite {
+	t.Helper()
+	metadata, err := store.Open(filepath.Join(t.TempDir(), "maid.db"))
+	if err != nil {
+		t.Fatalf("open metadata store: %v", err)
+	}
+	return metadata
 }
 
 func newForkRPCProvider() *optionsRPCProvider {
@@ -70,84 +91,109 @@ func newForkRPCProvider() *optionsRPCProvider {
 		InstanceID: "fork-provider",
 		Status:     provider.InstanceStatusInitialized,
 		Capabilities: provider.Capabilities{
-			Fork:          true,
 			SessionDelete: true,
 			LoadReplay:    true,
 		},
 	}}
 }
 
-// provider.completeCommand asks the thread's provider, in the thread's
-// workspace, and always answers an array.
-func TestRPCCompleteCommandAsksTheThreadsProvider(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
-	cwd := t.TempDir()
-	installForkRPCProvider(t, s, newForkRPCProvider(), cwd)
-	client := newRecordingClient(t, s)
+// runForkSourceTurn sends text as a turn of the fork test thread and returns
+// the turn once the provider has it: settled, or running when text is "hold".
+func runForkSourceTurn(t *testing.T, s *Server, text string) orchestration.TurnID {
+	t.Helper()
+	before, _ := s.orchestration.ThreadListEntry("source")
+	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "source", Message: &orchestration.CommandMessage{Text: text}}); err != nil {
+		t.Fatalf("start source turn %q: %v", text, err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		entry, _ := s.orchestration.ThreadListEntry("source")
+		if turn := entry.LatestTurn; turn != nil && (before.LatestTurn == nil || turn.ID != before.LatestTurn.ID) && (turn.CompletedAt != nil) == (text != "hold") && entry.Session != nil && (text == "hold" || entry.Session.Status == orchestration.SessionStatusReady) {
+			return turn.ID
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("source turn %q never reached the provider", text)
+	return ""
+}
 
-	var completions []wire.CommandCompletion
-	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "review", Input: "--base "}, &completions)
-	if want := []wire.CommandCompletion{{Input: "--base main", Label: "main", Description: cwd}}; !slices.Equal(completions, want) {
-		t.Fatalf("completions = %#v, want %#v", completions, want)
+// A fork keeps the turns the provider has: through a chosen turn, up to the
+// one before a chosen turn, or through the last settled one. The provider
+// forks natively when it can; a fork that keeps no turns is a new chat.
+func TestRPCForkThreadForksNativelyThroughATurn(t *testing.T) {
+	adapter := newForkRPCProvider()
+	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork"}
+	cwd := t.TempDir()
+	s := newForkTestServer(t, newForkTestStore(t), adapter, cwd)
+	client := newRecordingClient(t, s)
+	first := runForkSourceTurn(t, s, "first")
+	second := runForkSourceTurn(t, s, "second")
+
+	fork := func(params wire.ProviderForkThreadParams) (wire.ProviderForkThreadResult, provider.ForkSessionInput) {
+		t.Helper()
+		params.SourceThreadID = "source"
+		adapter.mu.Lock()
+		calls := len(adapter.forks)
+		adapter.mu.Unlock()
+		var result wire.ProviderForkThreadResult
+		client.call(t, wire.MethodProviderForkThread, params, &result)
+		adapter.mu.Lock()
+		defer adapter.mu.Unlock()
+		if len(adapter.forks) == calls {
+			return result, provider.ForkSessionInput{ProviderSessionID: "none"}
+		}
+		return result, adapter.forks[len(adapter.forks)-1]
 	}
-	var none json.RawMessage
-	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "goal"}, &none)
-	if string(none) != "[]" {
-		t.Fatalf("no completions = %s, want []", none)
+
+	result, input := fork(wire.ProviderForkThreadParams{ThroughTurnID: first})
+	if result.ThreadID == "" || result.Draft != nil || input.ProviderSessionID != "native-source" || input.ThroughTurnID != "native-"+string(first) {
+		t.Fatalf("fork through the first turn = %+v with %+v, want a native fork through native-%s", result, input, first)
 	}
-	if err := client.callErr(wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "missing", Command: "review"}, &none); err == nil {
-		t.Fatal("completion for an unknown thread succeeded")
+	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork-2"}
+	if result, input = fork(wire.ProviderForkThreadParams{}); result.ThreadID == "" || input.ProviderSessionID != "native-source" || input.ThroughTurnID != "native-"+string(second) {
+		t.Fatalf("fork of the settled thread = %+v with %+v, want a native fork through native-%s", result, input, second)
+	}
+	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork-3"}
+	if result, input = fork(wire.ProviderForkThreadParams{BeforeTurnID: second}); result.ThreadID == "" || input.ThroughTurnID != "native-"+string(first) {
+		t.Fatalf("fork before the second turn = %+v with %+v, want a native fork through native-%s", result, input, first)
+	}
+	if result, input = fork(wire.ProviderForkThreadParams{BeforeTurnID: first}); result.ThreadID != "" || input.ProviderSessionID != "none" ||
+		result.Draft == nil || result.Draft.ForkContext != "" || result.Draft.ProviderInstanceID != adapter.info.InstanceID || result.Draft.Cwd != cwd || result.Draft.SourceTitle != "Source" {
+		t.Fatalf("fork before the first turn = %+v with %+v, want a new chat with the source's provider and workspace", result, input)
+	}
+
+	// While a turn runs, a fork, even one through it, keeps the turns before
+	// it.
+	held := runForkSourceTurn(t, s, "hold")
+	for index, params := range []wire.ProviderForkThreadParams{{}, {ThroughTurnID: held}} {
+		adapter.forkSummary = provider.SessionSummary{SessionID: fmt.Sprintf("native-fork-running-%d", index)}
+		if result, input = fork(params); result.ThreadID == "" || input.ThroughTurnID != "native-"+string(second) {
+			t.Fatalf("fork %+v while a turn runs = %+v with %+v, want a native fork through native-%s", params, result, input, second)
+		}
 	}
 }
 
-func TestForkProviderThreadPreflightsPersistenceAndActiveTurn(t *testing.T) {
-	t.Run("persistence unavailable", func(t *testing.T) {
-		s := newServer(newLoggerFromEnv(), nil)
-		defer s.Close()
-		adapter := newForkRPCProvider()
-		installForkRPCProvider(t, s, adapter, t.TempDir())
+func TestForkProviderThreadNeedsPersistenceForANativeFork(t *testing.T) {
+	adapter := newForkRPCProvider()
+	s := newForkTestServer(t, nil, adapter, t.TempDir())
+	runForkSourceTurn(t, s, "first")
 
-		if _, _, err := s.ForkProviderThread(context.Background(), "source"); err == nil {
-			t.Fatal("fork without persistence succeeded")
-		}
-		if adapter.forkCalls != 0 {
-			t.Fatalf("native fork calls = %d, want none", adapter.forkCalls)
-		}
-	})
-
-	t.Run("turn running", func(t *testing.T) {
-		s := newTestServer(t)
-		defer s.Close()
-		adapter := newForkRPCProvider()
-		installForkRPCProvider(t, s, adapter, t.TempDir())
-		if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{
-			Type:               orchestration.CommandThreadTurnStart,
-			ThreadID:           "source",
-			ProviderInstanceID: adapter.info.InstanceID,
-			Message:            &orchestration.CommandMessage{Text: "still working"},
-		}); err != nil {
-			t.Fatalf("start source turn: %v", err)
-		}
-
-		if _, _, err := s.ForkProviderThread(context.Background(), "source"); err == nil {
-			t.Fatal("fork while turn was running succeeded")
-		}
-		if adapter.forkCalls != 0 {
-			t.Fatalf("native fork calls = %d, want none", adapter.forkCalls)
-		}
-	})
+	if _, err := s.ForkProviderThread(context.Background(), wire.ProviderForkThreadParams{SourceThreadID: "source"}); err == nil {
+		t.Fatal("fork without persistence succeeded")
+	}
+	if len(adapter.forks) != 0 {
+		t.Fatalf("native forks = %+v, want none", adapter.forks)
+	}
 }
 
 func TestForkProviderThreadDeletesUnpersistedNativeFork(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
 	adapter := newForkRPCProvider()
 	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork", Cwd: "relative-path"}
 	adapter.deleted = make(chan string, 1)
-	installForkRPCProvider(t, s, adapter, t.TempDir())
+	s := newForkTestServer(t, newForkTestStore(t), adapter, t.TempDir())
+	runForkSourceTurn(t, s, "first")
 
-	if _, _, err := s.ForkProviderThread(context.Background(), "source"); err == nil {
+	if _, err := s.ForkProviderThread(context.Background(), wire.ProviderForkThreadParams{SourceThreadID: "source"}); err == nil {
 		t.Fatal("fork with invalid imported cwd succeeded")
 	}
 	select {
@@ -161,12 +207,10 @@ func TestForkProviderThreadDeletesUnpersistedNativeFork(t *testing.T) {
 }
 
 func TestForkProviderThreadCarriesSourceSettings(t *testing.T) {
-	s := newTestServer(t)
-	defer s.Close()
 	adapter := newForkRPCProvider()
 	adapter.forkSummary = provider.SessionSummary{SessionID: "native-fork"}
 	cwd := t.TempDir()
-	installForkRPCProvider(t, s, adapter, cwd)
+	s := newForkTestServer(t, newForkTestStore(t), adapter, cwd)
 	if err := s.metadataStore.SaveInstance(provider.InstanceSpec{InstanceID: adapter.info.InstanceID, Driver: "test", Name: "Fork test"}); err != nil {
 		t.Fatalf("SaveInstance: %v", err)
 	}
@@ -176,6 +220,7 @@ func TestForkProviderThreadCarriesSourceSettings(t *testing.T) {
 		{OptionID: "model", Value: "gpt-6-luna", Category: provider.ConfigOptionCategoryModel},
 		{OptionID: "reasoning_effort", Value: "low", Category: provider.ConfigOptionCategoryThoughtLevel},
 	}
+	runForkSourceTurn(t, s, "first")
 	if _, err := s.providerService.StartSession(context.Background(), "source", provider.StartSessionInput{
 		ProviderInstanceID: adapter.info.InstanceID, Cwd: cwd,
 		ModelSelection:   &provider.ModelSelection{Model: "gpt-6-luna"},
@@ -184,10 +229,11 @@ func TestForkProviderThreadCarriesSourceSettings(t *testing.T) {
 		t.Fatalf("start source session: %v", err)
 	}
 
-	forkID, imported, err := s.ForkProviderThread(context.Background(), "source")
-	if err != nil || !imported {
-		t.Fatalf("ForkProviderThread = %q, %v, %v", forkID, imported, err)
+	result, err := s.ForkProviderThread(context.Background(), wire.ProviderForkThreadParams{SourceThreadID: "source"})
+	if err != nil || result.ThreadID == "" {
+		t.Fatalf("ForkProviderThread = %+v, %v", result, err)
 	}
+	forkID := result.ThreadID
 	entry, ok := s.orchestration.ThreadListEntry(forkID)
 	if !ok || entry.ModelSelection == nil || entry.ModelSelection.Model != "gpt-6-luna" {
 		t.Fatalf("fork thread model = %#v, want source model", entry.ModelSelection)
@@ -213,6 +259,28 @@ func TestForkProviderThreadCarriesSourceSettings(t *testing.T) {
 	adapter.mu.Unlock()
 	if resume.ProviderSessionID != "native-fork" || !reflect.DeepEqual(resume.ConfigSelections, sourceSettings) {
 		t.Fatalf("fork resume input = %#v, want native-fork with source settings", resume)
+	}
+}
+
+// provider.completeCommand asks the thread's provider, in the thread's
+// workspace, and always answers an array.
+func TestRPCCompleteCommandAsksTheThreadsProvider(t *testing.T) {
+	cwd := t.TempDir()
+	s := newForkTestServer(t, newForkTestStore(t), newForkRPCProvider(), cwd)
+	client := newRecordingClient(t, s)
+
+	var completions []wire.CommandCompletion
+	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "review", Input: "--base "}, &completions)
+	if want := []wire.CommandCompletion{{Input: "--base main", Label: "main", Description: cwd}}; !slices.Equal(completions, want) {
+		t.Fatalf("completions = %#v, want %#v", completions, want)
+	}
+	var none json.RawMessage
+	client.call(t, wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "source", Command: "goal"}, &none)
+	if string(none) != "[]" {
+		t.Fatalf("no completions = %s, want []", none)
+	}
+	if err := client.callErr(wire.MethodProviderCompleteCommand, wire.ProviderCompleteCommandParams{ThreadID: "missing", Command: "review"}, &none); err == nil {
+		t.Fatal("completion for an unknown thread succeeded")
 	}
 }
 
@@ -393,8 +461,9 @@ type optionsRPCProvider struct {
 	closeStarted chan struct{}
 	closeBlock   <-chan struct{}
 	closed       chan string
-	forkCalls    int
+	forks        []provider.ForkSessionInput
 	forkSummary  provider.SessionSummary
+	emit         provider.RuntimeEventListener
 	deleted      chan string
 	starts       []provider.StartSessionInput
 }
@@ -415,7 +484,28 @@ func (p *optionsRPCProvider) StartSession(_ context.Context, input provider.Star
 	p.starts = append(p.starts, input)
 	return provider.StartSessionResult{Session: provider.Session{ProviderSessionID: input.ProviderSessionID}}, nil
 }
-func (p *optionsRPCProvider) SendTurn(context.Context, provider.SendTurnInput) error { return nil }
+
+// SendTurn runs the turn as native-<turn id>, and ends it unless the prompt
+// is "hold".
+func (p *optionsRPCProvider) SendTurn(_ context.Context, input provider.SendTurnInput) error {
+	p.mu.Lock()
+	emit := p.emit
+	p.mu.Unlock()
+	if emit == nil || input.Steer {
+		return nil
+	}
+	event := provider.RuntimeEvent{ThreadID: input.ThreadID, TurnID: input.TurnID, CreatedAt: time.Now()}
+	started := event
+	started.Type = provider.RuntimeEventTurnStarted
+	emit(started)
+	if input.Input != "hold" {
+		completed := event
+		completed.Type = provider.RuntimeEventTurnCompleted
+		completed.Payload.TurnState, completed.Payload.ProviderTurnID = provider.RuntimeTurnCompleted, "native-"+input.TurnID
+		emit(completed)
+	}
+	return nil
+}
 func (p *optionsRPCProvider) InterruptTurn(context.Context, provider.InterruptTurnInput) error {
 	return nil
 }
@@ -440,10 +530,10 @@ func (p *optionsRPCProvider) DeleteSession(_ context.Context, sessionID string) 
 	return nil
 }
 func (p *optionsRPCProvider) CloseSession(context.Context, string) error { return nil }
-func (p *optionsRPCProvider) ForkSession(context.Context, provider.ForkSessionInput) (provider.ForkSessionResult, error) {
+func (p *optionsRPCProvider) ForkSession(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.forkCalls++
+	p.forks = append(p.forks, input)
 	return provider.ForkSessionResult{Summary: p.forkSummary}, nil
 }
 func (p *optionsRPCProvider) OpenOptionsSession(_ context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
@@ -1215,4 +1305,162 @@ func TestRPCAttachmentDataTravelsOutsideThreadMessages(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "was not uploaded") {
 		t.Fatalf("dispatch with a consumed upload err = %v, want not uploaded", err)
 	}
+}
+
+// waitForTurnSettled waits for the thread's latest turn to settle and
+// returns it.
+func waitForTurnSettled(t *testing.T, s *Server, threadID orchestration.ThreadID, after orchestration.TurnID) orchestration.Turn {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		entry, _ := s.orchestration.ThreadListEntry(threadID)
+		if turn := entry.LatestTurn; turn != nil && turn.ID != after && turn.CompletedAt != nil && entry.Session != nil && entry.Session.Status == orchestration.SessionStatusReady {
+			return *turn
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("thread %s: no turn settled after %q", threadID, after)
+	return orchestration.Turn{}
+}
+
+// The conversation a fork hands its agent goes once: retrying a first prompt
+// the agent received, though its turn failed, doesn't hand it over again.
+func TestRPCForkHandsTheConversationOverOnce(t *testing.T) {
+	s := newTestServer(t)
+	history := t.TempDir()
+	startFakeACPAgent(t, s, "agent", "-history", history)
+	client := newRecordingClient(t, s)
+	client.dispatch(t, orchestration.Command{
+		Type: orchestration.CommandThreadStart, ThreadID: "fork", ProviderInstanceID: "agent", Cwd: t.TempDir(),
+		ForkContext: "User:\nfirst\n\nAssistant:\nhi", Message: &orchestration.CommandMessage{MessageID: "prompt", Text: "fail-first"},
+	})
+	deadline := time.Now().Add(15 * time.Second)
+	var failed *orchestration.Turn
+	for failed == nil || failed.State != orchestration.TurnStateError {
+		if time.Now().After(deadline) {
+			t.Fatalf("first turn = %+v, want it failed", failed)
+		}
+		time.Sleep(10 * time.Millisecond)
+		entry, _ := s.orchestration.ThreadListEntry("fork")
+		failed = entry.LatestTurn
+	}
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnRetry, ThreadID: "fork", MessageID: "prompt"})
+	waitForTurnSettled(t, s, "fork", failed.ID)
+
+	sessions, err := filepath.Glob(filepath.Join(history, "*.json"))
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("agent sessions = %v (%v), want one", sessions, err)
+	}
+	data, err := os.ReadFile(sessions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompts []string
+	if err := json.Unmarshal(data, &prompts); err != nil {
+		t.Fatal(err)
+	}
+	if len(prompts) != 2 || !strings.Contains(prompts[0], "Assistant:\nhi") || prompts[1] != "fail-first" {
+		t.Fatalf("agent got %q, want the conversation with the first try only", prompts)
+	}
+}
+
+// An agent that can't fork natively (ACP has no stable session/fork) gets
+// the earlier conversation as text in front of the fork's first prompt. The
+// fork shows it apart from the prompt, live and as the agent replays it
+// after a restart.
+func TestRPCForkThreadHandsTheConversationToAnAgentWithoutNativeForks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maid.db")
+	metadata, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	s := newServer(newLoggerFromEnv(), metadata)
+	startFakeACPAgent(t, s, "agent", "-history", t.TempDir())
+	client := newRecordingClient(t, s)
+	cwd := t.TempDir()
+
+	// A client's new chat sends its model as a config selection.
+	startModel := provider.ConfigOptionSelection{OptionID: "model", Value: "test-model-1", Category: provider.ConfigOptionCategoryModel}
+	client.dispatch(t, orchestration.Command{
+		Type: orchestration.CommandThreadStart, ThreadID: "source", ProviderInstanceID: "agent", Cwd: cwd,
+		ConfigSelections: []provider.ConfigOptionSelection{startModel}, Message: &orchestration.CommandMessage{Text: "first"},
+	})
+	first := waitForTurnSettled(t, s, "source", "")
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: "source", Message: &orchestration.CommandMessage{Text: "second"}})
+	second := waitForTurnSettled(t, s, "source", first.ID)
+	// The fork starts on the model the source moved to since.
+	client.subscribeThread(t, "source")
+	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadConfigOptionSet, ThreadID: "source", OptionID: "model", Value: "test-model-2"})
+	client.waitForThreadEvent(t, func(event orchestration.Event) bool {
+		value, ok := configOptionValue(event.Payload.ConfigOptions, "model")
+		return event.Type == orchestration.EventThreadConfigOptionsUpdated && ok && value == "test-model-2"
+	})
+
+	var through wire.ProviderForkThreadResult
+	client.call(t, wire.MethodProviderForkThread, wire.ProviderForkThreadParams{SourceThreadID: "source"}, &through)
+	if through.Draft == nil || through.Draft.ForkContext != "User:\nfirst\n\nAssistant:\nhi\n\nUser:\nsecond\n\nAssistant:\nhi" {
+		t.Fatalf("fork of the whole thread = %+v, want a draft with both turns", through)
+	}
+	var before wire.ProviderForkThreadResult
+	client.call(t, wire.MethodProviderForkThread, wire.ProviderForkThreadParams{SourceThreadID: "source", BeforeTurnID: second.ID}, &before)
+	const conversation = "User:\nfirst\n\nAssistant:\nhi"
+	draft := before.Draft
+	if before.ThreadID != "" || draft == nil || draft.ForkContext != conversation || draft.ProviderInstanceID != "agent" || draft.Cwd != cwd || draft.SourceTitle != "first" {
+		t.Fatalf("fork before the second turn = %+v, want a draft of the first turn in the source's workspace", before)
+	}
+	forkModel := provider.ConfigOptionSelection{OptionID: "model", Value: "test-model-2", Category: provider.ConfigOptionCategoryModel}
+	if !slices.Contains(draft.ConfigSelections, forkModel) {
+		t.Fatalf("draft settings = %+v, want the source's current model %+v", draft.ConfigSelections, forkModel)
+	}
+
+	client.dispatch(t, orchestration.Command{
+		Type: orchestration.CommandThreadStart, ThreadID: "fork", ProviderInstanceID: draft.ProviderInstanceID, Cwd: draft.Cwd,
+		ConfigSelections: draft.ConfigSelections, ForkContext: draft.ForkContext,
+		Message: &orchestration.CommandMessage{MessageID: "edited", Text: "second, edited"},
+	})
+	waitForTurnSettled(t, s, "fork", "")
+	shown := func(c *recordingClient, threadID orchestration.ThreadID, snapshot orchestration.ThreadDetailSnapshot) {
+		t.Helper()
+		var texts []string
+		contextItem := ""
+		for _, entry := range snapshot.Thread.Timeline {
+			switch {
+			case entry.Item != nil && entry.Item.Kind == provider.ItemKindForkContext:
+				contextItem = entry.Item.ID
+			case entry.Message != nil && entry.Message.Role == orchestration.MessageRoleUser:
+				texts = append(texts, entry.Message.Text)
+			}
+		}
+		if contextItem == "" || !slices.Equal(texts, []string{"second, edited"}) {
+			t.Fatalf("fork timeline = %+v, want the handed conversation apart from the prompt", snapshot.Thread.Timeline)
+		}
+		var detail orchestration.Item
+		c.call(t, wire.MethodOrchestrationGetItemDetail, orchestration.GetItemDetailInput{ThreadID: threadID, ItemID: contextItem}, &detail)
+		var payload struct{ Text string }
+		if err := json.Unmarshal(detail.Payload, &payload); err != nil || payload.Text != conversation {
+			t.Fatalf("handed conversation = %s (%v), want %q", detail.Payload, err, conversation)
+		}
+	}
+	started := client.subscribeThread(t, "fork")
+	if model := started.Thread.ModelSelection; model == nil || model.Model != "test-model-2" {
+		t.Fatalf("fork model = %+v, want test-model-2", model)
+	}
+	shown(client, "fork", started)
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("server close: %v", err)
+	}
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restarted := newServer(newLoggerFromEnv(), reopened)
+	defer restarted.Close()
+	reconnected := newRecordingClient(t, restarted)
+	reconnected.subscribeThread(t, "fork")
+	reconnected.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadSessionPrepare, ThreadID: "fork"})
+	replayed := reconnected.waitForThreadSnapshot(t, func(snapshot orchestration.ThreadDetailSnapshot) bool {
+		return snapshot.Thread.ID == "fork" && !snapshot.HistoryRestorePending
+	})
+	shown(reconnected, "fork", *replayed.Snapshot)
 }

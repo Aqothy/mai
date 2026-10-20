@@ -115,6 +115,28 @@ final class ComposerAttachmentsModel {
         }
     }
 
+    /// Adds images sent before, as editing their prompt in a new chat does;
+    /// `data` loads each one's base64 bytes, which messages leave out.
+    func addSentImages(_ images: [Attachment], data: @escaping (Attachment) async throws -> String) {
+        for image in images {
+            let id = UUID()
+            let name = image.name ?? "Image"
+            attachments.append(ChatPendingAttachment(id: id, name: name))
+            Task {
+                do {
+                    let loaded = try await ChatAttachmentLoader.loadSentImage(
+                        data: try await data(image),
+                        mimeType: image.mimeType ?? "application/octet-stream",
+                        name: name
+                    )
+                    finishAttachment(id: id, with: loaded)
+                } catch {
+                    handleProcessingFailure(error, attachmentID: id)
+                }
+            }
+        }
+    }
+
     func remove(id: UUID) {
         attachments.removeAll { $0.id == id }
     }
@@ -393,36 +415,59 @@ enum ChatAttachmentLoader {
             guard data.count <= maximumImageBytes else {
                 throw ChatAttachmentLoadingError.imageTooLarge(name: name)
             }
-            guard
-                let source = CGImageSourceCreateWithData(data as CFData, nil),
-                let image = CGImageSourceCreateThumbnailAtIndex(
-                    source,
-                    0,
-                    [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceShouldCacheImmediately: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 320,
-                    ] as CFDictionary
-                )
-            else {
-                throw ChatAttachmentLoadingError.invalidImage(name: name)
-            }
-            #if os(macOS)
-                let platformImage = NSImage(
-                    cgImage: image,
-                    size: NSSize(width: image.width, height: image.height)
-                )
-            #else
-                let platformImage = UIImage(cgImage: image)
-            #endif
             return ChatLoadedImageAttachment(
                 data: data.base64EncodedString(),
                 mimeType: "image/jpeg",
                 name: name,
-                thumbnail: ChatComposerThumbnail(image: platformImage)
+                thumbnail: try makeThumbnail(ofImageData: data, name: name)
             )
         }.value
+    }
+
+    /// An image a message carried, base64-encoded as it was sent.
+    nonisolated static func loadSentImage(
+        data: String,
+        mimeType: String,
+        name: String
+    ) async throws -> ChatLoadedImageAttachment {
+        try await Task.detached(priority: .userInitiated) {
+            guard let bytes = Data(base64Encoded: data), !bytes.isEmpty else {
+                throw ChatAttachmentLoadingError.invalidImage(name: name)
+            }
+            return ChatLoadedImageAttachment(
+                data: data,
+                mimeType: mimeType,
+                name: name,
+                thumbnail: try makeThumbnail(ofImageData: bytes, name: name)
+            )
+        }.value
+    }
+
+    nonisolated private static func makeThumbnail(ofImageData data: Data, name: String) throws -> ChatComposerThumbnail {
+        guard
+            let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 320,
+                ] as CFDictionary
+            )
+        else {
+            throw ChatAttachmentLoadingError.invalidImage(name: name)
+        }
+        #if os(macOS)
+            let platformImage = NSImage(
+                cgImage: image,
+                size: NSSize(width: image.width, height: image.height)
+            )
+        #else
+            let platformImage = UIImage(cgImage: image)
+        #endif
+        return ChatComposerThumbnail(image: platformImage)
     }
 
     nonisolated private static func jpegData(from image: PlatformImage) -> Data? {

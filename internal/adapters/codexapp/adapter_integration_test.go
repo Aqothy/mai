@@ -95,9 +95,10 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	}
 
 	// Codex keeps a fork loaded, so the fork request itself carries the
-	// source's model and reasoning.
+	// source's model and reasoning. It ends through the chosen turn.
 	fork, err := instance.ForkSession(testContext(t), provider.ForkSessionInput{
 		ProviderSessionID: "native-thread",
+		ThroughTurnID:     "native-earlier-turn",
 		ModelSelection:    &provider.ModelSelection{Model: "fork-model"},
 		ConfigSelections:  []provider.ConfigOptionSelection{{OptionID: "reasoning_effort", Value: "low", Category: provider.ConfigOptionCategoryThoughtLevel}},
 	})
@@ -110,7 +111,8 @@ func TestInstanceStableLifecycleWireFlow(t *testing.T) {
 	completed := waitForRuntimeEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventTurnCompleted
 	})
-	if completed.Payload.TurnState != provider.RuntimeTurnFailed || completed.Payload.Message != "model failed" || completed.Payload.Detail != "retry later" {
+	// The completion names Codex's turn, which a fork through it uses.
+	if completed.Payload.TurnState != provider.RuntimeTurnFailed || completed.Payload.Message != "model failed" || completed.Payload.Detail != "retry later" || completed.Payload.ProviderTurnID != "native-turn" {
 		t.Fatalf("failed turn payload = %#v", completed.Payload)
 	}
 	// A steer that lost the race with the turn's end reports it, so
@@ -1473,7 +1475,7 @@ func runFakeAppServer(scenario string) error {
 					Effort string `json:"model_reasoning_effort"`
 				} `json:"config"`
 			}
-			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.LastTurnID != "" || params.Model != "fork-model" || params.Config.Effort != "low" {
+			if err := decodeFakeParams(message, &params); err != nil || params.ThreadID != "native-thread" || params.LastTurnID != "native-earlier-turn" || params.Model != "fork-model" || params.Config.Effort != "low" {
 				return fmt.Errorf("invalid thread/fork params: %s", fakeMessageJSON(message))
 			}
 			if err := writeFakeResult(encoder, message["id"], fakeThreadResponse("forked-thread")); err != nil {

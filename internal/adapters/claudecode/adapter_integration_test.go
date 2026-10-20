@@ -93,10 +93,12 @@ func fakeCLIMain() {
 			fakeWrite(map[string]any{"type": "user", "isReplay": true, "uuid": uuid, "session_id": sessionID, "parent_tool_use_id": nil, "message": message["message"]})
 		}
 	}
+	assistants := 0
 	emitText := func(text string) {
+		assistants++
 		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}})
 		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": text}}})
-		fakeWrite(map[string]any{"type": "assistant", "session_id": sessionID, "message": map[string]any{"id": "msg_text", "role": "assistant", "content": []map[string]any{{"type": "text", "text": text}}}})
+		fakeWrite(map[string]any{"type": "assistant", "uuid": fmt.Sprintf("assistant-%d", assistants), "session_id": sessionID, "message": map[string]any{"id": "msg_text", "role": "assistant", "content": []map[string]any{{"type": "text", "text": text}}}})
 		fakeWrite(map[string]any{"type": "stream_event", "session_id": sessionID, "event": map[string]any{"type": "content_block_stop", "index": 0}})
 	}
 	for scanner.Scan() {
@@ -520,7 +522,9 @@ func TestUnfoldedSteerKeepsTheTurnOpenForItsQuery(t *testing.T) {
 }
 
 // Output the CLI produces on its own gets a turn of its own, so it is never
-// attributed to no turn or to the user's next one.
+// attributed to no turn or to the user's next one. Each turn's completion
+// names one of its transcript lines, which a fork through it ends with: the
+// prompt written for the user's turn, the first message of the CLI's.
 func TestCLIStartedOutputGetsItsOwnTurn(t *testing.T) {
 	instance, events, _ := openTestInstance(t)
 	if _, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1", Cwd: t.TempDir()}); err != nil {
@@ -529,7 +533,7 @@ func TestCLIStartedOutputGetsItsOwnTurn(t *testing.T) {
 	if err := instance.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "WAKE later"}); err != nil {
 		t.Fatalf("SendTurn: %v", err)
 	}
-	waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
+	first := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
 		return event.Type == provider.RuntimeEventTurnCompleted && event.TurnID == "turn-1"
 	})
 	started := waitForEvent(t, events, func(event provider.RuntimeEvent) bool {
@@ -546,6 +550,12 @@ func TestCLIStartedOutputGetsItsOwnTurn(t *testing.T) {
 	})
 	if delta.TurnID != started.TurnID || done.TurnID != started.TurnID {
 		t.Fatalf("delta turn %q, completion turn %q, want both %q", delta.TurnID, done.TurnID, started.TurnID)
+	}
+	if line := first.Payload.ProviderTurnID; line == "" || strings.HasPrefix(line, "assistant-") {
+		t.Fatalf("user's turn names line %q, want the prompt written for it", line)
+	}
+	if line := done.Payload.ProviderTurnID; line != "assistant-2" {
+		t.Fatalf("CLI's turn names line %q, want its first message assistant-2", line)
 	}
 }
 
@@ -930,7 +940,7 @@ func TestTranscriptSessionManagement(t *testing.T) {
 		t.Fatalf("summaries = %#v", summaries)
 	}
 
-	forked, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID})
+	forked, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID, ThroughTurnID: "u1"})
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
@@ -963,6 +973,54 @@ func TestTranscriptSessionManagement(t *testing.T) {
 	replayedFork := replayEventsFromTranscript("t", lines)
 	if len(replayedFork) != len(replayedSource) {
 		t.Fatalf("fork replays %d events, source %d", len(replayedFork), len(replayedSource))
+	}
+
+	// A fork through a turn ends at that turn's last line. Any of the turn's
+	// lines names it: the line that starts it, as replay names turns, or a
+	// later one, as a live assistant message's uuid does.
+	second := fmt.Sprintf(`{"type":"user","uuid":"u3","parentUuid":"a3","timestamp":"2026-08-21T10:01:00Z","sessionId":%q,"message":{"role":"user","content":"Now ship it"}}`+"\n"+
+		`{"type":"assistant","uuid":"a4","parentUuid":"u3","timestamp":"2026-08-21T10:01:05Z","sessionId":%q,"message":{"id":"msg_3","role":"assistant","content":[{"type":"text","text":"Shipped."}]}}`+"\n", sessionID, sessionID)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err == nil {
+		_, err = file.WriteString(second)
+		_ = file.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationOf := func(sessionID string) []string {
+		t.Helper()
+		lines, err := instance.readTranscript(sessionID)
+		if err != nil {
+			t.Fatalf("read transcript: %v", err)
+		}
+		var messages []string
+		for _, event := range replayEventsFromTranscript("t", lines) {
+			switch {
+			case event.Payload.ItemType == provider.ItemKindUserMessage:
+				messages = append(messages, "user: "+event.Payload.Detail)
+			case event.Type == provider.RuntimeEventContentDelta && event.Payload.StreamKind == provider.RuntimeContentAssistantText:
+				messages = append(messages, "assistant: "+event.Payload.Delta)
+			}
+		}
+		return messages
+	}
+	throughFirst, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID, ThroughTurnID: "a3"})
+	if err != nil {
+		t.Fatalf("ForkSession through a3: %v", err)
+	}
+	if got, want := conversationOf(throughFirst.Summary.SessionID), []string{"user: Fix the bug", "assistant: Done."}; !slices.Equal(got, want) {
+		t.Fatalf("fork through the first turn replays %q, want %q", got, want)
+	}
+	throughSecond, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID, ThroughTurnID: "u3"})
+	if err != nil {
+		t.Fatalf("ForkSession through u3: %v", err)
+	}
+	if got, want := conversationOf(throughSecond.Summary.SessionID), []string{"user: Fix the bug", "assistant: Done.", "user: Now ship it", "assistant: Shipped."}; !slices.Equal(got, want) {
+		t.Fatalf("fork through the second turn replays %q, want %q", got, want)
+	}
+	if _, err := instance.ForkSession(context.Background(), provider.ForkSessionInput{ProviderSessionID: sessionID, ThroughTurnID: "missing"}); err == nil {
+		t.Fatal("fork through a line the session doesn't have succeeded")
 	}
 
 	// A maiD rename names the session the way /rename does.

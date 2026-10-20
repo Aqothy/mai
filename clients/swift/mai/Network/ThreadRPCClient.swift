@@ -21,7 +21,7 @@ protocol ThreadRPCClient: RPCTransportClient {
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
     func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
     func forkProviderThread(_ input: ProviderForkThreadParams) async throws
-        -> ProviderImportSessionResult
+        -> ProviderForkThreadResult
     func deleteProviderSession(_ input: ProviderSessionParams) async throws
     func closeProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
@@ -134,7 +134,7 @@ extension RPCClient: ThreadRPCClient {
     }
 
     func forkProviderThread(_ input: ProviderForkThreadParams) async throws
-        -> ProviderImportSessionResult
+        -> ProviderForkThreadResult
     {
         try await call(MaidRPCMethod.providerForkThread, params: input)
     }

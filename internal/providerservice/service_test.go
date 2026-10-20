@@ -1138,7 +1138,7 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 	instance := &fakeProviderInstance{info: provider.InstanceInfo{
 		InstanceID: "codex", Name: "Codex", Driver: "codex-app-server",
 		Status:       provider.InstanceStatusInitialized,
-		Capabilities: provider.Capabilities{Fork: true, AdditionalDirectories: true},
+		Capabilities: provider.Capabilities{AdditionalDirectories: true},
 	}}
 	instance.startSession = func(input provider.StartSessionInput) (provider.Session, error) {
 		sessionID := input.ProviderSessionID
@@ -1175,7 +1175,7 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	fork, err := s.ForkSession(context.Background(), "thread-source")
+	fork, err := s.ForkSession(context.Background(), "thread-source", "turn-1")
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
@@ -1191,7 +1191,7 @@ func TestForkSessionUsesPrivateRouteAndInheritsWorkspaceRoots(t *testing.T) {
 		return provider.ForkSessionResult{Summary: provider.SessionSummary{SessionID: "native-source"}}, nil
 	}
 	instance.mu.Unlock()
-	if _, err := s.ForkSession(context.Background(), "thread-source"); err == nil || !strings.Contains(err.Error(), "source session id") {
+	if _, err := s.ForkSession(context.Background(), "thread-source", "turn-1"); err == nil || !strings.Contains(err.Error(), "source session id") {
 		t.Fatalf("same-session fork err = %v, want source-id rejection", err)
 	}
 }

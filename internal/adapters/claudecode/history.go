@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -233,7 +234,8 @@ func (h *Instance) CloseSession(_ context.Context, sessionID string) error {
 // ForkSession copies the session into a new one, as the SDK's forkSession
 // does: sidechain and progress lines are dropped, every message gets a new
 // uuid with the parent chain kept, each records what it was forked from, and
-// the fork is titled after its source.
+// the fork is titled after its source. It ends at the last line of the turn
+// it forks through, as the SDK's up_to_message_id does.
 func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
 	if input.ProviderSessionID == "" {
 		return provider.ForkSessionResult{}, fmt.Errorf("Claude Code fork requires a provider session id")
@@ -247,7 +249,11 @@ func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInpu
 	if err != nil {
 		return provider.ForkSessionResult{}, err
 	}
-	forkID, lines, err := forkLines(data, input.ProviderSessionID, firstNonEmpty(title, "Forked session")+" (fork)")
+	upTo, ok := turnEnd(parseTranscript(data), input.ThroughTurnID)
+	if !ok {
+		return provider.ForkSessionResult{}, fmt.Errorf("Claude Code session %q has no turn %q", input.ProviderSessionID, input.ThroughTurnID)
+	}
+	forkID, lines, err := forkLines(data, input.ProviderSessionID, firstNonEmpty(title, "Forked session")+" (fork)", upTo)
 	if err != nil {
 		return provider.ForkSessionResult{}, err
 	}
@@ -265,9 +271,9 @@ func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInpu
 }
 
 // forkLines is the SDK's _build_fork_lines: the fork's transcript lines for
-// a source transcript, and the fork's session id. Values are kept as raw JSON
-// so message content is copied byte for byte.
-func forkLines(data []byte, sourceID, title string) (string, [][]byte, error) {
+// a source transcript through the line upTo, and the fork's session id. Values are kept as raw JSON so message content is
+// copied byte for byte.
+func forkLines(data []byte, sourceID, title, upTo string) (string, [][]byte, error) {
 	type entry = map[string]json.RawMessage
 	var transcript []entry
 	var replacements []json.RawMessage
@@ -295,6 +301,15 @@ func forkLines(data []byte, sourceID, title string) (string, [][]byte, error) {
 			}
 		}
 	}
+	cutoff := slices.IndexFunc(transcript, func(line entry) bool {
+		var id string
+		_ = json.Unmarshal(line["uuid"], &id)
+		return id == upTo
+	})
+	if cutoff < 0 {
+		return "", nil, fmt.Errorf("message %q not found in Claude Code session %q", upTo, sourceID)
+	}
+	transcript = transcript[:cutoff+1]
 	stringOf := func(line entry, key string) string {
 		var value string
 		_ = json.Unmarshal(line[key], &value)

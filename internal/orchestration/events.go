@@ -124,6 +124,9 @@ type EventPayload struct {
 	// ReplayedTurns are the settled turns restored by a history replay. Clients
 	// receive them through the snapshot that replaces the coalesced replay.
 	ReplayedTurns []Turn `json:"-"`
+	// ProviderTurnID is the provider's id for the turn a session-status-set
+	// settles.
+	ProviderTurnID string `json:"-"`
 }
 
 // ThreadID names the thread an event belongs to. Every event constructor

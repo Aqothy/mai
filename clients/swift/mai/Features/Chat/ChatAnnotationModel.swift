@@ -20,6 +20,19 @@ nonisolated struct ChatPendingAnnotation: Identifiable, Equatable, Codable, Send
     }
 }
 
+extension ChatPendingAnnotation {
+    /// An annotation a sent prompt carried, to send again.
+    @MainActor init(_ annotation: PromptAnnotation) {
+        self.init(
+            id: annotation.id,
+            messageID: annotation.messageID,
+            quote: annotation.quote,
+            role: annotation.role,
+            note: annotation.note
+        )
+    }
+}
+
 nonisolated struct ChatAnnotationDraft: Identifiable, Equatable, Sendable {
     let id: String
     let messageID: String?

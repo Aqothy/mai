@@ -210,7 +210,8 @@
         "web_search",
         "image_view",
         "image_generation",
-        "context_compaction"
+        "context_compaction",
+        "fork_context"
       ]
     },
     {

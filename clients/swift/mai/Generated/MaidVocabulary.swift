@@ -180,6 +180,7 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case imageView = "image_view"
     case imageGeneration = "image_generation"
     case contextCompaction = "context_compaction"
+    case forkContext = "fork_context"
 }
 
 /// Lifecycle status of a timeline item.

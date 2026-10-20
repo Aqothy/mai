@@ -273,10 +273,6 @@ final class ThreadStore {
         providerInfo(for: providerID)?.capabilities.additionalDirectories == true
     }
 
-    func providerSupportsFork(_ providerID: String) -> Bool {
-        providerInfo(for: providerID)?.capabilities.fork == true
-    }
-
     func providerInfo(for providerID: String) -> InstanceInfo? {
         if let instance = instancesByID[providerID] {
             return instance
@@ -490,16 +486,6 @@ final class ThreadStore {
         )
     }
 
-    /// Whether the owning provider advertises native thread forking. Keeping
-    /// this capability check in the store ensures unsupported providers never
-    /// expose a dead action in the chat toolbar.
-    func threadSupportsFork(_ threadID: String) -> Bool {
-        guard let thread = sessionsByID[threadID]?.thread,
-            let providerID = providerID(for: thread)
-        else { return false }
-        return providerSupportsFork(providerID)
-    }
-
     func threadIsRunning(_ threadID: String) -> Bool {
         sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
     }
@@ -555,30 +541,31 @@ final class ThreadStore {
         return sessionsByID[threadID]?.thread?.latestTurn?.error
     }
 
-    /// Forks the provider-native conversation and returns the already-imported
-    /// local thread id. The daemon owns native session identity and import
-    /// deduplication, so the client never synthesizes a second local thread.
-    func forkThread(_ sourceThreadID: String) async throws -> String {
+    /// Forks a chat at `point`. The daemon owns native session identity and
+    /// import deduplication, so a native fork is an already-imported chat and
+    /// the client never synthesizes a second local thread.
+    func forkThread(_ sourceThreadID: String, at point: ChatForkPoint) async throws -> ChatFork {
         guard connectionState == .connected else {
             throw RPCError("Reconnect before forking this chat")
         }
-        guard let thread = sessionsByID[sourceThreadID]?.thread else {
-            throw RPCError("This chat is not loaded")
+        var params = ProviderForkThreadParams(beforeTurnID: nil, sourceThreadID: sourceThreadID, throughTurnID: nil)
+        switch point {
+        case .latest:
+            break
+        case .through(let turnID):
+            params.throughTurnID = turnID
+        case .before(let turnID):
+            params.beforeTurnID = turnID
         }
-        guard thread.latestTurn?.turnState != .running else {
-            throw RPCError("Wait for the current response before forking")
+        let result = try await rpc.forkProviderThread(params)
+        if let threadID = result.threadID {
+            prepareThreadSubscription(threadID)
+            return .thread(threadID)
         }
-        guard let providerID = providerID(for: thread),
-            providerSupportsFork(providerID)
-        else {
-            throw RPCError("This provider does not support chat forking")
+        guard let draft = result.draft else {
+            throw RPCError("The daemon returned an empty fork")
         }
-
-        let result = try await rpc.forkProviderThread(
-            ProviderForkThreadParams(sourceThreadID: sourceThreadID)
-        )
-        prepareThreadSubscription(result.threadID)
-        return result.threadID
+        return .draft(draft)
     }
 
     /// Retries the daemon's failed turn in place. The orchestration command
@@ -608,7 +595,8 @@ final class ThreadStore {
         cwd: String,
         additionalDirectories: [String] = [],
         message: CommandMessage,
-        configSelections: [ConfigOptionSelection]
+        configSelections: [ConfigOptionSelection],
+        forkContext: String?
     ) async throws {
         var start = command(
             type: MaidCommandType.threadStart.rawValue,
@@ -617,6 +605,7 @@ final class ThreadStore {
         )
         start.additionalDirectories = additionalDirectories.isEmpty ? nil : additionalDirectories
         start.configSelections = configSelections
+        start.forkContext = forkContext
         start.cwd = cwd
         start.providerInstanceID = providerInstanceID
         _ = try await rpc.dispatchCommand(start)

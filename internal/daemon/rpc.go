@@ -682,11 +682,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		threadID, imported, err := h.server.ForkProviderThread(ctx, params.SourceThreadID)
-		if err != nil {
-			return nil, err
-		}
-		return wire.ProviderImportSessionResult{ThreadID: threadID, Imported: imported}, nil
+		return h.server.ForkProviderThread(ctx, params)
 	case wire.MethodProviderOptionsGet:
 		var params wire.ProviderOptionsGetParams
 		if err := decodeRPCParams(req, &params); err != nil {

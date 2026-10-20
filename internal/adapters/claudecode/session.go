@@ -189,11 +189,11 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	proc.process.Drain(proc.client.done, drainTimeout)
 	h.mu.Lock()
 	closing := proc.closing
-	var endedTurn string
+	var endedTurn, endedLine string
 	var background []string
 	if session.proc == proc {
 		session.proc = nil
-		endedTurn = session.activeLocalTurn
+		endedTurn, endedLine = session.activeLocalTurn, session.turnLine
 		session.endTurnLocked()
 		session.resetStreamStateLocked()
 		for toolUseID := range session.background {
@@ -210,9 +210,9 @@ func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	// The process is gone, so no result will end its turn. Settle it here on
 	// every exit path, deliberate stops included, before stopProcess returns.
 	if endedTurn != "" {
-		payload := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted}
+		payload := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted, ProviderTurnID: endedLine}
 		if !closing {
-			payload = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly"}
+			payload = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly", ProviderTurnID: endedLine}
 		}
 		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: endedTurn, Payload: payload})
 	}
@@ -285,19 +285,21 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		return fmt.Errorf("Claude Code process for thread %q exited during send", input.ThreadID)
 	}
 	busy := session.activeLocalTurn != ""
-	replaced := ""
+	replaced, replacedLine := "", ""
 	if busy {
 		if session.unechoedInput == nil {
 			session.unechoedInput = make(map[string]bool)
 		}
 		session.unechoedInput[uuid] = true
 		if !input.Steer {
-			replaced = session.activeLocalTurn // the CLI's own turn ends where the user's begins
+			// The CLI's own turn ends where the user's begins.
+			replaced, replacedLine = session.activeLocalTurn, session.turnLine
 		}
 	}
 	if !input.Steer {
 		session.activeLocalTurn = input.TurnID
 		session.cliStartedTurn = false
+		session.turnLine = uuid
 	}
 	nativeID := session.nativeSessionID
 	h.mu.Unlock()
@@ -324,7 +326,7 @@ func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) e
 		return nil
 	}
 	if replaced != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: replaced, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted}})
+		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: replaced, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted, ProviderTurnID: replacedLine}})
 	}
 	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: input.ThreadID, TurnID: input.TurnID})
 	return nil
@@ -527,6 +529,7 @@ func (h *Instance) providerSessionLocked(session *claudeSession) provider.Sessio
 func (s *claudeSession) endTurnLocked() {
 	s.activeLocalTurn = ""
 	s.cliStartedTurn = false
+	s.turnLine = ""
 	s.unechoedInput = nil
 }
 

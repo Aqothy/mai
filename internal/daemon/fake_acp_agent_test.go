@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 //	-login           act as the terminal sign-in program: exit 0 at once
 //	-ask-to-sign-in  offer an "ask-login" method that asks for a code (a
 //	                 session-less elicitation) and succeeds only with 1234
+//	-history <dir>   keep each session's prompts in dir, across agent
+//	                 processes, and replay them on session/load
 //
 // Per-turn behavior is scripted by the prompt text; see fakeACPAgent.prompt.
 func fakeACPAgentCommand(flags ...string) []string {
@@ -64,6 +67,7 @@ func TestHelperProcess(t *testing.T) {
 	pidPath := flags.String("pidfile", "", "")
 	login := flags.Bool("login", false, "")
 	askToSignIn := flags.Bool("ask-to-sign-in", false, "")
+	history := flags.String("history", "", "")
 	_ = flags.Parse(args)
 	if *login {
 		fmt.Println("signed in")
@@ -78,6 +82,7 @@ func TestHelperProcess(t *testing.T) {
 	agent := &fakeACPAgent{
 		listOnly:    *listOnly,
 		askToSignIn: *askToSignIn,
+		history:     *history,
 		out:         json.NewEncoder(os.Stdout),
 		cwds:        map[string]string{},
 		parked:      map[string]string{},
@@ -114,6 +119,7 @@ func TestHelperProcess(t *testing.T) {
 type fakeACPAgent struct {
 	listOnly    bool
 	askToSignIn bool
+	history     string
 	// signIn is the authenticate request waiting on its elicitation.
 	signIn json.RawMessage
 
@@ -268,6 +274,10 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 	case "session/new":
 		a.sessionCount++
 		sessionID = fmt.Sprintf("sess-%d", a.sessionCount)
+		if a.history != "" {
+			// Unique across the agent processes sharing the history.
+			sessionID = fmt.Sprintf("sess-%d-%d", os.Getpid(), a.sessionCount)
+		}
 		a.trackSession(sessionID, msg.Params.Cwd)
 		result = map[string]any{"sessionId": sessionID, "configOptions": a.configOptions()}
 	case "session/list":
@@ -278,6 +288,9 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 		result = map[string]any{"sessions": sessions}
 	case "session/load":
 		a.trackSession(sessionID, msg.Params.Cwd)
+		for _, prompt := range a.prompts(sessionID) {
+			a.update(sessionID, map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": prompt}})
+		}
 		a.chunk(sessionID, "replayed")
 	case "session/resume":
 		a.trackSession(sessionID, msg.Params.Cwd)
@@ -299,12 +312,40 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 				break
 			}
 		}
-		a.prompt(msg.ID, sessionID, text)
+		a.remember(sessionID, text)
+		// A conversation handed to a fork comes in front of the prompt that
+		// names the script.
+		_, script, _ := provider.SplitForkContext(text)
+		a.prompt(msg.ID, sessionID, script)
 		return
 	default:
 		fakeAgentFail("unexpected request: %s", line)
 	}
 	a.result(msg.ID, result)
+}
+
+// remember keeps a prompt in the session's history.
+func (a *fakeACPAgent) remember(sessionID, text string) {
+	if a.history == "" {
+		return
+	}
+	prompts, err := json.Marshal(append(a.prompts(sessionID), text))
+	if err == nil {
+		err = os.WriteFile(filepath.Join(a.history, sessionID+".json"), prompts, 0o644)
+	}
+	if err != nil {
+		fakeAgentFail("remember prompt: %v", err)
+	}
+}
+
+func (a *fakeACPAgent) prompts(sessionID string) []string {
+	var prompts []string
+	if a.history != "" {
+		if data, err := os.ReadFile(filepath.Join(a.history, sessionID+".json")); err == nil {
+			_ = json.Unmarshal(data, &prompts)
+		}
+	}
+	return prompts
 }
 
 // prompt runs the turn script named by the prompt text. This is the place to
@@ -316,6 +357,7 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 //	"permission"                    request permission, then echo "perm:<optionId>"
 //	"block [gateDir]"               park until session/cancel; with gateDir, write
 //	                                gateDir/ready and finish with "hi" once gateDir/release exists
+//	"fail-first"                    with -history, fail as the session's first prompt, else "hi"
 //	anything else                   a single "hi" chunk
 func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string) {
 	fields := strings.Fields(text)
@@ -359,6 +401,13 @@ func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string)
 				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
 			},
 		}})
+	case "fail-first":
+		if len(a.prompts(sessionID)) == 1 {
+			a.write(map[string]any{"id": id, "error": map[string]any{"code": -32603, "message": "model failed"}})
+			return
+		}
+		a.chunk(sessionID, "hi")
+		a.result(id, endTurn)
 	case "block":
 		a.parked[sessionID] = string(id)
 		if gate := strings.TrimSpace(strings.TrimPrefix(text, "block")); gate != "" {

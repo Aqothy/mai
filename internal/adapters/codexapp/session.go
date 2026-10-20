@@ -471,6 +471,7 @@ func (h *Instance) ForkSession(ctx context.Context, input provider.ForkSessionIn
 	// settings; the fork itself must carry the source's model and reasoning.
 	params := threadSettingsParams(modelEffortAndTier(input.ModelSelection, input.ConfigSelections))
 	params["threadId"] = input.ProviderSessionID
+	params["lastTurnId"] = input.ThroughTurnID
 	// The fork's history is read when its thread opens; full-history
 	// hydration is deprecated.
 	params["excludeTurns"] = true

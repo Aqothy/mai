@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/adapters/acp"
 	"github.com/Aqothy/maiD/internal/adapters/claudecode"
 	"github.com/Aqothy/maiD/internal/adapters/codexapp"
@@ -78,6 +80,12 @@ func NewServer() *Server {
 }
 
 func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
+	return newServerWithProviders(logger, metadata, openProviderInstance)
+}
+
+// newServerWithProviders is newServer with the provider instances that
+// openInstance opens.
+func newServerWithProviders(logger *slog.Logger, metadata *store.SQLite, openInstance providerservice.InstanceFactory) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		logger:                  logger,
@@ -112,7 +120,7 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 		providerOptions = append(providerOptions, providerservice.WithPromptStore(metadata))
 		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
 	}
-	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
+	s.providerService = providerservice.New(openInstance, providerOptions...)
 	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
 		InstanceID: "codex-app-server",
 		Name:       "Codex",
@@ -405,34 +413,51 @@ func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.
 	return threadID, imported, nil
 }
 
-// ForkProviderThread asks the owning provider to fork its native conversation,
-// then commits the returned native session through the ordinary import path.
-// This keeps fork identity, persistence, and duplicate protection identical to
-// provider-discovered sessions.
-func (s *Server) ForkProviderThread(ctx context.Context, sourceThreadID orchestration.ThreadID) (orchestration.ThreadID, bool, error) {
-	if s.metadataStore == nil {
-		return "", false, fmt.Errorf("provider session fork requires metadata persistence")
-	}
-	source, ok := s.orchestration.ThreadListEntry(sourceThreadID)
-	if !ok {
-		return "", false, fmt.Errorf("thread %q not found", sourceThreadID)
-	}
-	if source.LatestTurn != nil && source.LatestTurn.State == orchestration.TurnStateRunning {
-		return "", false, fmt.Errorf("cannot fork thread %q while its turn is running", sourceThreadID)
-	}
-	fork, err := s.providerService.ForkSession(ctx, string(sourceThreadID))
+// ForkProviderThread forks a thread. The provider forks its native
+// conversation when it can, and the fork is committed through the ordinary
+// import path, so fork identity, persistence, and duplicate protection are
+// identical to provider-discovered sessions. Otherwise the fork is a draft
+// that hands the conversation to a new session as text.
+func (s *Server) ForkProviderThread(ctx context.Context, params wire.ProviderForkThreadParams) (wire.ProviderForkThreadResult, error) {
+	source, err := s.orchestration.ForkSource(params.SourceThreadID, params.ThroughTurnID, params.BeforeTurnID)
 	if err != nil {
-		return "", false, err
+		return wire.ProviderForkThreadResult{}, err
+	}
+	if source.ThroughTurnID != "" {
+		switch threadID, err := s.forkNatively(ctx, params.SourceThreadID, source.Title, source.ThroughTurnID); {
+		case err == nil:
+			return wire.ProviderForkThreadResult{ThreadID: threadID}, nil
+		case !errors.Is(err, providerservice.ErrNoNativeFork):
+			return wire.ProviderForkThreadResult{}, err
+		}
+	}
+	return wire.ProviderForkThreadResult{Draft: &wire.ForkDraft{
+		SourceTitle:           source.Title,
+		ProviderInstanceID:    source.ProviderInstanceID,
+		Cwd:                   source.Cwd,
+		AdditionalDirectories: source.AdditionalDirectories,
+		ConfigSelections:      source.ConfigSelections,
+		ForkContext:           source.Conversation,
+	}}, nil
+}
+
+func (s *Server) forkNatively(ctx context.Context, sourceThreadID orchestration.ThreadID, sourceTitle, throughTurnID string) (orchestration.ThreadID, error) {
+	if s.metadataStore == nil {
+		return "", fmt.Errorf("provider session fork requires metadata persistence")
+	}
+	fork, err := s.providerService.ForkSession(ctx, string(sourceThreadID), throughTurnID)
+	if err != nil {
+		return "", err
 	}
 	if fork.Summary.Title == "" {
-		fork.Summary.Title = source.Title + " (fork)"
+		fork.Summary.Title = sourceTitle + " (fork)"
 	}
-	threadID, imported, err := s.ImportProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
+	threadID, _, err := s.ImportProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
 	if err != nil {
 		s.cleanupUnpersistedProviderFork(ctx, fork.InstanceID, fork.Summary.SessionID)
-		return "", false, err
+		return "", err
 	}
-	return threadID, imported, nil
+	return threadID, nil
 }
 
 func (s *Server) cleanupUnpersistedProviderFork(ctx context.Context, instanceID provider.InstanceID, sessionID string) {

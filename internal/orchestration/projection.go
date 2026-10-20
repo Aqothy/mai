@@ -286,7 +286,7 @@ func (p *Projection) applyThreadSessionStatusSet(event Event) {
 	session.UpdatedAt = event.OccurredAt
 	thread.Session = session
 	p.applySessionBindingFields(thread, session)
-	p.applySessionTurnState(thread, session, event.Payload.StopReason, event.OccurredAt)
+	p.applySessionTurnState(thread, session, event.Payload.StopReason, event.Payload.ProviderTurnID, event.OccurredAt)
 }
 
 func (p *Projection) applyThreadHistoryReplayCompleted(event Event) {
@@ -329,7 +329,7 @@ func (p *Projection) applySessionBindingFields(thread *Thread, session *SessionB
 	}
 }
 
-func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason provider.StopReason, occurredAt time.Time) {
+func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBinding, stopReason provider.StopReason, providerTurnID string, occurredAt time.Time) {
 	if session.ActiveTurnID != "" {
 		if thread.LatestTurn == nil || thread.LatestTurn.ID != session.ActiveTurnID {
 			replaceLatestTurn(thread, Turn{ID: session.ActiveTurnID, State: TurnStateRunning, RequestedAt: occurredAt, StartedAt: &occurredAt})
@@ -344,6 +344,7 @@ func (p *Projection) applySessionTurnState(thread *Thread, session *SessionBindi
 	completed := occurredAt
 	thread.LatestTurn.InterruptRequested = false
 	thread.LatestTurn.StopReason = stopReason
+	thread.LatestTurn.ProviderTurnID = providerTurnID
 	switch session.Status {
 	case SessionStatusError:
 		thread.LatestTurn.State = TurnStateError

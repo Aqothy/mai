@@ -5,6 +5,8 @@ struct ChatView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
     let openThread: ((String) -> Void)?
+    /// Shows the new-chat draft.
+    let openDraft: (() -> Void)?
 
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
@@ -22,11 +24,13 @@ struct ChatView: View {
         draftStore: ThreadDraftStore,
         projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
         initialWorkingDirectory: String? = nil,
-        openThread: ((String) -> Void)? = nil
+        openThread: ((String) -> Void)? = nil,
+        openDraft: (() -> Void)? = nil
     ) {
         self.store = store
         self.draftStore = draftStore
         self.openThread = openThread
+        self.openDraft = openDraft
         _draftModel = State(
             initialValue: DraftPromptModel(
                 store: store,
@@ -144,22 +148,13 @@ struct ChatView: View {
         .navigationTitle(selectedThreadTitle)
         .inlineNavigationBarTitle()
         .toolbar {
-            if let chatModel, openThread != nil,
-                store.threadSupportsFork(chatModel.threadID)
-            {
+            if let chatModel, let forkAction {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Fork Chat", systemImage: "arrow.triangle.branch") {
-                        Task {
-                            guard let threadID = await chatModel.forkThread() else { return }
-                            openThread?(threadID)
-                        }
+                        forkAction(.latest)
                     }
-                    .disabled(!chatModel.canForkThread)
-                    .accessibilityHint(
-                        store.threadIsRunning(chatModel.threadID)
-                            ? "Available after the current response finishes"
-                            : "Creates a new chat from this conversation"
-                    )
+                    .disabled(!chatModel.canFork)
+                    .accessibilityHint("Creates a new chat from this conversation’s finished turns")
                 }
             }
         }
@@ -328,6 +323,7 @@ struct ChatView: View {
             annotationModel: annotationModel,
             textLayoutStore: textLayoutStore
         )
+        .environment(\.chatFork, forkAction)
         .id(thread.id)
         .onAppear {
             // Whether mounted through the warm pass or the primed fast
@@ -344,6 +340,23 @@ struct ChatView: View {
         thread.latestTurn?.turnState == .running
             ? thread.latestTurn?.turnID
             : nil
+    }
+
+    /// Forks the open chat and opens the fork.
+    private var forkAction: ChatForkAction? {
+        guard let chatModel, let openThread, let openDraft else { return nil }
+        return ChatForkAction { point, prompt in
+            Task {
+                switch await chatModel.fork(at: point, editing: prompt) {
+                case .thread(let threadID):
+                    openThread(threadID)
+                case .draft:
+                    openDraft()
+                case nil:
+                    break
+                }
+            }
+        }
     }
 
     private var selectedThreadTitle: String {
@@ -434,7 +447,7 @@ private struct ChatComposerStack: View {
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
-                annotations: chatModel?.annotations ?? [],
+                annotations: chatModel?.annotations ?? draftModel.annotations,
                 promptCompletion: promptCompletion,
                 commands: state.slashCommands,
                 skills: state.skills,
@@ -459,7 +472,11 @@ private struct ChatComposerStack: View {
                     draftModel.removeAttachment(id: id)
                 }
             } removeAnnotation: { id in
-                annotationModel.remove(id: id)
+                if chatModel == nil {
+                    draftModel.removeAnnotation(id: id)
+                } else {
+                    annotationModel.remove(id: id)
+                }
             } leadingControls: {
                 ComposerAddMenu(
                     isImageAttachmentAvailable: supportsImageAttachments,
@@ -913,6 +930,7 @@ struct ChatTimeline: View {
     @State private var settledPreparationGeneration = 0
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.chatFork) private var chatFork
 
     /// Retained by the thread session across short navigation round trips.
     let textLayoutStore: ChatTextLayoutStore
@@ -998,6 +1016,8 @@ struct ChatTimeline: View {
                             threadID: threadID, store: store, foldModel: foldModel,
                             scrollState: scrollState, annotationModel: annotationModel, textLayoutStore: textLayoutStore
                         )
+                        // Natively hosted rows don't inherit this view's environment.
+                        .environment(\.chatFork, chatFork)
                         .id(nativeItems[index].id)
                         .frame(width: rowWidth)
                         .frame(maxWidth: .infinity)
@@ -2274,6 +2294,10 @@ private struct ChatTimelineRow: View {
                 }
             case .notice(let item):
                 ChatNoticeRow(item: item)
+            case .forkContext(let item):
+                ChatForkContextRow(item: item, threadID: threadID, store: store)
+            case .turnFork(let fork):
+                ChatTurnForkRow(fork: fork)
             case .approval(let approval):
                 ChatRequestRow(approval: approval, threadID: threadID, store: store)
                     // A request reopened after its resolution is a new one

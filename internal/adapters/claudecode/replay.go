@@ -17,9 +17,41 @@ import (
 // such. Event ids are deterministic and timestamps are nudged by microsecond
 // offsets so ordering is stable, mirroring codexapp replay.
 func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provider.RuntimeEvent {
-	r := &replay{threadID: threadID, tools: make(map[string]*replayTool)}
-	// A title the user chose wins over one the CLI generated.
-	customTitle, aiTitle := "", ""
+	r := replayTranscript(threadID, lines)
+	// Tools with no recorded result were cut off mid-flight.
+	for id, tool := range r.tools {
+		if tool.state.itemKind == "" {
+			continue
+		}
+		call := tool.state.call
+		r.events = append(r.events, provider.RuntimeEvent{
+			EventID: replayEventID(tool.turnID, id, "completed"), Type: provider.RuntimeEventItemCompleted,
+			Provider: DriverKind, ThreadID: threadID, TurnID: tool.turnID, ItemID: id, CreatedAt: tool.at.Add(time.Millisecond),
+			Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: provider.ItemStatusInterrupted, Title: tool.state.title, ToolCall: &call},
+		})
+	}
+	r.endTurn(r.lastAt.Add(time.Microsecond))
+	if title := firstNonEmpty(r.customTitle, r.aiTitle); title != "" {
+		r.events = append(r.events, provider.RuntimeEvent{
+			EventID: provider.RuntimeEventID("claude:replay:title"), Type: provider.RuntimeEventThreadMetadataUpdate,
+			Provider: DriverKind, ThreadID: threadID, CreatedAt: r.lastAt.Add(2 * time.Microsecond),
+			Payload: provider.RuntimeEventPayload{Title: title},
+		})
+	}
+	return r.events
+}
+
+// turnEnd is the uuid of the last line of the turn that has the line uuid,
+// the line a fork through that turn ends at.
+func turnEnd(lines []transcriptLine, uuid string) (string, bool) {
+	r := replayTranscript("", lines)
+	end, ok := r.turnEnds[r.lineTurns[uuid]]
+	return end, ok
+}
+
+// replayTranscript walks the conversation's lines into turns.
+func replayTranscript(threadID string, lines []transcriptLine) *replay {
+	r := &replay{threadID: threadID, tools: make(map[string]*replayTool), lineTurns: make(map[string]string), turnEnds: make(map[string]string)}
 	onConversation := conversation(lines)
 	for index, line := range lines {
 		if line.IsSidechain || line.chained() && !onConversation[index] {
@@ -27,9 +59,9 @@ func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provi
 		}
 		switch line.Type {
 		case "custom-title":
-			customTitle = firstNonEmpty(line.CustomTitle, customTitle)
+			r.customTitle = firstNonEmpty(line.CustomTitle, r.customTitle)
 		case "ai-title":
-			aiTitle = firstNonEmpty(line.AITitle, aiTitle)
+			r.aiTitle = firstNonEmpty(line.AITitle, r.aiTitle)
 		case "system":
 			if line.Subtype == "compact_boundary" && r.turn != "" {
 				itemID := "compaction:" + line.UUID
@@ -58,28 +90,12 @@ func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provi
 		case "assistant":
 			r.assistant(line)
 		}
-	}
-	// Tools with no recorded result were cut off mid-flight.
-	for id, tool := range r.tools {
-		if tool.state.itemKind == "" {
-			continue
+		if r.turn != "" && line.chained() {
+			r.lineTurns[line.UUID] = r.turn
+			r.turnEnds[r.turn] = line.UUID
 		}
-		call := tool.state.call
-		r.events = append(r.events, provider.RuntimeEvent{
-			EventID: replayEventID(tool.turnID, id, "completed"), Type: provider.RuntimeEventItemCompleted,
-			Provider: DriverKind, ThreadID: threadID, TurnID: tool.turnID, ItemID: id, CreatedAt: tool.at.Add(time.Millisecond),
-			Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: provider.ItemStatusInterrupted, Title: tool.state.title, ToolCall: &call},
-		})
 	}
-	r.endTurn(r.lastAt.Add(time.Microsecond))
-	if title := firstNonEmpty(customTitle, aiTitle); title != "" {
-		r.events = append(r.events, provider.RuntimeEvent{
-			EventID: provider.RuntimeEventID("claude:replay:title"), Type: provider.RuntimeEventThreadMetadataUpdate,
-			Provider: DriverKind, ThreadID: threadID, CreatedAt: r.lastAt.Add(2 * time.Microsecond),
-			Payload: provider.RuntimeEventPayload{Title: title},
-		})
-	}
-	return r.events
+	return r
 }
 
 type replayTool struct {
@@ -99,6 +115,10 @@ type replay struct {
 	turnMessage string
 	lastAt      time.Time
 	offset      int
+	// lineTurns is the turn of each line; turnEnds is each turn's last line.
+	lineTurns, turnEnds map[string]string
+	// A title the user chose wins over one the CLI generated.
+	customTitle, aiTitle string
 }
 
 func replayEventID(turn, item, suffix string) provider.RuntimeEventID {

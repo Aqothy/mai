@@ -276,6 +276,39 @@ struct ChatTimelineLayoutTests {
         }
     }
 
+    /// A settled turn ends with one fork row that edits its own prompt, even
+    /// when a retry splits it around the failed attempt; a running turn has
+    /// none.
+    @Test
+    func settledTurnsEndWithTheirForkRow() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        func turn(_ id: String, _ state: MaidTurnState) -> Turn {
+            Turn(
+                completedAt: state == .running ? nil : start, error: nil, interruptRequested: nil,
+                requestedAt: start, startedAt: start, state: state.rawValue, stopReason: nil,
+                turnID: id)
+        }
+        let result = rows(
+            [messageEntry(id: "m1", role: .user, turnID: "turn-2", text: "retried prompt"),
+             itemEntry(id: "e1", kind: .error, turnID: "turn-1"),
+             itemEntry(id: "i1", kind: .toolCall, turnID: "turn-2"),
+             assistantMessageEntry(id: "m2", turnID: "turn-2"),
+             messageEntry(id: "m3", role: .user, turnID: "turn-3", text: "running prompt")],
+            streaming: "turn-3",
+            latestTurn: turn("turn-3", .running),
+            previousTurns: [turn("turn-1", .error), turn("turn-2", .completed)]
+        )
+        let forks = result.compactMap { row -> ChatTurnFork? in
+            if case .turnFork(let fork) = row { return fork }
+            return nil
+        }
+        #expect(forks.map(\.turnID) == ["turn-1", "turn-2"])
+        #expect(forks.map(\.prompt?.text) == [nil, "retried prompt"])
+        let turn2Fork = result.firstIndex { $0.id == "fork-turn-2" }
+        #expect(turn2Fork == result.firstIndex { $0.id == "message-m3" }.map { $0 - 1 })
+        #expect(Set(result.map(\.id)).count == result.count)
+    }
+
     /// The header appears as soon as the turn starts, before any activity.
     @Test
     func runningTurnShowsHeaderBeforeFirstActivity() {
@@ -452,6 +485,8 @@ private func kindLabel(_ row: ChatTimelineRowModel) -> String {
     case .activityGroup: "group"
     case .notice: "notice"
     case .approval: "approval"
+    case .forkContext: "forkContext"
+    case .turnFork: "fork"
     }
 }
 

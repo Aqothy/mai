@@ -107,7 +107,7 @@
     {
       "name": "provider.forkThread",
       "params": "ProviderForkThreadParams",
-      "result": "ProviderImportSessionResult"
+      "result": "ProviderForkThreadResult"
     },
     {
       "name": "provider.options.get",
