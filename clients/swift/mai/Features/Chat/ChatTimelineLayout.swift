@@ -51,6 +51,10 @@ nonisolated enum ChatTimelineLayout {
                 isRunning: section.isRunning || section.id == liveTurnID,
                 isExpanded: expandedSectionIDs.contains(section.id)
             )
+            // Why a turn stopped when no one stopped it: maiD itself did.
+            if section.turn.turnState == .interrupted, let error = section.turn.error, !error.isEmpty {
+                rows.append(.stopNote(ChatTurnStopNote(turnID: section.id, text: error)))
+            }
             rows.append(contentsOf: (requestsByTurn[section.id] ?? []).map(ChatTimelineRowModel.request))
             // Any settled turn forks; one a prompt started also edits it.
             if section.turn.turnState?.isSettled == true {
@@ -336,6 +340,7 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
     case handoff(ChatItem)
     /// What another agent or maiD said to this one.
     case envelope(ChatItem)
+    case stopNote(ChatTurnStopNote)
     case turnFork(ChatTurnFork)
 
     var id: String {
@@ -348,9 +353,19 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
         case .request(let request): "request-\(request.id)"
         case .handoff(let item): "handoff-\(item.id)"
         case .envelope(let item): "envelope-\(item.id)"
+        case .stopNote(let note): note.id
         case .turnFork(let fork): fork.id
         }
     }
+}
+
+/// What the daemon recorded about a turn it cut off, such as maiD stopping
+/// while it ran.
+nonisolated struct ChatTurnStopNote: Identifiable, Equatable {
+    let turnID: String
+    let text: String
+
+    var id: String { "stop-note-\(turnID)" }
 }
 
 /// The turn's work header: a live "Working" timer while the turn runs, and

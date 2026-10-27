@@ -53,11 +53,12 @@ enum ThreadFixtures {
         state: MaidTurnState = .completed,
         startedAt: Date = .now,
         settledAt: Date? = nil,
+        error: String? = nil,
         entries: [EntryView]
     ) -> TurnView {
         TurnView(
             entries: entries,
-            error: nil,
+            error: error,
             id: id,
             participant: participant,
             settledAt: state == .running ? nil : settledAt ?? startedAt,

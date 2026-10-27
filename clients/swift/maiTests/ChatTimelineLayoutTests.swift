@@ -263,6 +263,22 @@ struct ChatTimelineLayoutTests {
         #expect(Set(result.map(\.id)).count == result.count)
     }
 
+    /// A turn maiD cut off says so after its content, even when the agent
+    /// did nothing before it stopped; a turn a person stopped has no note.
+    @Test
+    func aTurnMaiDCutOffSaysSo() {
+        let cutOff = ThreadFixtures.turn(
+            id: "turn-1", state: .interrupted, error: "maiD stopped while this turn ran.", entries: [user("m1")])
+        let stopped = ThreadFixtures.turn(id: "turn-2", state: .interrupted, entries: [user("m2")])
+        let result = rows([cutOff, stopped])
+        #expect(result.map(kindLabel) == ["message", "stopNote", "fork", "message", "fork"])
+        let note = result.compactMap { row -> ChatTurnStopNote? in
+            if case .stopNote(let note) = row { return note }
+            return nil
+        }
+        #expect(note.map(\.text) == ["maiD stopped while this turn ran."])
+    }
+
     /// The header appears as soon as the turn starts, before any activity.
     @Test
     func runningTurnShowsHeaderBeforeFirstActivity() {
@@ -384,6 +400,7 @@ private func kindLabel(_ row: ChatTimelineRowModel) -> String {
     case .request: "request"
     case .handoff: "handoff"
     case .envelope: "envelope"
+    case .stopNote: "stopNote"
     case .turnFork: "fork"
     }
 }

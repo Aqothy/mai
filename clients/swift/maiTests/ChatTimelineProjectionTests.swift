@@ -116,6 +116,8 @@ final class ChatTimelineProjectionTests: XCTestCase {
                 return "\(row.id)|\(request.isOpen)|\(request.actionID ?? "none")"
             case .turnActivity(let activity):
                 return "\(row.id)|\(activity.stepCount)|\(activity.isRunning)"
+            case .stopNote(let note):
+                return "\(row.id)|\(note.text)"
             case .turnFork(let fork):
                 return "\(row.id)|\(fork.prompt?.id ?? "")"
             }

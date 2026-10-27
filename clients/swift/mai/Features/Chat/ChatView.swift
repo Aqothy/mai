@@ -2257,6 +2257,12 @@ private struct ChatTimelineRow: View {
                 ChatHandoffRow(item: item, threadID: threadID, store: store)
             case .envelope(let item):
                 ChatEnvelopeRow(item: item)
+            case .stopNote(let note):
+                Label(note.text, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
             case .turnFork(let fork):
                 ChatTurnForkRow(fork: fork)
             case .request(let request):
