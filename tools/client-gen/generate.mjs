@@ -43,7 +43,7 @@ if (catalogStart < 0 || catalogModel < 0 || firstModel < 0) {
 }
 swiftSource = swiftSource.slice(0, catalogStart) + swiftSource.slice(firstModel);
 
-if (!swiftSource.includes("public var timeline: [TimelineEntry]")) {
+if (!swiftSource.includes("public var turns: [TurnView]")) {
   throw new Error("quicktype did not generate mutable model properties");
 }
 
