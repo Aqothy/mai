@@ -16,19 +16,21 @@ type command struct {
 	// joinsTurn says the command runs inside a turn Codex is running. The
 	// others replace that turn, so they can't be steered into one.
 	joinsTurn bool
-	run       func(h *Instance, ctx context.Context, send turnSend) error
+	run       func(h *Instance, ctx context.Context, send turnSend) (provider.SendAck, error)
 	// complete, if set, suggests the command's input.
 	complete func(ctx context.Context, cwd, input string) []provider.CommandCompletion
 }
 
-// turnSend is a prompt or command the user sent on a turn.
+// turnSend is a command sent to a thread: as its own turn, or into the turn
+// running.
 type turnSend struct {
-	localThread  string
-	turn         string
-	nativeThread string
-	cwd          string
-	args         string
-	placement    placement
+	thread   string
+	delivery string
+	text     string
+	cwd      string
+	args     string
+	// running is the turn Codex runs, which a command that joins runs in.
+	running string
 }
 
 const goalUsage = "[<objective>|clear|pause|resume]"
@@ -68,11 +70,16 @@ func (h *Instance) CompleteCommand(ctx context.Context, input provider.CompleteC
 
 // parseCommand finds the command a prompt runs, and its arguments. Text after
 // a command that takes no input makes the prompt an ordinary one.
-func parseCommand(input provider.SendTurnInput) (command, string, bool) {
+func parseCommand(input provider.SendInput) (command, string, bool) {
 	if len(input.Attachments) > 0 {
 		return command{}, "", false
 	}
-	text := strings.TrimSpace(input.Input)
+	envelopes, own := provider.SplitMessage(input.Text)
+	if len(envelopes) > 0 {
+		// Only a person's own words run a command.
+		return command{}, "", false
+	}
+	text := strings.TrimSpace(own)
 	name, args := text, ""
 	if index := strings.IndexFunc(text, unicode.IsSpace); index >= 0 {
 		name, args = text[:index], strings.TrimSpace(text[index:])
@@ -88,58 +95,81 @@ func parseCommand(input provider.SendTurnInput) (command, string, bool) {
 	return command{}, "", false
 }
 
-func (h *Instance) runCompact(ctx context.Context, send turnSend) error {
-	return h.startOperation(ctx, send, "thread/compact/start", map[string]any{"threadId": send.nativeThread})
+func (h *Instance) runCompact(ctx context.Context, send turnSend) (provider.SendAck, error) {
+	return h.startOperation(ctx, send, "thread/compact/start", map[string]any{"threadId": send.thread})
 }
 
-func (h *Instance) runShell(ctx context.Context, send turnSend) error {
-	params := map[string]any{"threadId": send.nativeThread, "command": send.args}
-	if send.placement != ownTurn {
+func (h *Instance) runShell(ctx context.Context, send turnSend) (provider.SendAck, error) {
+	params := map[string]any{"threadId": send.thread, "command": send.args}
+	if send.running != "" {
 		// The command runs inside the running turn and reports there.
-		return h.rpc.call(ctx, "thread/shellCommand", params, nil)
+		if err := h.rpc.call(ctx, "thread/shellCommand", params, nil); err != nil {
+			return provider.SendAck{}, err
+		}
+		h.emitTyped(send.thread, send.running, send.delivery, send.text)
+		return provider.SendAck{Turn: send.running}, nil
 	}
 	return h.startOperation(ctx, send, "thread/shellCommand", params)
 }
 
 // startOperation runs an app-server operation that Codex runs as a turn,
-// which takes the pending turn: review/start names it, and compaction and
-// shell commands start it with turn/started.
-func (h *Instance) startOperation(ctx context.Context, send turnSend, method string, params map[string]any) error {
-	h.await(send, awaitsCodexTurn)
+// which carries the delivery: review/start names it, and compaction and shell
+// commands start it with turn/started (the ack then names none).
+func (h *Instance) startOperation(ctx context.Context, send turnSend, method string, params map[string]any) (provider.SendAck, error) {
+	h.mu.Lock()
+	h.sessionLocked(send.thread).pending = &pendingTurn{delivery: send.delivery, awaits: awaitsCodexTurn, text: send.text}
+	h.mu.Unlock()
 	var response struct {
 		Turn *appTurn `json:"turn"`
 	}
 	if err := h.rpc.call(ctx, method, params, &response); err != nil {
-		return h.refuse(send, err)
+		h.dropPending(send.thread, send.delivery)
+		return provider.SendAck{}, err
 	}
-	if response.Turn != nil {
-		h.adoptTurn(send.localThread, send.turn, response.Turn.ID)
+	if response.Turn != nil && response.Turn.ID != "" {
+		return h.named(send.thread, send.delivery, response.Turn.ID), nil
 	}
-	return nil
+	return provider.SendAck{}, nil
 }
 
-func (h *Instance) runGoal(ctx context.Context, send turnSend) error {
+// runGoal shows, clears, pauses, resumes or sets the goal. Inside a running
+// turn its result joins that turn; otherwise it gets a turn of its own, once
+// a change Codex reports (thread/goal/updated) is in.
+func (h *Instance) runGoal(ctx context.Context, send turnSend) (provider.SendAck, error) {
 	action := parseGoalAction(send.args)
 	if !action.sets() {
-		report, err := h.readOrClearGoal(ctx, send.nativeThread, action)
+		report, err := h.readOrClearGoal(ctx, send.thread, action)
 		if err != nil {
-			return h.refuse(send, err)
+			return provider.SendAck{}, err
 		}
-		h.finishCommand(send, report)
-		return nil
+		return h.commandDone(send, report), nil
 	}
-	if send.placement == ownTurn {
-		h.await(send, awaitsGoalUpdate)
+	if send.running == "" {
+		h.mu.Lock()
+		h.sessionLocked(send.thread).pending = &pendingTurn{delivery: send.delivery, awaits: awaitsGoalUpdate, text: send.text}
+		h.mu.Unlock()
 	}
-	goal, err := h.setGoal(ctx, send.nativeThread, action, send.args)
+	goal, err := h.setGoal(ctx, send.thread, action, send.args)
 	if err != nil {
-		return h.refuse(send, err)
+		h.dropPending(send.thread, send.delivery)
+		return provider.SendAck{}, err
 	}
-	if send.placement != ownTurn {
-		h.finishCommand(send, goalReport(goal))
+	if send.running != "" {
+		return h.commandDone(send, goalReport(goal)), nil
 	}
-	// Otherwise the change's thread/goal/updated finishes it.
-	return nil
+	// The change's thread/goal/updated gives it its turn.
+	return provider.SendAck{}, nil
+}
+
+// commandDone reports a command's result: in the running turn it joined, or
+// in a turn of its own.
+func (h *Instance) commandDone(send turnSend, report string) provider.SendAck {
+	if send.running != "" {
+		h.emitTyped(send.thread, send.running, send.delivery, send.text)
+		h.emitReport(send.thread, send.running, send.delivery, report)
+		return provider.SendAck{Turn: send.running}
+	}
+	return h.reportTurn(send, report)
 }
 
 // goalAction is what a /goal command does, after the Codex TUI's /goal.

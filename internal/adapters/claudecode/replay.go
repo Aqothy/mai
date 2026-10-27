@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -10,177 +9,108 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// replayEventsFromTranscript rebuilds the event stream a session produced
-// live from its transcript, so a reopened thread shows what the user saw:
-// only the current conversation (see conversation), one turn per prompt,
-// steers inside their turn, and turns that were interrupted or failed as
-// such. Event ids are deterministic and timestamps are nudged by microsecond
-// offsets so ordering is stable, mirroring codexapp replay.
-func replayEventsFromTranscript(threadID string, lines []transcriptLine) []provider.RuntimeEvent {
-	r := replayTranscript(threadID, lines)
-	// Tools with no recorded result were cut off mid-flight.
-	for id, tool := range r.tools {
-		if tool.state.itemKind == "" {
-			continue
+// transcriptHistory is a session's history from its transcript: only the
+// current conversation (see conversation), one turn per prompt, steers inside
+// their turn, turns that were interrupted or failed as such, through the
+// mapper the live session uses. agent names a subagent's transcript, whose
+// turns are its runs. With running, the last turn is still running live.
+func transcriptHistory(session, agent string, lines []transcriptLine, running bool) ([]provider.HistoryTurn, []provider.SubagentSeen) {
+	var builder provider.HistoryBuilder
+	var subagents []provider.SubagentSeen
+	m := newMapper(session, func(body provider.EventBody, at time.Time) {
+		if seen, ok := body.(provider.SubagentSeen); ok {
+			subagents = append(subagents, seen)
 		}
-		call := tool.state.call
-		r.events = append(r.events, provider.RuntimeEvent{
-			EventID: replayEventID(tool.turnID, id, "completed"), Type: provider.RuntimeEventItemCompleted,
-			Provider: DriverKind, ThreadID: threadID, TurnID: tool.turnID, ItemID: id, CreatedAt: tool.at.Add(time.Millisecond),
-			Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: provider.ItemStatusInterrupted, Title: tool.state.title, ToolCall: &call},
-		})
-	}
-	r.endTurn(r.lastAt.Add(time.Microsecond))
-	if title := firstNonEmpty(r.customTitle, r.aiTitle); title != "" {
-		r.events = append(r.events, provider.RuntimeEvent{
-			EventID: provider.RuntimeEventID("claude:replay:title"), Type: provider.RuntimeEventThreadMetadataUpdate,
-			Provider: DriverKind, ThreadID: threadID, CreatedAt: r.lastAt.Add(2 * time.Microsecond),
-			Payload: provider.RuntimeEventPayload{Title: title},
-		})
-	}
-	return r.events
+		builder.Add(provider.Event{At: at, Body: body})
+	})
+	m.agent = agent
+	replayTranscript(m, lines, running, nil)
+	return builder.Turns(), subagents
 }
 
-// turnEnd is the uuid of the last line of the turn that has the line uuid,
-// the line a fork through that turn ends at.
-func turnEnd(lines []transcriptLine, uuid string) (string, bool) {
-	r := replayTranscript("", lines)
-	end, ok := r.turnEnds[r.lineTurns[uuid]]
+// turnEnd is the uuid of the last line of the turn ref, the line a fork
+// through that turn ends at.
+func turnEnd(lines []transcriptLine, ref string) (string, bool) {
+	m := newMapper("", func(provider.EventBody, time.Time) {})
+	ends := make(map[string]string)
+	replayTranscript(m, lines, false, func(line transcriptLine) {
+		if m.turn != "" && line.chained() {
+			ends[m.turn] = line.UUID
+		}
+	})
+	end, ok := ends[ref]
 	return end, ok
 }
 
-// replayTranscript walks the conversation's lines into turns.
-func replayTranscript(threadID string, lines []transcriptLine) *replay {
-	r := &replay{threadID: threadID, tools: make(map[string]*replayTool), lineTurns: make(map[string]string), turnEnds: make(map[string]string)}
+// replayTranscript feeds the conversation's lines to the mapper, calling
+// after with each line it took. Unless running, the last turn ended with the
+// transcript.
+func replayTranscript(m *mapper, lines []transcriptLine, running bool, after func(transcriptLine)) {
 	onConversation := conversation(lines)
+	var last time.Time
+	at := func(stamp string) time.Time {
+		if parsed, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
+			last = parsed
+		}
+		return last
+	}
 	for index, line := range lines {
-		if line.IsSidechain || line.chained() && !onConversation[index] {
+		if line.IsSidechain && m.agent == "" || line.chained() && !onConversation[index] {
 			continue
 		}
+		when := at(line.Timestamp)
 		switch line.Type {
-		case "custom-title":
-			r.customTitle = firstNonEmpty(line.CustomTitle, r.customTitle)
-		case "ai-title":
-			r.aiTitle = firstNonEmpty(line.AITitle, r.aiTitle)
 		case "system":
-			if line.Subtype == "compact_boundary" && r.turn != "" {
-				itemID := "compaction:" + line.UUID
-				r.emit(provider.RuntimeEventItemCompleted, itemID, "completed", r.at(line.Timestamp), provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: provider.ItemStatusCompleted, Title: "Compacted context"})
+			if line.Subtype == "compact_boundary" {
+				m.compaction(provider.ItemStatusCompleted, "", when)
 			}
 		case "attachment":
-			// A background task that ended during a turn is queued as its
-			// notification.
-			if line.Attachment != nil && line.Attachment.CommandMode == "task-notification" {
-				prompt, _ := promptContent(userAPIMessage{Content: line.Attachment.Prompt}.blocks())
+			if item := line.Attachment; item != nil && item.CommandMode == "task-notification" {
+				// A background task that ended during a turn is queued as its
+				// notification.
+				prompt, _ := promptContent(userAPIMessage{Content: item.Prompt}.blocks())
 				if notification, ok := parseTaskNotification(prompt); ok {
-					r.finishBackground(notification, line.Timestamp)
+					m.taskEnded(notification, when)
 				}
 			}
 			// A steer the CLI folded into a running query joins that turn,
 			// as it did live.
 			if text, attachments, ok := steeredPrompt(line.Attachment); ok {
-				at := r.at(line.Timestamp)
-				if r.turn == "" {
-					r.startTurn(line.UUID, at)
-				}
-				r.userMessage(line.UUID, text, attachments, at)
+				m.steer(firstNonEmpty(line.Attachment.SourceUUID, line.UUID), text, attachments, when)
 			}
 		case "user":
-			r.user(line)
+			replayUser(m, line, when)
 		case "assistant":
-			r.assistant(line)
+			var api apiMessage
+			if json.Unmarshal(line.Message, &api) != nil {
+				continue
+			}
+			if line.IsAPIErrorMessage {
+				// The CLI writes a failed API request as an assistant message
+				// whose text is the error; the turn failed with it.
+				m.ensureTurn(api.ID, when)
+				for _, block := range api.Content {
+					m.failed(block.Text)
+				}
+				continue
+			}
+			for _, block := range api.Content {
+				m.assistant(firstNonEmpty(api.ID, line.UUID), block, when)
+			}
 		}
-		if r.turn != "" && line.chained() {
-			r.lineTurns[line.UUID] = r.turn
-			r.turnEnds[r.turn] = line.UUID
+		if after != nil {
+			after(line)
 		}
 	}
-	return r
-}
-
-type replayTool struct {
-	state  *toolState
-	turnID string
-	at     time.Time
-}
-
-type replay struct {
-	threadID string
-	events   []provider.RuntimeEvent
-	tools    map[string]*replayTool
-	tasks    taskPlan
-	// turn is the open turn; turnState and turnMessage say how it ends.
-	turn        string
-	turnState   provider.RuntimeTurnState
-	turnMessage string
-	lastAt      time.Time
-	offset      int
-	// lineTurns is the turn of each line; turnEnds is each turn's last line.
-	lineTurns, turnEnds map[string]string
-	// A title the user chose wins over one the CLI generated.
-	customTitle, aiTitle string
-}
-
-func replayEventID(turn, item, suffix string) provider.RuntimeEventID {
-	return provider.RuntimeEventID("claude:replay:" + turn + ":" + item + ":" + suffix)
-}
-
-// at is a line's timestamp, or just after the previous one when it has none.
-func (r *replay) at(stamp string) time.Time {
-	r.offset++
-	if parsed, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
-		r.lastAt = parsed
-		return parsed
-	}
-	return r.lastAt.Add(time.Duration(r.offset) * time.Microsecond)
-}
-
-// emit appends an event of the open turn.
-func (r *replay) emit(eventType provider.RuntimeEventType, itemID, suffix string, at time.Time, payload provider.RuntimeEventPayload) {
-	r.events = append(r.events, provider.RuntimeEvent{
-		EventID: replayEventID(r.turn, itemID, suffix), Type: eventType, Provider: DriverKind,
-		ThreadID: r.threadID, TurnID: r.turn, ItemID: itemID, CreatedAt: at, Payload: payload,
-	})
-}
-
-func (r *replay) startTurn(id string, at time.Time) {
-	r.endTurn(at)
-	r.turn = firstNonEmpty(id, fmt.Sprintf("turn-%d", r.offset))
-	r.turnState, r.turnMessage = provider.RuntimeTurnCompleted, ""
-	r.emit(provider.RuntimeEventTurnStarted, "", "turn-started", at, provider.RuntimeEventPayload{})
-}
-
-func (r *replay) endTurn(at time.Time) {
-	if r.turn == "" {
+	if running {
 		return
 	}
-	r.emit(provider.RuntimeEventTurnCompleted, "", "turn-completed", at.Add(time.Nanosecond), provider.RuntimeEventPayload{TurnState: r.turnState, Message: r.turnMessage})
-	r.turn = ""
+	// Tools with no recorded result were cut off mid-flight.
+	m.cutOff(last)
+	m.endTurn(last)
 }
 
-// toolEvent emits an event of a tool item in the turn that started it.
-func (r *replay) toolEvent(tool *replayTool, itemID string, eventType provider.RuntimeEventType, status provider.ItemStatus, at time.Time) {
-	call := tool.state.call
-	r.events = append(r.events, provider.RuntimeEvent{
-		EventID: replayEventID(tool.turnID, itemID, string(eventType)), Type: eventType,
-		Provider: DriverKind, ThreadID: r.threadID, TurnID: tool.turnID, ItemID: itemID, CreatedAt: at,
-		Payload: provider.RuntimeEventPayload{ItemType: tool.state.itemKind, ItemStatus: status, Title: tool.state.title, ToolCall: &call},
-	})
-}
-
-// finishBackground completes the tool whose background task ended.
-func (r *replay) finishBackground(notification taskNotification, stamp string) {
-	if tool := r.tools[notification.ToolUseID]; tool != nil {
-		delete(r.tools, notification.ToolUseID)
-		r.toolEvent(tool, notification.ToolUseID, provider.RuntimeEventItemCompleted, tool.state.finish(notification), r.at(stamp))
-	}
-}
-
-func (r *replay) userMessage(id, text string, attachments []provider.Attachment, at time.Time) {
-	r.emit(provider.RuntimeEventItemCompleted, "user:"+id, "user", at.Add(time.Nanosecond), provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachments})
-}
-
-func (r *replay) user(line transcriptLine) {
+func replayUser(m *mapper, line transcriptLine, at time.Time) {
 	var api userAPIMessage
 	if json.Unmarshal(line.Message, &api) != nil {
 		return
@@ -188,33 +118,10 @@ func (r *replay) user(line transcriptLine) {
 	blocks, text := api.blocks()
 	hasToolResult := false
 	for _, block := range blocks {
-		if block.Type != "tool_result" {
-			continue
+		if block.Type == "tool_result" {
+			hasToolResult = true
+			m.toolResult(block, line.ToolUseResult, at)
 		}
-		hasToolResult = true
-		tool := r.tools[block.ToolUseID]
-		if tool == nil {
-			continue
-		}
-		delete(r.tools, block.ToolUseID)
-		if tool.state.itemKind == "" {
-			if !block.IsError && r.tasks.apply(tool.state.call.ProviderKind, tool.state.input, line.ToolUseResult) {
-				r.events = append(r.events, provider.RuntimeEvent{
-					EventID: replayEventID(tool.turnID, block.ToolUseID, "plan"), Type: provider.RuntimeEventTurnPlanUpdated,
-					Provider: DriverKind, ThreadID: r.threadID, TurnID: tool.turnID, CreatedAt: r.at(line.Timestamp),
-					Payload: provider.RuntimeEventPayload{PlanEntries: r.tasks.entries()},
-				})
-			}
-			continue
-		}
-		status := tool.state.applyResult(block, line.ToolUseResult)
-		if status == provider.ItemStatusInProgress {
-			// A background task runs on until its notification.
-			r.tools[block.ToolUseID] = tool
-			r.toolEvent(tool, block.ToolUseID, provider.RuntimeEventItemUpdated, status, r.at(line.Timestamp))
-			continue
-		}
-		r.toolEvent(tool, block.ToolUseID, provider.RuntimeEventItemCompleted, status, r.at(line.Timestamp))
 	}
 	if hasToolResult {
 		return
@@ -223,75 +130,21 @@ func (r *replay) user(line transcriptLine) {
 	// notification.
 	if content, _ := promptContent(blocks, text); content != "" {
 		if notification, ok := parseTaskNotification(content); ok {
-			r.finishBackground(notification, line.Timestamp)
+			m.taskEnded(notification, at)
 		}
 	}
 	prompt := classifyUserLine(line, blocks, text)
 	switch prompt.kind {
+	case userLineHidden:
+		// A local command's output ends what the command ran; the next
+		// prompt is a query of its own.
+		m.output = m.output || m.turn != ""
 	case userLineInterrupt:
-		if r.turn != "" {
-			r.turnState = provider.RuntimeTurnInterrupted
-		}
+		m.interrupted()
 	case userLineWake:
-		// A message from elsewhere (a background task finishing) wakes the
-		// CLI into a turn of its own, as it did live, with no prompt.
-		r.startTurn(line.UUID, r.at(line.Timestamp))
+		m.wake(at)
 	case userLinePrompt:
-		at := r.at(line.Timestamp)
-		r.startTurn(line.UUID, at)
-		r.userMessage(r.turn, prompt.text, prompt.attachments, at)
-	}
-}
-
-func (r *replay) assistant(line transcriptLine) {
-	var api apiMessage
-	if json.Unmarshal(line.Message, &api) != nil {
-		return
-	}
-	at := r.at(line.Timestamp)
-	if r.turn == "" {
-		// Output with no prompt before it is a turn the CLI started.
-		r.startTurn(line.UUID, at)
-	}
-	if line.IsAPIErrorMessage {
-		// The CLI writes a failed API request as an assistant message whose
-		// text is the error; the turn failed with it.
-		r.turnState = provider.RuntimeTurnFailed
-		for _, block := range api.Content {
-			r.turnMessage = firstNonEmpty(strings.TrimSpace(block.Text), r.turnMessage)
-		}
-		return
-	}
-	for index, block := range api.Content {
-		itemID := fmt.Sprintf("%s:%d", firstNonEmpty(line.UUID, api.ID), index)
-		blockAt := at.Add(time.Duration(index) * time.Microsecond)
-		switch block.Type {
-		case "text", "thinking":
-			text, kind, itemKind := block.Text, provider.RuntimeContentAssistantText, provider.ItemKindAssistantMessage
-			payload := provider.RuntimeEventPayload{ItemType: itemKind, ItemStatus: provider.ItemStatusCompleted}
-			if block.Type == "thinking" {
-				text, kind = block.Thinking, provider.RuntimeContentReasoningText
-				payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindReasoning, ItemStatus: provider.ItemStatusCompleted, Detail: text}
-			}
-			if text == "" {
-				continue
-			}
-			r.emit(provider.RuntimeEventContentDelta, itemID, "content", blockAt, provider.RuntimeEventPayload{StreamKind: kind, Delta: text})
-			r.emit(provider.RuntimeEventItemCompleted, itemID, "completed", blockAt.Add(time.Nanosecond), payload)
-		case "tool_use", "server_tool_use", "mcp_tool_use":
-			state := newToolState(block.Name, block.Input)
-			if state.itemKind == "" {
-				// TodoWrite's input is the plan; the Task tools' results are.
-				if entries := planEntriesFromInput(block.Input); entries != nil {
-					r.emit(provider.RuntimeEventTurnPlanUpdated, itemID, "plan", blockAt, provider.RuntimeEventPayload{PlanEntries: entries})
-				}
-				r.tools[block.ID] = &replayTool{state: state, turnID: r.turn, at: blockAt}
-				continue
-			}
-			call := state.call
-			r.emit(provider.RuntimeEventItemStarted, block.ID, "started", blockAt, provider.RuntimeEventPayload{ItemType: state.itemKind, ItemStatus: provider.ItemStatusInProgress, Title: state.title, ToolCall: &call})
-			r.tools[block.ID] = &replayTool{state: state, turnID: r.turn, at: blockAt}
-		}
+		m.prompt(line.UUID, prompt.text, prompt.attachments, at)
 	}
 }
 
@@ -329,14 +182,16 @@ func classifyUserLine(line transcriptLine, blocks []contentBlock, text string) u
 	text, attachments := promptContent(blocks, text)
 	trimmed := strings.TrimSpace(text)
 	switch {
+	// A message from elsewhere wakes the CLI even when it is a meta line,
+	// as a background subagent's report is.
+	case !line.Origin.fromUser():
+		return userLine{kind: userLineWake}
 	case line.IsMeta || line.IsCompactSummary || line.IsVisibleInTranscriptOnly:
 		return userLine{kind: userLineHidden}
 	case strings.HasPrefix(trimmed, "[Request interrupted by user"):
 		return userLine{kind: userLineInterrupt}
 	case strings.HasPrefix(trimmed, "<local-command-"):
 		return userLine{kind: userLineHidden}
-	case !line.Origin.fromUser():
-		return userLine{kind: userLineWake}
 	case trimmed == "" && len(attachments) == 0:
 		return userLine{kind: userLineHidden}
 	}

@@ -14,12 +14,12 @@ import (
 // runReview reviews what the input names, in the terms of the Codex CLI's
 // `codex review`: --uncommitted, --base BRANCH, --commit SHA, or custom
 // review instructions.
-func (h *Instance) runReview(ctx context.Context, send turnSend) error {
+func (h *Instance) runReview(ctx context.Context, send turnSend) (provider.SendAck, error) {
 	target, err := reviewTarget(send.args)
 	if err != nil {
-		return h.refuse(send, err)
+		return provider.SendAck{}, err
 	}
-	return h.startOperation(ctx, send, "review/start", map[string]any{"threadId": send.nativeThread, "target": target, "delivery": "inline"})
+	return h.startOperation(ctx, send, "review/start", map[string]any{"threadId": send.thread, "target": target, "delivery": "inline"})
 }
 
 func reviewTarget(args string) (map[string]any, error) {

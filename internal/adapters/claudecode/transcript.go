@@ -105,14 +105,6 @@ func (h *Instance) hasTranscript(sessionID string) bool {
 	return err == nil
 }
 
-func (h *Instance) readTranscript(sessionID string) ([]transcriptLine, error) {
-	path, err := h.findTranscript(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return readTranscriptFile(path)
-}
-
 func readTranscriptFile(path string) ([]transcriptLine, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -225,6 +217,8 @@ func conversation(lines []transcriptLine) map[int]bool {
 		current = parent
 	}
 
+	// A subagent's transcript is all sidechain.
+	sidechain := leaf >= 0 && lines[leaf].IsSidechain
 	messageIDs := make(map[string]bool)
 	toolUseIDs := make(map[string]bool)
 	for index := range included {
@@ -238,7 +232,7 @@ func conversation(lines []transcriptLine) map[int]bool {
 	}
 	// File order is creation order, so one pass sees parents before children.
 	for index, line := range lines {
-		if included[index] || !line.chained() || line.IsSidechain {
+		if included[index] || !line.chained() || line.IsSidechain != sidechain {
 			continue
 		}
 		switch line.Type {

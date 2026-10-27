@@ -25,16 +25,19 @@ const defaultServiceTier = "default"
 // UserInput values. Skill references remain in the text for readable history
 // and are additionally sent as structured skill values when they resolve to an
 // enabled skill advertised for the session.
-func userInputsFromTurn(input provider.SendTurnInput, skills []provider.Skill) ([]appUserInput, error) {
+func userInputs(input provider.SendInput, skills []provider.Skill) ([]appUserInput, error) {
 	converted := make([]appUserInput, 0, 1+len(input.Attachments)+len(skills))
-	if input.Input != "" {
+	if input.Text != "" {
 		converted = append(converted, appUserInput{
 			Type:         "text",
-			Text:         input.Input,
+			Text:         input.Text,
 			TextElements: []appTextElement{},
 		})
 	}
-	for _, skill := range referencedSkills(input.Input, skills) {
+	// Only the person's own text names skills, never what maiD wrapped
+	// around it.
+	_, own := provider.SplitMessage(input.Text)
+	for _, skill := range referencedSkills(own, skills) {
 		converted = append(converted, appUserInput{Type: "skill", Name: skill.Name, Path: skill.Path})
 	}
 	for _, attachment := range input.Attachments {
@@ -188,216 +191,129 @@ func isWindowsAbsolutePath(value string) bool {
 	return len(value) >= 3 && unicode.IsLetter(rune(value[0])) && value[1] == ':' && (value[2] == '\\' || value[2] == '/')
 }
 
-// replayEvents converts an app-server history snapshot into the same canonical
-// event vocabulary used by live streaming. Started item events are included as
-// chronology boundaries so text before a tool is committed before that tool.
-func replayEvents(localThreadID string, thread appThread) []provider.RuntimeEvent {
-	events := make([]provider.RuntimeEvent, 0)
-	threadFallback := unixSeconds(thread.UpdatedAt)
-	if threadFallback.IsZero() {
-		threadFallback = unixSeconds(thread.CreatedAt)
-	}
-	for _, turn := range thread.Turns {
-		turnID := turn.ID
-		startedAt := timeFromUnixSeconds(turn.StartedAt, threadFallback)
-		events = append(events, provider.RuntimeEvent{
-			EventID:   replayEventID(turnID, "", "turn-started"),
-			Type:      provider.RuntimeEventTurnStarted,
-			Provider:  DriverKind,
-			ThreadID:  localThreadID,
-			TurnID:    turnID,
-			CreatedAt: startedAt,
-		})
-		for index, original := range turn.Items {
-			item := original
-			if item.ID == "" {
-				item.ID = fmt.Sprintf("%s:item:%d", turnID, index+1)
-			}
-			at := startedAt.Add(time.Duration(index+1) * time.Microsecond)
-			switch item.Type {
-			case "userMessage":
-				if event, ok := runtimeEventFromItem(localThreadID, turnID, item, provider.RuntimeEventItemCompleted, at); ok {
-					event.EventID = replayEventID(turnID, item.ID, "completed")
-					events = append(events, event)
-				}
-			case "agentMessage":
-				if item.Text != "" {
-					events = append(events, replayContentEvent(localThreadID, turnID, item.ID, provider.RuntimeContentAssistantText, item.Text, at))
-				}
-				if event, ok := runtimeEventFromItem(localThreadID, turnID, item, provider.RuntimeEventItemCompleted, at.Add(time.Nanosecond)); ok {
-					event.EventID = replayEventID(turnID, item.ID, "completed")
-					events = append(events, event)
-				}
-			case "reasoning":
-				if text := reasoningText(item); text != "" {
-					events = append(events, replayContentEvent(localThreadID, turnID, item.ID, provider.RuntimeContentReasoningText, text, at))
-				}
-				// Preserve the same boundary as item/completed in the live
-				// stream. Otherwise adjacent thoughts concatenate on reload
-				// and every later reasoning segment receives a different ID.
-				if event, ok := runtimeEventFromItem(localThreadID, turnID, item, provider.RuntimeEventItemCompleted, at.Add(time.Nanosecond)); ok {
-					event.EventID = replayEventID(turnID, item.ID, "completed")
-					events = append(events, event)
-				}
-			default:
-				started := item
-				started.Status = "inProgress"
-				if event, ok := runtimeEventFromItem(localThreadID, turnID, started, provider.RuntimeEventItemStarted, at); ok {
-					event.EventID = replayEventID(turnID, item.ID, "started")
-					events = append(events, event)
-				}
-				if event, ok := runtimeEventFromItem(localThreadID, turnID, item, provider.RuntimeEventItemCompleted, at.Add(time.Nanosecond)); ok {
-					event.EventID = replayEventID(turnID, item.ID, "completed")
-					events = append(events, event)
-				}
-			}
+// historyTurns are a thread's turns as History returns them: each item
+// through itemEntries, as the live stream maps it on completion, so replay
+// gives the refs and final entries the session streamed.
+func historyTurns(turns []appTurn, fallback time.Time) ([]provider.HistoryTurn, []provider.SubagentSeen) {
+	history := make([]provider.HistoryTurn, 0, len(turns))
+	var subagents []provider.SubagentSeen
+	for _, turn := range turns {
+		startedAt := timeFromUnixSeconds(turn.StartedAt, fallback)
+		native := provider.HistoryTurn{Ref: turn.ID, StartedAt: startedAt, State: provider.TurnRunning, Entries: []provider.Entry{}}
+		if state, settled := turnState(turn.Status); settled {
+			native.State = state
 		}
-		if state, terminal := turnState(turn.Status); terminal {
-			completedAt := timeFromUnixSeconds(turn.CompletedAt, startedAt.Add(time.Duration(len(turn.Items)+1)*time.Microsecond))
-			payload := provider.RuntimeEventPayload{TurnState: state}
-			if turn.Error != nil {
-				payload.Message = strings.TrimSpace(turn.Error.Message)
-				if payload.Detail == "" && turn.Error.AdditionalDetails != nil {
-					payload.Detail = strings.TrimSpace(*turn.Error.AdditionalDetails)
-				}
-			}
-			events = append(events, provider.RuntimeEvent{
-				EventID:   replayEventID(turnID, "", "turn-completed"),
-				Type:      provider.RuntimeEventTurnCompleted,
-				Provider:  DriverKind,
-				ThreadID:  localThreadID,
-				TurnID:    turnID,
-				CreatedAt: completedAt,
-				Payload:   payload,
-			})
+		native.Error = turnError(turn)
+		for _, item := range turn.Items {
+			native.Entries = append(native.Entries, itemEntries(turn.ID, item, completedStatus(item), startedAt)...)
+			subagents = append(subagents, subagentsOf(item)...)
+		}
+		history = append(history, native)
+	}
+	return history, subagents
+}
+
+// completedStatus is an item's status once it ended: as it says, else
+// completed.
+func completedStatus(item appItem) provider.ItemStatus {
+	if status := itemStatusFromApp(item.Status); status != "" {
+		return status
+	}
+	return provider.ItemStatusCompleted
+}
+
+func turnError(turn appTurn) string {
+	if turn.Error == nil {
+		return ""
+	}
+	message := strings.TrimSpace(turn.Error.Message)
+	if turn.Error.AdditionalDetails != nil {
+		if details := strings.TrimSpace(*turn.Error.AdditionalDetails); details != "" {
+			message = strings.TrimSpace(message + "\n" + details)
 		}
 	}
-	return events
+	return message
 }
 
-func replayContentEvent(threadID, turnID, itemID string, kind provider.RuntimeContentStreamKind, delta string, at time.Time) provider.RuntimeEvent {
-	return provider.RuntimeEvent{
-		EventID:   replayEventID(turnID, itemID, "content"),
-		Type:      provider.RuntimeEventContentDelta,
-		Provider:  DriverKind,
-		ThreadID:  threadID,
-		TurnID:    turnID,
-		ItemID:    itemID,
-		CreatedAt: at,
-		Payload: provider.RuntimeEventPayload{
-			StreamKind: kind,
-			Delta:      delta,
-		},
+// itemEntries are an item as entries of turn, named by the item's id. A user
+// message splits into its envelopes and the person's text.
+func itemEntries(turn string, item appItem, status provider.ItemStatus, at time.Time) []provider.Entry {
+	if item.Type == "" || item.ID == "" {
+		return nil
 	}
-}
-
-func replayEventID(turnID, itemID, suffix string) provider.RuntimeEventID {
-	return provider.RuntimeEventID("codex:replay:" + turnID + ":" + itemID + ":" + suffix)
-}
-
-// runtimeEventFromItem converts one item lifecycle notification. Streaming
-// text itself is carried by the app-server delta notifications; assistant item
-// completion remains useful as the flush checkpoint for that stream.
-func runtimeEventFromItem(localThreadID, localTurnID string, item appItem, eventType provider.RuntimeEventType, at time.Time) (provider.RuntimeEvent, bool) {
-	if localThreadID == "" || item.Type == "" {
-		return provider.RuntimeEvent{}, false
-	}
-	event := provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(fmt.Sprintf("codex:item:%s:%s:%s", localTurnID, item.ID, eventType)),
-		Type:      eventType,
-		Provider:  DriverKind,
-		ThreadID:  localThreadID,
-		TurnID:    localTurnID,
-		ItemID:    item.ID,
-		CreatedAt: at,
-	}
-	status := itemStatusFromApp(item.Status, eventType)
+	entry := provider.Entry{Ref: item.ID, Turn: turn, Status: status, At: at}
 	switch item.Type {
 	case "userMessage":
 		text, attachments := userMessageContent(item.Content)
-		clientID := ""
-		if item.ClientID != nil {
-			clientID = *item.ClientID
-		}
-		event.Payload = provider.RuntimeEventPayload{
-			ClientMessageID: clientID,
-			ItemType:        provider.ItemKindUserMessage,
-			ItemStatus:      status,
-			Detail:          text,
-			Attachments:     attachments,
-		}
+		return provider.UserMessageEntries(item.ID, turn, text, attachments, stringValue(item.ClientID), at)
 	case "agentMessage":
-		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindAssistantMessage, ItemStatus: status}
+		entry.Kind, entry.Text = provider.ItemKindAssistantMessage, item.Text
 	case "reasoning":
-		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindReasoning, ItemStatus: status, Detail: reasoningText(item)}
+		entry.Kind, entry.Text = provider.ItemKindReasoning, reasoningText(item)
 	case "plan":
-		event.Payload = provider.RuntimeEventPayload{
-			ItemType:   provider.ItemKindToolCall,
-			ItemStatus: status,
-			Title:      "Plan",
-			ToolCall: &provider.ToolCall{
-				Name:         "Plan",
-				ProviderKind: item.Type,
-				Output:       boundedAppOutput(item.Text),
-			},
-		}
+		entry.Kind, entry.Title = provider.ItemKindToolCall, "Plan"
+		entry.Tool = &provider.ToolCall{Name: "Plan", ProviderKind: item.Type, Output: boundedAppOutput(item.Text)}
 	case "commandExecution":
-		event.Payload = toolPayload(item, provider.ItemKindCommandExecution, status, commandToolCall(item), "Ran command")
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindCommandExecution, "Ran command", commandToolCall(item)
 	case "fileChange":
-		event.Payload = toolPayload(item, provider.ItemKindFileChange, status, fileChangeToolCall(item), "Changed files")
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindFileChange, "Changed files", fileChangeToolCall(item)
 	case "mcpToolCall":
-		title := strings.Trim(strings.TrimSpace(item.Server)+" · "+strings.TrimSpace(item.Tool), " ·")
-		event.Payload = toolPayload(item, provider.ItemKindMCPToolCall, status, mcpToolCall(item), title)
+		entry.Kind, entry.Tool = provider.ItemKindMCPToolCall, mcpToolCall(item)
+		entry.Title = strings.Trim(strings.TrimSpace(item.Server)+" · "+strings.TrimSpace(item.Tool), " ·")
 	case "dynamicToolCall":
-		title := strings.Trim(strings.TrimSpace(stringValue(item.Namespace))+" · "+strings.TrimSpace(item.Tool), " ·")
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, dynamicToolCall(item), title)
+		entry.Kind, entry.Tool = provider.ItemKindToolCall, dynamicToolCall(item)
+		entry.Title = strings.Trim(strings.TrimSpace(stringValue(item.Namespace))+" · "+strings.TrimSpace(item.Tool), " ·")
 	case "collabAgentToolCall":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, collabToolCall(item), collabTitle(item.Tool))
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindToolCall, collabTitle(item.Tool), collabToolCall(item)
 	case "subAgentActivity":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, subagentToolCall(item), "Agent "+item.Kind)
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindToolCall, "Agent "+item.Kind, subagentToolCall(item)
 	case "webSearch":
-		event.Payload = toolPayload(item, provider.ItemKindWebSearch, status, webSearchToolCall(item), webSearchTitle(item))
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindWebSearch, webSearchTitle(item), webSearchToolCall(item)
 	case "imageView":
-		event.Payload = toolPayload(item, provider.ItemKindImageView, status, imageViewToolCall(item), "Viewed image")
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindImageView, "Viewed image", imageViewToolCall(item)
 	case "imageGeneration":
-		event.Payload = toolPayload(item, provider.ItemKindImageGeneration, status, imageGenerationToolCall(item), "Generated image")
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindImageGeneration, "Generated image", imageGenerationToolCall(item)
 	case "contextCompaction":
-		event.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindContextCompaction, ItemStatus: status, Title: "Compacted context"}
+		entry.Kind, entry.Title = provider.ItemKindContextCompaction, "Compacted context"
 	case "enteredReviewMode", "exitedReviewMode":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, reviewModeToolCall(item), item.Type)
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindToolCall, item.Type, reviewModeToolCall(item)
 	case "sleep":
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, sleepToolCall(item), "Waited")
+		entry.Kind, entry.Title, entry.Tool = provider.ItemKindToolCall, "Waited", sleepToolCall(item)
 	case "hookPrompt":
 		var text []string
 		for _, fragment := range item.Fragments {
 			text = append(text, fragment.Text)
 		}
-		call := &provider.ToolCall{Name: "Hook", ProviderKind: item.Type, Output: boundedAppOutput(strings.Join(text, "\n"))}
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, call, "Hook added context")
+		entry.Kind, entry.Title = provider.ItemKindToolCall, "Hook added context"
+		entry.Tool = &provider.ToolCall{Name: "Hook", ProviderKind: item.Type, Output: boundedAppOutput(strings.Join(text, "\n"))}
 	case "functionCallOutput":
-		call := &provider.ToolCall{Name: item.Name, Namespace: stringValue(item.Namespace), ProviderKind: item.Type, Output: functionCallOutputText(item.Output)}
-		event.Payload = toolPayload(item, provider.ItemKindToolCall, status, call, strings.Trim(stringValue(item.Namespace)+" · "+item.Name, " ·"))
+		entry.Kind = provider.ItemKindToolCall
+		entry.Title = strings.Trim(stringValue(item.Namespace)+" · "+item.Name, " ·")
+		entry.Tool = &provider.ToolCall{Name: item.Name, Namespace: stringValue(item.Namespace), ProviderKind: item.Type, Output: functionCallOutputText(item.Output)}
 	default:
-		event.Payload = provider.RuntimeEventPayload{
-			ItemType:   provider.ItemKindToolCall,
-			ItemStatus: status,
-			Title:      item.Type,
-			ToolCall: &provider.ToolCall{
-				Name:         item.Type,
-				ProviderKind: item.Type,
-			},
-		}
+		entry.Kind, entry.Title = provider.ItemKindToolCall, item.Type
+		entry.Tool = &provider.ToolCall{Name: item.Type, ProviderKind: item.Type}
 	}
-	return event, true
+	entry.Title = strings.TrimSpace(entry.Title)
+	return []provider.Entry{entry}
 }
 
-func toolPayload(item appItem, kind provider.ItemKind, status provider.ItemStatus, call *provider.ToolCall, title string) provider.RuntimeEventPayload {
-	return provider.RuntimeEventPayload{
-		ItemType:   kind,
-		ItemStatus: status,
-		Title:      strings.TrimSpace(title),
-		ToolCall:   call,
+// subagentsOf names the provider's own subagents an item announces:
+// multi-agent v1 spawns (spawnAgent) take input, v2 children don't.
+func subagentsOf(item appItem) []provider.SubagentSeen {
+	switch {
+	case item.Type == "collabAgentToolCall" && item.Tool == "spawnAgent":
+		var seen []provider.SubagentSeen
+		for _, thread := range item.ReceiverThreadIDs {
+			if thread = strings.TrimSpace(thread); thread != "" {
+				seen = append(seen, provider.SubagentSeen{Item: item.ID, Session: thread, Name: provider.PromptPreviewTitle(stringValue(item.Prompt)), Model: stringValue(item.Model), AcceptsInput: true})
+			}
+		}
+		return seen
+	case item.Type == "subAgentActivity" && item.Kind == "started" && strings.TrimSpace(item.AgentThreadID) != "":
+		return []provider.SubagentSeen{{Item: item.ID, Session: strings.TrimSpace(item.AgentThreadID)}}
 	}
+	return nil
 }
 
 func commandToolCall(item appItem) *provider.ToolCall {
@@ -771,22 +687,20 @@ func reasoningText(item appItem) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func turnState(status string) (provider.RuntimeTurnState, bool) {
+func turnState(status string) (provider.TurnState, bool) {
 	switch status {
 	case "completed":
-		return provider.RuntimeTurnCompleted, true
+		return provider.TurnCompleted, true
 	case "failed":
-		return provider.RuntimeTurnFailed, true
-	case "interrupted":
-		return provider.RuntimeTurnInterrupted, true
-	case "cancelled", "canceled":
-		return provider.RuntimeTurnCancelled, true
+		return provider.TurnFailed, true
+	case "interrupted", "cancelled", "canceled":
+		return provider.TurnInterrupted, true
 	default:
 		return "", false
 	}
 }
 
-func itemStatusFromApp(status string, eventType provider.RuntimeEventType) provider.ItemStatus {
+func itemStatusFromApp(status string) provider.ItemStatus {
 	switch status {
 	case "inProgress", "in_progress", "running":
 		return provider.ItemStatusInProgress
@@ -799,14 +713,7 @@ func itemStatusFromApp(status string, eventType provider.RuntimeEventType) provi
 	case "declined", "rejected":
 		return provider.ItemStatusDeclined
 	}
-	switch eventType {
-	case provider.RuntimeEventItemStarted:
-		return provider.ItemStatusInProgress
-	case provider.RuntimeEventItemCompleted:
-		return provider.ItemStatusCompleted
-	default:
-		return ""
-	}
+	return ""
 }
 
 func unixSeconds(value float64) time.Time {
@@ -1085,17 +992,15 @@ var goalStatuses = map[string]provider.GoalStatus{
 	"complete":      provider.GoalComplete,
 }
 
-// goalEvent reports the thread's goal, or that it has none when goal is nil.
-// It reports nothing for a status this adapter doesn't know.
-func goalEvent(localThread string, goal *appGoal) (provider.RuntimeEvent, bool) {
-	event := provider.RuntimeEvent{Type: provider.RuntimeEventThreadGoalUpdated, Provider: DriverKind, ThreadID: localThread}
+// goalOf is a native goal for provider.GoalChanged; nil for none, and false
+// for a status maiD doesn't know.
+func goalOf(goal *appGoal) (*provider.Goal, bool) {
 	if goal == nil {
-		return event, true
+		return nil, true
 	}
 	status, ok := goalStatuses[goal.Status]
 	if !ok {
-		return provider.RuntimeEvent{}, false
+		return nil, false
 	}
-	event.Payload.Goal = &provider.Goal{Objective: goal.Objective, Status: status, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, TimeUsedSeconds: goal.TimeUsedSeconds}
-	return event, true
+	return &provider.Goal{Objective: goal.Objective, Status: status, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, TimeUsedSeconds: goal.TimeUsedSeconds}, true
 }

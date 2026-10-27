@@ -28,7 +28,7 @@ func TestTerminalProgramReportsReachTheListWithoutAttaching(t *testing.T) {
 	terminalID, runID := created.Terminal.TerminalID, created.RunID
 
 	// A right-to-left override in the message must not reach the list.
-	message := base64.StdEncoding.EncodeToString([]byte("Apply‮ patch?"))
+	message := base64.StdEncoding.EncodeToString([]byte("Apply\u202e patch?"))
 	controller.writeTerminal(t, terminalID, runID,
 		`printf '\033]0;✳ refactor task\007\033]7;file:///tmp/project\007`+
 			`\033]7501;state=blocked:kind=permission:app=codex:msg=`+message+`\033\\'`+"\n")

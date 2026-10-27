@@ -151,95 +151,74 @@
       ],
       "title": "ACPRegistryStartParams"
     },
-    "Approval": {
+    "AccessModes": {
       "properties": {
-        "requestId": {
+        "option": {
           "type": "string"
         },
-        "turnId": {
-          "type": "string"
-        },
-        "args": true,
-        "request": {
-          "$ref": "#/$defs/Request"
-        },
-        "status": {
-          "type": "string"
-        },
-        "decision": {
-          "type": "string"
-        },
-        "actionId": {
-          "type": "string"
-        },
-        "answers": {
+        "levels": {
           "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "type": "string"
           },
           "type": "object"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "requestId",
-        "status",
-        "createdAt",
-        "updatedAt"
+        "option",
+        "levels"
       ],
-      "title": "Approval"
+      "title": "AccessModes"
     },
-    "ApprovalEvent": {
+    "ActorView": {
       "properties": {
-        "requestId": {
+        "kind": {
           "type": "string"
         },
-        "turnId": {
+        "thread": {
           "type": "string"
         },
-        "requestType": {
+        "participant": {
           "type": "string"
         },
-        "args": true,
-        "request": {
-          "$ref": "#/$defs/Request"
-        },
-        "decision": {
+        "name": {
           "type": "string"
-        },
-        "actionId": {
-          "type": "string"
-        },
-        "cancelled": {
-          "type": "boolean"
-        },
-        "answers": {
-          "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": "object"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "requestId"
+        "kind",
+        "name"
       ],
-      "title": "ApprovalEvent"
+      "title": "ActorView"
+    },
+    "AddParticipant": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "settings": {
+          "items": {
+            "$ref": "#/$defs/ConfigOptionSelection"
+          },
+          "type": "array"
+        },
+        "session": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread",
+        "instance"
+      ],
+      "title": "AddParticipant"
     },
     "Attachment": {
       "properties": {
@@ -287,11 +266,21 @@
       ],
       "title": "Attachment"
     },
-    "AttachmentUploadParams": {
+    "AttachmentParams": {
       "properties": {
         "id": {
           "type": "string"
-        },
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "title": "AttachmentParams"
+    },
+    "AttachmentUploadParams": {
+      "properties": {
         "data": {
           "type": "string"
         }
@@ -299,10 +288,43 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "id",
         "data"
       ],
       "title": "AttachmentUploadParams"
+    },
+    "AttachmentUploadResult": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "title": "AttachmentUploadResult"
+    },
+    "Attention": {
+      "properties": {
+        "needsInput": {
+          "type": "boolean"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "unread": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "needsInput",
+        "failed",
+        "unread"
+      ],
+      "title": "Attention"
     },
     "Auth": {
       "properties": {
@@ -386,24 +408,61 @@
       ],
       "title": "AuthenticationResult"
     },
+    "CancelDelivery": {
+      "properties": {
+        "delivery": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "delivery"
+      ],
+      "title": "CancelDelivery"
+    },
     "Capabilities": {
       "properties": {
-        "sessionList": {
-          "type": "boolean"
+        "history": {
+          "type": "string"
         },
-        "sessionDelete": {
-          "type": "boolean"
-        },
-        "sessionClose": {
-          "type": "boolean"
-        },
-        "loadReplay": {
-          "type": "boolean"
+        "historyVersion": {
+          "type": "integer"
         },
         "resume": {
           "type": "boolean"
         },
+        "fork": {
+          "type": "boolean"
+        },
+        "steer": {
+          "type": "boolean"
+        },
+        "subagents": {
+          "type": "boolean"
+        },
+        "instructions": {
+          "type": "boolean"
+        },
+        "messageIds": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "$ref": "#/$defs/MCPCapabilities"
+        },
+        "promptContent": {
+          "$ref": "#/$defs/PromptContentCapabilities"
+        },
         "additionalDirectories": {
+          "type": "boolean"
+        },
+        "sessions": {
+          "type": "boolean"
+        },
+        "delete": {
+          "type": "boolean"
+        },
+        "rename": {
           "type": "boolean"
         },
         "auth": {
@@ -412,100 +471,17 @@
         "logout": {
           "type": "boolean"
         },
-        "promptContent": {
-          "$ref": "#/$defs/PromptContentCapabilities"
-        },
-        "mcp": {
-          "$ref": "#/$defs/MCPCapabilities"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "title": "Capabilities"
-    },
-    "Command": {
-      "properties": {
-        "type": {
-          "type": "string"
-        },
-        "commandId": {
-          "type": "string"
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "providerInstanceId": {
-          "type": "string"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "additionalDirectories": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
-        },
-        "message": {
-          "$ref": "#/$defs/CommandMessage"
-        },
-        "steer": {
+        "commandCompletion": {
           "type": "boolean"
-        },
-        "messageId": {
-          "type": "string"
-        },
-        "itemId": {
-          "type": "string"
-        },
-        "requestId": {
-          "type": "string"
-        },
-        "actionId": {
-          "type": "string"
-        },
-        "answers": {
-          "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": "object"
-        },
-        "optionId": {
-          "type": "string"
-        },
-        "value": true,
-        "configSelections": {
-          "items": {
-            "$ref": "#/$defs/ConfigOptionSelection"
-          },
-          "type": "array"
-        },
-        "forkContext": {
-          "type": "string"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "type"
+        "history",
+        "historyVersion"
       ],
-      "title": "Command"
+      "title": "Capabilities"
     },
     "CommandCompletion": {
       "properties": {
@@ -527,54 +503,82 @@
       ],
       "title": "CommandCompletion"
     },
-    "CommandMessage": {
+    "CommandParams": {
       "properties": {
-        "messageId": {
+        "key": {
           "type": "string"
         },
-        "text": {
-          "type": "string"
+        "createThread": {
+          "$ref": "#/$defs/CreateThread"
         },
-        "attachments": {
-          "items": {
-            "$ref": "#/$defs/Attachment"
-          },
-          "type": "array"
+        "updateThread": {
+          "$ref": "#/$defs/UpdateThread"
         },
-        "annotations": {
-          "items": {
-            "$ref": "#/$defs/PromptAnnotation"
-          },
-          "type": "array"
+        "deleteThread": {
+          "$ref": "#/$defs/DeleteThread"
+        },
+        "forkThread": {
+          "$ref": "#/$defs/ForkThread"
+        },
+        "spawn": {
+          "$ref": "#/$defs/Spawn"
+        },
+        "addParticipant": {
+          "$ref": "#/$defs/AddParticipant"
+        },
+        "updateParticipant": {
+          "$ref": "#/$defs/UpdateParticipant"
+        },
+        "deliver": {
+          "$ref": "#/$defs/Deliver"
+        },
+        "cancelDelivery": {
+          "$ref": "#/$defs/CancelDelivery"
+        },
+        "moveDelivery": {
+          "$ref": "#/$defs/MoveDelivery"
+        },
+        "steerDelivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        },
+        "retryDelivery": {
+          "$ref": "#/$defs/RetryDelivery"
+        },
+        "interrupt": {
+          "$ref": "#/$defs/Interrupt"
+        },
+        "stop": {
+          "$ref": "#/$defs/Stop"
+        },
+        "continue": {
+          "$ref": "#/$defs/Continue"
+        },
+        "respond": {
+          "$ref": "#/$defs/Respond"
+        },
+        "stopItem": {
+          "$ref": "#/$defs/StopItem"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "text"
-      ],
-      "title": "CommandMessage"
+      "title": "CommandParams"
     },
-    "CompleteCommandInput": {
+    "CommandResult": {
       "properties": {
-        "threadId": {
+        "thread": {
           "type": "string"
         },
-        "command": {
+        "participant": {
           "type": "string"
         },
-        "input": {
+        "delivery": {
           "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "threadId",
-        "command",
-        "input"
-      ],
-      "title": "CompleteCommandInput"
+      "title": "CommandResult"
     },
     "ConfigChoice": {
       "properties": {
@@ -674,107 +678,99 @@
       "type": "object",
       "title": "ContentAnnotations"
     },
-    "DispatchResult": {
+    "Continue": {
       "properties": {
-        "sequence": {
-          "type": "integer"
+        "thread": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "sequence"
+        "thread"
       ],
-      "title": "DispatchResult"
+      "title": "Continue"
     },
-    "EmptyParams": {
-      "properties": {},
-      "additionalProperties": false,
-      "type": "object",
-      "title": "EmptyParams"
-    },
-    "Event": {
+    "CreateThread": {
       "properties": {
-        "sequence": {
-          "type": "integer"
-        },
-        "eventId": {
-          "type": "string"
-        },
-        "type": {
-          "type": "string"
-        },
-        "occurredAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "commandId": {
-          "type": "string"
-        },
-        "actor": {
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/$defs/EventMetadata"
-        },
-        "payload": {
-          "$ref": "#/$defs/EventPayload"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "sequence",
-        "eventId",
-        "type",
-        "occurredAt",
-        "payload"
-      ],
-      "title": "Event"
-    },
-    "EventMetadata": {
-      "properties": {
-        "requestId": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "title": "EventMetadata"
-    },
-    "EventPayload": {
-      "properties": {
-        "threadId": {
-          "type": "string"
-        },
         "title": {
           "type": "string"
         },
-        "providerInstanceId": {
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
+        },
+        "participant": {
+          "$ref": "#/$defs/NewParticipant"
+        },
+        "prompt": {
+          "$ref": "#/$defs/MessageBody"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "workspace",
+        "participant"
+      ],
+      "title": "CreateThread"
+    },
+    "DeleteThread": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread"
+      ],
+      "title": "DeleteThread"
+    },
+    "Deliver": {
+      "properties": {
+        "thread": {
           "type": "string"
         },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
-        },
-        "cwd": {
+        "to": {
           "type": "string"
         },
-        "additionalDirectories": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "body": {
+          "$ref": "#/$defs/MessageBody"
         },
-        "session": {
-          "$ref": "#/$defs/SessionBinding"
+        "mode": {
+          "type": "string"
         },
-        "sessionCleared": {
+        "wantsReply": {
           "type": "boolean"
-        },
-        "messageId": {
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread",
+        "body"
+      ],
+      "title": "Deliver"
+    },
+    "DeliveryView": {
+      "properties": {
+        "id": {
           "type": "string"
         },
-        "role": {
+        "to": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/ActorView"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "state": {
           "type": "string"
         },
         "text": {
@@ -792,88 +788,191 @@
           },
           "type": "array"
         },
-        "turnId": {
+        "reason": {
           "type": "string"
         },
-        "delivery": {
+        "answers": {
           "type": "string"
         },
-        "deliveryError": {
-          "type": "string"
-        },
-        "stopReason": {
+        "turn": {
           "type": "string"
         },
         "createdAt": {
           "type": "string",
           "format": "date-time"
         },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "requestId": {
-          "type": "string"
-        },
-        "decision": {
-          "type": "string"
-        },
-        "actionId": {
-          "type": "string"
-        },
-        "optionId": {
-          "type": "string"
-        },
-        "answers": {
-          "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": "object"
-        },
-        "value": true,
-        "itemId": {
-          "type": "string"
-        },
-        "item": {
-          "$ref": "#/$defs/Item"
-        },
-        "plan": {
-          "$ref": "#/$defs/Plan"
-        },
-        "approval": {
-          "$ref": "#/$defs/ApprovalEvent"
-        },
-        "configOptions": {
-          "items": {
-            "$ref": "#/$defs/ConfigOption"
-          },
-          "type": "array"
-        },
-        "slashCommands": {
-          "items": {
-            "$ref": "#/$defs/SlashCommand"
-          },
-          "type": "array"
-        },
-        "skills": {
-          "items": {
-            "$ref": "#/$defs/Skill"
-          },
-          "type": "array"
-        },
-        "tokenUsage": {
-          "$ref": "#/$defs/TokenUsage"
-        },
-        "goal": {
-          "$ref": "#/$defs/Goal"
+        "position": {
+          "type": "number"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "title": "EventPayload"
+      "required": [
+        "id",
+        "to",
+        "from",
+        "kind",
+        "mode",
+        "state",
+        "createdAt",
+        "position"
+      ],
+      "title": "DeliveryView"
+    },
+    "EmptyParams": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "title": "EmptyParams"
+    },
+    "Entry": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "turn": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolCall"
+        },
+        "envelope": {
+          "$ref": "#/$defs/Envelope"
+        },
+        "request": {
+          "$ref": "#/$defs/RequestRecord"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ref",
+        "turn",
+        "kind"
+      ],
+      "title": "Entry"
+    },
+    "EntryView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/PromptAnnotation"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolCallSummary"
+        },
+        "envelope": {
+          "$ref": "#/$defs/Envelope"
+        },
+        "request": {
+          "$ref": "#/$defs/RequestRecord"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detailAvailable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ref",
+        "kind"
+      ],
+      "title": "EntryView"
+    },
+    "Envelope": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "thread": {
+          "type": "string"
+        },
+        "covers": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "title": "Envelope"
     },
     "FileChange": {
       "properties": {
@@ -922,75 +1021,60 @@
       ],
       "title": "FileChangeSummary"
     },
-    "ForkDraft": {
+    "ForkPoint": {
       "properties": {
-        "sourceTitle": {
+        "thread": {
           "type": "string"
         },
-        "providerInstanceId": {
-          "type": "string"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "additionalDirectories": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "configSelections": {
-          "items": {
-            "$ref": "#/$defs/ConfigOptionSelection"
-          },
-          "type": "array"
-        },
-        "forkContext": {
+        "turn": {
           "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "sourceTitle",
-        "providerInstanceId",
-        "cwd"
+        "thread"
       ],
-      "title": "ForkDraft"
+      "title": "ForkPoint"
     },
-    "GetAttachmentInput": {
+    "ForkPreview": {
       "properties": {
-        "threadId": {
-          "type": "string"
+        "native": {
+          "type": "boolean"
         },
-        "attachmentId": {
+        "summary": {
           "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "threadId",
-        "attachmentId"
+        "native"
       ],
-      "title": "GetAttachmentInput"
+      "title": "ForkPreview"
     },
-    "GetItemDetailInput": {
+    "ForkThread": {
       "properties": {
-        "threadId": {
+        "thread": {
           "type": "string"
         },
-        "itemId": {
+        "through": {
           "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/NewParticipant"
+        },
+        "prompt": {
+          "$ref": "#/$defs/MessageBody"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "threadId",
-        "itemId"
+        "thread",
+        "prompt"
       ],
-      "title": "GetItemDetailInput"
+      "title": "ForkThread"
     },
     "Goal": {
       "properties": {
@@ -1050,6 +1134,9 @@
         },
         "auth": {
           "$ref": "#/$defs/Auth"
+        },
+        "access": {
+          "$ref": "#/$defs/AccessModes"
         }
       },
       "additionalProperties": false,
@@ -1066,65 +1153,25 @@
       ],
       "title": "InstanceInfo"
     },
-    "Item": {
+    "Interrupt": {
       "properties": {
-        "id": {
+        "thread": {
           "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "detailAvailable": {
-          "type": "boolean"
-        },
-        "toolCallSummary": {
-          "$ref": "#/$defs/ToolCallSummary"
-        },
-        "sequence": {
-          "type": "integer"
-        },
-        "toolCall": {
-          "$ref": "#/$defs/ToolCall"
-        },
-        "payload": true,
-        "textDelta": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "id",
-        "kind",
-        "status",
-        "createdAt",
-        "updatedAt"
+        "thread"
       ],
-      "title": "Item"
+      "title": "Interrupt"
     },
     "MCPCapabilities": {
       "properties": {
         "http": {
           "type": "boolean"
         },
-        "sse": {
+        "stdio": {
           "type": "boolean"
         }
       },
@@ -1132,14 +1179,8 @@
       "type": "object",
       "title": "MCPCapabilities"
     },
-    "Message": {
+    "MessageBody": {
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "role": {
-          "type": "string"
-        },
         "text": {
           "type": "string"
         },
@@ -1154,67 +1195,178 @@
             "$ref": "#/$defs/PromptAnnotation"
           },
           "type": "array"
-        },
-        "turnId": {
-          "type": "string"
-        },
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "MessageBody"
+    },
+    "MoveDelivery": {
+      "properties": {
         "delivery": {
           "type": "string"
         },
-        "deliveryError": {
+        "before": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "delivery"
+      ],
+      "title": "MoveDelivery"
+    },
+    "NewParticipant": {
+      "properties": {
+        "instance": {
           "type": "string"
         },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
+        "settings": {
+          "items": {
+            "$ref": "#/$defs/ConfigOptionSelection"
+          },
+          "type": "array"
         },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
+        "session": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ],
+      "title": "NewParticipant"
+    },
+    "OriginSummary": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "forkedFrom": {
+          "$ref": "#/$defs/ForkPoint"
+        },
+        "acceptsInput": {
+          "type": "boolean"
+        },
+        "brief": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "acceptsInput"
+      ],
+      "title": "OriginSummary"
+    },
+    "ParticipantSummary": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "id",
-        "role",
-        "text",
-        "createdAt",
-        "updatedAt"
+        "instance",
+        "name",
+        "driver"
       ],
-      "title": "Message"
+      "title": "ParticipantSummary"
     },
-    "ModelSelection": {
+    "ParticipantView": {
       "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
         "model": {
           "type": "string"
         },
-        "options": true
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "title": "ModelSelection"
-    },
-    "Plan": {
-      "properties": {
-        "entries": {
+        "settings": {
           "items": {
-            "$ref": "#/$defs/PlanEntry"
+            "$ref": "#/$defs/ConfigOptionSelection"
           },
           "type": "array"
         },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ConfigOption"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/SlashCommand"
+          },
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
+        },
+        "goal": {
+          "$ref": "#/$defs/Goal"
+        },
+        "usage": {
+          "$ref": "#/$defs/TokenUsage"
+        },
+        "live": {
+          "type": "boolean"
+        },
+        "access": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "entries",
-        "updatedAt"
+        "id",
+        "instance",
+        "name",
+        "driver",
+        "settings",
+        "options",
+        "commands",
+        "skills",
+        "live"
       ],
-      "title": "Plan"
+      "title": "ParticipantView"
     },
     "PlanEntry": {
       "properties": {
@@ -1297,74 +1449,29 @@
       ],
       "title": "ProviderAuthenticateParams"
     },
-    "ProviderForkThreadParams": {
+    "ProviderCompleteCommandParams": {
       "properties": {
-        "sourceThreadId": {
+        "thread": {
           "type": "string"
         },
-        "throughTurnId": {
+        "participant": {
           "type": "string"
         },
-        "beforeTurnId": {
+        "command": {
           "type": "string"
         },
-        "providerInstanceId": {
+        "input": {
           "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "sourceThreadId"
+        "thread",
+        "command",
+        "input"
       ],
-      "title": "ProviderForkThreadParams"
-    },
-    "ProviderForkThreadResult": {
-      "properties": {
-        "threadId": {
-          "type": "string"
-        },
-        "draft": {
-          "$ref": "#/$defs/ForkDraft"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "title": "ProviderForkThreadResult"
-    },
-    "ProviderImportSessionParams": {
-      "properties": {
-        "instanceId": {
-          "type": "string"
-        },
-        "session": {
-          "$ref": "#/$defs/SessionSummary"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "instanceId",
-        "session"
-      ],
-      "title": "ProviderImportSessionParams"
-    },
-    "ProviderImportSessionResult": {
-      "properties": {
-        "threadId": {
-          "type": "string"
-        },
-        "imported": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "threadId",
-        "imported"
-      ],
-      "title": "ProviderImportSessionResult"
+      "title": "ProviderCompleteCommandParams"
     },
     "ProviderInstanceParams": {
       "properties": {
@@ -1618,40 +1725,6 @@
       ],
       "title": "QuestionOption"
     },
-    "QueuedPrompt": {
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "attachments": {
-          "items": {
-            "$ref": "#/$defs/Attachment"
-          },
-          "type": "array"
-        },
-        "annotations": {
-          "items": {
-            "$ref": "#/$defs/PromptAnnotation"
-          },
-          "type": "array"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "messageId",
-        "text",
-        "createdAt"
-      ],
-      "title": "QueuedPrompt"
-    },
     "Request": {
       "properties": {
         "message": {
@@ -1671,7 +1744,8 @@
             "$ref": "#/$defs/RequestAction"
           },
           "type": "array"
-        }
+        },
+        "details": true
       },
       "additionalProperties": false,
       "type": "object",
@@ -1704,79 +1778,132 @@
       ],
       "title": "RequestAction"
     },
-    "SessionBinding": {
+    "RequestRecord": {
       "properties": {
-        "threadId": {
+        "request": {
           "type": "string"
         },
-        "providerInstanceId": {
+        "ask": {
+          "$ref": "#/$defs/Request"
+        },
+        "action": {
           "type": "string"
         },
-        "providerName": {
-          "type": "string"
-        },
-        "driver": {
-          "type": "string"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "additionalDirectories": {
-          "items": {
-            "type": "string"
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "type": "array"
-        },
-        "status": {
-          "type": "string"
-        },
-        "activeTurnId": {
-          "type": "string"
-        },
-        "stopRequested": {
-          "type": "boolean"
-        },
-        "configOptions": {
-          "items": {
-            "$ref": "#/$defs/ConfigOption"
-          },
-          "type": "array"
-        },
-        "slashCommands": {
-          "items": {
-            "$ref": "#/$defs/SlashCommand"
-          },
-          "type": "array"
-        },
-        "skills": {
-          "items": {
-            "$ref": "#/$defs/Skill"
-          },
-          "type": "array"
-        },
-        "tokenUsage": {
-          "$ref": "#/$defs/TokenUsage"
-        },
-        "goal": {
-          "$ref": "#/$defs/Goal"
-        },
-        "lastError": {
-          "type": "string"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
+          "type": "object"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "threadId",
-        "providerInstanceId",
-        "status",
-        "updatedAt"
+        "request",
+        "ask"
       ],
-      "title": "SessionBinding"
+      "title": "RequestRecord"
+    },
+    "RequestResolution": {
+      "properties": {
+        "request": {
+          "type": "string"
+        },
+        "record": {
+          "$ref": "#/$defs/RequestRecord"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "request",
+        "record"
+      ],
+      "title": "RequestResolution"
+    },
+    "RequestView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "participant": {
+          "type": "string"
+        },
+        "turn": {
+          "type": "string"
+        },
+        "entry": {
+          "type": "string"
+        },
+        "ask": {
+          "$ref": "#/$defs/Request"
+        },
+        "openedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "answering": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "participant",
+        "ask",
+        "openedAt"
+      ],
+      "title": "RequestView"
+    },
+    "Respond": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "request": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread",
+        "request",
+        "action"
+      ],
+      "title": "Respond"
+    },
+    "RetryDelivery": {
+      "properties": {
+        "delivery": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "delivery"
+      ],
+      "title": "RetryDelivery"
     },
     "SessionSummary": {
       "properties": {
@@ -1860,18 +1987,82 @@
       ],
       "title": "SlashCommand"
     },
-    "SubscribeThreadInput": {
+    "Spawn": {
       "properties": {
-        "threadId": {
+        "parent": {
+          "type": "string"
+        },
+        "brief": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/NewParticipant"
+        },
+        "access": {
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/$defs/ForkPoint"
+        },
+        "resultSchema": true,
+        "wake": {
+          "type": "string"
+        },
+        "title": {
           "type": "string"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "threadId"
+        "parent",
+        "brief",
+        "agent"
       ],
-      "title": "SubscribeThreadInput"
+      "title": "Spawn"
+    },
+    "SteerDelivery": {
+      "properties": {
+        "delivery": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "delivery"
+      ],
+      "title": "SteerDelivery"
+    },
+    "Stop": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread"
+      ],
+      "title": "Stop"
+    },
+    "StopItem": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "item": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread",
+        "item"
+      ],
+      "title": "StopItem"
     },
     "TerminalAppearance": {
       "properties": {
@@ -2244,94 +2435,223 @@
       ],
       "title": "TerminalWriteParams"
     },
-    "Thread": {
+    "TextAppend": {
       "properties": {
-        "id": {
+        "turn": {
           "type": "string"
         },
-        "title": {
+        "entry": {
           "type": "string"
         },
-        "providerInstanceId": {
+        "stream": {
           "type": "string"
         },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
-        },
-        "cwd": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "turn",
+        "entry",
+        "stream",
+        "text"
+      ],
+      "title": "TextAppend"
+    },
+    "ThreadEntryParams": {
+      "properties": {
+        "thread": {
           "type": "string"
         },
-        "additionalDirectories": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread",
+        "ref"
+      ],
+      "title": "ThreadEntryParams"
+    },
+    "ThreadEvent": {
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "thread": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "turn": {
+          "$ref": "#/$defs/TurnView"
+        },
+        "entry": {
+          "$ref": "#/$defs/EntryView"
+        },
+        "text": {
+          "$ref": "#/$defs/TextAppend"
+        },
+        "delivery": {
+          "$ref": "#/$defs/DeliveryView"
+        },
+        "request": {
+          "$ref": "#/$defs/RequestView"
+        },
+        "resolved": {
+          "$ref": "#/$defs/RequestResolution"
+        },
+        "participant": {
+          "$ref": "#/$defs/ParticipantView"
+        },
+        "summary": {
+          "$ref": "#/$defs/ThreadSummary"
+        },
+        "plan": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/PlanEntry"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "seq",
+        "thread",
+        "kind"
+      ],
+      "title": "ThreadEvent"
+    },
+    "ThreadForkPreviewParams": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "through": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread"
+      ],
+      "title": "ThreadForkPreviewParams"
+    },
+    "ThreadListItem": {
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "threads": {
+          "items": {
+            "$ref": "#/$defs/ThreadSummary"
           },
           "type": "array"
         },
-        "session": {
-          "$ref": "#/$defs/SessionBinding"
+        "thread": {
+          "$ref": "#/$defs/ThreadSummary"
         },
-        "latestTurn": {
-          "$ref": "#/$defs/Turn"
+        "removed": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "seq",
+        "kind"
+      ],
+      "title": "ThreadListItem"
+    },
+    "ThreadParams": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread"
+      ],
+      "title": "ThreadParams"
+    },
+    "ThreadSnapshot": {
+      "properties": {
+        "seq": {
+          "type": "integer"
         },
-        "previousTurns": {
+        "thread": {
+          "$ref": "#/$defs/ThreadSummary"
+        },
+        "participants": {
           "items": {
-            "$ref": "#/$defs/Turn"
+            "$ref": "#/$defs/ParticipantView"
           },
           "type": "array"
         },
-        "timeline": {
-          "$ref": "#/$defs/Timeline"
-        },
-        "queuedPrompts": {
+        "turns": {
           "items": {
-            "$ref": "#/$defs/QueuedPrompt"
+            "$ref": "#/$defs/TurnView"
+          },
+          "type": "array"
+        },
+        "older": {
+          "type": "string"
+        },
+        "queue": {
+          "items": {
+            "$ref": "#/$defs/DeliveryView"
+          },
+          "type": "array"
+        },
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/RequestView"
+          },
+          "type": "array"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/ThreadSummary"
           },
           "type": "array"
         },
         "plan": {
-          "$ref": "#/$defs/Plan"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
+          "items": {
+            "$ref": "#/$defs/PlanEntry"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "id",
-        "title",
-        "timeline",
-        "createdAt",
-        "updatedAt"
+        "seq",
+        "thread",
+        "participants",
+        "turns",
+        "queue",
+        "requests",
+        "children",
+        "plan"
       ],
-      "title": "Thread"
+      "title": "ThreadSnapshot"
     },
-    "ThreadDetailSnapshot": {
-      "properties": {
-        "historyRestorePending": {
-          "type": "boolean"
-        },
-        "snapshotSequence": {
-          "type": "integer"
-        },
-        "thread": {
-          "$ref": "#/$defs/Thread"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "snapshotSequence",
-        "thread"
-      ],
-      "title": "ThreadDetailSnapshot"
-    },
-    "ThreadListEntry": {
+    "ThreadSummary": {
       "properties": {
         "id": {
           "type": "string"
@@ -2339,23 +2659,32 @@
         "title": {
           "type": "string"
         },
-        "providerInstanceId": {
-          "type": "string"
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
         },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
+        "origin": {
+          "$ref": "#/$defs/OriginSummary"
         },
-        "cwd": {
-          "type": "string"
-        },
-        "additionalDirectories": {
+        "participants": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ParticipantSummary"
           },
           "type": "array"
         },
-        "latestTurn": {
-          "$ref": "#/$defs/Turn"
+        "address": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "hold": {
+          "type": "string"
+        },
+        "attention": {
+          "$ref": "#/$defs/Attention"
+        },
+        "children": {
+          "type": "integer"
         },
         "createdAt": {
           "type": "string",
@@ -2364,12 +2693,6 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
-        },
-        "session": {
-          "$ref": "#/$defs/SessionBinding"
-        },
-        "hasPendingApprovals": {
-          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -2377,106 +2700,54 @@
       "required": [
         "id",
         "title",
+        "workspace",
+        "origin",
+        "participants",
+        "status",
+        "attention",
+        "children",
         "createdAt",
-        "updatedAt",
-        "hasPendingApprovals"
+        "updatedAt"
       ],
-      "title": "ThreadListEntry"
+      "title": "ThreadSummary"
     },
-    "ThreadListSnapshot": {
+    "ThreadTurnsParams": {
       "properties": {
-        "snapshotSequence": {
-          "type": "integer"
+        "thread": {
+          "type": "string"
         },
-        "threads": {
+        "before": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thread"
+      ],
+      "title": "ThreadTurnsParams"
+    },
+    "ThreadTurnsResult": {
+      "properties": {
+        "turns": {
           "items": {
-            "$ref": "#/$defs/ThreadListEntry"
+            "$ref": "#/$defs/TurnView"
           },
           "type": "array"
         },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "snapshotSequence",
-        "threads",
-        "updatedAt"
-      ],
-      "title": "ThreadListSnapshot"
-    },
-    "ThreadListStreamItem": {
-      "properties": {
-        "kind": {
+        "older": {
           "type": "string"
-        },
-        "snapshot": {
-          "$ref": "#/$defs/ThreadListSnapshot"
-        },
-        "sequence": {
-          "type": "integer"
-        },
-        "thread": {
-          "$ref": "#/$defs/ThreadListEntry"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "kind"
+        "turns"
       ],
-      "title": "ThreadListStreamItem"
-    },
-    "ThreadStreamItem": {
-      "properties": {
-        "kind": {
-          "type": "string"
-        },
-        "snapshot": {
-          "$ref": "#/$defs/ThreadDetailSnapshot"
-        },
-        "event": {
-          "$ref": "#/$defs/Event"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "kind"
-      ],
-      "title": "ThreadStreamItem"
-    },
-    "Timeline": {
-      "items": {
-        "$ref": "#/$defs/TimelineEntry"
-      },
-      "type": "array",
-      "title": "Timeline"
-    },
-    "TimelineEntry": {
-      "properties": {
-        "kind": {
-          "type": "string"
-        },
-        "message": {
-          "$ref": "#/$defs/Message"
-        },
-        "item": {
-          "$ref": "#/$defs/Item"
-        },
-        "approval": {
-          "$ref": "#/$defs/Approval"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "kind"
-      ],
-      "title": "TimelineEntry"
+      "title": "ThreadTurnsResult"
     },
     "TokenUsage": {
       "properties": {
@@ -2678,25 +2949,40 @@
       ],
       "title": "ToolLocation"
     },
-    "Turn": {
+    "TreePolicy": {
       "properties": {
-        "turnId": {
+        "maxDepth": {
+          "type": "integer"
+        },
+        "maxRunning": {
+          "type": "integer"
+        },
+        "hopLimit": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "maxDepth",
+        "maxRunning",
+        "hopLimit"
+      ],
+      "title": "TreePolicy"
+    },
+    "TurnView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "participant": {
+          "type": "string"
+        },
+        "startedBy": {
           "type": "string"
         },
         "state": {
           "type": "string"
-        },
-        "requestedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "startedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "completedAt": {
-          "type": "string",
-          "format": "date-time"
         },
         "stopReason": {
           "type": "string"
@@ -2704,18 +2990,90 @@
         "error": {
           "type": "string"
         },
-        "interruptRequested": {
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "settledAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/EntryView"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "participant",
+        "startedBy",
+        "state",
+        "startedAt",
+        "entries"
+      ],
+      "title": "TurnView"
+    },
+    "UpdateParticipant": {
+      "properties": {
+        "participant": {
+          "type": "string"
+        },
+        "setting": {
+          "$ref": "#/$defs/ConfigOptionSelection"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "participant",
+        "setting"
+      ],
+      "title": "UpdateParticipant"
+    },
+    "UpdateThread": {
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/TreePolicy"
+        },
+        "read": {
           "type": "boolean"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "turnId",
-        "state",
-        "requestedAt"
+        "thread"
       ],
-      "title": "Turn"
+      "title": "UpdateThread"
+    },
+    "Workspace": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "additionalDirectories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cwd"
+      ],
+      "title": "Workspace"
     },
     "WorkspaceBrowseDirectoriesParams": {
       "properties": {
@@ -2830,71 +3188,83 @@
         "emptyParams": {
           "$ref": "#/$defs/EmptyParams"
         },
-        "command": {
-          "$ref": "#/$defs/Command"
+        "commandParams": {
+          "$ref": "#/$defs/CommandParams"
         },
-        "commandMessage": {
-          "$ref": "#/$defs/CommandMessage"
+        "commandResult": {
+          "$ref": "#/$defs/CommandResult"
         },
-        "dispatchResult": {
-          "$ref": "#/$defs/DispatchResult"
+        "threadParams": {
+          "$ref": "#/$defs/ThreadParams"
         },
-        "subscribeThreadParams": {
-          "$ref": "#/$defs/SubscribeThreadInput"
+        "threadTurnsParams": {
+          "$ref": "#/$defs/ThreadTurnsParams"
         },
-        "getItemDetailParams": {
-          "$ref": "#/$defs/GetItemDetailInput"
+        "threadTurnsResult": {
+          "$ref": "#/$defs/ThreadTurnsResult"
         },
-        "getAttachmentParams": {
-          "$ref": "#/$defs/GetAttachmentInput"
+        "threadEntryParams": {
+          "$ref": "#/$defs/ThreadEntryParams"
+        },
+        "threadForkPreviewParams": {
+          "$ref": "#/$defs/ThreadForkPreviewParams"
+        },
+        "forkPreview": {
+          "$ref": "#/$defs/ForkPreview"
         },
         "attachmentUploadParams": {
           "$ref": "#/$defs/AttachmentUploadParams"
         },
-        "threadStreamItem": {
-          "$ref": "#/$defs/ThreadStreamItem"
+        "attachmentUploadResult": {
+          "$ref": "#/$defs/AttachmentUploadResult"
         },
-        "threadListStreamItem": {
-          "$ref": "#/$defs/ThreadListStreamItem"
+        "attachmentParams": {
+          "$ref": "#/$defs/AttachmentParams"
         },
-        "threadDetailSnapshot": {
-          "$ref": "#/$defs/ThreadDetailSnapshot"
+        "threadSummary": {
+          "$ref": "#/$defs/ThreadSummary"
         },
-        "threadListSnapshot": {
-          "$ref": "#/$defs/ThreadListSnapshot"
+        "originSummary": {
+          "$ref": "#/$defs/OriginSummary"
         },
-        "threadListEntry": {
-          "$ref": "#/$defs/ThreadListEntry"
+        "participantSummary": {
+          "$ref": "#/$defs/ParticipantSummary"
         },
-        "event": {
-          "$ref": "#/$defs/Event"
+        "participantView": {
+          "$ref": "#/$defs/ParticipantView"
         },
-        "eventMetadata": {
-          "$ref": "#/$defs/EventMetadata"
+        "attention": {
+          "$ref": "#/$defs/Attention"
         },
-        "eventPayload": {
-          "$ref": "#/$defs/EventPayload"
+        "threadSnapshot": {
+          "$ref": "#/$defs/ThreadSnapshot"
         },
-        "approvalEvent": {
-          "$ref": "#/$defs/ApprovalEvent"
+        "turnView": {
+          "$ref": "#/$defs/TurnView"
         },
-        "thread": {
-          "$ref": "#/$defs/Thread"
+        "entryView": {
+          "$ref": "#/$defs/EntryView"
         },
-        "turn": {
-          "$ref": "#/$defs/Turn"
+        "deliveryView": {
+          "$ref": "#/$defs/DeliveryView"
         },
-        "message": {
-          "$ref": "#/$defs/Message"
+        "actorView": {
+          "$ref": "#/$defs/ActorView"
         },
-        "approval": {
-          "$ref": "#/$defs/Approval"
+        "requestView": {
+          "$ref": "#/$defs/RequestView"
         },
-        "sessionBinding": {
-          "$ref": "#/$defs/SessionBinding"
+        "threadEvent": {
+          "$ref": "#/$defs/ThreadEvent"
         },
-        "item": {
-          "$ref": "#/$defs/Item"
+        "textAppend": {
+          "$ref": "#/$defs/TextAppend"
+        },
+        "requestResolution": {
+          "$ref": "#/$defs/RequestResolution"
+        },
+        "threadListItem": {
+          "$ref": "#/$defs/ThreadListItem"
         },
         "toolCallSummary": {
           "$ref": "#/$defs/ToolCallSummary"
@@ -2902,14 +3272,71 @@
         "fileChangeSummary": {
           "$ref": "#/$defs/FileChangeSummary"
         },
-        "toolAttachmentSummary": {
+        "toolAttachment": {
           "$ref": "#/$defs/ToolAttachmentSummary"
         },
-        "timelineEntry": {
-          "$ref": "#/$defs/TimelineEntry"
+        "forkPoint": {
+          "$ref": "#/$defs/ForkPoint"
         },
-        "plan": {
-          "$ref": "#/$defs/Plan"
+        "treePolicy": {
+          "$ref": "#/$defs/TreePolicy"
+        },
+        "messageBody": {
+          "$ref": "#/$defs/MessageBody"
+        },
+        "newParticipant": {
+          "$ref": "#/$defs/NewParticipant"
+        },
+        "createThread": {
+          "$ref": "#/$defs/CreateThread"
+        },
+        "updateThread": {
+          "$ref": "#/$defs/UpdateThread"
+        },
+        "deleteThread": {
+          "$ref": "#/$defs/DeleteThread"
+        },
+        "forkThread": {
+          "$ref": "#/$defs/ForkThread"
+        },
+        "spawn": {
+          "$ref": "#/$defs/Spawn"
+        },
+        "addParticipant": {
+          "$ref": "#/$defs/AddParticipant"
+        },
+        "updateParticipant": {
+          "$ref": "#/$defs/UpdateParticipant"
+        },
+        "deliver": {
+          "$ref": "#/$defs/Deliver"
+        },
+        "cancelDelivery": {
+          "$ref": "#/$defs/CancelDelivery"
+        },
+        "moveDelivery": {
+          "$ref": "#/$defs/MoveDelivery"
+        },
+        "steerDelivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        },
+        "retryDelivery": {
+          "$ref": "#/$defs/RetryDelivery"
+        },
+        "interrupt": {
+          "$ref": "#/$defs/Interrupt"
+        },
+        "stop": {
+          "$ref": "#/$defs/Stop"
+        },
+        "continue": {
+          "$ref": "#/$defs/Continue"
+        },
+        "respond": {
+          "$ref": "#/$defs/Respond"
+        },
+        "stopItem": {
+          "$ref": "#/$defs/StopItem"
         },
         "instanceInfo": {
           "$ref": "#/$defs/InstanceInfo"
@@ -2926,9 +3353,6 @@
         "promptAnnotation": {
           "$ref": "#/$defs/PromptAnnotation"
         },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
-        },
         "configOption": {
           "$ref": "#/$defs/ConfigOption"
         },
@@ -2942,7 +3366,7 @@
           "$ref": "#/$defs/SlashCommand"
         },
         "providerCompleteCommandParams": {
-          "$ref": "#/$defs/CompleteCommandInput"
+          "$ref": "#/$defs/ProviderCompleteCommandParams"
         },
         "commandCompletion": {
           "$ref": "#/$defs/CommandCompletion"
@@ -2959,20 +3383,29 @@
         "requestAction": {
           "$ref": "#/$defs/RequestAction"
         },
+        "entry": {
+          "$ref": "#/$defs/Entry"
+        },
+        "envelope": {
+          "$ref": "#/$defs/Envelope"
+        },
+        "requestRecord": {
+          "$ref": "#/$defs/RequestRecord"
+        },
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
+        },
+        "planEntry": {
+          "$ref": "#/$defs/PlanEntry"
+        },
         "providerStartParams": {
           "$ref": "#/$defs/ProviderStartParams"
         },
-        "acpRegistryStartParams": {
+        "aCPRegistryStartParams": {
           "$ref": "#/$defs/ACPRegistryStartParams"
         },
         "providerAuthenticateParams": {
           "$ref": "#/$defs/ProviderAuthenticateParams"
-        },
-        "providerForkThreadParams": {
-          "$ref": "#/$defs/ProviderForkThreadParams"
-        },
-        "providerForkThreadResult": {
-          "$ref": "#/$defs/ProviderForkThreadResult"
         },
         "providerInstanceParams": {
           "$ref": "#/$defs/ProviderInstanceParams"
@@ -2982,12 +3415,6 @@
         },
         "providerSessionParams": {
           "$ref": "#/$defs/ProviderSessionParams"
-        },
-        "providerImportSessionParams": {
-          "$ref": "#/$defs/ProviderImportSessionParams"
-        },
-        "providerImportSessionResult": {
-          "$ref": "#/$defs/ProviderImportSessionResult"
         },
         "providerOptionsGetParams": {
           "$ref": "#/$defs/ProviderOptionsGetParams"
@@ -3007,16 +3434,16 @@
         "providerQuestionAnswerParams": {
           "$ref": "#/$defs/ProviderQuestionAnswerParams"
         },
-        "acpRegistryAgent": {
+        "aCPRegistryAgent": {
           "$ref": "#/$defs/ACPRegistryAgent"
         },
-        "acpRegistryInstalledAgent": {
+        "aCPRegistryInstalledAgent": {
           "$ref": "#/$defs/ACPRegistryInstalledAgent"
         },
-        "acpRegistryInstallParams": {
+        "aCPRegistryInstallParams": {
           "$ref": "#/$defs/ACPRegistryInstallParams"
         },
-        "acpCustomAgentAddParams": {
+        "aCPCustomAgentAddParams": {
           "$ref": "#/$defs/ACPCustomAgentAddParams"
         },
         "terminalSummary": {
@@ -3037,7 +3464,7 @@
         "terminalCreateParams": {
           "$ref": "#/$defs/TerminalCreateParams"
         },
-        "terminalIdParams": {
+        "terminalIDParams": {
           "$ref": "#/$defs/TerminalIDParams"
         },
         "terminalAttachParams": {
@@ -3075,39 +3502,61 @@
       "type": "object",
       "required": [
         "emptyParams",
-        "command",
-        "commandMessage",
-        "dispatchResult",
-        "subscribeThreadParams",
-        "getItemDetailParams",
-        "getAttachmentParams",
+        "commandParams",
+        "commandResult",
+        "threadParams",
+        "threadTurnsParams",
+        "threadTurnsResult",
+        "threadEntryParams",
+        "threadForkPreviewParams",
+        "forkPreview",
         "attachmentUploadParams",
-        "threadStreamItem",
-        "threadListStreamItem",
-        "threadDetailSnapshot",
-        "threadListSnapshot",
-        "threadListEntry",
-        "event",
-        "eventMetadata",
-        "eventPayload",
-        "approvalEvent",
-        "thread",
-        "turn",
-        "message",
-        "approval",
-        "sessionBinding",
-        "item",
+        "attachmentUploadResult",
+        "attachmentParams",
+        "threadSummary",
+        "originSummary",
+        "participantSummary",
+        "participantView",
+        "attention",
+        "threadSnapshot",
+        "turnView",
+        "entryView",
+        "deliveryView",
+        "actorView",
+        "requestView",
+        "threadEvent",
+        "textAppend",
+        "requestResolution",
+        "threadListItem",
         "toolCallSummary",
         "fileChangeSummary",
-        "toolAttachmentSummary",
-        "timelineEntry",
-        "plan",
+        "toolAttachment",
+        "forkPoint",
+        "treePolicy",
+        "messageBody",
+        "newParticipant",
+        "createThread",
+        "updateThread",
+        "deleteThread",
+        "forkThread",
+        "spawn",
+        "addParticipant",
+        "updateParticipant",
+        "deliver",
+        "cancelDelivery",
+        "moveDelivery",
+        "steerDelivery",
+        "retryDelivery",
+        "interrupt",
+        "stop",
+        "continue",
+        "respond",
+        "stopItem",
         "instanceInfo",
         "authenticationResult",
         "sessionSummary",
         "attachment",
         "promptAnnotation",
-        "modelSelection",
         "configOption",
         "configChoice",
         "configOptionSelection",
@@ -3118,33 +3567,34 @@
         "tokenUsage",
         "goal",
         "requestAction",
+        "entry",
+        "envelope",
+        "requestRecord",
+        "workspace",
+        "planEntry",
         "providerStartParams",
-        "acpRegistryStartParams",
+        "aCPRegistryStartParams",
         "providerAuthenticateParams",
-        "providerForkThreadParams",
-        "providerForkThreadResult",
         "providerInstanceParams",
         "providerListSessionsParams",
         "providerSessionParams",
-        "providerImportSessionParams",
-        "providerImportSessionResult",
         "providerOptionsGetParams",
         "providerOptionsSetParams",
         "providerOptionsResult",
         "providerOptionsInvalidated",
         "providerQuestion",
         "providerQuestionAnswerParams",
-        "acpRegistryAgent",
-        "acpRegistryInstalledAgent",
-        "acpRegistryInstallParams",
-        "acpCustomAgentAddParams",
+        "aCPRegistryAgent",
+        "aCPRegistryInstalledAgent",
+        "aCPRegistryInstallParams",
+        "aCPCustomAgentAddParams",
         "terminalSummary",
         "terminalAttachSnapshot",
         "terminalStreamItem",
         "terminalListStreamItem",
         "terminalRenameParams",
         "terminalCreateParams",
-        "terminalIdParams",
+        "terminalIDParams",
         "terminalAttachParams",
         "terminalDetachParams",
         "terminalWriteParams",

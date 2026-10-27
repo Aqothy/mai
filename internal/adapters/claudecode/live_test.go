@@ -7,109 +7,72 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/provider/providertest"
 )
 
-// TestLiveSmoke drives the real claude CLI end to end. It costs a small
-// amount of API/subscription usage, so it only runs when explicitly asked:
+// TestLiveSmoke drives the real claude CLI end to end and checks that what
+// streams live is what the transcript replays. It costs a small amount of
+// API/subscription usage, so it only runs when explicitly asked:
 //
 //	CLAUDE_LIVE_TEST=1 go test ./internal/adapters/claudecode/ -run TestLiveSmoke -v
 func TestLiveSmoke(t *testing.T) {
 	if os.Getenv("CLAUDE_LIVE_TEST") != "1" {
 		t.Skip("set CLAUDE_LIVE_TEST=1 to run the live CLI smoke test")
 	}
-	events := make(chan provider.RuntimeEvent, 1024)
-	instance, err := OpenInstance(context.Background(), provider.InstanceSpec{InstanceID: "claude-code", Name: "Claude Code"}, func(event provider.RuntimeEvent) {
-		select {
-		case events <- event:
-		default:
-		}
-	})
+	events := providertest.NewRecorder()
+	events.Timeout = 2 * time.Minute
+	instance, err := OpenInstance(context.Background(), provider.InstanceSpec{InstanceID: "claude-code", Name: "Claude Code"}, provider.Host{Emit: events.Emit})
 	if err != nil {
 		t.Fatalf("OpenInstance: %v", err)
 	}
 	defer instance.Close()
-	info := instance.Info()
-	t.Logf("auth status: %s", info.Auth.Status)
-	if info.Auth.Status != provider.AuthStatusAuthenticated {
+	if info := instance.Info(); info.Auth.Status != provider.AuthStatusAuthenticated {
 		t.Skip("claude CLI is not logged in; skipping live turn")
 	}
+	h := testInstance{Instance: instance, events: events}
 
 	cwd := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	result, err := instance.StartSession(ctx, provider.StartSessionInput{
-		ThreadID:       "live-thread",
-		Cwd:            cwd,
-		ModelSelection: &provider.ModelSelection{Model: "haiku"},
+	opened, err := instance.Open(ctx, provider.OpenInput{
+		Workspace: provider.Workspace{Cwd: cwd},
+		Settings:  []provider.ConfigOptionSelection{{OptionID: "model", Value: "haiku"}, {OptionID: "permission_mode", Value: "acceptEdits"}},
 	})
 	if err != nil {
-		t.Fatalf("StartSession: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
-	t.Logf("session id: %s, options: %d, skills: %d", result.Session.ProviderSessionID, len(result.Session.ConfigOptions), len(result.Session.Skills))
+	session := opened.Session
+	defer func() { _ = instance.Delete(context.Background(), session) }()
 
-	// Without a selection the session runs in the CLI's configured mode.
-	mode, _ := provider.CurrentConfigString(result.Session.ConfigOptions, "permission_mode")
-	t.Logf("permission mode: %s", mode)
-	defer func() { _ = instance.DeleteSession(context.Background(), result.Session.ProviderSessionID) }()
+	first := h.send(t, session, "Write the word OK to a file named ok.txt with your Write tool, then reply with exactly: DONE", false)
+	requireCompleted(t, events, first)
+	steered := h.send(t, session, "Use your Bash tool to run `sleep 3 && echo one`, then reply with exactly: ONE", false)
+	events.WaitFor(t, "the tool to start", func(event provider.Event) bool {
+		upserted, ok := event.Body.(provider.EntryUpserted)
+		return ok && upserted.Entry.Turn == steered && upserted.Entry.Tool != nil
+	})
+	steer := h.send(t, session, "Also reply with the word TWO after ONE.", true)
+	// The steer joins the turn at the tool's boundary, or runs as the next.
+	requireCompleted(t, events, steered)
+	events.WaitFor(t, "the steer to be read", func(event provider.Event) bool {
+		upserted, ok := event.Body.(provider.EntryUpserted)
+		return ok && upserted.Entry.Delivery == steer
+	})
+	if turn := events.LiveTurns(session); turn[len(turn)-1].State == provider.TurnRunning {
+		requireCompleted(t, events, turn[len(turn)-1].Ref)
+	}
+	if found, err := instance.Delivered(ctx, session, provider.DeliveryProbe{Delivery: steer}); err != nil || found != provider.TriYes {
+		t.Fatalf("steer delivered = %v, %v", found, err)
+	}
+	h.requireLiveIsHistory(t, session)
+	for _, turn := range h.events.LiveTurns(session) {
+		t.Logf("turn %s %s: %q", turn.Ref, turn.State, entryTexts(turn))
+	}
+}
 
-	runTurn := func(turnID, prompt string) string {
-		t.Helper()
-		if err := instance.SendTurn(ctx, provider.SendTurnInput{ThreadID: "live-thread", TurnID: turnID, Input: prompt}); err != nil {
-			t.Fatalf("SendTurn: %v", err)
-		}
-		text := ""
-		deadline := time.After(90 * time.Second)
-		for {
-			select {
-			case event := <-events:
-				switch event.Type {
-				case provider.RuntimeEventContentDelta:
-					if event.Payload.StreamKind == provider.RuntimeContentAssistantText {
-						text += event.Payload.Delta
-					}
-				case provider.RuntimeEventThreadTokenUsage:
-					t.Logf("usage: %+v", event.Payload.TokenUsage)
-				case provider.RuntimeEventTurnCompleted:
-					if event.TurnID != turnID {
-						continue
-					}
-					if event.Payload.TurnState != provider.RuntimeTurnCompleted {
-						t.Fatalf("turn state = %q (%s)", event.Payload.TurnState, event.Payload.Message)
-					}
-					if text == "" {
-						t.Fatal("no assistant text streamed")
-					}
-					t.Logf("assistant text: %q", text)
-					return text
-				}
-			case <-deadline:
-				t.Fatal("live turn timed out")
-			}
-		}
-	}
-	runTurn("live-turn-1", "Reply with exactly: OK")
-
-	// Effort changes apply to the running CLI.
-	if err := instance.SetConfigOption(ctx, provider.SetConfigOptionInput{ThreadID: "live-thread", OptionID: "effort", Value: "low"}); err != nil {
-		t.Fatalf("set effort: %v", err)
-	}
-	runTurn("live-turn-2", "Reply with exactly: DONE")
-
-	// The transcript replays both turns.
-	if err := instance.StopSession(ctx, provider.StopSessionInput{ThreadID: "live-thread"}); err != nil {
-		t.Fatalf("StopSession: %v", err)
-	}
-	replayed, err := instance.StartSession(ctx, provider.StartSessionInput{ThreadID: "live-thread", Cwd: cwd, ResumeCursor: result.Session.ResumeCursor, ReplayHistory: true})
-	if err != nil {
-		t.Fatalf("replay StartSession: %v", err)
-	}
-	var prompts []string
-	for _, event := range replayed.Replay {
-		if event.Payload.ItemType == provider.ItemKindUserMessage {
-			prompts = append(prompts, event.Payload.Detail)
-		}
-	}
-	if len(prompts) != 2 || replayed.HistoryUnavailable {
-		t.Fatalf("replayed prompts = %q (unavailable %v)", prompts, replayed.HistoryUnavailable)
+func requireCompleted(t *testing.T, events *providertest.Recorder, turn string) {
+	t.Helper()
+	if settled := events.WaitFor(t, "turn "+turn, providertest.Settled(turn)).Body.(provider.TurnSettled); settled.State != provider.TurnCompleted {
+		t.Fatalf("turn %s = %#v", turn, settled)
 	}
 }

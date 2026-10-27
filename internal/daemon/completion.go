@@ -2,22 +2,21 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/Aqothy/jsonrpc2"
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/orchestration"
+	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// completeCommand suggests a slash command's input from the thread's provider,
+// completeCommand suggests a slash command's input from a thread's agent,
 // which looks in the thread's workspace (a git repository's branches, say).
 func (s *Server) completeCommand(ctx context.Context, params wire.ProviderCompleteCommandParams) ([]wire.CommandCompletion, error) {
-	cwd, ok := s.orchestration.ThreadCwd(orchestration.ThreadID(params.ThreadID))
-	if !ok {
-		return nil, fmt.Errorf("%w: unknown thread %q", jsonrpc2.ErrInvalidParams, params.ThreadID)
+	agent, err := s.engine.ParticipantSession(ctx, params.Thread, params.Participant)
+	if err != nil {
+		return nil, err
 	}
-	params.Cwd = cwd
-	completions, err := s.providerService.CompleteCommand(ctx, params)
+	completions, err := s.providerService.CompleteCommand(ctx, agent.Instance, provider.CompleteCommandInput{
+		Session: agent.Session, Cwd: agent.Workspace.Cwd, Command: params.Command, Input: params.Input,
+	})
 	if err != nil {
 		return nil, err
 	}

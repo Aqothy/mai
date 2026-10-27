@@ -2,10 +2,10 @@
 //
 // Reasoning replay assumption: session/load replays agent thoughts as one
 // agent_thought_chunk per thought with no separators, while live streams
-// carry their own paragraph breaks. Replay therefore appends a paragraph
-// break after every thought chunk (separateReplayReasoningBlocks). An agent
-// that replays a single thought as several sub-newline chunks would gain
-// spurious breaks; no supported agent (gemini-cli, claude-code-acp) does.
+// carry their own paragraph breaks. The mapper therefore appends a paragraph
+// break after every replayed thought chunk. An agent that replays a single
+// thought as several sub-newline chunks would gain spurious breaks; no
+// supported agent (gemini-cli, claude-code-acp) does.
 package acp
 
 import (
@@ -39,9 +39,24 @@ type Config struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-// OpenInstance decodes the ACP configuration, starts the agent, initializes the
-// connection, and publishes provider-neutral runtime events through emit.
-func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (*Instance, error) {
+// historyVersion changes whenever the mapper maps frames differently.
+const historyVersion = 1
+
+// Driver is the ACP driver. An agent's capabilities come with its
+// initialize response and its modes are its own, so little is known before
+// it runs: an unrated mode bounds others as full access.
+var Driver = provider.Driver{
+	Open: func(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (provider.Instance, error) {
+		return OpenInstance(ctx, spec, host)
+	},
+	Static: func(provider.InstanceSpec) provider.InstanceInfo {
+		return provider.InstanceInfo{Capabilities: provider.Capabilities{HistoryVersion: historyVersion}}
+	},
+}
+
+// OpenInstance decodes the ACP configuration, starts the agent and
+// initializes the connection.
+func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (*Instance, error) {
 	if spec.InstanceID == "" {
 		return nil, fmt.Errorf("missing provider instance id")
 	}
@@ -73,7 +88,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		return nil, fmt.Errorf("start ACP agent: %w", err)
 	}
 
-	h := newInstance(emit)
+	h := newInstance(host)
 	h.config = config
 	h.process = process
 	logger := slog.Default().With("component", "acp-sdk", "providerInstance", spec.InstanceID)
@@ -101,7 +116,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 		Status:        provider.InstanceStatusInitialized,
 		StartedAt:     startedAt,
 		InitializedAt: h.initializedAt,
-		Capabilities:  capabilitySet(initResp),
+		Capabilities:  capabilitySet(initResp, host.Mirror != nil),
 		Auth:          authStateFromACP(initResp),
 	}
 	go h.wait()
@@ -109,6 +124,8 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 }
 
 type Instance struct {
+	provider.Unsupported
+
 	mu sync.Mutex
 	// config is the agent's launch configuration, reused to run terminal
 	// sign-in methods.
@@ -122,26 +139,19 @@ type Instance struct {
 	initialize    schema.InitializeResponse
 	info          provider.InstanceInfo
 
-	// sessions holds all per-session state (stream, turn, config, scope, tool
-	// reconciliation, pending permissions) keyed by ACP session id;
-	// sessionsByThread is the thread->session index. Unbinding a session is
-	// deleting its one entry plus the index entry.
-	sessions         map[string]*acpSession
-	sessionsByThread map[string]string
+	// sessions holds the live sessions, options sessions among them, by ACP
+	// session id.
+	sessions map[string]*acpSession
 
 	// signInAsk answers request-scoped elicitations while authenticate runs.
 	signInAsk func(context.Context, provider.Request) (provider.RequestAnswer, error)
 
-	runtimeEventListener provider.RuntimeEventListener
-	once                 sync.Once
+	host provider.Host
+	once sync.Once
 }
 
-func newInstance(listener provider.RuntimeEventListener) *Instance {
-	h := &Instance{
-		runtimeEventListener: listener,
-		sessions:             make(map[string]*acpSession),
-		sessionsByThread:     make(map[string]string),
-	}
+func newInstance(host provider.Host) *Instance {
+	h := &Instance{host: host, sessions: make(map[string]*acpSession)}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h
 }
@@ -279,7 +289,7 @@ func (h *Instance) noteAuthRequired(err error) {
 
 func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	if !h.Info().Capabilities.Logout {
-		return provider.InstanceInfo{}, fmt.Errorf("ACP agent did not advertise logout capability")
+		return provider.InstanceInfo{}, provider.ErrUnsupported
 	}
 	_, err := h.agentPeer.Logout(ctx, schema.LogoutRequest{})
 	if err != nil {

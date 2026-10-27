@@ -4,12 +4,10 @@ package daemon
 // rename/terminate/delete actions.
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
@@ -128,12 +126,8 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 
 func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	useQuietTestShell(t)
-	path := filepath.Join(t.TempDir(), "maid.db")
-	metadata, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	s := newServer(newLoggerFromEnv(), metadata)
+	dir := t.TempDir()
+	s := newTestServerAt(t, dir)
 	url := newWSTestServer(t, s)
 	client := dialRecordingClient(t, url)
 
@@ -150,12 +144,7 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	metadata2, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
-	}
-	restarted := newServer(newLoggerFromEnv(), metadata2)
-	defer restarted.Close()
+	restarted := newTestServerAt(t, dir)
 	url2 := newWSTestServer(t, restarted)
 	client2 := dialRecordingClient(t, url2)
 

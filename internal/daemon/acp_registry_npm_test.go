@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -14,14 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
@@ -121,9 +119,9 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	var info provider.InstanceInfo
 	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
 	firstPID := info.PID
-	id := orchestration.ThreadID("registry-update-qa")
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadCreate, ThreadID: id, Title: "Registry QA", Cwd: dir, ProviderInstanceID: info.InstanceID})
-	client.dispatch(t, orchestration.Command{Type: orchestration.CommandThreadTurnStart, ThreadID: id, Message: &orchestration.CommandMessage{MessageID: "qa-prompt", Text: "block " + dir}})
+	thread := client.createThread(t, info.InstanceID, dir).Thread
+	client.subscribe(t, thread)
+	blocked := client.deliver(t, thread, "block "+dir).Delivery
 	waitForFile(t, filepath.Join(dir, "ready"))
 	mu.Lock()
 	ceiling = "2.0.0"
@@ -137,16 +135,8 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if info.PID != firstPID {
 		t.Fatal("update replaced the running provider")
 	}
-	threadSnapshot := func() orchestration.Thread {
-		item, err := s.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: id})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return item.Snapshot.Thread
-	}
-	thread := threadSnapshot()
-	if thread.LatestTurn == nil || thread.LatestTurn.State != orchestration.TurnStateRunning {
-		t.Fatalf("active turn interrupted: %#v", thread.LatestTurn)
+	if turns := client.subscribe(t, thread).Turns; len(turns) != 1 || turns[0].State != provider.TurnRunning {
+		t.Fatalf("active turn interrupted: %#v", turns)
 	}
 	launches, err := os.ReadFile(launchLog)
 	if err != nil || string(launches) != "1.0.0\n" {
@@ -155,47 +145,21 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "release"), []byte("finish"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		thread = threadSnapshot()
-		if thread.LatestTurn != nil && thread.LatestTurn.State == orchestration.TurnStateCompleted {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	turn := client.waitSettled(t, thread, blocked)
+	if want := []string{"user_message: block " + dir, "assistant_message: hi"}; turn.State != provider.TurnCompleted || !slices.Equal(entryTexts(turn), want) {
+		t.Fatalf("turn after update = %s %q, want completed %q", turn.State, entryTexts(turn), want)
 	}
-	if thread.LatestTurn == nil || thread.LatestTurn.State != orchestration.TurnStateCompleted {
-		t.Fatalf("turn did not finish after update: %#v", thread.LatestTurn)
-	}
-	users, assistants := 0, 0
-	for _, entry := range thread.Timeline {
-		if entry.Message == nil {
-			continue
-		}
-		if entry.Message.Role == "user" && entry.Message.Text == "block "+dir {
-			users++
-		}
-		if entry.Message.Role == "assistant" && entry.Message.Text == "hi" {
-			assistants++
-		}
-	}
-	if users != 1 || assistants != 1 {
-		t.Fatalf("completed transcript user=%d assistant=%d", users, assistants)
-	}
-	// End only the owned, now-idle process group. The next ordinary session
-	// start must pick the saved update, not silently respawn the old version.
+	// End only the owned, now-idle process group. The chat's next message
+	// must start the saved update, not silently respawn the old version.
 	if err := syscall.Kill(-firstPID, syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		current, err := s.providerService.Info(info.InstanceID)
-		if err == nil && current.Status == provider.InstanceStatusExited {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if _, err := s.providerService.StartSession(context.Background(), string(id), provider.StartSessionInput{ProviderInstanceID: info.InstanceID}); err != nil {
-		t.Fatal(err)
+	waitUntil(t, "the old version to exit", func() bool {
+		current, ok := s.providerService.Info(info.InstanceID)
+		return ok && current.Status == provider.InstanceStatusExited
+	})
+	if turn := client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery); turn.State != provider.TurnCompleted {
+		t.Fatalf("turn on the update = %s, want completed", turn.State)
 	}
 	launches, err = os.ReadFile(launchLog)
 	if err != nil || string(launches) != "1.0.0\n2.0.0\n" {

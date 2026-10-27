@@ -109,11 +109,11 @@ func TestTurnStateFromResult(t *testing.T) {
 	// Plain success and aborted (interrupted) results are covered by the
 	// fake-CLI turns. Running out of turns or tokens completes the turn early.
 	state, reason, _ := turnStateFromResult(resultMessage{Subtype: "error_max_turns", IsError: true})
-	if state != provider.RuntimeTurnCompleted || reason != provider.StopReasonMaxTurnRequests {
+	if state != provider.TurnCompleted || reason != provider.StopReasonMaxTurnRequests {
 		t.Fatalf("max turns = %q %q, want completed early at the request limit", state, reason)
 	}
 	state, reason, _ = turnStateFromResult(resultMessage{Subtype: "success", StopReason: "max_tokens"})
-	if state != provider.RuntimeTurnCompleted || reason != provider.StopReasonMaxTokens {
+	if state != provider.TurnCompleted || reason != provider.StopReasonMaxTokens {
 		t.Fatalf("max tokens = %q %q, want completed early at the output limit", state, reason)
 	}
 	var message string
@@ -143,7 +143,7 @@ func TestTokenUsageFromResult(t *testing.T) {
 }
 
 func TestUserContentBlocks(t *testing.T) {
-	blocks, err := userContentBlocks(provider.SendTurnInput{Input: "hello", Attachments: []provider.Attachment{{Kind: "image", MimeType: "image/png", Data: "Zm9v"}}})
+	blocks, err := userContentBlocks("hello", []provider.Attachment{{Kind: "image", MimeType: "image/png", Data: "Zm9v"}})
 	if err != nil {
 		t.Fatalf("userContentBlocks: %v", err)
 	}
@@ -154,14 +154,14 @@ func TestUserContentBlocks(t *testing.T) {
 	if source["media_type"] != "image/png" || source["data"] != "Zm9v" {
 		t.Fatalf("source = %#v", source)
 	}
-	if _, err := userContentBlocks(provider.SendTurnInput{}); err == nil {
+	if _, err := userContentBlocks("", nil); err == nil {
 		t.Fatal("empty turn should error")
 	}
-	if _, err := userContentBlocks(provider.SendTurnInput{Attachments: []provider.Attachment{{Kind: "audio", Data: "x"}}}); err == nil {
+	if _, err := userContentBlocks("", []provider.Attachment{{Kind: "audio", Data: "x"}}); err == nil {
 		t.Fatal("audio attachment should error")
 	}
 	// data URLs are unwrapped into raw base64 for the API block.
-	blocks, err = userContentBlocks(provider.SendTurnInput{Attachments: []provider.Attachment{{Kind: "image", Data: "data:image/jpeg;base64,YWJj"}}})
+	blocks, err = userContentBlocks("", []provider.Attachment{{Kind: "image", Data: "data:image/jpeg;base64,YWJj"}})
 	if err != nil {
 		t.Fatalf("data url attachment: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAskUserQuestionAnswers(t *testing.T) {
 	}
 	pending := &pendingApproval{input: input, question: &question}
 	respond := func(answers map[string][]string) (map[string]any, error) {
-		return approvalResponse(pending, provider.RespondToRequestInput{Action: question.request().Actions[0], Answers: answers})
+		return approvalResponse(pending, provider.RequestAnswer{Action: question.request().Actions[0], Answers: answers})
 	}
 	if _, err := respond(map[string][]string{"Which one?": {"B"}}); err == nil {
 		t.Fatal("an unanswered question was sent")
@@ -252,7 +252,7 @@ func TestPlanReviewResponse(t *testing.T) {
 			if !ok {
 				t.Fatalf("the review offers no %q action", tt.action)
 			}
-			payload, err := approvalResponse(pending, provider.RespondToRequestInput{Action: action, Answers: map[string][]string{planFeedbackQuestionID: tt.feedback}})
+			payload, err := approvalResponse(pending, provider.RequestAnswer{Action: action, Answers: map[string][]string{planFeedbackQuestionID: tt.feedback}})
 			if err != nil || !reflect.DeepEqual(payload, tt.want) {
 				t.Fatalf("payload = %#v, err = %v; want %#v", payload, err, tt.want)
 			}
@@ -272,7 +272,7 @@ func TestElicitationResponse(t *testing.T) {
 		if !ok {
 			t.Fatalf("the form offers no %q action", actionID)
 		}
-		return approvalResponse(pending, provider.RespondToRequestInput{Action: action, Answers: answers})
+		return approvalResponse(pending, provider.RequestAnswer{Action: action, Answers: answers})
 	}
 	if _, err := respond("accept", nil); err == nil {
 		t.Fatal("a missing required answer was sent")

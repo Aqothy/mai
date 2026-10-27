@@ -1,18 +1,15 @@
-// Package providerservice owns provider runtime instances for the daemon.
-//
-// It is the daemon's seam to provider adapters: callers use provider-neutral,
-// thread-scoped requests and never hold adapter-specific connection/session
-// handles.
+// Package providerservice owns the daemon's provider instances: their specs,
+// their processes and their lifecycles. It starts instances lazily and
+// restarts them, stamps each process's events with its generation, and says
+// when a generation's process is gone. Sessions are orchestration's.
 package providerservice
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
-	"strings"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -20,528 +17,214 @@ import (
 	"github.com/Aqothy/maiD/internal/store"
 )
 
-// ProviderInstance is the provider adapter seam used by the Service. The
-// interface is thread-scoped, not native-session-scoped: adapters own their
-// protocol/session identifiers and expose only provider-neutral operations.
-type ProviderInstance interface {
-	Info() provider.InstanceInfo
-	Close() error
-	StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error)
-	// SendTurn dispatches a turn. It is asynchronous: the turn lifecycle
-	// (turn.started/turn.completed) and all content are reported through runtime
-	// events, so SendTurn returns once the turn is accepted/dispatched.
-	//
-	// A provider can run a turn it started on its own (Claude Code woken by a
-	// background task, a Codex goal continuing). A turn sent while one runs
-	// joins it: the adapter reports the provider's turn as the sent turn from
-	// then on, and ends the sent turn when the provider's turn ends.
-	SendTurn(ctx context.Context, input provider.SendTurnInput) error
-	InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error
-	SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error
-	RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error
-	StopSession(ctx context.Context, input provider.StopSessionInput) error
+// Sink receives instances' events and the end of their processes.
+type Sink struct {
+	// Event is one event of the process of generation.
+	Event func(instance provider.InstanceID, generation uint64, event provider.Event)
+	// Gone: the process of generation exited or was replaced.
+	Gone func(instance provider.InstanceID, generation uint64)
 }
 
-// Authenticator is the optional sign-in facet. Authenticate signs in directly,
-// returns a challenge the user finishes elsewhere (browser, device code), or
-// returns a Terminal command for the host to run interactively.
-type Authenticator interface {
-	Authenticate(ctx context.Context, input provider.AuthenticateInput) (provider.AuthenticationResult, error)
-	Logout(ctx context.Context) (provider.InstanceInfo, error)
-}
-
-// SessionManager is an optional capability for adapters whose providers support
-// session management (ACP session/list, /delete, /close). The Service
-// type-asserts it; providers that don't implement it report "not supported".
-type SessionManager interface {
-	ListSessions(ctx context.Context, cwd string) ([]provider.SessionSummary, error)
-	DeleteSession(ctx context.Context, sessionID string) error
-	CloseSession(ctx context.Context, sessionID string) error
-}
-
-// SessionForker is implemented by providers that fork their own sessions
-// through a turn; a fork of any other provider's thread is handed over as
-// text. The service supplies the provider-native session id from its private
-// thread route; clients never see that identifier.
-type SessionForker interface {
-	ForkSession(ctx context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error)
-}
-
-// SessionRenamer is optional, for providers whose native sessions have names
-// (Codex threads, Claude Code sessions).
-type SessionRenamer interface {
-	RenameSession(ctx context.Context, input provider.RenameSessionInput) error
-}
-
-// CommandCompleter is optional, for providers that suggest what follows a
-// slash command (SlashCommand.Completes).
-type CommandCompleter interface {
-	CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error)
-}
-
-// ItemStopper is optional, for providers that can stop an item running on
-// its own, such as a background task a tool started, without interrupting
-// the turn. Adapters mark such items with ToolCall.Background.
-type ItemStopper interface {
-	StopItem(ctx context.Context, input provider.StopItemInput) error
-}
-
-// ClientMessageIdentityProvider can return the exact dispatch identity in
-// native history. Providers without it retain their ordinary text replay.
-type ClientMessageIdentityProvider interface {
-	ReplaysClientMessageIDs() bool
-}
-
-// OptionsSessionProvider is optional. Providers with a static catalog can
-// implement these methods without opening a native session; ACP uses an
-// unbound session so dependent configuration remains spec-correct.
-type OptionsSessionProvider interface {
-	OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error)
-	SetOptionsSessionValue(ctx context.Context, handle string, optionID string, value any) ([]provider.ConfigOption, error)
-	CloseOptionsSession(ctx context.Context, handle string) error
-}
-
-// InstanceFactory opens one concrete adapter instance. The daemon owns driver
-// selection; providerservice supplies the per-instance event sink.
-type InstanceFactory func(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (ProviderInstance, error)
-
-const runtimeEventBuffer = 256
-
-type runtimeEventEnvelope struct {
-	event      provider.RuntimeEvent
-	instanceID provider.InstanceID
+type running struct {
+	instance   provider.Instance
 	generation uint64
+	// ended reports the generation gone once, whether it exited or was
+	// replaced first.
+	ended sync.Once
 }
 
-type threadRoute struct {
-	InstanceID        provider.InstanceID
-	Generation        uint64
-	ProviderSessionID string
-	ResumeCursor      json.RawMessage
-	StartInput        provider.StartSessionInput
-}
-
-// Service owns provider instances, thread routes, event generation fencing, and
-// the runtime-event fan-in hub. Instances are keyed by InstanceID, so multiple
-// instances of the same driver can coexist.
+// Service owns provider instances, keyed by InstanceID, so several instances
+// of one driver coexist.
 type Service struct {
+	drivers map[provider.DriverKind]provider.Driver
+	store   store.InstanceStore
+	mirror  func(provider.InstanceID) provider.Mirror
+	sink    Sink
+	logger  *slog.Logger
+
 	mu        sync.Mutex
-	instances map[provider.InstanceID]ProviderInstance // live processes only
-	// instanceSpecs includes persisted and manifest-owned specs for instances
-	// that are still cold.
-	instanceSpecs map[provider.InstanceID]provider.InstanceSpec
-	// Manifest configuration never enters the route database. Updates to a
-	// running instance wait for its next launch; cold defaults must not override
-	// an explicit custom executable chosen when the instance first starts.
-	manifestInstanceIDs  map[provider.InstanceID]struct{}
-	pendingManifestSpecs map[provider.InstanceID]provider.InstanceSpec
-	threadRoutes         map[string]threadRoute
-	// startLocks serialize an instance's launches (held across the launch);
-	// session starts read-lock only to look up the instance, so they wait for
-	// an in-flight launch but never hold up the next one.
-	startLocks   map[provider.InstanceID]*sync.RWMutex
-	openInstance InstanceFactory
-
-	activeEventGenerations map[provider.InstanceID]uint64
-	nextEventGeneration    uint64
-
-	routeStore     store.RouteStore
-	promptStore    store.PromptStore
-	storeMu        sync.Mutex
-	routeBindMu    sync.Mutex
-	dirtyInstances map[provider.InstanceID]struct{}
-	dirtyRoutes    map[string]struct{}
-
-	// ingress is the fan-in hub: every instance's runtime events funnel here and
-	// runHub forwards active-generation events to the single events channel
-	// consumed by ProviderRuntimeIngestion. This keeps providerservice free of
-	// any orchestration dependency.
-	ingress chan runtimeEventEnvelope
-	events  chan provider.RuntimeEvent
-
-	closeOnce sync.Once
-	closing   bool // guarded by mu; fences instance creation against Close
-	closed    chan struct{}
-	wg        sync.WaitGroup
+	instances map[provider.InstanceID]*running
+	// specs are every configured instance's, persisted or from a manifest.
+	specs map[provider.InstanceID]provider.InstanceSpec
+	// manifest instances are the daemon's own definitions, never persisted
+	// with their config; pending holds a manifest update for a running one
+	// until its next launch.
+	manifest   map[provider.InstanceID]bool
+	pending    map[provider.InstanceID]provider.InstanceSpec
+	generation uint64
+	// startLocks serialize an instance's launches.
+	startLocks map[provider.InstanceID]*sync.Mutex
+	closing    bool
 }
 
-// Option configures a Service.
-type Option func(*Service)
-
-// WithRouteStore enables persistence for routes and instance specs.
-func WithRouteStore(routeStore store.RouteStore) Option {
-	return func(s *Service) { s.routeStore = routeStore }
-}
-
-func WithPromptStore(promptStore store.PromptStore) Option {
-	return func(s *Service) { s.promptStore = promptStore }
-}
-
-func New(openInstance InstanceFactory, opts ...Option) *Service {
+// New makes the service. mirror gives each instance's adapter its native
+// mirror.
+func New(drivers map[provider.DriverKind]provider.Driver, instances store.InstanceStore, mirror func(provider.InstanceID) provider.Mirror, sink Sink, logger *slog.Logger) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Service{
-		instances:              make(map[provider.InstanceID]ProviderInstance),
-		instanceSpecs:          make(map[provider.InstanceID]provider.InstanceSpec),
-		manifestInstanceIDs:    make(map[provider.InstanceID]struct{}),
-		pendingManifestSpecs:   make(map[provider.InstanceID]provider.InstanceSpec),
-		threadRoutes:           make(map[string]threadRoute),
-		startLocks:             make(map[provider.InstanceID]*sync.RWMutex),
-		openInstance:           openInstance,
-		activeEventGenerations: make(map[provider.InstanceID]uint64),
-		ingress:                make(chan runtimeEventEnvelope, runtimeEventBuffer),
-		events:                 make(chan provider.RuntimeEvent, runtimeEventBuffer),
-		closed:                 make(chan struct{}),
-		dirtyInstances:         make(map[provider.InstanceID]struct{}),
-		dirtyRoutes:            make(map[string]struct{}),
+		drivers: drivers, store: instances, mirror: mirror, sink: sink, logger: logger.With("component", "providerservice"),
+		instances: make(map[provider.InstanceID]*running), specs: make(map[provider.InstanceID]provider.InstanceSpec),
+		manifest: make(map[provider.InstanceID]bool), pending: make(map[provider.InstanceID]provider.InstanceSpec),
+		startLocks: make(map[provider.InstanceID]*sync.Mutex),
 	}
-	for _, opt := range opts {
-		opt(s)
+	if instances != nil {
+		specs, err := instances.LoadInstances()
+		if err != nil {
+			s.logger.Warn("load persisted instance specs", "error", err)
+		}
+		for _, spec := range specs {
+			s.specs[spec.InstanceID] = cloneSpec(spec)
+		}
 	}
-	if s.routeStore != nil {
-		s.restorePersistedState()
-	}
-
-	s.wg.Add(1)
-	go s.runHub()
 	return s
 }
 
-// restorePersistedState rehydrates thread routes and instance specs from the
-// route store. It runs inside New, before the service is shared with any other
-// goroutine, so the map writes need no locking. Instances stay cold — they
-// respawn lazily on first use of a routed thread (ensureInstanceStarted). All
-// restored routes share one generation that is never assigned to an instance,
-// so withThreadInstance's stale-generation recovery re-runs StartSession with
-// the stored start input and resume cursor before the first operation on the
-// thread.
-func (s *Service) restorePersistedState() {
-	specs, err := s.routeStore.LoadInstances()
-	if err != nil {
-		log.Printf("providerservice: load persisted instance specs: %v", err)
-	}
-	for _, spec := range specs {
-		s.instanceSpecs[spec.InstanceID] = cloneInstanceSpec(spec)
-	}
-
-	routes, err := s.routeStore.LoadRoutes()
-	if err != nil {
-		log.Printf("providerservice: load persisted thread routes: %v; route persistence disabled for this run", err)
-		// A failed read is not proof that no routes exist. Freeze the durable
-		// route table so live in-memory sessions cannot overwrite resumable state
-		// that may become readable again on the next boot.
-		s.routeStore = nil
-		return
-	}
-	if len(routes) == 0 {
-		return
-	}
-	restoredGeneration := s.allocateEventGeneration()
-	for threadID, record := range routes {
-		s.threadRoutes[threadID] = threadRoute{
-			InstanceID:        record.InstanceID,
-			Generation:        restoredGeneration,
-			ProviderSessionID: record.ProviderSessionID,
-			ResumeCursor:      append(json.RawMessage(nil), record.ResumeCursor...),
-			StartInput:        persistentStartSessionInput(record.StartInput),
-		}
-	}
-}
-
-// ensureInstanceStarted lazily spawns a persisted provider instance on first
-// use after a daemon restart and replaces an exited provider process on its
-// next session start. A missing restored spec is not an error; the instance
-// lookup downstream reports "not initialized" as before.
-func (s *Service) ensureInstanceStarted(ctx context.Context, instanceID provider.InstanceID) error {
-	s.mu.Lock()
-	instance := s.instances[instanceID]
-	spec, restorable := s.instanceSpecs[instanceID]
-	if manifest, ok := s.pendingManifestSpecs[instanceID]; ok {
-		spec, restorable = manifest, true
-	}
-	s.mu.Unlock()
-
-	needsStart := instance == nil
-	if instance != nil {
-		needsStart = instance.Info().Status == provider.InstanceStatusExited
-	}
-	if !needsStart || !restorable {
-		return nil
-	}
-	_, err := s.StartInstance(ctx, spec, false)
-	return err
-}
-
-// RegisterManifestInstance makes a backend-owned provider definition
-// available for lazy startup. The full spec remains in memory; it is not
-// written to the route database.
+// RegisterManifestInstance makes a daemon-owned definition available to
+// start. Its config stays in memory.
 func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
-	if spec.InstanceID == "" {
-		return fmt.Errorf("register manifest provider requires instanceId")
+	if spec.InstanceID == "" || spec.Driver == "" {
+		return fmt.Errorf("a manifest provider needs an instance id and a driver")
 	}
 	if spec.Name == "" {
 		spec.Name = string(spec.InstanceID)
 	}
-	if spec.Driver == "" {
-		return fmt.Errorf("register manifest provider %q requires a driver", spec.InstanceID)
-	}
-	spec = cloneInstanceSpec(spec)
-
-	// Serialize registration with launch so an in-flight factory cannot
-	// overwrite a newer definition before a process has been installed.
 	lock := s.startLock(spec.InstanceID)
 	lock.Lock()
 	defer lock.Unlock()
 	s.mu.Lock()
-	s.manifestInstanceIDs[spec.InstanceID] = struct{}{}
-	// Preserve the spec of a running process until an explicit restart swaps it;
-	// cold definitions can immediately adopt updated manifest configuration.
-	if instance := s.instances[spec.InstanceID]; instance == nil || instance.Info().Status == provider.InstanceStatusExited {
-		s.instanceSpecs[spec.InstanceID] = spec
-		delete(s.pendingManifestSpecs, spec.InstanceID)
+	defer s.mu.Unlock()
+	s.manifest[spec.InstanceID] = true
+	if current := s.instances[spec.InstanceID]; current == nil || exited(current.instance) {
+		s.specs[spec.InstanceID] = cloneSpec(spec)
+		delete(s.pending, spec.InstanceID)
 	} else {
-		s.pendingManifestSpecs[spec.InstanceID] = spec
+		s.pending[spec.InstanceID] = cloneSpec(spec)
 	}
+	return nil
+}
+
+func exited(instance provider.Instance) bool {
+	return instance.Info().Status == provider.InstanceStatusExited
+}
+
+// Instance returns the running instance, starting its spec when it isn't.
+func (s *Service) Instance(ctx context.Context, id provider.InstanceID) (provider.Instance, uint64, error) {
+	s.mu.Lock()
+	current := s.instances[id]
 	s.mu.Unlock()
-
-	return nil
-}
-
-func (s *Service) persistManifestInstanceReference(spec provider.InstanceSpec) error {
-	if s.routeStore == nil {
-		return nil
+	if current != nil && !exited(current.instance) {
+		return current.instance, current.generation, nil
 	}
-	reference := cloneInstanceSpec(spec)
-	reference.Config = nil
-	s.storeMu.Lock()
-	defer s.storeMu.Unlock()
-	delete(s.dirtyInstances, spec.InstanceID)
-	if err := s.routeStore.SaveInstance(reference); err != nil {
-		return fmt.Errorf("persist manifest provider %q reference: %w", spec.InstanceID, err)
-	}
-	return nil
-}
-
-// StartConfiguredInstance starts a cold instance from its registered spec.
-func (s *Service) StartConfiguredInstance(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
-	if instanceID == "" {
-		return provider.InstanceInfo{}, fmt.Errorf("start configured provider requires instanceId")
+	if _, err := s.StartConfiguredInstance(ctx, id); err != nil {
+		return nil, 0, err
 	}
 	s.mu.Lock()
-	_, configured := s.instanceSpecs[instanceID]
+	defer s.mu.Unlock()
+	current = s.instances[id]
+	if current == nil {
+		return nil, 0, fmt.Errorf("provider instance %q is not running", id)
+	}
+	return current.instance, current.generation, nil
+}
+
+// Info describes a configured instance: its process's info when it runs,
+// otherwise what its driver knows before it starts.
+func (s *Service) Info(id provider.InstanceID) (provider.InstanceInfo, bool) {
+	s.mu.Lock()
+	current := s.instances[id]
+	spec, configured := s.specs[id]
 	s.mu.Unlock()
+	if current != nil {
+		return current.instance.Info(), true
+	}
 	if !configured {
-		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", instanceID)
+		return provider.InstanceInfo{}, false
 	}
-	if err := s.ensureInstanceStarted(ctx, instanceID); err != nil {
-		return provider.InstanceInfo{}, err
-	}
-	return s.Info(instanceID)
+	return s.staticInfo(spec), true
 }
 
-func (s *Service) persistThreadRoute(threadID string) {
-	if s.routeStore == nil || threadID == "" {
-		return
+func (s *Service) staticInfo(spec provider.InstanceSpec) provider.InstanceInfo {
+	info := provider.InstanceInfo{InstanceID: spec.InstanceID, Name: spec.Name, Driver: spec.Driver, Status: provider.InstanceStatusConfigured, Auth: provider.Auth{Status: provider.AuthStatusUnknown}}
+	if driver, ok := s.drivers[spec.Driver]; ok && driver.Static != nil {
+		static := driver.Static(spec)
+		info.Capabilities, info.Access = static.Capabilities, static.Access
 	}
-	s.storeMu.Lock()
-	defer s.storeMu.Unlock()
-	s.dirtyRoutes[threadID] = struct{}{}
-	s.flushPersistenceLocked()
+	info.InstanceID, info.Name, info.Driver, info.Status = spec.InstanceID, spec.Name, spec.Driver, provider.InstanceStatusConfigured
+	return info
 }
 
-func (s *Service) persistInstanceSpec(instanceID provider.InstanceID) {
-	if s.routeStore == nil || instanceID == "" {
-		return
-	}
-	s.storeMu.Lock()
-	defer s.storeMu.Unlock()
-	s.dirtyInstances[instanceID] = struct{}{}
-	s.flushPersistenceLocked()
-}
-
-func (s *Service) flushPersistenceLocked() {
-	for instanceID := range s.dirtyInstances {
-		s.mu.Lock()
-		spec, ok := s.instanceSpecs[instanceID]
-		spec = cloneInstanceSpec(spec)
-		s.mu.Unlock()
-		if !ok {
-			delete(s.dirtyInstances, instanceID)
-			continue
-		}
-		if err := s.routeStore.SaveInstance(spec); err != nil {
-			log.Printf("providerservice: persist instance %q spec: %v (will retry)", instanceID, err)
-			continue
-		}
-		delete(s.dirtyInstances, instanceID)
-	}
-
-	for threadID := range s.dirtyRoutes {
-		if s.persistThreadRouteLocked(threadID) {
-			delete(s.dirtyRoutes, threadID)
-		}
-	}
-}
-
-func (s *Service) persistThreadRouteLocked(threadID string) bool {
+// ListInstances is every configured instance, running or not.
+func (s *Service) ListInstances() []provider.InstanceInfo {
 	s.mu.Lock()
-	route, ok := s.threadRoutes[threadID]
-	if ok {
-		route.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
-		route.StartInput = cloneStartSessionInput(route.StartInput)
+	ids := make([]provider.InstanceID, 0, len(s.specs))
+	for id := range s.specs {
+		ids = append(ids, id)
+	}
+	for id := range s.instances {
+		if _, ok := s.specs[id]; !ok {
+			ids = append(ids, id)
+		}
 	}
 	s.mu.Unlock()
-
-	if !ok {
-		if err := s.routeStore.DeleteRoute(threadID); err != nil {
-			log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
-			return false
-		}
-		return true
-	}
-	if _, dirty := s.dirtyInstances[route.InstanceID]; dirty {
-		return false
-	}
-	if err := s.routeStore.SaveRoute(threadID, store.RouteRecord{
-		InstanceID:        route.InstanceID,
-		ProviderSessionID: route.ProviderSessionID,
-		ResumeCursor:      route.ResumeCursor,
-		StartInput:        route.StartInput,
-	}); err != nil {
-		log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
-		return false
-	}
-	return true
-}
-
-func (s *Service) Close() {
-	s.closeOnce.Do(func() {
-		// Mark the service first so a factory already in flight cannot install an
-		// untracked process after the registry is drained.
-		s.mu.Lock()
-		s.closing = true
-		s.mu.Unlock()
-
-		close(s.closed)
-		s.wg.Wait()
-		// runHub has exited, so nothing sends to events anymore; closing it tells
-		// the consumer (ingestion) the stream is over.
-		close(s.events)
-
-		if s.routeStore != nil {
-			s.storeMu.Lock()
-			s.flushPersistenceLocked()
-			s.storeMu.Unlock()
-		}
-
-		s.mu.Lock()
-		instances := make([]ProviderInstance, 0, len(s.instances))
-		for _, instance := range s.instances {
-			instances = append(instances, instance)
-		}
-		s.instances = make(map[provider.InstanceID]ProviderInstance)
-		s.instanceSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
-		s.pendingManifestSpecs = make(map[provider.InstanceID]provider.InstanceSpec)
-		s.threadRoutes = make(map[string]threadRoute)
-		s.activeEventGenerations = make(map[provider.InstanceID]uint64)
-		s.mu.Unlock()
-
-		for _, instance := range instances {
-			_ = instance.Close()
-		}
-	})
-}
-
-// Events returns the generation-filtered runtime stream in hub order. Close
-// closes it.
-func (s *Service) Events() <-chan provider.RuntimeEvent {
-	return s.events
-}
-
-// publish is the only sink the per-instance adapter listeners call. It blocks
-// only until the buffered hub accepts the event (or the service closes), giving
-// natural backpressure without dropping events.
-func (s *Service) publish(envelope runtimeEventEnvelope) {
-	select {
-	case <-s.closed:
-	case s.ingress <- envelope:
-	}
-}
-
-func (s *Service) runHub() {
-	defer s.wg.Done()
-	for {
-		select {
-		case <-s.closed:
-			return
-		case envelope := <-s.ingress:
-			if !s.eventGenerationAdmissible(envelope) {
-				continue
-			}
-			select {
-			case <-s.closed:
-				return
-			case s.events <- envelope.event:
-			}
+	infos := make([]provider.InstanceInfo, 0, len(ids))
+	for _, id := range ids {
+		if info, ok := s.Info(id); ok {
+			infos = append(infos, info)
 		}
 	}
+	return infos
 }
 
-func (s *Service) allocateEventGeneration() uint64 {
+func (s *Service) startLock(id provider.InstanceID) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nextEventGeneration++
-	return s.nextEventGeneration
-}
-
-func (s *Service) eventGenerationAdmissible(envelope runtimeEventEnvelope) bool {
-	if envelope.instanceID == "" || envelope.generation == 0 {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.activeEventGenerations[envelope.instanceID] == envelope.generation {
-		return true
-	}
-	// A replaced (dying) process may still settle work it started: terminal,
-	// turn-scoped events are admitted because dropping one before the replacement
-	// session binds would strand the old turn. The session binding carries its
-	// process generation, so ingestion drops the event after a replacement has
-	// actually rebound the thread. All non-terminal events from stale generations
-	// stay dropped here.
-	return terminalEventFromReplacedGeneration(envelope.event)
-}
-
-func terminalEventFromReplacedGeneration(event provider.RuntimeEvent) bool {
-	if event.ThreadID == "" || event.TurnID == "" {
-		return false
-	}
-	return event.Type == provider.RuntimeEventTurnCompleted || event.Type == provider.RuntimeEventRuntimeError
-}
-
-func (s *Service) startLock(instanceID provider.InstanceID) *sync.RWMutex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	lock := s.startLocks[instanceID]
+	lock := s.startLocks[id]
 	if lock == nil {
-		lock = &sync.RWMutex{}
-		s.startLocks[instanceID] = lock
+		lock = &sync.Mutex{}
+		s.startLocks[id] = lock
 	}
 	return lock
 }
 
-func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+// StartConfiguredInstance starts a configured instance that isn't running.
+func (s *Service) StartConfiguredInstance(ctx context.Context, id provider.InstanceID) (provider.InstanceInfo, error) {
 	s.mu.Lock()
-	_, manifestOwned := s.manifestInstanceIDs[spec.InstanceID]
-	s.mu.Unlock()
-	if manifestOwned {
-		if err := s.persistManifestInstanceReference(spec); err != nil {
-			return provider.InstanceInfo{}, err
-		}
+	spec, configured := s.specs[id]
+	if pending, ok := s.pending[id]; ok {
+		spec, configured = pending, true
 	}
-	return s.startInstance(ctx, spec, restart, !manifestOwned)
+	current := s.instances[id]
+	s.mu.Unlock()
+	if !configured {
+		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", id)
+	}
+	if current != nil && !exited(current.instance) {
+		return current.instance.Info(), nil
+	}
+	return s.start(ctx, spec, false, false)
 }
 
-// StartManifestInstance starts a manifest-owned definition without persisting
-// its command, arguments, or environment in SQLite.
+// StartInstance starts (or with restart replaces) an instance of spec. A
+// user's spec persists; a manifest's config doesn't.
+func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+	s.mu.Lock()
+	manifest := s.manifest[spec.InstanceID]
+	s.mu.Unlock()
+	if manifest {
+		reference := cloneSpec(spec)
+		reference.Config = nil
+		if s.store != nil {
+			if err := s.store.SaveInstance(reference); err != nil {
+				return provider.InstanceInfo{}, fmt.Errorf("persist manifest provider %q: %w", spec.InstanceID, err)
+			}
+		}
+	}
+	return s.start(ctx, spec, restart, !manifest)
+}
+
+// StartManifestInstance registers a manifest definition and starts it.
 func (s *Service) StartManifestInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
 	if err := s.RegisterManifestInstance(spec); err != nil {
 		return provider.InstanceInfo{}, err
@@ -549,25 +232,35 @@ func (s *Service) StartManifestInstance(ctx context.Context, spec provider.Insta
 	if !restart {
 		return s.StartConfiguredInstance(ctx, spec.InstanceID)
 	}
-	return s.StartInstance(ctx, spec, restart)
+	return s.StartInstance(ctx, spec, true)
 }
 
-func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec, restart bool, persistConfig bool) (provider.InstanceInfo, error) {
-	action := "provider start"
-	if restart {
-		action = "provider restart"
+// RestartInstance replaces a running instance with a new process of its
+// spec, e.g. so an agent picks up a sign-in.
+func (s *Service) RestartInstance(ctx context.Context, id provider.InstanceID) (provider.InstanceInfo, error) {
+	s.mu.Lock()
+	spec, ok := s.specs[id]
+	if pending, has := s.pending[id]; has {
+		spec, ok = pending, true
 	}
-	if spec.InstanceID == "" {
-		return provider.InstanceInfo{}, fmt.Errorf("%s requires a provider instance id", action)
+	s.mu.Unlock()
+	if !ok {
+		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", id)
+	}
+	return s.start(ctx, spec, true, false)
+}
+
+func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, restart, persist bool) (provider.InstanceInfo, error) {
+	if spec.InstanceID == "" || spec.Driver == "" {
+		return provider.InstanceInfo{}, fmt.Errorf("a provider needs an instance id and a driver")
 	}
 	if spec.Name == "" {
 		spec.Name = string(spec.InstanceID)
 	}
-	if spec.Driver == "" {
-		return provider.InstanceInfo{}, fmt.Errorf("%s requires a provider driver", action)
+	driver, ok := s.drivers[spec.Driver]
+	if !ok {
+		return provider.InstanceInfo{}, fmt.Errorf("unsupported provider driver %q", spec.Driver)
 	}
-	spec = cloneInstanceSpec(spec)
-
 	lock := s.startLock(spec.InstanceID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -575,858 +268,198 @@ func (s *Service) startInstance(ctx context.Context, spec provider.InstanceSpec,
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
-		return provider.InstanceInfo{}, fmt.Errorf("%s: provider service is closed", action)
+		return provider.InstanceInfo{}, fmt.Errorf("the provider service is closed")
 	}
-	if existing := s.instances[spec.InstanceID]; existing != nil {
-		info := existing.Info()
-		if info.Status != provider.InstanceStatusExited {
-			if !restart {
-				existingSpec := s.instanceSpecs[spec.InstanceID]
-				if existingSpec.Driver != spec.Driver {
-					s.mu.Unlock()
-					return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is already initialized as %s; use restart to replace it", spec.InstanceID, existingSpec.Driver)
-				}
-				if !instanceSpecsEqual(existingSpec, spec) {
-					s.mu.Unlock()
-					return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is already initialized with different configuration; use restart to replace it", spec.InstanceID)
-				}
-				s.mu.Unlock()
-				return info, nil
-			}
+	current := s.instances[spec.InstanceID]
+	if current != nil && !exited(current.instance) && !restart {
+		existing := s.specs[spec.InstanceID]
+		s.mu.Unlock()
+		if !specsEqual(existing, spec) {
+			return provider.InstanceInfo{}, fmt.Errorf("provider instance %q runs with another configuration; restart it to change it", spec.InstanceID)
 		}
+		return current.instance.Info(), nil
 	}
+	s.generation++
+	launched := &running{generation: s.generation}
 	s.mu.Unlock()
 
-	generation := s.allocateEventGeneration()
-	// The sink, not the event payload, is authoritative for source identity.
-	// Its captured generation distinguishes a replacement process with the same
-	// provider instance id from the stale process it replaced.
-	emit := func(event provider.RuntimeEvent) {
-		event.ProviderInstanceID = spec.InstanceID
-		event.ProviderName = spec.Name
-		event.Provider = spec.Driver
-		event.Generation = generation
-		s.publish(runtimeEventEnvelope{event: event, instanceID: spec.InstanceID, generation: generation})
+	id := spec.InstanceID
+	host := provider.Host{Emit: func(event provider.Event) {
+		if changed, ok := event.Body.(provider.InstanceChanged); ok && changed.Info.Status == provider.InstanceStatusExited {
+			s.gone(id, launched)
+		}
+		if s.sink.Event != nil {
+			s.sink.Event(id, launched.generation, event)
+		}
+	}}
+	if s.mirror != nil {
+		host.Mirror = s.mirror(id)
 	}
-
-	// Respect a caller's explicit acquisition deadline (registry-backed npm
-	// agents may need longer on first launch), while retaining a bounded default
-	// for internal lazy starts.
-	openCtx := ctx
-	cancel := func() {}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+	// A caller's deadline wins (npm-launched agents may install first);
+	// otherwise a lazy start gets a bounded one.
+	openCtx, cancel := ctx, func() {}
+	if _, has := ctx.Deadline(); !has {
 		openCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	}
 	defer cancel()
-	instance, err := s.openInstance(openCtx, cloneInstanceSpec(spec), emit)
+	instance, err := driver.Open(openCtx, cloneSpec(spec), host)
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-
-	info := instance.Info()
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
 		_ = instance.Close()
-		return provider.InstanceInfo{}, fmt.Errorf("%s: provider service is closed", action)
+		return provider.InstanceInfo{}, fmt.Errorf("the provider service is closed")
 	}
-	current := s.instances[spec.InstanceID]
-	s.instances[spec.InstanceID] = instance
-	s.instanceSpecs[spec.InstanceID] = cloneInstanceSpec(spec)
-	if pending, ok := s.pendingManifestSpecs[spec.InstanceID]; ok && instanceSpecsEqual(pending, spec) {
-		delete(s.pendingManifestSpecs, spec.InstanceID)
+	replaced := s.instances[id]
+	launched.instance = instance
+	s.instances[id] = launched
+	s.specs[id] = cloneSpec(spec)
+	if pending, ok := s.pending[id]; ok && specsEqual(pending, spec) {
+		delete(s.pending, id)
 	}
-	s.activeEventGenerations[spec.InstanceID] = generation
 	s.mu.Unlock()
-	if current != nil && current != instance {
-		_ = current.Close()
+	if replaced != nil {
+		_ = replaced.instance.Close()
+		s.gone(id, replaced)
 	}
-	if persistConfig {
-		s.persistInstanceSpec(spec.InstanceID)
-	}
-	return info, nil
-}
-
-func cloneInstanceSpec(spec provider.InstanceSpec) provider.InstanceSpec {
-	spec.Config = append(json.RawMessage(nil), spec.Config...)
-	return spec
-}
-
-func instanceSpecsEqual(a provider.InstanceSpec, b provider.InstanceSpec) bool {
-	return a.InstanceID == b.InstanceID && a.Name == b.Name && a.Driver == b.Driver && jsonValuesEqual(a.Config, b.Config)
-}
-
-func jsonValuesEqual(a json.RawMessage, b json.RawMessage) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return len(a) == len(b)
-	}
-	var av any
-	var bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return bytes.Equal(a, b)
-	}
-	// Values decoded from JSON can always be encoded again.
-	aJSON, _ := json.Marshal(av)
-	bJSON, _ := json.Marshal(bv)
-	return bytes.Equal(aJSON, bJSON)
-}
-
-func (s *Service) Authenticate(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
-	instance, err := s.instance(instanceID)
-	if err != nil {
-		return provider.AuthenticationResult{}, err
-	}
-	authenticator, ok := instance.(Authenticator)
-	if !ok || !instance.Info().Capabilities.Auth {
-		return provider.AuthenticationResult{}, fmt.Errorf("provider does not support authentication")
-	}
-	return authenticator.Authenticate(ctx, input)
-}
-
-// RestartInstance replaces a running instance with a fresh process using its
-// current configuration, e.g. so an agent re-initializes after signing in.
-func (s *Service) RestartInstance(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
-	s.mu.Lock()
-	spec, ok := s.instanceSpecs[instanceID]
-	s.mu.Unlock()
-	if !ok {
-		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not running", instanceID)
-	}
-	return s.startInstance(ctx, spec, true, false)
-}
-
-func (s *Service) Logout(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
-	instance, err := s.instance(instanceID)
-	if err != nil {
-		return provider.InstanceInfo{}, err
-	}
-	authenticator, ok := instance.(Authenticator)
-	if !ok || !instance.Info().Capabilities.Logout {
-		return provider.InstanceInfo{}, fmt.Errorf("provider does not support logout")
-	}
-	return authenticator.Logout(ctx)
-}
-
-func (s *Service) Info(instanceID provider.InstanceID) (provider.InstanceInfo, error) {
-	instance, err := s.instance(instanceID)
-	if err != nil {
-		return provider.InstanceInfo{}, err
+	if persist && s.store != nil {
+		if err := s.store.SaveInstance(spec); err != nil {
+			s.logger.Warn("persist provider instance", "instance", id, "error", err)
+		}
 	}
 	return instance.Info(), nil
 }
 
-func (s *Service) ListSessions(ctx context.Context, instanceID provider.InstanceID, cwd string) ([]provider.SessionSummary, error) {
-	manager, err := s.sessionManager(instanceID, "list")
+func (s *Service) gone(id provider.InstanceID, process *running) {
+	process.ended.Do(func() {
+		if s.sink.Gone != nil {
+			s.sink.Gone(id, process.generation)
+		}
+	})
+}
+
+// running is the instance's process, or an error saying it isn't running.
+func (s *Service) runningInstance(id provider.InstanceID) (provider.Instance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.instances[id]
+	if current == nil {
+		return nil, fmt.Errorf("provider instance %q is not running", id)
+	}
+	return current.instance, nil
+}
+
+// sessionCallTimeout bounds calls on behalf of a client, so a hung agent
+// can't pin the connection's calls.
+const sessionCallTimeout = 60 * time.Second
+
+func (s *Service) Authenticate(ctx context.Context, id provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+	instance, _, err := s.Instance(ctx, id)
+	if err != nil {
+		return provider.AuthenticationResult{}, err
+	}
+	return instance.Authenticate(ctx, input)
+}
+
+func (s *Service) Logout(ctx context.Context, id provider.InstanceID) (provider.InstanceInfo, error) {
+	instance, _, err := s.Instance(ctx, id)
+	if err != nil {
+		return provider.InstanceInfo{}, err
+	}
+	return instance.Logout(ctx)
+}
+
+// Sessions lists an instance's native sessions in cwd.
+func (s *Service) Sessions(ctx context.Context, id provider.InstanceID, cwd string) ([]provider.SessionSummary, error) {
+	instance, _, err := s.Instance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sessionCallTimeout)
 	defer cancel()
-	return manager.ListSessions(ctx, cwd)
+	return instance.Sessions(ctx, cwd)
 }
 
-// RegisterImportedSession installs an already-persisted external session route
-// in the live registry. The metadata store owns the atomic thread+route write;
-// this method only makes that committed route usable without a daemon restart.
-func (s *Service) RegisterImportedSession(threadID string, instanceID provider.InstanceID, sessionID string, startInput provider.StartSessionInput) error {
-	if threadID == "" || instanceID == "" || sessionID == "" {
-		return fmt.Errorf("register imported provider session requires threadId, instanceId, and sessionId")
-	}
-	s.routeBindMu.Lock()
-	defer s.routeBindMu.Unlock()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.activeEventGenerations[instanceID]; !ok || s.instances[instanceID] == nil {
-		return fmt.Errorf("provider instance %q is not initialized", instanceID)
-	}
-	if existing, ok := s.threadRoutes[threadID]; ok {
-		if existing.InstanceID == instanceID && existing.ProviderSessionID == sessionID {
-			return nil
-		}
-		return fmt.Errorf("thread %q already has a different provider session route", threadID)
-	}
-	for existingThreadID, route := range s.threadRoutes {
-		if route.InstanceID == instanceID && route.ProviderSessionID == sessionID {
-			return fmt.Errorf("provider session %q is already bound to thread %q", sessionID, existingThreadID)
-		}
-	}
-	// No live session exists yet. Like a boot-restored route, use a generation
-	// no instance owns so the first start restores the stored preferences.
-	s.nextEventGeneration++
-	s.threadRoutes[threadID] = threadRoute{
-		InstanceID:        instanceID,
-		Generation:        s.nextEventGeneration,
-		ProviderSessionID: sessionID,
-		StartInput:        persistentStartSessionInput(startInput),
-	}
-	return nil
-}
-
-// sessionManageRPCTimeout prevents a hung agent from pinning daemon resources.
-const sessionManageRPCTimeout = 60 * time.Second
-
-func (s *Service) DeleteSession(ctx context.Context, instanceID provider.InstanceID, sessionID string) error {
-	return s.manageSession(ctx, instanceID, sessionID, "delete", func(ctx context.Context, manager SessionManager) error {
-		if err := manager.DeleteSession(ctx, sessionID); err != nil {
-			return err
-		}
-		if s.promptStore != nil {
-			return s.promptStore.DeletePrompts(instanceID, sessionID)
-		}
-		return nil
-	})
-}
-
-func (s *Service) CloseSession(ctx context.Context, instanceID provider.InstanceID, sessionID string) error {
-	return s.manageSession(ctx, instanceID, sessionID, "close", func(ctx context.Context, manager SessionManager) error {
-		return manager.CloseSession(ctx, sessionID)
-	})
-}
-
-// ForkedSession is a new native fork ready for the import path. Settings
-// carries the source route's model and config preferences so the fork resumes
-// with the source's settings rather than provider defaults.
-type ForkedSession struct {
-	InstanceID provider.InstanceID
-	Summary    provider.SessionSummary
-	Settings   provider.StartSessionInput
-}
-
-// RenameSession names the native session bound to threadID. A thread with no
-// provider session yet, or a provider whose sessions have no names, has
-// nothing to rename.
-func (s *Service) RenameSession(ctx context.Context, threadID, title string) error {
-	route := s.routeForThread(threadID)
-	if route.InstanceID == "" || route.ProviderSessionID == "" || strings.TrimSpace(title) == "" {
-		return nil
-	}
-	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
-		return err
-	}
-	instance, err := s.instance(route.InstanceID)
+// DeleteSession deletes a native session from its provider.
+func (s *Service) DeleteSession(ctx context.Context, id provider.InstanceID, session string) error {
+	instance, _, err := s.Instance(ctx, id)
 	if err != nil {
 		return err
 	}
-	renamer, ok := instance.(SessionRenamer)
-	if !ok {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sessionCallTimeout)
 	defer cancel()
-	return renamer.RenameSession(ctx, provider.RenameSessionInput{ProviderSessionID: route.ProviderSessionID, Title: strings.TrimSpace(title)})
+	return instance.Delete(ctx, session)
 }
 
-// ErrNoNativeFork is returned by ForkSession when the provider can't fork its
-// sessions.
-var ErrNoNativeFork = errors.New("provider can't fork its sessions")
-
-// ForkSession forks the provider-owned session bound to sourceThreadID
-// through the provider's turn throughTurnID. The returned summary can be
-// committed through the same atomic import path used for sessions discovered
-// by provider.listSessions.
-func (s *Service) ForkSession(ctx context.Context, sourceThreadID, throughTurnID string) (ForkedSession, error) {
-	if sourceThreadID == "" {
-		return ForkedSession{}, fmt.Errorf("provider session fork requires sourceThreadId")
-	}
-	route := s.routeForThread(sourceThreadID)
-	if route.InstanceID == "" || route.ProviderSessionID == "" {
-		return ForkedSession{}, fmt.Errorf("thread %q has no forkable provider session", sourceThreadID)
-	}
-	if err := s.ensureInstanceStarted(ctx, route.InstanceID); err != nil {
-		return ForkedSession{}, err
-	}
-	instance, err := s.instance(route.InstanceID)
-	if err != nil {
-		return ForkedSession{}, err
-	}
-	forker, ok := instance.(SessionForker)
-	if !ok {
-		return ForkedSession{}, ErrNoNativeFork
-	}
-	source := route.StartInput // routeForThread returned a detached copy.
-	settings := provider.StartSessionInput{
-		ModelSelection:   source.ModelSelection,
-		ConfigSelections: canonicalModelConfigSelections(source.ModelSelection, source.ConfigSelections),
-		Options:          source.Options,
-	}
-	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
-	defer cancel()
-	result, err := forker.ForkSession(ctx, provider.ForkSessionInput{
-		ProviderSessionID: route.ProviderSessionID,
-		ThroughTurnID:     throughTurnID,
-		ModelSelection:    settings.ModelSelection,
-		ConfigSelections:  settings.ConfigSelections,
-	})
-	if err != nil {
-		return ForkedSession{}, err
-	}
-	if result.Summary.SessionID == "" {
-		return ForkedSession{}, fmt.Errorf("provider fork returned an empty session id")
-	}
-	if result.Summary.SessionID == route.ProviderSessionID {
-		return ForkedSession{}, fmt.Errorf("provider fork returned the source session id")
-	}
-	if s.promptStore != nil {
-		if err := s.promptStore.ForkPrompts(route.InstanceID, route.ProviderSessionID, result.Summary.SessionID); err != nil {
-			// The caller cannot import a fork with silently missing cards. Undo
-			// only this newly created native fork when metadata cannot be copied.
-			if manager, ok := instance.(SessionManager); ok {
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionManageRPCTimeout)
-				cleanupErr := manager.DeleteSession(cleanupCtx, result.Summary.SessionID)
-				cancel()
-				if cleanupErr != nil {
-					return ForkedSession{}, fmt.Errorf("copy fork annotations: %w; clean up native fork %q: %v", err, result.Summary.SessionID, cleanupErr)
-				}
-			}
-			return ForkedSession{}, fmt.Errorf("copy fork annotations: %w", err)
-		}
-	}
-	if result.Summary.Cwd == "" {
-		result.Summary.Cwd = route.StartInput.Cwd
-	}
-	if result.Summary.AdditionalDirectories == nil {
-		result.Summary.AdditionalDirectories = append([]string(nil), route.StartInput.AdditionalDirectories...)
-	}
-	return ForkedSession{InstanceID: route.InstanceID, Summary: result.Summary, Settings: settings}, nil
-}
-
-// The bound-session guard is best-effort against a concurrent bind. The adapter
-// call deliberately runs outside instance locks, with a deadline, so a hung
-// maintenance RPC cannot block thread work on that instance.
-func (s *Service) manageSession(ctx context.Context, instanceID provider.InstanceID, sessionID string, action string, operation func(context.Context, SessionManager) error) error {
-	if sessionID == "" {
-		return fmt.Errorf("provider session %s requires sessionId", action)
-	}
-	manager, err := s.sessionManager(instanceID, action)
-	if err != nil {
-		return err
-	}
-	if threadID := s.boundThreadForProviderSession(instanceID, sessionID); threadID != "" {
-		return fmt.Errorf("cannot %s provider session %q while it is bound to thread %q", action, sessionID, threadID)
-	}
-	ctx, cancel := context.WithTimeout(ctx, sessionManageRPCTimeout)
-	defer cancel()
-	return operation(ctx, manager)
-}
-
-func (s *Service) boundThreadForProviderSession(instanceID provider.InstanceID, sessionID string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for threadID, route := range s.threadRoutes {
-		if route.InstanceID == instanceID && route.ProviderSessionID == sessionID {
-			return threadID
-		}
-	}
-	return ""
-}
-
-func (s *Service) sessionManager(instanceID provider.InstanceID, operation string) (SessionManager, error) {
-	instance, err := s.instance(instanceID)
+func (s *Service) CompleteCommand(ctx context.Context, id provider.InstanceID, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
+	instance, err := s.runningInstance(id)
 	if err != nil {
 		return nil, err
 	}
-	capabilities := instance.Info().Capabilities
-	supported := false
-	switch operation {
-	case "list":
-		supported = capabilities.SessionList
-	case "delete":
-		supported = capabilities.SessionDelete
-	case "close":
-		supported = capabilities.SessionClose
-	}
-	if !supported {
-		return nil, fmt.Errorf("provider does not support session %s", operation)
-	}
-	manager, ok := instance.(SessionManager)
-	if !ok {
-		return nil, fmt.Errorf("provider does not support session management")
-	}
-	return manager, nil
+	return instance.CompleteCommand(ctx, input)
 }
 
-func (s *Service) ListInstances() []provider.InstanceInfo {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	infos := make([]provider.InstanceInfo, 0, len(s.instances)+len(s.instanceSpecs))
-	for _, instance := range s.instances {
-		infos = append(infos, instance.Info())
-	}
-	// Registered specs without a live instance this run are configured
-	// providers: listed so clients can offer and start them, with a status that
-	// says no process exists yet.
-	for id, spec := range s.instanceSpecs {
-		if s.instances[id] != nil {
-			continue
-		}
-		infos = append(infos, provider.InstanceInfo{
-			InstanceID: id,
-			Name:       spec.Name,
-			Driver:     spec.Driver,
-			Status:     provider.InstanceStatusConfigured,
-			Auth:       provider.Auth{Status: provider.AuthStatusUnknown},
-		})
-	}
-	return infos
-}
-
-func (s *Service) StartSession(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, error) {
-	if threadID == "" {
-		threadID = input.ThreadID
-	}
-	if threadID == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("provider start session requires threadId")
-	}
-	if input.ThreadID == "" {
-		input.ThreadID = threadID
-	}
-	if input.ProviderInstanceID == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("provider start session requires providerInstanceId")
-	}
-	if err := s.ensureInstanceStarted(ctx, input.ProviderInstanceID); err != nil {
-		return provider.StartSessionResult{}, err
-	}
-	if route := s.routeForThread(threadID); route.InstanceID != "" && route.InstanceID != input.ProviderInstanceID {
-		_ = s.ReleaseSession(ctx, provider.StopSessionInput{ThreadID: threadID})
-	}
-	for {
-		result, generation, err := s.startSessionOnCurrentInstance(ctx, threadID, input)
-		if generation == 0 || !s.instanceReplaced(input.ProviderInstanceID, generation) {
-			return result, err
-		}
-		// A restart replaced the instance during the start, so the session
-		// would live in a dying process. Start it again on the replacement,
-		// which resumes the native session the route now holds.
-	}
-}
-
-func (s *Service) instanceReplaced(instanceID provider.InstanceID, generation uint64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activeEventGenerations[instanceID] != generation
-}
-
-// Provider switching drops the old route before best-effort StopSession. A
-// missing, exited, stale, or wedged old instance must not block the switch.
-func (s *Service) releaseThreadRouteForSwitch(ctx context.Context, threadID string, route threadRoute) {
-	instance, generation, err := s.instanceWithGeneration(route.InstanceID)
-
-	s.mu.Lock()
-	if current := s.threadRoutes[threadID]; current.InstanceID == route.InstanceID {
-		delete(s.threadRoutes, threadID)
-	}
-	s.mu.Unlock()
-	s.persistThreadRoute(threadID)
-
-	if err != nil {
-		return
-	}
-	if instance.Info().Status == provider.InstanceStatusExited {
-		return
-	}
-	if route.Generation != 0 && route.Generation != generation {
-		// The route points at a replaced process generation; the session died
-		// with it, so there is no live provider session to stop.
-		return
-	}
-	if err := instance.StopSession(ctx, provider.StopSessionInput{ThreadID: threadID}); err != nil {
-		log.Printf("providerservice: best-effort release of thread %q previous session on instance %q failed: %v", threadID, route.InstanceID, err)
-	}
-}
-
-// ReleaseSession drops a thread's current route and best-effort stops its old
-// provider session. Provider switches call this as soon as the canonical
-// thread projection clears the binding, rather than waiting for another turn.
-func (s *Service) ReleaseSession(ctx context.Context, input provider.StopSessionInput) error {
-	route := s.routeForThread(input.ThreadID)
-	if route.InstanceID == "" {
-		return nil
-	}
-	s.releaseThreadRouteForSwitch(ctx, input.ThreadID, route)
-	return nil
-}
-
-// startSessionOnCurrentInstance starts the thread's session on the instance's
-// current process and binds the route to that process's generation, which it
-// returns once the instance is found (also on error). It waits for an
-// in-flight launch of the instance, so a new session starts on the
-// replacement, but never holds the start lock across the provider call.
-func (s *Service) startSessionOnCurrentInstance(ctx context.Context, threadID string, input provider.StartSessionInput) (provider.StartSessionResult, uint64, error) {
-	lock := s.startLock(input.ProviderInstanceID)
-	lock.RLock()
-	instance, generation, err := s.instanceWithGeneration(input.ProviderInstanceID)
-	lock.RUnlock()
-	if err != nil {
-		return provider.StartSessionResult{}, 0, err
-	}
-	if len(input.AdditionalDirectories) > 0 && !instance.Info().Capabilities.AdditionalDirectories {
-		return provider.StartSessionResult{}, generation, fmt.Errorf("provider does not support additional directories")
-	}
-	if route := s.routeForThread(threadID); route.InstanceID == input.ProviderInstanceID {
-		if input.ProviderSessionID == "" {
-			input.ProviderSessionID = route.ProviderSessionID
-		}
-		// Only a stale route needs its provider-owned preferences restored. Once
-		// rebound to this generation, each new input remains authoritative.
-		if route.Generation != generation {
-			stored := route.StartInput
-			if input.ModelSelection == nil {
-				input.ModelSelection = stored.ModelSelection
-			}
-			if len(input.ConfigSelections) == 0 {
-				input.ConfigSelections = stored.ConfigSelections
-			}
-			if len(input.Options) == 0 {
-				input.Options = stored.Options
-			}
-		}
-		if len(input.ResumeCursor) == 0 {
-			input.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
-		}
-	}
-	input.ConfigSelections = canonicalModelConfigSelections(input.ModelSelection, input.ConfigSelections)
-	// Read before starting replay: a storage error must not consume the
-	// adapter's one-shot history response and silently drop annotation cards.
-	var prompts map[string]store.PromptRecord
-	if s.promptStore != nil && input.ReplayHistory && input.ProviderSessionID != "" {
-		var err error
-		prompts, err = s.promptStore.LoadPrompts(input.ProviderInstanceID, input.ProviderSessionID)
-		if err != nil {
-			return provider.StartSessionResult{}, generation, err
-		}
-	}
-	result, err := instance.StartSession(ctx, input)
-	if err != nil {
-		return provider.StartSessionResult{}, generation, err
-	}
-	info := instance.Info()
-	if result.Session.ProviderSessionID == input.ProviderSessionID {
-		restorePromptPresentations(result.Replay, prompts)
-	}
-	for index := range result.Replay {
-		result.Replay[index].Provider = info.Driver
-		result.Replay[index].ProviderInstanceID = input.ProviderInstanceID
-		result.Replay[index].ProviderName = info.Name
-		result.Replay[index].Generation = generation
-		result.Replay[index].ThreadID = threadID
-	}
-	// The requested/selected provider instance is the authoritative routing
-	// identity. Adapter-returned sessions may be resumed from stale native state,
-	// so never let their ProviderInstanceID rebind the thread route.
-	result.Session.Provider = info.Driver
-	result.Session.ProviderInstanceID = input.ProviderInstanceID
-	result.Session.ProviderName = info.Name
-	result.Session.Generation = generation
-	if result.Session.ThreadID == "" {
-		result.Session.ThreadID = threadID
-	}
-	if err := s.bindThreadSession(threadID, input.ProviderInstanceID, generation, result.Session.ProviderSessionID, result.Session.ResumeCursor, input); err != nil {
-		return provider.StartSessionResult{}, generation, err
-	}
-	return result, generation, nil
-}
-
-func (s *Service) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
-		var err error
-		input, err = s.preparePromptPresentation(instance, input)
-		if err != nil {
-			return err
-		}
-		return instance.SendTurn(ctx, input)
-	})
-}
-
-// withThreadInstance runs operation on the thread's instance without holding
-// the start lock, so a restart neither waits for nor blocks it. An operation
-// that races a restart runs against the replaced process, like one issued just
-// before it. With recoverStale, a route bound to a replaced process first
-// starts its session again on the current one.
-func (s *Service) withThreadInstance(ctx context.Context, threadID string, recoverStale bool, operation func(ProviderInstance) error) error {
-	if threadID == "" {
-		return fmt.Errorf("provider thread route requires threadId")
-	}
-	for {
-		route := s.routeForThread(threadID)
-		if route.InstanceID == "" {
-			return fmt.Errorf("thread %q has no provider session route", threadID)
-		}
-		instance, generation, err := s.instanceWithGeneration(route.InstanceID)
-		if err != nil {
-			return err
-		}
-		if !recoverStale || route.Generation == 0 || route.Generation == generation {
-			return operation(instance)
-		}
-		startInput := cloneStartSessionInput(route.StartInput)
-		if startInput.ThreadID == "" {
-			startInput.ThreadID = threadID
-		}
-		if startInput.ProviderInstanceID == "" {
-			startInput.ProviderInstanceID = route.InstanceID
-		}
-		if len(startInput.ResumeCursor) == 0 && len(route.ResumeCursor) > 0 {
-			startInput.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
-		}
-		if _, _, err := s.startSessionOnCurrentInstance(ctx, threadID, startInput); err != nil {
-			return err
-		}
-	}
-}
-
-func (s *Service) InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
-		return instance.InterruptTurn(ctx, input)
-	})
-}
-
-func (s *Service) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
-		if err := instance.SetConfigOption(ctx, input); err != nil {
-			return err
-		}
-		s.updateRouteStartInput(input.ThreadID, instance.Info().InstanceID, func(start *provider.StartSessionInput) {
-			if input.Category == provider.ConfigOptionCategoryModel {
-				model, ok := input.Value.(string)
-				if !ok || model == "" {
-					return
-				}
-				if start.ModelSelection == nil {
-					start.ModelSelection = &provider.ModelSelection{}
-				}
-				start.ModelSelection.Model = model
-				start.ConfigSelections = canonicalModelConfigSelections(start.ModelSelection, start.ConfigSelections)
-				return
-			}
-
-			selection := provider.ConfigOptionSelection{OptionID: input.OptionID, Value: input.Value, Category: input.Category}
-			for index := range start.ConfigSelections {
-				if start.ConfigSelections[index].OptionID == input.OptionID {
-					start.ConfigSelections[index] = selection
-					return
-				}
-			}
-			start.ConfigSelections = append(start.ConfigSelections, selection)
-		})
-		return nil
-	})
-}
-
-func (s *Service) OpenOptionsSession(ctx context.Context, instanceID provider.InstanceID, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
-	instance, err := s.instance(instanceID)
+func (s *Service) OpenOptions(ctx context.Context, id provider.InstanceID, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	instance, _, err := s.Instance(ctx, id)
 	if err != nil {
 		return provider.OptionsSession{}, err
 	}
-	optionsProvider, ok := instance.(OptionsSessionProvider)
-	if !ok {
-		return provider.OptionsSession{}, fmt.Errorf("provider instance %q does not support config options", instanceID)
-	}
-	return optionsProvider.OpenOptionsSession(ctx, cwd, callbacks)
+	return instance.OpenOptions(ctx, cwd, callbacks)
 }
 
-func (s *Service) SetOptionsSessionValue(ctx context.Context, instanceID provider.InstanceID, handle string, optionID string, value any) ([]provider.ConfigOption, error) {
-	instance, err := s.instance(instanceID)
+func (s *Service) SetOption(ctx context.Context, id provider.InstanceID, handle, option string, value any) ([]provider.ConfigOption, error) {
+	instance, err := s.runningInstance(id)
 	if err != nil {
 		return nil, err
 	}
-	optionsProvider, ok := instance.(OptionsSessionProvider)
-	if !ok {
-		return nil, fmt.Errorf("provider instance %q does not support config options", instanceID)
-	}
-	return optionsProvider.SetOptionsSessionValue(ctx, handle, optionID, value)
+	return instance.SetOption(ctx, handle, option, value)
 }
 
-func (s *Service) CloseOptionsSession(ctx context.Context, instanceID provider.InstanceID, handle string) error {
-	instance, err := s.instance(instanceID)
+func (s *Service) CloseOptions(ctx context.Context, id provider.InstanceID, handle string) error {
+	instance, err := s.runningInstance(id)
 	if err != nil {
-		return err
-	}
-	optionsProvider, ok := instance.(OptionsSessionProvider)
-	if !ok {
 		return nil
 	}
-	return optionsProvider.CloseOptionsSession(ctx, handle)
+	return instance.CloseOptions(ctx, handle)
 }
 
-// updateRouteStartInput persists a successful live-session preference for a
-// future generation recovery. The reactor serializes a thread's operations,
-// so no recovery of the same thread reads the route in between.
-func (s *Service) updateRouteStartInput(threadID string, instanceID provider.InstanceID, update func(*provider.StartSessionInput)) {
+// Close ends every instance's process.
+func (s *Service) Close() {
 	s.mu.Lock()
-	route, ok := s.threadRoutes[threadID]
-	if !ok || route.InstanceID != instanceID {
-		s.mu.Unlock()
-		return
+	s.closing = true
+	instances := make([]*running, 0, len(s.instances))
+	for _, current := range s.instances {
+		instances = append(instances, current)
 	}
-	update(&route.StartInput)
-	s.threadRoutes[threadID] = route
+	s.instances = make(map[provider.InstanceID]*running)
 	s.mu.Unlock()
-	s.persistThreadRoute(threadID)
-}
-
-func (s *Service) StopSession(ctx context.Context, input provider.StopSessionInput) error {
-	// The route outlives the stop: the native session is still the thread's
-	// agent context, so the next turn and a daemon restart resume it.
-	return s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
-		return instance.StopSession(ctx, input)
-	})
-}
-
-// StopItem never restores a session on a restarted provider: the item's task
-// ended with the process that ran it.
-func (s *Service) StopItem(ctx context.Context, input provider.StopItemInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
-		stopper, ok := instance.(ItemStopper)
-		if !ok {
-			return fmt.Errorf("provider instance %q cannot stop items", instance.Info().InstanceID)
-		}
-		return stopper.StopItem(ctx, input)
-	})
-}
-
-// CompleteCommand suggests input for a slash command of the thread's
-// provider; a provider without suggestions has none.
-func (s *Service) CompleteCommand(ctx context.Context, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
-	var completions []provider.CommandCompletion
-	err := s.withThreadInstance(ctx, input.ThreadID, false, func(instance ProviderInstance) error {
-		completer, ok := instance.(CommandCompleter)
-		if !ok {
-			return nil
-		}
-		var err error
-		completions, err = completer.CompleteCommand(ctx, input)
-		return err
-	})
-	return completions, err
-}
-
-func (s *Service) RespondToRequest(ctx context.Context, input provider.RespondToRequestInput) error {
-	return s.withThreadInstance(ctx, input.ThreadID, true, func(instance ProviderInstance) error {
-		return instance.RespondToRequest(ctx, input)
-	})
-}
-
-func (s *Service) bindThreadSession(threadID string, instanceID provider.InstanceID, generation uint64, providerSessionID string, resumeCursor json.RawMessage, startInput provider.StartSessionInput) error {
-	route := threadRoute{
-		InstanceID:        instanceID,
-		Generation:        generation,
-		ProviderSessionID: providerSessionID,
-		ResumeCursor:      append(json.RawMessage(nil), resumeCursor...),
-		StartInput:        persistentStartSessionInput(startInput),
+	var closed sync.WaitGroup
+	for _, current := range instances {
+		closed.Go(func() { _ = current.instance.Close() })
 	}
-
-	s.routeBindMu.Lock()
-	defer s.routeBindMu.Unlock()
-	s.mu.Lock()
-	for existingThreadID, existing := range s.threadRoutes {
-		if existingThreadID != threadID && existing.InstanceID == instanceID && existing.ProviderSessionID == providerSessionID && providerSessionID != "" {
-			s.mu.Unlock()
-			return fmt.Errorf("%w: provider session %q belongs to thread %q", store.ErrProviderSessionBound, providerSessionID, existingThreadID)
-		}
-	}
-	s.mu.Unlock()
-
-	return s.persistNewThreadRoute(threadID, route)
+	closed.Wait()
 }
 
-// persistNewThreadRoute reserves a provider session durably before publishing
-// its live binding. Transient store failures retain the existing best-effort
-// retry behavior; a uniqueness conflict must reject the second live owner.
-func (s *Service) persistNewThreadRoute(threadID string, route threadRoute) error {
-	publish := func() {
-		s.mu.Lock()
-		s.threadRoutes[threadID] = route
-		s.mu.Unlock()
-	}
-	if s.routeStore == nil {
-		publish()
-		return nil
-	}
-	s.storeMu.Lock()
-	defer s.storeMu.Unlock()
-	s.flushPersistenceLocked()
-	err := s.routeStore.SaveRoute(threadID, store.RouteRecord{
-		InstanceID:        route.InstanceID,
-		ProviderSessionID: route.ProviderSessionID,
-		ResumeCursor:      route.ResumeCursor,
-		StartInput:        route.StartInput,
-	})
-	if errors.Is(err, store.ErrProviderSessionBound) {
-		return err
-	}
-	if err != nil {
-		log.Printf("providerservice: persist route for thread %q: %v (will retry)", threadID, err)
-		s.dirtyRoutes[threadID] = struct{}{}
-		publish()
-		return nil
-	}
-	delete(s.dirtyRoutes, threadID)
-	publish()
-	return nil
+func cloneSpec(spec provider.InstanceSpec) provider.InstanceSpec {
+	spec.Config = append(json.RawMessage(nil), spec.Config...)
+	return spec
 }
 
-func (s *Service) routeForThread(threadID string) threadRoute {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	route := s.threadRoutes[threadID]
-	route.ResumeCursor = append(json.RawMessage(nil), route.ResumeCursor...)
-	route.StartInput = cloneStartSessionInput(route.StartInput)
-	return route
+func specsEqual(a, b provider.InstanceSpec) bool {
+	return a.InstanceID == b.InstanceID && a.Name == b.Name && a.Driver == b.Driver && jsonEqual(a.Config, b.Config)
 }
 
-func (s *Service) instance(instanceID provider.InstanceID) (ProviderInstance, error) {
-	instance, _, err := s.instanceWithGeneration(instanceID)
-	return instance, err
-}
-
-func (s *Service) instanceWithGeneration(instanceID provider.InstanceID) (ProviderInstance, uint64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if instanceID == "" {
-		return nil, 0, fmt.Errorf("provider lookup requires an instance id")
+func jsonEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
 	}
-	instance := s.instances[instanceID]
-	if instance == nil {
-		return nil, 0, fmt.Errorf("provider instance %q is not initialized", instanceID)
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return bytes.Equal(a, b)
 	}
-	return instance, s.activeEventGenerations[instanceID], nil
-}
-
-func cloneStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
-	cloned := input
-	cloned.AdditionalDirectories = append([]string(nil), input.AdditionalDirectories...)
-	cloned.ResumeCursor = append(json.RawMessage(nil), input.ResumeCursor...)
-	cloned.Options = append(json.RawMessage(nil), input.Options...)
-	cloned.ConfigSelections = append([]provider.ConfigOptionSelection(nil), input.ConfigSelections...)
-	if input.ModelSelection != nil {
-		model := *input.ModelSelection
-		model.Options = append(json.RawMessage(nil), input.ModelSelection.Options...)
-		cloned.ModelSelection = &model
-	}
-	return cloned
-}
-
-// canonicalModelConfigSelections makes string model-category selections agree
-// with ModelSelection, which is the canonical model. A draft sends its model
-// both ways, but later model changes update only ModelSelection; adapters let
-// config selections win, so a stale draft entry would otherwise revert the
-// model on the next session start or resume.
-func canonicalModelConfigSelections(model *provider.ModelSelection, selections []provider.ConfigOptionSelection) []provider.ConfigOptionSelection {
-	if model == nil || model.Model == "" {
-		return selections
-	}
-	canonical := append([]provider.ConfigOptionSelection(nil), selections...)
-	for index, selection := range canonical {
-		if _, isString := selection.Value.(string); isString && selection.Category == provider.ConfigOptionCategoryModel {
-			canonical[index].Value = model.Model
-		}
-	}
-	return canonical
-}
-
-func persistentStartSessionInput(input provider.StartSessionInput) provider.StartSessionInput {
-	cloned := cloneStartSessionInput(input)
-	cloned.ProviderSessionID = ""
-	cloned.ReplayHistory = false
-	return cloned
+	aJSON, _ := json.Marshal(av)
+	bJSON, _ := json.Marshal(bv)
+	return bytes.Equal(aJSON, bJSON)
 }

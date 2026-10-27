@@ -135,18 +135,6 @@ type requestedPermissions struct {
 	} `json:"fileSystem"`
 }
 
-// requestType is the closest provider-neutral kind of what is asked.
-func (r requestedPermissions) requestType() provider.RuntimeRequestType {
-	switch {
-	case r.FileSystem != nil && len(r.FileSystem.Write) > 0:
-		return provider.RuntimeRequestFileChange
-	case r.FileSystem != nil && len(r.FileSystem.Read) > 0:
-		return provider.RuntimeRequestFileRead
-	default:
-		return provider.RuntimeRequestCommandExecution
-	}
-}
-
 func (r requestedPermissions) summary() string {
 	var parts []string
 	if r.Network != nil && r.Network.Enabled != nil && *r.Network.Enabled {

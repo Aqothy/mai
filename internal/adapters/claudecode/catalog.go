@@ -288,7 +288,7 @@ func skillFrontmatter(path string) (string, string) {
 	return name, description
 }
 
-func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+func (h *Instance) OpenOptions(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
 	h.mu.Lock()
 	modelsMissing := len(h.models) == 0
 	h.mu.Unlock()
@@ -314,7 +314,7 @@ func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks
 	}, nil
 }
 
-func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID string, value any) ([]provider.ConfigOption, error) {
+func (h *Instance) SetOption(_ context.Context, handle, optionID string, value any) ([]provider.ConfigOption, error) {
 	h.mu.Lock()
 	state := h.options[handle]
 	if state == nil {
@@ -359,7 +359,7 @@ func (h *Instance) SetOptionsSessionValue(_ context.Context, handle, optionID st
 	return snapshot, nil
 }
 
-func (h *Instance) CloseOptionsSession(_ context.Context, handle string) error {
+func (h *Instance) CloseOptions(_ context.Context, handle string) error {
 	h.mu.Lock()
 	delete(h.options, handle)
 	h.mu.Unlock()

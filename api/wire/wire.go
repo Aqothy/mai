@@ -5,6 +5,7 @@
 package wire
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/orchestration"
@@ -12,13 +13,18 @@ import (
 )
 
 const (
-	MethodOrchestrationDispatchCommand     = "orchestration.dispatchCommand"
-	MethodOrchestrationSubscribeThreadList = "orchestration.subscribeThreadList"
-	MethodOrchestrationSubscribeThread     = "orchestration.subscribeThread"
-	MethodOrchestrationUnsubscribeThread   = "orchestration.unsubscribeThread"
-	MethodOrchestrationGetItemDetail       = "orchestration.getItemDetail"
-	MethodOrchestrationGetAttachment       = "orchestration.getAttachment"
-	MethodOrchestrationUploadAttachment    = "orchestration.uploadAttachment"
+	MethodThreadCommand       = "thread.command"
+	MethodThreadSubscribeList = "thread.subscribeList"
+	MethodThreadList          = "thread.list"
+	MethodThreadSubscribe     = "thread.subscribe"
+	MethodThreadEvent         = "thread.event"
+	MethodThreadUnsubscribe   = "thread.unsubscribe"
+	MethodThreadSync          = "thread.sync"
+	MethodThreadTurns         = "thread.turns"
+	MethodThreadEntry         = "thread.entry"
+	MethodThreadForkPreview   = "thread.forkPreview"
+	MethodAttachmentUpload    = "attachment.upload"
+	MethodAttachmentGet       = "attachment.get"
 
 	MethodProviderStart              = "provider.start"
 	MethodProviderList               = "provider.list"
@@ -30,10 +36,7 @@ const (
 	MethodProviderAuthenticate       = "provider.authenticate"
 	MethodProviderLogout             = "provider.logout"
 	MethodProviderListSessions       = "provider.listSessions"
-	MethodProviderImportSession      = "provider.importSession"
 	MethodProviderDeleteSession      = "provider.deleteSession"
-	MethodProviderCloseSession       = "provider.closeSession"
-	MethodProviderForkThread         = "provider.forkThread"
 	MethodProviderOptionsGet         = "provider.options.get"
 	MethodProviderOptionsSet         = "provider.options.set"
 	MethodProviderOptionsUpdated     = "provider.options.updated"
@@ -46,68 +49,190 @@ const (
 // EmptyParams is the params object sent to methods that take no arguments.
 type EmptyParams struct{}
 
-// Client-visible orchestration types. Aliases deliberately keep the current
-// wire format identical while making the complete contract discoverable from
-// this package.
-type Command = orchestration.Command
-type CommandMessage = orchestration.CommandMessage
-type DispatchResult = orchestration.DispatchResult
-type SubscribeThreadParams = orchestration.SubscribeThreadInput
-type GetItemDetailParams = orchestration.GetItemDetailInput
-type GetAttachmentParams = orchestration.GetAttachmentInput
-type ThreadStreamItem = orchestration.ThreadStreamItem
-type ThreadListStreamItem = orchestration.ThreadListStreamItem
-type ThreadDetailSnapshot = orchestration.ThreadDetailSnapshot
-type ThreadListSnapshot = orchestration.ThreadListSnapshot
-type ThreadListEntry = orchestration.ThreadListEntry
-type Event = orchestration.Event
-type EventMetadata = orchestration.EventMetadata
-type EventPayload = orchestration.EventPayload
-type ApprovalEvent = orchestration.ApprovalEvent
-type Thread = orchestration.Thread
-type Turn = orchestration.Turn
-type Message = orchestration.Message
-type Approval = orchestration.Approval
-type SessionBinding = orchestration.SessionBinding
-type Item = orchestration.Item
-type ToolCallSummary = orchestration.ToolCallSummary
-type FileChangeSummary = orchestration.FileChangeSummary
-type ToolAttachmentSummary = orchestration.ToolAttachmentSummary
-type TimelineEntry = orchestration.TimelineEntry
-type Plan = orchestration.Plan
+// Client-visible orchestration types: the thread list, a thread's snapshot
+// and events, and the commands that change them.
+type (
+	ThreadSummary      = orchestration.ThreadSummary
+	OriginSummary      = orchestration.OriginSummary
+	ParticipantSummary = orchestration.ParticipantSummary
+	ParticipantView    = orchestration.ParticipantView
+	Attention          = orchestration.Attention
+	ForkPreview        = orchestration.ForkPreview
+	ThreadSnapshot     = orchestration.ThreadSnapshot
+	TurnView           = orchestration.TurnView
+	EntryView          = orchestration.EntryView
+	DeliveryView       = orchestration.DeliveryView
+	ActorView          = orchestration.ActorView
+	RequestView        = orchestration.RequestView
+	ThreadEvent        = orchestration.ThreadEvent
+	TextAppend         = orchestration.TextAppend
+	RequestResolution  = orchestration.RequestResolution
+	ThreadListItem     = orchestration.ThreadListItem
+	ToolCallSummary    = orchestration.ToolCallSummary
+	FileChangeSummary  = orchestration.FileChangeSummary
+	ToolAttachment     = orchestration.ToolAttachmentSummary
+	ForkPoint          = orchestration.ForkPoint
+	TreePolicy         = orchestration.TreePolicy
+	MessageBody        = orchestration.MessageBody
+	NewParticipant     = orchestration.NewParticipant
+	CommandResult      = orchestration.CommandResult
+	CreateThread       = orchestration.CreateThread
+	UpdateThread       = orchestration.UpdateThread
+	DeleteThread       = orchestration.DeleteThread
+	ForkThread         = orchestration.ForkThread
+	Spawn              = orchestration.Spawn
+	AddParticipant     = orchestration.AddParticipant
+	UpdateParticipant  = orchestration.UpdateParticipant
+	Deliver            = orchestration.Deliver
+	CancelDelivery     = orchestration.CancelDelivery
+	MoveDelivery       = orchestration.MoveDelivery
+	SteerDelivery      = orchestration.SteerDelivery
+	RetryDelivery      = orchestration.RetryDelivery
+	Interrupt          = orchestration.Interrupt
+	Stop               = orchestration.Stop
+	Continue           = orchestration.Continue
+	Respond            = orchestration.Respond
+	StopItem           = orchestration.StopItem
+)
 
 // Client-visible provider types.
-type InstanceInfo = provider.InstanceInfo
-type AuthenticationResult = provider.AuthenticationResult
-type SessionSummary = provider.SessionSummary
-type Attachment = provider.Attachment
-type PromptAnnotation = provider.PromptAnnotation
-type ModelSelection = provider.ModelSelection
-type ConfigOption = provider.ConfigOption
-type ConfigChoice = provider.ConfigChoice
-type ConfigOptionSelection = provider.ConfigOptionSelection
-type SlashCommand = provider.SlashCommand
-type ProviderCompleteCommandParams = provider.CompleteCommandInput
-type CommandCompletion = provider.CommandCompletion
-type Skill = provider.Skill
-type TokenUsage = provider.TokenUsage
-type Goal = provider.Goal
-type RequestAction = provider.RequestAction
+type (
+	InstanceInfo          = provider.InstanceInfo
+	AuthenticationResult  = provider.AuthenticationResult
+	SessionSummary        = provider.SessionSummary
+	Attachment            = provider.Attachment
+	PromptAnnotation      = provider.PromptAnnotation
+	ConfigOption          = provider.ConfigOption
+	ConfigChoice          = provider.ConfigChoice
+	ConfigOptionSelection = provider.ConfigOptionSelection
+	SlashCommand          = provider.SlashCommand
+	CommandCompletion     = provider.CommandCompletion
+	Skill                 = provider.Skill
+	TokenUsage            = provider.TokenUsage
+	Goal                  = provider.Goal
+	RequestAction         = provider.RequestAction
+	Entry                 = provider.Entry
+	Envelope              = provider.Envelope
+	RequestRecord         = provider.RequestRecord
+	Workspace             = provider.Workspace
+	PlanEntry             = provider.PlanEntry
+)
+
+// CommandParams is one command: exactly one of its fields, and a key that
+// makes it idempotent (a client's command ID, retried after a dropped
+// connection).
+type CommandParams struct {
+	Key               string             `json:"key,omitempty"`
+	CreateThread      *CreateThread      `json:"createThread,omitempty"`
+	UpdateThread      *UpdateThread      `json:"updateThread,omitempty"`
+	DeleteThread      *DeleteThread      `json:"deleteThread,omitempty"`
+	ForkThread        *ForkThread        `json:"forkThread,omitempty"`
+	Spawn             *Spawn             `json:"spawn,omitempty"`
+	AddParticipant    *AddParticipant    `json:"addParticipant,omitempty"`
+	UpdateParticipant *UpdateParticipant `json:"updateParticipant,omitempty"`
+	Deliver           *Deliver           `json:"deliver,omitempty"`
+	CancelDelivery    *CancelDelivery    `json:"cancelDelivery,omitempty"`
+	MoveDelivery      *MoveDelivery      `json:"moveDelivery,omitempty"`
+	SteerDelivery     *SteerDelivery     `json:"steerDelivery,omitempty"`
+	RetryDelivery     *RetryDelivery     `json:"retryDelivery,omitempty"`
+	Interrupt         *Interrupt         `json:"interrupt,omitempty"`
+	Stop              *Stop              `json:"stop,omitempty"`
+	Continue          *Continue          `json:"continue,omitempty"`
+	Respond           *Respond           `json:"respond,omitempty"`
+	StopItem          *StopItem          `json:"stopItem,omitempty"`
+}
+
+// Body is the one command set, validated at the boundary.
+func (p CommandParams) Body() (orchestration.CommandBody, error) {
+	var bodies []orchestration.CommandBody
+	add := func(set bool, body func() orchestration.CommandBody) {
+		if set {
+			bodies = append(bodies, body())
+		}
+	}
+	add(p.CreateThread != nil, func() orchestration.CommandBody { return *p.CreateThread })
+	add(p.UpdateThread != nil, func() orchestration.CommandBody { return *p.UpdateThread })
+	add(p.DeleteThread != nil, func() orchestration.CommandBody { return *p.DeleteThread })
+	add(p.ForkThread != nil, func() orchestration.CommandBody { return *p.ForkThread })
+	add(p.Spawn != nil, func() orchestration.CommandBody { return *p.Spawn })
+	add(p.AddParticipant != nil, func() orchestration.CommandBody { return *p.AddParticipant })
+	add(p.UpdateParticipant != nil, func() orchestration.CommandBody { return *p.UpdateParticipant })
+	add(p.Deliver != nil, func() orchestration.CommandBody { return *p.Deliver })
+	add(p.CancelDelivery != nil, func() orchestration.CommandBody { return *p.CancelDelivery })
+	add(p.MoveDelivery != nil, func() orchestration.CommandBody { return *p.MoveDelivery })
+	add(p.SteerDelivery != nil, func() orchestration.CommandBody { return *p.SteerDelivery })
+	add(p.RetryDelivery != nil, func() orchestration.CommandBody { return *p.RetryDelivery })
+	add(p.Interrupt != nil, func() orchestration.CommandBody { return *p.Interrupt })
+	add(p.Stop != nil, func() orchestration.CommandBody { return *p.Stop })
+	add(p.Continue != nil, func() orchestration.CommandBody { return *p.Continue })
+	add(p.Respond != nil, func() orchestration.CommandBody { return *p.Respond })
+	add(p.StopItem != nil, func() orchestration.CommandBody { return *p.StopItem })
+	if len(bodies) != 1 {
+		return nil, fmt.Errorf("a command sets exactly one of its fields, not %d", len(bodies))
+	}
+	return bodies[0], nil
+}
+
+// ThreadParams names a thread.
+type ThreadParams struct {
+	Thread orchestration.ThreadID `json:"thread"`
+}
+
+// ThreadTurnsParams pages a thread's turns older than Before.
+type ThreadTurnsParams struct {
+	Thread orchestration.ThreadID `json:"thread"`
+	Before orchestration.TurnID   `json:"before,omitempty"`
+	Limit  int                    `json:"limit,omitempty"`
+}
+
+type ThreadTurnsResult struct {
+	Turns []TurnView `json:"turns"`
+	// Older continues the paging; empty at the thread's first turn.
+	Older orchestration.TurnID `json:"older,omitempty"`
+}
+
+// ThreadForkPreviewParams asks how a fork of a thread through a turn would
+// start: with the chat's own agent, or Agent instead.
+type ThreadForkPreviewParams struct {
+	Thread  orchestration.ThreadID `json:"thread"`
+	Through orchestration.TurnID   `json:"through,omitempty"`
+	Agent   provider.InstanceID    `json:"agent,omitempty"`
+}
+
+// ThreadEntryParams names one entry of a thread, read whole.
+type ThreadEntryParams struct {
+	Thread orchestration.ThreadID `json:"thread"`
+	Ref    string                 `json:"ref"`
+}
+
+// AttachmentUploadParams carries one attachment's data ahead of the command
+// that sends it; the command names it by the ID the upload returns.
+type AttachmentUploadParams struct {
+	Data string `json:"data"`
+}
+
+type AttachmentUploadResult struct {
+	ID string `json:"id"`
+}
+
+type AttachmentParams struct {
+	ID string `json:"id"`
+}
+
+// ProviderCompleteCommandParams asks a thread's agent (Participant, else its
+// address) for what may follow a slash command.
+type ProviderCompleteCommandParams struct {
+	Thread      orchestration.ThreadID      `json:"thread"`
+	Participant orchestration.ParticipantID `json:"participant,omitempty"`
+	Command     string                      `json:"command"`
+	Input       string                      `json:"input"`
+}
 
 // ProviderStartParams starts a configured provider. Config is adapter-owned
 // JSON and is intentionally unconstrained by the shared contract.
 type ProviderStartParams struct {
 	provider.InstanceSpec
 	Restart bool `json:"restart,omitempty"`
-}
-
-// AttachmentUploadParams carries one attachment's data ahead of the
-// thread.start or thread.turn.start command that sends it. The command lists
-// the attachment by ID without data, so no single message grows with the
-// number of attachments.
-type AttachmentUploadParams struct {
-	ID   string `json:"id"`
-	Data string `json:"data"`
 }
 
 type ACPRegistryStartParams struct {
@@ -151,39 +276,6 @@ type ProviderAuthenticateParams struct {
 	Secret     string              `json:"secret,omitempty"`
 }
 
-// ProviderForkThreadParams forks a thread's turns through ThroughTurnID, or
-// up to BeforeTurnID, or, with neither, all of them; only the turns the
-// provider ran to the end are kept.
-type ProviderForkThreadParams struct {
-	SourceThreadID orchestration.ThreadID `json:"sourceThreadId"`
-	ThroughTurnID  orchestration.TurnID   `json:"throughTurnId,omitempty"`
-	BeforeTurnID   orchestration.TurnID   `json:"beforeTurnId,omitempty"`
-	// ProviderInstanceID continues the thread in another agent; empty keeps
-	// the thread's own.
-	ProviderInstanceID provider.InstanceID `json:"providerInstanceId,omitempty"`
-}
-
-// ProviderForkThreadResult is the fork: ThreadID holds the provider's native
-// fork, or, when the provider can't make it natively, Draft is a new chat
-// whose thread.start hands the conversation to a new session.
-type ProviderForkThreadResult struct {
-	ThreadID orchestration.ThreadID `json:"threadId,omitempty"`
-	Draft    *ForkDraft             `json:"draft,omitempty"`
-}
-
-// ForkDraft is a new chat with the forked thread's provider, workspace and
-// settings.
-type ForkDraft struct {
-	SourceTitle           string                           `json:"sourceTitle"`
-	ProviderInstanceID    provider.InstanceID              `json:"providerInstanceId"`
-	Cwd                   string                           `json:"cwd"`
-	AdditionalDirectories []string                         `json:"additionalDirectories,omitempty"`
-	ConfigSelections      []provider.ConfigOptionSelection `json:"configSelections,omitempty"`
-	// ForkContext goes in the draft's thread.start; it is empty when the fork
-	// keeps no turns.
-	ForkContext string `json:"forkContext,omitempty"`
-}
-
 type ProviderInstanceParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 }
@@ -196,16 +288,6 @@ type ProviderListSessionsParams struct {
 type ProviderSessionParams struct {
 	InstanceID provider.InstanceID `json:"instanceId"`
 	SessionID  string              `json:"sessionId"`
-}
-
-type ProviderImportSessionParams struct {
-	InstanceID provider.InstanceID `json:"instanceId"`
-	Session    SessionSummary      `json:"session"`
-}
-
-type ProviderImportSessionResult struct {
-	ThreadID orchestration.ThreadID `json:"threadId"`
-	Imported bool                   `json:"imported"`
 }
 
 type ProviderOptionsGetParams struct {

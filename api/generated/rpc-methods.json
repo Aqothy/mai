@@ -1,39 +1,54 @@
 {
   "methods": [
     {
-      "name": "orchestration.dispatchCommand",
-      "params": "Command",
-      "result": "DispatchResult"
+      "name": "thread.command",
+      "params": "CommandParams",
+      "result": "CommandResult"
     },
     {
-      "name": "orchestration.subscribeThreadList",
+      "name": "thread.subscribeList",
       "params": "EmptyParams",
-      "result": "ThreadListStreamItem"
+      "result": "ThreadListItem"
     },
     {
-      "name": "orchestration.subscribeThread",
-      "params": "SubscribeThreadInput",
-      "result": "ThreadStreamItem"
+      "name": "thread.subscribe",
+      "params": "ThreadParams",
+      "result": "ThreadSnapshot"
     },
     {
-      "name": "orchestration.unsubscribeThread",
-      "params": "SubscribeThreadInput",
+      "name": "thread.unsubscribe",
+      "params": "ThreadParams",
       "resultNull": true
     },
     {
-      "name": "orchestration.getItemDetail",
-      "params": "GetItemDetailInput",
-      "result": "Item"
+      "name": "thread.sync",
+      "params": "ThreadParams",
+      "resultNull": true
     },
     {
-      "name": "orchestration.getAttachment",
-      "params": "GetAttachmentInput",
-      "result": "Attachment"
+      "name": "thread.turns",
+      "params": "ThreadTurnsParams",
+      "result": "ThreadTurnsResult"
     },
     {
-      "name": "orchestration.uploadAttachment",
+      "name": "thread.entry",
+      "params": "ThreadEntryParams",
+      "result": "Entry"
+    },
+    {
+      "name": "thread.forkPreview",
+      "params": "ThreadForkPreviewParams",
+      "result": "ForkPreview"
+    },
+    {
+      "name": "attachment.upload",
       "params": "AttachmentUploadParams",
-      "resultNull": true
+      "result": "AttachmentUploadResult"
+    },
+    {
+      "name": "attachment.get",
+      "params": "AttachmentParams",
+      "result": "Attachment"
     },
     {
       "name": "provider.start",
@@ -90,24 +105,9 @@
       "resultArray": true
     },
     {
-      "name": "provider.importSession",
-      "params": "ProviderImportSessionParams",
-      "result": "ProviderImportSessionResult"
-    },
-    {
       "name": "provider.deleteSession",
       "params": "ProviderSessionParams",
       "resultNull": true
-    },
-    {
-      "name": "provider.closeSession",
-      "params": "ProviderSessionParams",
-      "resultNull": true
-    },
-    {
-      "name": "provider.forkThread",
-      "params": "ProviderForkThreadParams",
-      "result": "ProviderForkThreadResult"
     },
     {
       "name": "provider.options.get",
@@ -193,12 +193,12 @@
   ],
   "notifications": [
     {
-      "name": "orchestration.subscribeThreadList",
-      "payload": "ThreadListStreamItem"
+      "name": "thread.list",
+      "payload": "ThreadListItem"
     },
     {
-      "name": "orchestration.subscribeThread",
-      "payload": "ThreadStreamItem"
+      "name": "thread.event",
+      "payload": "ThreadEvent"
     },
     {
       "name": "provider.options.updated",

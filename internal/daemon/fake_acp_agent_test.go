@@ -87,7 +87,6 @@ func TestHelperProcess(t *testing.T) {
 		cwds:        map[string]string{},
 		parked:      map[string]string{},
 		permissions: map[string]fakePermission{},
-		failed:      map[string]bool{},
 		mode:        "ask",
 		model:       "test-model-1",
 	}
@@ -130,7 +129,6 @@ type fakeACPAgent struct {
 	cwds        map[string]string         // session id -> cwd
 	parked      map[string]string         // session id -> blocked session/prompt request id
 	permissions map[string]fakePermission // permission request id -> prompt to settle
-	failed      map[string]bool           // fail scripts that already failed
 
 	sessionCount, permissionCount int
 	mode, model                   string
@@ -256,7 +254,7 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 		}
 		result = map[string]any{
 			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "loadSession": !a.listOnly, "sessionCapabilities": sessionCapabilities},
+			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "loadSession": !a.listOnly, "sessionCapabilities": sessionCapabilities, "promptCapabilities": map[string]any{"image": true}},
 			"agentInfo":         map[string]any{"name": "fake-acp-agent"},
 			"authMethods":       authMethods,
 		}
@@ -315,9 +313,9 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			}
 		}
 		a.remember(sessionID, text)
-		// A conversation handed to a fork comes in front of the prompt that
-		// names the script.
-		_, script, _ := provider.SplitForkContext(text)
+		// A handed-over conversation comes in front of the prompt that names
+		// the script.
+		_, script := provider.SplitMessage(text)
 		a.prompt(msg.ID, sessionID, script)
 		return
 	default:
@@ -359,8 +357,6 @@ func (a *fakeACPAgent) prompts(sessionID string) []string {
 //	"permission"                    request permission, then echo "perm:<optionId>"
 //	"block [gateDir]"               park until session/cancel; with gateDir, write
 //	                                gateDir/ready and finish with "hi" once gateDir/release exists
-//	"fail-once"                     fail the first time the agent gets it, else "hi"
-//	"answer-then-fail-once"         the first time, a "hi" chunk and then fail; else "hi"
 //	anything else                   a single "hi" chunk
 func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string) {
 	fields := strings.Fields(text)
@@ -404,16 +400,6 @@ func (a *fakeACPAgent) prompt(id json.RawMessage, sessionID string, text string)
 				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
 			},
 		}})
-	case "fail-once", "answer-then-fail-once":
-		if verb == "answer-then-fail-once" || a.failed[verb] {
-			a.chunk(sessionID, "hi")
-		}
-		if !a.failed[verb] {
-			a.failed[verb] = true
-			a.write(map[string]any{"id": id, "error": map[string]any{"code": -32603, "message": "model failed"}})
-			return
-		}
-		a.result(id, endTurn)
 	case "block":
 		a.parked[sessionID] = string(id)
 		if gate := strings.TrimSpace(strings.TrimPrefix(text, "block")); gate != "" {

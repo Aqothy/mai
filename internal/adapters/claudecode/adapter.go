@@ -1,8 +1,8 @@
 // Package claudecode adapts the Claude Code CLI's stream-json protocol (the
-// same wire protocol the official Claude Agent SDKs speak) to maiD's
-// provider-neutral runtime contract. Each thread owns one CLI subprocess; a
-// short-lived probe process supplies the account, model catalog, and command
-// list without making any API calls.
+// same wire protocol the official Claude Agent SDKs speak) to maiD's provider
+// contract. Each live session owns one CLI subprocess; a short-lived probe
+// process supplies the account, model catalog, and command list without
+// making any API calls. A session's transcript is its native history.
 package claudecode
 
 import (
@@ -23,6 +23,9 @@ import (
 
 const DriverKind provider.DriverKind = "claude-code"
 
+// historyVersion changes whenever transcripts map to entries differently.
+const historyVersion = 1
+
 type Config struct {
 	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
@@ -32,6 +35,38 @@ type Config struct {
 	ConfigDir string `json:"configDir,omitempty"`
 }
 
+// Driver is the Claude Code driver.
+var Driver = provider.Driver{
+	Open: func(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (provider.Instance, error) {
+		return OpenInstance(ctx, spec, host)
+	},
+	Static: func(provider.InstanceSpec) provider.InstanceInfo {
+		return provider.InstanceInfo{Capabilities: capabilities(), Access: accessModes()}
+	},
+}
+
+func capabilities() provider.Capabilities {
+	return provider.Capabilities{
+		History: provider.HistoryExact, HistoryVersion: historyVersion,
+		Resume: true, Fork: true, Steer: true, Subagents: true, Instructions: true, MessageIDs: true,
+		MCP:                   provider.MCPCapabilities{HTTP: true, Stdio: true},
+		AdditionalDirectories: true, Sessions: true, Delete: true, Rename: true, Auth: true, Logout: true,
+		// The stream-json user message accepts base64 image blocks. Audio
+		// and embedded-resource blocks are not part of the SDK prompt
+		// surface, so they are not advertised.
+		PromptContent: provider.PromptContentCapabilities{Image: true},
+	}
+}
+
+// accessModes rates the CLI's permission modes. Plan mode and
+// dontAsk refuse what isn't pre-approved; auto decides without asking.
+func accessModes() *provider.AccessModes {
+	return &provider.AccessModes{Option: "permission_mode", Levels: map[string]provider.AccessLevel{
+		"plan": provider.AccessReadOnly, "dontAsk": provider.AccessReadOnly, "default": provider.AccessAsk,
+		"acceptEdits": provider.AccessEdit, "auto": provider.AccessFull, "bypassPermissions": provider.AccessFull,
+	}}
+}
+
 // sessionProcess owns one CLI subprocess. done is closed once waitProcess
 // has retired it; closing marks a deliberate stop.
 type sessionProcess struct {
@@ -39,91 +74,68 @@ type sessionProcess struct {
 	client  *streamClient
 	done    chan struct{}
 	closing bool
+	// mcpConfig is the file holding the session's MCP servers, removed with
+	// the process.
+	mcpConfig string
 }
 
+// claudeSession is a live session. Its mapper and the stream state are
+// touched only by the process's reader, in read order; the rest under h.mu.
 type claudeSession struct {
-	localThreadID   string
-	nativeSessionID string
-	cwd             string
-	additionalDirs  []string
-	model           string
-	effort          string
-	permissionMode  string
-	skills          []provider.Skill
-	configOptions   []provider.ConfigOption
+	id             string
+	cwd            string
+	additionalDirs []string
+	model          string
+	effort         string
+	permissionMode string
+	instructions   string
+	mcp            *provider.MCPServer
+	skills         []provider.Skill
+	options        []provider.ConfigOption
 
 	proc *sessionProcess
 
-	// Claude Code has no native turn ids, so one turn id at a time stands for
-	// the CLI's work: from the message that starts it to the result that ends
-	// it. The CLI folds a message written mid-turn into the running query at
-	// its next tool boundary and echoes it (--replay-user-messages); a message
-	// it could not fold runs as one more query with its own result. So a
-	// result that arrives while a written message is still unechoed does not
-	// end the turn: the next result does.
-	activeLocalTurn string
-	// cliStartedTurn marks an activeLocalTurn the CLI began on its own, when
-	// a background task or agent finishing woke it.
-	cliStartedTurn bool
-	// turnLine is the uuid of one of activeLocalTurn's transcript lines: the
-	// prompt written to start it, or the first message of a turn the CLI
-	// started. A fork through the turn ends at the turn's last line.
-	turnLine      string
-	unechoedInput map[string]bool
+	// mapMu orders the live mapping: the reader maps and emits under it.
+	mapMu sync.Mutex
+	live  *mapper
+	// unechoed are messages written that the CLI hasn't read yet.
+	unechoed map[string]bool
+	// tasks are the background tasks of running tools, by tool use id,
+	// which stop_task names.
+	tasks map[string]string
+	// subagents are the session's subagents by the tool use that runs them.
+	subagents map[string]*subagent
 
-	// Streaming state for the in-flight assistant message.
-	toolStates   map[string]*toolState
-	openBlocks   map[int]string
-	streamedText map[string]string
-	itemSeq      int
-	// seenAssistant holds the assistant messages already shown: after
-	// /compact the CLI sends the last kept one again.
-	seenAssistant map[string]bool
-	// compactionItem is the item of a compaction in progress.
-	compactionItem string
-	// tasks is the plan the CLI keeps with its Task tools.
-	tasks taskPlan
-	// background holds the tools still running as background tasks, by
-	// tool use id.
-	background map[string]backgroundTool
 	// title is the session title last published (see publishTitle).
 	title string
-
 	// activeModel is the model id the CLI reports it runs.
 	activeModel string
-
-	// Usage carried across turns for live token reporting.
+	// Usage carried across turns.
 	contextTokens int
 	contextWindow int
 	costUSD       float64
+}
+
+// subagent is a provider subagent whose messages stream live.
+type subagent struct {
+	key  string
+	live *mapper
 }
 
 type toolState struct {
 	call     provider.ToolCall
 	itemKind provider.ItemKind
 	title    string
+	// text is what a tool that delivers a message (SubagentHandback) said.
+	text string
 	// input is the tool's latest parsed input.
-	input       json.RawMessage
-	partialJSON string
-	fingerprint string
-	// taskID is the CLI task the tool started (system/task_started), which
-	// stop_task names.
-	taskID string
-}
-
-// backgroundTool is a tool item that runs on as a background task after its
-// turn, until the task's notification.
-type backgroundTool struct {
-	state *toolState
-	turn  string
+	input json.RawMessage
 }
 
 type pendingApproval struct {
 	controlRequestID string
 	requestID        string
-	localThread      string
-	localTurn        string
-	requestType      provider.RuntimeRequestType
+	session          string
 	input            json.RawMessage
 	suggestions      []json.RawMessage
 	// question is set for AskUserQuestion, reviewsPlan for ExitPlanMode, and
@@ -144,17 +156,15 @@ type optionsState struct {
 }
 
 type Instance struct {
+	provider.Unsupported
+
 	mu     sync.Mutex
 	info   provider.InstanceInfo
 	config Config
-	emit   provider.RuntimeEventListener
+	host   provider.Host
 	logger *slog.Logger
 
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	sessionsByLocal  map[string]*claudeSession
-	localByNative    map[string]string
+	sessions         map[string]*claudeSession
 	pendingApprovals map[string]*pendingApproval
 	models           []sdkModel
 	commands         []sdkCommand
@@ -162,12 +172,13 @@ type Instance struct {
 	// selection, from the user's settings.
 	defaultPermissionMode string
 	options               map[string]*optionsState
+	// emptyReads are the transcripts whose last read found nothing new.
+	emptyReads map[string]transcriptRead
 
 	closeOnce sync.Once
-	closeErr  error
 }
 
-func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (*Instance, error) {
+func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (*Instance, error) {
 	if spec.InstanceID == "" {
 		return nil, fmt.Errorf("missing provider instance id")
 	}
@@ -189,40 +200,22 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 
 	h := &Instance{
 		config:           config,
-		emit:             emit,
+		host:             host,
 		logger:           slog.Default().With("component", "claude-code", "providerInstance", spec.InstanceID),
-		sessionsByLocal:  make(map[string]*claudeSession),
-		localByNative:    make(map[string]string),
+		sessions:         make(map[string]*claudeSession),
 		pendingApprovals: make(map[string]*pendingApproval),
 		options:          make(map[string]*optionsState),
+		emptyReads:       make(map[string]transcriptRead),
 	}
-	h.ctx, h.cancel = context.WithCancel(context.Background())
 	h.info = provider.InstanceInfo{
-		InstanceID: spec.InstanceID,
-		Name:       spec.Name,
-		Driver:     DriverKind,
-		Status:     provider.InstanceStatusConfigured,
-		StartedAt:  time.Now(),
-		Capabilities: provider.Capabilities{
-			SessionList:           true,
-			SessionDelete:         true,
-			SessionClose:          true,
-			LoadReplay:            true,
-			Resume:                true,
-			AdditionalDirectories: true,
-			Auth:                  true,
-			Logout:                true,
-			// The stream-json user message accepts base64 image blocks. Audio
-			// and embedded-resource blocks are not part of the SDK prompt
-			// surface, so they are not advertised.
-			PromptContent: provider.PromptContentCapabilities{Image: true},
-		},
+		InstanceID: spec.InstanceID, Name: spec.Name, Driver: DriverKind,
+		Status: provider.InstanceStatusConfigured, StartedAt: time.Now(),
+		Capabilities: capabilities(), Access: accessModes(),
 		Auth: provider.Auth{Status: provider.AuthStatusUnknown, Methods: claudeAuthMethods()},
 	}
 	// The probe performs the SDK initialize handshake only — the CLI answers
 	// it before any API request, so this is free and works logged-out too.
 	if err := h.probe(ctx); err != nil {
-		h.cancel()
 		return nil, fmt.Errorf("initialize Claude Code CLI: %w", err)
 	}
 	h.mu.Lock()
@@ -242,22 +235,20 @@ func (h *Instance) Info() provider.InstanceInfo {
 
 func (h *Instance) Close() error {
 	h.closeOnce.Do(func() {
-		h.cancel()
 		h.mu.Lock()
-		sessions := make([]*claudeSession, 0, len(h.sessionsByLocal))
-		for _, session := range h.sessionsByLocal {
+		sessions := make([]*claudeSession, 0, len(h.sessions))
+		for _, session := range h.sessions {
 			sessions = append(sessions, session)
 		}
 		h.info.Status = provider.InstanceStatusExited
 		h.mu.Unlock()
-		h.cancelPendingApprovals()
 		var stopped sync.WaitGroup
 		for _, session := range sessions {
 			stopped.Go(func() { h.stopProcess(session) })
 		}
 		stopped.Wait()
 	})
-	return h.closeErr
+	return nil
 }
 
 // startCLI starts one CLI process with the shared stream-json flags and its
@@ -283,6 +274,10 @@ const stopGrace = 5 * time.Second
 // drainTimeout bounds reading what an exited CLI wrote last.
 const drainTimeout = 2 * time.Second
 
+// probeTimeout bounds the OpenInstance handshake when the caller supplied no
+// deadline of its own.
+const probeTimeout = 30 * time.Second
+
 // configDir resolves where the CLI persists sessions and settings.
 func (h *Instance) configDir() string {
 	if h.config.ConfigDir != "" {
@@ -298,52 +293,22 @@ func (h *Instance) configDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-func (h *Instance) sessionForLocal(localID string) (*claudeSession, error) {
+func (h *Instance) session(key string) (*claudeSession, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	session := h.sessionsByLocal[localID]
+	session := h.sessions[key]
 	if session == nil {
-		return nil, fmt.Errorf("Claude Code thread %q is not bound", localID)
+		return nil, fmt.Errorf("Claude Code session %q is not open", key)
 	}
 	return session, nil
 }
 
-func (h *Instance) bindSessionLocked(session *claudeSession) {
-	if old := h.sessionsByLocal[session.localThreadID]; old != nil && old.nativeSessionID != session.nativeSessionID {
-		delete(h.localByNative, old.nativeSessionID)
-	}
-	h.sessionsByLocal[session.localThreadID] = session
-	h.localByNative[session.nativeSessionID] = session.localThreadID
+func (h *Instance) emit(session string, body provider.EventBody) {
+	h.emitAt(session, body, time.Now())
 }
 
-func newClaudeSession(localID, nativeID, cwd string) *claudeSession {
-	return &claudeSession{
-		localThreadID:   localID,
-		nativeSessionID: nativeID,
-		cwd:             cwd,
-		toolStates:      make(map[string]*toolState),
-		openBlocks:      make(map[int]string),
-		streamedText:    make(map[string]string),
-		seenAssistant:   make(map[string]bool),
-		background:      make(map[string]backgroundTool),
+func (h *Instance) emitAt(session string, body provider.EventBody, at time.Time) {
+	if h.host.Emit != nil {
+		h.host.Emit(provider.Event{Session: session, At: at, Body: body})
 	}
-}
-
-func (h *Instance) emitEvent(event provider.RuntimeEvent) {
-	if h.emit == nil {
-		return
-	}
-	if event.Provider == "" {
-		event.Provider = DriverKind
-	}
-	if event.ProviderInstanceID == "" {
-		event.ProviderInstanceID = h.info.InstanceID
-	}
-	if event.ProviderName == "" {
-		event.ProviderName = h.info.Name
-	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now()
-	}
-	h.emit(event)
 }

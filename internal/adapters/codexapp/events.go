@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters/elicitation"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
+// handleNotification maps app-server notifications to events of the native
+// thread they name: maiD's threads and their children alike, since a child's
+// notifications arrive on its parent's connection.
 func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 	switch method {
 	case "turn/started":
@@ -20,7 +21,7 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			Turn     appTurn `json:"turn"`
 		}
 		if json.Unmarshal(raw, &notification) == nil {
-			h.emitTurnStarted(notification.ThreadID, notification.Turn.ID)
+			h.turnStarted(notification.ThreadID, notification.Turn.ID)
 		}
 	case "turn/completed":
 		var notification struct {
@@ -28,7 +29,7 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			Turn     appTurn `json:"turn"`
 		}
 		if json.Unmarshal(raw, &notification) == nil {
-			h.emitTurnCompleted(notification.ThreadID, notification.Turn)
+			h.turnCompleted(notification.ThreadID, notification.Turn)
 		}
 	case "item/started", "item/completed":
 		var notification struct {
@@ -39,34 +40,32 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			CompletedAtMs int64   `json:"completedAtMs"`
 		}
 		if json.Unmarshal(raw, &notification) == nil {
-			h.emitItem(method, notification.ThreadID, notification.TurnID, notification.Item, notification.StartedAtMs, notification.CompletedAtMs)
+			h.item(method == "item/completed", notification.ThreadID, notification.TurnID, notification.Item, notification.StartedAtMs, notification.CompletedAtMs)
 		}
 	case "item/agentMessage/delta":
-		h.emitTextDelta(raw, provider.RuntimeContentAssistantText, "")
+		h.textDelta(raw, provider.StreamAssistant, "")
 	case "item/reasoning/summaryTextDelta":
-		h.emitTextDelta(raw, provider.RuntimeContentReasoningText, "summary")
+		h.textDelta(raw, provider.StreamReasoning, "summary")
 	case "item/reasoning/textDelta":
-		h.emitTextDelta(raw, provider.RuntimeContentReasoningText, "content")
+		h.textDelta(raw, provider.StreamReasoning, "content")
 	case "item/reasoning/summaryPartAdded":
 		// Part boundaries are derived from the index every reasoning delta
 		// carries, so this notification adds nothing.
 	case "item/commandExecution/outputDelta":
-		h.emitCommandOutput(raw)
+		h.commandOutput(raw)
 	case "item/fileChange/patchUpdated":
-		h.emitFilePatch(raw)
+		h.filePatch(raw)
 	case "turn/plan/updated":
-		h.emitPlan(raw)
+		h.plan(raw)
 	case "thread/tokenUsage/updated":
-		h.emitTokenUsage(raw)
+		h.tokenUsage(raw)
 	case "thread/name/updated":
 		var notification struct {
 			ThreadID   string `json:"threadId"`
 			ThreadName string `json:"threadName"`
 		}
-		if json.Unmarshal(raw, &notification) == nil {
-			if local, _, ok := h.resolveIDs(notification.ThreadID, ""); ok {
-				h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadMetadataUpdate, ThreadID: local, Payload: provider.RuntimeEventPayload{Title: notification.ThreadName}})
-			}
+		if json.Unmarshal(raw, &notification) == nil && notification.ThreadName != "" {
+			h.emit(notification.ThreadID, provider.TitleChanged{Title: notification.ThreadName})
 		}
 	case "thread/goal/updated":
 		var notification struct {
@@ -77,7 +76,9 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 		if json.Unmarshal(raw, &notification) != nil {
 			return
 		}
-		h.emitGoal(notification.ThreadID, &notification.Goal)
+		if goal, ok := goalOf(&notification.Goal); ok {
+			h.emit(notification.ThreadID, provider.GoalChanged{Goal: goal})
+		}
 		// thread/goal/set reports its change without a turn; changes a turn
 		// makes carry its id.
 		if notification.TurnID == nil {
@@ -88,12 +89,12 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			ThreadID string `json:"threadId"`
 		}
 		if json.Unmarshal(raw, &notification) == nil {
-			h.emitGoal(notification.ThreadID, nil)
+			h.emit(notification.ThreadID, provider.GoalChanged{})
 		}
 	case "serverRequest/resolved":
 		h.resolveServerRequest(raw)
 	case "thread/closed", "thread/deleted":
-		h.handleNativeThreadClosed(raw)
+		h.threadClosed(raw)
 	case "error":
 		var notification struct {
 			ThreadID  string `json:"threadId"`
@@ -103,17 +104,14 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(raw, &notification) != nil {
+		if json.Unmarshal(raw, &notification) != nil || strings.TrimSpace(notification.Error.Message) == "" {
 			return
 		}
-		switch {
-		case notification.WillRetry:
-			// An error Codex retries is not fatal to the turn.
-			h.emitThreadEvent(notification.ThreadID, notification.TurnID, provider.RuntimeEventRuntimeWarning, notification.Error.Message)
-		case notification.TurnID == "":
-			h.emitThreadEvent(notification.ThreadID, "", provider.RuntimeEventRuntimeError, notification.Error.Message)
-		default:
-			// The failed turn/completed that follows carries the same error.
+		// An error Codex retries is not fatal to the turn, and one outside a
+		// turn has none to fail; otherwise the failed turn/completed that
+		// follows carries it.
+		if notification.WillRetry || notification.TurnID == "" {
+			h.emit(notification.ThreadID, provider.Warning{Turn: notification.TurnID, Message: notification.Error.Message})
 		}
 	case "warning", "guardianWarning":
 		var notification struct {
@@ -121,9 +119,11 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			Message  string  `json:"message"`
 		}
 		if json.Unmarshal(raw, &notification) == nil {
-			if notification.ThreadID == nil || !h.emitThreadEvent(*notification.ThreadID, "", provider.RuntimeEventRuntimeWarning, notification.Message) {
+			if notification.ThreadID == nil {
 				h.logger.Warn("Codex warning", "message", notification.Message)
+				return
 			}
+			h.emit(*notification.ThreadID, provider.Warning{Message: notification.Message})
 		}
 	case "configWarning", "deprecationNotice":
 		// Not about a thread: there is no conversation to show them in.
@@ -140,7 +140,7 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 		}
 		if json.Unmarshal(raw, &notification) == nil {
 			message := fmt.Sprintf("Codex switched from %s to %s for this turn (%s).", notification.FromModel, notification.ToModel, notification.Reason)
-			h.emitThreadEvent(notification.ThreadID, notification.TurnID, provider.RuntimeEventRuntimeWarning, message)
+			h.emit(notification.ThreadID, provider.Warning{Turn: notification.TurnID, Message: message})
 		}
 	case "mcpServer/startupStatus/updated":
 		var notification struct {
@@ -154,9 +154,11 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			if detail := strings.TrimSpace(stringValue(notification.Error)); detail != "" {
 				message += ": " + detail
 			}
-			if notification.ThreadID == nil || !h.emitThreadEvent(*notification.ThreadID, "", provider.RuntimeEventRuntimeWarning, message) {
+			if notification.ThreadID == nil {
 				h.logger.Warn(message)
+				return
 			}
+			h.emit(*notification.ThreadID, provider.Warning{Message: message})
 		}
 	case "account/updated", "account/login/completed":
 		if method == "account/login/completed" {
@@ -170,6 +172,7 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 			if err := h.refreshAccount(ctx); err != nil {
 				h.logger.Debug("refresh account after notification", "error", err)
 			}
+			h.emit("", provider.InstanceChanged{Info: h.Info()})
 		}()
 	case "skills/changed":
 		go h.refreshActiveSkills()
@@ -178,161 +181,99 @@ func (h *Instance) handleNotification(method string, raw json.RawMessage) {
 	}
 }
 
-// emitThreadEvent emits a warning or error on the thread bound to a native
-// thread, and reports whether one is.
-func (h *Instance) emitThreadEvent(nativeThread, nativeTurn string, eventType provider.RuntimeEventType, message string) bool {
-	local, turn, ok := h.resolveIDs(nativeThread, nativeTurn)
-	if ok && strings.TrimSpace(message) != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: eventType, ThreadID: local, TurnID: turn, Payload: provider.RuntimeEventPayload{Message: message}})
-	}
-	return ok
-}
-
-func (h *Instance) resolveIDs(nativeThread, nativeTurn string) (string, string, bool) {
+// turnStarted reports a turn Codex started: the pending delivery's, when one
+// waits for a turn, else Codex's own.
+func (h *Instance) turnStarted(thread, turn string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	localThread := h.localByNative[nativeThread]
-	if localThread == "" {
-		return "", "", false
+	session := h.sessionLocked(thread)
+	if session.started[turn] {
+		h.mu.Unlock()
+		return
 	}
-	session := h.sessionsByLocal[localThread]
-	if session == nil {
-		return "", "", false
-	}
-	localTurn := ""
-	if nativeTurn != "" {
-		localTurn = h.resolveTurnLocked(session, nativeTurn)
-	}
-	return localThread, localTurn, true
-}
-
-// resolveTurnLocked names a native turn locally. The first turn Codex
-// reports while the user's input awaits one carries it; any other turn is
-// Codex's own and keeps its name.
-func (h *Instance) resolveTurnLocked(session *sessionState, nativeTurn string) string {
-	if local := session.nativeToLocalTurn[nativeTurn]; local != "" {
-		return local
-	}
-	local := nativeTurn
-	if session.pending != nil && session.pending.awaits == awaitsCodexTurn {
-		local = session.pending.id
+	session.started[turn] = true
+	session.activeTurn = turn
+	started := provider.TurnStarted{Turn: turn, By: provider.TurnByProvider}
+	typed := ""
+	if pending := session.pending; pending != nil && pending.awaits == awaitsCodexTurn {
+		started.By, started.Delivery, typed = provider.TurnByClient, pending.delivery, pending.text
 		session.pending = nil
 	}
-	session.nativeToLocalTurn[nativeTurn] = local
-	session.localToNativeTurn[local] = nativeTurn
-	return local
-}
-
-func (h *Instance) emitTurnStarted(nativeThread, nativeTurn string) {
-	h.mu.Lock()
-	session := h.sessionsByLocal[h.localByNative[nativeThread]]
-	if session == nil {
-		h.mu.Unlock()
-		return
-	}
-	// The turn/start response may have reported the start already.
-	if local := session.nativeToLocalTurn[nativeTurn]; local != "" && session.startedTurns[local] {
-		h.mu.Unlock()
-		return
-	}
-	localTurn := h.resolveTurnLocked(session, nativeTurn)
-	session.startedTurns[localTurn] = true
-	session.activeNativeTurn = nativeTurn
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: session.localThreadID, TurnID: localTurn})
+	h.emit(thread, started)
+	if typed != "" {
+		h.emitTyped(thread, turn, started.Delivery, typed)
+	}
 }
 
-func (h *Instance) emitTurnCompleted(nativeThread string, turn appTurn) {
-	localThread, localTurn, ok := h.resolveIDs(nativeThread, turn.ID)
-	if !ok {
-		return
-	}
-	state, _ := turnState(turn.Status)
-	payload := provider.RuntimeEventPayload{TurnState: state, ProviderTurnID: turn.ID}
-	if turn.Error != nil {
-		payload.Message = strings.TrimSpace(turn.Error.Message)
-		if turn.Error.AdditionalDetails != nil {
-			payload.Detail = strings.TrimSpace(*turn.Error.AdditionalDetails)
-		}
+func (h *Instance) turnCompleted(thread string, turn appTurn) {
+	state, settled := turnState(turn.Status)
+	if !settled {
+		state = provider.TurnCompleted
 	}
 	h.mu.Lock()
-	if session := h.sessionsByLocal[localThread]; session != nil {
-		if session.activeNativeTurn == turn.ID {
-			session.activeNativeTurn = ""
-			session.streamed = make(map[string]streamedItem)
-		}
+	session := h.sessionLocked(thread)
+	first := !session.started[turn.ID]
+	session.started[turn.ID] = true
+	if session.activeTurn == turn.ID {
+		session.activeTurn = ""
 	}
+	session.streamed = make(map[string]streamedItem)
+	clear(session.entries)
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: localThread, TurnID: localTurn, Payload: payload})
+	if first {
+		h.emit(thread, provider.TurnStarted{Turn: turn.ID, By: provider.TurnByProvider})
+	}
+	h.emit(thread, provider.TurnSettled{Turn: turn.ID, State: state, Error: turnError(turn)})
 }
 
-func (h *Instance) emitItem(method, nativeThread, nativeTurn string, item appItem, startedMs, completedMs int64) {
-	// maiD records every client-authored prompt before dispatch. App-server
-	// echoes that prompt as a live userMessage item, so publishing it again
-	// would append a duplicate user bubble. Replay still converts userMessage
-	// items through replayEvents, where no local command message exists.
-	if item.Type == "userMessage" {
-		return
-	}
-	localThread, localTurn, ok := h.resolveIDs(nativeThread, nativeTurn)
-	if !ok {
-		return
-	}
-	if method == "item/completed" {
-		var kind provider.RuntimeContentStreamKind
-		var snapshot string
-		switch item.Type {
-		case "agentMessage":
-			kind = provider.RuntimeContentAssistantText
-			snapshot = item.Text
-		case "reasoning":
-			kind = provider.RuntimeContentReasoningText
-			snapshot = reasoningText(item)
-		}
-		if kind != "" {
-			h.mu.Lock()
-			streamed := ""
-			if session := h.sessionsByLocal[localThread]; session != nil {
-				streamed = session.streamed[item.ID].text
-				delete(session.streamed, item.ID)
-			}
-			h.mu.Unlock()
-			if strings.HasPrefix(snapshot, streamed) && len(snapshot) > len(streamed) {
-				h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, ThreadID: localThread, TurnID: localTurn, ItemID: item.ID, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: snapshot[len(streamed):]}})
-			}
-		}
-	}
-	eventType := provider.RuntimeEventItemStarted
+// item reports an item's entries as it starts and completes, mapped as
+// History maps the item, so the completed entry is the replayed one.
+func (h *Instance) item(completed bool, thread, turn string, item appItem, startedMs, completedMs int64) {
 	at := time.Now()
-	if method == "item/completed" {
-		eventType = provider.RuntimeEventItemCompleted
+	status := provider.ItemStatusInProgress
+	if completed {
+		status = completedStatus(item)
 		if completedMs > 0 {
 			at = time.UnixMilli(completedMs)
 		}
-	} else if startedMs > 0 {
-		at = time.UnixMilli(startedMs)
-	}
-	event, ok := runtimeEventFromItem(localThread, localTurn, item, eventType, at)
-	if !ok {
-		return
-	}
-	if event.Payload.ToolCall != nil {
-		h.mu.Lock()
-		if session := h.sessionsByLocal[localThread]; session != nil {
-			session.items[item.ID] = *event.Payload.ToolCall
+	} else {
+		if startedMs > 0 {
+			at = time.UnixMilli(startedMs)
 		}
-		h.mu.Unlock()
+		if started := itemStatusFromApp(item.Status); started != "" {
+			status = started
+		}
 	}
-	h.emitEvent(event)
+	entries := itemEntries(turn, item, status, at)
+	h.mu.Lock()
+	session := h.sessionLocked(thread)
+	for _, entry := range entries {
+		if completed {
+			delete(session.entries, entry.Ref)
+			delete(session.streamed, entry.Ref)
+		} else {
+			session.entries[entry.Ref] = entry
+			if entry.Kind == provider.ItemKindAssistantMessage || entry.Kind == provider.ItemKindReasoning {
+				session.streamed[entry.Ref] = streamedItem{text: entry.Text}
+			}
+		}
+	}
+	h.mu.Unlock()
+	for _, entry := range entries {
+		h.emit(thread, provider.EntryUpserted{Entry: entry})
+	}
+	for _, seen := range subagentsOf(item) {
+		seen.Parent = thread
+		h.emit(thread, seen)
+	}
 }
 
-// emitTextDelta forwards a live text delta. partKind is "summary" or
-// "content" for reasoning deltas (naming which index on the notification
-// identifies the part) and "" for assistant text. The completed reasoning
-// item joins its parts as paragraphs (reasoningText), so a part change
-// inserts the same break live; that keeps what the user watched, the tail
-// emitted on completion, and the replayed thread identical.
-func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeContentStreamKind, partKind string) {
+// textDelta streams an item's text. partKind is "summary" or "content" for
+// reasoning deltas (naming which index identifies the part) and "" for
+// assistant text. The completed reasoning item joins its parts as paragraphs
+// (reasoningText), so a part change inserts the same break live, and the
+// streamed text matches the completed entry.
+func (h *Instance) textDelta(raw json.RawMessage, stream provider.StreamKind, partKind string) {
 	var notification struct {
 		ThreadID     string `json:"threadId"`
 		TurnID       string `json:"turnId"`
@@ -344,10 +285,6 @@ func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeConte
 	if json.Unmarshal(raw, &notification) != nil || notification.Delta == "" {
 		return
 	}
-	local, turn, ok := h.resolveIDs(notification.ThreadID, notification.TurnID)
-	if !ok {
-		return
-	}
 	part := ""
 	switch partKind {
 	case "summary":
@@ -357,15 +294,24 @@ func (h *Instance) emitTextDelta(raw json.RawMessage, kind provider.RuntimeConte
 	}
 	delta := notification.Delta
 	h.mu.Lock()
-	if session := h.sessionsByLocal[local]; session != nil {
-		item := session.streamed[notification.ItemID]
-		if part != "" && item.part != "" && item.part != part {
-			delta = paragraphBreak(item.text) + delta
-		}
-		session.streamed[notification.ItemID] = streamedItem{text: item.text + delta, part: part}
+	session := h.sessionLocked(notification.ThreadID)
+	item, streaming := session.streamed[notification.ItemID]
+	if part != "" && item.part != "" && item.part != part {
+		delta = paragraphBreak(item.text) + delta
 	}
+	session.streamed[notification.ItemID] = streamedItem{text: item.text + delta, part: part}
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventContentDelta, ThreadID: local, TurnID: turn, ItemID: notification.ItemID, Payload: provider.RuntimeEventPayload{StreamKind: kind, Delta: delta}})
+	if !streaming {
+		// The entry the text streams onto, should item/started not have made
+		// one.
+		kind := provider.ItemKindAssistantMessage
+		if stream == provider.StreamReasoning {
+			kind = provider.ItemKindReasoning
+		}
+		h.emit(notification.ThreadID, provider.EntryUpserted{Entry: provider.Entry{Ref: notification.ItemID, Turn: notification.TurnID, Kind: kind, Status: provider.ItemStatusInProgress, Text: delta, At: time.Now()}})
+		return
+	}
+	h.emit(notification.ThreadID, provider.TextAppended{Entry: notification.ItemID, Turn: notification.TurnID, Stream: stream, Text: delta})
 }
 
 // paragraphBreak returns the newlines that make text end in a blank line.
@@ -380,38 +326,30 @@ func paragraphBreak(text string) string {
 	}
 }
 
-func (h *Instance) emitCommandOutput(raw json.RawMessage) {
+// commandOutput adds streamed output to a command's entry. Every update
+// re-sends the whole entry, so output past the limit is dropped;
+// item/completed carries the bounded aggregate anyway.
+func (h *Instance) commandOutput(raw json.RawMessage) {
 	var notification struct{ ThreadID, TurnID, ItemID, Delta string }
 	if json.Unmarshal(raw, &notification) != nil || notification.Delta == "" {
 		return
 	}
-	local, turn, ok := h.resolveIDs(notification.ThreadID, notification.TurnID)
-	if !ok {
-		return
-	}
 	h.mu.Lock()
-	session := h.sessionsByLocal[local]
-	if session == nil {
+	session := h.sessionLocked(notification.ThreadID)
+	entry, known := session.entries[notification.ItemID]
+	if !known || entry.Tool == nil || len(entry.Tool.Output) >= appToolOutputLimit {
 		h.mu.Unlock()
 		return
 	}
-	// Output belongs to the snapshot recorded at item/started. Without one
-	// there is nothing to merge into, and emitting a blank tool call would show
-	// an empty row until the next full snapshot.
-	tool, known := session.items[notification.ItemID]
-	// Every update re-emits the whole snapshot, so output past the limit is
-	// dropped; item/completed carries the bounded aggregate anyway.
-	if !known || len(tool.Output) >= appToolOutputLimit {
-		h.mu.Unlock()
-		return
-	}
+	tool := *entry.Tool
 	tool.Output = boundedAppOutput(tool.Output + notification.Delta)
-	session.items[notification.ItemID] = tool
+	entry.Tool = &tool
+	session.entries[notification.ItemID] = entry
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemUpdated, ThreadID: local, TurnID: turn, ItemID: notification.ItemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindCommandExecution, ToolCall: &tool}})
+	h.emit(notification.ThreadID, provider.EntryUpserted{Entry: entry})
 }
 
-func (h *Instance) emitFilePatch(raw json.RawMessage) {
+func (h *Instance) filePatch(raw json.RawMessage) {
 	var notification struct {
 		ThreadID, TurnID, ItemID string
 		Changes                  []appFileUpdateChange `json:"changes"`
@@ -419,23 +357,20 @@ func (h *Instance) emitFilePatch(raw json.RawMessage) {
 	if json.Unmarshal(raw, &notification) != nil {
 		return
 	}
-	local, turn, ok := h.resolveIDs(notification.ThreadID, notification.TurnID)
-	if !ok {
-		return
+	h.mu.Lock()
+	session := h.sessionLocked(notification.ThreadID)
+	entry, known := session.entries[notification.ItemID]
+	if !known {
+		entry = provider.Entry{Ref: notification.ItemID, Turn: notification.TurnID, Kind: provider.ItemKindFileChange, Status: provider.ItemStatusInProgress, Title: "Changed files", At: time.Now()}
 	}
 	tool := provider.ToolCall{ProviderKind: "fileChange", Changes: providerFileChanges(notification.Changes)}
-	h.mu.Lock()
-	session := h.sessionsByLocal[local]
-	if session == nil {
-		h.mu.Unlock()
-		return
-	}
-	session.items[notification.ItemID] = tool
+	entry.Tool = &tool
+	session.entries[notification.ItemID] = entry
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventItemUpdated, ThreadID: local, TurnID: turn, ItemID: notification.ItemID, Payload: provider.RuntimeEventPayload{ItemType: provider.ItemKindFileChange, ToolCall: &tool}})
+	h.emit(notification.ThreadID, provider.EntryUpserted{Entry: entry})
 }
 
-func (h *Instance) emitPlan(raw json.RawMessage) {
+func (h *Instance) plan(raw json.RawMessage) {
 	var notification struct {
 		ThreadID, TurnID string
 		Plan             []struct{ Step, Status string } `json:"plan"`
@@ -443,30 +378,14 @@ func (h *Instance) emitPlan(raw json.RawMessage) {
 	if json.Unmarshal(raw, &notification) != nil {
 		return
 	}
-	local, turn, ok := h.resolveIDs(notification.ThreadID, notification.TurnID)
-	if !ok {
-		return
-	}
 	steps := make([]appPlanStep, 0, len(notification.Plan))
 	for _, step := range notification.Plan {
 		steps = append(steps, appPlanStep{Step: step.Step, Status: step.Status})
 	}
-	entries := planEntriesFromApp(steps)
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnPlanUpdated, ThreadID: local, TurnID: turn, Payload: provider.RuntimeEventPayload{PlanEntries: entries}})
+	h.emit(notification.ThreadID, provider.PlanChanged{Entries: planEntriesFromApp(steps)})
 }
 
-// emitGoal reports a native thread's goal, or that it has none.
-func (h *Instance) emitGoal(nativeThread string, goal *appGoal) {
-	local, _, ok := h.resolveIDs(nativeThread, "")
-	if !ok {
-		return
-	}
-	if event, ok := goalEvent(local, goal); ok {
-		h.emitEvent(event)
-	}
-}
-
-func (h *Instance) emitTokenUsage(raw json.RawMessage) {
+func (h *Instance) tokenUsage(raw json.RawMessage) {
 	// total sums every request of the thread; last is the newest request,
 	// whose tokens are what the context window holds now (as the Codex TUI
 	// computes it).
@@ -482,294 +401,9 @@ func (h *Instance) emitTokenUsage(raw json.RawMessage) {
 	if json.Unmarshal(raw, &notification) != nil {
 		return
 	}
-	local, turn, ok := h.resolveIDs(notification.ThreadID, notification.TurnID)
-	if !ok {
-		return
-	}
-	max := 0
+	window := 0
 	if notification.TokenUsage.ModelContextWindow != nil {
-		max = *notification.TokenUsage.ModelContextWindow
+		window = *notification.TokenUsage.ModelContextWindow
 	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventThreadTokenUsage, ThreadID: local, TurnID: turn, Payload: provider.RuntimeEventPayload{TokenUsage: &provider.TokenUsage{UsedTokens: notification.TokenUsage.Last.TotalTokens, MaxTokens: max}}})
-}
-
-func (h *Instance) handleServerRequest(id json.RawMessage, method string, raw json.RawMessage) {
-	switch method {
-	case "mcpServer/elicitation/request":
-		h.openElicitation(id, raw)
-		return
-	case "item/permissions/requestApproval":
-		h.openPermissionsRequest(id, raw)
-		return
-	}
-	if method != "item/commandExecution/requestApproval" && method != "item/fileChange/requestApproval" {
-		_ = h.rpc.respondError(id, -32601, "method not supported by maiD")
-		return
-	}
-	var request struct {
-		ThreadID   string `json:"threadId"`
-		TurnID     string `json:"turnId"`
-		ItemID     string `json:"itemId"`
-		ApprovalID string `json:"approvalId"`
-		Reason     string `json:"reason"`
-		Command    string `json:"command"`
-		Cwd        string `json:"cwd"`
-		// The rules Codex proposes to approve similar requests from now on.
-		ProposedExecpolicyAmendment     []string `json:"proposedExecpolicyAmendment"`
-		ProposedNetworkPolicyAmendments []struct {
-			Host   string `json:"host"`
-			Action string `json:"action"`
-		} `json:"proposedNetworkPolicyAmendments"`
-	}
-	if err := json.Unmarshal(raw, &request); err != nil {
-		_ = h.rpc.respondError(id, -32602, "invalid approval request")
-		return
-	}
-	local, turn, ok := h.resolveIDs(request.ThreadID, request.TurnID)
-	if !ok {
-		_ = h.rpc.respond(id, map[string]any{"decision": "cancel"})
-		return
-	}
-	requestID := request.ApprovalID
-	if requestID == "" {
-		requestID = h.requestID(id)
-	}
-	requestType := provider.RuntimeRequestCommandExecution
-	if method == "item/fileChange/requestApproval" {
-		requestType = provider.RuntimeRequestFileChange
-	}
-	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: requestID, localThread: local, localTurn: turn, requestType: requestType, kind: pendingApprovalRequest, amendments: make(map[string]map[string]any)}
-	detail := strings.TrimSpace(request.Reason)
-	if detail == "" {
-		detail = strings.TrimSpace(request.Command)
-	}
-	asked := provider.Request{Message: detail, Actions: []provider.RequestAction{
-		{ID: "accept", Label: "Allow once", Decision: provider.ApprovalDecisionAccept},
-		{ID: "acceptForSession", Label: "Allow for session", Decision: provider.ApprovalDecisionAcceptForSession},
-	}}
-	// Like the Codex TUI, offer each proposed rule as its own action.
-	if prefix := strings.Join(request.ProposedExecpolicyAmendment, " "); prefix != "" && !strings.ContainsAny(prefix, "\r\n") {
-		pending.amendments["acceptWithExecpolicyAmendment"] = map[string]any{"decision": map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": request.ProposedExecpolicyAmendment}}}
-		asked.Actions = append(asked.Actions, provider.RequestAction{ID: "acceptWithExecpolicyAmendment", Label: fmt.Sprintf("Always allow commands that start with `%s`", prefix), Decision: provider.ApprovalDecisionAcceptForSession})
-	}
-	for index, proposed := range request.ProposedNetworkPolicyAmendments {
-		action := provider.RequestAction{ID: fmt.Sprintf("networkPolicyAmendment:%d", index), Label: "Always allow " + proposed.Host, Decision: provider.ApprovalDecisionAcceptForSession}
-		if proposed.Action == "deny" {
-			action.Label, action.Decision = "Always block "+proposed.Host, provider.ApprovalDecisionDecline
-		}
-		pending.amendments[action.ID] = map[string]any{"decision": map[string]any{"applyNetworkPolicyAmendment": map[string]any{"network_policy_amendment": proposed}}}
-		asked.Actions = append(asked.Actions, action)
-	}
-	asked.Actions = append(asked.Actions, provider.RequestAction{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline})
-	h.mu.Lock()
-	h.pendingApprovals[requestID] = pending
-	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: requestID, Payload: provider.RuntimeEventPayload{RequestType: requestType, Args: append(json.RawMessage(nil), raw...), Request: &asked}})
-}
-
-// openElicitation surfaces an MCP server's elicitation as questions, or as a
-// permission request when it only asks yes or no. Only the MCP form and URL
-// modes are shown; Codex's own modes are cancelled.
-func (h *Instance) openElicitation(id json.RawMessage, raw json.RawMessage) {
-	var request struct {
-		ThreadID        string          `json:"threadId"`
-		TurnID          string          `json:"turnId"`
-		Mode            string          `json:"mode"`
-		Message         string          `json:"message"`
-		URL             string          `json:"url"`
-		RequestedSchema json.RawMessage `json:"requestedSchema"`
-		Meta            struct {
-			Persist json.RawMessage `json:"persist"`
-		} `json:"_meta"`
-	}
-	if err := json.Unmarshal(raw, &request); err != nil {
-		_ = h.rpc.respondError(id, -32602, "invalid elicitation request")
-		return
-	}
-	asked, form, err := elicitation.Parse(request.Message, request.Mode, request.URL, request.RequestedSchema, rememberActions(request.Meta.Persist)...)
-	local, turn, ok := h.resolveIDs(request.ThreadID, request.TurnID)
-	if err != nil || !ok {
-		// The user never saw it, so it was neither accepted nor declined.
-		_ = h.rpc.respond(id, map[string]any{"action": elicitation.ActionCancel, "content": nil})
-		return
-	}
-	pending := &pendingApproval{id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id), localThread: local, localTurn: turn, kind: pendingElicitation, form: form}
-	h.mu.Lock()
-	h.pendingApprovals[pending.requestID] = pending
-	h.mu.Unlock()
-	payload := provider.RuntimeEventPayload{Request: &asked}
-	if form.Confirms() {
-		// What it confirms, an MCP tool call's server, tool and arguments
-		// above all, is only in the raw request.
-		payload.Args = append(json.RawMessage(nil), raw...)
-	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, RequestID: pending.requestID, Payload: payload})
-}
-
-// rememberActionPrefix starts the ID of an action that keeps allowing what
-// an elicitation confirms; the rest is Codex's persist mode.
-const rememberActionPrefix = "persist:"
-
-// rememberActions are the ways Codex offers to keep allowing what an
-// elicitation confirms, MCP tool calls above all: _meta.persist names
-// "session", "always" or both, and the chosen one goes back as the
-// response's _meta.persist (codex-rs/protocol/src/mcp_approval_meta.rs,
-// read by parse_mcp_tool_approval_elicitation_response). They apply only to
-// a form that asks for nothing.
-func rememberActions(persist json.RawMessage) []provider.RequestAction {
-	var modes []string
-	var mode string
-	if json.Unmarshal(persist, &mode) == nil {
-		modes = []string{mode}
-	} else {
-		_ = json.Unmarshal(persist, &modes)
-	}
-	var actions []provider.RequestAction
-	for _, offer := range []struct{ mode, label string }{{"session", "Allow for this session"}, {"always", "Always allow"}} {
-		if slices.Contains(modes, offer.mode) {
-			actions = append(actions, provider.RequestAction{ID: rememberActionPrefix + offer.mode, Label: offer.label, Decision: provider.ApprovalDecisionAcceptForSession})
-		}
-	}
-	return actions
-}
-
-// openPermissionsRequest surfaces a request for more sandbox access as a
-// permission request that can be granted for the turn or the session.
-func (h *Instance) openPermissionsRequest(id json.RawMessage, raw json.RawMessage) {
-	var request permissionsRequest
-	var requested requestedPermissions
-	if json.Unmarshal(raw, &request) != nil || json.Unmarshal(request.Permissions, &requested) != nil {
-		_ = h.rpc.respondError(id, -32602, "invalid permissions request")
-		return
-	}
-	local, turn, ok := h.resolveIDs(request.ThreadID, request.TurnID)
-	if !ok {
-		_ = h.rpc.respond(id, permissionsReply(request.Permissions, provider.ApprovalDecisionCancel))
-		return
-	}
-	pending := &pendingApproval{
-		id: append(json.RawMessage(nil), id...), rpcRequestID: normalizeRequestID(id), requestID: h.requestID(id),
-		localThread: local, localTurn: turn, requestType: requested.requestType(),
-		kind: pendingPermissions, permissions: append(json.RawMessage(nil), request.Permissions...),
-	}
-	h.mu.Lock()
-	h.pendingApprovals[pending.requestID] = pending
-	h.mu.Unlock()
-	detail := requested.summary()
-	if request.Reason != nil && strings.TrimSpace(*request.Reason) != "" {
-		detail = strings.TrimSpace(*request.Reason)
-	}
-	asked := provider.Request{Message: detail, Actions: []provider.RequestAction{
-		{ID: "turn", Label: "Allow for this turn", Decision: provider.ApprovalDecisionAccept},
-		{ID: "session", Label: "Allow for this session", Decision: provider.ApprovalDecisionAcceptForSession},
-		{ID: "decline", Label: "Decline", Decision: provider.ApprovalDecisionDecline},
-	}}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestOpened, ThreadID: local, TurnID: turn, ItemID: request.ItemID, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Args: append(json.RawMessage(nil), raw...), Request: &asked}})
-}
-
-func (h *Instance) RespondToRequest(_ context.Context, input provider.RespondToRequestInput) error {
-	h.mu.Lock()
-	pending := h.pendingApprovals[input.RequestID]
-	h.mu.Unlock()
-	if pending == nil {
-		return fmt.Errorf("Codex approval request %q is not pending", input.RequestID)
-	}
-	// Build the reply before claiming the request: an invalid answer must
-	// leave the question answerable.
-	reply, err := pending.reply(input)
-	if err != nil {
-		return err
-	}
-	h.mu.Lock()
-	if h.pendingApprovals[input.RequestID] != pending {
-		h.mu.Unlock()
-		return fmt.Errorf("Codex approval request %q is not pending", input.RequestID)
-	}
-	delete(h.pendingApprovals, input.RequestID)
-	h.mu.Unlock()
-	if err := h.rpc.respond(pending.id, reply); err != nil {
-		h.mu.Lock()
-		if _, exists := h.pendingApprovals[input.RequestID]; !exists {
-			h.pendingApprovals[input.RequestID] = pending
-		}
-		h.mu.Unlock()
-		return err
-	}
-	var answers map[string][]string
-	if input.Action.Submit {
-		answers = input.Answers
-	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: input.Action.Decision, ActionID: input.Action.ID, Answers: answers}})
-	return nil
-}
-
-func (h *Instance) cancelPendingApprovals() {
-	h.mu.Lock()
-	pending := h.pendingApprovals
-	h.pendingApprovals = make(map[string]*pendingApproval)
-	h.mu.Unlock()
-	for _, request := range pending {
-		_ = h.rpc.respond(request.id, request.cancelReply())
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: request.localThread, TurnID: request.localTurn, RequestID: request.requestID, Payload: provider.RuntimeEventPayload{RequestType: request.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
-	}
-}
-
-// requestID names a server request for clients. JSON-RPC ids restart with
-// every app-server process, so the instance's nonce keeps a new request from
-// taking an old one's name.
-func (h *Instance) requestID(id json.RawMessage) string {
-	return "codex:" + h.requestNonce + ":" + normalizeRequestID(id)
-}
-
-func normalizeRequestID(id json.RawMessage) string {
-	return strings.Trim(string(id), "\"")
-}
-
-func (h *Instance) resolveServerRequest(raw json.RawMessage) {
-	var notification struct {
-		RequestID json.RawMessage `json:"requestId"`
-	}
-	if json.Unmarshal(raw, &notification) != nil || len(notification.RequestID) == 0 {
-		return
-	}
-	rpcRequestID := normalizeRequestID(notification.RequestID)
-	var resolved *pendingApproval
-	h.mu.Lock()
-	for requestID, pending := range h.pendingApprovals {
-		if pending.rpcRequestID == rpcRequestID {
-			resolved = pending
-			delete(h.pendingApprovals, requestID)
-			break
-		}
-	}
-	h.mu.Unlock()
-	if resolved != nil {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: resolved.localThread, TurnID: resolved.localTurn, RequestID: resolved.requestID, Payload: provider.RuntimeEventPayload{RequestType: resolved.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
-	}
-}
-
-func (h *Instance) handleNativeThreadClosed(raw json.RawMessage) {
-	var notification struct {
-		ThreadID string `json:"threadId"`
-	}
-	if json.Unmarshal(raw, &notification) != nil || notification.ThreadID == "" {
-		return
-	}
-	var resolved []*pendingApproval
-	h.mu.Lock()
-	local := h.localByNative[notification.ThreadID]
-	if local != "" {
-		delete(h.localByNative, notification.ThreadID)
-		delete(h.sessionsByLocal, local)
-		for requestID, pending := range h.pendingApprovals {
-			if pending.localThread == local {
-				resolved = append(resolved, pending)
-				delete(h.pendingApprovals, requestID)
-			}
-		}
-	}
-	h.mu.Unlock()
-	for _, pending := range resolved {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
-	}
+	h.emit(notification.ThreadID, provider.UsageChanged{Usage: provider.TokenUsage{UsedTokens: notification.TokenUsage.Last.TotalTokens, MaxTokens: window}})
 }

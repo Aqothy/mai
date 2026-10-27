@@ -50,12 +50,12 @@ func TestLiveHistoryPagination(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	instance, err := OpenInstance(ctx, provider.InstanceSpec{InstanceID: "codex-history-qa", Config: config}, nil)
+	instance, err := OpenInstance(ctx, provider.InstanceSpec{InstanceID: "codex-history-qa", Config: config}, provider.Host{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = instance.Close() })
-	sessions, err := instance.ListSessions(ctx, fixture.Cwd)
+	sessions, err := instance.Sessions(ctx, fixture.Cwd)
 	if err != nil {
 		t.Fatalf("scoped listing: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestLiveHistoryPagination(t *testing.T) {
 	}
 	t.Logf("scoped history: %d sessions, %d one-item pages, same complete order", len(sessions), pages)
 	if os.Getenv("CODEX_HISTORY_LIST_ALL") == "1" {
-		all, err := instance.ListSessions(ctx, "")
+		all, err := instance.Sessions(ctx, "")
 		if err != nil {
 			t.Fatalf("full listing: %v", err)
 		}
@@ -113,41 +113,33 @@ func TestLiveHistoryPagination(t *testing.T) {
 		}
 		t.Logf("actual adapter pagination: %d unique sessions across its 100-item boundary; metadata not logged", len(all))
 	}
-	var selection *provider.ModelSelection
-	if model := os.Getenv("CODEX_LIVE_MODEL"); model != "" {
-		selection = &provider.ModelSelection{Model: model}
-	}
-	resumed, err := instance.StartSession(ctx, provider.StartSessionInput{
-		ThreadID: "history-qa-replay", ProviderSessionID: fixture.ThreadID,
-		Cwd: fixture.Cwd, ReplayHistory: true, ModelSelection: selection,
-	})
+	page, err := instance.History(ctx, fixture.ThreadID, provider.Workspace{Cwd: fixture.Cwd}, "")
 	if err != nil {
-		t.Fatalf("fixture resume/replay: %v", err)
+		t.Fatalf("fixture history: %v", err)
 	}
-	if resumed.HistoryUnavailable {
-		t.Fatal("fixture history unavailable")
-	}
-	var users []provider.RuntimeEventPayload
+	var users []provider.Entry
 	var assistants []string
 	completed := 0
-	for _, event := range resumed.Replay {
-		if event.Type == provider.RuntimeEventItemCompleted && event.Payload.ItemType == provider.ItemKindUserMessage {
-			users = append(users, event.Payload)
-		}
-		if event.Type == provider.RuntimeEventContentDelta && event.Payload.StreamKind == provider.RuntimeContentAssistantText {
-			assistants = append(assistants, event.Payload.Delta)
-		}
-		if event.Type == provider.RuntimeEventTurnCompleted && event.Payload.TurnState == provider.RuntimeTurnCompleted {
+	for _, turn := range page.Turns {
+		if turn.State == provider.TurnCompleted {
 			completed++
+		}
+		for _, entry := range turn.Entries {
+			switch entry.Kind {
+			case provider.ItemKindUserMessage:
+				users = append(users, entry)
+			case provider.ItemKindAssistantMessage:
+				assistants = append(assistants, entry.Text)
+			}
 		}
 	}
 	if len(users) != len(fixture.Users) || completed != len(fixture.Users) || !slices.Equal(assistants, fixture.Assistants) {
-		t.Fatalf("replay lost or changed messages/turns: users=%d, assistants=%d, completed=%d", len(users), len(assistants), completed)
+		t.Fatalf("history lost or changed messages/turns: users=%d, assistants=%d, completed=%d", len(users), len(assistants), completed)
 	}
 	for i, expected := range fixture.Users {
-		if users[i].Detail != expected.Text || len(users[i].Attachments) != 1 || users[i].Attachments[0].Data != expected.Data {
-			t.Fatalf("replayed user message %d changed text or image bytes", i)
+		if users[i].Text != expected.Text || len(users[i].Attachments) != 1 || users[i].Attachments[0].Data != expected.Data {
+			t.Fatalf("history user message %d changed text or image bytes", i)
 		}
 	}
-	t.Logf("fixture resume/replay: %d completed turns; exact user text, images and assistant replies preserved", completed)
+	t.Logf("fixture history: %d completed turns; exact user text, images and assistant replies preserved", completed)
 }

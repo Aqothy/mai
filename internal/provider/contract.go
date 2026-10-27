@@ -1,15 +1,15 @@
-// Package provider defines the provider-neutral runtime contract used by the daemon.
+// Package provider defines the provider-neutral contract between the daemon
+// and its adapters.
 //
-// Provider adapters translate native protocols, SDKs, desktop app sockets, and
-// process protocols into this package. Native SDK/generated DTOs should
-// stay inside adapter packages; the rest of the server only sees thread-scoped
-// provider sessions, provider turns, and canonical runtime events.
+// Adapters speak native sessions: they translate a provider's protocol into
+// sessions named by native keys, turns and entries named by deterministic
+// native refs, and typed events. They never see maiD's own threads,
+// participants or deliveries; native SDK DTOs stay inside adapter packages.
 package provider
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,11 +19,6 @@ import (
 type InstanceID string
 
 type DriverKind string
-
-// RuntimeEventListener receives canonical runtime events from an adapter.
-// Adapters call it after converting provider-specific updates into
-// provider.RuntimeEvent values.
-type RuntimeEventListener func(RuntimeEvent)
 
 // InstanceSpec describes a configured provider instance to materialize. Config
 // is an opaque, driver-owned JSON envelope: providerservice routes and stores it
@@ -70,36 +65,63 @@ type PromptContentCapabilities struct {
 	EmbeddedContext bool `json:"embeddedContext,omitempty"`
 }
 
-// MCPCapabilities reports which MCP transports a provider supports.
+// MCPCapabilities reports which MCP transports a provider can be given
+// servers over (OpenInput.MCP).
 type MCPCapabilities struct {
-	HTTP bool `json:"http,omitempty"`
-	SSE  bool `json:"sse,omitempty"`
+	HTTP  bool `json:"http,omitempty"`
+	Stdio bool `json:"stdio,omitempty"`
 }
 
-// Capabilities is the provider-neutral capability set. It advertises ONLY the
-// axes that genuinely vary across coding-agent providers; baseline abilities
-// (creating sessions, running/interrupting turns, responding to approvals) are
-// assumed of every provider and are not listed here. UI clients use these to
-// show/hide controls and the server uses them to gate commands.
+// HistoryQuality is how well a provider rebuilds a session's conversation
+// from its own record.
+type HistoryQuality string
+
+const (
+	// HistoryNone: the provider can't replay sessions.
+	HistoryNone HistoryQuality = "none"
+	// HistoryLossy: replay leaves things out or shows them differently from
+	// how they streamed.
+	HistoryLossy HistoryQuality = "lossy"
+	// HistoryExact: replay gives the entries the session streamed, ref for
+	// ref; replay fixtures prove it.
+	HistoryExact HistoryQuality = "exact"
+)
+
+// Capabilities says what an instance offers. Every Instance method exists on
+// every instance; one its capabilities don't offer returns ErrUnsupported.
+// Features read capabilities, never driver names, and clients read the same
+// struct.
 type Capabilities struct {
-	// SessionList reports whether the provider can enumerate existing sessions.
-	SessionList bool `json:"sessionList,omitempty"`
-	// SessionDelete and SessionClose are advertised independently because ACP
-	// agents may support one lifecycle operation without the other.
-	SessionDelete bool `json:"sessionDelete,omitempty"`
-	SessionClose  bool `json:"sessionClose,omitempty"`
-	// LoadReplay reports whether the provider can rebuild display history for a stored session.
-	LoadReplay bool `json:"loadReplay,omitempty"`
-	// Resume reports whether the provider can restore agent context without
-	// replaying display history.
+	// History is how a session the provider ran outside maiD rebuilds.
+	// Sessions maiD ran always rebuild exactly: adapters keep what the
+	// provider can't replay in the host's Mirror.
+	History HistoryQuality `json:"history"`
+	// HistoryVersion changes whenever the adapter maps native history to
+	// entries differently, so entries cached by another version are rebuilt.
+	HistoryVersion int `json:"historyVersion"`
+	// Resume reopens a session with the agent's memory of it.
 	Resume bool `json:"resume,omitempty"`
-	// AdditionalDirectories allows a session to expose more workspace roots in
-	// addition to its primary cwd.
+	// Fork forks a session natively through one of its turns.
+	Fork bool `json:"fork,omitempty"`
+	// Steer adds a message to a running turn.
+	Steer bool `json:"steer,omitempty"`
+	// Subagents emits SubagentSeen for the provider's own subagents.
+	Subagents bool `json:"subagents,omitempty"`
+	// Instructions puts OpenInput.Instructions in a system or developer
+	// prompt; without it the daemon sends them with the first turn.
+	Instructions bool `json:"instructions,omitempty"`
+	// MessageIDs keeps SendInput.Delivery in the session, so Delivered is
+	// exact rather than a match on the text sent.
+	MessageIDs            bool                      `json:"messageIds,omitempty"`
+	MCP                   MCPCapabilities           `json:"mcp,omitzero"`
+	PromptContent         PromptContentCapabilities `json:"promptContent,omitzero"`
 	AdditionalDirectories bool                      `json:"additionalDirectories,omitempty"`
+	Sessions              bool                      `json:"sessions,omitempty"`
+	Delete                bool                      `json:"delete,omitempty"`
+	Rename                bool                      `json:"rename,omitempty"`
 	Auth                  bool                      `json:"auth,omitempty"`
 	Logout                bool                      `json:"logout,omitempty"`
-	PromptContent         PromptContentCapabilities `json:"promptContent,omitzero"`
-	MCP                   MCPCapabilities           `json:"mcp,omitzero"`
+	CommandCompletion     bool                      `json:"commandCompletion,omitempty"`
 }
 
 type AuthStatus string
@@ -196,6 +218,9 @@ type InstanceInfo struct {
 	InitializedAt time.Time      `json:"initializedAt"`
 	Capabilities  Capabilities   `json:"capabilities"`
 	Auth          Auth           `json:"auth"`
+	// Access says which config option sets a session's access and how much
+	// each of its values allows; nil when the provider has no such option.
+	Access *AccessModes `json:"access,omitempty"`
 }
 
 // SlashCommand is an agent-advertised command the client can offer (ACP
@@ -213,11 +238,11 @@ type SlashCommand struct {
 // CompleteCommandInput asks for suggestions for what follows a slash
 // command, given what has been typed after its name.
 type CompleteCommandInput struct {
-	ThreadID string `json:"threadId"`
-	Command  string `json:"command"`
-	Input    string `json:"input"`
-	// Cwd is the thread's workspace, which the daemon resolves.
-	Cwd string `json:"-"`
+	// Session is the live session the command runs in, if any.
+	Session string
+	Cwd     string
+	Command string
+	Input   string
 }
 
 // CommandCompletion is one suggestion for a slash command's input.
@@ -303,15 +328,6 @@ func TruncateUTF8(text string, limit int) string {
 	return text[:cut]
 }
 
-// ModelSelection is WHAT a provider instance runs (model + provider-shaped
-// options). WHO runs it — the provider instance — is always the separate
-// providerInstanceId field wherever a selection travels; the two are never
-// duplicated.
-type ModelSelection struct {
-	Model   string          `json:"model,omitempty"`
-	Options json.RawMessage `json:"options,omitempty"`
-}
-
 // ConfigOptionCategory is a UX hint distinguishing kinds of settable session
 // configuration options. It must be treated as advisory; unknown values are
 // allowed and handled gracefully.
@@ -364,32 +380,6 @@ func CurrentConfigString(options []ConfigOption, optionID string) (string, bool)
 	return "", false
 }
 
-// Session is the provider-neutral session projection returned by a provider
-// instance. It is thread-scoped: adapters own any native session identifiers and
-// expose only a generic resume cursor when useful. It carries only fields the
-// server consumes (session binding + resume cursor); session STATUS is derived
-// by orchestration from runtime events, never reported here.
-type Session struct {
-	Provider           DriverKind `json:"provider"`
-	ProviderInstanceID InstanceID `json:"providerInstanceId,omitempty"`
-	// Generation identifies the concrete provider process that materialized this
-	// session. It is internal fencing metadata, not part of the client contract.
-	Generation uint64 `json:"-"`
-	// ProviderSessionID identifies this session to the optional provider session-
-	// management API. It is retained server-side for binding safety and is never
-	// exposed in the thread/session projection.
-	ProviderSessionID     string          `json:"-"`
-	ProviderName          string          `json:"providerName,omitempty"`
-	Cwd                   string          `json:"cwd,omitempty"`
-	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
-	ThreadID              string          `json:"threadId"`
-	ResumeCursor          json.RawMessage `json:"resumeCursor,omitempty"`
-	// ConfigOptions uses omitzero, not omitempty: provider session snapshots can
-	// intentionally report an empty set of provider metadata.
-	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
-	Skills        []Skill        `json:"skills,omitzero"`
-}
-
 type ConfigOptionSelection struct {
 	OptionID string               `json:"optionId"`
 	Value    any                  `json:"value"`
@@ -404,40 +394,11 @@ type OptionsSession struct {
 	Skills        []Skill
 }
 
+// OptionsSessionCallbacks report changes of an OptionsSession made on the
+// provider's side: new options, or the session ending.
 type OptionsSessionCallbacks struct {
 	Updated     func([]ConfigOption)
 	Invalidated func()
-}
-
-type StartSessionInput struct {
-	ThreadID           string     `json:"threadId"`
-	Provider           DriverKind `json:"provider,omitempty"`
-	ProviderInstanceID InstanceID `json:"providerInstanceId,omitempty"`
-	// ProviderSessionID is supplied internally when an external session was
-	// imported. It is adapter-owned routing data and is never exposed to clients.
-	ProviderSessionID     string                  `json:"-"`
-	Cwd                   string                  `json:"cwd,omitempty"`
-	AdditionalDirectories []string                `json:"additionalDirectories,omitempty"`
-	ModelSelection        *ModelSelection         `json:"modelSelection,omitempty"`
-	ConfigSelections      []ConfigOptionSelection `json:"configSelections,omitempty"`
-	ResumeCursor          json.RawMessage         `json:"resumeCursor,omitempty"`
-	// ReplayHistory asks the provider to rebuild display history while restoring
-	// the session. On success, StartSessionResult.Replay contains the complete
-	// ordered replay batch. A failed start must not expose partial replay events.
-	ReplayHistory bool            `json:"replayHistory,omitempty"`
-	Options       json.RawMessage `json:"options,omitempty"`
-}
-
-// StartSessionResult is the atomic result of preparing a provider session.
-// Replay is populated only when ReplayHistory was requested and the provider
-// can restore display history. HistoryUnavailable lets orchestration finish a
-// degraded restore without confusing an empty history with an unsupported one.
-// During a replay start, adapters must include same-thread setup events in
-// Replay rather than publishing them to the live event sink before returning.
-type StartSessionResult struct {
-	Session            Session
-	Replay             []RuntimeEvent
-	HistoryUnavailable bool
 }
 
 // AttachmentKind is what an attachment carries.
@@ -492,86 +453,6 @@ type PromptAnnotation struct {
 	Note      string `json:"note,omitempty"`
 }
 
-type SendTurnInput struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId,omitempty"`
-	// Steer adds the input to the running turn TurnID instead of starting
-	// TurnID. It never starts a turn in its place: a steer whose turn already
-	// ended returns ErrTurnNotRunning, and orchestration sends the input as the
-	// next turn. Any other error means the provider refused it.
-	Steer          bool               `json:"steer,omitempty"`
-	Input          string             `json:"input,omitempty"`
-	Attachments    []Attachment       `json:"attachments,omitempty"`
-	Annotations    []PromptAnnotation `json:"annotations,omitempty"`
-	ModelSelection *ModelSelection    `json:"modelSelection,omitempty"`
-	Options        json.RawMessage    `json:"options,omitempty"`
-	// Presentation and ClientMessageID are local replay bookkeeping, never
-	// provider-visible prompt text or client API fields.
-	Presentation    *PromptPresentation `json:"-"`
-	ClientMessageID string              `json:"-"`
-}
-
-// PromptPresentation retains client-owned identity and annotation cards. Text
-// is present only when annotations changed the provider-facing prompt; ordinary
-// conversation content remains provider-owned.
-// ErrTurnNotRunning is returned (wrapped) by SendTurn for a steer whose turn
-// is no longer running at the provider.
-var ErrTurnNotRunning = errors.New("turn is not running")
-
-type PromptPresentation struct {
-	MessageID   string             `json:"messageId"`
-	Text        *string            `json:"text,omitempty"`
-	Annotations []PromptAnnotation `json:"annotations,omitempty"`
-}
-
-type InterruptTurnInput struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId,omitempty"`
-}
-
-type StopSessionInput struct {
-	ThreadID string `json:"threadId"`
-}
-
-// StopItemInput stops an item that runs on its own, apart from its turn: a
-// tool whose ToolCall.Background is set. The provider then settles the item
-// through its usual events.
-type StopItemInput struct {
-	ThreadID string `json:"threadId"`
-	ItemID   string `json:"itemId"`
-}
-
-// ForkSessionInput forks a native session through one of its turns.
-type ForkSessionInput struct {
-	ProviderSessionID string `json:"-"`
-	// ThroughTurnID is the provider's id for the last turn the fork keeps
-	// (RuntimeEventPayload.ProviderTurnID).
-	ThroughTurnID string `json:"-"`
-	// ModelSelection and ConfigSelections are the source session's settings.
-	// Providers that keep a fork loaded apply them when creating it.
-	ModelSelection   *ModelSelection         `json:"-"`
-	ConfigSelections []ConfigOptionSelection `json:"-"`
-}
-
-// RenameSessionInput names the native session behind a thread after the
-// thread, so the name the user chose in maiD shows in the provider's own
-// tools too.
-type RenameSessionInput struct {
-	ProviderSessionID string `json:"-"`
-	Title             string `json:"title"`
-}
-
-type ForkSessionResult struct {
-	Summary SessionSummary `json:"summary"`
-}
-
-type SetConfigOptionInput struct {
-	ThreadID string               `json:"threadId"`
-	OptionID string               `json:"optionId"`
-	Value    any                  `json:"value"`
-	Category ConfigOptionCategory `json:"category,omitempty"`
-}
-
 type ApprovalDecision string
 
 const (
@@ -580,17 +461,6 @@ const (
 	ApprovalDecisionDecline          ApprovalDecision = "decline"
 	ApprovalDecisionCancel           ApprovalDecision = "cancel"
 )
-
-type RespondToRequestInput struct {
-	ThreadID  string `json:"threadId"`
-	RequestID string `json:"requestId"`
-	// Action is the one the user chose, among the request's own.
-	Action RequestAction `json:"action"`
-	// Answers answers the request's questions when Action submits, keyed by
-	// Question.ID. Choice questions answer with option values; other kinds
-	// with one entered value.
-	Answers map[string][]string `json:"answers,omitempty"`
-}
 
 // Request is what an agent asks the user, in one shape for every kind: a
 // permission, a question or form, a yes or no, a link to open, a plan to
@@ -604,6 +474,9 @@ type Request struct {
 	URL       string          `json:"url,omitempty"`
 	Questions []Question      `json:"questions,omitempty"`
 	Actions   []RequestAction `json:"actions"`
+	// Details is the provider's own description of what it asks (a tool's
+	// input), shown on request as is.
+	Details json.RawMessage `json:"details,omitempty"`
 }
 
 // RequestAction is one way to answer a Request. Decision is what choosing it
@@ -657,38 +530,6 @@ type QuestionOption struct {
 	Description string `json:"description,omitempty"`
 }
 
-type RuntimeEventID string
-
-type RuntimeEventType string
-
-const (
-	RuntimeEventThreadMetadataUpdate RuntimeEventType = "thread.metadata.updated"
-	RuntimeEventThreadTokenUsage     RuntimeEventType = "thread.token-usage.updated"
-	// RuntimeEventThreadGoalUpdated reports the thread's goal: Payload.Goal,
-	// or no goal when it is nil. Adapters emit it whenever the goal changes
-	// and when a session starts on a thread that may have one.
-	RuntimeEventThreadGoalUpdated    RuntimeEventType = "thread.goal.updated"
-	RuntimeEventTurnStarted          RuntimeEventType = "turn.started"
-	RuntimeEventTurnCompleted        RuntimeEventType = "turn.completed"
-	RuntimeEventTurnPlanUpdated      RuntimeEventType = "turn.plan.updated"
-	RuntimeEventItemStarted          RuntimeEventType = "item.started"
-	RuntimeEventItemUpdated          RuntimeEventType = "item.updated"
-	RuntimeEventItemCompleted        RuntimeEventType = "item.completed"
-	RuntimeEventContentDelta         RuntimeEventType = "content.delta"
-	RuntimeEventRequestOpened        RuntimeEventType = "request.opened"
-	RuntimeEventRequestResolved      RuntimeEventType = "request.resolved"
-	RuntimeEventRuntimeWarning       RuntimeEventType = "runtime.warning"
-	RuntimeEventRuntimeError         RuntimeEventType = "runtime.error"
-	RuntimeEventConfigOptionsUpdated RuntimeEventType = "config.options.updated"
-)
-
-type RuntimeContentStreamKind string
-
-const (
-	RuntimeContentAssistantText RuntimeContentStreamKind = "assistant_text"
-	RuntimeContentReasoningText RuntimeContentStreamKind = "reasoning_text"
-)
-
 // StopReason says why a completed turn ended early. It is empty when the turn
 // finished normally; failures and cancellation are turn states instead.
 type StopReason string
@@ -699,29 +540,20 @@ const (
 	StopReasonRefusal         StopReason = "refusal"
 )
 
-type RuntimeTurnState string
+// TurnState is a turn's lifecycle state.
+type TurnState string
 
 const (
-	RuntimeTurnCompleted   RuntimeTurnState = "completed"
-	RuntimeTurnFailed      RuntimeTurnState = "failed"
-	RuntimeTurnInterrupted RuntimeTurnState = "interrupted"
-	RuntimeTurnCancelled   RuntimeTurnState = "cancelled"
+	TurnRunning     TurnState = "running"
+	TurnCompleted   TurnState = "completed"
+	TurnFailed      TurnState = "failed"
+	TurnInterrupted TurnState = "interrupted"
 )
 
-type RuntimeRequestType string
+// Settled reports whether the turn ended.
+func (s TurnState) Settled() bool { return s != TurnRunning }
 
-const (
-	RuntimeRequestCommandExecution RuntimeRequestType = "command_execution_approval"
-	RuntimeRequestFileRead         RuntimeRequestType = "file_read_approval"
-	RuntimeRequestFileChange       RuntimeRequestType = "file_change_approval"
-	RuntimeRequestDynamicToolCall  RuntimeRequestType = "dynamic_tool_call"
-)
-
-// ItemKind is the provider-neutral kind of streamed content and thread
-// timeline items. Adapters map their native item/update types onto these;
-// message kinds are routed into the message pipeline by ingestion while the
-// rest become thread timeline items (the things a coding agent does, beyond
-// plain messages).
+// ItemKind is the kind of one entry of a session's conversation (Entry).
 type ItemKind string
 
 const (
@@ -738,10 +570,22 @@ const (
 	ItemKindImageView         ItemKind = "image_view"
 	ItemKindImageGeneration   ItemKind = "image_generation"
 	ItemKindContextCompaction ItemKind = "context_compaction"
-	// ItemKindForkContext is the conversation a fork handed its session as
-	// text (see PromptWithForkContext).
-	ItemKindForkContext ItemKind = "fork_context"
+	// ItemKindEnvelope is a block maiD wrapped around text it sent the
+	// session: a handoff, an agent's message, a reply, a notice (Envelope).
+	ItemKindEnvelope ItemKind = "envelope"
+	// ItemKindRequest records what was asked of the user and how it was
+	// answered (RequestRecord). The daemon writes it; providers don't keep it.
+	ItemKindRequest ItemKind = "request"
 )
+
+// IsTool reports whether entries of the kind carry a ToolCall.
+func (k ItemKind) IsTool() bool {
+	switch k {
+	case ItemKindCommandExecution, ItemKindFileChange, ItemKindMCPToolCall, ItemKindToolCall:
+		return true
+	}
+	return false
+}
 
 // ToolAction is a semantic action a provider explicitly states for a tool
 // call. The empty value means the provider stated none, which is the normal
@@ -851,69 +695,4 @@ type PlanEntry struct {
 	Content  string            `json:"content"`
 	Priority PlanEntryPriority `json:"priority,omitempty"`
 	Status   PlanEntryStatus   `json:"status,omitempty"`
-}
-
-// RuntimeEventPayload is a provider-neutral tagged payload. Structured fields
-// cover orchestration and client-visible facts. Args carries opaque approval
-// arguments.
-type RuntimeEventPayload struct {
-	// Internal replay metadata, resolved by the service from exact client IDs.
-	ClientMessageID string                   `json:"-"`
-	Presentation    *PromptPresentation      `json:"-"`
-	TurnState       RuntimeTurnState         `json:"turnState,omitempty"`
-	StopReason      StopReason               `json:"stopReason,omitempty"`
-	StreamKind      RuntimeContentStreamKind `json:"streamKind,omitempty"`
-	Delta           string                   `json:"delta,omitempty"`
-	Attachments     []Attachment             `json:"attachments,omitempty"`
-	ItemType        ItemKind                 `json:"itemType,omitempty"`
-	ItemStatus      ItemStatus               `json:"status,omitempty"`
-	RequestType     RuntimeRequestType       `json:"requestType,omitempty"`
-	Decision        ApprovalDecision         `json:"decision,omitempty"`
-	// Detail is free-form context for the event. On an ItemCompleted event for
-	// a reasoning item it carries the provider's full reasoning text, which
-	// ingestion treats as authoritative over the streamed deltas.
-	Detail    string          `json:"detail,omitempty"`
-	Message   string          `json:"message,omitempty"`
-	Title     string          `json:"title,omitempty"`
-	Cancelled bool            `json:"cancelled,omitempty"`
-	Args      json.RawMessage `json:"args,omitempty"`
-	ToolCall  *ToolCall       `json:"toolCall,omitempty"`
-	// Request is what a request.opened asks. Its request.resolved carries the
-	// chosen ActionID (empty when the request ended without the user, such
-	// as on cancellation) and the Answers it submitted.
-	Request  *Request            `json:"request,omitempty"`
-	ActionID string              `json:"actionId,omitempty"`
-	Answers  map[string][]string `json:"answers,omitempty"`
-	// ConfigOptions/SlashCommands use omitzero, not omitempty: an explicit
-	// empty update (non-nil []) must still serialize so consumers clear state.
-	ConfigOptions []ConfigOption `json:"configOptions,omitzero"`
-	SlashCommands []SlashCommand `json:"slashCommands,omitzero"`
-	Skills        []Skill        `json:"skills,omitzero"`
-	TokenUsage    *TokenUsage    `json:"tokenUsage,omitempty"`
-	PlanEntries   []PlanEntry    `json:"planEntries,omitempty"`
-	Goal          *Goal          `json:"goal,omitempty"`
-	// ProviderTurnID names, on a live turn.completed, the turn in the
-	// provider's session (ForkSessionInput.ThroughTurnID); it is empty when
-	// the turn never reached the provider. A replayed turn's TurnID is the
-	// provider's own.
-	ProviderTurnID string `json:"providerTurnId,omitempty"`
-}
-
-// RuntimeEvent is the canonical provider-neutral event emitted by adapters.
-type RuntimeEvent struct {
-	EventID            RuntimeEventID   `json:"eventId"`
-	Type               RuntimeEventType `json:"type"`
-	Provider           DriverKind       `json:"provider"`
-	ProviderInstanceID InstanceID       `json:"providerInstanceId,omitempty"`
-	ProviderName       string           `json:"providerName,omitempty"`
-	// Generation identifies the concrete provider process that emitted the
-	// event. ProviderService stamps it at the event sink; adapters do not manage
-	// it and clients never see it.
-	Generation uint64              `json:"-"`
-	ThreadID   string              `json:"threadId"`
-	TurnID     string              `json:"turnId,omitempty"`
-	ItemID     string              `json:"itemId,omitempty"`
-	RequestID  string              `json:"requestId,omitempty"`
-	CreatedAt  time.Time           `json:"createdAt"`
-	Payload    RuntimeEventPayload `json:"payload"`
 }

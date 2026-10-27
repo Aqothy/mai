@@ -18,8 +18,6 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// REPLAY_PLACEHOLDER
-
 // transcriptTailBytes is how much of a transcript's end is read for its
 // title, which the CLI appends as the session goes on.
 const transcriptTailBytes = 256 << 10
@@ -129,7 +127,148 @@ func steeredPrompt(item *transcriptItem) (string, []provider.Attachment, bool) {
 	return text, attachments, true
 }
 
-func (h *Instance) ListSessions(_ context.Context, cwd string) ([]provider.SessionSummary, error) {
+// History is the session's turns from its transcript. A turn still running
+// in the live session stays running.
+func (h *Instance) History(ctx context.Context, key string, _ provider.Workspace, after provider.Marker) (provider.HistoryPage, error) {
+	path, err := h.transcriptPath(key)
+	if err != nil {
+		return provider.HistoryPage{}, fmt.Errorf("Claude Code session %q has no transcript: %w", key, provider.ErrSessionNotFound)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return provider.HistoryPage{}, err
+	}
+	// The CLI only appends to a transcript, so one the same size and age as
+	// when it had nothing past after still has nothing.
+	read := transcriptRead{after: after, size: info.Size(), modified: info.ModTime().UnixNano()}
+	h.mu.Lock()
+	unchanged := h.emptyReads[key] == read
+	h.mu.Unlock()
+	if unchanged {
+		return provider.HistoryPage{Next: after}, nil
+	}
+	lines, err := readTranscriptFile(path)
+	if err != nil {
+		return provider.HistoryPage{}, err
+	}
+	parent, agent := splitSubagentKey(key)
+	running := false
+	h.mu.Lock()
+	session := h.sessions[parent]
+	h.mu.Unlock()
+	if session != nil {
+		session.mapMu.Lock()
+		running = agent == "" && session.live.turn != ""
+		for _, sub := range session.subagents {
+			running = running || sub.key == key && sub.live.turn != ""
+		}
+		session.mapMu.Unlock()
+	}
+	turns, subagents := transcriptHistory(key, agent, lines, running)
+	page := provider.After(turns, after)
+	page.Subagents = subagents
+	h.mu.Lock()
+	if len(page.Turns) == 0 && !page.Reset {
+		h.emptyReads[key] = read
+	} else {
+		delete(h.emptyReads, key)
+	}
+	h.mu.Unlock()
+	return page, nil
+}
+
+// transcriptRead is a transcript as a read found it.
+type transcriptRead struct {
+	after    provider.Marker
+	size     int64
+	modified int64
+}
+
+// Delivered finds the message's uuid in the transcript: a prompt's line, or
+// the queued command of a steer. One the live CLI holds but hasn't read yet
+// may still be read, or lost with the process.
+func (h *Instance) Delivered(ctx context.Context, key string, probe provider.DeliveryProbe) (provider.Tri, error) {
+	h.mu.Lock()
+	session := h.sessions[key]
+	h.mu.Unlock()
+	if session != nil {
+		session.mapMu.Lock()
+		pending := session.unechoed[probe.Delivery]
+		session.mapMu.Unlock()
+		if pending {
+			return provider.TriUnknown, nil
+		}
+	}
+	lines, err := h.lines(key)
+	if errors.Is(err, provider.ErrSessionNotFound) {
+		// A session that never ran took nothing.
+		return provider.TriNo, nil
+	}
+	if err != nil {
+		return provider.TriUnknown, err
+	}
+	for _, line := range lines {
+		if line.Type == "user" && line.UUID == probe.Delivery || line.Attachment != nil && line.Attachment.SourceUUID == probe.Delivery {
+			return provider.TriYes, nil
+		}
+	}
+	return provider.TriNo, nil
+}
+
+// lines are the session's transcript lines.
+func (h *Instance) lines(key string) ([]transcriptLine, error) {
+	path, err := h.transcriptPath(key)
+	if err != nil {
+		return nil, fmt.Errorf("Claude Code session %q has no transcript: %w", key, provider.ErrSessionNotFound)
+	}
+	return readTranscriptFile(path)
+}
+
+// transcriptPath is where the session's transcript is; a subagent's lives
+// under its session's, as the SDK's get_subagent_messages finds it.
+func (h *Instance) transcriptPath(key string) (string, error) {
+	parent, agent := splitSubagentKey(key)
+	path, err := h.findTranscript(parent)
+	if err != nil || agent == "" {
+		return path, err
+	}
+	name := "agent-" + agent + ".jsonl"
+	found := ""
+	_ = filepath.WalkDir(filepath.Join(filepath.Dir(path), parent, "subagents"), func(candidate string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && entry.Name() == name {
+			found = candidate
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if found == "" {
+		return "", fmt.Errorf("Claude Code subagent %q has no transcript: %w", key, os.ErrNotExist)
+	}
+	return found, nil
+}
+
+// ensureProjectDir is the project directory the CLI uses for cwd, made if
+// missing. A long path's name ends in a hash only the CLI computes, so only
+// an existing one is found.
+func (h *Instance) ensureProjectDir(cwd string) (string, error) {
+	if dir := h.projectDir(cwd); dir != "" {
+		return dir, nil
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	name := sanitizePath(cwd)
+	if h.configDir() == "" || len(name) > maxSanitizedLength {
+		return "", fmt.Errorf("no Claude Code project directory for %q", cwd)
+	}
+	dir := filepath.Join(h.configDir(), "projects", name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func (h *Instance) Sessions(_ context.Context, cwd string) ([]provider.SessionSummary, error) {
 	configDir := h.configDir()
 	if configDir == "" {
 		return nil, fmt.Errorf("Claude Code config directory is unavailable")
@@ -176,98 +315,74 @@ func (h *Instance) ListSessions(_ context.Context, cwd string) ([]provider.Sessi
 			if info, err := entry.Info(); err == nil {
 				updatedAt = info.ModTime().UTC().Format(time.RFC3339Nano)
 			}
-			summaries = append(summaries, provider.SessionSummary{
-				SessionID: sessionID,
-				Title:     title,
-				Cwd:       sessionCwd,
-				UpdatedAt: updatedAt,
-			})
+			summaries = append(summaries, provider.SessionSummary{SessionID: sessionID, Title: title, Cwd: sessionCwd, UpdatedAt: updatedAt})
 		}
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].UpdatedAt > summaries[j].UpdatedAt })
 	return summaries, nil
 }
 
-func (h *Instance) DeleteSession(_ context.Context, sessionID string) error {
-	path, err := h.findTranscript(sessionID)
-	if err != nil {
+// Delete removes the session's transcript and its subagents'.
+func (h *Instance) Delete(ctx context.Context, key string) error {
+	if _, agent := splitSubagentKey(key); agent != "" {
+		return fmt.Errorf("Claude Code subagent %q is deleted with its session", key)
+	}
+	_ = h.Release(ctx, key)
+	path, err := h.findTranscript(key)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	h.mu.Lock()
-	local := h.localByNative[sessionID]
-	session := h.sessionsByLocal[local]
-	h.mu.Unlock()
-	if session != nil {
-		h.stopProcess(session)
-		h.mu.Lock()
-		delete(h.sessionsByLocal, local)
-		delete(h.localByNative, sessionID)
-		h.mu.Unlock()
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	// Subagent transcripts live in a sibling <session id>/ directory.
-	return os.RemoveAll(filepath.Join(filepath.Dir(path), sessionID))
-}
-
-func (h *Instance) CloseSession(_ context.Context, sessionID string) error {
-	h.mu.Lock()
-	local := h.localByNative[sessionID]
-	session := h.sessionsByLocal[local]
-	h.mu.Unlock()
-	if session == nil {
-		return nil
-	}
-	h.stopProcess(session)
-	h.mu.Lock()
-	if h.sessionsByLocal[local] == session {
-		delete(h.sessionsByLocal, local)
-		if h.localByNative[sessionID] == local {
-			delete(h.localByNative, sessionID)
+	if err == nil {
+		// Subagent transcripts live in a sibling <session id>/ directory.
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(filepath.Join(filepath.Dir(path), key)); err != nil {
+			return err
 		}
 	}
-	h.mu.Unlock()
 	return nil
 }
 
-// ForkSession copies the session into a new one, as the SDK's forkSession
-// does: sidechain and progress lines are dropped, every message gets a new
-// uuid with the parent chain kept, each records what it was forked from, and
-// the fork is titled after its source. It ends at the last line of the turn
-// it forks through, as the SDK's up_to_message_id does.
-func (h *Instance) ForkSession(_ context.Context, input provider.ForkSessionInput) (provider.ForkSessionResult, error) {
-	if input.ProviderSessionID == "" {
-		return provider.ForkSessionResult{}, fmt.Errorf("Claude Code fork requires a provider session id")
-	}
-	sourcePath, err := h.findTranscript(input.ProviderSessionID)
+// Fork copies the session into a new one, as the SDK's forkSession does:
+// sidechain and progress lines are dropped, every message gets a new uuid
+// with the parent chain kept, each records what it was forked from, and the
+// fork is titled after its source. It ends at the last line of the turn it
+// forks through, as the SDK's up_to_message_id does, in the project
+// directory of the fork's workspace, where the CLI resumes it.
+func (h *Instance) Fork(ctx context.Context, in provider.ForkInput) (string, error) {
+	lines, err := h.lines(in.Session)
 	if err != nil {
-		return provider.ForkSessionResult{}, err
+		return "", err
 	}
-	title, _ := transcriptSummary(sourcePath)
-	data, err := os.ReadFile(sourcePath)
+	path, err := h.findTranscript(in.Session)
 	if err != nil {
-		return provider.ForkSessionResult{}, err
+		return "", err
 	}
-	upTo, ok := turnEnd(parseTranscript(data), input.ThroughTurnID)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	upTo, ok := turnEnd(lines, in.Through)
 	if !ok {
-		return provider.ForkSessionResult{}, fmt.Errorf("Claude Code session %q has no turn %q", input.ProviderSessionID, input.ThroughTurnID)
+		return "", fmt.Errorf("Claude Code session %q has no turn %q", in.Session, in.Through)
 	}
-	forkID, lines, err := forkLines(data, input.ProviderSessionID, firstNonEmpty(title, "Forked session")+" (fork)", upTo)
+	title := ""
+	for _, line := range lines {
+		title = firstNonEmpty(line.CustomTitle, line.AITitle, title)
+	}
+	forkID, forked, err := forkLines(data, in.Session, firstNonEmpty(title, "Forked session")+" (fork)", upTo)
 	if err != nil {
-		return provider.ForkSessionResult{}, err
+		return "", err
 	}
-	targetPath := filepath.Join(filepath.Dir(sourcePath), forkID+".jsonl")
-	if err := writeNewFile(targetPath, append(bytes.Join(lines, []byte("\n")), '\n')); err != nil {
-		return provider.ForkSessionResult{}, err
+	dir, err := h.ensureProjectDir(in.Workspace.Cwd)
+	if err != nil {
+		return "", err
 	}
-	forkTitle, cwd := transcriptSummary(targetPath)
-	return provider.ForkSessionResult{Summary: provider.SessionSummary{
-		SessionID: forkID,
-		Title:     forkTitle,
-		Cwd:       cwd,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}}, nil
+	if err := writeNewFile(filepath.Join(dir, forkID+".jsonl"), append(bytes.Join(forked, []byte("\n")), '\n')); err != nil {
+		return "", err
+	}
+	return forkID, nil
 }
 
 // forkLines is the SDK's _build_fork_lines: the fork's transcript lines for
@@ -396,28 +511,28 @@ func writeNewFile(path string, data []byte) error {
 	return nil
 }
 
-// RenameSession names the session as /rename does, with the custom-title
-// line the SDK's renameSession appends to the transcript. A live CLI is told
-// too, so its own title agrees. A session with no transcript yet has no
-// messages to name; its next prompt starts one.
-func (h *Instance) RenameSession(ctx context.Context, input provider.RenameSessionInput) error {
+// Rename names the session as /rename does, with the custom-title line the
+// SDK's renameSession appends to the transcript. A live CLI is told too, so
+// its own title agrees. A session with no transcript yet has no messages to
+// name; its next prompt starts one.
+func (h *Instance) Rename(ctx context.Context, key, title string) error {
 	h.mu.Lock()
 	var proc *sessionProcess
-	if session := h.sessionsByLocal[h.localByNative[input.ProviderSessionID]]; session != nil {
+	if session := h.sessions[key]; session != nil {
 		proc = session.proc
 	}
 	h.mu.Unlock()
 	if proc != nil {
-		_ = proc.client.control(ctx, map[string]any{"subtype": "rename_session", "title": input.Title, "source": "host", "session_id": input.ProviderSessionID}, nil)
+		_ = proc.client.control(ctx, map[string]any{"subtype": "rename_session", "title": title, "source": "host", "session_id": key}, nil)
 	}
-	path, err := h.findTranscript(input.ProviderSessionID)
+	path, err := h.findTranscript(key)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	line, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": input.Title, "sessionId": input.ProviderSessionID})
+	line, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": title, "sessionId": key})
 	if err != nil {
 		return err
 	}

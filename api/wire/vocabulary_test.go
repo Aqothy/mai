@@ -14,23 +14,29 @@ import (
 // goVocabularyTypes points each vocabulary at the Go type whose constants
 // define it; coverage is then derived from the source.
 var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
-	"EventType":                  {"../../internal/orchestration", "EventType"},
-	"CommandType":                {"../../internal/orchestration", "CommandType"},
-	"StreamItemKind":             {"../../internal/orchestration", "StreamItemKind"},
+	"CommandErrorCode":           {"../../internal/orchestration", "ErrorCode"},
+	"ThreadStatus":               {"../../internal/orchestration", "ThreadStatus"},
+	"OriginKind":                 {"../../internal/orchestration", "OriginKind"},
+	"Hold":                       {"../../internal/orchestration", "Hold"},
+	"StartedBy":                  {"../../internal/orchestration", "StartedBy"},
+	"DeliveryKind":               {"../../internal/orchestration", "DeliveryKind"},
+	"DeliveryMode":               {"../../internal/orchestration", "DeliveryMode"},
+	"DeliveryState":              {"../../internal/orchestration", "DeliveryState"},
 	"ActorKind":                  {"../../internal/orchestration", "ActorKind"},
-	"TimelineEntryKind":          {"../../internal/orchestration", "TimelineEntryKind"},
-	"MessageRole":                {"../../internal/orchestration", "MessageRole"},
-	"MessageDelivery":            {"../../internal/orchestration", "MessageDelivery"},
-	"TurnState":                  {"../../internal/orchestration", "TurnState"},
-	"SessionStatus":              {"../../internal/orchestration", "SessionStatus"},
-	"ApprovalStatus":             {"../../internal/orchestration", "ApprovalStatus"},
+	"WakeMode":                   {"../../internal/orchestration", "WakeMode"},
+	"ThreadEventKind":            {"../../internal/orchestration", "ThreadEventKind"},
+	"ThreadListKind":             {"../../internal/orchestration", "ThreadListKind"},
+	"TurnState":                  {"../../internal/provider", "TurnState"},
+	"StreamKind":                 {"../../internal/provider", "StreamKind"},
+	"EnvelopeKind":               {"../../internal/provider", "EnvelopeKind"},
+	"HistoryQuality":             {"../../internal/provider", "HistoryQuality"},
 	"ApprovalDecision":           {"../../internal/provider", "ApprovalDecision"},
-	"RequestType":                {"../../internal/provider", "RuntimeRequestType"},
 	"QuestionKind":               {"../../internal/provider", "QuestionKind"},
 	"OutputFormat":               {"../../internal/provider", "OutputFormat"},
 	"StopReason":                 {"../../internal/provider", "StopReason"},
 	"AttachmentKind":             {"../../internal/provider", "AttachmentKind"},
 	"AuthKind":                   {"../../internal/provider", "AuthKind"},
+	"AccessLevel":                {"../../internal/provider", "AccessLevel"},
 	"ItemKind":                   {"../../internal/provider", "ItemKind"},
 	"ItemStatus":                 {"../../internal/provider", "ItemStatus"},
 	"GoalStatus":                 {"../../internal/provider", "GoalStatus"},
@@ -116,7 +122,11 @@ func stringConstantsOfType(t *testing.T, pkgDir string, typeName string) []strin
 					if err != nil {
 						t.Fatalf("unquote %s constant %s: %v", typeName, literal.Value, err)
 					}
-					found = append(found, unquoted)
+					// An empty constant is the field's absence on the wire
+					// (omitempty), not a value clients name.
+					if unquoted != "" {
+						found = append(found, unquoted)
+					}
 				}
 			}
 		}

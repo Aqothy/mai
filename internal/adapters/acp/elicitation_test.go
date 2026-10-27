@@ -29,25 +29,16 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 		a.respond(id, map[string]any{"stopReason": "end_turn"})
 	}
 	h := newWireTestHandle(t, agent)
-	opened := make(chan provider.RuntimeEvent, 1)
-	resolved := make(chan provider.RuntimeEvent, 1)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		switch event.Type {
-		case provider.RuntimeEventRequestOpened:
-			opened <- event
-		case provider.RuntimeEventRequestResolved:
-			resolved <- event
-		}
-	}
-	bindStreamingSession(h)
-	if err := h.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "thread-1", TurnID: "turn-1", Input: "go"}); err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
+	session := openSession(t, h, provider.OpenInput{}).Session
+	send(t, h, session, "d1", "go")
 
-	request := waitFor(t, opened, "elicitation was not surfaced")
-	input := request.Payload.Request
-	if input == nil || input.Message != "How should I refactor?" {
-		t.Fatalf("request = %#v, want a request with the message", request.Payload)
+	request := h.events.WaitFor(t, "the elicitation", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestOpened)
+		return ok
+	}).Body.(provider.RequestOpened)
+	input := request.Ask
+	if input.Message != "How should I refactor?" || request.Turn != "d1" {
+		t.Fatalf("request = %#v, want the message on turn d1", request)
 	}
 	var kinds []string
 	for _, question := range input.Questions {
@@ -58,8 +49,8 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 	}
 
 	answer := func(count string) error {
-		return h.RespondToRequest(context.Background(), provider.RespondToRequestInput{
-			ThreadID: "thread-1", RequestID: request.RequestID, Action: input.Actions[0],
+		return h.Respond(context.Background(), session, request.Request, provider.RequestAnswer{
+			Action:  input.Actions[0],
 			Answers: map[string][]string{"strategy": {"balanced"}, "count": {count}, "confirm": {"false"}, "tags": {"a", "b"}},
 		})
 	}
@@ -67,7 +58,7 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 		t.Fatal("an answer below the minimum was accepted")
 	}
 	if err := answer("3"); err != nil {
-		t.Fatalf("RespondToRequest: %v", err)
+		t.Fatalf("Respond: %v", err)
 	}
 
 	reply := waitFor(t, replies, "agent got no elicitation response")
@@ -79,8 +70,12 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("elicitation response = %v, want %v", got, want)
 	}
-	if event := waitFor(t, resolved, "elicitation was not resolved"); event.Payload.Decision != provider.ApprovalDecisionAccept || event.Payload.Answers["count"][0] != "3" {
-		t.Fatalf("resolved = %#v, want accepted with the submitted answers", event.Payload)
+	resolved := h.events.WaitFor(t, "the elicitation to resolve", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestResolved)
+		return ok
+	}).Body.(provider.RequestResolved)
+	if resolved.Action != "accept" || resolved.Answers["count"][0] != "3" {
+		t.Fatalf("resolved = %#v, want accepted with the submitted answers", resolved)
 	}
 }
 
@@ -89,21 +84,21 @@ func TestFormElicitationRoundTrip(t *testing.T) {
 func TestElicitationOutsideTurnIsAnswerable(t *testing.T) {
 	agent := &fakeWireAgent{responses: make(chan wireMsg, 1)}
 	h := newWireTestHandle(t, agent)
-	opened := make(chan provider.RuntimeEvent, 1)
-	h.runtimeEventListener = func(event provider.RuntimeEvent) {
-		if event.Type == provider.RuntimeEventRequestOpened {
-			opened <- event
-		}
-	}
-	bindStreamingSession(h)
+	session := openSession(t, h, provider.OpenInput{}).Session
 	agent.write(map[string]any{"jsonrpc": "2.0", "id": "e1", "method": "elicitation/create", "params": map[string]any{
 		"sessionId": "sess", "mode": "url", "message": "Connect GitHub", "url": "https://example.com/connect",
 	}})
 
-	request := waitFor(t, opened, "question outside a turn was not shown")
-	decline, _ := request.Payload.Request.Action("decline")
-	if err := h.RespondToRequest(context.Background(), provider.RespondToRequestInput{ThreadID: "thread-1", RequestID: request.RequestID, Action: decline}); err != nil {
-		t.Fatalf("RespondToRequest: %v", err)
+	request := h.events.WaitFor(t, "the question outside a turn", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestOpened)
+		return ok
+	}).Body.(provider.RequestOpened)
+	if request.Turn != "" {
+		t.Fatalf("request turn = %q, want none", request.Turn)
+	}
+	decline, _ := request.Ask.Action("decline")
+	if err := h.Respond(context.Background(), session, request.Request, provider.RequestAnswer{Action: decline}); err != nil {
+		t.Fatalf("Respond: %v", err)
 	}
 	if reply := waitFor(t, agent.responses, "agent got no reply"); string(reply.Result) != `{"action":"decline"}` {
 		t.Fatalf("reply = %s, want decline", reply.Result)

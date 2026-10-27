@@ -61,7 +61,7 @@ func TestConfigOptionsFromACPKeepsValidDescriptorsOnly(t *testing.T) {
 }
 
 func TestSetSessionConfigOptionRejectsNonACPValue(t *testing.T) {
-	instance := newInstance(nil)
+	instance := newInstance(provider.Host{})
 	err := instance.setSessionConfigOptionValue(context.Background(), "session", "option", []string{"value"})
 	if err == nil {
 		t.Fatal("non-ACP config value was accepted")
@@ -84,7 +84,7 @@ func TestSetBooleanConfigOptionSendsBooleanType(t *testing.T) {
 		},
 	}
 	instance := newWireTestHandle(t, agent)
-	opened, err := instance.OpenOptionsSession(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{})
+	opened, err := instance.OpenOptions(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("OpenOptionsSession: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSetBooleanConfigOptionSendsBooleanType(t *testing.T) {
 		t.Fatalf("opened options = %#v, want auto-approve=false", opened.ConfigOptions)
 	}
 
-	options, err := instance.SetOptionsSessionValue(context.Background(), opened.Handle, "auto-approve", true)
+	options, err := instance.SetOption(context.Background(), opened.Handle, "auto-approve", true)
 	if err != nil {
 		t.Fatalf("SetOptionsSessionValue: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 	instance := newWireTestHandle(t, agent)
 	updates := make(chan []provider.ConfigOption, 1)
 
-	opened, err := instance.OpenOptionsSession(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{
+	opened, err := instance.OpenOptions(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{
 		Updated: func(options []provider.ConfigOption) { updates <- options },
 	})
 	if err != nil {
@@ -133,11 +133,8 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 	if opened.Handle != "options-session" || len(opened.ConfigOptions) != 1 {
 		t.Fatalf("opened = %#v, want one live option", opened)
 	}
-	if threadID := instance.threadIDForSession(opened.Handle); threadID != "" {
-		t.Fatalf("options session bound to thread %q", threadID)
-	}
 
-	options, err := instance.SetOptionsSessionValue(context.Background(), opened.Handle, "model", "slow")
+	options, err := instance.SetOption(context.Background(), opened.Handle, "model", "slow")
 	if err != nil {
 		t.Fatalf("SetOptionsSessionValue: %v", err)
 	}
@@ -159,7 +156,7 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 		t.Fatalf("update = %#v, want model=fast", update)
 	}
 
-	if err := instance.CloseOptionsSession(context.Background(), opened.Handle); err != nil {
+	if err := instance.CloseOptions(context.Background(), opened.Handle); err != nil {
 		t.Fatalf("CloseOptionsSession: %v", err)
 	}
 	if instance.sessionLockedForTest(opened.Handle) {
@@ -176,11 +173,11 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 	}
 	instance := newWireTestHandle(t, agent)
 
-	first, err := instance.OpenOptionsSession(context.Background(), "/first", provider.OptionsSessionCallbacks{})
+	first, err := instance.OpenOptions(context.Background(), "/first", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open first options session: %v", err)
 	}
-	second, err := instance.OpenOptionsSession(context.Background(), "/second", provider.OptionsSessionCallbacks{})
+	second, err := instance.OpenOptions(context.Background(), "/second", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open second options session: %v", err)
 	}
@@ -188,10 +185,10 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 		t.Fatalf("options sessions were not independently registered: first=%q second=%q", first.Handle, second.Handle)
 	}
 
-	if err := instance.CloseOptionsSession(context.Background(), first.Handle); err != nil {
+	if err := instance.CloseOptions(context.Background(), first.Handle); err != nil {
 		t.Fatalf("close first options session: %v", err)
 	}
-	third, err := instance.OpenOptionsSession(context.Background(), "/third", provider.OptionsSessionCallbacks{})
+	third, err := instance.OpenOptions(context.Background(), "/third", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open replacement options session: %v", err)
 	}
@@ -203,25 +200,27 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 func (h *Instance) sessionLockedForTest(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.sessionLocked(sessionID) != nil
+	return h.sessions[sessionID] != nil
 }
 
 // claude-acp can switch modes with only current_mode_update while exposing the
 // mode as a config option; the option must follow, or the picker goes stale.
 func TestCurrentModeUpdateMovesModeConfigOption(t *testing.T) {
-	instance := newInstance(nil)
-	if err := instance.bindSession("thread", "sess"); err != nil {
-		t.Fatal(err)
-	}
-	category := schema.SessionConfigOptionCategoryMode
-	instance.cacheSessionState("sess", []schema.SessionConfigOption{{
-		ID: "mode", Name: "Mode", Type: schema.SessionConfigOptionTypeSelect, Category: &category, CurrentValue: "auto",
-		Options: []schema.SessionConfigSelectOption{{Value: "auto", Name: "Auto"}, {Value: "acceptEdits", Name: "Accept edits"}},
-	}}, nil)
-
-	instance.handleACPSessionUpdate(testSessionNotification(t, `{"sessionId":"sess","update":{"sessionUpdate":"current_mode_update","currentModeId":"acceptEdits"}}`))
-
-	if current, _ := provider.CurrentConfigString(instance.combinedConfigOptions("sess"), "mode"); current != "acceptEdits" {
+	mode := "mode"
+	agent := &fakeWireAgent{onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+		a.respond(id, map[string]any{"sessionId": "sess", "configOptions": []any{map[string]any{
+			"type": "select", "id": "mode", "name": "Mode", "category": mode, "currentValue": "auto",
+			"options": []any{map[string]any{"value": "auto", "name": "Auto"}, map[string]any{"value": "acceptEdits", "name": "Accept edits"}},
+		}}})
+	}}
+	h := newWireTestHandle(t, agent)
+	openSession(t, h, provider.OpenInput{})
+	agent.sendUpdate("sess", map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "acceptEdits"})
+	changed := h.events.WaitFor(t, "the options", func(event provider.Event) bool {
+		changed, ok := event.Body.(provider.ConfigChanged)
+		return ok && changed.Options != nil
+	}).Body.(provider.ConfigChanged)
+	if current, _ := provider.CurrentConfigString(changed.Options, "mode"); current != "acceptEdits" {
 		t.Fatalf("mode option = %q, want acceptEdits", current)
 	}
 }

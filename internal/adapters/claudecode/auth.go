@@ -62,8 +62,12 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 // offer sign-in.
 func (h *Instance) markSignedOut() {
 	h.mu.Lock()
+	changed := h.info.Auth.Status != provider.AuthStatusUnauthenticated
 	h.info.Auth.Status = provider.AuthStatusUnauthenticated
 	h.mu.Unlock()
+	if changed {
+		h.emit("", provider.InstanceChanged{Info: h.Info()})
+	}
 }
 
 // cliArgv is the configured CLI invocation followed by args.

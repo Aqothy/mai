@@ -1,9 +1,7 @@
-github.com/Aqothy/go-acp v0.0.0-20261008054301-516b42744af3 h1:ctK1mJyJHQP6/VmC7e1Oq34eyC0w/aMyz1MVH5uYcoE=
-github.com/Aqothy/go-acp v0.0.0-20261008054301-516b42744af3/go.mod h1:hzh5TWKEo37Hp8adPV71UFEICloz/BhLDQ/t4hY8ZjE=
-github.com/Aqothy/jsonrpc2 v0.0.0-20261008054236-f91ab22fc4e3 h1:MY0Ml5GqEFPliAd0Rg5CBpQd6a08hW2vR1eSmWcwxbM=
-github.com/Aqothy/jsonrpc2 v0.0.0-20261008054236-f91ab22fc4e3/go.mod h1:JYE0H2dW5xBYAFUUF4b/CS/VS/SafdWSz70eIBKTGTM=
-github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
-github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
+github.com/Aqothy/go-acp v0.0.0-20261027050104-d4180fbb362b h1:yfC0unALE+cQ05/WiLS3cOve6f7HxyQAlekObwG/VW0=
+github.com/Aqothy/go-acp v0.0.0-20261027050104-d4180fbb362b/go.mod h1:HnobGUaRly8KmKa2XxqX6ZNz9pF1VCkg15uBXNaJeVA=
+github.com/Aqothy/jsonrpc2 v0.0.0-20261027050031-e1508e8f7928 h1:M690AmI4bT1+QLo3rsG67XY/L7ltJjPx3XNOAUXx1Ss=
+github.com/Aqothy/jsonrpc2 v0.0.0-20261027050031-e1508e8f7928/go.mod h1:JYE0H2dW5xBYAFUUF4b/CS/VS/SafdWSz70eIBKTGTM=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.1.2 h1:frqHqw7otoVbk5M8LlE/L7HTnIq2v9RX6EJ48i9AxJk=

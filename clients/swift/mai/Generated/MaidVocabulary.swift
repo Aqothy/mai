@@ -5,112 +5,135 @@
 // still decodes; use `Maid<Name>(rawValue:)` to branch and treat nil as
 // "unrecognized" rather than as an error.
 
-/// Type discriminator of a thread event delivered on orchestration.subscribeThread.
-public enum MaidEventType: String, Codable, Sendable, CaseIterable {
-    case threadCreated = "thread.created"
-    case threadImported = "thread.imported"
-    case threadMetaUpdated = "thread.meta-updated"
-    case threadMessageSent = "thread.message-sent"
-    case threadTurnStartRequested = "thread.turn-start-requested"
-    case threadTurnInterruptRequested = "thread.turn-interrupt-requested"
-    case threadTurnInterruptConfirmed = "thread.turn-interrupt-confirmed"
-    case threadTurnInterruptFailed = "thread.turn-interrupt-failed"
-    case threadItemStopRequested = "thread.item-stop-requested"
-    case threadApprovalResponseRequested = "thread.approval-response-requested"
-    case threadSessionPrepareRequested = "thread.session-prepare-requested"
-    case threadSessionStopRequested = "thread.session-stop-requested"
-    case threadSessionStopFailed = "thread.session-stop-failed"
-    case threadConfigOptionSetRequested = "thread.config-option-set-requested"
-    case threadSessionStatusSet = "thread.session-status-set"
-    case threadItemUpserted = "thread.item-upserted"
-    case threadPlanUpdated = "thread.plan-updated"
-    case threadApprovalOpened = "thread.approval-opened"
-    case threadApprovalResolved = "thread.approval-resolved"
-    case threadConfigOptionsUpdated = "thread.config-options-updated"
-    case threadSlashCommandsUpdated = "thread.slash-commands-updated"
-    case threadSkillsUpdated = "thread.skills-updated"
-    case threadTokenUsageUpdated = "thread.token-usage-updated"
-    case threadGoalUpdated = "thread.goal-updated"
-    case threadHistoryReplayCompleted = "thread.history-replay-completed"
-    case threadPromptQueued = "thread.prompt-queued"
-    case threadPromptRemoved = "thread.prompt-removed"
-    case threadMessageSteerRequested = "thread.message-steer-requested"
-    case threadMessageDeliveryUpdated = "thread.message-delivery-updated"
-    case threadMessageSteerMissed = "thread.message-steer-missed"
+/// Why thread.command refused a command: the data.code of its JSON-RPC error.
+public enum MaidCommandErrorCode: String, Codable, Sendable, CaseIterable {
+    case outOfScope = "out_of_scope"
+    case ceilingExceeded = "ceiling_exceeded"
+    case depthExceeded = "depth_exceeded"
+    case agentUnavailable = "agent_unavailable"
+    case notFound = "not_found"
+    case notRunning = "not_running"
+    case permissionRequest = "permission_request"
+    case invalid = "invalid"
 }
 
-/// Type discriminator of a client command sent to orchestration.dispatchCommand.
-public enum MaidCommandType: String, Codable, Sendable, CaseIterable {
-    case threadCreate = "thread.create"
-    case threadStart = "thread.start"
-    case threadMetaUpdate = "thread.meta.update"
-    case threadTurnStart = "thread.turn.start"
-    case threadTurnRetry = "thread.turn.retry"
-    case threadTurnInterrupt = "thread.turn.interrupt"
-    case threadItemStop = "thread.item.stop"
-    case threadPromptSend = "thread.prompt.send"
-    case threadPromptRemove = "thread.prompt.remove"
-    case threadApprovalRespond = "thread.approval.respond"
-    case threadSessionPrepare = "thread.session.prepare"
-    case threadSessionStop = "thread.session.stop"
-    case threadConfigOptionSet = "thread.config-option.set"
+/// What a thread is doing, derived from its turns, requests and queue.
+public enum MaidThreadStatus: String, Codable, Sendable, CaseIterable {
+    case running = "running"
+    case waiting = "waiting"
+    case held = "held"
+    case idle = "idle"
 }
 
-/// Payload discriminator of a subscription snapshot or update.
-public enum MaidStreamItemKind: String, Codable, Sendable, CaseIterable {
-    case snapshot = "snapshot"
-    case event = "event"
-    case threadUpserted = "thread-upserted"
-}
-
-/// Origin of a thread event.
-public enum MaidActorKind: String, Codable, Sendable, CaseIterable {
-    case client = "client"
-    case server = "server"
-    case provider = "provider"
-}
-
-/// Which payload of a timeline entry's tagged union is populated.
-public enum MaidTimelineEntryKind: String, Codable, Sendable, CaseIterable {
-    case message = "message"
-    case item = "item"
-    case approval = "approval"
-}
-
-/// Author of a timeline message.
-public enum MaidMessageRole: String, Codable, Sendable, CaseIterable {
+/// How a thread began: a person's chat, a spawned child, or a provider's own subagent.
+public enum MaidOriginKind: String, Codable, Sendable, CaseIterable {
     case user = "user"
-    case assistant = "assistant"
+    case spawn = "spawn"
+    case native = "native"
 }
 
-/// A user message on its way to the provider; absent once delivered.
-public enum MaidMessageDelivery: String, Codable, Sendable, CaseIterable {
+/// Why a thread's queue waits, and so who may release it; absent when nothing holds it.
+public enum MaidHold: String, Codable, Sendable, CaseIterable {
+    case stoppedPerson = "stoppedPerson"
+    case stoppedAgent = "stoppedAgent"
+    case failed = "failed"
+    case hops = "hops"
+}
+
+/// What started a turn.
+public enum MaidStartedBy: String, Codable, Sendable, CaseIterable {
+    case delivery = "delivery"
+    case provider = "provider"
+    case found = "found"
+}
+
+/// Who a delivery is from: a person's prompt, an agent's message, a reply, a daemon notice.
+public enum MaidDeliveryKind: String, Codable, Sendable, CaseIterable {
+    case prompt = "prompt"
+    case message = "message"
+    case reply = "reply"
+    case notice = "notice"
+}
+
+/// How a delivery goes: as the next turn, or into the running one.
+public enum MaidDeliveryMode: String, Codable, Sendable, CaseIterable {
+    case queue = "queue"
+    case steer = "steer"
+}
+
+/// Where a delivery is on its way to the agent.
+public enum MaidDeliveryState: String, Codable, Sendable, CaseIterable {
+    case queued = "queued"
     case sending = "sending"
-    case notDelivered = "not-delivered"
+    case delivered = "delivered"
+    case refused = "refused"
+    case cancelled = "cancelled"
 }
 
-/// Lifecycle state of a thread's latest turn.
+/// Who sent a delivery or issued a command.
+public enum MaidActorKind: String, Codable, Sendable, CaseIterable {
+    case device = "device"
+    case agent = "agent"
+    case daemon = "daemon"
+}
+
+/// When a spawned thread's parent hears from it.
+public enum MaidWakeMode: String, Codable, Sendable, CaseIterable {
+    case settled = "settled"
+    case needsInput = "needsInput"
+}
+
+/// Which change a thread.event notification carries.
+public enum MaidThreadEventKind: String, Codable, Sendable, CaseIterable {
+    case entry = "entry"
+    case text = "text"
+    case turn = "turn"
+    case delivery = "delivery"
+    case request = "request"
+    case resolved = "resolved"
+    case participant = "participant"
+    case thread = "thread"
+    case child = "child"
+    case plan = "plan"
+    case refresh = "refresh"
+    case removed = "removed"
+}
+
+/// Whether a thread.list item is the snapshot, an upsert or a removal.
+public enum MaidThreadListKind: String, Codable, Sendable, CaseIterable {
+    case snapshot = "snapshot"
+    case upsert = "upsert"
+    case remove = "remove"
+}
+
+/// Lifecycle state of a turn.
 public enum MaidTurnState: String, Codable, Sendable, CaseIterable {
     case running = "running"
-    case interrupted = "interrupted"
     case completed = "completed"
-    case error = "error"
-}
-
-/// Status of a thread's provider session binding.
-public enum MaidSessionStatus: String, Codable, Sendable, CaseIterable {
-    case starting = "starting"
-    case running = "running"
-    case ready = "ready"
+    case failed = "failed"
     case interrupted = "interrupted"
-    case stopped = "stopped"
-    case error = "error"
 }
 
-/// Whether an approval request is still awaiting a decision.
-public enum MaidApprovalStatus: String, Codable, Sendable, CaseIterable {
-    case pending = "pending"
-    case resolved = "resolved"
+/// What streamed text adds to.
+public enum MaidStreamKind: String, Codable, Sendable, CaseIterable {
+    case assistant = "assistant"
+    case reasoning = "reasoning"
+}
+
+/// What a block maiD wrapped around text it sent an agent carries.
+public enum MaidEnvelopeKind: String, Codable, Sendable, CaseIterable {
+    case handoff = "handoff"
+    case message = "message"
+    case reply = "reply"
+    case notice = "notice"
+    case instructions = "instructions"
+}
+
+/// How well a provider rebuilds a session run outside maiD from its own record.
+public enum MaidHistoryQuality: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case lossy = "lossy"
+    case exact = "exact"
 }
 
 /// Client decision on an approval request.
@@ -119,14 +142,6 @@ public enum MaidApprovalDecision: String, Codable, Sendable, CaseIterable {
     case acceptForSession = "acceptForSession"
     case decline = "decline"
     case cancel = "cancel"
-}
-
-/// What an approval request is asking permission for.
-public enum MaidRequestType: String, Codable, Sendable, CaseIterable {
-    case commandExecutionApproval = "command_execution_approval"
-    case fileReadApproval = "file_read_approval"
-    case fileChangeApproval = "file_change_approval"
-    case dynamicToolCall = "dynamic_tool_call"
 }
 
 /// How a sign-in method or challenge proceeds.
@@ -165,7 +180,15 @@ public enum MaidQuestionKind: String, Codable, Sendable, CaseIterable {
     case choice = "choice"
 }
 
-/// Kind of a non-message timeline item.
+/// How much a session may do without asking, from read_only to full; absent when its mode isn't mapped.
+public enum MaidAccessLevel: String, Codable, Sendable, CaseIterable {
+    case readOnly = "read_only"
+    case ask = "ask"
+    case edit = "edit"
+    case full = "full"
+}
+
+/// Kind of an entry of a session's conversation.
 public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case userMessage = "user_message"
     case assistantMessage = "assistant_message"
@@ -180,10 +203,11 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case imageView = "image_view"
     case imageGeneration = "image_generation"
     case contextCompaction = "context_compaction"
-    case forkContext = "fork_context"
+    case envelope = "envelope"
+    case request = "request"
 }
 
-/// Lifecycle status of a timeline item.
+/// Lifecycle status of an entry.
 public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case inProgress = "in_progress"
     case completed = "completed"

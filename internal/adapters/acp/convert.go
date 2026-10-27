@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/jsonrpc2"
@@ -28,7 +27,10 @@ func authStateFromACP(initResp schema.InitializeResponse) provider.Auth {
 	return provider.Auth{Status: status, Methods: methods}
 }
 
-func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
+// capabilitySet is what the agent offers. Sessions maiD ran rebuild from the
+// mirror, so they keep their delivery IDs (MessageIDs) only with one; the
+// agent's own replay rates only sessions run elsewhere.
+func capabilitySet(initResp schema.InitializeResponse, mirrored bool) provider.Capabilities {
 	capabilities := agentCapabilitiesValue(initResp.AgentCapabilities)
 	prompt := schema.PromptCapabilities{}
 	if capabilities.PromptCapabilities != nil {
@@ -38,23 +40,29 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 	if capabilities.MCPCapabilities != nil {
 		mcp = *capabilities.MCPCapabilities
 	}
+	sessions := schema.SessionCapabilities{}
+	if capabilities.SessionCapabilities != nil {
+		sessions = *capabilities.SessionCapabilities
+	}
+	history := provider.HistoryNone
+	if boolValue(capabilities.LoadSession) {
+		history = provider.HistoryLossy
+	}
 	return provider.Capabilities{
-		SessionList:           capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
-		SessionDelete:         capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Delete != nil,
-		SessionClose:          capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Close != nil,
-		LoadReplay:            boolValue(capabilities.LoadSession),
-		Resume:                sessionResumeSupported(capabilities),
-		AdditionalDirectories: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.AdditionalDirectories != nil,
+		History:               history,
+		HistoryVersion:        historyVersion,
+		Resume:                sessions.Resume != nil || boolValue(capabilities.LoadSession),
+		MessageIDs:            mirrored,
+		MCP:                   provider.MCPCapabilities{HTTP: boolValue(mcp.HTTP), Stdio: true},
+		AdditionalDirectories: sessions.AdditionalDirectories != nil,
+		Sessions:              sessions.List != nil,
+		Delete:                sessions.Delete != nil,
 		Auth:                  hasSupportedAuthMethod(initResp.AuthMethods),
 		Logout:                capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
 			Audio:           boolValue(prompt.Audio),
 			EmbeddedContext: boolValue(prompt.EmbeddedContext),
-		},
-		MCP: provider.MCPCapabilities{
-			HTTP: boolValue(mcp.HTTP),
-			SSE:  boolValue(mcp.SSE),
 		},
 	}
 }
@@ -66,10 +74,6 @@ func agentCapabilitiesValue(capabilities *schema.AgentCapabilities) schema.Agent
 	return *capabilities
 }
 
-func sessionResumeSupported(capabilities schema.AgentCapabilities) bool {
-	return capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Resume != nil
-}
-
 func boolValue(value *bool) bool {
 	return value != nil && *value
 }
@@ -77,10 +81,10 @@ func boolValue(value *bool) bool {
 // contentBlocks builds the ACP prompt content. Text and resource_link are
 // always allowed (baseline ACP); image/audio/embedded blocks are gated on the
 // agent's advertised prompt-content capabilities.
-func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapabilities) ([]schema.ContentBlock, error) {
+func contentBlocks(input provider.SendInput, caps provider.PromptContentCapabilities) ([]schema.ContentBlock, error) {
 	blocks := make([]schema.ContentBlock, 0, len(input.Attachments)+1)
-	if strings.TrimSpace(input.Input) != "" {
-		blocks = append(blocks, schema.TextBlock(input.Input))
+	if strings.TrimSpace(input.Text) != "" {
+		blocks = append(blocks, schema.TextBlock(input.Text))
 	}
 	for _, attachment := range input.Attachments {
 		var block schema.ContentBlock
@@ -160,15 +164,6 @@ func cancelledPermissionResponse() schema.RequestPermissionResponse {
 	return schema.RequestPermissionResponse{Outcome: schema.RequestPermissionOutcome{Outcome: schema.RequestPermissionOutcomeOutcomeCancelled}}
 }
 
-func selectedPermissionOptionID(resp schema.RequestPermissionResponse) (schema.PermissionOptionId, bool) {
-	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeSelected || resp.Outcome.OptionID == nil {
-		return "", false
-	}
-	return *resp.Outcome.OptionID, true
-}
-
-// permissionRequestFromACP offers the agent's options as the request's
-// actions, deciding by their ACP kind.
 func permissionRequestFromACP(message string, options []schema.PermissionOption) provider.Request {
 	request := provider.Request{Message: message, Actions: make([]provider.RequestAction, 0, len(options))}
 	for _, option := range options {
@@ -190,84 +185,6 @@ func permissionDecision(kind schema.PermissionOptionKind) provider.ApprovalDecis
 	}
 }
 
-func permissionRequestID(threadID string, toolCallID string) string {
-	base := threadID
-	if base == "" {
-		base = "unknown"
-	}
-	if toolCallID == "" {
-		return "permission:" + base
-	}
-	return "permission:" + base + ":" + toolCallID
-}
-
-func permissionDecisionFromResponse(options []schema.PermissionOption, resp schema.RequestPermissionResponse) (provider.ApprovalDecision, string) {
-	optionID, ok := selectedPermissionOptionID(resp)
-	if !ok {
-		return provider.ApprovalDecisionCancel, ""
-	}
-	for _, option := range options {
-		if option.OptionID == optionID {
-			return permissionDecision(option.Kind), string(optionID)
-		}
-	}
-	return provider.ApprovalDecisionCancel, ""
-}
-
-// sessionRuntimeEvent converts a session/update into a runtime event. It
-// reports false for variants maiD does not render (unknown or unstable ones
-// the agent sends regardless), which callers drop.
-func sessionRuntimeEvent(notification schema.SessionNotification) (provider.RuntimeEvent, bool) {
-	update := provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(newID()),
-		Provider:  DriverKind,
-		CreatedAt: time.Now(),
-	}
-	u := notification.Update
-	switch u.SessionUpdate {
-	case schema.SessionUpdateUserMessageChunk:
-		update.Type = provider.RuntimeEventItemCompleted
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateAgentMessageChunk:
-		update.Type = provider.RuntimeEventContentDelta
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateAgentThoughtChunk:
-		update.Type = provider.RuntimeEventContentDelta
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateToolCall:
-		update.Type = provider.RuntimeEventItemStarted
-		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(toolCallStatus(u.Status))), Title: stringValue(u.Title)}
-	case schema.SessionUpdateToolCallUpdate:
-		update.Type = provider.RuntimeEventItemUpdated
-		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(toolCallStatus(u.Status))), Title: stringValue(u.Title)}
-	case schema.SessionUpdatePlan:
-		update.Type = provider.RuntimeEventTurnPlanUpdated
-		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries)}
-	case schema.SessionUpdateAvailableCommandsUpdate:
-		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands)}
-	case schema.SessionUpdateSessionInfoUpdate:
-		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title)}
-	case schema.SessionUpdateUsageUpdate:
-		update.Type = provider.RuntimeEventThreadTokenUsage
-		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u)}
-	default:
-		return provider.RuntimeEvent{}, false
-	}
-	return update, true
-}
-
-// stopReasonFromACP keeps the stop reasons that say a completed turn ended
-// early; end_turn is a normal finish.
 func stopReasonFromACP(reason schema.StopReason) provider.StopReason {
 	switch reason {
 	case schema.StopReasonMaxTokens:
@@ -774,20 +691,6 @@ func toolCallTitle(tool schema.ToolCallUpdate) string {
 	return string(tool.ToolCallID)
 }
 
-func permissionRequestType(tool schema.ToolCallUpdate) provider.RuntimeRequestType {
-	kind := toolKindString(tool.Kind)
-	if hasTerminalContent(tool.Content) || kind == "execute" || kind == "terminal" || kind == "command" || kind == "shell" {
-		return provider.RuntimeRequestCommandExecution
-	}
-	if kind == "read" {
-		return provider.RuntimeRequestFileRead
-	}
-	if hasDiffContent(tool.Content) || kind == "edit" || kind == "patch" || kind == "file_change" || kind == "delete" || kind == "move" {
-		return provider.RuntimeRequestFileChange
-	}
-	return provider.RuntimeRequestDynamicToolCall
-}
-
 func toolKindString(kind *schema.ToolKind) string {
 	if kind == nil {
 		return ""
@@ -819,36 +722,11 @@ func toolCallIDValue(id *schema.ToolCallId) string {
 	return string(*id)
 }
 
-func hasDiffContent(content []schema.ToolCallContent) bool {
-	for _, block := range content {
-		if block.Type == schema.ToolCallContentTypeDiff {
-			return true
-		}
-	}
-	return false
-}
-
-func hasTerminalContent(content []schema.ToolCallContent) bool {
-	for _, block := range content {
-		if block.Type == schema.ToolCallContentTypeTerminal {
-			return true
-		}
-	}
-	return false
-}
-
 func stringValue(value *string) string {
 	if value == nil {
 		return ""
 	}
 	return *value
-}
-
-func messageID(id *schema.MessageId) string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
 }
 
 func acpRequestError(err error) error {
@@ -1068,17 +946,6 @@ func configStringValue(value any) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func resumeSessionID(cursor json.RawMessage) string {
-	if len(cursor) == 0 {
-		return ""
-	}
-	var payload struct {
-		SessionId string `json:"sessionId"`
-	}
-	_ = json.Unmarshal(cursor, &payload)
-	return payload.SessionId
 }
 
 func marshalRaw(value any) json.RawMessage {

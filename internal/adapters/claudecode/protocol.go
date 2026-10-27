@@ -102,6 +102,7 @@ func (u apiUsage) contextTokens() int {
 // streamEvent is the payload of a stream_event line (raw API stream chunk).
 type streamEvent struct {
 	Type         string        `json:"type"`
+	Message      *apiMessage   `json:"message,omitempty"`
 	Index        int           `json:"index,omitempty"`
 	ContentBlock *contentBlock `json:"content_block,omitempty"`
 	Delta        *streamDelta  `json:"delta,omitempty"`
@@ -198,9 +199,11 @@ type controlRequestBody struct {
 	// approval.
 	SuppressAlwaysAllowRule bool   `json:"suppress_always_allow_rule,omitempty"`
 	ToolUseID               string `json:"tool_use_id,omitempty"`
-	Description             string `json:"description,omitempty"`
-	Title                   string `json:"title,omitempty"`
-	DecisionReason          string `json:"decision_reason,omitempty"`
+	// AgentID names the subagent that asks, when one does.
+	AgentID        string `json:"agent_id,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Title          string `json:"title,omitempty"`
+	DecisionReason string `json:"decision_reason,omitempty"`
 	// MCP elicitation fields (subtype "elicitation").
 	MCPServerName   string          `json:"mcp_server_name,omitempty"`
 	Message         string          `json:"message,omitempty"`
@@ -295,6 +298,8 @@ type transcriptItem struct {
 	CommandMode string          `json:"commandMode,omitempty"`
 	Prompt      json.RawMessage `json:"prompt,omitempty"`
 	Origin      *messageOrigin  `json:"origin,omitempty"`
+	// SourceUUID is the uuid of the message the command came in: a steer's.
+	SourceUUID string `json:"source_uuid,omitempty"`
 }
 
 // askUserQuestion mirrors the AskUserQuestionInput tool schema. Answers are

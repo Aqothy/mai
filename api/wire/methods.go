@@ -18,13 +18,16 @@ type NotificationDefinition struct {
 
 // Methods is the canonical typed JSON-RPC method registry used by generators.
 var Methods = []MethodDefinition{
-	{Name: MethodOrchestrationDispatchCommand, Params: "Command", Result: "DispatchResult"},
-	{Name: MethodOrchestrationSubscribeThreadList, Params: "EmptyParams", Result: "ThreadListStreamItem"},
-	{Name: MethodOrchestrationSubscribeThread, Params: "SubscribeThreadInput", Result: "ThreadStreamItem"},
-	{Name: MethodOrchestrationUnsubscribeThread, Params: "SubscribeThreadInput", ResultNull: true},
-	{Name: MethodOrchestrationGetItemDetail, Params: "GetItemDetailInput", Result: "Item"},
-	{Name: MethodOrchestrationGetAttachment, Params: "GetAttachmentInput", Result: "Attachment"},
-	{Name: MethodOrchestrationUploadAttachment, Params: "AttachmentUploadParams", ResultNull: true},
+	{Name: MethodThreadCommand, Params: "CommandParams", Result: "CommandResult"},
+	{Name: MethodThreadSubscribeList, Params: "EmptyParams", Result: "ThreadListItem"},
+	{Name: MethodThreadSubscribe, Params: "ThreadParams", Result: "ThreadSnapshot"},
+	{Name: MethodThreadUnsubscribe, Params: "ThreadParams", ResultNull: true},
+	{Name: MethodThreadSync, Params: "ThreadParams", ResultNull: true},
+	{Name: MethodThreadTurns, Params: "ThreadTurnsParams", Result: "ThreadTurnsResult"},
+	{Name: MethodThreadEntry, Params: "ThreadEntryParams", Result: "Entry"},
+	{Name: MethodThreadForkPreview, Params: "ThreadForkPreviewParams", Result: "ForkPreview"},
+	{Name: MethodAttachmentUpload, Params: "AttachmentUploadParams", Result: "AttachmentUploadResult"},
+	{Name: MethodAttachmentGet, Params: "AttachmentParams", Result: "Attachment"},
 	{Name: MethodProviderStart, Params: "ProviderStartParams", Result: "InstanceInfo"},
 	{Name: MethodProviderList, Params: "EmptyParams", Result: "InstanceInfo", ResultArray: true},
 	{Name: MethodACPRegistryList, Params: "EmptyParams", Result: "ACPRegistryAgent", ResultArray: true},
@@ -35,10 +38,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderAuthenticate, Params: "ProviderAuthenticateParams", Result: "AuthenticationResult"},
 	{Name: MethodProviderLogout, Params: "ProviderInstanceParams", Result: "InstanceInfo"},
 	{Name: MethodProviderListSessions, Params: "ProviderListSessionsParams", Result: "SessionSummary", ResultArray: true},
-	{Name: MethodProviderImportSession, Params: "ProviderImportSessionParams", Result: "ProviderImportSessionResult"},
 	{Name: MethodProviderDeleteSession, Params: "ProviderSessionParams", ResultNull: true},
-	{Name: MethodProviderCloseSession, Params: "ProviderSessionParams", ResultNull: true},
-	{Name: MethodProviderForkThread, Params: "ProviderForkThreadParams", Result: "ProviderForkThreadResult"},
 	{Name: MethodProviderOptionsGet, Params: "ProviderOptionsGetParams", Result: "ProviderOptionsResult"},
 	{Name: MethodProviderCompleteCommand, Params: "ProviderCompleteCommandParams", Result: "CommandCompletion", ResultArray: true},
 	{Name: MethodProviderOptionsSet, Params: "ProviderOptionsSetParams", Result: "ProviderOptionsResult"},
@@ -61,8 +61,8 @@ var Methods = []MethodDefinition{
 }
 
 var Notifications = []NotificationDefinition{
-	{Name: MethodOrchestrationSubscribeThreadList, Payload: "ThreadListStreamItem"},
-	{Name: MethodOrchestrationSubscribeThread, Payload: "ThreadStreamItem"},
+	{Name: MethodThreadList, Payload: "ThreadListItem"},
+	{Name: MethodThreadEvent, Payload: "ThreadEvent"},
 	{Name: MethodProviderOptionsUpdated, Payload: "ProviderOptionsResult"},
 	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
 	{Name: MethodProviderQuestionAsked, Payload: "ProviderQuestion"},

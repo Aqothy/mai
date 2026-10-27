@@ -1,176 +1,88 @@
 package codexapp
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/provider/providertest"
 )
 
-// Exercise the adapter and the real ingestion/projection together. Checking
-// only flattened adapter text misses differences in item boundaries on reload.
-func TestReasoningLiveAndReloadTimelineAgree(t *testing.T) {
-	const threadID = "reasoning-thread"
-	const turnID = "reasoning-turn"
-	live := newReasoningPipeline(t, threadID)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	runtimeEvents := make(chan provider.RuntimeEvent, 64)
-	runDone := make(chan struct{})
-	go func() {
-		defer close(runDone)
-		live.ingestion.Run(ctx, runtimeEvents)
-	}()
-	t.Cleanup(func() { cancel(); <-runDone })
-	h := &Instance{
-		emit:            func(event provider.RuntimeEvent) { runtimeEvents <- event },
-		sessionsByLocal: map[string]*sessionState{},
-		localByNative:   map[string]string{},
-	}
-	h.bindSessionLocked(newSessionState(threadID, threadID, "/tmp"))
-	h.emitTurnStarted(threadID, turnID)
+// What streams live folds to the entries History maps from the same items:
+// reasoning streamed in parts, reasoning that streamed nothing, a draft
+// corrected by its completed item, and adjacent reasoning items kept apart.
+func TestLiveAndHistoryAgree(t *testing.T) {
+	const thread, turn = "reasoning-thread", "reasoning-turn"
+	events := providertest.NewRecorder()
+	h := &Instance{host: provider.Host{Emit: events.Emit}, sessions: map[string]*sessionState{}}
+	clientID := "delivery-1"
+	user := appItem{Type: "userMessage", ID: "user-1", ClientID: &clientID, Content: []appUserInput{{Type: "text", Text: "Think it through"}}}
 	first := appItem{Type: "reasoning", ID: "thought-1", Summary: []string{"**Planning**\n\nOne café 👩🏽‍💻", "**Checking**"}, ReasoningContent: []string{"Detail α", "Detail β"}}
 	second := appItem{Type: "reasoning", ID: "thought-2", Summary: []string{"Recovered without deltas"}}
 	tool := appItem{Type: "commandExecution", ID: "tool-1", Status: "completed", Command: "echo fixture"}
 	third := appItem{Type: "reasoning", ID: "thought-3", Summary: []string{"**Corrected**", "Finish"}}
 	reply := appItem{Type: "agentMessage", ID: "answer", Text: "DONE café 👩🏽‍💻"}
-	notify := func(method string, values map[string]any) {
+	delta := func(item, part string, index int, text string, stream provider.StreamKind) {
 		t.Helper()
-		values["threadId"], values["turnId"], values["itemId"] = threadID, turnID, first.ID
+		values := map[string]any{"threadId": thread, "turnId": turn, "itemId": item, "delta": text, "summaryIndex": index, "contentIndex": index}
 		raw, err := json.Marshal(values)
 		if err != nil {
 			t.Fatal(err)
 		}
-		h.handleNotification(method, raw)
+		h.textDelta(raw, stream, part)
 	}
-	notify("item/reasoning/summaryTextDelta", map[string]any{"summaryIndex": 0, "delta": "**Plan"})
-	notify("item/reasoning/summaryTextDelta", map[string]any{"summaryIndex": 0, "delta": "ning**\n\nOne café 👩🏽‍💻"})
-	live.waitForThought(t, 0, "**Planning**\n\nOne café 👩🏽‍💻", provider.ItemStatusInProgress)
-	notify("item/reasoning/summaryPartAdded", map[string]any{"summaryIndex": 1})
-	notify("item/reasoning/summaryTextDelta", map[string]any{"summaryIndex": 1, "delta": "**Checking**\n"})
-	notify("item/reasoning/textDelta", map[string]any{"contentIndex": 0, "delta": "Detail α"})
-	notify("item/reasoning/textDelta", map[string]any{"contentIndex": 1, "delta": "Detail β"})
-	live.waitForThought(t, 0, "**Planning**\n\nOne café 👩🏽‍💻\n\n**Checking**\n\nDetail α\n\nDetail β", provider.ItemStatusInProgress)
-	h.emitItem("item/completed", threadID, turnID, first, 0, 0)
-	live.waitForThought(t, 0, reasoningText(first), provider.ItemStatusCompleted)
-	// Adjacent reasoning items must remain separate after a history reload.
-	h.emitItem("item/completed", threadID, turnID, second, 0, 0)
-	live.waitForThought(t, 1, reasoningText(second), provider.ItemStatusCompleted)
-	startedTool := tool
-	startedTool.Status = "inProgress"
-	h.emitItem("item/started", threadID, turnID, startedTool, 0, 0)
-	h.emitItem("item/completed", threadID, turnID, tool, 0, 0)
-	h.emitTextDelta(json.RawMessage(`{"threadId":"reasoning-thread","turnId":"reasoning-turn","itemId":"thought-3","summaryIndex":0,"delta":"**Draft**"}`), provider.RuntimeContentReasoningText, "summary")
-	live.waitForThought(t, 2, "**Draft**", provider.ItemStatusInProgress)
-	h.emitItem("item/completed", threadID, turnID, third, 0, 0)
-	live.waitForThought(t, 2, reasoningText(third), provider.ItemStatusCompleted)
-	h.emitItem("item/completed", threadID, turnID, reply, 0, 0)
-	h.emitTurnCompleted(threadID, appTurn{ID: turnID, Status: "completed"})
-	live.waitForCompletion(t)
-	cancel()
-	<-runDone
 
-	reload := newReasoningPipeline(t, threadID)
-	for _, event := range replayEvents(threadID, appThread{ID: threadID, Turns: []appTurn{{ID: turnID, Status: "completed", Items: []appItem{first, second, tool, third, reply}}}}) {
-		reload.ingestion.Ingest(event)
+	h.turnStarted(thread, turn)
+	h.item(true, thread, turn, user, 0, 0)
+	delta(first.ID, "summary", 0, "**Plan", provider.StreamReasoning)
+	delta(first.ID, "summary", 0, "ning**\n\nOne café 👩🏽‍💻", provider.StreamReasoning)
+	delta(first.ID, "summary", 1, "**Checking**\n", provider.StreamReasoning)
+	delta(first.ID, "content", 0, "Detail α", provider.StreamReasoning)
+	delta(first.ID, "content", 1, "Detail β", provider.StreamReasoning)
+	if live := events.LiveTurns(thread); live[0].Entries[1].Text != "**Planning**\n\nOne café 👩🏽‍💻\n\n**Checking**\n\nDetail α\n\nDetail β" {
+		t.Fatalf("streamed reasoning = %q", live[0].Entries[1].Text)
 	}
-	want := []reasoningTimelineValue{
-		{Kind: "reasoning", ID: "reasoning:" + threadID + ":" + turnID, Status: "completed", Text: reasoningText(first)},
-		{Kind: "reasoning", ID: "reasoning:" + threadID + ":" + turnID + ":2", Status: "completed", Text: reasoningText(second)},
-		{Kind: "command_execution", ID: tool.ID, Status: "completed"},
-		{Kind: "reasoning", ID: "reasoning:" + threadID + ":" + turnID + ":3", Status: "completed", Text: reasoningText(third)},
-		{Kind: "assistant", ID: "assistant:answer", Text: reply.Text},
+	h.item(true, thread, turn, first, 0, 0)
+	h.item(true, thread, turn, second, 0, 0)
+	started := tool
+	started.Status = "inProgress"
+	h.item(false, thread, turn, started, 0, 0)
+	h.item(true, thread, turn, tool, 0, 0)
+	delta(third.ID, "summary", 0, "**Draft**", provider.StreamReasoning)
+	h.item(true, thread, turn, third, 0, 0)
+	h.item(true, thread, turn, reply, 0, 0)
+	h.turnCompleted(thread, appTurn{ID: turn, Status: "completed"})
+
+	replayed, _ := historyTurns([]appTurn{{ID: turn, Status: "completed", Items: []appItem{user, first, second, tool, third, reply}}}, time.Time{})
+	live, want := comparable(events.LiveTurns(thread)), comparable(replayed)
+	if !reflect.DeepEqual(live, want) {
+		t.Fatalf("live = %#v\nhistory = %#v", live, want)
 	}
-	for label, pipeline := range map[string]*reasoningPipeline{"live": live, "reload": reload} {
-		if got := pipeline.values(t); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s timeline = %#v; want %#v", label, got, want)
+	var refs []string
+	for _, entry := range want[0].Entries {
+		refs = append(refs, entry.Ref+" "+string(entry.Kind))
+	}
+	if !slices.Equal(refs, []string{"user-1 user_message", "thought-1 reasoning", "thought-2 reasoning", "tool-1 command_execution", "thought-3 reasoning", "answer assistant_message"}) {
+		t.Fatalf("entries = %q", refs)
+	}
+	if want[0].Entries[0].Delivery != clientID {
+		t.Fatalf("user entry = %#v, want the delivery it carried", want[0].Entries[0])
+	}
+}
+
+// comparable drops the times, which live are the stream's and in history the
+// items'.
+func comparable(turns []provider.HistoryTurn) []provider.HistoryTurn {
+	out := slices.Clone(turns)
+	for index := range out {
+		out[index].StartedAt = time.Time{}
+		out[index].Entries = slices.Clone(out[index].Entries)
+		for entry := range out[index].Entries {
+			out[index].Entries[entry].At = time.Time{}
 		}
 	}
-}
-
-type reasoningTimelineValue struct {
-	Kind, ID, Status, Text string
-}
-
-type reasoningPipeline struct {
-	engine    *orchestration.Engine
-	ingestion *orchestration.ProviderRuntimeIngestion
-	threadID  orchestration.ThreadID
-}
-
-func newReasoningPipeline(t *testing.T, id string) *reasoningPipeline {
-	t.Helper()
-	e := orchestration.NewEngine()
-	t.Cleanup(e.Close)
-	p := &reasoningPipeline{engine: e, ingestion: orchestration.NewProviderRuntimeIngestion(e), threadID: orchestration.ThreadID(id)}
-	_, err := e.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "create", ThreadID: p.threadID, Title: "Multipart reasoning", ProviderInstanceID: "codex"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = e.AppendEvent(context.Background(), orchestration.EventInput{Type: orchestration.EventThreadSessionStatusSet, ThreadID: p.threadID, Payload: orchestration.EventPayload{Session: &orchestration.SessionBinding{ThreadID: p.threadID, ProviderInstanceID: "codex", Status: orchestration.SessionStatusReady, UpdatedAt: time.Now()}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func (p *reasoningPipeline) snapshot() orchestration.Thread {
-	item, _ := p.engine.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: p.threadID})
-	return item.Snapshot.Thread
-}
-
-func (p *reasoningPipeline) values(t *testing.T) []reasoningTimelineValue {
-	t.Helper()
-	var values []reasoningTimelineValue
-	for _, entry := range p.snapshot().Timeline {
-		if item := entry.Item; item != nil {
-			value := reasoningTimelineValue{Kind: string(item.Kind), ID: item.ID, Status: string(item.Status)}
-			if item.Kind == provider.ItemKindReasoning {
-				var payload struct{ Text string }
-				if err := json.Unmarshal(item.Payload, &payload); err != nil {
-					t.Fatal(err)
-				}
-				value.Text = payload.Text
-			}
-			values = append(values, value)
-		} else if message := entry.Message; message != nil {
-			values = append(values, reasoningTimelineValue{Kind: string(message.Role), ID: string(message.ID), Text: message.Text})
-		}
-	}
-	return values
-}
-
-func (p *reasoningPipeline) waitForThought(t *testing.T, index int, text string, status provider.ItemStatus) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		thoughtIndex := 0
-		for _, value := range p.values(t) {
-			if value.Kind != "reasoning" {
-				continue
-			}
-			if thoughtIndex == index && value.Text == text && value.Status == string(status) {
-				return
-			}
-			thoughtIndex++
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("thought %d did not reach %q/%s; got %#v", index, text, status, p.values(t))
-}
-
-func (p *reasoningPipeline) waitForCompletion(t *testing.T) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if turn := p.snapshot().LatestTurn; turn != nil && string(turn.State) == "completed" {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("turn did not complete: %#v", p.snapshot().LatestTurn)
+	return out
 }

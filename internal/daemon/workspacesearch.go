@@ -22,11 +22,11 @@ func (s *Server) searchWorkspaceFiles(ctx context.Context, params wire.Workspace
 
 	root := params.Cwd
 	if hasThread {
-		cwd, ok := s.orchestration.ThreadCwd(params.ThreadID)
-		if !ok {
-			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: unknown thread %q", jsonrpc2.ErrInvalidParams, params.ThreadID)
+		workspace, err := s.engine.Workspace(ctx, params.ThreadID)
+		if err != nil {
+			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
-		root = cwd
+		root = workspace.Cwd
 	}
 
 	result, err := s.workspaceSearch.Search(ctx, root, params.Query, params.Limit)

@@ -7,108 +7,87 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func (h *Instance) StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
-	if input.ThreadID == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("Claude Code session requires threadId")
+// Open starts a session's CLI, resuming its transcript. A session without
+// one (it never ran, or the CLI cleaned it up) is a new session under a new
+// key, so the host sees the conversation is gone and catches it up.
+func (h *Instance) Open(ctx context.Context, in provider.OpenInput) (provider.Opened, error) {
+	if in.Workspace.Cwd == "" {
+		return provider.Opened{}, fmt.Errorf("Claude Code session requires cwd")
 	}
-	if input.Cwd == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("Claude Code session requires cwd")
+	if _, agent := splitSubagentKey(in.Session); agent != "" {
+		return provider.Opened{}, fmt.Errorf("Claude Code subagent %q takes no input of its own", in.Session)
 	}
+	key := in.Session
 	h.mu.Lock()
-	if existing := h.sessionsByLocal[input.ThreadID]; existing != nil {
-		session := h.providerSessionLocked(existing)
+	if existing := h.sessions[key]; key != "" && existing != nil {
+		opened := h.openedLocked(existing)
 		h.mu.Unlock()
-		return provider.StartSessionResult{Session: session, HistoryUnavailable: input.ReplayHistory}, nil
+		return opened, nil
 	}
 	h.mu.Unlock()
-
-	nativeID := input.ProviderSessionID
-	if nativeID == "" && len(input.ResumeCursor) > 0 {
-		_ = json.Unmarshal(input.ResumeCursor, &nativeID)
+	if key != "" && !sessionIDPattern.MatchString(key) {
+		return provider.Opened{}, fmt.Errorf("invalid Claude Code session id %q", key)
 	}
-	resuming := nativeID != ""
-	if nativeID == "" {
-		nativeID = newSessionUUID()
+	resume := key != "" && h.hasTranscript(key)
+	if !resume {
+		key = newSessionUUID()
 	}
-
-	session := newClaudeSession(input.ThreadID, nativeID, input.Cwd)
-	session.additionalDirs = append([]string(nil), input.AdditionalDirectories...)
-	session.model, session.effort, session.permissionMode = modelEffortAndMode(input.ModelSelection, input.ConfigSelections)
-
-	var replay []provider.RuntimeEvent
-	historyUnavailable := false
-	if input.ReplayHistory {
-		transcript, err := h.readTranscript(nativeID)
-		if err != nil {
-			historyUnavailable = true
-		} else {
-			replay = replayEventsFromTranscript(input.ThreadID, transcript)
-		}
+	model, effort, mode := settingsOf(in.Settings)
+	session := &claudeSession{
+		id: key, cwd: in.Workspace.Cwd, additionalDirs: append([]string(nil), in.Workspace.AdditionalDirectories...),
+		model: model, effort: effort, permissionMode: mode, instructions: in.Instructions, mcp: in.MCP,
+		unechoed: make(map[string]bool), tasks: make(map[string]string), subagents: make(map[string]*subagent),
 	}
-
+	session.live = newMapper(key, func(body provider.EventBody, at time.Time) { h.emitAt(session.id, body, at) })
 	h.mu.Lock()
-	previous := h.sessionsByLocal[input.ThreadID]
-	h.bindSessionLocked(session)
+	if existing := h.sessions[key]; existing != nil {
+		// Opened concurrently: one process per session.
+		opened := h.openedLocked(existing)
+		h.mu.Unlock()
+		return opened, nil
+	}
+	h.sessions[key] = session
 	h.mu.Unlock()
-	rollback := func() {
+	if err := h.spawnProcess(ctx, session, resume); err != nil {
 		h.mu.Lock()
-		if h.sessionsByLocal[input.ThreadID] == session {
-			delete(h.sessionsByLocal, input.ThreadID)
-			if h.localByNative[nativeID] == input.ThreadID {
-				delete(h.localByNative, nativeID)
-			}
-			if previous != nil {
-				h.bindSessionLocked(previous)
-			}
+		if h.sessions[key] == session {
+			delete(h.sessions, key)
 		}
 		h.mu.Unlock()
+		return provider.Opened{}, err
 	}
-
-	if err := h.spawnProcess(ctx, session, resuming); err != nil {
-		rollback()
-		return provider.StartSessionResult{}, err
-	}
-
 	skills := h.scanSkills(session.cwd)
 	h.mu.Lock()
-	options := h.configOptionsLocked(session.model, session.effort, session.permissionMode)
 	session.skills = skills
-	session.configOptions = options
-	commands := slashCommandsFromSDK(h.commands)
-	providerSession := h.providerSessionLocked(session)
+	session.options = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
+	opened := h.openedLocked(session)
 	h.mu.Unlock()
-
-	result := provider.StartSessionResult{Session: providerSession, HistoryUnavailable: historyUnavailable}
-	metadata := provider.RuntimeEvent{
-		EventID:  provider.RuntimeEventID("claude:meta:" + input.ThreadID + ":start"),
-		Type:     provider.RuntimeEventThreadMetadataUpdate,
-		ThreadID: input.ThreadID,
-		Payload:  provider.RuntimeEventPayload{SlashCommands: commands, Skills: skills},
-	}
-	if input.ReplayHistory {
-		// Same-thread setup events must ride the replay batch, never the live
-		// sink, so a failed start cannot leak partial state.
-		result.Replay = append(replay, metadata)
-	} else {
-		h.emitEvent(metadata)
-	}
-	return result, nil
+	return opened, nil
 }
 
-// spawnProcess launches the per-thread CLI process. Callers must have bound
-// the session already; stream callbacks fence on the process pointer so a
-// stale process can never mutate a successor's state.
+func (h *Instance) openedLocked(session *claudeSession) provider.Opened {
+	return provider.Opened{
+		Session:  session.id,
+		Options:  append([]provider.ConfigOption(nil), session.options...),
+		Commands: slashCommandsFromSDK(h.commands),
+		Skills:   append([]provider.Skill(nil), session.skills...),
+	}
+}
+
+// spawnProcess launches the session's CLI process. Stream callbacks fence on
+// the process pointer so a stale process can never touch a successor's state.
 func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, resume bool) error {
 	extra := []string{
 		"--include-partial-messages",
 		// Echoes each written message when the CLI takes it into a query,
-		// which is how a steer is known to have joined the running turn.
+		// which is how a message is known to have been read, and where.
 		"--replay-user-messages",
 		"--permission-prompt-tool", "stdio",
 		// Enables bypassPermissions as a selectable mode without turning it
@@ -119,12 +98,10 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 		// still the user's setting.
 		"--thinking-display", "summarized",
 	}
-	// Resuming a session that never ran fails: it has no transcript yet.
-	resume = resume && h.hasTranscript(session.nativeSessionID)
 	if resume {
-		extra = append(extra, "--resume", session.nativeSessionID)
+		extra = append(extra, "--resume", session.id)
 	} else {
-		extra = append(extra, "--session-id", session.nativeSessionID)
+		extra = append(extra, "--session-id", session.id)
 	}
 	if model := strings.TrimSpace(session.model); model != "" && model != "default" {
 		extra = append(extra, "--model", model)
@@ -144,12 +121,24 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 			extra = append(extra, "--add-dir", dir)
 		}
 	}
+	if session.instructions != "" {
+		extra = append(extra, "--append-system-prompt", session.instructions)
+	}
+	mcpConfig := ""
+	if session.mcp != nil {
+		var err error
+		if mcpConfig, err = writeMCPConfig(*session.mcp); err != nil {
+			return err
+		}
+		extra = append(extra, "--mcp-config", mcpConfig)
+	}
 
 	process, client, err := h.startCLI(session.cwd, extra)
 	if err != nil {
+		removeFile(mcpConfig)
 		return fmt.Errorf("start Claude Code CLI: %w", err)
 	}
-	proc := &sessionProcess{process: process, client: client, done: make(chan struct{})}
+	proc := &sessionProcess{process: process, client: client, done: make(chan struct{}), mcpConfig: mcpConfig}
 	proc.client.onMessage = func(message sdkMessage) { h.handleMessage(session, proc, message) }
 	proc.client.onControlRequest = func(requestID string, request controlRequestBody, raw json.RawMessage) {
 		h.handleControlRequest(session, proc, requestID, request, raw)
@@ -162,9 +151,10 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 	go h.waitProcess(session, proc)
 
 	// The initialize handshake answers before any API call and refreshes the
-	// cwd-scoped command list plus account/model catalog.
+	// cwd-scoped command list plus account/model catalog. Subagents' text
+	// streams too, for their child threads.
 	var initResponse initializeResponse
-	if err := proc.client.control(ctx, map[string]any{"subtype": "initialize"}, &initResponse); err != nil {
+	if err := proc.client.control(ctx, map[string]any{"subtype": "initialize", "forwardSubagentText": true}, &initResponse); err != nil {
 		h.stopProcess(session)
 		return fmt.Errorf("initialize Claude Code session: %w", err)
 	}
@@ -183,38 +173,90 @@ func (h *Instance) spawnProcess(ctx context.Context, session *claudeSession, res
 	return nil
 }
 
+// writeMCPConfig writes the session's MCP server as an --mcp-config file,
+// readable only by the user since its headers carry credentials.
+func writeMCPConfig(server provider.MCPServer) (string, error) {
+	entry := map[string]any{"type": "http", "url": server.URL}
+	if len(server.Headers) > 0 {
+		entry["headers"] = server.Headers
+	}
+	if server.Stdio != nil {
+		if len(server.Stdio.Argv) == 0 {
+			return "", fmt.Errorf("MCP server %q has no command", server.Name)
+		}
+		entry = map[string]any{"type": "stdio", "command": server.Stdio.Argv[0], "args": server.Stdio.Argv[1:]}
+		if len(server.Stdio.Env) > 0 {
+			env := make(map[string]string, len(server.Stdio.Env))
+			for _, pair := range server.Stdio.Env {
+				name, value, _ := strings.Cut(pair, "=")
+				env[name] = value
+			}
+			entry["env"] = env
+		}
+	}
+	data, err := json.Marshal(map[string]any{"mcpServers": map[string]any{server.Name: entry}})
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp("", "maid-mcp-*.json")
+	if err != nil {
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		removeFile(file.Name())
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		removeFile(file.Name())
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	return file.Name(), nil
+}
+
+func removeFile(path string) {
+	if path != "" {
+		_ = os.Remove(path)
+	}
+}
+
+// waitProcess retires an exited process. A process that exited on its own
+// closes its session; its open turn and tools end with it.
 func (h *Instance) waitProcess(session *claudeSession, proc *sessionProcess) {
 	// Deliver what the CLI wrote before exiting, such as the result or the
 	// error that ends its turn, while it is still the session's process.
 	proc.process.Drain(proc.client.done, drainTimeout)
 	h.mu.Lock()
 	closing := proc.closing
-	var endedTurn, endedLine string
-	var background []string
-	if session.proc == proc {
+	current := session.proc == proc
+	if current {
 		session.proc = nil
-		endedTurn, endedLine = session.activeLocalTurn, session.turnLine
-		session.endTurnLocked()
-		session.resetStreamStateLocked()
-		for toolUseID := range session.background {
-			background = append(background, toolUseID)
+		if !closing && h.sessions[session.id] == session {
+			delete(h.sessions, session.id)
 		}
 	}
 	h.mu.Unlock()
-	// Background tasks end with the CLI that runs them.
-	for _, toolUseID := range background {
-		h.finishBackground(session, taskNotification{ToolUseID: toolUseID, Status: "stopped"})
-	}
 	proc.client.fail(firstError(proc.process.Err(), io.EOF))
+	removeFile(proc.mcpConfig)
 	h.cancelApprovalsForClient(proc.client)
-	// The process is gone, so no result will end its turn. Settle it here on
-	// every exit path, deliberate stops included, before stopProcess returns.
-	if endedTurn != "" {
-		payload := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnInterrupted, ProviderTurnID: endedLine}
+	if current {
+		state, reason := provider.TurnInterrupted, ""
 		if !closing {
-			payload = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Claude Code process exited unexpectedly", ProviderTurnID: endedLine}
+			state, reason = provider.TurnFailed, "Claude Code exited unexpectedly."
 		}
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: session.localThreadID, TurnID: endedTurn, Payload: payload})
+		session.mapMu.Lock()
+		// Background tasks end with the CLI that runs them.
+		for _, sub := range session.subagents {
+			sub.live.cutOff(time.Now())
+			sub.live.settle(state, "", reason, time.Now())
+		}
+		session.live.cutOff(time.Now())
+		session.live.settle(state, "", reason, time.Now())
+		clear(session.unechoed)
+		session.mapMu.Unlock()
+		if !closing {
+			h.emit(session.id, provider.SessionClosed{Error: reason})
+		}
 	}
 	close(proc.done)
 }
@@ -234,216 +276,149 @@ func (h *Instance) stopProcess(session *claudeSession) {
 	<-proc.done
 }
 
-// SendTurn writes one user message to the session's CLI. A new turn starts
-// when the CLI is idle, or replaces a turn the CLI started on its own; a steer
-// joins the running turn and the CLI picks the boundary.
-func (h *Instance) SendTurn(ctx context.Context, input provider.SendTurnInput) error {
-	session, err := h.sessionForLocal(input.ThreadID)
+// Release stops the session's CLI; a running turn ends as interrupted.
+func (h *Instance) Release(_ context.Context, key string) error {
+	h.mu.Lock()
+	session := h.sessions[key]
+	delete(h.sessions, key)
+	h.mu.Unlock()
+	if session != nil {
+		h.stopProcess(session)
+	}
+	return nil
+}
+
+// Send writes one user message to the session's CLI, with the delivery's ID
+// as its uuid. The CLI reads it when it can: at once when idle, into the
+// running query at its next tool boundary, or as the next query. Its echo
+// then names its turn (mapper.echo), so the ack names none.
+func (h *Instance) Send(_ context.Context, key string, in provider.SendInput) (provider.SendAck, error) {
+	if !sessionIDPattern.MatchString(in.Delivery) {
+		return provider.SendAck{}, fmt.Errorf("Claude Code message id %q is not a UUID", in.Delivery)
+	}
+	content, err := userContentBlocks(in.Text, in.Attachments)
 	if err != nil {
-		return err
+		return provider.SendAck{}, err
+	}
+	session, err := h.session(key)
+	if err != nil {
+		return provider.SendAck{}, err
 	}
 	h.mu.Lock()
-	if err := sendConflictLocked(session, input); err != nil {
-		h.mu.Unlock()
-		return err
-	}
 	proc := session.proc
-	model := session.model
 	h.mu.Unlock()
 	if proc == nil {
-		if err := h.spawnProcess(ctx, session, true); err != nil {
-			return err
-		}
-		h.mu.Lock()
-		proc = session.proc
-		h.mu.Unlock()
-		if proc == nil {
-			return fmt.Errorf("Claude Code process for thread %q exited during start", input.ThreadID)
-		}
+		return provider.SendAck{}, fmt.Errorf("Claude Code session %q: %w", key, provider.ErrSessionNotFound)
 	}
-	if !input.Steer && input.ModelSelection != nil && input.ModelSelection.Model != "" && input.ModelSelection.Model != model {
-		if err := h.applyModel(ctx, session, input.ModelSelection.Model); err != nil {
-			return err
-		}
+	session.mapMu.Lock()
+	defer session.mapMu.Unlock()
+	busy := session.live.turn != ""
+	if in.Steer && !busy {
+		return provider.SendAck{}, fmt.Errorf("Claude Code session %q: %w", key, provider.ErrTurnNotRunning)
 	}
-	content, err := userContentBlocks(input)
-	if err != nil {
-		return err
-	}
-	uuid := newSessionUUID()
-
-	h.mu.Lock()
-	// The turn can end, or the CLI can start one, while the process spawns.
-	if err := sendConflictLocked(session, input); err != nil {
-		h.mu.Unlock()
-		return err
-	}
-	// Once the turn is recorded, waitProcess ends it if the process exits; a
-	// process that already exited would leave it running.
-	if session.proc != proc {
-		h.mu.Unlock()
-		return fmt.Errorf("Claude Code process for thread %q exited during send", input.ThreadID)
-	}
-	busy := session.activeLocalTurn != ""
-	replaced, replacedLine := "", ""
-	if busy {
-		if session.unechoedInput == nil {
-			session.unechoedInput = make(map[string]bool)
-		}
-		session.unechoedInput[uuid] = true
-		if !input.Steer {
-			// The CLI's own turn ends where the user's begins.
-			replaced, replacedLine = session.activeLocalTurn, session.turnLine
-		}
-	}
-	if !input.Steer {
-		session.activeLocalTurn = input.TurnID
-		session.cliStartedTurn = false
-		session.turnLine = uuid
-	}
-	nativeID := session.nativeSessionID
-	h.mu.Unlock()
-
 	message := map[string]any{
 		"type":               "user",
-		"uuid":               uuid,
-		"session_id":         nativeID,
+		"uuid":               in.Delivery,
+		"session_id":         key,
 		"parent_tool_use_id": nil,
-		"message": map[string]any{
-			"role":    "user",
-			"content": content,
-		},
+		"message":            map[string]any{"role": "user", "content": content},
 	}
 	if busy {
-		// The CLI is mid-query: the message waits for its next boundary.
+		// Mid-query, the message joins the query at its next tool boundary.
 		message["priority"] = "next"
 	}
-	// A failed write means the process is exiting; waitProcess ends the turn.
+	session.unechoed[in.Delivery] = true
+	// A failed write means the process is exiting; waitProcess closes it.
 	if err := proc.client.send(message); err != nil {
-		return err
+		delete(session.unechoed, in.Delivery)
+		return provider.SendAck{}, err
 	}
-	if input.Steer {
-		return nil
-	}
-	if replaced != "" {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnCompleted, ThreadID: input.ThreadID, TurnID: replaced, Payload: provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCompleted, ProviderTurnID: replacedLine}})
-	}
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventTurnStarted, ThreadID: input.ThreadID, TurnID: input.TurnID})
-	return nil
+	return provider.SendAck{}, nil
 }
 
-// sendConflictLocked rejects a steer whose turn is no longer running and a
-// new turn while the user's previous one still runs.
-func sendConflictLocked(session *claudeSession, input provider.SendTurnInput) error {
-	switch {
-	case input.Steer && session.activeLocalTurn != input.TurnID:
-		return fmt.Errorf("Claude Code thread %q turn %q: %w", session.localThreadID, input.TurnID, provider.ErrTurnNotRunning)
-	case !input.Steer && session.activeLocalTurn != "" && !session.cliStartedTurn:
-		return fmt.Errorf("Claude Code thread %q already has a running turn", session.localThreadID)
-	}
-	return nil
-}
-
-func (h *Instance) InterruptTurn(ctx context.Context, input provider.InterruptTurnInput) error {
-	session, err := h.sessionForLocal(input.ThreadID)
+// Interrupt aborts the running query; on a subagent it stops the subagent's
+// task. Messages queued behind the query survive and run next.
+func (h *Instance) Interrupt(ctx context.Context, key, _ string) error {
+	parent, agent := splitSubagentKey(key)
+	session, err := h.session(parent)
 	if err != nil {
 		return err
 	}
 	h.mu.Lock()
 	proc := session.proc
-	active := session.activeLocalTurn
-	// cancel_queued drops the steers the CLI has not folded in yet, so the
-	// aborted result ends the turn instead of waiting for their query.
-	session.unechoedInput = nil
 	h.mu.Unlock()
-	if proc == nil || active == "" {
-		return fmt.Errorf("Claude Code thread %q has no active turn", input.ThreadID)
+	if proc == nil {
+		return nil
 	}
-	return proc.client.control(ctx, map[string]any{"subtype": "interrupt", "cancel_queued": true}, nil)
+	if agent != "" {
+		return proc.client.control(ctx, map[string]any{"subtype": "stop_task", "task_id": agent}, nil)
+	}
+	session.mapMu.Lock()
+	running := session.live.turn != ""
+	session.mapMu.Unlock()
+	if !running {
+		return nil
+	}
+	return proc.client.control(ctx, map[string]any{"subtype": "interrupt"}, nil)
 }
 
 // StopItem stops the background task a tool started (stop_task). The task's
-// notification then ends the tool's item as interrupted.
-func (h *Instance) StopItem(ctx context.Context, input provider.StopItemInput) error {
-	session, err := h.sessionForLocal(input.ThreadID)
+// notification then ends the tool's entry as interrupted.
+func (h *Instance) StopItem(ctx context.Context, key, item string) error {
+	session, err := h.session(key)
 	if err != nil {
 		return err
 	}
 	h.mu.Lock()
 	proc := session.proc
-	tool, running := session.background[input.ItemID]
 	h.mu.Unlock()
-	// The process exiting ends its tasks before waitProcess settles them.
-	if proc == nil || !running {
-		return fmt.Errorf("Claude Code item %q is not a running background task", input.ItemID)
+	session.mapMu.Lock()
+	task := session.tasks[item]
+	session.mapMu.Unlock()
+	if proc == nil || task == "" {
+		return fmt.Errorf("Claude Code item %q is not a running background task", item)
 	}
-	return proc.client.control(ctx, map[string]any{"subtype": "stop_task", "task_id": tool.state.taskID}, nil)
+	return proc.client.control(ctx, map[string]any{"subtype": "stop_task", "task_id": task}, nil)
 }
 
-func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionInput) error {
-	h.mu.Lock()
-	session := h.sessionsByLocal[input.ThreadID]
-	if session == nil {
-		h.mu.Unlock()
-		return nil
+func (h *Instance) Configure(ctx context.Context, key string, setting provider.ConfigOptionSelection) error {
+	session, err := h.session(key)
+	if err != nil {
+		return err
 	}
+	value, ok := setting.Value.(string)
+	if !ok {
+		return fmt.Errorf("Claude Code config option %q requires a string value", setting.OptionID)
+	}
+	h.mu.Lock()
 	proc := session.proc
-	active := session.activeLocalTurn
 	h.mu.Unlock()
-	if proc != nil && active != "" {
-		if err := proc.client.control(ctx, map[string]any{"subtype": "interrupt", "cancel_queued": true}, nil); err != nil {
-			h.mu.Lock()
-			stillActive := h.sessionsByLocal[input.ThreadID] == session && session.activeLocalTurn == active && session.proc == proc
-			h.mu.Unlock()
-			if stillActive {
-				h.logger.Debug("interrupt during stop", "error", err)
+	switch setting.OptionID {
+	case "model":
+		h.mu.Lock()
+		valid := modelValueValid(h.models, value)
+		h.mu.Unlock()
+		if !valid {
+			return fmt.Errorf("Claude Code model %q is not available", value)
+		}
+		if proc != nil {
+			var model any = value
+			if value == "default" {
+				model = nil
+			}
+			if err := proc.client.control(ctx, map[string]any{"subtype": "set_model", "model": model}, nil); err != nil {
+				return err
 			}
 		}
-	}
-	h.stopProcess(session)
-	h.mu.Lock()
-	if h.sessionsByLocal[input.ThreadID] == session {
-		delete(h.sessionsByLocal, input.ThreadID)
-		if h.localByNative[session.nativeSessionID] == input.ThreadID {
-			delete(h.localByNative, session.nativeSessionID)
-		}
-	}
-	approvals := make([]*pendingApproval, 0)
-	for id, pending := range h.pendingApprovals {
-		if pending.localThread == input.ThreadID {
-			delete(h.pendingApprovals, id)
-			approvals = append(approvals, pending)
-		}
-	}
-	h.mu.Unlock()
-	for _, pending := range approvals {
-		h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventRequestResolved, ThreadID: pending.localThread, TurnID: pending.localTurn, RequestID: pending.requestID, Payload: provider.RuntimeEventPayload{RequestType: pending.requestType, Decision: provider.ApprovalDecisionCancel, Cancelled: true}})
-	}
-	return nil
-}
-
-func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
-	session, err := h.sessionForLocal(input.ThreadID)
-	if err != nil {
-		return err
-	}
-	value, ok := input.Value.(string)
-	if !ok {
-		return fmt.Errorf("Claude Code config option %q requires a string value", input.OptionID)
-	}
-	switch input.OptionID {
-	case "model":
-		if err := h.applyModel(ctx, session, value); err != nil {
-			return err
-		}
+		h.mu.Lock()
+		session.model = value
+		h.mu.Unlock()
 	case "effort":
 		h.mu.Lock()
 		options := h.configOptionsLocked(session.model, value, session.permissionMode)
-		current, present := provider.CurrentConfigString(options, "effort")
-		proc := session.proc
 		h.mu.Unlock()
-		if !present || current != value {
-			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)
+		if current, present := provider.CurrentConfigString(options, "effort"); !present || current != value {
+			return fmt.Errorf("Claude Code config option %q does not accept value %q", setting.OptionID, value)
 		}
 		if proc != nil {
 			// A null effortLevel returns to the model's default effort.
@@ -460,11 +435,8 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 		h.mu.Unlock()
 	case "permission_mode":
 		if !validPermissionMode(value) {
-			return fmt.Errorf("Claude Code config option %q does not accept value %q", input.OptionID, value)
+			return fmt.Errorf("Claude Code config option %q does not accept value %q", setting.OptionID, value)
 		}
-		h.mu.Lock()
-		proc := session.proc
-		h.mu.Unlock()
 		if proc != nil {
 			if err := proc.client.control(ctx, map[string]any{"subtype": "set_permission_mode", "mode": value}, nil); err != nil {
 				return err
@@ -474,83 +446,22 @@ func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfig
 		session.permissionMode = value
 		h.mu.Unlock()
 	default:
-		return fmt.Errorf("Claude Code config option %q is not supported", input.OptionID)
+		return fmt.Errorf("Claude Code config option %q is not supported", setting.OptionID)
 	}
 	h.mu.Lock()
-	session.configOptions = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
-	snapshot := append([]provider.ConfigOption(nil), session.configOptions...)
+	session.options = h.configOptionsLocked(session.model, session.effort, session.permissionMode)
+	options := append([]provider.ConfigOption(nil), session.options...)
 	h.mu.Unlock()
-	h.emitEvent(provider.RuntimeEvent{Type: provider.RuntimeEventConfigOptionsUpdated, ThreadID: input.ThreadID, Payload: provider.RuntimeEventPayload{ConfigOptions: snapshot}})
+	h.emit(key, provider.ConfigChanged{Options: options})
 	return nil
 }
 
-// applyModel validates a model switch and applies it in-session when a
-// process is live. It takes h.mu itself.
-func (h *Instance) applyModel(ctx context.Context, session *claudeSession, model string) error {
-	h.mu.Lock()
-	valid := modelValueValid(h.models, model)
-	proc := session.proc
-	h.mu.Unlock()
-	if !valid {
-		return fmt.Errorf("Claude Code model %q is not available", model)
-	}
-	if proc != nil {
-		payload := map[string]any{"subtype": "set_model", "model": model}
-		if model == "default" {
-			payload["model"] = nil
-		}
-		if err := proc.client.control(ctx, payload, nil); err != nil {
-			return err
-		}
-	}
-	h.mu.Lock()
-	session.model = model
-	h.mu.Unlock()
-	return nil
-}
-
-// providerSessionLocked snapshots the public projection of one live binding.
-func (h *Instance) providerSessionLocked(session *claudeSession) provider.Session {
-	resumeCursor, _ := json.Marshal(session.nativeSessionID)
-	return provider.Session{
-		Provider:              DriverKind,
-		ProviderInstanceID:    h.info.InstanceID,
-		ProviderSessionID:     session.nativeSessionID,
-		ProviderName:          h.info.Name,
-		Cwd:                   session.cwd,
-		AdditionalDirectories: append([]string(nil), session.additionalDirs...),
-		ThreadID:              session.localThreadID,
-		ResumeCursor:          resumeCursor,
-		ConfigOptions:         append([]provider.ConfigOption(nil), session.configOptions...),
-		Skills:                append([]provider.Skill(nil), session.skills...),
-	}
-}
-
-func (s *claudeSession) endTurnLocked() {
-	s.activeLocalTurn = ""
-	s.cliStartedTurn = false
-	s.turnLine = ""
-	s.unechoedInput = nil
-}
-
-func (s *claudeSession) resetStreamStateLocked() {
-	s.toolStates = make(map[string]*toolState)
-	s.openBlocks = make(map[int]string)
-	s.streamedText = make(map[string]string)
-}
-
-func modelEffortAndMode(selection *provider.ModelSelection, selections []provider.ConfigOptionSelection) (string, string, string) {
-	model, effort, mode := "", "", ""
-	if selection != nil {
-		model = selection.Model
-	}
-	for _, option := range selections {
+func settingsOf(settings []provider.ConfigOptionSelection) (model, effort, mode string) {
+	for _, option := range settings {
 		value, _ := option.Value.(string)
 		switch option.OptionID {
 		case "model":
-			if value != "" {
-				model = value
-			}
+			model = value
 		case "effort":
 			effort = value
 		case "permission_mode":
@@ -569,6 +480,16 @@ func validPermissionMode(mode string) bool {
 	}
 }
 
+// splitSubagentKey splits a subagent's session key into its session's and
+// its agent id; agent is empty for a session's own key.
+func splitSubagentKey(key string) (session, agent string) {
+	session, agent, found := strings.Cut(key, "/agent-")
+	if !found {
+		return key, ""
+	}
+	return session, agent
+}
+
 // newSessionUUID returns a random version 4 UUID; crypto/rand.Read never fails.
 func newSessionUUID() string {
 	var raw [16]byte
@@ -578,7 +499,3 @@ func newSessionUUID() string {
 	encoded := hex.EncodeToString(raw[:])
 	return strings.Join([]string{encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32]}, "-")
 }
-
-// probeTimeout bounds the OpenInstance handshake when the caller supplied no
-// deadline of its own.
-const probeTimeout = 30 * time.Second

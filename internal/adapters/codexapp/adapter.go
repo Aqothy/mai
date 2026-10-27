@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/adapters/elicitation"
@@ -29,13 +28,20 @@ type Config struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
+// historyVersion changes whenever items map to entries differently.
+const historyVersion = 1
+
+// sessionState is one native thread (session key = thread id): one maiD
+// opened, or a child thread its notifications name.
 type sessionState struct {
-	localThreadID  string
-	nativeThreadID string
-	cwd            string
-	model          string
-	effort         string
-	serviceTier    string
+	thread string
+	cwd    string
+	// loaded: maiD opened or resumed it, so it is subscribed and takes
+	// turns; a child thread is known only through its notifications.
+	loaded      bool
+	model       string
+	effort      string
+	serviceTier string
 	// permissions is the current permission preset, or customPermissions.
 	// permissionsChanged is set when the user picked a preset that the next
 	// turn/start must apply.
@@ -44,17 +50,18 @@ type sessionState struct {
 	skills             []provider.Skill
 	configOptions      []provider.ConfigOption
 
-	pending           *pendingTurn
-	nativeToLocalTurn map[string]string
-	localToNativeTurn map[string]string
-	startedTurns      map[string]bool
-	activeNativeTurn  string
-	items             map[string]provider.ToolCall
-	streamed          map[string]streamedItem
+	// pending is a delivery whose turn Codex hasn't named yet.
+	pending *pendingTurn
+	// activeTurn is the turn Codex runs on the thread.
+	activeTurn string
+	started    map[string]bool
+	// entries are the entries of items still updating (a command's output),
+	// by ref.
+	entries  map[string]provider.Entry
+	streamed map[string]streamedItem
 }
 
-// streamedItem accumulates the live text deltas of one app-server item so
-// item/completed can emit only the tail the stream has not delivered yet.
+// streamedItem accumulates the live text deltas of one app-server item.
 // part identifies the reasoning part (summary or content index) the last
 // delta belonged to; app-server streams parts back to back, so a part change
 // is the only signal for the paragraph boundary the completed item will carry.
@@ -67,9 +74,7 @@ type pendingApproval struct {
 	id           json.RawMessage
 	rpcRequestID string
 	requestID    string
-	localThread  string
-	localTurn    string
-	requestType  provider.RuntimeRequestType
+	thread       string
 	kind         pendingKind
 	// form is an elicitation's form; nil for a URL elicitation.
 	form *elicitation.Form
@@ -95,7 +100,7 @@ const (
 )
 
 // reply builds the server-request response for the user's answer.
-func (p *pendingApproval) reply(input provider.RespondToRequestInput) (map[string]any, error) {
+func (p *pendingApproval) reply(input provider.RequestAnswer) (map[string]any, error) {
 	if reply, ok := p.amendments[input.Action.ID]; ok {
 		return reply, nil
 	}
@@ -142,22 +147,21 @@ type optionsState struct {
 }
 
 type Instance struct {
+	provider.Unsupported
+
 	mu     sync.Mutex
 	info   provider.InstanceInfo
-	emit   provider.RuntimeEventListener
+	host   provider.Host
 	logger *slog.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	// requestNonce is random per instance; see requestID.
 	requestNonce string
-	// localIDs numbers the reports the adapter makes itself.
-	localIDs atomic.Uint64
-	process  *procgroup.Process
-	rpc      *rpcClient
+	process      *procgroup.Process
+	rpc          *rpcClient
 
-	sessionsByLocal  map[string]*sessionState
-	localByNative    map[string]string
+	sessions         map[string]*sessionState
 	pendingApprovals map[string]*pendingApproval
 	models           []appModel
 	options          map[string]*optionsState
@@ -182,9 +186,37 @@ const stopGrace = 5 * time.Second
 // drainTimeout bounds reading what an exited app-server wrote last.
 const drainTimeout = 2 * time.Second
 
-func (*Instance) ReplaysClientMessageIDs() bool { return true }
+// Driver is the Codex app-server driver.
+var Driver = provider.Driver{
+	Open: func(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (provider.Instance, error) {
+		return OpenInstance(ctx, spec, host)
+	},
+	Static: func(provider.InstanceSpec) provider.InstanceInfo {
+		return provider.InstanceInfo{Capabilities: capabilities(), Access: accessModes()}
+	},
+}
 
-func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (*Instance, error) {
+func capabilities() provider.Capabilities {
+	return provider.Capabilities{
+		History: provider.HistoryExact, HistoryVersion: historyVersion,
+		Resume: true, Fork: true, Steer: true, Subagents: true, Instructions: true, MessageIDs: true,
+		MCP:      provider.MCPCapabilities{HTTP: true},
+		Sessions: true, Delete: true, Rename: true, Auth: true, Logout: true, CommandCompletion: true,
+		// Stable app-server UserInput supports text, image, localImage,
+		// audio, localAudio, skill, and mention. It has no embedded-resource
+		// prompt variant, so do not advertise ACP-style embedded context.
+		PromptContent: provider.PromptContentCapabilities{Image: true, Audio: true},
+	}
+}
+
+// accessModes rates Codex's permission presets.
+func accessModes() *provider.AccessModes {
+	return &provider.AccessModes{Option: permissionsOptionID, Levels: map[string]provider.AccessLevel{
+		"read-only": provider.AccessReadOnly, "auto": provider.AccessEdit, "full-access": provider.AccessFull,
+	}}
+}
+
+func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider.Host) (*Instance, error) {
 	if spec.InstanceID == "" {
 		return nil, fmt.Errorf("missing provider instance id")
 	}
@@ -216,12 +248,11 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	}
 
 	h := &Instance{
-		emit:             emit,
+		host:             host,
 		logger:           slog.Default().With("component", "codex-app-server", "providerInstance", spec.InstanceID),
 		process:          process,
 		requestNonce:     rand.Text()[:8],
-		sessionsByLocal:  make(map[string]*sessionState),
-		localByNative:    make(map[string]string),
+		sessions:         make(map[string]*sessionState),
 		pendingApprovals: make(map[string]*pendingApproval),
 		options:          make(map[string]*optionsState),
 		processDone:      make(chan struct{}),
@@ -234,16 +265,7 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, emit provider
 	h.info = provider.InstanceInfo{
 		InstanceID: spec.InstanceID, Name: spec.Name, Driver: DriverKind,
 		PID: process.Pid(), Status: provider.InstanceStatusConfigured,
-		StartedAt: startedAt,
-		Capabilities: provider.Capabilities{
-			SessionList: true, SessionDelete: true, SessionClose: true,
-			LoadReplay: true, Resume: true,
-			Auth: true, Logout: true,
-			// Stable app-server UserInput supports text, image, localImage,
-			// audio, localAudio, skill, and mention. It has no embedded-resource
-			// prompt variant, so do not advertise ACP-style embedded context.
-			PromptContent: provider.PromptContentCapabilities{Image: true, Audio: true},
-		},
+		StartedAt: startedAt, Capabilities: capabilities(), Access: accessModes(),
 		Auth: provider.Auth{Status: provider.AuthStatusUnknown},
 	}
 	go h.rpc.run()
@@ -307,9 +329,11 @@ func (h *Instance) waitProcess() {
 	h.processErr = err
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
+	info := h.info
 	h.mu.Unlock()
 	h.rpc.fail(firstError(err, io.EOF))
 	h.cancel()
+	h.emit("", provider.InstanceChanged{Info: info})
 	close(h.processDone)
 }
 
@@ -320,41 +344,44 @@ func firstError(err, fallback error) error {
 	return fallback
 }
 
+// handleTransportClosed ends what app-server can no longer finish: running
+// turns end, every open session closes, and requests end unanswered.
 func (h *Instance) handleTransportClosed(err error) {
 	h.mu.Lock()
 	h.transportClosed = true
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
-	outcome := provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnFailed, Message: "Codex app-server disconnected unexpectedly"}
+	settled := provider.TurnSettled{State: provider.TurnFailed, Error: "Codex app-server disconnected unexpectedly"}
 	if err != nil {
-		outcome.Message += ": " + err.Error()
+		settled.Error += ": " + err.Error()
 	}
 	if h.closing {
-		outcome = provider.RuntimeEventPayload{TurnState: provider.RuntimeTurnCancelled}
+		settled = provider.TurnSettled{State: provider.TurnInterrupted}
 	}
-	// Running turns end, and so do pending ones: taking a pending turn makes
-	// this its outcome, and a request still in flight then fails without
-	// reporting it again (releaseTurn).
-	type localTurn struct{ thread, turn string }
-	var ended []localTurn
-	for _, session := range h.sessionsByLocal {
-		if nativeTurn := session.activeNativeTurn; nativeTurn != "" {
-			ended = append(ended, localTurn{session.localThreadID, h.resolveTurnLocked(session, nativeTurn)})
+	type ended struct{ session, turn string }
+	var turns []ended
+	var closed []string
+	for _, session := range h.sessions {
+		if session.activeTurn != "" {
+			turns = append(turns, ended{session.thread, session.activeTurn})
 		}
-		if session.pending != nil {
-			ended = append(ended, localTurn{session.localThreadID, session.pending.id})
-			session.pending = nil
+		if session.loaded {
+			closed = append(closed, session.thread)
 		}
-		session.activeNativeTurn = ""
+		session.activeTurn, session.pending = "", nil
 		session.streamed = make(map[string]streamedItem)
 	}
 	h.mu.Unlock()
 	// Without a transport the process is useless; a malformed stream ends it.
 	h.process.Kill()
 	h.cancel()
-	h.cancelPendingApprovals()
-	for _, turn := range ended {
-		h.endTurn(turn.thread, turn.turn, outcome)
+	h.cancelPendingApprovals("")
+	for _, turn := range turns {
+		settled.Turn = turn.turn
+		h.emit(turn.session, settled)
+	}
+	for _, session := range closed {
+		h.emit(session, provider.SessionClosed{Error: settled.Error})
 	}
 }
 
@@ -364,7 +391,7 @@ func (h *Instance) Close() error {
 		intentional := h.info.Status != provider.InstanceStatusExited
 		h.closing = intentional
 		h.mu.Unlock()
-		h.cancelPendingApprovals()
+		h.cancelPendingApprovals("")
 		h.cancel()
 		h.process.Stop(stopGrace)
 		<-h.processDone
@@ -377,37 +404,23 @@ func (h *Instance) Close() error {
 	return h.closeErr
 }
 
-func newSessionState(localID, nativeID, cwd string) *sessionState {
-	return &sessionState{
-		localThreadID: localID, nativeThreadID: nativeID, cwd: cwd,
-		nativeToLocalTurn: make(map[string]string), localToNativeTurn: make(map[string]string),
-		startedTurns: make(map[string]bool), items: make(map[string]provider.ToolCall), streamed: make(map[string]streamedItem),
+// sessionLocked is the state of a native thread, made the first time the
+// thread is named. h.mu must be held.
+func (h *Instance) sessionLocked(thread string) *sessionState {
+	session := h.sessions[thread]
+	if session == nil {
+		session = &sessionState{
+			thread: thread, started: make(map[string]bool),
+			entries: make(map[string]provider.Entry), streamed: make(map[string]streamedItem),
+		}
+		h.sessions[thread] = session
 	}
+	return session
 }
 
-func (h *Instance) bindSessionLocked(session *sessionState) {
-	if old := h.sessionsByLocal[session.localThreadID]; old != nil && old.nativeThreadID != session.nativeThreadID {
-		delete(h.localByNative, old.nativeThreadID)
+// emit reports one event of a session.
+func (h *Instance) emit(session string, body provider.EventBody) {
+	if h.host.Emit != nil {
+		h.host.Emit(provider.Event{Session: session, At: time.Now(), Body: body})
 	}
-	h.sessionsByLocal[session.localThreadID] = session
-	h.localByNative[session.nativeThreadID] = session.localThreadID
-}
-
-func (h *Instance) emitEvent(event provider.RuntimeEvent) {
-	if h.emit == nil {
-		return
-	}
-	if event.Provider == "" {
-		event.Provider = DriverKind
-	}
-	if event.ProviderInstanceID == "" {
-		event.ProviderInstanceID = h.info.InstanceID
-	}
-	if event.ProviderName == "" {
-		event.ProviderName = h.info.Name
-	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now()
-	}
-	h.emit(event)
 }

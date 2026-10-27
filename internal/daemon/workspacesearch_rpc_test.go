@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/orchestration"
 )
 
 func newWorkspaceFixture(t *testing.T) string {
@@ -51,8 +50,7 @@ func searchUntilWarm(t *testing.T, client *recordingClient, params wire.Workspac
 }
 
 func TestWorkspaceSearchFilesForDraftCwdAndThread(t *testing.T) {
-	s := newServer(newLoggerFromEnv(), nil)
-	t.Cleanup(func() { _ = s.Close() })
+	s := newTestServer(t)
 	client := newRecordingClient(t, s)
 	root := newWorkspaceFixture(t)
 
@@ -66,13 +64,7 @@ func TestWorkspaceSearchFilesForDraftCwdAndThread(t *testing.T) {
 	}
 
 	// A thread resolves the same workspace from its cwd.
-	threadID := orchestration.NewThreadID()
-	client.dispatch(t, orchestration.Command{
-		Type:     orchestration.CommandThreadCreate,
-		ThreadID: threadID,
-		Title:    "workspace search fixture",
-		Cwd:      root,
-	})
+	threadID := client.createThread(t, "claude-code", root).Thread
 	result = searchUntilWarm(t, client, wire.WorkspaceSearchFilesParams{ThreadID: threadID, Query: "promptcomp"})
 	if len(result.Entries) == 0 || result.Entries[0].RelativePath != "clients/swift/PromptComposer.swift" {
 		t.Fatalf("unexpected thread-backed result: %+v", result.Entries)
@@ -82,8 +74,7 @@ func TestWorkspaceSearchFilesForDraftCwdAndThread(t *testing.T) {
 // Root and query validation is owned by workspacesearch; these cases cover
 // the daemon's own threadId/cwd resolution.
 func TestWorkspaceSearchFilesRejectsInvalidRequests(t *testing.T) {
-	s := newServer(newLoggerFromEnv(), nil)
-	t.Cleanup(func() { _ = s.Close() })
+	s := newTestServer(t)
 	client := newRecordingClient(t, s)
 
 	invalid := []struct {
@@ -91,8 +82,8 @@ func TestWorkspaceSearchFilesRejectsInvalidRequests(t *testing.T) {
 		params wire.WorkspaceSearchFilesParams
 	}{
 		{"neither threadId nor cwd", wire.WorkspaceSearchFilesParams{Query: "q"}},
-		{"both threadId and cwd", wire.WorkspaceSearchFilesParams{ThreadID: orchestration.NewThreadID(), Cwd: t.TempDir(), Query: "q"}},
-		{"unknown thread", wire.WorkspaceSearchFilesParams{ThreadID: orchestration.NewThreadID(), Query: "q"}},
+		{"both threadId and cwd", wire.WorkspaceSearchFilesParams{ThreadID: "missing-thread", Cwd: t.TempDir(), Query: "q"}},
+		{"unknown thread", wire.WorkspaceSearchFilesParams{ThreadID: "missing-thread", Query: "q"}},
 	}
 	for _, tc := range invalid {
 		var result wire.WorkspaceSearchFilesResult

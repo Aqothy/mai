@@ -18,8 +18,7 @@ import (
 
 func warmWorkspaceServer(b *testing.B, root string) *Server {
 	b.Helper()
-	s := newServer(newLoggerFromEnv(), nil)
-	b.Cleanup(func() { _ = s.Close() })
+	s := newTestServer(b)
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
 		result, err := s.searchWorkspaceFiles(context.Background(), wire.WorkspaceSearchFilesParams{Cwd: root, Query: "warmup"})

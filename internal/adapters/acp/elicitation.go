@@ -1,14 +1,13 @@
 // Elicitation for the ACP adapter: elicitation/create asks the user for
 // structured input (a form), a yes or no (a form with no fields), or consent
 // to open a URL. Requests are surfaced as provider-neutral user-input or
-// permission requests and answered through RespondToRequest, sharing the
-// permission request lifecycle.
+// permission requests and answered through Respond, sharing the permission
+// request lifecycle.
 package acp
 
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	acp "github.com/Aqothy/go-acp"
 	"github.com/Aqothy/go-acp/schema"
@@ -34,60 +33,14 @@ func (h *Instance) createElicitation(ctx context.Context, params json.RawMessage
 	if req.SessionID == nil {
 		return h.askDuringSignIn(ctx, asked, form), nil
 	}
-	sessionID := string(*req.SessionID)
-	// Like permission requests, re-enter the session's ordered stream first so
-	// every update the agent sent before asking is published before the question.
-	if stream := h.sessionStreamFor(sessionID); stream != nil {
-		if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
-			return schema.CreateElicitationResponse{Action: string(elicitation.ActionCancel)}, nil
-		}
-	}
-	state := h.permissionRequestState(sessionID)
-	requestID := "elicitation:" + state.threadID + ":" + newID()
-	requestCtx, cancel, pending := h.beginPermissionRequest(ctx, sessionID, requestID)
-	defer cancel()
-	defer h.endPermissionRequest(sessionID, requestID, pending)
-	pending.elicitation, pending.form = true, form
-	payload := provider.RuntimeEventPayload{Request: &asked}
 	if form.Confirms() {
-		payload.Args = append(json.RawMessage(nil), params...)
+		asked.Details = append(json.RawMessage(nil), params...)
 	}
-	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(newID()),
-		Provider:  DriverKind,
-		ThreadID:  state.threadID,
-		TurnID:    state.turnID,
-		Type:      provider.RuntimeEventRequestOpened,
-		RequestID: requestID,
-		CreatedAt: time.Now(),
-		Payload:   payload,
-	})
-
-	var response approvalResponse
-	select {
-	case response = <-pending.ch:
-	case <-requestCtx.Done():
+	response, answered := h.ask(ctx, string(*req.SessionID), "", asked, form, true)
+	if !answered {
+		return schema.CreateElicitationResponse{Action: string(elicitation.ActionCancel)}, nil
 	}
-	if response.action.ID == "" {
-		response = approvalResponse{action: provider.RequestAction{Decision: provider.ApprovalDecisionCancel}, elicited: elicitation.ActionCancel}
-	}
-	resp := elicitationResponse(response.elicited, response.content)
-	h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(newID()),
-		Provider:  DriverKind,
-		ThreadID:  state.threadID,
-		TurnID:    state.turnID,
-		Type:      provider.RuntimeEventRequestResolved,
-		RequestID: requestID,
-		CreatedAt: time.Now(),
-		Payload: provider.RuntimeEventPayload{
-			Decision:  response.action.Decision,
-			ActionID:  response.action.ID,
-			Cancelled: response.elicited == elicitation.ActionCancel,
-			Answers:   response.answers,
-		},
-	})
-	return resp, nil
+	return elicitationResponse(response.elicited, response.content), nil
 }
 
 // askDuringSignIn shows a request-scoped elicitation (one with no session,

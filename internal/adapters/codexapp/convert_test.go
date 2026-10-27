@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/provider/providertest"
 )
 
 func TestUserInputsFromTurnConvertsSkillsAndMedia(t *testing.T) {
-	input := provider.SendTurnInput{
-		Input: "Use $review, but not $reviewer or $disabled.",
+	input := provider.SendInput{
+		Text: "Use $review, but not $reviewer or $disabled.",
 		Attachments: []provider.Attachment{
 			{Kind: "image", MimeType: "image/png", Data: "aW1hZ2U="},
 			{Kind: "image", URI: "file:///tmp/a%20b.png"},
@@ -25,14 +26,14 @@ func TestUserInputsFromTurnConvertsSkillsAndMedia(t *testing.T) {
 		{Name: "disabled", Path: "/skills/disabled/SKILL.md", Enabled: false},
 	}
 
-	converted, err := userInputsFromTurn(input, skills)
+	converted, err := userInputs(input, skills)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(converted) != 5 {
 		t.Fatalf("converted input count = %d, want 5: %#v", len(converted), converted)
 	}
-	if converted[0].Type != "text" || converted[0].Text != input.Input || converted[0].TextElements == nil {
+	if converted[0].Type != "text" || converted[0].Text != input.Text || converted[0].TextElements == nil {
 		t.Fatalf("text input = %#v", converted[0])
 	}
 	if converted[1].Type != "skill" || converted[1].Name != "review" || converted[1].Path != "/skills/review/SKILL.md" {
@@ -70,25 +71,9 @@ func TestUserInputsRejectUnsupportedRemoteAndEmbeddedAttachments(t *testing.T) {
 		{Kind: "audio", URI: "https://example.test/audio.mp3"},
 		{Kind: "resource", URI: "file:///tmp/context.txt", Data: "context"},
 	} {
-		if _, err := userInputsFromTurn(provider.SendTurnInput{Attachments: []provider.Attachment{attachment}}, nil); err == nil {
+		if _, err := userInputs(provider.SendInput{Attachments: []provider.Attachment{attachment}}, nil); err == nil {
 			t.Fatalf("attachment %#v unexpectedly accepted", attachment)
 		}
-	}
-}
-
-func TestLiveUserMessageItemIsNotReemitted(t *testing.T) {
-	events := make(chan provider.RuntimeEvent, 1)
-	h := &Instance{
-		info:            provider.InstanceInfo{InstanceID: "codex-test", Name: "Codex", Driver: DriverKind},
-		emit:            func(event provider.RuntimeEvent) { events <- event },
-		sessionsByLocal: map[string]*sessionState{"local-thread": newSessionState("local-thread", "native-thread", "/tmp")},
-		localByNative:   map[string]string{"native-thread": "local-thread"},
-	}
-	h.emitItem("item/started", "native-thread", "native-turn", appItem{Type: "userMessage", ID: "user-item"}, 0, 0)
-	select {
-	case event := <-events:
-		t.Fatalf("live user message was reemitted: %#v", event)
-	default:
 	}
 }
 
@@ -97,24 +82,25 @@ func TestSetConfigOptionValidatesCatalogAndNormalizesEffortForModel(t *testing.T
 		{Model: "model-a", SupportedReasoningEfforts: []appReasoningEffortOption{{ReasoningEffort: "medium"}, {ReasoningEffort: "high"}}, DefaultReasoningEffort: "medium", IsDefault: true},
 		{Model: "model-b", SupportedReasoningEfforts: []appReasoningEffortOption{{ReasoningEffort: "low"}}, DefaultReasoningEffort: "low"},
 	}
-	session := newSessionState("local-thread", "native-thread", "/tmp")
+	h := &Instance{models: models, sessions: map[string]*sessionState{}}
+	session := h.sessionLocked("native-thread")
+	session.loaded = true
 	session.model = "model-a"
 	session.effort = "high"
-	h := &Instance{models: models, sessionsByLocal: map[string]*sessionState{"local-thread": session}}
 
-	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "local-thread", OptionID: "model", Value: "model-b"}); err != nil {
+	if err := h.Configure(context.Background(), "native-thread", provider.ConfigOptionSelection{OptionID: "model", Value: "model-b"}); err != nil {
 		t.Fatalf("set model: %v", err)
 	}
 	if session.model != "model-b" || session.effort != "low" {
 		t.Fatalf("normalized model/effort = %q/%q", session.model, session.effort)
 	}
-	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "local-thread", OptionID: "reasoning_effort", Value: "xhigh"}); err == nil {
+	if err := h.Configure(context.Background(), "native-thread", provider.ConfigOptionSelection{OptionID: "reasoning_effort", Value: "xhigh"}); err == nil {
 		t.Fatal("unsupported effort was accepted")
 	}
 	if session.effort != "low" {
 		t.Fatalf("rejected effort mutated session to %q", session.effort)
 	}
-	if err := h.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "local-thread", OptionID: "model", Value: "missing"}); err == nil {
+	if err := h.Configure(context.Background(), "native-thread", provider.ConfigOptionSelection{OptionID: "model", Value: "missing"}); err == nil {
 		t.Fatal("unsupported model was accepted")
 	}
 }
@@ -137,13 +123,23 @@ func TestProtocolDecodingToleratesUnknownFieldsAndItems(t *testing.T) {
 		t.Fatalf("reasoning content = %#v", reasoning.ReasoningContent)
 	}
 	unknown := thread.Turns[0].Items[1]
-	event, ok := runtimeEventFromItem("local-1", "local-turn-1", unknown, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
-	if !ok || event.Payload.ItemType != provider.ItemKindToolCall || event.Payload.ToolCall == nil || event.Payload.ToolCall.ProviderKind != "futureTool" {
-		t.Fatalf("unknown item fallback = %#v, ok = %v", event, ok)
+	entry := completedEntry(t, unknown)
+	if entry.Kind != provider.ItemKindToolCall || entry.Tool == nil || entry.Tool.ProviderKind != "futureTool" {
+		t.Fatalf("unknown item fallback = %#v", entry)
 	}
 }
 
-func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
+// completedEntry is the entry a completed item shows as.
+func completedEntry(t *testing.T, item appItem) provider.Entry {
+	t.Helper()
+	entries := itemEntries("turn", item, completedStatus(item), time.Unix(1, 0))
+	if len(entries) != 1 {
+		t.Fatalf("item %#v made entries %#v, want one", item, entries)
+	}
+	return entries[0]
+}
+
+func TestItemEntriesNormalizeTools(t *testing.T) {
 	exitCode := 0
 	duration := int64(250)
 	path := "/repo/README.md"
@@ -153,13 +149,10 @@ func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
 		Command: "rg needle", Cwd: "/repo", AggregatedOutput: ptr("match"), ExitCode: &exitCode, DurationMS: &duration,
 		CommandActions: []appCommandAction{{Type: "search", Path: &path, Query: &query}},
 	}
-	event, ok := runtimeEventFromItem("thread", "turn", command, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
-	if !ok {
-		t.Fatal("command did not convert")
-	}
-	call := event.Payload.ToolCall
-	if event.Payload.ItemType != provider.ItemKindCommandExecution || event.Payload.ItemStatus != provider.ItemStatusCompleted || call == nil {
-		t.Fatalf("command payload = %#v", event.Payload)
+	entry := completedEntry(t, command)
+	call := entry.Tool
+	if entry.Kind != provider.ItemKindCommandExecution || entry.Status != provider.ItemStatusCompleted || call == nil {
+		t.Fatalf("command entry = %#v", entry)
 	}
 	if call.Action != provider.ToolActionSearch || call.Command != "rg needle" || call.Query != "needle" || call.Cwd != "/repo" || call.Output != "match" || call.ExitCode == nil || *call.ExitCode != 0 {
 		t.Fatalf("command tool = %#v", call)
@@ -169,11 +162,11 @@ func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
 	fileItem := appItem{Type: "fileChange", ID: "patch-1", Status: "completed", Changes: []appFileUpdateChange{{
 		Path: "/repo/old.swift", Diff: "diff", Kind: appPatchChangeKind{Type: "update", MovePath: &movePath},
 	}}}
-	fileEvent, ok := runtimeEventFromItem("thread", "turn", fileItem, provider.RuntimeEventItemCompleted, time.Unix(2, 0))
-	if !ok || fileEvent.Payload.ToolCall == nil {
-		t.Fatalf("file event = %#v, ok = %v", fileEvent, ok)
+	fileEntry := completedEntry(t, fileItem)
+	if fileEntry.Tool == nil {
+		t.Fatalf("file entry = %#v", fileEntry)
 	}
-	changes := fileEvent.Payload.ToolCall.Changes
+	changes := fileEntry.Tool.Changes
 	if len(changes) != 1 || changes[0].Kind != provider.FileChangeMove || changes[0].MovePath != movePath {
 		t.Fatalf("file changes = %#v", changes)
 	}
@@ -182,7 +175,7 @@ func TestRuntimeEventFromItemNormalizesTools(t *testing.T) {
 // Only Codex's own parsed commandActions state an action: all read/listFiles
 // is read, all search is search, and anything mixed, unknown, or unparsed,
 // like every non-command item, leaves it empty.
-func TestRuntimeEventFromItemStatedActions(t *testing.T) {
+func TestItemEntriesStatedActions(t *testing.T) {
 	commands := func(types ...string) appItem {
 		item := appItem{Type: "commandExecution", ID: "cmd", Command: "cmd"}
 		for _, actionType := range types {
@@ -203,23 +196,21 @@ func TestRuntimeEventFromItemStatedActions(t *testing.T) {
 		{"unparsed", commands(), ""},
 		{"mcp", appItem{Type: "mcpToolCall", ID: "mcp", Server: "github", Tool: "search_issues"}, ""},
 	} {
-		event, ok := runtimeEventFromItem("thread", "turn", tc.item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
-		if !ok || event.Payload.ToolCall == nil || event.Payload.ToolCall.Action != tc.want {
-			t.Errorf("%s: tool call = %#v, want action %q", tc.name, event.Payload.ToolCall, tc.want)
+		if entry := completedEntry(t, tc.item); entry.Tool == nil || entry.Tool.Action != tc.want {
+			t.Errorf("%s: tool call = %#v, want action %q", tc.name, entry.Tool, tc.want)
 		}
 	}
 }
 
-func TestRuntimeEventFromItemNormalizesMCPResult(t *testing.T) {
+func TestItemEntriesNormalizeMCPResult(t *testing.T) {
 	result := json.RawMessage(`{"content":[{"type":"text","text":"done"},{"type":"image","data":"aW1n","mimeType":"image/png"},{"type":"resource_link","uri":"https://example.test/spec","name":"spec","title":"Protocol","description":"Reference","mimeType":"text/html","size":42,"annotations":{"audience":["assistant"],"priority":0.8,"lastModified":"2026-08-20T00:00:00Z","_meta":{"hint":"read"}},"_meta":{"source":"mcp"}}],"structuredContent":null}`)
 	item := appItem{
 		Type: "mcpToolCall", ID: "mcp-1", Status: "completed", Server: "docs", Tool: "lookup", Result: result,
 	}
-	event, ok := runtimeEventFromItem("thread", "turn", item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
-	if !ok || event.Payload.ToolCall == nil {
-		t.Fatalf("MCP event = %#v, ok = %v", event, ok)
+	call := completedEntry(t, item).Tool
+	if call == nil {
+		t.Fatal("MCP entry has no tool call")
 	}
-	call := event.Payload.ToolCall
 	if call.Namespace != "docs" || call.Name != "lookup" || call.Output != "done" {
 		t.Fatalf("MCP call = %#v", call)
 	}
@@ -234,40 +225,17 @@ func TestRuntimeEventFromItemNormalizesMCPResult(t *testing.T) {
 
 func TestImageGenerationUsesInlineBase64Attachment(t *testing.T) {
 	item := appItem{Type: "imageGeneration", ID: "image-1", Status: "completed", Result: json.RawMessage(`"aW1hZ2U="`)}
-	event, ok := runtimeEventFromItem("thread", "turn", item, provider.RuntimeEventItemCompleted, time.Unix(1, 0))
-	if !ok || event.Payload.ToolCall == nil || len(event.Payload.ToolCall.Attachments) != 1 {
-		t.Fatalf("image generation event = %#v, ok = %v", event, ok)
+	entry := completedEntry(t, item)
+	if entry.Tool == nil || len(entry.Tool.Attachments) != 1 {
+		t.Fatalf("image generation entry = %#v", entry)
 	}
-	attachment := event.Payload.ToolCall.Attachments[0]
+	attachment := entry.Tool.Attachments[0]
 	if attachment.Kind != "image" || attachment.Data != "aW1hZ2U=" || attachment.MimeType != "image/png" || attachment.URI != "" {
 		t.Fatalf("generated image attachment = %#v", attachment)
 	}
 }
 
-func TestCompletedTextEmitsOnlyTheMissingStableTail(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := &Instance{
-		emit:            func(event provider.RuntimeEvent) { events = append(events, event) },
-		sessionsByLocal: map[string]*sessionState{},
-		localByNative:   map[string]string{},
-	}
-	session := newSessionState("local-thread", "native-thread", "/tmp")
-	h.bindSessionLocked(session)
-	h.emitTextDelta(json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"message-1","delta":"partial"}`), provider.RuntimeContentAssistantText, "")
-	h.emitItem("item/completed", "native-thread", "native-turn", appItem{Type: "agentMessage", ID: "message-1", Status: "completed", Text: "partial answer"}, 0, 0)
-
-	var deltas []string
-	for _, event := range events {
-		if event.Type == provider.RuntimeEventContentDelta {
-			deltas = append(deltas, event.Payload.Delta)
-		}
-	}
-	if len(deltas) != 2 || deltas[0] != "partial" || deltas[1] != " answer" {
-		t.Fatalf("content deltas = %#v, want streamed prefix plus only the missing completed tail", deltas)
-	}
-}
-
-func TestReplayEventsPreservesTurnAndItemOrder(t *testing.T) {
+func TestHistoryTurnsKeepTurnAndItemOrder(t *testing.T) {
 	started := float64(100)
 	completed := float64(101)
 	output := "ok"
@@ -282,34 +250,19 @@ func TestReplayEventsPreservesTurnAndItemOrder(t *testing.T) {
 		},
 	}}}
 
-	events := replayEvents("local-thread", thread)
-	wantTypes := []provider.RuntimeEventType{
-		provider.RuntimeEventTurnStarted,
-		provider.RuntimeEventItemCompleted,
-		provider.RuntimeEventContentDelta,
-		provider.RuntimeEventItemCompleted,
-		provider.RuntimeEventItemStarted,
-		provider.RuntimeEventItemCompleted,
-		provider.RuntimeEventContentDelta,
-		provider.RuntimeEventItemCompleted,
-		provider.RuntimeEventTurnCompleted,
+	turns, _ := historyTurns(thread.Turns, time.Unix(90, 0))
+	if len(turns) != 1 || turns[0].Ref != "native-turn" || turns[0].State != provider.TurnCompleted || !turns[0].StartedAt.Equal(time.Unix(100, 0)) {
+		t.Fatalf("turns = %#v", turns)
 	}
-	if len(events) != len(wantTypes) {
-		t.Fatalf("event count = %d, want %d: %#v", len(events), len(wantTypes), events)
+	var got []string
+	for _, entry := range turns[0].Entries {
+		got = append(got, entry.Ref+" "+string(entry.Kind)+" "+entry.Text)
 	}
-	for index, want := range wantTypes {
-		if events[index].Type != want {
-			t.Fatalf("event[%d].Type = %q, want %q", index, events[index].Type, want)
-		}
-		if events[index].ThreadID != "local-thread" || events[index].TurnID != "native-turn" || events[index].CreatedAt.IsZero() {
-			t.Fatalf("event[%d] identity/timestamp = %#v", index, events[index])
-		}
+	if want := []string{"user user_message hello", "agent assistant_message answer", "command command_execution ", "reason reasoning thinking"}; !slices.Equal(got, want) {
+		t.Fatalf("entries = %q, want %q", got, want)
 	}
-	if events[1].Payload.Detail != "hello" || events[1].Payload.ClientMessageID != "maid:dispatch" || events[2].Payload.Delta != "answer" || events[6].Payload.Delta != "thinking" {
-		t.Fatalf("replay content = %#v", events)
-	}
-	if events[len(events)-1].Payload.TurnState != provider.RuntimeTurnCompleted || !events[len(events)-1].CreatedAt.Equal(time.Unix(101, 0)) {
-		t.Fatalf("turn completion = %#v", events[len(events)-1])
+	if turns[0].Entries[0].Delivery != "maid:dispatch" {
+		t.Fatalf("user entry = %#v, want the delivery its clientId names", turns[0].Entries[0])
 	}
 }
 
@@ -361,7 +314,7 @@ func TestSkillsFromResponseFallsBackToInterfaceDescriptionAndDeduplicates(t *tes
 }
 
 func TestTurnStateAndTimestampsAreUnknownTolerant(t *testing.T) {
-	if state, terminal := turnState("cancelled"); !terminal || state != provider.RuntimeTurnCancelled {
+	if state, terminal := turnState("cancelled"); !terminal || state != provider.TurnInterrupted {
 		t.Fatalf("cancelled state = %q, %v", state, terminal)
 	}
 	if state, terminal := turnState("futureStatus"); terminal || state != "" {
@@ -376,22 +329,18 @@ func TestTurnStateAndTimestampsAreUnknownTolerant(t *testing.T) {
 func ptr(value string) *string { return &value }
 
 func TestCommandOutputBeforeItemStartIsDropped(t *testing.T) {
-	var events []provider.RuntimeEvent
-	h := &Instance{
-		emit:            func(event provider.RuntimeEvent) { events = append(events, event) },
-		sessionsByLocal: map[string]*sessionState{},
-		localByNative:   map[string]string{},
+	events := providertest.NewRecorder()
+	h := &Instance{host: provider.Host{Emit: events.Emit}, sessions: map[string]*sessionState{}}
+	h.commandOutput(json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"cmd-1","delta":"early"}`))
+	if got := events.Snapshot(); len(got) != 0 {
+		t.Fatalf("output for an unknown item was emitted: %#v", got)
 	}
-	h.bindSessionLocked(newSessionState("local-thread", "native-thread", "/tmp"))
-	h.emitCommandOutput(json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"cmd-1","delta":"early"}`))
-	if len(events) != 0 {
-		t.Fatalf("output for an unknown item was emitted: %#v", events)
-	}
-	h.emitItem("item/started", "native-thread", "native-turn", appItem{Type: "commandExecution", ID: "cmd-1", Status: "inProgress", Command: "pwd"}, 0, 0)
-	h.emitCommandOutput(json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"cmd-1","delta":"/tmp"}`))
-	last := events[len(events)-1]
-	if last.Type != provider.RuntimeEventItemUpdated || last.Payload.ToolCall == nil || last.Payload.ToolCall.Output != "/tmp" || last.Payload.ToolCall.Name == "" {
-		t.Fatalf("output update after item start = %#v, want merged into the started snapshot", last)
+	h.item(false, "native-thread", "native-turn", appItem{Type: "commandExecution", ID: "cmd-1", Status: "inProgress", Command: "pwd"}, 0, 0)
+	h.commandOutput(json.RawMessage(`{"threadId":"native-thread","turnId":"native-turn","itemId":"cmd-1","delta":"/tmp"}`))
+	got := events.Snapshot()
+	last, ok := got[len(got)-1].Body.(provider.EntryUpserted)
+	if !ok || last.Entry.Tool == nil || last.Entry.Tool.Output != "/tmp" || last.Entry.Tool.Name == "" {
+		t.Fatalf("output update after item start = %#v, want merged into the started entry", got[len(got)-1])
 	}
 }
 

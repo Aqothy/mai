@@ -24,7 +24,7 @@ import (
 //   - the compaction summary is not a prompt, and history before the
 //     compaction stays;
 //   - a background task waking the CLI starts a turn without a prompt;
-//   - a title the user chose wins; a generated one is ignored.
+//   - a title the user chose wins in the session list.
 func TestReplayMatchesLiveConversation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	lines := []string{
@@ -64,39 +64,32 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	history, _ := transcriptHistory("s", "", transcript, false)
 	var turns []string
 	prompts := map[string][]string{}
-	states := map[string]provider.RuntimeTurnState{}
-	var failure, compactionTurn, title, text string
-	var plan []provider.PlanEntry
-	var background string
+	states := map[string]provider.TurnState{}
+	errors := map[string]string{}
+	var compactionTurn, text, background string
 	tools := 0
-	for _, event := range replayEventsFromTranscript("thread", transcript) {
-		switch {
-		case event.Type == provider.RuntimeEventTurnStarted:
-			turns = append(turns, event.TurnID)
-		case event.Type == provider.RuntimeEventTurnCompleted:
-			states[event.TurnID] = event.Payload.TurnState
-			if event.TurnID == "u3" {
-				failure = event.Payload.Message
+	for _, turn := range history {
+		turns = append(turns, turn.Ref)
+		states[turn.Ref], errors[turn.Ref] = turn.State, turn.Error
+		for _, entry := range turn.Entries {
+			switch {
+			case entry.Kind == provider.ItemKindUserMessage:
+				prompts[turn.Ref] = append(prompts[turn.Ref], entry.Text)
+			case entry.Kind == provider.ItemKindContextCompaction:
+				compactionTurn = turn.Ref
+			case entry.Ref == "bg":
+				background = turn.Ref + " " + string(entry.Status) + " " + entry.Tool.Output
+			case entry.Kind == provider.ItemKindCommandExecution && entry.Status == provider.ItemStatusCompleted:
+				tools++
+			case entry.Kind == provider.ItemKindAssistantMessage:
+				text += entry.Text
 			}
-		case event.Payload.ItemType == provider.ItemKindUserMessage:
-			prompts[event.TurnID] = append(prompts[event.TurnID], event.Payload.Detail)
-		case event.Payload.ItemType == provider.ItemKindContextCompaction:
-			compactionTurn = event.TurnID
-		case event.Type == provider.RuntimeEventItemCompleted && event.ItemID == "bg":
-			background = event.TurnID + " " + event.Payload.ToolCall.Output
-		case event.Type == provider.RuntimeEventItemCompleted && event.Payload.ItemType == provider.ItemKindCommandExecution:
-			tools++
-		case event.Type == provider.RuntimeEventContentDelta:
-			text += event.Payload.Delta
-		case event.Type == provider.RuntimeEventThreadMetadataUpdate:
-			title = event.Payload.Title
-		case event.Type == provider.RuntimeEventTurnPlanUpdated:
-			plan = event.Payload.PlanEntries
 		}
 	}
-	if !slices.Equal(turns, []string{"u2", "c1", "u3", "w1"}) {
+	if !slices.Equal(turns, []string{"u2", "c1", "u3", "wake:m3"}) {
 		t.Fatalf("turns = %q", turns)
 	}
 	want := map[string][]string{"u2": {"Fix it", "also add a test"}, "c1": {"/model sonnet"}, "u3": {"Try again"}}
@@ -105,11 +98,11 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 			t.Errorf("turn %s prompts = %q, want %q", turn, prompts[turn], prompt)
 		}
 	}
-	if len(prompts["w1"]) != 0 {
-		t.Errorf("wake-up turn prompts = %q, want none", prompts["w1"])
+	if len(prompts["wake:m3"]) != 0 {
+		t.Errorf("wake-up turn prompts = %q, want none", prompts["wake:m3"])
 	}
-	if states["u2"] != provider.RuntimeTurnInterrupted || states["u3"] != provider.RuntimeTurnFailed || failure != "API Error: Overloaded" || states["w1"] != provider.RuntimeTurnCompleted {
-		t.Errorf("turn states = %v, failure %q", states, failure)
+	if states["u2"] != provider.TurnInterrupted || states["u3"] != provider.TurnFailed || errors["u3"] != "API Error: Overloaded" || states["wake:m3"] != provider.TurnCompleted {
+		t.Errorf("turn states = %v, errors %q", states, errors)
 	}
 	if tools != 2 {
 		t.Errorf("completed tools = %d, want both parallel calls", tools)
@@ -117,17 +110,11 @@ func TestReplayMatchesLiveConversation(t *testing.T) {
 	if text != "The build passed." {
 		t.Errorf("assistant text = %q, want only the current conversation's", text)
 	}
-	if background != `u2 Background command "make test" completed` {
+	if background != `u2 completed Background command "make test" completed` {
 		t.Errorf("background command = %q", background)
-	}
-	if !slices.Equal(plan, []provider.PlanEntry{{Content: "Write the test", Status: provider.PlanEntryStatusInProgress}}) {
-		t.Errorf("plan = %#v", plan)
 	}
 	if compactionTurn != "u3" {
 		t.Errorf("compaction in turn %q, want u3", compactionTurn)
-	}
-	if title != "Chosen title" {
-		t.Errorf("replayed title = %q", title)
 	}
 	if summaryTitle, cwd := transcriptSummary(path); summaryTitle != "Chosen title" || cwd != "/work" {
 		t.Errorf("summary = %q, %q", summaryTitle, cwd)

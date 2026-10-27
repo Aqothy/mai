@@ -32,6 +32,7 @@ type toolInput struct {
 	Plan         string `json:"plan,omitempty"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Skill        string `json:"skill,omitempty"`
+	Message      string `json:"message,omitempty"`
 	Offset       *int   `json:"offset,omitempty"`
 }
 
@@ -124,6 +125,14 @@ func newToolState(name string, rawInput json.RawMessage) *toolState {
 	case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
 		// The plan tools surface as the turn's plan, not as timeline items.
 		state.itemKind = ""
+	case "SubagentHandback":
+		// A subagent the CLI runs in the background reports to its caller
+		// with this tool instead of a final message; the report is its
+		// answer.
+		if strings.TrimSpace(input.Message) != "" {
+			state.itemKind = provider.ItemKindAssistantMessage
+			state.text = input.Message
+		}
 	}
 	state.call = call
 	state.title = title
@@ -306,29 +315,29 @@ func toolResultContent(raw json.RawMessage) (string, []provider.Attachment) {
 	return strings.Join(parts, "\n"), attachments
 }
 
-func turnStateFromResult(result resultMessage) (provider.RuntimeTurnState, provider.StopReason, string) {
+func turnStateFromResult(result resultMessage) (provider.TurnState, provider.StopReason, string) {
 	if strings.Contains(result.TerminalReason, "aborted") {
-		return provider.RuntimeTurnInterrupted, "", ""
+		return provider.TurnInterrupted, "", ""
 	}
 	if result.Subtype == "error_max_turns" {
 		// The agent ran out of turns: a completed turn that ended early.
-		return provider.RuntimeTurnCompleted, provider.StopReasonMaxTurnRequests, ""
+		return provider.TurnCompleted, provider.StopReasonMaxTurnRequests, ""
 	}
 	if result.Subtype == "success" && !result.IsError {
 		switch result.StopReason {
 		case "max_tokens":
-			return provider.RuntimeTurnCompleted, provider.StopReasonMaxTokens, ""
+			return provider.TurnCompleted, provider.StopReasonMaxTokens, ""
 		case "refusal":
-			return provider.RuntimeTurnCompleted, provider.StopReasonRefusal, ""
+			return provider.TurnCompleted, provider.StopReasonRefusal, ""
 		default:
-			return provider.RuntimeTurnCompleted, "", ""
+			return provider.TurnCompleted, "", ""
 		}
 	}
 	message := resultErrorMessage(result)
 	if message == "" && strings.HasPrefix(result.Subtype, "error_") {
 		message = strings.TrimPrefix(result.Subtype, "error_")
 	}
-	return provider.RuntimeTurnFailed, "", message
+	return provider.TurnFailed, "", message
 }
 
 // resultErrorMessage extracts a user-facing error, skipping the CLI's internal
@@ -379,13 +388,13 @@ func costCurrency(cost float64) string {
 	return ""
 }
 
-// userContentBlocks converts one SendTurn into API user message content.
-func userContentBlocks(input provider.SendTurnInput) ([]map[string]any, error) {
-	blocks := make([]map[string]any, 0, 1+len(input.Attachments))
-	if strings.TrimSpace(input.Input) != "" {
-		blocks = append(blocks, map[string]any{"type": "text", "text": input.Input})
+// userContentBlocks converts a message into API user message content.
+func userContentBlocks(text string, attachments []provider.Attachment) ([]map[string]any, error) {
+	blocks := make([]map[string]any, 0, 1+len(attachments))
+	if strings.TrimSpace(text) != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": text})
 	}
-	for _, attachment := range input.Attachments {
+	for _, attachment := range attachments {
 		switch attachment.Kind {
 		case provider.AttachmentResourceLink:
 			// Claude Code resolves files mentioned as `@path` in the prompt
@@ -427,23 +436,6 @@ func slashCommandsFromSDK(commands []sdkCommand) []provider.SlashCommand {
 	return result
 }
 
-// approvalRequestType is the permission a tool asks for; questions ask for
-// none.
-func approvalRequestType(toolName string) provider.RuntimeRequestType {
-	switch toolName {
-	case "AskUserQuestion":
-		return ""
-	case "Bash":
-		return provider.RuntimeRequestCommandExecution
-	case "Edit", "Write", "NotebookEdit":
-		return provider.RuntimeRequestFileChange
-	case "Read":
-		return provider.RuntimeRequestFileRead
-	default:
-		return provider.RuntimeRequestDynamicToolCall
-	}
-}
-
 func approvalDetail(request controlRequestBody) string {
 	if reason := strings.TrimSpace(request.DecisionReason); reason != "" {
 		return reason
@@ -463,7 +455,7 @@ func approvalDetail(request controlRequestBody) string {
 // approvalResponse builds the control response for a pending request: a
 // permission decision, AskUserQuestion answers, a plan review, or an MCP
 // elicitation result.
-func approvalResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, error) {
+func approvalResponse(pending *pendingApproval, input provider.RequestAnswer) (map[string]any, error) {
 	switch {
 	case pending.isElicitation:
 		action, content, err := elicitation.Answer(pending.form, input.Action, input.Answers)
@@ -487,7 +479,7 @@ func approvalResponse(pending *pendingApproval, input provider.RespondToRequestI
 // questionResponse answers AskUserQuestion through updatedInput.answers, keyed
 // by question text, with several selections joined by ", ". Declining tells
 // the model without interrupting the turn.
-func questionResponse(pending *pendingApproval, input provider.RespondToRequestInput) (map[string]any, error) {
+func questionResponse(pending *pendingApproval, input provider.RequestAnswer) (map[string]any, error) {
 	if !input.Action.Submit {
 		return map[string]any{"behavior": "deny", "message": "The user declined to answer."}, nil
 	}
@@ -540,7 +532,7 @@ func planReviewRequest(rawInput json.RawMessage) provider.Request {
 
 // planReviewResponse approves the plan, or denies ExitPlanMode with the
 // user's feedback, if any, as the message the model reads.
-func planReviewResponse(pending *pendingApproval, input provider.RespondToRequestInput) map[string]any {
+func planReviewResponse(pending *pendingApproval, input provider.RequestAnswer) map[string]any {
 	if input.Action.ID == planApprove {
 		return permissionResponse(pending, "accept")
 	}

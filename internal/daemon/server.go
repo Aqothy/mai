@@ -1,20 +1,16 @@
 package daemon
 
 import (
-	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"slices"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/adapters/acp"
 	"github.com/Aqothy/maiD/internal/adapters/claudecode"
 	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
@@ -23,21 +19,6 @@ import (
 	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
-
-// openProviderInstance maps a configured provider driver to its adapter.
-// New drivers get a case here; providerservice supplies the runtime event sink.
-func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
-	switch spec.Driver {
-	case acp.DriverKind:
-		return acp.OpenInstance(ctx, spec, emit)
-	case codexapp.DriverKind:
-		return codexapp.OpenInstance(ctx, spec, emit)
-	case claudecode.DriverKind:
-		return claudecode.OpenInstance(ctx, spec, emit)
-	default:
-		return nil, fmt.Errorf("unsupported provider driver %q", spec.Driver)
-	}
-}
 
 type Server struct {
 	logger *slog.Logger
@@ -50,11 +31,8 @@ type Server struct {
 
 	providerService *providerservice.Service
 	acpRegistry     *acpRegistry
-	orchestration   *orchestration.Engine
-
-	metadataStore    *store.SQLite
-	threadMetaWriter *threadMetaWriter
-	importMu         sync.Mutex
+	engine          *orchestration.Engine
+	metadataStore   *store.SQLite
 
 	terminals *terminalRuntime
 
@@ -64,77 +42,72 @@ type Server struct {
 
 	pingInterval time.Duration
 
-	rpcMu                   sync.Mutex
-	rpcClients              map[string]*rpcClient
-	historyReplayCoalescing map[orchestration.ThreadID]struct{}
+	rpcMu      sync.Mutex
+	rpcClients map[string]*rpcClient
 
 	closeOnce sync.Once
 	closeErr  error
-	// fatalErr, guarded by mu, records an orchestration invariant violation;
-	// RunWebSocket returns it so main owns the process exit.
+	// fatalErr, guarded by mu, records the error that stopped the
+	// orchestration engine; RunWebSocket returns it so main owns the exit.
 	fatalErr error
 }
 
-func NewServer() *Server {
+// NewServer opens the data directory and starts the daemon's services.
+func NewServer() (*Server, error) {
 	logger := newLoggerFromEnv()
-	return newServer(logger, openMetadataStore(logger))
+	dir, err := maidDataDir()
+	if err != nil {
+		return nil, err
+	}
+	return newServer(logger, dir, drivers)
 }
 
-func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
-	return newServerWithProviders(logger, metadata, openProviderInstance)
-}
-
-// newServerWithProviders is newServer with the provider instances that
-// openInstance opens.
-func newServerWithProviders(logger *slog.Logger, metadata *store.SQLite, openInstance providerservice.InstanceFactory) *Server {
+// newServer starts the daemon on a data directory with drivers.
+func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverKind]provider.Driver) (*Server, error) {
+	metadata, err := store.Open(filepath.Join(dataDir, "maid.db"))
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("data directory opened", "path", dataDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		logger:                  logger,
-		pingInterval:            rpcPingInterval,
-		rpcClients:              make(map[string]*rpcClient),
-		historyReplayCoalescing: make(map[orchestration.ThreadID]struct{}),
-		ctx:                     ctx,
-		ctxCancel:               cancel,
-		metadataStore:           metadata,
-		acpRegistry:             newACPRegistry(),
+		logger:        logger,
+		pingInterval:  rpcPingInterval,
+		rpcClients:    make(map[string]*rpcClient),
+		ctx:           ctx,
+		ctxCancel:     cancel,
+		metadataStore: metadata,
+		acpRegistry:   newACPRegistry(),
 	}
-	var terminalMeta store.TerminalStore
-	if metadata != nil {
-		terminalMeta = metadata
-	}
-	s.terminals = newTerminalRuntime(terminalMeta, logger)
+	s.terminals = newTerminalRuntime(metadata, logger)
 	s.workspaceSearch = workspacesearch.NewService()
-	s.orchestration = orchestration.NewEngine()
-	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
-	if metadata != nil {
-		count, err := restorePersistedThreads(s.orchestration, metadata, metadata, logger)
-		if err != nil {
-			logger.Warn("restore persisted threads", "error", err)
-		} else {
-			logger.Info("restored persisted threads", "count", count)
+	// The engine and the providers need each other: the providers report to
+	// the engine, which they don't call until it has started.
+	var engine *orchestration.Engine
+	s.providerService = providerservice.New(drivers, metadata, func(id provider.InstanceID) provider.Mirror { return engine.Mirror(id) }, providerservice.Sink{
+		Event: func(instance provider.InstanceID, generation uint64, event provider.Event) {
+			engine.ProviderEvent(instance, generation, event)
+		},
+		Gone: func(instance provider.InstanceID, generation uint64) { engine.InstanceGone(instance, generation) },
+	}, logger)
+	defaultCwd, _ := os.Getwd()
+	engine, err = orchestration.Open(orchestration.Config{
+		DB: metadata.DB(), Providers: s.providerService, DataDir: dataDir, DefaultCwd: defaultCwd, Logger: logger,
+	})
+	if err != nil {
+		cancel()
+		_ = metadata.Close()
+		return nil, err
+	}
+	s.engine = engine
+	go s.watchEngine()
+	for _, spec := range []provider.InstanceSpec{
+		{InstanceID: "codex-app-server", Name: "Codex", Driver: codexapp.DriverKind},
+		{InstanceID: "claude-code", Name: "Claude Code", Driver: claudecode.DriverKind},
+	} {
+		if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+			logger.Warn("register provider", "provider", spec.InstanceID, "error", err)
 		}
-	}
-	ingestion := orchestration.NewProviderRuntimeIngestion(s.orchestration)
-	var providerOptions []providerservice.Option
-	if metadata != nil {
-		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
-		providerOptions = append(providerOptions, providerservice.WithPromptStore(metadata))
-		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
-	}
-	s.providerService = providerservice.New(openInstance, providerOptions...)
-	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
-		InstanceID: "codex-app-server",
-		Name:       "Codex",
-		Driver:     codexapp.DriverKind,
-	}); err != nil {
-		logger.Warn("register Codex app-server provider", "error", err)
-	}
-	if err := s.providerService.RegisterManifestInstance(provider.InstanceSpec{
-		InstanceID: "claude-code",
-		Name:       "Claude Code",
-		Driver:     claudecode.DriverKind,
-	}); err != nil {
-		logger.Warn("register Claude Code provider", "error", err)
 	}
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
@@ -145,17 +118,21 @@ func newServerWithProviders(logger *slog.Logger, metadata *store.SQLite, openIns
 			}
 		}
 	}
-	// The reactor registers itself as an engine listener.
-	orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, ingestion)
-	go ingestion.Run(ctx, s.providerService.Events())
-	s.orchestration.OnEvent(func(event orchestration.Event) {
-		s.logEvent(event)
-		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
-			s.threadMetaWriter.markDirty(event.ThreadID())
+	return s, nil
+}
+
+// watchEngine shuts the daemon down when the engine stops on its own: its
+// state can no longer be trusted, and main owns the process exit.
+func (s *Server) watchEngine() {
+	<-s.engine.Done()
+	if err := s.engine.Err(); err != nil {
+		s.mu.Lock()
+		if s.fatalErr == nil {
+			s.fatalErr = err
 		}
-		s.publishOrchestrationEvent(event)
-	})
-	return s
+		s.mu.Unlock()
+		go s.Close()
+	}
 }
 
 func newLoggerFromEnv() *slog.Logger {
@@ -169,78 +146,6 @@ func newLoggerFromEnv() *slog.Logger {
 		level = slog.LevelError
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-}
-
-// logEvent deliberately records only correlation metadata. Event payloads can
-// contain prompts, tool output, attachments, and secrets and do not belong in
-// routine daemon logs. The daemon intentionally retains no historical event
-// payloads; clients recover from authoritative snapshots.
-func (s *Server) logEvent(event orchestration.Event) {
-	// Runs on the engine worker for every event, including each streamed
-	// flush, so do not build the attribute slice unless it will be used.
-	if !s.logger.Enabled(context.Background(), slog.LevelDebug) {
-		return
-	}
-	attrs := []any{
-		"sequence", event.Sequence,
-		"event", event.Type,
-		"actor", event.Actor,
-		"thread", event.ThreadID(),
-	}
-	if event.CommandID != "" {
-		attrs = append(attrs, "command", event.CommandID)
-	}
-
-	// Streamed text and reasoning chunks are intentionally absent. They are
-	// high-volume, may contain private content, and their lifecycle boundaries
-	// are already represented by turn/session events.
-	switch event.Type {
-	case orchestration.EventThreadMessageSent:
-		return
-	case orchestration.EventThreadItemUpserted:
-		item := event.Payload.Item
-		if item == nil || item.TextDelta != "" {
-			return
-		}
-		attrs = append(attrs, "item", item.ID, "kind", item.Kind, "status", item.Status, "turn", item.TurnID)
-	case orchestration.EventThreadSessionStatusSet:
-		if session := event.Payload.Session; session != nil {
-			attrs = append(attrs, "provider", session.ProviderInstanceID, "status", session.Status, "turn", session.ActiveTurnID, "generation", session.ProviderGeneration)
-		}
-	case orchestration.EventThreadTurnStartRequested,
-		orchestration.EventThreadTurnInterruptRequested,
-		orchestration.EventThreadTurnInterruptConfirmed,
-		orchestration.EventThreadTurnInterruptFailed:
-		attrs = append(attrs, "turn", event.Payload.TurnID)
-	case orchestration.EventThreadApprovalOpened, orchestration.EventThreadApprovalResolved:
-		if approval := event.Payload.Approval; approval != nil {
-			attrs = append(attrs, "request", approval.RequestID, "turn", approval.TurnID, "kind", approval.RequestType, "decision", approval.Decision)
-		}
-	case orchestration.EventThreadPlanUpdated:
-		if plan := event.Payload.Plan; plan != nil {
-			attrs = append(attrs, "entries", len(plan.Entries))
-		}
-	case orchestration.EventThreadConfigOptionsUpdated:
-		attrs = append(attrs, "options", len(event.Payload.ConfigOptions))
-	case orchestration.EventThreadSlashCommandsUpdated:
-		attrs = append(attrs, "commands", len(event.Payload.SlashCommands))
-	case orchestration.EventThreadTokenUsageUpdated:
-		if usage := event.Payload.TokenUsage; usage != nil {
-			attrs = append(attrs, "usedTokens", usage.UsedTokens)
-		}
-	}
-	s.logger.Debug("orchestration event", attrs...)
-}
-
-// handleInvariantViolation preserves main's ownership of process exit while
-// using normal shutdown to kill every group-isolated provider process.
-func (s *Server) handleInvariantViolation(err *orchestration.InvariantViolationError) {
-	s.mu.Lock()
-	if s.fatalErr == nil {
-		s.fatalErr = err
-	}
-	s.mu.Unlock()
-	_ = s.Close()
 }
 
 // Close shuts the daemon down exactly once; concurrent callers block until the
@@ -264,8 +169,8 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	s.orchestration.Close()
 	s.providerService.Close()
+	s.engine.Close()
 	// Terminal shells never survive daemon shutdown; wait for every process
 	// group to be cleaned up before releasing clients and the store.
 	s.terminals.service.Close()
@@ -283,206 +188,8 @@ func (s *Server) doClose() error {
 		_ = client.conn.Close()
 		client.closeOutbound()
 	}
-
-	if s.threadMetaWriter != nil {
-		<-s.orchestration.Stopped()
-		s.threadMetaWriter.Close()
-	}
-	if s.metadataStore != nil {
-		_ = s.metadataStore.Close()
-	}
+	_ = s.metadataStore.Close()
 	return err
-}
-
-// ImportProviderSession persists an explicitly selected provider session and
-// installs its empty, replay-pending thread stub in the live engine. Import is
-// serialized so duplicate requests always observe the first completed stub.
-// settings' model, config selections and options become the route's resume
-// preferences.
-func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary, settings provider.StartSessionInput) (orchestration.ThreadID, bool, error) {
-	if s.metadataStore == nil {
-		return "", false, fmt.Errorf("provider session import requires metadata persistence")
-	}
-	if instanceID == "" || summary.SessionID == "" {
-		return "", false, fmt.Errorf("provider session import requires instanceId and session.sessionId")
-	}
-	info, err := s.providerService.Info(instanceID)
-	if err != nil {
-		return "", false, err
-	}
-	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
-		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
-	}
-	if len(summary.AdditionalDirectories) > 0 && !info.Capabilities.AdditionalDirectories {
-		return "", false, fmt.Errorf("provider does not support additional directories")
-	}
-
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
-
-	cwd, err := s.orchestration.ResolveThreadCwd(summary.Cwd)
-	if err != nil {
-		return "", false, err
-	}
-	summary.Cwd = cwd
-	additionalDirectories, err := s.orchestration.ResolveAdditionalDirectories(summary.AdditionalDirectories, cwd)
-	if err != nil {
-		return "", false, err
-	}
-	summary.AdditionalDirectories = additionalDirectories
-
-	now := time.Now()
-	updatedAt := now
-	if summary.UpdatedAt != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, summary.UpdatedAt); err == nil {
-			updatedAt = parsed
-		}
-	}
-	threadID := orchestration.NewThreadID()
-	startInput := provider.StartSessionInput{
-		ThreadID:              string(threadID),
-		ProviderInstanceID:    instanceID,
-		Cwd:                   summary.Cwd,
-		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
-		ModelSelection:        settings.ModelSelection,
-		ConfigSelections:      settings.ConfigSelections,
-		Options:               settings.Options,
-	}
-	meta := store.ThreadMeta{
-		ThreadID:              string(threadID),
-		Title:                 summary.Title,
-		Cwd:                   summary.Cwd,
-		AdditionalDirectories: append([]string(nil), summary.AdditionalDirectories...),
-		ProviderInstanceID:    instanceID,
-		ModelSelection:        settings.ModelSelection,
-		CreatedAt:             updatedAt,
-		UpdatedAt:             updatedAt,
-	}
-	route := store.RouteRecord{
-		InstanceID:        instanceID,
-		ProviderSessionID: summary.SessionID,
-		StartInput:        startInput,
-	}
-	persistedThreadID, imported, err := s.metadataStore.ImportThread(meta, route)
-	if err != nil {
-		return "", false, err
-	}
-	threadID = orchestration.ThreadID(persistedThreadID)
-	if !imported {
-		// Use the committed row rather than caller-supplied duplicate metadata.
-		// This also repairs live state after a prior import committed just as the
-		// daemon shut down.
-		metas, err := s.metadataStore.ListThreads()
-		if err != nil {
-			return "", false, err
-		}
-		metaIndex := slices.IndexFunc(metas, func(stored store.ThreadMeta) bool { return stored.ThreadID == persistedThreadID })
-		if metaIndex >= 0 {
-			meta = metas[metaIndex]
-		}
-		routes, err := s.metadataStore.LoadRoutes()
-		if err != nil {
-			return "", false, err
-		}
-		var foundRoute bool
-		route, foundRoute = routes[persistedThreadID]
-		if metaIndex < 0 || !foundRoute {
-			return "", false, fmt.Errorf("imported thread %q has incomplete persisted metadata", persistedThreadID)
-		}
-	}
-	startInput = route.StartInput
-	startInput.ThreadID = persistedThreadID
-	startInput.ProviderInstanceID = route.InstanceID
-	if err := s.providerService.RegisterImportedSession(persistedThreadID, route.InstanceID, route.ProviderSessionID, startInput); err != nil {
-		return "", false, err
-	}
-	// Once SQLite commits, finish live reconciliation even if the requesting
-	// client disconnects. A canceled RPC must not leave the durable import
-	// invisible until the next daemon restart.
-	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
-		ThreadID:              threadID,
-		Title:                 meta.Title,
-		Cwd:                   meta.Cwd,
-		AdditionalDirectories: append([]string(nil), meta.AdditionalDirectories...),
-		ProviderInstanceID:    meta.ProviderInstanceID,
-		ModelSelection:        meta.ModelSelection,
-		CreatedAt:             meta.CreatedAt,
-		UpdatedAt:             meta.UpdatedAt,
-	}); err != nil {
-		return "", false, err
-	}
-	return threadID, imported, nil
-}
-
-// ForkProviderThread forks a thread. The provider forks its native
-// conversation when it can, and the fork is committed through the ordinary
-// import path, so fork identity, persistence, and duplicate protection are
-// identical to provider-discovered sessions. Otherwise, and for a fork into
-// another agent, the fork is a draft that hands the conversation to a new
-// session as text.
-func (s *Server) ForkProviderThread(ctx context.Context, params wire.ProviderForkThreadParams) (wire.ProviderForkThreadResult, error) {
-	source, err := s.orchestration.ForkSource(params.SourceThreadID, params.ThroughTurnID, params.BeforeTurnID)
-	if err != nil {
-		return wire.ProviderForkThreadResult{}, err
-	}
-	target := cmp.Or(params.ProviderInstanceID, source.ProviderInstanceID)
-	if target == source.ProviderInstanceID && source.ThroughTurnID != "" {
-		switch threadID, err := s.forkNatively(ctx, params.SourceThreadID, source.Title, source.ThroughTurnID); {
-		case err == nil:
-			return wire.ProviderForkThreadResult{ThreadID: threadID}, nil
-		case !errors.Is(err, providerservice.ErrNoNativeFork):
-			return wire.ProviderForkThreadResult{}, err
-		}
-	}
-	draft := &wire.ForkDraft{
-		SourceTitle:           source.Title,
-		ProviderInstanceID:    target,
-		Cwd:                   source.Cwd,
-		AdditionalDirectories: source.AdditionalDirectories,
-		ForkContext:           source.Conversation,
-	}
-	// Settings belong to the source's agent; another starts with its own.
-	if target == source.ProviderInstanceID {
-		draft.ConfigSelections = source.ConfigSelections
-	}
-	return wire.ProviderForkThreadResult{Draft: draft}, nil
-}
-
-func (s *Server) forkNatively(ctx context.Context, sourceThreadID orchestration.ThreadID, sourceTitle, throughTurnID string) (orchestration.ThreadID, error) {
-	if s.metadataStore == nil {
-		return "", fmt.Errorf("provider session fork requires metadata persistence")
-	}
-	fork, err := s.providerService.ForkSession(ctx, string(sourceThreadID), throughTurnID)
-	if err != nil {
-		return "", err
-	}
-	if fork.Summary.Title == "" {
-		fork.Summary.Title = sourceTitle + " (fork)"
-	}
-	threadID, _, err := s.ImportProviderSession(ctx, fork.InstanceID, fork.Summary, fork.Settings)
-	if err != nil {
-		s.cleanupUnpersistedProviderFork(ctx, fork.InstanceID, fork.Summary.SessionID)
-		return "", err
-	}
-	return threadID, nil
-}
-
-func (s *Server) cleanupUnpersistedProviderFork(ctx context.Context, instanceID provider.InstanceID, sessionID string) {
-	routes, err := s.metadataStore.LoadRoutes()
-	if err != nil {
-		s.logger.Warn("inspect failed provider fork import", "provider", instanceID, "session", sessionID, "error", err)
-		return
-	}
-	for _, route := range routes {
-		if route.InstanceID == instanceID && route.ProviderSessionID == sessionID {
-			return
-		}
-	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := s.providerService.DeleteSession(cleanupCtx, instanceID, sessionID); err != nil {
-		s.logger.Warn("delete unpersisted provider fork", "provider", instanceID, "session", sessionID, "error", err)
-	}
 }
 
 // authenticateProvider signs in to a provider. A provider whose sign-in is an
@@ -517,7 +224,7 @@ const providerIdlePollInterval = time.Second
 func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID) {
 	ticker := time.NewTicker(providerIdlePollInterval)
 	defer ticker.Stop()
-	for s.orchestration.ProviderTurnRunning(instanceID) {
+	for s.engine.InstanceBusy(s.ctx, instanceID) {
 		select {
 		case <-s.ctx.Done():
 			return

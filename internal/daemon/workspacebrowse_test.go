@@ -10,8 +10,7 @@ import (
 )
 
 func TestBrowseWorkspaceDirectoriesRPCAndValidation(t *testing.T) {
-	server := newServer(newLoggerFromEnv(), nil)
-	t.Cleanup(func() { _ = server.Close() })
+	server := newTestServer(t)
 	client := newRecordingClient(t, server)
 	root := t.TempDir()
 	for _, name := range []string{"zeta", "Alpha", ".hidden"} {
