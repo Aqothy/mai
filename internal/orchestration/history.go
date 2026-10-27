@@ -27,17 +27,6 @@ func (e *Engine) catchUp(s *step, thread *threadState) chan struct{} {
 	return done
 }
 
-// releaseSyncs ends the opens waiting for the thread's history reads.
-func (e *Engine) releaseSyncs(s *step, thread *threadState) {
-	waiting := thread.caughtUp
-	thread.caughtUp = nil
-	s.after(func() {
-		for _, done := range waiting {
-			close(done)
-		}
-	})
-}
-
 func (e *Engine) readingHistory(thread *threadState) bool {
 	return slices.ContainsFunc(thread.participants, func(id ParticipantID) bool { return e.participants[id].reconciling })
 }
@@ -80,7 +69,13 @@ func (e *Engine) applyHistory(s *step, id ParticipantID, session string, page pr
 	participant.reconciling = false
 	thread := e.threads[participant.Thread]
 	if !e.readingHistory(thread) {
-		e.releaseSyncs(s, thread)
+		waiting := thread.caughtUp
+		thread.caughtUp = nil
+		s.after(func() {
+			for _, done := range waiting {
+				close(done)
+			}
+		})
 	}
 	if err != nil {
 		e.logger.Info("session history unavailable; showing the cache", "thread", thread.ID, "session", session, "error", err)

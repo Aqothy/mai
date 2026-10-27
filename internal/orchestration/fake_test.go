@@ -29,9 +29,8 @@ type fakeInstance struct {
 	sessions map[string]*fakeSession
 	live     map[string]bool
 	opened   int
-	// openGate, while set, holds Open until closed; historyGate, History.
-	openGate    chan struct{}
-	historyGate chan struct{}
+	// openGate, while set, holds Open until closed.
+	openGate chan struct{}
 	// onSend runs a sent message; the default answers it and ends the turn.
 	onSend func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error)
 	// received is every message sent, in order.
@@ -212,17 +211,7 @@ func (f *fakeInstance) Configure(context.Context, string, provider.ConfigOptionS
 	return nil
 }
 
-func (f *fakeInstance) History(ctx context.Context, session string, _ provider.Workspace, after provider.Marker) (provider.HistoryPage, error) {
-	f.mu.Lock()
-	gate := f.historyGate
-	f.mu.Unlock()
-	if gate != nil {
-		select {
-		case <-gate:
-		case <-ctx.Done():
-			return provider.HistoryPage{}, ctx.Err()
-		}
-	}
+func (f *fakeInstance) History(_ context.Context, session string, _ provider.Workspace, after provider.Marker) (provider.HistoryPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	native := f.sessions[session]

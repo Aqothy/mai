@@ -320,41 +320,6 @@ func TestProviderSubagentIsAChildThread(t *testing.T) {
 	}
 }
 
-// Deleting a chat while its history is read releases the open waiting on
-// the read at once, and the read's late result changes nothing.
-func TestDeletingAChatWhileItsHistoryIsReadIsSafe(t *testing.T) {
-	claude := newFakeInstance("claude", "Claude")
-	h := newHarness(t, claude)
-	chat := h.createThread("claude", "hello")
-	h.settledTurns(chat.Thread, 1)
-	h.restart()
-	gate := make(chan struct{})
-	claude.mu.Lock()
-	claude.historyGate = gate
-	claude.mu.Unlock()
-	synced := make(chan error, 1)
-	go func() { synced <- h.engine.Sync(context.Background(), chat.Thread) }()
-	h.eventually("the read to start", func() bool {
-		reading, err := call(context.Background(), h.engine, func(s *step) (bool, error) {
-			thread := h.engine.threads[chat.Thread]
-			return thread != nil && h.engine.readingHistory(thread), nil
-		})
-		return err == nil && reading
-	})
-	h.do(DeleteThread{Thread: chat.Thread})
-	select {
-	case err := <-synced:
-		if err != nil {
-			t.Fatalf("sync = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the open waited out its timeout on a deleted chat")
-	}
-	close(gate)
-	// The read's result lands on a deleted chat; the engine takes commands.
-	h.settledTurns(h.createThread("claude", "still here").Thread, 1)
-}
-
 // An adapter whose mapping changed rebuilds a cached session from its
 // native history on the next open, before the chat shows, keeping what maiD
 // itself recorded.

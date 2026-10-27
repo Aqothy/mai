@@ -559,7 +559,6 @@ func (e *Engine) deleteThread(s *step, actor Actor, id ThreadID) error {
 		}
 		delete(e.threads, victim.ID)
 		e.forgetWaits(victim.ID)
-		e.releaseSyncs(s, victim)
 	}
 	if parent := e.threads[thread.Origin.Parent]; parent != nil {
 		parent.children = slices.DeleteFunc(parent.children, func(child ThreadID) bool { return child == id })
