@@ -55,13 +55,8 @@ struct ChatView: View {
         let promptCompletion = currentPromptCompletion
 
         Group {
-            if let errorMessage = store.selectedThreadLoadErrorMessage {
+            if let errorMessage = store.selectedThreadLoadErrorMessage, store.selectedThread == nil {
                 ThreadLoadErrorView(store: store, errorMessage: errorMessage)
-            } else if let errorMessage = store.selectedThreadHistoryRestoreErrorMessage {
-                ThreadLoadErrorView(store: store, errorMessage: errorMessage)
-            } else if store.isSelectedThreadRestoringHistory {
-                ProgressView("Restoring Chat…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let thread = store.selectedThread,
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
@@ -82,8 +77,8 @@ struct ChatView: View {
                         )
                         .environment(
                             \.attachmentLoader,
-                            ChatTranscriptAttachmentLoader(threadID: thread.id) { [store, threadID = thread.id] attachmentID in
-                                try await store.attachmentData(threadID: threadID, attachmentID: attachmentID)
+                            ChatTranscriptAttachmentLoader(threadID: thread.id) { [store] attachmentID in
+                                try await store.attachmentData(attachmentID: attachmentID)
                             }
                         )
                     } else {
@@ -141,7 +136,8 @@ struct ChatView: View {
                     annotationModel: annotationModel,
                     scrollState: scrollState,
                     promptText: promptText,
-                    promptCompletion: promptCompletion
+                    promptCompletion: promptCompletion,
+                    openThread: openThread
                 )
             )
         )
@@ -219,13 +215,13 @@ struct ChatView: View {
     /// Projects the timeline incrementally: the session invalidates the
     /// projection per event, so steady-state streaming reprojects only the
     /// changed suffix instead of re-walking the whole transcript.
-    private func projectedSections(for thread: Thread)
+    private func projectedSections(for thread: ThreadDetail)
         -> [ChatTimelineLayout.Section]
     {
         guard let projection = store.selectedThreadTimelineProjection else {
-            return ChatTimelineLayout.sections(timeline: thread.timeline)
+            return ChatTimelineLayout.sections(turns: thread.turns)
         }
-        return projection.project(thread.timeline)
+        return projection.project(thread.turns)
     }
 
     /// The rows of the first mounted page, from a full walk of `thread`.
@@ -234,15 +230,13 @@ struct ChatView: View {
     /// consuming the projection's watermark against a stale timeline would
     /// leave the mounted timeline showing stale sections.
     private static func initialPageRows(
-        of thread: Thread
+        of thread: ThreadDetail
     ) -> [ChatTimelineRowModel] {
         ChatTimelineLayout.rows(
             sections: ChatTimeline.initialSections(
-                in: ChatTimelineLayout.sections(timeline: thread.timeline)
+                in: ChatTimelineLayout.sections(turns: thread.turns)
             ),
-            streamingTurnID: streamingTurnID(of: thread),
-            latestTurn: thread.latestTurn,
-            previousTurns: thread.previousTurns ?? [],
+            requests: thread.requests.map(ChatRequest.init(open:)),
             expandedSectionIDs: []
         )
     }
@@ -251,7 +245,7 @@ struct ChatView: View {
     /// perform is already cached, so the timeline can mount without a warm
     /// pass. Only cache lookups run here; nothing parses.
     private static func isInitialPagePrimed(
-        thread: Thread,
+        thread: ThreadDetail,
         segmentCache: ChatMarkdownSegmentCache
     ) -> Bool {
         let pageRows = initialPageRows(of: thread)
@@ -298,7 +292,7 @@ struct ChatView: View {
     /// timeline's first body runs. Without this, every settled message on a
     /// cold open would parse synchronously during view construction.
     private func warmInitialPage(
-        thread: Thread,
+        thread: ThreadDetail,
         segmentCache: ChatMarkdownSegmentCache
     ) async {
         // The rendered rows are only needed by `prepare`'s layout pass; the
@@ -311,17 +305,17 @@ struct ChatView: View {
     }
 
     private func chatTimeline(
-        thread: Thread,
+        thread: ThreadDetail,
         segmentCache: ChatMarkdownSegmentCache,
         textLayoutStore: ChatTextLayoutStore
     ) -> some View {
         ChatTimeline(
             threadID: thread.id,
             sections: projectedSections(for: thread),
-            timelineEntryCount: thread.timeline.count,
+            requests: thread.requests.map(ChatRequest.init(open:)),
+            timelineEntryCount: thread.turns.reduce(thread.turns.count) { $0 + $1.entries.count },
+            hasOlderTurns: thread.older != nil,
             plan: thread.plan,
-            latestTurn: thread.latestTurn,
-            previousTurns: thread.previousTurns ?? [],
             streamingTurnID: Self.streamingTurnID(of: thread),
             segmentCache: segmentCache,
             store: store,
@@ -342,32 +336,25 @@ struct ChatView: View {
         }
     }
 
-    private static func streamingTurnID(of thread: Thread) -> String? {
-        thread.latestTurn?.turnState == .running
-            ? thread.latestTurn?.turnID
-            : nil
+    private static func streamingTurnID(of thread: ThreadDetail) -> String? {
+        thread.runningTurn?.id
     }
 
-    /// Forks the open chat and opens the fork.
+    /// Opens a new-chat draft that forks the open chat.
     private var forkAction: ChatForkAction? {
-        guard let chatModel, let openThread, let openDraft else { return nil }
-        let agentID = store.selectedThread?.providerInstanceID
+        guard let chatModel, let openDraft else { return nil }
+        let agentID = store.selectedThread?.addressee?.instance
         return ChatForkAction(otherAgents: store.availableProviders.filter { $0.id != agentID }) { point, agent, prompt in
             Task {
-                switch await chatModel.fork(at: point, into: agent, editing: prompt) {
-                case .thread(let threadID):
-                    openThread(threadID)
-                case .draft:
+                if await chatModel.fork(at: point, into: agent, editing: prompt) {
                     openDraft()
-                case nil:
-                    break
                 }
             }
         }
     }
 
     private var selectedThreadTitle: String {
-        if let title = store.selectedThread?.title {
+        if let title = store.selectedThread?.summary.title {
             return title
         }
         return store.selectedThreadTitle ?? ""
@@ -409,18 +396,42 @@ private struct ChatComposerStack: View {
     let scrollState: ChatScrollState
     let promptText: Binding<String>
     let promptCompletion: PromptCompletionModel
+    let openThread: ((String) -> Void)?
 
     var body: some View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
 
         VStack(alignment: .leading) {
-            if let chatModel, chatModel.showsFailedTurnRetry {
-                ChatFailedTurnRetryView(model: chatModel)
+            if chatModel != nil, let openThread, let thread = store.selectedThread {
+                let origin = thread.summary.origin
+                let parent = origin.parent.flatMap { id in store.threads.first { $0.id == id } }
+                let forkedFrom = origin.forkedFrom.flatMap { fork in store.threads.first { $0.id == fork.thread } }
+                if parent != nil || forkedFrom != nil || !thread.children.isEmpty {
+                    ChatThreadTreeBar(parent: parent, forkedFrom: forkedFrom, children: thread.children, openThread: openThread)
+                }
+            }
+
+            if let chatModel, chatModel.failedTurnID != nil {
+                ChatFailedTurnView(model: chatModel)
             } else if let reason = chatModel?.stopReason {
                 ChatTurnStopNoticeView(reason: reason)
             }
 
-            if chatModel != nil, let goal = state.session?.goal {
+            if let chatModel, let hold = state.hold {
+                ChatHoldView(model: chatModel, hold: hold)
+            }
+
+            if chatModel != nil, state.exists, !state.acceptsInput {
+                Label("The agent that started this subagent directs it.", systemImage: "person.2")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: ChatContentMetrics.maximumWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
+
+            if chatModel != nil, let goal = state.participant?.goal {
                 ChatGoalStatusView(goal: goal)
             }
 
@@ -437,7 +448,7 @@ private struct ChatComposerStack: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal)
                 .padding(.bottom, 10)
-            } else if let chatModel, !chatModel.queuedPrompts.isEmpty {
+            } else if let chatModel, state.hasQueue {
                 ChatPromptQueueView(model: chatModel)
             }
 
@@ -445,11 +456,11 @@ private struct ChatComposerStack: View {
                 text: promptText,
                 isEnabled: chatModel == nil
                     ? draftModel.isPromptEnabled
-                    : state.exists && chatModel?.isPromptEnabled == true,
+                    : state.acceptsInput && chatModel?.isPromptEnabled == true,
                 focusID: chatModel == nil ? draftModel.promptFocusID : nil,
                 canSend: chatModel == nil
                     ? draftModel.canSend
-                    : state.exists && chatModel?.canSend == true,
+                    : state.acceptsInput && chatModel?.canSend == true,
                 isSending: isSendingNow,
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
@@ -469,8 +480,8 @@ private struct ChatComposerStack: View {
                     Task { await draftModel.send() }
                 }
             } stop: {
-                if let chatModel, let turnID = state.turnID {
-                    Task { await chatModel.interrupt(turnID: turnID) }
+                if let chatModel, state.isRunning {
+                    Task { await chatModel.interrupt() }
                 }
             } removeAttachment: { id in
                 if let chatModel {
@@ -509,7 +520,7 @@ private struct ChatComposerStack: View {
             } trailingControls: {
                 if let chatModel, state.exists {
                     ChatComposerControlsView(
-                        session: state.session,
+                        participant: state.participant,
                         model: chatModel
                     )
                 } else if chatModel == nil {
@@ -530,7 +541,7 @@ private struct ChatComposerStack: View {
     private var supportsImageAttachments: Bool {
         if chatModel != nil {
             return store.promptContentCapabilities(
-                for: store.selectedThread?.providerInstanceID
+                for: store.selectedThread?.addressee?.instance
             )?.image == true
         }
         return draftModel.supportsImageAttachments
@@ -543,7 +554,9 @@ private struct ChatComposerStack: View {
     }
 }
 
-private struct ChatFailedTurnRetryView: View {
+/// A failed turn's error. The agent's session keeps the message and what it
+/// did before failing, so what comes next is the person's to write.
+private struct ChatFailedTurnView: View {
     let model: ChatPromptModel
 
     @State private var signIn: ChatSignInTarget?
@@ -565,14 +578,6 @@ private struct ChatFailedTurnRetryView: View {
                     signIn = ChatSignInTarget(id: providerID)
                 }
             }
-
-            Button(
-                model.isRetryingFailedTurn ? "Retrying…" : "Retry",
-                systemImage: "arrow.clockwise"
-            ) {
-                Task { await model.retryFailedTurn() }
-            }
-            .disabled(!model.canRetryFailedTurn)
         }
         .frame(maxWidth: ChatContentMetrics.maximumWidth)
         .frame(maxWidth: .infinity)
@@ -584,65 +589,11 @@ private struct ChatFailedTurnRetryView: View {
     }
 }
 
-/// Under a message that never reached the agent: why, and a way to send the
-/// same message again.
-private struct ChatUndeliveredMessageRow: View {
-    let message: Message
-    let threadID: String
-    let store: ThreadStore
-
-    @State private var isRetrying = false
-    @State private var retryError: String?
-    @State private var signIn: ChatSignInTarget?
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Spacer(minLength: 0)
-
-            Label {
-                Text("Not delivered: \(retryError ?? message.deliveryError ?? "unknown error")")
-                    .lineLimit(3)
-            } icon: {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(.red)
-            }
-            .foregroundStyle(.secondary)
-
-            if let providerID = store.signedOutProviderID(for: threadID) {
-                Button("Sign In") { signIn = ChatSignInTarget(id: providerID) }
-            }
-
-            Button(isRetrying ? "Retrying…" : "Retry", systemImage: "arrow.clockwise") {
-                Task { await retry() }
-            }
-            .disabled(isRetrying || store.connectionState != .connected)
-        }
-        .font(.footnote)
-        .buttonStyle(.borderless)
-        .padding(.bottom, 6)
-        .task(id: message.id) { await store.refreshProvidersAfterFailure() }
-        .sheet(item: $signIn) { ChatProviderSignInSheet(providerID: $0.id, store: store) }
-    }
-
-    private func retry() async {
-        isRetrying = true
-        defer { isRetrying = false }
-        do {
-            try await store.retryMessage(threadID: threadID, messageID: message.id)
-            retryError = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            retryError = error.localizedDescription
-        }
-    }
-}
-
 /// Stops a background task, such as a command run in the background. Sending
 /// the stop does not end the task; the item's own update does, which removes
 /// the button, so a stop that did not take can be sent again.
 private struct ChatStopBackgroundItemButton: View {
-    let itemID: String
+    let ref: String
     let threadID: String
     let store: ThreadStore
 
@@ -670,7 +621,7 @@ private struct ChatStopBackgroundItemButton: View {
         isStopping = true
         defer { isStopping = false }
         do {
-            try await store.stopItem(threadID: threadID, itemID: itemID)
+            try await store.stopItem(threadID: threadID, ref: ref)
             errorMessage = nil
         } catch is CancellationError {
             return
@@ -707,25 +658,30 @@ private struct ChatProviderSignInSheet: View {
     }
 }
 
-/// The composer needs a handful of session fields, not the thread's entire
-/// value-typed timeline. Capturing this projection in its view-builder
-/// closures keeps the store's timeline buffer uniquely owned while text
-/// streams into its final entry.
+/// The composer needs a handful of thread fields, not the thread's turns.
+/// Capturing this projection in its view-builder closures keeps the store's
+/// turns uniquely owned while text streams into the running one.
 private struct ChatComposerThreadState {
     let exists: Bool
-    let turnID: String?
+    /// A native subagent its provider gives no input to only shows what its
+    /// parent agent has it do.
+    let acceptsInput: Bool
     let isRunning: Bool
-    let session: SessionBinding?
+    let hold: MaidHold?
+    let participant: ParticipantView?
     let slashCommands: [SlashCommand]
     let skills: [Skill]
+    let hasQueue: Bool
 
-    init(thread: Thread?) {
+    init(thread: ThreadDetail?) {
         exists = thread != nil
-        turnID = thread?.latestTurn?.turnID
-        isRunning = thread?.latestTurn?.turnState == .running
-        session = thread?.session
-        slashCommands = thread?.session?.slashCommands ?? []
-        skills = thread?.session?.skills ?? []
+        acceptsInput = thread?.summary.origin.acceptsInput == true
+        isRunning = thread?.status == .running
+        hold = thread?.summary.holdReason
+        participant = thread?.addressee
+        slashCommands = participant?.commands ?? []
+        skills = participant?.skills ?? []
+        hasQueue = thread?.queue.isEmpty == false
     }
 }
 
@@ -844,7 +800,7 @@ nonisolated enum ChatTimelineMetrics {
     }
 
     static func proseTextWidth(role: String, in rowWidth: CGFloat) -> CGFloat {
-        guard role == MaidMessageRole.user.rawValue else { return rowWidth }
+        guard role == ChatRole.user.rawValue else { return rowWidth }
         return max(0, rowWidth - 2 * userBubbleHorizontalPadding)
     }
 }
@@ -900,10 +856,12 @@ struct ChatTimeline: View {
 
     let threadID: String
     let sections: [ChatTimelineLayout.Section]
+    /// Requests still open, shown with their turns.
+    let requests: [ChatRequest]
     let timelineEntryCount: Int
-    let plan: Plan?
-    let latestTurn: Turn?
-    let previousTurns: [Turn]
+    /// Whether the daemon has turns before the loaded ones.
+    let hasOlderTurns: Bool
+    let plan: [PlanEntry]
     let streamingTurnID: String?
     let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
@@ -952,14 +910,13 @@ struct ChatTimeline: View {
         let _ = settledPreparationGeneration
         let settlingTurnID = streamingContinuity.settlingTurnID(
             streamingTurnID: streamingTurnID,
-            latestTurnID: latestTurn?.turnID
+            latestTurnID: sections.last?.id
         )
         let effectiveStreamingTurnID = streamingTurnID ?? settlingTurnID
         let timelineRows = ChatTimelineLayout.rows(
             sections: loadedSections,
-            streamingTurnID: effectiveStreamingTurnID,
-            latestTurn: latestTurn,
-            previousTurns: previousTurns,
+            requests: requests,
+            liveTurnID: effectiveStreamingTurnID,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         let rows = Self.renderRows(
@@ -967,7 +924,7 @@ struct ChatTimeline: View {
             streamingTurnID: effectiveStreamingTurnID,
             segmentCache: segmentCache
         )
-        let hasEarlierSections = loadedSections.first?.id != sections.first?.id
+        let hasEarlierSections = loadedSections.first?.id != sections.first?.id || hasOlderTurns
         let preparationKey = ChatTimelinePreparationKey(
             timelineEntryCount: timelineEntryCount,
             streamingTurnID: streamingTurnID,
@@ -1118,9 +1075,8 @@ struct ChatTimeline: View {
                     ? timelineRows
                     : ChatTimelineLayout.rows(
                         sections: loadedSections,
-                        streamingTurnID: streamingTurnID,
-                        latestTurn: latestTurn,
-                        previousTurns: previousTurns,
+                        requests: requests,
+                        liveTurnID: streamingTurnID,
                         expandedSectionIDs: foldModel.expandedSectionIDs
                     )
                 await Self.prepare(
@@ -1394,7 +1350,7 @@ struct ChatTimeline: View {
                     .listRowSeparator(.hidden)
             }
 
-            if !hasEarlierSections, let plan, !plan.entries.isEmpty {
+            if !hasEarlierSections, !plan.isEmpty {
                 ChatPlanRow(plan: plan)
                     .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
                     .frame(
@@ -1500,7 +1456,10 @@ struct ChatTimeline: View {
                     loadedSections: loadedSections,
                     rowWidth: rowWidth
                 )
-            else { return }
+            else {
+                await loadOlderTurns(loadedSections: loadedSections)
+                return
+            }
 
             // The preserver needs the exact number of rows entering above the
             // current anchor: the page's rows plus the change in leading
@@ -1512,12 +1471,12 @@ struct ChatTimeline: View {
             )
             let oldLeadingRowCount = hasEarlierSections
                 ? 1
-                : (plan?.entries.isEmpty == false ? 1 : 0)
+                : (plan.isEmpty ? 0 : 1)
             let hasEarlierSectionsAfterLoad =
-                page.newOldestSectionID != sections.first?.id
+                page.newOldestSectionID != sections.first?.id || hasOlderTurns
             let newLeadingRowCount = hasEarlierSectionsAfterLoad
                 ? 1
-                : (plan?.entries.isEmpty == false ? 1 : 0)
+                : (plan.isEmpty ? 0 : 1)
             let leadingRowCount = pageRows.count
                 + newLeadingRowCount - oldLeadingRowCount
 
@@ -1546,7 +1505,10 @@ struct ChatTimeline: View {
                     loadedSections: loadedSections,
                     rowWidth: rowWidth
                 )
-            else { return }
+            else {
+                await loadOlderTurns(loadedSections: loadedSections)
+                return
+            }
 
             if preservesPosition {
                 // Loading only arms at the top edge, so pinning the former first
@@ -1560,6 +1522,15 @@ struct ChatTimeline: View {
             }
         }
     #endif
+
+    /// With every loaded turn shown, reads the daemon's next older page;
+    /// once it lands, the load runs again over the widened sections.
+    private func loadOlderTurns(loadedSections: [ChatTimelineLayout.Section]) async {
+        guard hasOlderTurns, loadedSections.first?.id == sections.first?.id else { return }
+        await store.loadOlderTurns()
+        guard !Task.isCancelled else { return }
+        historyLoadRequest &+= 1
+    }
 
     private func prepareEarlierPage(
         loadedSections: [ChatTimelineLayout.Section],
@@ -1582,9 +1553,7 @@ struct ChatTimeline: View {
         )
         let pageTimelineRows = ChatTimelineLayout.rows(
             sections: pageSections,
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
-            previousTurns: previousTurns,
+            liveTurnID: streamingTurnID,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         await Self.prepare(
@@ -1683,7 +1652,7 @@ struct ChatTimeline: View {
                 appendBlocks(messageID: segment.rowID, source: segment.source)
             case .standard(.message(let message)):
                 guard
-                    message.role != MaidMessageRole.assistant.rawValue
+                    message.role != ChatRole.assistant.rawValue
                         || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { continue }
@@ -1795,7 +1764,7 @@ struct ChatTimeline: View {
                     // not classify it as the streaming message when nothing is
                     // streaming.
                     guard message.annotations?.isEmpty != false,
-                        message.role == MaidMessageRole.assistant.rawValue,
+                        message.role == ChatRole.assistant.rawValue,
                         streamingTurnID == nil || message.turnID != streamingTurnID
                     else { return [.standard(row)] }
 
@@ -1842,8 +1811,7 @@ struct ChatTimeline: View {
                             ? message.attachments
                             : nil,
                         isFirst: index == 0,
-                        isLast: index == segments.count - 1,
-                        isPending: message.messageDelivery != nil
+                        isLast: index == segments.count - 1
                     )
                     return segment.kind == .prose
                         ? .prose(model)
@@ -1860,7 +1828,7 @@ struct ChatTimeline: View {
     ) -> [ChatMarkdownRenderRequest] {
         rows.compactMap { row in
             guard case .message(let message) = row,
-                message.role == MaidMessageRole.assistant.rawValue,
+                message.role == ChatRole.assistant.rawValue,
                 streamingTurnID == nil || message.turnID != streamingTurnID,
                 case .existingRenderer = ChatMessageTextPlanner.plan(
                     messageID: message.id,
@@ -1886,7 +1854,7 @@ struct ChatTimeline: View {
             switch row {
             case .standard(.message(let message)):
                 guard
-                    message.role != MaidMessageRole.assistant.rawValue
+                    message.role != ChatRole.assistant.rawValue
                         || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { return nil }
@@ -1968,7 +1936,7 @@ struct ChatTimeline: View {
                 )
             case .standard(.message(let message)):
                 guard
-                    message.role != MaidMessageRole.assistant.rawValue
+                    message.role != ChatRole.assistant.rawValue
                         || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { continue }
@@ -1984,7 +1952,7 @@ struct ChatTimeline: View {
                         id: block.rowID,
                         content: .rendered(prose.text),
                         width: ChatTimelineMetrics.proseTextWidth(
-                            role: MaidMessageRole.assistant.rawValue,
+                            role: ChatRole.assistant.rawValue,
                             in: rowWidth
                         )
                     )
@@ -2008,7 +1976,7 @@ enum ChatTimelineRenderRow: Identifiable {
         case .prose(let segment), .richMarkdown(let segment):
             ChatAnnotationContext(messageID: segment.messageID, role: segment.role, model: model)
         case .resolvedMarkdown(let block):
-            ChatAnnotationContext(messageID: block.messageID, role: MaidMessageRole.assistant.rawValue, model: model)
+            ChatAnnotationContext(messageID: block.messageID, role: ChatRole.assistant.rawValue, model: model)
         case .standard:
             nil
         }
@@ -2079,7 +2047,6 @@ struct ChatTimelineRenderRowView: View {
                     role: segment.role,
                     annotations: segment.annotations,
                     attachments: segment.attachments,
-                    isPending: segment.isPending,
                     streamingText: nil,
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
@@ -2089,8 +2056,7 @@ struct ChatTimelineRenderRowView: View {
                 ChatMessageBubble(
                     role: segment.role,
                     annotations: segment.annotations,
-                    attachments: segment.attachments,
-                    isPending: segment.isPending
+                    attachments: segment.attachments
                 ) {
                     ChatSelectableText(
                         layoutID: segment.rowID,
@@ -2135,8 +2101,6 @@ struct ChatMessageSegmentRowModel {
     let attachments: [Attachment]?
     let isFirst: Bool
     let isLast: Bool
-    /// The agent does not have the message yet, or never got it.
-    var isPending = false
 
     var rowID: String { "\(messageID)#segment-\(index)" }
 }
@@ -2147,12 +2111,10 @@ struct ChatMessageBubble<Content: View>: View {
     let role: String
     var annotations: [PromptAnnotation]? = nil
     var attachments: [Attachment]? = nil
-    /// Dims a message the agent does not have yet, or never got.
-    var isPending = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        let isUser = role == MaidMessageRole.user.rawValue
+        let isUser = role == ChatRole.user.rawValue
         VStack(alignment: .leading) {
             content()
 
@@ -2170,7 +2132,6 @@ struct ChatMessageBubble<Content: View>: View {
             isUser ? Color.accentColor.opacity(0.15) : Color.clear,
             in: .rect(cornerRadius: 18)
         )
-        .opacity(isPending ? 0.5 : 1)
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
@@ -2240,11 +2201,7 @@ private struct ChatTimelineRow: View {
                     role: message.role,
                     annotations: message.annotations,
                     attachments: message.attachments,
-                    isPending: message.messageDelivery != nil,
-                    streamingText: store.streamingMessageText(
-                        threadID: threadID,
-                        messageID: message.id
-                    ),
+                    streamingText: store.streamingText(threadID: threadID, rowID: message.id),
                     presentation: ChatMarkdownPresentation.timelineMessage(
                         role: message.role,
                         turnID: message.turnID,
@@ -2261,15 +2218,10 @@ private struct ChatTimelineRow: View {
                     )
                 )
                 .padding(.vertical, 10)
-            case .undelivered(let message):
-                ChatUndeliveredMessageRow(message: message, threadID: threadID, store: store)
             case .thought(let item):
                 ChatThoughtRow(
                     item: item,
-                    streamingText: store.streamingReasoningText(
-                        threadID: threadID,
-                        itemID: item.id
-                    ),
+                    streamingText: store.streamingText(threadID: threadID, rowID: item.id),
                     foldModel: foldModel,
                     scrollState: scrollState
                 )
@@ -2301,15 +2253,16 @@ private struct ChatTimelineRow: View {
                 }
             case .notice(let item):
                 ChatNoticeRow(item: item)
-            case .forkContext(let item):
-                ChatForkContextRow(item: item, threadID: threadID, store: store)
+            case .handoff(let item):
+                ChatHandoffRow(item: item, threadID: threadID, store: store)
+            case .envelope(let item):
+                ChatEnvelopeRow(item: item)
             case .turnFork(let fork):
                 ChatTurnForkRow(fork: fork)
-            case .approval(let approval):
-                ChatRequestRow(approval: approval, threadID: threadID, store: store)
-                    // A request reopened after its resolution is a new one
-                    // to answer, with fresh form state.
-                    .id(approval.status)
+            case .request(let request):
+                ChatRequestRow(request: request, threadID: threadID, store: store)
+                    // An answered request shows its record: fresh state.
+                    .id(request.isOpen)
                     .padding(.vertical, 10)
             }
         }
@@ -2322,7 +2275,7 @@ private struct ChatTimelineRow: View {
 /// compact font and secondary color rather than the document-level styling of
 /// assistant messages.
 private struct ChatThoughtRow: View {
-    let item: Item
+    let item: ChatItem
     let streamingText: ThreadStreamingText?
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
@@ -2571,8 +2524,8 @@ private struct ChatActivityGroupRow: View {
     }
 
     /// A single-step group shows its specific work instead of an aggregate.
-    static func itemLineText(_ item: Item) -> Text {
-        let summary = item.toolCallSummary
+    static func itemLineText(_ item: ChatItem) -> Text {
+        let summary = item.tool
         let verb = ChatActivityVerb(item: item)
         switch verb {
         case .ranCommand:
@@ -2580,10 +2533,6 @@ private struct ChatActivityGroupRow: View {
                 return Text("Ran \(monospaced(command))")
             }
         case .thought:
-            let seconds = item.updatedAt.timeIntervalSince(item.createdAt)
-            if seconds >= 1 {
-                return Text("Thought for \(ChatTurnActivity.formatted(.seconds(seconds)))")
-            }
             return Text("Thought")
         case .read:
             if let path = summary?.locations?.first?.path, !path.isEmpty {
@@ -2616,7 +2565,7 @@ private struct ChatActivityGroupRow: View {
         path.split(separator: "/").last.map(String.init) ?? path
     }
 
-    static func iconName(for item: Item?) -> String {
+    static func iconName(for item: ChatItem?) -> String {
         guard let item else { return "circle.dashed" }
         return switch ChatActivityVerb(item: item) {
         case .thought: "brain"
@@ -2634,7 +2583,7 @@ private struct ChatActivityGroupRow: View {
 /// box; file edits open the diff viewer directly; steps with nothing more to
 /// show are plain text, not buttons.
 private struct ChatActivityItemRow: View {
-    let item: Item
+    let item: ChatItem
     let threadID: String
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
@@ -2643,7 +2592,7 @@ private struct ChatActivityItemRow: View {
     // Captured at presentation: `detail` is cleared whenever the item
     // updates, and an open sheet must not lose its content to that.
     @State private var presentedChanges: [FileChange]?
-    @State private var detail: Item?
+    @State private var detail: Entry?
     @State private var isLoadingDetail = false
     @State private var detailErrorMessage: String?
 
@@ -2668,7 +2617,7 @@ private struct ChatActivityItemRow: View {
                 }
 
                 if item.isRunningInBackground {
-                    ChatStopBackgroundItemButton(itemID: item.id, threadID: threadID, store: store)
+                    ChatStopBackgroundItemButton(ref: item.ref, threadID: threadID, store: store)
                 }
             }
 
@@ -2688,15 +2637,11 @@ private struct ChatActivityItemRow: View {
         }
         .task(id: isExpanded) {
             // Also runs when a reused row reappears already expanded.
-            if isExpanded, detail == nil, item.detailAvailable == true {
+            if isExpanded, detail == nil, item.detailAvailable {
                 await loadDetail()
             }
         }
-        .onChange(of: item.sequence) { _, _ in
-            itemDidUpdate()
-        }
-        .onChange(of: item.updatedAt) { _, _ in
-            guard item.sequence == nil else { return }
+        .onChange(of: updateKey) { _, _ in
             itemDidUpdate()
         }
     }
@@ -2764,7 +2709,7 @@ private struct ChatActivityItemRow: View {
             if let attachments = toolCall?.attachments, !attachments.isEmpty {
                 ChatMessageAttachmentsView(attachments: attachments)
             } else if hasAttachmentSummary, detail == nil,
-                item.detailAvailable == true
+                item.detailAvailable
             {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -2806,8 +2751,18 @@ private struct ChatActivityItemRow: View {
         nonmutating set { foldModel.setExpanded(.activityItem(itemID: item.id), newValue) }
     }
 
-    private var summary: ToolCallSummary? { item.toolCallSummary }
-    private var toolCall: ToolCall? { detail?.toolCall }
+    private var summary: ToolCallSummary? { item.tool }
+    private var toolCall: ToolCall? { detail?.tool }
+
+    /// Changes whenever the entry does, so a read whole entry isn't kept
+    /// past its update.
+    private var updateKey: String {
+        let tool = item.tool
+        return [
+            item.entry.status ?? "", String(item.text?.count ?? 0), tool?.outputPreview ?? "",
+            tool?.errorPreview ?? "", tool?.exitCode.map(String.init) ?? "", String(tool?.changeCount ?? 0),
+        ].joined(separator: "|")
+    }
 
     private var isFileChangeStep: Bool {
         ChatActivityVerb(item: item) == .edited
@@ -2848,7 +2803,7 @@ private struct ChatActivityItemRow: View {
         if detail == nil {
             await loadDetail()
         }
-        if let changes = detail?.toolCall?.changes, !changes.isEmpty {
+        if let changes = detail?.tool?.changes, !changes.isEmpty {
             presentedChanges = changes
         } else if hasExpandableContent || detailErrorMessage != nil {
             // No structured diff came back; fall back to whatever the step
@@ -2896,7 +2851,7 @@ private struct ChatActivityItemRow: View {
         detailErrorMessage = nil
         defer { isLoadingDetail = false }
         do {
-            detail = try await store.itemDetail(threadID: threadID, item: item)
+            detail = try await store.entryDetail(threadID: threadID, item: item)
         } catch {
             detailErrorMessage = error.localizedDescription
         }
@@ -2984,7 +2939,7 @@ private struct ChatStepOutputBox: View {
 
 /// Warnings and errors stay visible outside the fold.
 private struct ChatNoticeRow: View {
-    let item: Item
+    let item: ChatItem
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -3018,13 +2973,12 @@ private struct ChatMessageRow: View {
     let role: String
     let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
-    let isPending: Bool
     let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
-        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments, isPending: isPending) {
+        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments) {
             if !text.isEmpty {
                 // A restored thread can retain a replayed streaming buffer
                 // for its final messages. Once the message presents as
@@ -3052,7 +3006,7 @@ private struct ChatMessageRow: View {
 }
 
 struct ChatPlanRow: View {
-    let plan: Plan
+    let plan: [PlanEntry]
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -3060,8 +3014,8 @@ struct ChatPlanRow: View {
                 .bold()
 
             // PlanEntry has no stable key and plans are replaced wholesale.
-            ForEach(plan.entries.indices, id: \.self) { index in
-                let entry = plan.entries[index]
+            ForEach(plan.indices, id: \.self) { index in
+                let entry = plan[index]
                 HStack(alignment: .firstTextBaseline) {
                     Image(
                         systemName: entry.status == "completed" ? "checkmark.circle.fill" : "circle"
@@ -3140,9 +3094,14 @@ private struct ChatPromptQueueView: View {
     private let composerOverlap: CGFloat = 24
 
     var body: some View {
+        let queue = model.queue
         VStack(spacing: 0) {
-            ForEach(model.queuedPrompts, id: \.messageID) { prompt in
-                QueuedPromptRow(model: model, prompt: prompt)
+            ForEach(Array(queue.enumerated()), id: \.element.id) { index, delivery in
+                QueuedPromptRow(
+                    model: model,
+                    delivery: delivery,
+                    previous: index > 0 ? queue[index - 1] : nil
+                )
             }
         }
         .padding(.bottom, composerOverlap)
@@ -3157,34 +3116,56 @@ private struct ChatPromptQueueView: View {
     }
 }
 
+/// A message waiting for the running turn, on its way, or one that didn't
+/// get through.
 private struct QueuedPromptRow: View {
     let model: ChatPromptModel
-    let prompt: QueuedPrompt
+    let delivery: DeliveryView
+    /// The message before it in the queue, to move it up past.
+    let previous: DeliveryView?
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "arrow.turn.down.right")
-                .foregroundStyle(.secondary)
+            Image(systemName: isRefused ? "exclamationmark.circle.fill" : "arrow.turn.down.right")
+                .foregroundStyle(isRefused ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
 
-            Text(
-                Self.summary(
-                    text: prompt.text,
-                    attachmentCount: prompt.attachments?.count ?? 0,
-                    annotationCount: prompt.annotations?.count ?? 0
+            VStack(alignment: .leading, spacing: 2) {
+                if delivery.from.kind != MaidActorKind.device.rawValue {
+                    Text("From \(delivery.from.name)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(
+                    Self.summary(
+                        text: delivery.text ?? "",
+                        attachmentCount: delivery.attachments?.count ?? 0,
+                        annotationCount: delivery.annotations?.count ?? 0
+                    )
                 )
-            )
-            .lineLimit(1)
+                .lineLimit(1)
+                if isRefused {
+                    Text("Not delivered: \(delivery.reason ?? String(localized: "unknown error"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
 
             Spacer()
 
             Group {
-                if model.isTurnRunning {
-                    Button("Steer", systemImage: "arrow.triangle.branch") {
-                        Task { await model.sendQueuedPrompt(prompt.messageID) }
+                switch delivery.deliveryState {
+                case .sending:
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Sending")
+                case .refused:
+                    Button("Retry", systemImage: "arrow.clockwise") {
+                        Task { await model.retry(delivery) }
                     }
-                } else {
-                    Button("Send", systemImage: "arrow.up") {
-                        Task { await model.sendQueuedPrompt(prompt.messageID) }
+                default:
+                    Button(model.isTurnRunning ? "Steer" : "Send", systemImage: model.isTurnRunning ? "arrow.triangle.branch" : "arrow.up") {
+                        Task { await model.sendNow(delivery) }
                     }
                 }
             }
@@ -3192,17 +3173,28 @@ private struct QueuedPromptRow: View {
             .foregroundStyle(.secondary)
             .disabled(model.store.connectionState != .connected)
 
-            Button("Remove queued prompt", systemImage: "trash") {
-                Task { await model.removeQueuedPrompt(prompt.messageID) }
+            if delivery.deliveryState != .sending {
+                Button("Remove queued message", systemImage: "trash") {
+                    Task { await model.cancel(delivery) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contextMenu {
+            if let previous, delivery.deliveryState == .queued, previous.deliveryState == .queued {
+                Button("Move Up", systemImage: "arrow.up") {
+                    Task { await model.move(delivery, before: previous) }
+                }
+            }
+        }
     }
+
+    private var isRefused: Bool { delivery.deliveryState == .refused }
 
     private static func summary(
         text: String,
@@ -3217,6 +3209,40 @@ private struct QueuedPromptRow: View {
             return "\(annotationCount) annotation(s)"
         }
         return "\(attachmentCount) attachment(s)"
+    }
+}
+
+/// Why a chat's queue waits — stopped, failed, or agents going back and
+/// forth too long — and the way to let it go on.
+private struct ChatHoldView: View {
+    let model: ChatPromptModel
+    let hold: MaidHold
+
+    var body: some View {
+        HStack {
+            Label(message, systemImage: "pause.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button("Continue", systemImage: "play.fill") {
+                Task { await model.continueThread() }
+            }
+            .disabled(model.store.connectionState != .connected)
+        }
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
+    private var message: String {
+        switch hold {
+        case .stoppedPerson: String(localized: "Stopped. Messages wait until you continue.")
+        case .stoppedAgent: String(localized: "An agent stopped this chat. Messages wait until it continues.")
+        case .failed: String(localized: "A turn failed. Messages wait until you continue.")
+        case .hops: String(localized: "Agents went back and forth too long. Messages wait until you continue.")
+        }
     }
 }
 

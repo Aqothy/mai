@@ -23,13 +23,16 @@ struct ThreadListFilter: Equatable {
         providerID = nil
     }
 
+    /// Chats an agent started show under the chat that started them, so
+    /// the list holds top-level chats only, unless a search looks for any.
     func apply(
-        to threads: [ThreadListEntry],
-        providerID providerIDForThread: (ThreadListEntry) -> String?
-    ) -> [ThreadListEntry] {
+        to threads: [ThreadSummary],
+        providerID providerIDForThread: (ThreadSummary) -> String?
+    ) -> [ThreadSummary] {
         let query = trimmedQuery
         return threads.filter { thread in
-            (projectCwd == nil || thread.cwd == projectCwd)
+            (thread.origin.parent == nil || !query.isEmpty)
+                && (projectCwd == nil || thread.workspace.cwd == projectCwd)
                 && (providerID == nil || providerIDForThread(thread) == providerID)
                 && (query.isEmpty || thread.title.localizedStandardContains(query))
         }

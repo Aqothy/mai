@@ -22,7 +22,7 @@ struct MaiApp: App {
             if let turnCount = ChatBenchmarkAutoRun.syntheticThreadTurnCount {
                 let thread = ChatSyntheticBenchmarkThread.thread(turnCount: turnCount)
                 syntheticStore = ThreadStore(
-                    previewThreads: [ChatSyntheticBenchmarkThread.listEntry(for: thread)],
+                    previewThreads: [thread.summary],
                     selectedThread: thread
                 )
             }
@@ -30,7 +30,7 @@ struct MaiApp: App {
         usesSyntheticBenchmarkStore = syntheticStore != nil
         _threadStore = State(
             initialValue: syntheticStore
-                ?? ThreadStore(rpc: rpc, connection: connection, readState: ThreadReadStateStore())
+                ?? ThreadStore(rpc: rpc, connection: connection)
         )
         _terminalStore = State(
             initialValue: TerminalStore(rpc: rpc, connection: connection)

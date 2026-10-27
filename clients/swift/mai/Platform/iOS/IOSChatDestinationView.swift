@@ -54,6 +54,14 @@ struct IOSChatDestinationView: View {
                 break
             }
         }
+        // Going back leaves the chat: what finishes in it afterwards is
+        // unread. A chat pushed on top selects itself first, so this is a
+        // no-op then.
+        .onDisappear {
+            if case .thread(let threadID) = route, store.selectedThreadID == threadID {
+                store.selectThread(nil)
+            }
+        }
     }
 }
 

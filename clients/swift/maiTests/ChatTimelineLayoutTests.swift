@@ -5,8 +5,8 @@ import Testing
 #endif
 @testable import mai
 
-/// `ChatTimelineLayout` turns the wire timeline into the rows the chat List
-/// renders: contiguous turn sections, compact activity groups, and the fold
+/// `ChatTimelineLayout` turns a thread's turns into the rows the chat List
+/// renders: one section per turn, compact activity groups, and the fold
 /// that hides a finished turn's work behind a "Worked for Ns" header.
 struct ChatTimelineLayoutTests {
     #if os(macOS)
@@ -120,30 +120,16 @@ struct ChatTimelineLayoutTests {
 
     @Test
     func paginatesByCompleteUserTurns() {
-        var timeline: [TimelineEntry] = []
-        for index in 1...7 {
-            let turnID = "turn-\(index)"
-            timeline.append(
-                userMessageEntry(id: "user-\(index)", turnID: turnID)
-            )
-            timeline.append(
-                assistantMessageEntry(id: "assistant-\(index)", turnID: turnID)
-            )
+        let turns = (1...7).map { index in
+            turn("turn-\(index)", [user("user-\(index)"), assistant("assistant-\(index)")])
         }
+        // A turn an agent's message started has no prompt; it rides along.
+        let sections = ChatTimelineLayout.sections(turns: turns + [turn("turn-8", [assistant("reply")])])
 
-        let sections = ChatTimelineLayout.sections(timeline: timeline)
-        let firstPage = ChatTimelineLayout.paginatedSections(
-            sections,
-            userMessageLimit: 5
-        )
-        let secondPage = ChatTimelineLayout.paginatedSections(
-            sections,
-            userMessageLimit: 10
-        )
+        let firstPage = ChatTimelineLayout.paginatedSections(sections, userMessageLimit: 5)
+        let secondPage = ChatTimelineLayout.paginatedSections(sections, userMessageLimit: 10)
 
-        #expect(firstPage.map(\.turnID) == [
-            "turn-3", "turn-4", "turn-5", "turn-6", "turn-7",
-        ])
+        #expect(firstPage.map(\.id) == ["turn-3", "turn-4", "turn-5", "turn-6", "turn-7", "turn-8"])
         #expect(secondPage.map(\.id) == sections.map(\.id))
     }
 
@@ -151,153 +137,121 @@ struct ChatTimelineLayoutTests {
 
     @Test
     func rowsGroupFoldAndKeepAttentionItemsVisible() {
-        let cases: [(name: String, timeline: [TimelineEntry], streaming: String?, expanded: Set<String>, kinds: [String])] = [
+        let cases: [(name: String, turns: [TurnView], expanded: Set<String>, kinds: [String])] = [
             ("consecutive activity groups",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
-              itemEntry(id: "i3", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1")],
-             "turn-1", [], ["message", "turnActivity", "group", "message"]),
+             [turn("turn-1", .running, [user("m1"), item("i1", .toolCall), item("i2", .commandExecution),
+                                        item("i3", .toolCall), assistant("m2")])],
+             [], ["message", "turnActivity", "group", "message"]),
             ("reasoning stays outside groups while running",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .reasoning, turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1")],
-             "turn-1", [], ["message", "turnActivity", "thought", "group", "message"]),
+             [turn("turn-1", .running, [user("m1"), item("i1", .reasoning), item("i2", .toolCall), assistant("m2")])],
+             [], ["message", "turnActivity", "thought", "group", "message"]),
             ("reasoning folds once finished",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .reasoning, turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1")],
-             nil, [], ["message", "turnActivity", "message"]),
+             [turn("turn-1", [user("m1"), item("i1", .reasoning), item("i2", .toolCall), assistant("m2")])],
+             [], ["message", "turnActivity", "message", "fork"]),
             ("assistant message splits groups",
-             [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
-             "turn-1", [], ["turnActivity", "group", "message", "group"]),
+             [turn("turn-1", .running, [item("i1", .toolCall), assistant("m1"), item("i2", .toolCall)])],
+             [], ["turnActivity", "group", "message", "group"]),
             ("expanded finished turn shows intermediate segments",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .commandExecution, turnID: "turn-1"),
-              assistantMessageEntry(id: "m3", turnID: "turn-1")],
-             nil, ["section-message-m1"], ["message", "turnActivity", "group", "message", "group", "message"]),
+             [turn("turn-1", [user("m1"), item("i1", .toolCall), assistant("m2"), item("i2", .commandExecution),
+                              assistant("m3")])],
+             ["turn-1"], ["message", "turnActivity", "group", "message", "group", "message", "fork"]),
             ("empty streamed segment produces no row",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              messageEntry(id: "m2", role: .assistant, turnID: "turn-1", text: ""),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1")],
-             "turn-1", [], ["message", "turnActivity", "group"]),
+             [turn("turn-1", .running, [user("m1"), assistant("m2", text: ""), item("i1", .toolCall)])],
+             [], ["message", "turnActivity", "group"]),
             ("previous turn folds while the next runs",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1"),
-              userMessageEntry(id: "m3", turnID: "turn-2"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2")],
-             "turn-2", [], ["message", "turnActivity", "message", "message", "turnActivity", "group"]),
+             [turn("turn-1", [user("m1"), item("i1", .toolCall), assistant("m2")]),
+              turn("turn-2", .running, [user("m3"), item("i2", .toolCall)])],
+             [], ["message", "turnActivity", "message", "fork", "message", "turnActivity", "group"]),
             ("steering prompt stays inside its turn",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              userMessageEntry(id: "m2", turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
-             "turn-1", [], ["message", "turnActivity", "group", "message", "group"]),
-            // Restored history has no turn ids; user messages split sections.
-            ("history without turn ids",
-             [userMessageEntry(id: "m1", turnID: nil),
-              itemEntry(id: "i1", kind: .toolCall, turnID: nil),
-              assistantMessageEntry(id: "m2", turnID: nil),
-              userMessageEntry(id: "m3", turnID: nil),
-              itemEntry(id: "i2", kind: .toolCall, turnID: nil),
-              assistantMessageEntry(id: "m4", turnID: nil)],
-             nil, ["section-message-m3"], ["message", "turnActivity", "message", "message", "turnActivity", "group", "message"]),
+             [turn("turn-1", .running, [user("m1"), item("i1", .toolCall), user("m2"), item("i2", .toolCall)])],
+             [], ["message", "turnActivity", "group", "message", "group"]),
             ("warnings and errors never fold",
-             [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .warning, turnID: "turn-1"),
-              itemEntry(id: "i3", kind: .error, turnID: "turn-1")],
-             nil, [], ["turnActivity", "notice", "notice"]),
-            ("pending approval stays visible",
-             [approvalEntry(requestID: "r1", status: .pending, turnID: "turn-1")],
-             nil, [], ["approval"]),
-            ("resolved approval folds",
-             [approvalEntry(requestID: "r1", status: .resolved, turnID: "turn-1")],
-             nil, [], ["turnActivity"]),
+             [turn("turn-1", [item("i1", .toolCall), item("i2", .warning), item("i3", .error)])],
+             [], ["turnActivity", "notice", "notice", "fork"]),
+            ("an answered request folds into its turn",
+             [turn("turn-1", [user("m1"), recordedRequest("r1"), assistant("m2")])],
+             [], ["message", "turnActivity", "message", "fork"]),
+            ("what other agents said never folds, the chat's instructions never show",
+             [turn("turn-1", [envelope("e1", .message), envelope("e2", .instructions), item("i1", .toolCall),
+                              envelope("e3", .handoff), assistant("m1")])],
+             [], ["envelope", "turnActivity", "handoff", "message", "fork"]),
             ("running background task outlives its turn's fold",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              itemEntry(id: "bg", kind: .commandExecution, turnID: "turn-1", status: .inProgress, background: true),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1")],
-             nil, [], ["message", "turnActivity", "group", "message"]),
+             [turn("turn-1", [user("m1"), item("i1", .toolCall),
+                              item("bg", .commandExecution, status: .inProgress, background: true),
+                              item("i2", .toolCall), assistant("m2")])],
+             [], ["message", "turnActivity", "group", "message", "fork"]),
             ("finished background task folds",
-             [userMessageEntry(id: "m1", turnID: "turn-1"),
-              itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              itemEntry(id: "bg", kind: .commandExecution, turnID: "turn-1", status: .interrupted, background: true),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1"),
-              assistantMessageEntry(id: "m2", turnID: "turn-1")],
-             nil, [], ["message", "turnActivity", "message"]),
+             [turn("turn-1", [user("m1"), item("i1", .toolCall),
+                              item("bg", .commandExecution, status: .interrupted, background: true),
+                              item("i2", .toolCall), assistant("m2")])],
+             [], ["message", "turnActivity", "message", "fork"]),
         ]
         for testCase in cases {
-            let result = rows(testCase.timeline, streaming: testCase.streaming, expanded: testCase.expanded)
-            #expect(result.map(kindLabel) == testCase.kinds, "\(testCase.name)")
-        }
-        let grouped = rows(cases[0].timeline, streaming: "turn-1")
-        #expect(activityGroup(grouped[2])?.items.map(\.id) == ["i1", "i2", "i3"])
-        let folded = rows(cases[4].timeline, streaming: nil)
-        #expect(folded.map(kindLabel) == ["message", "turnActivity", "message"])
-        #expect(folded.last?.id == "message-m3")
-        let previous = rows(cases[6].timeline, streaming: "turn-2")
-        #expect(turnActivity(previous[1])?.isRunning == false)
-        #expect(turnActivity(previous[4])?.isRunning == true)
-        let background = rows(cases[12].timeline, streaming: nil)
-        #expect(activityGroup(background[2])?.items.map(\.id) == ["bg"])
-    }
-
-    /// Retry moves the failed turn's prompt onto the new turn, so that turn
-    /// spans two sections around the failed attempt. Duplicate row IDs crash
-    /// the Mac transcript, and the live header must stay below the attempt.
-    @Test
-    func retriedTurnSplitAroundFailedAttempt() {
-        let retried = [
-            userMessageEntry(id: "m1", turnID: "turn-2"),
-            itemEntry(id: "e1", kind: .error, turnID: "turn-1"),
-        ]
-        let cases: [(name: String, timeline: [TimelineEntry], kinds: [String])] = [
-            ("before the retry's first activity", retried,
-             ["message", "notice", "turnActivity"]),
-            ("after the retry's first activity",
-             retried + [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-2")],
-             ["message", "notice", "turnActivity", "group"]),
-        ]
-        for testCase in cases {
-            let result = rows(testCase.timeline, streaming: "turn-2")
+            let result = rows(testCase.turns, expanded: testCase.expanded)
             #expect(result.map(kindLabel) == testCase.kinds, "\(testCase.name)")
             #expect(Set(result.map(\.id)).count == result.count, "\(testCase.name)")
-            #expect(result.compactMap(turnActivity).map(\.isRunning) == [true], "\(testCase.name)")
         }
+        let grouped = rows(cases[0].turns)
+        #expect(activityGroup(grouped[2])?.items.map(\.ref) == ["i1", "i2", "i3"])
+        let folded = rows(cases[4].turns)
+        #expect(folded.map(kindLabel) == ["message", "turnActivity", "message", "fork"])
+        #expect(folded[2].id == "message-turn-1|m3")
+        let previous = rows(cases[6].turns)
+        #expect(turnActivity(previous[1])?.isRunning == false)
+        #expect(turnActivity(previous[5])?.isRunning == true)
+        let background = rows(cases[11].turns)
+        #expect(activityGroup(background[2])?.items.map(\.ref) == ["bg"])
     }
 
-    /// A settled turn ends with one fork row that edits its own prompt, even
-    /// when a retry splits it around the failed attempt; a running turn has
-    /// none.
+    /// A turn that just settled stays presented as running until its settled
+    /// rows are prepared.
+    @Test
+    func liveTurnStaysUnfoldedUntilItsSettledRowsAreReady() {
+        let turns = [turn("turn-1", [user("m1"), item("i1", .toolCall), assistant("m2")])]
+        let live = ChatTimelineLayout.rows(
+            sections: ChatTimelineLayout.sections(turns: turns), liveTurnID: "turn-1", expandedSectionIDs: [])
+        #expect(live.map(kindLabel) == ["message", "turnActivity", "group", "message", "fork"])
+        #expect(turnActivity(live[1])?.isRunning == true)
+    }
+
+    /// An open request shows at the end of its turn, or at the end of the
+    /// chat when its turn isn't loaded; once its record joins the turn, the
+    /// record shows instead of both.
+    @Test
+    func openRequestsShowAtTheEndOfTheirTurnOnce() {
+        let turns = [
+            turn("turn-1", [user("m1"), item("i1", .toolCall), assistant("m2")]),
+            turn("turn-2", .running, [user("m3"), item("i2", .toolCall)]),
+        ]
+        let result = rows(turns, requests: [openRequest("r1", turn: "turn-1"), openRequest("r2", turn: "turn-2"),
+                                            openRequest("r3", turn: "unloaded"), openRequest("r4", turn: nil)])
+        #expect(result.map(\.id) == [
+            "message-turn-1|m1", "activity-turn-1", "message-turn-1|m2", "request-r1", "fork-turn-1",
+            "message-turn-2|m3", "activity-turn-2", "group-turn-2|i2", "request-r2",
+            "request-r3", "request-r4",
+        ])
+
+        var recorded = turns
+        recorded[1].entries.append(recordedRequest("r2"))
+        let resolving = rows(recorded, requests: [openRequest("r2", turn: "turn-2")])
+        #expect(resolving.filter { $0.id == "request-r2" }.count == 1)
+        guard case .request(let request) = resolving.last else {
+            Issue.record("rows = \(resolving.map(\.id))")
+            return
+        }
+        #expect(!request.isOpen)
+    }
+
+    /// A settled turn ends with one fork row that edits its own prompt; a
+    /// running turn has none. Refs repeat across turns of different sessions,
+    /// so row IDs carry the turn.
     @Test
     func settledTurnsEndWithTheirForkRow() {
-        let start = Date(timeIntervalSince1970: 1_000)
-        func turn(_ id: String, _ state: MaidTurnState) -> Turn {
-            Turn(
-                completedAt: state == .running ? nil : start, error: nil, interruptRequested: nil,
-                requestedAt: start, startedAt: start, state: state.rawValue, stopReason: nil,
-                turnID: id)
-        }
-        let result = rows(
-            [messageEntry(id: "m1", role: .user, turnID: "turn-2", text: "retried prompt"),
-             itemEntry(id: "e1", kind: .error, turnID: "turn-1"),
-             itemEntry(id: "i1", kind: .toolCall, turnID: "turn-2"),
-             assistantMessageEntry(id: "m2", turnID: "turn-2"),
-             messageEntry(id: "m3", role: .user, turnID: "turn-3", text: "running prompt")],
-            streaming: "turn-3",
-            latestTurn: turn("turn-3", .running),
-            previousTurns: [turn("turn-1", .error), turn("turn-2", .completed)]
-        )
+        let result = rows([
+            turn("turn-1", .failed, [item("e1", .error)]),
+            turn("turn-2", [user("m1", text: "retried prompt"), item("i1", .toolCall), assistant("m2")]),
+            turn("turn-3", .running, [user("m1", text: "running prompt")]),
+        ])
         let forks = result.compactMap { row -> ChatTurnFork? in
             if case .turnFork(let fork) = row { return fork }
             return nil
@@ -305,7 +259,7 @@ struct ChatTimelineLayoutTests {
         #expect(forks.map(\.turnID) == ["turn-1", "turn-2"])
         #expect(forks.map(\.prompt?.text) == [nil, "retried prompt"])
         let turn2Fork = result.firstIndex { $0.id == "fork-turn-2" }
-        #expect(turn2Fork == result.firstIndex { $0.id == "message-m3" }.map { $0 - 1 })
+        #expect(turn2Fork == result.firstIndex { $0.id == "message-turn-3|m1" }.map { $0 - 1 })
         #expect(Set(result.map(\.id)).count == result.count)
     }
 
@@ -313,14 +267,7 @@ struct ChatTimelineLayoutTests {
     @Test
     func runningTurnShowsHeaderBeforeFirstActivity() {
         let startedAt = Date(timeIntervalSince1970: 2_000)
-        let result = rows(
-            [userMessageEntry(id: "m1", turnID: "turn-1")],
-            streaming: "turn-1",
-            latestTurn: Turn(
-                completedAt: nil, error: nil, interruptRequested: nil, requestedAt: startedAt,
-                startedAt: startedAt, state: MaidTurnState.running.rawValue, stopReason: nil,
-                turnID: "turn-1")
-        )
+        let result = rows([turn("turn-1", .running, startedAt: startedAt, [user("m1")])])
         #expect(result.map(kindLabel) == ["message", "turnActivity"])
         #expect(turnActivity(result[1])?.isRunning == true)
         #expect(turnActivity(result[1])?.startedAt == startedAt)
@@ -328,75 +275,30 @@ struct ChatTimelineLayoutTests {
 
     // MARK: Turn header
 
+    /// The turn's own start and settle times give the duration; an entry
+    /// the provider finished after a stop doesn't change the outcome.
     @Test
     func headerTitleReflectsDurationAndOutcome() {
         let start = Date(timeIntervalSince1970: 1_000)
-        func turn(_ state: MaidTurnState, seconds: TimeInterval) -> Turn {
-            Turn(
-                completedAt: start.addingTimeInterval(seconds), error: nil, interruptRequested: nil,
-                requestedAt: start, startedAt: start, state: state.rawValue, stopReason: nil,
-                turnID: "turn-1")
-        }
-        let cases: [(timeline: [TimelineEntry], latestTurn: Turn?, title: String)] = [
-            // The latest turn's own timestamps win.
-            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1")],
-             turn(.completed, seconds: 65), "Worked for 1m 5s"),
-            // Older turns derive a duration from their items.
-            ([itemEntry(
-                id: "i1", kind: .toolCall, turnID: "turn-1",
-                createdAt: start, updatedAt: start.addingTimeInterval(42))],
-             nil, "Worked for 42s"),
-            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1"),
-              itemEntry(id: "i2", kind: .toolCall, turnID: "turn-1")],
-             nil, "Worked"),
-            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)],
-             turn(.interrupted, seconds: 12), "Stopped after 12s"),
-            ([itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .interrupted)],
-             nil, "Stopped"),
+        let cases: [(state: MaidTurnState, seconds: TimeInterval, entries: [EntryView], title: String)] = [
+            (.completed, 65, [item("i1", .toolCall)], "Worked for 1m 5s"),
+            (.completed, 0.5, [item("i1", .toolCall), item("i2", .toolCall)], "Worked"),
+            (.interrupted, 12, [item("i1", .toolCall, status: .interrupted)], "Stopped after 12s"),
+            (.interrupted, 9, [item("i1", .commandExecution)], "Stopped after 9s"),
+            (.completed, 0.5, [item("i1", .toolCall, status: .interrupted)], "Stopped"),
         ]
         for testCase in cases {
-            let result = rows(testCase.timeline, streaming: nil, latestTurn: testCase.latestTurn)
+            let result = rows([turn(
+                "turn-1", testCase.state, startedAt: start, settledAt: start.addingTimeInterval(testCase.seconds),
+                testCase.entries)])
             #expect(turnActivity(result[0])?.title == testCase.title)
-            #expect(turnActivity(result[0])?.stepCount == testCase.timeline.count)
+            #expect(turnActivity(result[0])?.stepCount == testCase.entries.count)
         }
-    }
-
-    @Test
-    func stoppedOlderTurnKeepsItsOutcomeAfterLateToolCompletion() {
-        let startedAt = Date(timeIntervalSince1970: 3_000)
-        let result = rows(
-            [
-                // The provider finished the command after the stop.
-                itemEntry(
-                    id: "i1", kind: .commandExecution, turnID: "turn-1",
-                    createdAt: startedAt, updatedAt: startedAt.addingTimeInterval(49)
-                ),
-                itemEntry(id: "i2", kind: .toolCall, turnID: "turn-2"),
-            ],
-            streaming: nil,
-            latestTurn: Turn(
-                completedAt: nil, error: nil, interruptRequested: nil,
-                requestedAt: startedAt.addingTimeInterval(60), startedAt: startedAt.addingTimeInterval(60),
-                state: MaidTurnState.completed.rawValue, stopReason: nil, turnID: "turn-2"
-            ),
-            previousTurns: [
-                Turn(
-                    completedAt: startedAt.addingTimeInterval(9), error: nil, interruptRequested: nil,
-                    requestedAt: startedAt, startedAt: startedAt,
-                    state: MaidTurnState.interrupted.rawValue, stopReason: nil, turnID: "turn-1"
-                )
-            ]
-        )
-
-        #expect(turnActivity(result[0])?.title == "Stopped after 9s")
     }
 
     @Test
     func headerFlagsFailedSteps() {
-        let result = rows(
-            [itemEntry(id: "i1", kind: .toolCall, turnID: "turn-1", status: .failed)],
-            streaming: nil
-        )
+        let result = rows([turn("turn-1", [item("i1", .toolCall, status: .failed)])])
         #expect(turnActivity(result[0])?.hasFailure == true)
     }
 
@@ -404,16 +306,16 @@ struct ChatTimelineLayoutTests {
 
     @Test
     func summarizesGroupedActivityFromStatedFacts() {
-        func command(_ id: String, _ action: MaidToolAction? = nil) -> Item {
+        func command(_ id: String, _ action: MaidToolAction? = nil) -> ChatItem {
             makeItem(id: id, kind: .commandExecution, action: action)
         }
         func tool(
             _ id: String, _ name: String?, kind: MaidItemKind = .toolCall,
             action: MaidToolAction? = nil, namespace: String? = nil, title: String? = nil
-        ) -> Item {
+        ) -> ChatItem {
             makeItem(id: id, kind: kind, action: action, toolName: name, namespace: namespace, title: title)
         }
-        let cases: [(name: String, items: [Item], summary: String)] = [
+        let cases: [(name: String, items: [ChatItem], summary: String)] = [
             ("codex read and search commands",
              [command("c1", .read), command("c2", .read), command("c3", .search),
               command("c4", .search), command("c5")],
@@ -459,17 +361,13 @@ struct ChatTimelineLayoutTests {
 }
 
 private func rows(
-    _ timeline: [TimelineEntry],
-    streaming: String?,
-    expanded: Set<String> = [],
-    latestTurn: Turn? = nil,
-    previousTurns: [Turn] = []
+    _ turns: [TurnView],
+    requests: [RequestView] = [],
+    expanded: Set<String> = []
 ) -> [ChatTimelineRowModel] {
     ChatTimelineLayout.rows(
-        sections: ChatTimelineLayout.sections(timeline: timeline),
-        streamingTurnID: streaming,
-        latestTurn: latestTurn,
-        previousTurns: previousTurns,
+        sections: ChatTimelineLayout.sections(turns: turns),
+        requests: requests.map(ChatRequest.init(open:)),
         expandedSectionIDs: expanded
     )
 }
@@ -479,13 +377,13 @@ private func rows(
 private func kindLabel(_ row: ChatTimelineRowModel) -> String {
     switch row {
     case .message: "message"
-    case .undelivered: "undelivered"
     case .thought: "thought"
     case .turnActivity: "turnActivity"
     case .activityGroup: "group"
     case .notice: "notice"
-    case .approval: "approval"
-    case .forkContext: "forkContext"
+    case .request: "request"
+    case .handoff: "handoff"
+    case .envelope: "envelope"
     case .turnFork: "fork"
     }
 }
@@ -500,83 +398,58 @@ private func turnActivity(_ row: ChatTimelineRowModel) -> ChatTurnActivity? {
     return nil
 }
 
-private func userMessageEntry(id: String, turnID: String?) -> TimelineEntry {
-    messageEntry(id: id, role: .user, turnID: turnID)
+private func turn(_ id: String, _ entries: [EntryView]) -> TurnView {
+    turn(id, .completed, entries)
 }
 
-private func assistantMessageEntry(id: String, turnID: String?) -> TimelineEntry {
-    messageEntry(id: id, role: .assistant, turnID: turnID)
+private func turn(
+    _ id: String,
+    _ state: MaidTurnState,
+    startedAt: Date = Date(timeIntervalSince1970: 0),
+    settledAt: Date? = nil,
+    _ entries: [EntryView]
+) -> TurnView {
+    ThreadFixtures.turn(id: id, state: state, startedAt: startedAt, settledAt: settledAt, entries: entries)
 }
 
-func messageEntry(
-    id: String,
-    role: MaidMessageRole,
-    turnID: String?,
-    text: String = "text"
-) -> TimelineEntry {
-    TimelineEntry(
-        approval: nil,
-        item: nil,
-        kind: MaidTimelineEntryKind.message.rawValue,
-        message: Message(
-            attachments: nil,
-            createdAt: Date(timeIntervalSince1970: 0),
-            id: id,
-            role: role.rawValue,
-            text: text,
-            turnID: turnID,
-            updatedAt: Date(timeIntervalSince1970: 0)
-        )
-    )
+private func user(_ ref: String, text: String = "text") -> EntryView {
+    ThreadFixtures.entry(ref: ref, kind: .userMessage, text: text)
 }
 
-func itemEntry(
-    id: String,
-    kind: MaidItemKind,
-    turnID: String?,
+private func assistant(_ ref: String, text: String = "text") -> EntryView {
+    ThreadFixtures.entry(ref: ref, kind: .assistantMessage, text: text)
+}
+
+private func item(
+    _ ref: String,
+    _ kind: MaidItemKind,
     status: MaidItemStatus = .completed,
-    background: Bool = false,
-    createdAt: Date = Date(timeIntervalSince1970: 0),
-    updatedAt: Date = Date(timeIntervalSince1970: 0)
-) -> TimelineEntry {
-    TimelineEntry(
-        approval: nil,
-        item: makeItem(
-            id: id,
-            kind: kind,
-            status: status,
-            background: background,
-            turnID: turnID,
-            createdAt: createdAt,
-            updatedAt: updatedAt
-        ),
-        kind: MaidTimelineEntryKind.item.rawValue,
-        message: nil
-    )
+    background: Bool = false
+) -> EntryView {
+    makeItem(id: ref, kind: kind, status: status, background: background).entry
 }
 
-private func approvalEntry(
-    requestID: String,
-    status: MaidApprovalStatus,
-    turnID: String?
-) -> TimelineEntry {
-    TimelineEntry(
-        approval: Approval(
-            actionID: nil,
-            answers: nil,
-            args: nil,
-            createdAt: Date(timeIntervalSince1970: 0),
-            decision: nil,
-            request: nil,
-            requestID: requestID,
-            status: status.rawValue,
-            turnID: turnID,
-            updatedAt: Date(timeIntervalSince1970: 0)
-        ),
-        item: nil,
-        kind: MaidTimelineEntryKind.approval.rawValue,
-        message: nil
-    )
+private func envelope(_ ref: String, _ kind: MaidEnvelopeKind) -> EntryView {
+    var entry = ThreadFixtures.entry(ref: ref, kind: .envelope)
+    entry.envelope = Envelope(
+        answers: nil, body: "said", covers: nil, delivery: nil, from: "Reviewer", kind: kind.rawValue, thread: nil)
+    return entry
+}
+
+private let ask = Request(
+    actions: [RequestAction(decision: MaidApprovalDecision.accept.rawValue, id: "allow", label: "Allow", submit: nil)],
+    details: nil, message: "Run tests?", questions: nil, url: nil)
+
+private func openRequest(_ id: String, turn: String?) -> RequestView {
+    RequestView(
+        answering: nil, ask: ask, entry: nil, id: id, openedAt: Date(timeIntervalSince1970: 0), participant: "agent",
+        turn: turn)
+}
+
+private func recordedRequest(_ id: String) -> EntryView {
+    var entry = ThreadFixtures.entry(ref: "request:\(id)", kind: .request)
+    entry.request = RequestRecord(action: "allow", answers: nil, ask: ask, request: id)
+    return entry
 }
 
 private func makeItem(
@@ -587,47 +460,17 @@ private func makeItem(
     action: MaidToolAction? = nil,
     toolName: String? = nil,
     namespace: String? = nil,
-    title: String? = nil,
-    turnID: String? = nil,
-    createdAt: Date = Date(timeIntervalSince1970: 0),
-    updatedAt: Date = Date(timeIntervalSince1970: 0)
-) -> Item {
-    Item(
-        createdAt: createdAt,
-        detailAvailable: nil,
-        id: id,
-        kind: kind.rawValue,
-        payload: nil,
-        sequence: nil,
-        status: status.rawValue,
-        textDelta: nil,
-        title: title,
-        toolCall: nil,
-        toolCallSummary: action == nil && toolName == nil && !background
-            ? nil
-            : ToolCallSummary(
-                action: action?.rawValue,
-                attachmentCount: nil,
-                attachments: nil,
-                background: background ? true : nil,
-                changeCount: nil,
-                changes: nil,
-                commandPreview: nil,
-                cwd: nil,
-                durationMilliseconds: nil,
-                errorPreview: nil,
-                exitCode: nil,
-                locationCount: nil,
-                locations: nil,
-                name: toolName,
-                namespace: namespace,
-                outputFormat: nil,
-                outputPreview: nil,
-                providerKind: nil,
-                queryPreview: nil,
-                truncated: nil
-            ),
-        turnID: turnID,
-        updatedAt: updatedAt
-    )
+    title: String? = nil
+) -> ChatItem {
+    let tool = action == nil && toolName == nil && !background
+        ? nil
+        : ToolCallSummary(
+            action: action?.rawValue, attachmentCount: nil, attachments: nil, background: background ? true : nil,
+            changeCount: nil, changes: nil, commandPreview: nil, cwd: nil, durationMilliseconds: nil,
+            errorPreview: nil, exitCode: nil, locationCount: nil, locations: nil, name: toolName,
+            namespace: namespace, outputFormat: nil, outputPreview: nil, providerKind: nil, queryPreview: nil,
+            truncated: nil)
+    return ChatItem(
+        turnID: "turn-1",
+        entry: ThreadFixtures.entry(ref: id, kind: kind, status: status, title: title, tool: tool))
 }

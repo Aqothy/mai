@@ -952,8 +952,8 @@ private struct MockChatTimeline: View {
         for message in messages {
             let messageID = message.id.uuidString
             let role = message.role == .user
-                ? MaidMessageRole.user.rawValue
-                : MaidMessageRole.assistant.rawValue
+                ? ChatRole.user.rawValue
+                : ChatRole.assistant.rawValue
             // User bubbles inset their text; matching production's width rule
             // keeps every prepared layout an exact cache hit.
             let textWidth = ChatTimelineMetrics.proseTextWidth(
@@ -1049,8 +1049,8 @@ private struct MockChatTimeline: View {
                 // rule keeps every prepared layout an exact cache hit.
                 let textWidth = ChatTimelineMetrics.proseTextWidth(
                     role: message.role == .user
-                        ? MaidMessageRole.user.rawValue
-                        : MaidMessageRole.assistant.rawValue,
+                        ? ChatRole.user.rawValue
+                        : ChatRole.assistant.rawValue,
                     in: rowWidth
                 )
                 return segments.indices.compactMap { index in
@@ -1073,8 +1073,8 @@ private struct MockChatTimeline: View {
         return ChatMessageTextPlanner.plan(
             messageID: turnID,
             role: message.role == .user
-                ? MaidMessageRole.user.rawValue
-                : MaidMessageRole.assistant.rawValue,
+                ? ChatRole.user.rawValue
+                : ChatRole.assistant.rawValue,
             messageTurnID: turnID,
             streamingTurnID: message.displayedIsStreaming ? turnID : nil,
             source: message.displayedText,
@@ -1252,8 +1252,8 @@ private struct MockChatMessageRow: View {
         let plan = ChatMessageTextPlanner.plan(
             messageID: turnID,
             role: message.role == .user
-                ? MaidMessageRole.user.rawValue
-                : MaidMessageRole.assistant.rawValue,
+                ? ChatRole.user.rawValue
+                : ChatRole.assistant.rawValue,
             messageTurnID: turnID,
             streamingTurnID: message.displayedIsStreaming ? turnID : nil,
             source: message.displayedText,
@@ -1357,7 +1357,7 @@ private struct MockChatBubble: View {
     var body: some View {
         ChatMessageBubble(
             role: message.role == .user
-                ? MaidMessageRole.user.rawValue : MaidMessageRole.assistant.rawValue
+                ? ChatRole.user.rawValue : ChatRole.assistant.rawValue
         ) {
             if message.displayedIsStreaming, message.displayedText.isEmpty {
                 ProgressView()
@@ -1392,8 +1392,8 @@ private struct MockChatBubble: View {
         return ChatMessageTextPlanner.plan(
             messageID: turnID,
             role: message.role == .user
-                ? MaidMessageRole.user.rawValue
-                : MaidMessageRole.assistant.rawValue,
+                ? ChatRole.user.rawValue
+                : ChatRole.assistant.rawValue,
             messageTurnID: turnID,
             streamingTurnID: message.displayedIsStreaming ? turnID : nil,
             source: message.displayedText,

@@ -39,114 +39,83 @@ nonisolated final class ChatPresentationLifetimeTests: XCTestCase {
 nonisolated
 final class ChatTimelineProjectionTests: XCTestCase {
     @MainActor
-    private func makeTimeline(turnCount: Int) -> [TimelineEntry] {
+    private func makeTurns(count: Int) -> [TurnView] {
         let response = String(repeating: "Wrapped prose for the fixture. ", count: 18)
-        return (0..<turnCount).flatMap { turn in
-            [
-                messageEntry(id: "user-\(turn)", role: .user, turnID: "turn-\(turn)", text: "Question \(turn)?"),
-                messageEntry(id: "assistant-\(turn)", role: .assistant, turnID: "turn-\(turn)", text: response),
-            ] + (0..<3).map { item in
-                itemEntry(id: "item-\(turn)-\(item)", kind: .commandExecution, turnID: "turn-\(turn)")
-            }
+        let start = Date(timeIntervalSince1970: 0)
+        return (0..<count).map { turn in
+            ThreadFixtures.turn(
+                id: "turn-\(turn)",
+                state: turn == count - 1 ? .running : .completed,
+                startedAt: start.addingTimeInterval(Double(turn) * 60),
+                settledAt: start.addingTimeInterval(Double(turn) * 60 + 42),
+                entries: [
+                    ThreadFixtures.entry(ref: "user-\(turn)", kind: .userMessage, text: "Question \(turn)?"),
+                    ThreadFixtures.entry(ref: "assistant-\(turn)", kind: .assistantMessage, text: response),
+                ] + (0..<3).map { item in
+                    ThreadFixtures.entry(ref: "item-\(turn)-\(item)", kind: .commandExecution)
+                })
         }
     }
 
-    /// Simulated structural streaming events over `initial`: returns each
-    /// mutated timeline plus the invalidation index `ThreadEventReducer`
-    /// would report for it. The mix matches live agent traffic — appended
-    /// tool items, in-place tail updates, and (every third event) an older
-    /// approval resolving mid-timeline, the one real case where live events
-    /// touch non-tail entries.
+    /// Simulated live events over `initial`: each mutated turn list plus the
+    /// lowest turn index the session would report for it. The mix matches
+    /// live agent traffic: entries appended to the running turn, its newest
+    /// entry updating in place, a new turn starting, and (every fourth
+    /// event) an older turn changing, as when a request resolves into it.
     @MainActor
     private func streamedSteps(
-        initial: [TimelineEntry],
-        runningTurnID: String,
+        initial: [TurnView],
         eventCount: Int
-    ) -> [(timeline: [TimelineEntry], firstChangedIndex: Int)] {
-        var timeline = initial
-        var steps: [(timeline: [TimelineEntry], firstChangedIndex: Int)] = []
+    ) -> [(turns: [TurnView], firstChangedIndex: Int)] {
+        var turns = initial
+        var steps: [(turns: [TurnView], firstChangedIndex: Int)] = []
         steps.reserveCapacity(eventCount)
 
         for event in 0..<eventCount {
-            switch event % 3 {
+            let last = turns.count - 1
+            switch event % 4 {
             case 0:
-                // A new tool item appends at the tail of the running turn.
-                let index = timeline.count
-                timeline.append(
-                    itemEntry(
-                        id: "streamed-item-\(event)",
-                        kind: .commandExecution,
-                        turnID: runningTurnID,
-                        status: .inProgress
-                    )
-                )
-                steps.append((timeline, index))
+                turns[last].entries.append(
+                    ThreadFixtures.entry(ref: "streamed-\(event)", kind: .commandExecution, status: .inProgress))
+                steps.append((turns, last))
             case 1:
-                // The newest entry updates in place (status/payload merge).
-                var last = timeline[timeline.count - 1]
-                last.item?.updatedAt = Date(timeIntervalSince1970: Double(event))
-                last.item?.status = MaidItemStatus.completed.rawValue
-                timeline[timeline.count - 1] = last
-                steps.append((timeline, timeline.count - 1))
+                let newest = turns[last].entries.count - 1
+                turns[last].entries[newest].status = MaidItemStatus.completed.rawValue
+                turns[last].entries[newest].title = "Finished \(event)"
+                steps.append((turns, last))
+            case 2:
+                turns[last].state = MaidTurnState.completed.rawValue
+                turns.append(ThreadFixtures.turn(
+                    id: "streamed-turn-\(event)", state: .running,
+                    entries: [ThreadFixtures.entry(ref: "prompt-\(event)", kind: .userMessage, text: "Next \(event)")]))
+                steps.append((turns, last))
             default:
-                // An older approval resolves mid-timeline.
-                let index = timeline.count / 2
-                var entry = timeline[index]
-                if entry.approval == nil {
-                    entry.approval = Approval(
-                        actionID: nil,
-                        answers: nil,
-                        args: nil,
-                        createdAt: Date(timeIntervalSince1970: 0),
-                        decision: nil,
-                        request: nil,
-                        requestID: "approval-\(event)",
-                        status: MaidApprovalStatus.pending.rawValue,
-                        turnID: nil,
-                        updatedAt: Date(timeIntervalSince1970: 0)
-                    )
-                } else {
-                    entry.approval?.decision = "allow"
-                    entry.approval?.status = MaidApprovalStatus.resolved.rawValue
-                }
-                timeline[index] = entry
-                steps.append((timeline, index))
+                let index = turns.count / 2
+                turns[index].entries.append(
+                    ThreadFixtures.entry(ref: "warning-\(event)", kind: .warning, text: "Resolved \(event)"))
+                steps.append((turns, index))
             }
         }
         return steps
     }
 
     /// Content-sensitive fingerprint, not just identity: a stale projection
-    /// could keep identical row IDs while showing outdated item statuses,
-    /// approval decisions, or timestamps.
+    /// could keep identical row IDs while showing outdated statuses or text.
     @MainActor
     private func rowFingerprints(of sections: [ChatTimelineLayout.Section]) -> [String] {
-        ChatTimelineLayout.rows(
-            sections: sections,
-            streamingTurnID: nil,
-            latestTurn: nil,
-            expandedSectionIDs: []
-        ).map { row -> String in
+        ChatTimelineLayout.rows(sections: sections, expandedSectionIDs: []).map { row -> String in
             switch row {
             case .message(let message):
-                return "\(row.id)|\(message.text)|\(message.updatedAt.timeIntervalSince1970)"
-            case .undelivered(let message):
-                return "\(row.id)|\(message.deliveryError ?? "")"
-            case .thought(let item):
-                return "\(row.id)|\(item.status)|\(item.updatedAt.timeIntervalSince1970)"
+                return "\(row.id)|\(message.text)"
+            case .thought(let item), .notice(let item), .handoff(let item), .envelope(let item):
+                return "\(row.id)|\(item.entry.status ?? "")|\(item.text ?? "")"
             case .activityGroup(let group):
-                let items = group.items.map {
-                    "\($0.id):\($0.status):\($0.updatedAt.timeIntervalSince1970)"
-                }.joined(separator: ",")
+                let items = group.items.map { "\($0.id):\($0.entry.status ?? ""):\($0.title ?? "")" }.joined(separator: ",")
                 return "\(row.id)|\(items)"
-            case .notice(let item):
-                return "\(row.id)|\(item.status)|\(item.updatedAt.timeIntervalSince1970)"
-            case .approval(let approval):
-                return "\(row.id)|\(approval.status)|\(approval.decision ?? "none")"
+            case .request(let request):
+                return "\(row.id)|\(request.isOpen)|\(request.actionID ?? "none")"
             case .turnActivity(let activity):
                 return "\(row.id)|\(activity.stepCount)|\(activity.isRunning)"
-            case .forkContext(let item):
-                return "\(row.id)|\(item.updatedAt.timeIntervalSince1970)"
             case .turnFork(let fork):
                 return "\(row.id)|\(fork.prompt?.id ?? "")"
             }
@@ -156,66 +125,65 @@ final class ChatTimelineProjectionTests: XCTestCase {
     // MARK: Correctness
 
     /// Locks the incremental projection to a full rebuild after every step:
-    /// identical sections through appends, tail mutations, mid-timeline
-    /// mutations, snapshot replacement, coalesced invalidations, and pure
-    /// cache hits.
+    /// identical sections through appends, tail mutations, new turns, older
+    /// turns changing, snapshot replacement, coalesced invalidations, and
+    /// pure cache hits.
     @MainActor
     func testIncrementalProjectionMatchesFullRebuild() {
-        let initial = makeTimeline(turnCount: 40)
+        let initial = makeTurns(count: 40)
         let projection = ChatTimelineProjection()
 
         var sections = projection.project(initial)
-        XCTAssertEqual(rowFingerprints(of: sections), rowFingerprints(of: ChatTimelineLayout.sections(timeline: initial)))
+        XCTAssertEqual(rowFingerprints(of: sections), rowFingerprints(of: ChatTimelineLayout.sections(turns: initial)))
 
-        var timeline = initial
-        let steps = streamedSteps(
-            initial: initial,
-            runningTurnID: "turn-\(40 - 1)",
-            eventCount: 120
-        )
-        for step in steps {
-            timeline = step.timeline
-            projection.invalidate(from: step.firstChangedIndex)
-            sections = projection.project(step.timeline)
+        var turns = initial
+        for (step, event) in streamedSteps(initial: initial, eventCount: 120).enumerated() {
+            turns = event.turns
+            projection.invalidate(fromTurn: event.firstChangedIndex)
+            sections = projection.project(event.turns)
             XCTAssertEqual(
                 rowFingerprints(of: sections),
-                rowFingerprints(of: ChatTimelineLayout.sections(timeline: step.timeline)),
-                "Incremental projection diverged from a full rebuild"
+                rowFingerprints(of: ChatTimelineLayout.sections(turns: event.turns)),
+                "Incremental projection diverged from a full rebuild at step \(step)"
             )
 
-            // Snapshot replacement drops leading entries; only a full
+            // A snapshot or refresh replaces the turns; only a full
             // invalidation describes it.
-            if step.firstChangedIndex == 60 {
-                var replaced = step.timeline
+            if step == 60 {
+                var replaced = event.turns
                 replaced.removeFirst(10)
-                timeline = replaced
+                turns = replaced
                 projection.invalidateAll()
                 sections = projection.project(replaced)
                 XCTAssertEqual(
                     rowFingerprints(of: sections),
-                    rowFingerprints(of: ChatTimelineLayout.sections(timeline: replaced))
+                    rowFingerprints(of: ChatTimelineLayout.sections(turns: replaced))
                 )
+                // The stream goes on from its own turns, which replace these
+                // again.
+                projection.invalidateAll()
             }
         }
 
         // Several events may land before one body evaluation; the lowest
         // index wins.
-        var coalesced = timeline
-        coalesced[coalesced.count - 1].item?.status = MaidItemStatus.failed.rawValue
-        projection.invalidate(from: coalesced.count - 1)
-        coalesced[5].message?.text = "Edited earlier message"
-        projection.invalidate(from: 5)
-        coalesced[coalesced.count - 2].item?.status = MaidItemStatus.failed.rawValue
-        projection.invalidate(from: coalesced.count - 2)
-        timeline = coalesced
+        var coalesced = turns
+        let last = coalesced.count - 1
+        coalesced[last].entries[0].status = MaidItemStatus.failed.rawValue
+        projection.invalidate(fromTurn: last)
+        coalesced[5].entries[1].text = "Edited earlier message"
+        projection.invalidate(fromTurn: 5)
+        coalesced[last - 1].entries[0].status = MaidItemStatus.failed.rawValue
+        projection.invalidate(fromTurn: last - 1)
+        turns = coalesced
         sections = projection.project(coalesced)
         XCTAssertEqual(
             rowFingerprints(of: sections),
-            rowFingerprints(of: ChatTimelineLayout.sections(timeline: coalesced))
+            rowFingerprints(of: ChatTimelineLayout.sections(turns: coalesced))
         )
 
-        // An unchanged timeline is a pure cache hit with identical output.
-        let unchanged = projection.project(timeline)
+        // Unchanged turns are a pure cache hit with identical output.
+        let unchanged = projection.project(turns)
         XCTAssertEqual(rowFingerprints(of: unchanged), rowFingerprints(of: sections))
     }
 }

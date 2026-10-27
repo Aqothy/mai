@@ -9,19 +9,18 @@ struct ThreadStoreTests {
     /// and offsets), not Foundation's default.
     @Test
     func fractionalDateNotificationsUpdateTheSidebar() async throws {
-        let original = makeThread("date-wire")
+        let original = makeSummary("date-wire")
         let rpc = MockThreadRPCClient(threads: [original])
         let store = ThreadStore(rpc: rpc)
         await store.start()
-        let entryData = try newJSONEncoder().encode(makeThreadListEntry(original))
-        var entry = try #require(JSONSerialization.jsonObject(with: entryData) as? [String: Any])
-        entry["title"] = "Fractional sidebar"
-        entry["updatedAt"] = "2026-09-24T00:26:41.437657-04:00"
+        let summaryData = try newJSONEncoder().encode(original)
+        var summary = try #require(JSONSerialization.jsonObject(with: summaryData) as? [String: Any])
+        summary["title"] = "Fractional sidebar"
+        summary["updatedAt"] = "2026-09-24T00:26:41.437657-04:00"
         let update: [String: Any] = ["params": [
-            "kind": "thread-upserted", "sequence": 101, "thread": entry
+            "kind": MaidThreadListKind.upsert.rawValue, "seq": 101, "thread": summary
         ]]
-        rpc.onNotification?(MaidRPCMethod.orchestrationSubscribeThreadList,
-                            try JSONSerialization.data(withJSONObject: update))
+        rpc.onNotification?(MaidRPCMethod.threadList, try JSONSerialization.data(withJSONObject: update))
         #expect(store.errorMessage == nil)
         let listed = try #require(store.threads.first)
         #expect(listed.title == "Fractional sidebar")
@@ -131,61 +130,63 @@ struct ThreadStoreTests {
 
     @Test
     func reasoningDeltasInvalidateOnlyLiveTextAndCompletionPublishesAuthoritativeText() async throws {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a", status: .running)])
         let store = ThreadStore(rpc: rpc)
         await store.start()
         store.selectThread("a")
         await waitUntil { store.subscribedThreadIDs.contains("a") }
-        try rpc.sendReasoning(threadID: "a", delta: "Start", sequence: 100)
-        let liveText = try #require(store.streamingReasoningText(threadID: "a", itemID: "thought"))
+        try rpc.sendEntry(threadID: "a", ref: "thought", kind: .reasoning, status: .inProgress, seq: 100)
+        try rpc.sendText(threadID: "a", ref: "thought", text: "Start", seq: 101)
+        let liveText = try #require(store.streamingText(threadID: "a", rowID: "turn-a|thought"))
         let invalidated = trackInvalidations(of: store, liveText: liveText)
         for index in 1...20 {
-            try rpc.sendReasoning(threadID: "a", delta: " café 👩🏽‍💻", sequence: 100 + index)
+            try rpc.sendText(threadID: "a", ref: "thought", text: " café 👩🏽‍💻", seq: 101 + index)
         }
         #expect(invalidated.text.withLock { $0 })
         #expect(!invalidated.timeline.withLock { $0 })
         #expect(!invalidated.sidebar.withLock { $0 })
         #expect(liveText.text == "Start" + String(repeating: " café 👩🏽‍💻", count: 20))
 
-        // The completed payload can correct streamed text. Publish that change
+        // The completed entry can correct streamed text. Publish that change
         // to the disclosure row and discard its live buffer in the same event.
         let authoritative = "Completed **thought** with corrected Unicode 👩🏽‍💻."
-        try rpc.sendReasoning(threadID: "a", completedText: authoritative, sequence: 121)
+        try rpc.sendEntry(threadID: "a", ref: "thought", kind: .reasoning, text: authoritative, seq: 122)
         #expect(invalidated.timeline.withLock { $0 })
         #expect(!invalidated.sidebar.withLock { $0 })
-        #expect(store.streamingReasoningText(threadID: "a", itemID: "thought") == nil)
-        let settled = try #require(store.selectedThread?.timeline.last?.item)
+        #expect(store.streamingText(threadID: "a", rowID: "turn-a|thought") == nil)
+        let settled = try #require(store.selectedThread?.turns.last?.entries.last)
         #expect(settled.itemStatus == .completed)
-        #expect((settled.payload?.value as? [String: Any])?["text"] as? String == authoritative)
+        #expect(settled.text == authoritative)
     }
 
     @Test
     func streamingDeltasInvalidateTheLiveTextWithoutInvalidatingTimelineOrSidebar() async throws {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a", isRunning: true)])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a", status: .running)])
         let store = ThreadStore(rpc: rpc)
         await store.start()
         store.selectThread("a")
         await waitUntil { store.subscribedThreadIDs.contains("a") }
-        try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: "Start", sequence: 100)
-        let liveText = try #require(store.streamingMessageText(threadID: "a", messageID: "reply"))
+        try rpc.sendEntry(threadID: "a", ref: "reply", kind: .assistantMessage, status: .inProgress, seq: 100)
+        try rpc.sendText(threadID: "a", ref: "reply", text: "Start", seq: 101)
+        let liveText = try #require(store.streamingText(threadID: "a", rowID: "turn-a|reply"))
         let invalidated = trackInvalidations(of: store, liveText: liveText)
         for index in 1...20 {
-            try rpc.sendAssistantDelta(threadID: "a", messageID: "reply", text: " 👋🏽", sequence: 100 + index)
+            try rpc.sendText(threadID: "a", ref: "reply", text: " 👋🏽", seq: 101 + index)
         }
         #expect(invalidated.text.withLock { $0 })
         #expect(!invalidated.timeline.withLock { $0 })
         #expect(!invalidated.sidebar.withLock { $0 })
         #expect(liveText.text == "Start" + String(repeating: " 👋🏽", count: 20))
-        #expect(store.selectedThread?.timeline.last?.message?.text == liveText.text)
-        // A new message is structural and must publish the enclosing timeline.
-        try rpc.sendAssistantDelta(threadID: "a", messageID: "next", text: "Next", sequence: 121)
+        #expect(store.selectedThread?.turns.last?.entries.last?.text == liveText.text)
+        // A new entry is structural and must publish the enclosing timeline.
+        try rpc.sendEntry(threadID: "a", ref: "next", kind: .assistantMessage, status: .inProgress, seq: 122)
         #expect(invalidated.timeline.withLock { $0 })
     }
 
     @Test
     func recentChatRetainsPresentationButEvictionReleasesIt() async throws {
         let threadIDs = (0...6).map { "thread-\($0)" }
-        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
+        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeSummary($0) })
         let store = ThreadStore(rpc: rpc)
         await store.start()
         store.selectThread("thread-0")
@@ -217,31 +218,47 @@ struct ThreadStoreTests {
             store.selectThread(threadID)
             await waitUntil { store.subscribedThreadIDs.contains(threadID) }
         }
-        // Five inactive subscriptions stay warm; the oldest is evicted but
-        // its model stays cached.
+        // Five inactive subscriptions stay warm; the oldest is evicted with
+        // its content.
         await waitUntil { rpc.unsubscribedThreadIDs == ["thread-0"] }
         #expect(store.inactiveSubscribedThreadIDs == Set(threadIDs[1...5]))
         #expect(store.subscribedThreadIDs == Set(threadIDs[1...6]))
-        #expect(store.cachedThreadIDs == Set(threadIDs))
+        #expect(store.cachedThreadIDs == Set(threadIDs[1...6]))
         #expect(originalSegments == nil)
         #expect(originalLayouts == nil)
         #expect(preparedLayout == nil)
 
-        // Reopening shows the cached model at once, then resubscribes for a
-        // fresh snapshot.
+        // Reopening loads it rather than showing what went stale.
         let subscriptionCount = rpc.subscriptionCount(for: "thread-0")
         store.selectThread("thread-0")
+        #expect(store.selectedThread == nil)
+        await waitUntil { rpc.subscriptionCount(for: "thread-0") == subscriptionCount + 1 }
+        await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
         #expect(store.selectedThread?.id == "thread-0")
         let freshSegments = try #require(store.selectedThreadMarkdownSegmentCache)
         #expect(freshSegments.entryCount == 0)
-        await waitUntil { rpc.subscriptionCount(for: "thread-0") == subscriptionCount + 1 }
-        await waitUntil { store.subscribedThreadIDs.contains("thread-0") }
+    }
+
+    /// A chat is caught up with its agent's session before it shows, and
+    /// again when the person returns to it while it is still watched.
+    @Test
+    func openingAChatSyncsItFirstAndReturningSyncsAgain() async {
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a"), makeSummary("b")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        store.selectThread("b")
+        await waitUntil { store.subscribedThreadIDs.contains("b") }
+        store.selectThread("a")
+        await waitUntil { rpc.openCalls.count == 5 }
+        #expect(rpc.openCalls == ["sync a", "subscribe a", "sync b", "subscribe b", "sync a"])
     }
 
     @Test
     func hiddenRunningThreadIsProtectedOutsideIdleBudget() async {
-        let running = makeThread("running", isRunning: true)
-        let idleThreads = (0...5).map { makeThread("idle-\($0)") }
+        let running = makeSummary("running", status: .running)
+        let idleThreads = (0...5).map { makeSummary("idle-\($0)") }
         let rpc = MockThreadRPCClient(threads: [running] + idleThreads)
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -262,7 +279,7 @@ struct ThreadStoreTests {
     @Test
     func inactiveSubscriptionExpiresAfterThirtyMinutes() async {
         var currentDate = Date(timeIntervalSince1970: 1_000)
-        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a"), makeSummary("b")])
         let store = ThreadStore(rpc: rpc, now: { currentDate })
         await store.start()
 
@@ -278,17 +295,16 @@ struct ThreadStoreTests {
 
         currentDate = currentDate.addingTimeInterval(2)
         store.performSubscriptionMaintenance(at: currentDate)
-        await Task.yield()
+        await waitUntil { rpc.unsubscribedThreadIDs.contains("a") }
 
         #expect(!store.subscribedThreadIDs.contains("a"))
-        #expect(store.cachedThreadIDs.contains("a"))
-        #expect(rpc.unsubscribedThreadIDs.contains("a"))
+        #expect(!store.cachedThreadIDs.contains("a"))
     }
 
     @Test
     func reopeningCoalescesBehindPendingUnsubscribe() async {
         let threadIDs = (0...6).map { "thread-\($0)" }
-        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeThread($0) })
+        let rpc = MockThreadRPCClient(threads: threadIDs.map { makeSummary($0) })
         rpc.shouldBlockUnsubscribe = true
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -317,7 +333,7 @@ struct ThreadStoreTests {
 
     @Test
     func hiddenThreadEventsDoNotInvalidateSelectedThreadObservers() async throws {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a"), makeSummary("b")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
 
@@ -334,18 +350,18 @@ struct ThreadStoreTests {
             selectedObserverInvalidated.withLock { $0 = true }
         }
 
-        try rpc.sendTitleUpdate(threadID: "a", title: "Hidden update", sequence: 100)
-        #expect(store.cachedThread(for: "a")?.title == "Hidden update")
+        try rpc.sendSummary(makeSummary("a", title: "Hidden update"), seq: 100)
+        #expect(store.cachedThread(for: "a")?.summary.title == "Hidden update")
         #expect(!selectedObserverInvalidated.withLock { $0 })
 
-        try rpc.sendTitleUpdate(threadID: "b", title: "Visible update", sequence: 101)
+        try rpc.sendSummary(makeSummary("b", title: "Visible update"), seq: 101)
         await waitUntil { selectedObserverInvalidated.withLock { $0 } }
-        #expect(store.selectedThread?.title == "Visible update")
+        #expect(store.selectedThread?.summary.title == "Visible update")
     }
 
     @Test
     func retryResubscribesSelectedThreadAfterSnapshotFailure() async {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a")])
         rpc.threadSubscriptionFailuresRemaining = 1
         let store = ThreadStore(rpc: rpc)
         await store.start()
@@ -364,43 +380,35 @@ struct ThreadStoreTests {
         #expect(store.selectedThread?.id == "a")
     }
 
+    /// Events and list updates that arrive while the snapshot is on its way
+    /// apply on top of it once it lands.
     @Test
     func subscribeRecoveryAppliesBufferedDetailAndListUpdates() async throws {
-        let initialDate = Date(timeIntervalSince1970: 1_000)
         let updatedDate = Date(timeIntervalSince1970: 2_000)
-        let thread = makeThread("a").with(updatedAt: initialDate)
-        let rpc = MockThreadRPCClient(threads: [thread])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a", updatedAt: Date(timeIntervalSince1970: 1_000))])
         rpc.shouldBlockSubscribe = true
         let store = ThreadStore(rpc: rpc)
         await store.start()
 
         store.selectThread("a")
         await waitUntil { rpc.subscriptionCount(for: "a") == 1 }
-        try rpc.sendUserMessage(
-            threadID: "a",
-            text: "message during recovery",
-            occurredAt: updatedDate,
-            authoritativeUpdatedAt: updatedDate,
-            sequence: 100
-        )
+        try rpc.sendEntry(
+            threadID: "a", ref: "prompt", kind: .userMessage, text: "message during recovery", seq: 100)
+        try rpc.sendListUpsert(makeSummary("a", updatedAt: updatedDate), seq: 100)
 
         rpc.resumeSubscribes()
         await waitUntil { store.subscribedThreadIDs.contains("a") }
 
-        #expect(
-            store.cachedThread(for: "a")?.timeline.last?.message?.text
-                == "message during recovery"
-        )
+        #expect(store.cachedThread(for: "a")?.turns.last?.entries.last?.text == "message during recovery")
         #expect(store.threads.first(where: { $0.id == "a" })?.updatedAt == updatedDate)
-        #expect(store.cachedThread(for: "a")?.updatedAt == initialDate)
     }
 
     @Test
     func protectedThreadGetsFullInactiveTTLAfterCompletion() async throws {
         var currentDate = Date(timeIntervalSince1970: 1_000)
         let rpc = MockThreadRPCClient(threads: [
-            makeThread("running", isRunning: true),
-            makeThread("other"),
+            makeSummary("running", status: .running),
+            makeSummary("other"),
         ])
         let store = ThreadStore(rpc: rpc, now: { currentDate })
         await store.start()
@@ -411,12 +419,8 @@ struct ThreadStoreTests {
         await waitUntil { store.protectedSubscribedThreadIDs.contains("running") }
 
         currentDate = currentDate.addingTimeInterval(31 * 60)
-        try rpc.sendTurnInterrupted(
-            threadID: "running",
-            turnID: "turn-running",
-            occurredAt: currentDate,
-            sequence: 100
-        )
+        try rpc.sendTurn(threadID: "running", state: .interrupted, seq: 100)
+        try rpc.sendSummary(makeSummary("running"), seq: 101)
 
         #expect(store.inactiveSubscribedThreadIDs.contains("running"))
         store.performSubscriptionMaintenance(
@@ -427,13 +431,12 @@ struct ThreadStoreTests {
         store.performSubscriptionMaintenance(
             at: currentDate.addingTimeInterval(30 * 60 + 1)
         )
-        await Task.yield()
-        #expect(!store.subscribedThreadIDs.contains("running"))
+        await waitUntil { !store.subscribedThreadIDs.contains("running") }
     }
 
     @Test
     func reconnectKeepsCachedContentAndResubscribesAfterARepeatedFailure() async {
-        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a"), makeSummary("b")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
         store.selectThread("a")
@@ -450,75 +453,10 @@ struct ThreadStoreTests {
             rpc.threadListFailuresRemaining == 0 && store.connectionState == .disconnected
         }
 
-        let subscriptionCount = rpc.subscriptionInputs.count
+        let subscriptionCount = rpc.subscribedThreadIDs.count
         store.retry()
-        await waitUntil { rpc.subscriptionInputs.count == subscriptionCount + 2 }
+        await waitUntil { rpc.subscribedThreadIDs.count == subscriptionCount + 2 }
         await waitUntil { store.subscribedThreadIDs == ["a", "b"] }
-    }
-
-    @Test
-    func restoredThreadPreparationIsLimitedAndRetryable() async {
-        let rpc = MockThreadRPCClient(
-            threads: [
-                makeThread("restored"),
-                makeThread("active", isRunning: true),
-            ],
-            historyRestorePendingThreadIDs: ["restored"]
-        )
-        rpc.prepareFailuresRemaining = 1
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-
-        store.selectThread("restored")
-        await waitUntil {
-            rpc.prepareFailuresRemaining == 0
-                && store.selectedThreadLoadErrorMessage != nil
-        }
-
-        store.retry()
-        await waitUntil {
-            rpc.dispatchedCommands.filter {
-                $0.type == "thread.session.prepare" && $0.threadID == "restored"
-            }.count == 2
-        }
-
-        #expect(store.selectedThreadLoadErrorMessage == nil)
-
-        store.selectThread("active")
-        await waitUntil { store.selectedThread?.id == "active" }
-        await Task.yield()
-
-        #expect(
-            !rpc.dispatchedCommands.contains {
-                $0.type == "thread.session.prepare" && $0.threadID == "active"
-            }
-        )
-    }
-
-    @Test
-    func reopeningARestoredChatSubscribedInTheBackgroundPreparesIt() async {
-        let rpc = MockThreadRPCClient(
-            threads: [makeThread("restored"), makeThread("other")],
-            historyRestorePendingThreadIDs: ["restored"]
-        )
-        let store = ThreadStore(rpc: rpc)
-        await store.start()
-        rpc.shouldBlockSubscribe = true
-
-        // The restored chat's subscription finishes while another chat is
-        // selected, as after a reconnect restores recent subscriptions.
-        store.selectThread("restored")
-        await waitUntil { rpc.subscriptionCount(for: "restored") == 1 }
-        store.selectThread("other")
-        rpc.resumeSubscribes()
-        await waitUntil { store.selectedThread?.id == "other" }
-
-        store.selectThread("restored")
-        await waitUntil {
-            rpc.dispatchedCommands.contains {
-                $0.type == "thread.session.prepare" && $0.threadID == "restored"
-            }
-        }
     }
 
     @Test
@@ -577,7 +515,7 @@ struct ThreadStoreTests {
 
         #expect(model.optionsPhase == .live)
         #expect(model.configOptions.map(\.id) == ["model"])
-        #expect(rpc.dispatchedCommands.isEmpty)
+        #expect(rpc.commands.isEmpty)
 
         model.workingDirectory = "/tmp/other"
 
@@ -636,7 +574,7 @@ struct ThreadStoreTests {
         let draftStore = ThreadDraftStore(defaults: defaults)
         let model = DraftPromptModel(store: store, draftStore: draftStore)
         model.ensureLocalDraft()
-        let threadID = try #require(draftStore.activeDraftThreadID)
+        let draftID = try #require(draftStore.activeDraftThreadID)
         model.selectedProviderID = "codex"
         model.workingDirectory = "/tmp/original"
         model.prompt = "Original prompt"
@@ -652,12 +590,43 @@ struct ThreadStoreTests {
         rpc.resumeProviderStarts()
         await sendTask.value
 
-        let input = try #require(rpc.dispatchedCommands.first { $0.type == "thread.start" })
-        #expect(input.cwd == "/tmp/original")
-        #expect(input.message?.text == "Original prompt")
-        #expect(store.selectedThreadID == threadID)
+        let create = try #require(rpc.commands.compactMap(\.createThread).first)
+        #expect(create.workspace.cwd == "/tmp/original")
+        #expect(create.prompt?.text == "Original prompt")
+        #expect(store.selectedThreadID == "created-1")
         #expect(draftStore.activeDraftThreadID == nil)
-        #expect(draftStore.text(for: threadID).isEmpty)
+        #expect(draftStore.text(for: draftID).isEmpty)
+    }
+
+    /// A Start whose reply was lost may have made the chat; sending again
+    /// must not make a second one, so both carry the draft's key.
+    @Test
+    func retriedStartCarriesTheSameKey() async throws {
+        let suiteName = "DraftRetryKeyTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let rpc = MockThreadRPCClient(threads: [])
+        rpc.commandFailuresRemaining = 1
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let draftStore = ThreadDraftStore(defaults: defaults)
+        let model = DraftPromptModel(store: store, draftStore: draftStore)
+        model.ensureLocalDraft()
+        model.selectedProviderID = "codex"
+        model.workingDirectory = "/tmp/project"
+        model.prompt = "Start once"
+
+        await model.send()
+        #expect(model.errorMessage != nil)
+        #expect(store.selectedThreadID == nil)
+        model.isErrorPresented = false
+        await model.send()
+
+        let keys = rpc.commands.filter { $0.createThread != nil }.map(\.key)
+        #expect(keys.count == 2)
+        #expect(keys[0] != nil && keys[0] == keys[1])
+        #expect(store.selectedThreadID == "created-1")
     }
 
     @Test
@@ -686,8 +655,10 @@ struct ThreadStoreTests {
         #expect(model.canSend)
 
         await model.send()
-        let start = try #require(rpc.dispatchedCommands.first { $0.type == "thread.start" })
-        #expect(start.message?.attachments?.count == 1)
+        let create = try #require(rpc.commands.compactMap(\.createThread).first)
+        // The image travels on its own; the command names it.
+        #expect(create.prompt?.attachments?.map(\.id) == ["upload-1"])
+        #expect(create.prompt?.attachments?.allSatisfy { $0.data == nil } == true)
 
         // The next new chat starts empty instead of offering the sent image.
         model.ensureLocalDraft()
@@ -695,93 +666,181 @@ struct ThreadStoreTests {
         #expect(!model.canSend)
     }
 
-    /// Editing a sent prompt in a new chat brings its text, comments and
-    /// images into the composer of a chat whose agent can't fork, and sends
-    /// them with the conversation the fork hands that agent.
+    /// Unread is the daemon's, so every device agrees: opening an unread
+    /// chat reads it there once, and marking it unread asks the daemon.
     @Test
-    func editingAPromptInANewChatCarriesItsCommentsAndImages() async throws {
-        let suiteName = "EditPromptInNewChatTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
-        rpc.supportsImages = true
-        rpc.forkResult = ProviderForkThreadResult(
-            draft: ForkDraft(
-                additionalDirectories: nil, configSelections: nil, cwd: "/tmp/project",
-                forkContext: "User:\nfirst", providerInstanceID: "codex", sourceTitle: "A"
-            ),
-            threadID: nil
-        )
-        rpc.attachmentData["image-1"] =
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+    func readStateGoesToTheDaemon() async throws {
+        var unread = makeSummary("a")
+        unread.attention.unread = true
+        let rpc = MockThreadRPCClient(threads: [unread, makeSummary("b")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
+        #expect(store.isThreadUnread("a") && !store.isThreadUnread("b"))
+
+        store.selectThread("a")
+        store.selectThread("b")
+        await waitUntil { !rpc.commands.compactMap(\.updateThread).isEmpty }
+        store.markThreadUnread("b")
+        await waitUntil { rpc.commands.compactMap(\.updateThread).count == 2 }
+        let updates = rpc.commands.compactMap(\.updateThread)
+        #expect(updates.map(\.thread) == ["a", "b"])
+        #expect(updates.map(\.read) == [true, false])
+    }
+
+    /// Editing a sent prompt starts a fork draft before its turn with the
+    /// prompt's text, comments and images, and makes nothing until it is
+    /// sent; sending forks and delivers in one keyed command.
+    @Test
+    func editingAPromptDraftsAForkBeforeItsTurnThatSendingMakes() async throws {
+        let suiteName = "EditPromptForkTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = ThreadFixtures.summary(id: "a", title: "a", cwd: "/tmp/project", agent: ("codex", "Codex"))
+        let rpc = MockThreadRPCClient(threads: [source], turns: ["a": [
+            ThreadFixtures.turn(id: "turn-1", entries: [ThreadFixtures.entry(ref: "p1", kind: .userMessage, text: "first")]),
+            ThreadFixtures.turn(id: "turn-2", entries: [ThreadFixtures.entry(ref: "p2", kind: .userMessage, text: "long")]),
+        ]])
+        rpc.supportsImages = true
+        rpc.attachmentData["image-1"] = onePixelPNG
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
         let drafts = ThreadDraftStore(defaults: defaults)
         let chat = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
-        let sent = Message(
-            annotations: [
-                PromptAnnotation(id: "comment-1", messageID: "reply-1", note: "Shorter", quote: "a long answer", role: "assistant")
-            ],
+        var prompt = ThreadFixtures.entry(
+            ref: "p2", kind: .userMessage, text: "Make it shorter",
             attachments: [
                 mai.Attachment(
                     meta: nil, annotations: nil, data: nil, description: nil, id: "image-1",
                     kind: MaidAttachmentKind.image.rawValue, mimeType: "image/png", name: "shot.png",
                     resourceMeta: nil, size: nil, title: nil, uri: nil
                 )
-            ],
-            createdAt: .now, delivery: nil, deliveryError: nil, id: "prompt-2", role: "user",
-            text: "Make it shorter", turnID: "turn-2", updatedAt: .now
-        )
+            ])
+        prompt.annotations = [
+            PromptAnnotation(id: "comment-1", messageID: "reply-1", note: "Shorter", quote: "a long answer", role: "assistant")
+        ]
 
-        let fork = await chat.fork(at: .before(turnID: "turn-2"), editing: sent)
-        guard case .draft = fork else {
-            Issue.record("fork = \(String(describing: fork)), want a new-chat draft")
-            return
-        }
-        #expect(rpc.forkInputs.map(\.beforeTurnID) == ["turn-2"])
-        let draft = DraftPromptModel(store: store, draftStore: drafts)
-        draft.activate()
-        draft.configureInitialSelection()
-        await waitUntil { !draft.attachments.isEmpty && draft.attachments.allSatisfy { !$0.isProcessing } }
-        #expect(draft.prompt == "Make it shorter")
-        #expect(draft.annotations.map(\.quote) == ["a long answer"])
-        #expect(draft.attachments.map(\.name) == ["shot.png"])
-        #expect(draft.canSend)
+        #expect(await chat.fork(at: .before(turnID: "turn-2"), editing: ChatMessage(turnID: "turn-2", entry: prompt)))
+        #expect(rpc.commands.isEmpty)
+        #expect(rpc.forkPreviews.map(\.through) == ["turn-1"])
+        let fork = try #require(drafts.activeFork)
+        #expect(fork.sourceThreadID == "a" && fork.throughTurnID == "turn-1" && fork.agentID == "codex" && fork.native)
 
-        await draft.send()
-        let start = try #require(rpc.dispatchedCommands.first { $0.type == "thread.start" })
-        #expect(start.forkContext == "User:\nfirst")
-        #expect(start.cwd == "/tmp/project")
-        #expect(start.message?.text == "Make it shorter")
-        #expect(start.message?.annotations?.map(\.note) == ["Shorter"])
-        #expect(start.message?.attachments?.map(\.mimeType) == ["image/png"])
+        let model = DraftPromptModel(store: store, draftStore: drafts)
+        model.activate()
+        model.configureInitialSelection()
+        await waitUntil { !model.attachments.isEmpty && model.attachments.allSatisfy { !$0.isProcessing } }
+        #expect(model.selectedProviderID == "codex" && model.forksOwnAgent)
+        #expect(model.prompt == "Make it shorter")
+        #expect(model.annotations.map(\.quote) == ["a long answer"])
+        #expect(model.canSend)
+
+        let draftID = try #require(drafts.activeDraftThreadID)
+        await model.send()
+        let command = try #require(rpc.commands.first { $0.forkThread != nil })
+        let sent = try #require(command.forkThread)
+        #expect(command.key == draftID)
+        #expect(sent.thread == "a" && sent.through == "turn-1" && sent.agent == nil)
+        #expect(sent.prompt.text == "Make it shorter")
+        #expect(sent.prompt.annotations?.map(\.note) == ["Shorter"])
+        #expect(sent.prompt.attachments?.map(\.mimeType) == ["image/png"])
+        #expect(store.selectedThreadID == "created-1")
+        #expect(drafts.activeFork == nil)
     }
 
+    /// A send that failed without an answer may have reached the daemon:
+    /// sending the same message again carries the same key, so it lands once;
+    /// an edited message is a new one.
     @Test
-    func authoritativeThreadListReconcilesAcceptedDraftAfterEdits() async throws {
-        let suiteName = "DraftReconnectReconciliationTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let rpc = MockThreadRPCClient(threads: [])
+    func resendingAnUnansweredMessageCarriesItsKey() async throws {
+        let suite = "ResendKey-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
-        let draftStore = ThreadDraftStore(defaults: defaults)
-        draftStore.setActiveDraftThreadID("accepted-thread")
-        draftStore.setText("Edited while offline", for: "accepted-thread")
-        let model = DraftPromptModel(store: store, draftStore: draftStore)
-        model.selectedProviderID = "codex"
-        model.workingDirectory = "/tmp/project"
+        let model = ChatPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults), threadID: "a")
+        model.text = "Once"
+        rpc.commandFailuresRemaining = 1
+        await model.send(.standard)
+        #expect(model.errorMessage != nil)
+        await model.send(.standard)
+        model.text = "Edited"
+        rpc.commandFailuresRemaining = 1
+        await model.send(.standard)
+        model.text = "Edited again"
+        await model.send(.standard)
+        let keys = rpc.commands.filter { $0.deliver != nil }.map(\.key)
+        #expect(keys.count == 4)
+        #expect(keys[0] != nil && keys[0] == keys[1])
+        #expect(keys[2] != keys[1] && keys[3] != keys[2])
+    }
 
-        try rpc.sendThreadUpsert(
-            makeThread("accepted-thread", isRunning: true),
-            sequence: 1
-        )
-        await model.loadOptions()
+    /// Taking back a waiting prompt puts it in the composer ahead of what was
+    /// typed since, with its comments; another agent's message is only
+    /// removed.
+    @Test
+    func cancellingAWaitingPromptReturnsItToTheComposer() async throws {
+        let suite = "CancelReturns-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a")])
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        let model = ChatPromptModel(store: store, draftStore: ThreadDraftStore(defaults: defaults), threadID: "a")
+        func waiting(_ id: String, kind: MaidDeliveryKind, text: String) -> DeliveryView {
+            DeliveryView(
+                annotations: [PromptAnnotation(id: "c-\(id)", messageID: "m", note: "why", quote: "this", role: "assistant")],
+                answers: nil, attachments: nil, createdAt: Date(),
+                from: ActorView(kind: kind == .prompt ? "device" : "agent", name: "", participant: nil, thread: nil),
+                id: id, kind: kind.rawValue, mode: MaidDeliveryMode.queue.rawValue, position: 1, reason: nil,
+                state: MaidDeliveryState.queued.rawValue, text: text, to: "p", turn: nil
+            )
+        }
+        model.text = "typed since"
+        await model.cancel(waiting("d1", kind: .prompt, text: "Do the thing"))
+        #expect(rpc.commands.compactMap(\.cancelDelivery).map(\.delivery) == ["d1"])
+        #expect(model.text == "Do the thing\n\ntyped since")
+        #expect(model.annotations.map(\.quote) == ["this"])
 
-        #expect(store.selectedThreadID == "accepted-thread")
-        #expect(draftStore.activeDraftThreadID == nil)
-        #expect(draftStore.text(for: "accepted-thread").isEmpty)
+        await model.cancel(waiting("d2", kind: .message, text: "From another agent"))
+        #expect(rpc.commands.compactMap(\.cancelDelivery).map(\.delivery) == ["d1", "d2"])
+        #expect(model.text == "Do the thing\n\ntyped since")
+    }
+
+    /// An agent that can't fork its own session is handed the conversation
+    /// in the first message: the draft's composer starts with the summary,
+    /// and sending starts that agent with what is in it.
+    @Test
+    func aForkWithoutANativeSessionStartsFromTheEditableSummary() async throws {
+        let suiteName = "SummaryForkTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = ThreadFixtures.summary(id: "a", title: "a", cwd: "/tmp/project", agent: ("codex", "Codex"))
+        let rpc = MockThreadRPCClient(threads: [source], turns: ["a": [
+            ThreadFixtures.turn(id: "turn-1", entries: [ThreadFixtures.entry(ref: "p1", kind: .userMessage, text: "first")]),
+        ]])
+        rpc.forkPreviewResult = ForkPreview(native: false, summary: "Here is the conversation so far:\n\nUser: first\n\n")
+        let store = ThreadStore(rpc: rpc)
+        await store.start()
+        store.selectThread("a")
+        await waitUntil { store.subscribedThreadIDs.contains("a") }
+        let drafts = ThreadDraftStore(defaults: defaults)
+        let chat = ChatPromptModel(store: store, draftStore: drafts, threadID: "a")
+
+        #expect(await chat.fork(at: .latest))
+        #expect(rpc.forkPreviews.map(\.through) == ["turn-1"])
+        let model = DraftPromptModel(store: store, draftStore: drafts)
+        model.activate()
+        model.configureInitialSelection()
+        #expect(!model.forksOwnAgent)
+        #expect(model.prompt == "Here is the conversation so far:\n\nUser: first\n\n")
+        model.prompt += "Now the tests."
+        await model.send()
+        let sent = try #require(rpc.commands.compactMap(\.forkThread).first)
+        #expect(sent.agent?.instance == "codex" && sent.through == "turn-1")
+        #expect(sent.prompt.text == "Here is the conversation so far:\n\nUser: first\n\nNow the tests.")
     }
 
     @Test
@@ -789,7 +848,7 @@ struct ThreadStoreTests {
         let suite = "AnnotationSendQA-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let rpc = MockThreadRPCClient(threads: [makeThread("a")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
         let drafts = ThreadDraftStore(defaults: defaults)
@@ -800,24 +859,24 @@ struct ThreadStoreTests {
         annotations.addEditorDraft()
         let originalID = try #require(annotations.annotations.first?.id)
         #expect(model.canSend)
-        rpc.turnFailuresRemaining = 1
+        rpc.commandFailuresRemaining = 1
         await model.send(.standard)
         #expect(annotations.annotations.first?.id == originalID)
         #expect(model.errorMessage != nil)
         #expect(!model.isSending)
 
-        rpc.shouldBlockTurnDispatch = true
+        rpc.shouldBlockCommands = true
         let sending = Task { await model.send(.standard) }
-        await waitUntil { rpc.dispatchedCommands.filter { $0.type == "thread.turn.start" }.count == 2 }
+        await waitUntil { rpc.commands.filter { $0.deliver != nil }.count == 2 }
         #expect(model.isSending)
         annotations.beginComment(quote: "New quote", messageID: "message-b", role: "assistant")
         annotations.addEditorDraft()
         model.text = "Next prompt"
-        rpc.resumeTurnDispatches()
+        rpc.resumeCommands()
         await sending.value
 
-        let sent = try #require(rpc.dispatchedCommands.last?.message)
-        #expect(sent.text.isEmpty)
+        let sent = try #require(rpc.commands.last?.deliver?.body)
+        #expect(sent.text == nil)
         #expect(sent.annotations?.map(\.id) == [originalID])
         #expect(annotations.annotations.map(\.quote) == ["New quote"])
         #expect(model.text == "Next prompt")
@@ -829,7 +888,7 @@ struct ThreadStoreTests {
         let suite = "ChatDraftOwnershipQA-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let rpc = MockThreadRPCClient(threads: [makeThread("a"), makeThread("b")])
+        let rpc = MockThreadRPCClient(threads: [makeSummary("a"), makeSummary("b")])
         let store = ThreadStore(rpc: rpc)
         await store.start()
         let drafts = ThreadDraftStore(defaults: defaults)
@@ -873,13 +932,13 @@ struct ThreadStoreTests {
         returnedA.removeAttachment(id: attachmentID)
         #expect(ChatPromptModel(store: store, draftStore: drafts, threadID: "a").attachments.isEmpty)
         returnedA.text = "Accepted 雪"
-        rpc.shouldBlockTurnDispatch = true
+        rpc.shouldBlockCommands = true
         let sending = Task { await returnedA.send(.standard) }
-        await waitUntil { rpc.dispatchedCommands.contains { $0.type == "thread.turn.start" } }
+        await waitUntil { rpc.commands.contains { $0.deliver != nil } }
         annotations.show(threadID: "b", draftStore: drafts)
-        rpc.resumeTurnDispatches()
+        rpc.resumeCommands()
         await sending.value
-        let sent = try #require(rpc.dispatchedCommands.last?.message)
+        let sent = try #require(rpc.commands.last?.deliver?.body)
         #expect(sent.text == "Accepted 雪")
         #expect(sent.annotations?.map(\.id) == [submittedID])
         #expect(drafts.annotations(for: "a").isEmpty)
@@ -926,8 +985,7 @@ struct ThreadStoreTests {
     }
 
     private func writeOnePixelPNG(to url: URL) throws {
-        try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
-            .write(to: url)
+        try #require(Data(base64Encoded: onePixelPNG)).write(to: url)
     }
 
     private func waitUntil(
@@ -942,13 +1000,24 @@ struct ThreadStoreTests {
     }
 }
 
+private let onePixelPNG =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+/// A daemon that answers from per-thread snapshots, records what the store
+/// sends, and pushes the notifications a test scripts.
 private final class MockThreadRPCClient: ThreadRPCClient {
     var onNotification: ((String, Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
-    private(set) var subscriptionInputs: [SubscribeThreadInput] = []
+    private(set) var subscribedThreadIDs: [String] = []
     private(set) var unsubscribedThreadIDs: [String] = []
-    private(set) var dispatchedCommands: [Command] = []
+    /// thread.sync and thread.subscribe calls in order, as "sync a" or
+    /// "subscribe a".
+    private(set) var openCalls: [String] = []
+    private(set) var commands: [CommandParams] = []
     private(set) var providerStartInputs: [String] = []
+    /// What thread.forkPreview answers, and the previews asked for.
+    var forkPreviewResult = ForkPreview(native: true, summary: nil)
+    private(set) var forkPreviews: [ThreadForkPreviewParams] = []
     private(set) var providerOptionSetInputs: [ProviderOptionsSetParams] = []
     private(set) var fileSearchInputs: [WorkspaceSearchFilesParams] = []
     private var fileSearchContinuations: [Int: CheckedContinuation<WorkspaceSearchFilesResult, Error>] = [:]
@@ -956,15 +1025,13 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     var shouldBlockUnsubscribe = false
     var shouldBlockProviderStart = false
     var shouldBlockProviderOptionSet = false
-    var shouldBlockTurnDispatch = false
-    var turnFailuresRemaining = 0
+    var shouldBlockCommands = false
+    /// Commands that fail as if the connection dropped before the reply.
+    var commandFailuresRemaining = 0
     var threadListFailuresRemaining = 0
     var threadSubscriptionFailuresRemaining = 0
-    var prepareFailuresRemaining = 0
     var providerStatus = "initialized"
     var supportsImages = false
-    var forkResult: ProviderForkThreadResult?
-    private(set) var forkInputs: [ProviderForkThreadParams] = []
     /// Base64 image data by attachment id.
     var attachmentData: [String: String] = [:]
     var providerOptions = [
@@ -980,45 +1047,24 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     ]
 
     private var subscribeContinuations:
-        [(continuation: CheckedContinuation<ThreadStreamItem, Never>, snapshot: ThreadStreamItem)] = []
+        [(continuation: CheckedContinuation<ThreadSnapshot, Never>, snapshot: ThreadSnapshot)] = []
     private var unsubscribeContinuations: [CheckedContinuation<Void, Never>] = []
     private var providerStartContinuations: [CheckedContinuation<Void, Never>] = []
     private var providerOptionSetContinuations: [CheckedContinuation<Void, Never>] = []
-    private var turnDispatchContinuations: [CheckedContinuation<Void, Never>] = []
-    private let threadListItem: ThreadListStreamItem
-    private var snapshotsByID: [String: ThreadStreamItem]
+    private var commandContinuations: [CheckedContinuation<Void, Never>] = []
+    private let listSnapshot: [ThreadSummary]
+    private var snapshotsByID: [String: ThreadSnapshot]
+    /// The thread a CreateThread or ForkThread made, by the command's key,
+    /// as the daemon's receipts keep them.
+    private var createdByKey: [String: String] = [:]
+    private var uploads = 0
 
-    init(threads: [mai.Thread], historyRestorePendingThreadIDs: Set<String> = []) {
-        let entries = threads.map(makeThreadListEntry)
-        threadListItem = ThreadListStreamItem(
-            kind: "snapshot",
-            sequence: nil,
-            snapshot: ThreadListSnapshot(
-                snapshotSequence: 0,
-                threads: entries,
-                updatedAt: .now
-            ),
-            thread: nil
-        )
+    init(threads: [ThreadSummary], turns: [String: [TurnView]] = [:]) {
+        listSnapshot = threads
         snapshotsByID = Dictionary(
-            uniqueKeysWithValues: threads.enumerated().map { index, thread in
-                (
-                    thread.id,
-                    ThreadStreamItem(
-                        event: nil,
-                        kind: "snapshot",
-                        snapshot: ThreadDetailSnapshot(
-                            historyRestorePending:
-                                historyRestorePendingThreadIDs.contains(
-                                    thread.id
-                                ),
-                            snapshotSequence: index + 1,
-                            thread: thread
-                        )
-                    )
-                )
-            }
-        )
+            uniqueKeysWithValues: threads.map { summary in
+                (summary.id, makeSnapshot(summary, turns: turns[summary.id]))
+            })
     }
 
     func connect() {}
@@ -1045,23 +1091,29 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         for continuation in pending { continuation.resume(throwing: CancellationError()) }
     }
 
-    func subscribeThreadList() async throws -> ThreadListStreamItem {
+    func subscribeThreadList() async throws -> ThreadListItem {
         if threadListFailuresRemaining > 0 {
             threadListFailuresRemaining -= 1
             onDisconnect?(MockError.disconnected)
             throw MockError.disconnected
         }
-        return threadListItem
+        return ThreadListItem(
+            kind: MaidThreadListKind.snapshot.rawValue, removed: nil, seq: 0, thread: nil, threads: listSnapshot)
     }
 
-    func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem {
-        subscriptionInputs.append(input)
+    func syncThread(_ threadID: String) async throws {
+        openCalls.append("sync \(threadID)")
+    }
+
+    func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {
+        openCalls.append("subscribe \(threadID)")
+        subscribedThreadIDs.append(threadID)
         if threadSubscriptionFailuresRemaining > 0 {
             threadSubscriptionFailuresRemaining -= 1
             throw MockError.subscriptionFailed
         }
-        guard let snapshot = snapshotsByID[input.threadID] else {
-            throw MockError.missingThread(input.threadID)
+        guard let snapshot = snapshotsByID[threadID] else {
+            throw MockError.missingThread(threadID)
         }
         if shouldBlockSubscribe {
             return await withCheckedContinuation { continuation in
@@ -1071,8 +1123,8 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         return snapshot
     }
 
-    func unsubscribeThread(_ input: SubscribeThreadInput) async throws {
-        unsubscribedThreadIDs.append(input.threadID)
+    func unsubscribeThread(_ threadID: String) async throws {
+        unsubscribedThreadIDs.append(threadID)
         if shouldBlockUnsubscribe {
             await withCheckedContinuation { continuation in
                 unsubscribeContinuations.append(continuation)
@@ -1130,55 +1182,53 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         resumeAll(&providerOptionSetContinuations)
     }
 
-    func uploadAttachment(_ input: AttachmentUploadParams) async throws {}
-
-    func forkProviderThread(_ input: ProviderForkThreadParams) async throws -> ProviderForkThreadResult {
-        forkInputs.append(input)
-        guard let forkResult else { throw RPCError("No fork scripted") }
-        return forkResult
+    func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview {
+        forkPreviews.append(input)
+        return forkPreviewResult
     }
 
-    func getAttachment(_ input: GetAttachmentInput) async throws -> mai.Attachment {
-        guard let data = attachmentData[input.attachmentID] else { throw RPCError("No such attachment") }
+    func uploadAttachment(_ data: String) async throws -> String {
+        uploads += 1
+        return "upload-\(uploads)"
+    }
+
+    func getAttachment(_ id: String) async throws -> mai.Attachment {
+        guard let data = attachmentData[id] else { throw RPCError("No such attachment") }
         return mai.Attachment(
             meta: nil, annotations: nil, data: data, description: nil,
-            id: input.attachmentID, kind: MaidAttachmentKind.image.rawValue, mimeType: "image/png", name: nil,
+            id: id, kind: MaidAttachmentKind.image.rawValue, mimeType: "image/png", name: nil,
             resourceMeta: nil, size: nil, title: nil, uri: nil
         )
     }
 
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult {
-        dispatchedCommands.append(command)
-        if command.type == "thread.turn.start" {
-            if turnFailuresRemaining > 0 {
-                turnFailuresRemaining -= 1
-                throw MockError.disconnected
-            }
-            if shouldBlockTurnDispatch {
-                await withCheckedContinuation { turnDispatchContinuations.append($0) }
-            }
+    func command(_ params: CommandParams) async throws -> CommandResult {
+        commands.append(params)
+        if shouldBlockCommands {
+            await withCheckedContinuation { commandContinuations.append($0) }
         }
-        if command.type == "thread.session.prepare", prepareFailuresRemaining > 0 {
-            prepareFailuresRemaining -= 1
-            throw MockError.prepareFailed
+        // The daemon may have run a command whose reply was lost.
+        let created = createdThread(for: params)
+        if commandFailuresRemaining > 0 {
+            commandFailuresRemaining -= 1
+            throw MockError.disconnected
         }
-        if command.type == "thread.start", let threadID = command.threadID {
-            let thread = makeThread(threadID).with(
-                cwd: .some(command.cwd),
-                providerInstanceID: .some(command.providerInstanceID),
-                title: command.title ?? command.message?.text ?? "Untitled thread"
-            )
-            snapshotsByID[threadID] = ThreadStreamItem(
-                event: nil,
-                kind: "snapshot",
-                snapshot: ThreadDetailSnapshot(
-                    historyRestorePending: nil,
-                    snapshotSequence: 1,
-                    thread: thread
-                )
-            )
-        }
-        return DispatchResult(sequence: 1)
+        return CommandResult(delivery: nil, participant: nil, thread: created)
+    }
+
+    /// Makes the thread a CreateThread or ForkThread asks for, once per key.
+    private func createdThread(for params: CommandParams) -> String? {
+        guard params.createThread != nil || params.forkThread != nil else { return nil }
+        if let key = params.key, let existing = createdByKey[key] { return existing }
+        let id = "created-\(createdByKey.count + 1)"
+        let title = params.createThread?.prompt?.text ?? "Untitled"
+        snapshotsByID[id] = makeSnapshot(makeSummary(id, title: title), turns: nil)
+        if let key = params.key { createdByKey[key] = id }
+        return id
+    }
+
+    func resumeCommands() {
+        shouldBlockCommands = false
+        resumeAll(&commandContinuations)
     }
 
     func resumeUnsubscribes() {
@@ -1196,25 +1246,20 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     }
 
     func subscriptionCount(for threadID: String) -> Int {
-        subscriptionInputs.filter { $0.threadID == threadID }.count
+        subscribedThreadIDs.filter { $0 == threadID }.count
     }
 
     private func makeProvider(status: String) -> InstanceInfo {
         InstanceInfo(
+            access: nil,
             auth: Auth(methods: nil, status: "authenticated"),
             capabilities: Capabilities(
-                additionalDirectories: nil,
-                auth: nil,
-                loadReplay: nil,
-                logout: nil,
-                mcp: nil,
+                additionalDirectories: nil, auth: nil, commandCompletion: nil, delete: nil, fork: true,
+                history: "native", historyVersion: 1, instructions: nil, logout: nil, mcp: nil, messageIDS: nil,
                 promptContent: supportsImages
                     ? PromptContentCapabilities(audio: nil, embeddedContext: nil, image: true)
                     : nil,
-                resume: nil,
-                sessionClose: nil,
-                sessionDelete: nil,
-                sessionList: nil
+                rename: nil, resume: nil, sessions: nil, steer: nil, subagents: nil
             ),
             driver: "mock",
             initializedAt: .now,
@@ -1234,115 +1279,41 @@ private final class MockThreadRPCClient: ThreadRPCClient {
         onNotification?(method, try newJSONEncoder().encode(MockNotification(params: params)))
     }
 
-    private func sendEvent(
-        _ type: String, payload: EventPayload, sequence: Int, occurredAt: Date = .now
+    private func sendEvent(_ event: ThreadEvent) throws {
+        try publish(MaidRPCMethod.threadEvent, event)
+    }
+
+    /// An entry of the thread's turn `turn-<thread>`, which runs.
+    func sendEntry(
+        threadID: String, ref: String, kind: MaidItemKind, text: String? = nil,
+        status: MaidItemStatus = .completed, seq: Int
     ) throws {
-        let event = Event(
-            actor: nil, commandID: nil, eventID: "event-\(sequence)", metadata: nil,
-            occurredAt: occurredAt, payload: payload, sequence: sequence, type: type)
+        try sendEvent(ThreadFixtures.event(
+            .entry, thread: threadID, seq: seq,
+            turn: ThreadFixtures.turn(id: "turn-\(threadID)", state: .running, entries: []),
+            entry: ThreadFixtures.entry(ref: ref, kind: kind, text: text, status: status)))
+    }
+
+    func sendText(threadID: String, ref: String, text: String, seq: Int) throws {
+        try sendEvent(ThreadFixtures.event(
+            .text, thread: threadID, seq: seq,
+            text: TextAppend(entry: ref, stream: "", text: text, turn: "turn-\(threadID)")))
+    }
+
+    func sendTurn(threadID: String, state: MaidTurnState, seq: Int) throws {
+        try sendEvent(ThreadFixtures.event(
+            .turn, thread: threadID, seq: seq,
+            turn: ThreadFixtures.turn(id: "turn-\(threadID)", state: state, entries: [])))
+    }
+
+    func sendSummary(_ summary: ThreadSummary, seq: Int) throws {
+        try sendEvent(ThreadFixtures.event(.thread, thread: summary.id, seq: seq, summary: summary))
+    }
+
+    func sendListUpsert(_ summary: ThreadSummary, seq: Int) throws {
         try publish(
-            MaidRPCMethod.orchestrationSubscribeThread,
-            ThreadStreamItem(event: event, kind: "event", snapshot: nil))
-    }
-
-    func sendTitleUpdate(threadID: String, title: String, sequence: Int) throws {
-        try sendEvent(
-            "thread.meta-updated", payload: makeEventPayload(threadID: threadID, title: title),
-            sequence: sequence)
-    }
-
-    func sendAssistantDelta(threadID: String, messageID: String, text: String, sequence: Int) throws {
-        try sendEvent(
-            "thread.message-sent",
-            payload: makeEventPayload(
-                threadID: threadID, messageID: messageID, role: "assistant", text: text,
-                turnID: "turn-\(threadID)"),
-            sequence: sequence)
-    }
-
-    func sendReasoning(
-        threadID: String, delta: String? = nil, completedText: String? = nil, sequence: Int
-    ) throws {
-        let reasoning = Item(
-            createdAt: .now, detailAvailable: false, id: "thought", kind: MaidItemKind.reasoning.rawValue,
-            payload: completedText.map { JSONAny(["text": $0]) }, sequence: nil,
-            status: completedText == nil ? MaidItemStatus.inProgress.rawValue : MaidItemStatus.completed.rawValue,
-            textDelta: delta, title: nil, toolCall: nil, toolCallSummary: nil,
-            turnID: "turn-\(threadID)", updatedAt: .now)
-        try sendEvent(
-            MaidEventType.threadItemUpserted.rawValue,
-            payload: makeEventPayload(threadID: threadID, item: reasoning), sequence: sequence)
-    }
-
-    func sendUserMessage(
-        threadID: String,
-        text: String,
-        occurredAt: Date,
-        authoritativeUpdatedAt: Date,
-        sequence: Int
-    ) throws {
-        guard snapshotsByID[threadID]?.snapshot?.thread != nil else {
-            throw MockError.missingThread(threadID)
-        }
-        try sendEvent(
-            "thread.message-sent",
-            payload: makeEventPayload(
-                threadID: threadID, messageID: "message-\(sequence)", role: "user", text: text),
-            sequence: sequence, occurredAt: occurredAt)
-        try sendThreadListTimestamp(
-            threadID: threadID,
-            updatedAt: authoritativeUpdatedAt,
-            sequence: sequence
-        )
-    }
-
-    func sendThreadListTimestamp(
-        threadID: String,
-        updatedAt: Date,
-        sequence: Int
-    ) throws {
-        guard let thread = snapshotsByID[threadID]?.snapshot?.thread else {
-            throw MockError.missingThread(threadID)
-        }
-        try publish(
-            MaidRPCMethod.orchestrationSubscribeThreadList,
-            ThreadListStreamItem(
-                kind: "thread-upserted", sequence: sequence, snapshot: nil,
-                thread: makeThreadListEntry(thread).with(updatedAt: updatedAt)))
-    }
-
-    func sendThreadUpsert(_ thread: mai.Thread, sequence: Int) throws {
-        snapshotsByID[thread.id] = ThreadStreamItem(
-            event: nil,
-            kind: "snapshot",
-            snapshot: ThreadDetailSnapshot(
-                historyRestorePending: nil,
-                snapshotSequence: sequence,
-                thread: thread
-            )
-        )
-        try publish(
-            MaidRPCMethod.orchestrationSubscribeThreadList,
-            ThreadListStreamItem(
-                kind: "thread-upserted", sequence: sequence, snapshot: nil,
-                thread: makeThreadListEntry(thread)))
-    }
-
-    func sendTurnInterrupted(
-        threadID: String,
-        turnID: String,
-        occurredAt: Date,
-        sequence: Int
-    ) throws {
-        try sendEvent(
-            "thread.turn-interrupt-confirmed",
-            payload: makeEventPayload(threadID: threadID, turnID: turnID),
-            sequence: sequence, occurredAt: occurredAt)
-    }
-
-    func resumeTurnDispatches() {
-        shouldBlockTurnDispatch = false
-        resumeAll(&turnDispatchContinuations)
+            MaidRPCMethod.threadList,
+            ThreadListItem(kind: MaidThreadListKind.upsert.rawValue, removed: nil, seq: seq, thread: summary, threads: nil))
     }
 
     private func resumeAll(_ continuations: inout [CheckedContinuation<Void, Never>]) {
@@ -1354,7 +1325,6 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     private enum MockError: Error {
         case disconnected
         case missingThread(String)
-        case prepareFailed
         case subscriptionFailed
     }
 
@@ -1363,83 +1333,20 @@ private final class MockThreadRPCClient: ThreadRPCClient {
     }
 }
 
-private func makeThreadListEntry(_ thread: mai.Thread) -> ThreadListEntry {
-    ThreadListEntry(
-        createdAt: thread.createdAt,
-        cwd: thread.cwd,
-        hasPendingApprovals: thread.timeline.contains { $0.approval?.status == "pending" },
-        id: thread.id,
-        latestTurn: thread.latestTurn,
-        modelSelection: thread.modelSelection,
-        providerInstanceID: thread.providerInstanceID,
-        session: thread.session,
-        title: thread.title,
-        updatedAt: thread.updatedAt
-    )
+private func makeSummary(
+    _ id: String, title: String? = nil, status: MaidThreadStatus = .idle, updatedAt: Date = .now
+) -> ThreadSummary {
+    ThreadFixtures.summary(
+        id: id, title: title ?? id, agent: ("codex", "Codex"), status: status, updatedAt: updatedAt)
 }
 
-private func makeEventPayload(
-    threadID: String,
-    messageID: String? = nil,
-    role: String? = nil,
-    text: String? = nil,
-    title: String? = nil,
-    turnID: String? = nil,
-    item: Item? = nil
-) -> EventPayload {
-    EventPayload(
-        approval: nil,
-        attachments: nil,
-        configOptions: nil,
-        createdAt: nil,
-        cwd: nil,
-        decision: nil,
-        item: item,
-        messageID: messageID,
-        modelSelection: nil,
-        optionID: nil,
-        plan: nil,
-        providerInstanceID: nil,
-        requestID: nil,
-        role: role,
-        session: nil,
-        sessionCleared: nil,
-        slashCommands: nil,
-        stopReason: nil,
-        text: text,
-        threadID: threadID,
-        title: title,
-        tokenUsage: nil,
-        turnID: turnID,
-        updatedAt: nil,
-        value: nil
-    )
-}
-
-private func makeThread(_ id: String, isRunning: Bool = false) -> mai.Thread {
-    let turn = isRunning
-        ? Turn(
-            completedAt: nil,
-            error: nil,
-            interruptRequested: false,
-            requestedAt: .now,
-            startedAt: .now,
-            state: "running",
-            stopReason: nil,
-            turnID: "turn-\(id)"
-        )
-        : nil
-    return mai.Thread(
-        createdAt: .now,
-        cwd: nil,
-        id: id,
-        latestTurn: turn,
-        modelSelection: nil,
-        plan: nil,
-        providerInstanceID: "provider",
-        session: nil,
-        timeline: [],
-        title: id,
-        updatedAt: .now
+/// A running thread's snapshot shows its running turn.
+private func makeSnapshot(_ summary: ThreadSummary, turns: [TurnView]?) -> ThreadSnapshot {
+    let turns = turns ?? (summary.threadStatus == .running
+        ? [ThreadFixtures.turn(id: "turn-\(summary.id)", participant: summary.participants[0].id, state: .running, entries: [])]
+        : [])
+    return ThreadSnapshot(
+        children: [], older: nil, participants: [ThreadFixtures.participant(of: summary)], plan: [], queue: [],
+        requests: [], seq: 1, thread: summary, turns: turns
     )
 }

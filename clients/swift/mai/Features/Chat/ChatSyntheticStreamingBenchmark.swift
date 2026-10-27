@@ -9,7 +9,6 @@
         nonisolated deinit {}
 
         private let store: ThreadStore
-        private var sequence = 0
         private let turnID = "synthetic-stream-turn"
         private let messageID = "synthetic-stream-assistant"
         private let characters: [Character]
@@ -36,29 +35,33 @@
                     .prefix(20_000))
         }
 
+        private var turn: TurnView? {
+            store.selectedThread?.turns.last { $0.id == turnID }
+        }
+
+        private func entry(_ ref: String) -> EntryView? {
+            turn?.entries.last { $0.ref == ref }
+        }
+
         var sourceMatches: Bool {
-            let replyMatches = store.selectedThread?.timeline.last(where: { $0.message?.id == messageID })?.message?
-                .text == String(characters)
-                && store.selectedThread?.latestTurn?.completedAt != nil
+            let replyMatches = entry(messageID)?.text == String(characters)
+                && turn?.turnState?.isSettled == true
             guard includesActivity else { return replyMatches }
-            let items = store.selectedThread?.timeline.compactMap(\.item) ?? []
             let thoughtsMatch = [("first", firstThought), ("second", secondThought)].allSatisfy {
                 name, expected in
-                guard let item = items.first(where: { $0.id == "synthetic-stream-thought-\(name)" }),
-                    let payload = item.payload?.value as? [String: Any]
-                else { return false }
-                return item.itemStatus == .completed && payload["text"] as? String == expected
+                let thought = entry("synthetic-stream-thought-\(name)")
+                return thought?.itemStatus == .completed && thought?.text == expected
             }
-            let tool = items.first { $0.id == "synthetic-stream-tool" }
+            let tool = entry("synthetic-stream-tool")
             return replyMatches && thoughtsMatch && tool?.itemStatus == .completed
-                && tool?.toolCallSummary?.outputPreview == "QA output step 12 of 12"
+                && tool?.tool?.outputPreview == "QA output step 12 of 12"
         }
 
         func prepare() {
-            send(.threadTurnStartRequested)
-            send(
-                .threadMessageSent, messageID: "synthetic-stream-user", role: .user,
-                text: "Explain the implementation with code and tables.")
+            sendTurn(.running)
+            sendEntry(ThreadFixtures.entry(
+                ref: "synthetic-stream-user", kind: .userMessage,
+                text: "Explain the implementation with code and tables."))
             if includesActivity {
                 sendThought(name: "first", text: String(firstThought.prefix(16)))
                 traceActivity("first-thought-start")
@@ -85,15 +88,10 @@
             }
             for offset in stride(from: min(16, characters.count), to: characters.count, by: 16) {
                 guard !Task.isCancelled else { return }
-                send(
-                    .threadMessageSent, messageID: messageID, role: .assistant,
-                    text: String(characters[offset..<min(offset + 16, characters.count)]))
+                sendText(messageID, String(characters[offset..<min(offset + 16, characters.count)]))
                 do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
             }
-            var session = store.selectedThread?.session
-            session?.activeTurnID = nil
-            session?.status = MaidSessionStatus.ready.rawValue
-            send(.threadSessionStatusSet, session: session)
+            sendTurn(.completed)
             if includesActivity { traceActivity("turn-completed") }
             // Include the settled renderer's transition in the measured interval.
             try? await Task.sleep(for: .seconds(1))
@@ -101,9 +99,9 @@
         }
 
         private func prepareReply() {
-            send(
-                .threadMessageSent, messageID: messageID, role: .assistant,
-                text: String(characters.prefix(16)))
+            sendEntry(ThreadFixtures.entry(
+                ref: messageID, kind: .assistantMessage, text: String(characters.prefix(16)),
+                status: .inProgress))
         }
 
         private func streamThought(name: String, text: String, seeded: Bool) async -> Bool {
@@ -111,7 +109,7 @@
             if !seeded { sendThought(name: name, text: String(source.prefix(16))) }
             for offset in stride(from: 16, to: source.count, by: 40) {
                 guard !Task.isCancelled else { return false }
-                sendThought(name: name, delta: String(source[offset..<min(offset + 40, source.count)]))
+                sendText("synthetic-stream-thought-\(name)", String(source[offset..<min(offset + 40, source.count)]))
                 // Match the daemon's 50 ms reasoning flush rather than inventing
                 // a render-only text path or an animation for this fixture.
                 do { try await Task.sleep(for: .milliseconds(50)) } catch { return false }
@@ -120,31 +118,22 @@
             return true
         }
 
-        private func sendThought(
-            name: String, text: String? = nil, delta: String? = nil, completed: Bool = false
-        ) {
-            send(.threadItemUpserted, item: Item(
-                createdAt: .now, detailAvailable: false,
-                id: "synthetic-stream-thought-\(name)", kind: MaidItemKind.reasoning.rawValue,
-                payload: text.map { JSONAny(["text": $0]) }, sequence: nil,
-                status: completed ? MaidItemStatus.completed.rawValue : MaidItemStatus.inProgress.rawValue,
-                textDelta: delta, title: nil, toolCall: nil, toolCallSummary: nil,
-                turnID: turnID, updatedAt: .now))
+        private func sendThought(name: String, text: String, completed: Bool = false) {
+            sendEntry(ThreadFixtures.entry(
+                ref: "synthetic-stream-thought-\(name)", kind: .reasoning, text: text,
+                status: completed ? .completed : .inProgress))
         }
 
         private func sendTool(step: Int, completed: Bool) -> Bool {
-            guard var item = store.selectedThread?.timeline.compactMap(\.item)
+            guard var tool = store.selectedThread?.turns.lazy.flatMap(\.entries)
                 .first(where: { $0.itemKind == .commandExecution })
             else { return false }
-            item.id = "synthetic-stream-tool"
-            item.turnID = turnID
-            item.createdAt = .now
-            item.updatedAt = .now
-            item.status = completed ? MaidItemStatus.completed.rawValue : MaidItemStatus.inProgress.rawValue
-            item.toolCallSummary?.commandPreview = "printf 'QA tool output'"
-            item.toolCallSummary?.outputPreview = "QA output step \(step) of 12"
-            item.toolCallSummary?.exitCode = completed ? 0 : nil
-            send(.threadItemUpserted, item: item)
+            tool.ref = "synthetic-stream-tool"
+            tool.status = completed ? MaidItemStatus.completed.rawValue : MaidItemStatus.inProgress.rawValue
+            tool.tool?.commandPreview = "printf 'QA tool output'"
+            tool.tool?.outputPreview = "QA output step \(step) of 12"
+            tool.tool?.exitCode = completed ? 0 : nil
+            sendEntry(tool)
             return true
         }
 
@@ -152,25 +141,37 @@
             ChatBenchmarkAutoRun.trace("activity phase=\(phase) unixTime=\(Date.now.timeIntervalSince1970)")
         }
 
-        private func send(
-            _ type: MaidEventType, messageID: String? = nil,
-            role: MaidMessageRole? = nil, text: String? = nil, session: SessionBinding? = nil,
-            item: Item? = nil
-        ) {
-            sequence += 1
-            let payload = EventPayload(
-                approval: nil, attachments: nil, configOptions: nil,
-                createdAt: nil, cwd: nil, decision: nil, item: item, messageID: messageID,
-                modelSelection: nil, optionID: nil, plan: nil, providerInstanceID: nil,
-                requestID: nil, role: role?.rawValue, session: session, sessionCleared: nil,
-                slashCommands: nil, stopReason: nil, text: text,
-                threadID: ChatSyntheticBenchmarkThread.threadID, title: nil, tokenUsage: nil,
-                turnID: turnID, updatedAt: nil, value: nil)
-            store.applySyntheticBenchmarkEvent(
-                Event(
-                    actor: nil, commandID: nil,
-                    eventID: "synthetic-stream-event-\(sequence)", metadata: nil, occurredAt: .now,
-                    payload: payload, sequence: sequence, type: type.rawValue))
+        /// Each event follows what the thread has seen.
+        private var nextSeq: Int {
+            (store.selectedThread?.seq ?? 0) + 1
+        }
+
+        private var turnView: TurnView {
+            turn ?? ThreadFixtures.turn(id: turnID, state: .running, entries: [])
+        }
+
+        private func sendTurn(_ state: MaidTurnState) {
+            var view = turnView
+            view.entries = []
+            view.state = state.rawValue
+            view.settledAt = state == .running ? nil : .now
+            apply(ThreadFixtures.event(.turn, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, turn: view))
+        }
+
+        private func sendEntry(_ entry: EntryView) {
+            var view = turnView
+            view.entries = []
+            apply(ThreadFixtures.event(
+                .entry, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, turn: view, entry: entry))
+        }
+
+        private func sendText(_ ref: String, _ text: String) {
+            let append = TextAppend(entry: ref, stream: MaidStreamKind.assistant.rawValue, text: text, turn: turnID)
+            apply(ThreadFixtures.event(.text, thread: ChatSyntheticBenchmarkThread.threadID, seq: nextSeq, text: append))
+        }
+
+        private func apply(_ event: ThreadEvent) {
+            store.applySyntheticBenchmarkEvent(event)
         }
     }
 #endif

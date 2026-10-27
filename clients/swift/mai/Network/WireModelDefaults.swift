@@ -22,181 +22,9 @@ extension Attachment {
     }
 }
 
-extension Command {
-    init(
-        commandID: String?,
-        configSelections: [ConfigOptionSelection]?,
-        createdAt: Date?,
-        cwd: String?,
-        message: CommandMessage?,
-        modelSelection: ModelSelection?,
-        optionID: String?,
-        providerInstanceID: String?,
-        requestID: String?,
-        threadID: String?,
-        title: String?,
-        turnID: String?,
-        type: String,
-        value: JSONAny?
-    ) {
-        self.init(
-            actionID: nil,
-            additionalDirectories: nil,
-            answers: nil,
-            commandID: commandID,
-            configSelections: configSelections,
-            createdAt: createdAt,
-            cwd: cwd,
-            forkContext: nil,
-            itemID: nil,
-            message: message,
-            messageID: nil,
-            modelSelection: modelSelection,
-            optionID: optionID,
-            providerInstanceID: providerInstanceID,
-            requestID: requestID,
-            steer: nil,
-            threadID: threadID,
-            title: title,
-            turnID: turnID,
-            type: type,
-            value: value
-        )
-    }
-}
-
 extension ConfigChoice {
     init(label: String?, value: String) {
         self.init(description: nil, group: nil, groupLabel: nil, label: label, value: value)
-    }
-}
-
-extension EventPayload {
-    init(
-        approval: ApprovalEvent?,
-        attachments: [Attachment]?,
-        configOptions: [ConfigOption]?,
-        createdAt: Date?,
-        cwd: String?,
-        decision: String?,
-        item: Item?,
-        messageID: String?,
-        modelSelection: ModelSelection?,
-        optionID: String?,
-        plan: Plan?,
-        providerInstanceID: String?,
-        requestID: String?,
-        role: String?,
-        session: SessionBinding?,
-        sessionCleared: Bool?,
-        slashCommands: [SlashCommand]?,
-        stopReason: String?,
-        text: String?,
-        threadID: String?,
-        title: String?,
-        tokenUsage: TokenUsage?,
-        turnID: String?,
-        updatedAt: Date?,
-        value: JSONAny?
-    ) {
-        self.init(
-            actionID: nil,
-            additionalDirectories: nil,
-            annotations: nil,
-            answers: nil,
-            approval: approval,
-            attachments: attachments,
-            configOptions: configOptions,
-            createdAt: createdAt,
-            cwd: cwd,
-            decision: decision,
-            delivery: nil,
-            deliveryError: nil,
-            goal: nil,
-            item: item,
-            itemID: nil,
-            messageID: messageID,
-            modelSelection: modelSelection,
-            optionID: optionID,
-            plan: plan,
-            providerInstanceID: providerInstanceID,
-            requestID: requestID,
-            role: role,
-            session: session,
-            sessionCleared: sessionCleared,
-            skills: nil,
-            slashCommands: slashCommands,
-            stopReason: stopReason,
-            text: text,
-            threadID: threadID,
-            title: title,
-            tokenUsage: tokenUsage,
-            turnID: turnID,
-            updatedAt: updatedAt,
-            value: value
-        )
-    }
-}
-
-extension Message {
-    init(
-        attachments: [Attachment]?,
-        createdAt: Date,
-        id: String,
-        role: String,
-        text: String,
-        turnID: String?,
-        updatedAt: Date
-    ) {
-        self.init(
-            annotations: nil,
-            attachments: attachments,
-            createdAt: createdAt,
-            delivery: nil,
-            deliveryError: nil,
-            id: id,
-            role: role,
-            text: text,
-            turnID: turnID,
-            updatedAt: updatedAt
-        )
-    }
-}
-
-extension SessionBinding {
-    init(
-        activeTurnID: String?,
-        configOptions: [ConfigOption]?,
-        cwd: String?,
-        driver: String?,
-        lastError: String?,
-        providerInstanceID: String,
-        providerName: String?,
-        slashCommands: [SlashCommand]?,
-        status: String,
-        stopRequested: Bool?,
-        threadID: String,
-        tokenUsage: TokenUsage?,
-        updatedAt: Date
-    ) {
-        self.init(
-            activeTurnID: activeTurnID,
-            additionalDirectories: nil,
-            configOptions: configOptions,
-            cwd: cwd,
-            driver: driver,
-            goal: nil,
-            lastError: lastError,
-            providerInstanceID: providerInstanceID,
-            providerName: providerName,
-            skills: nil,
-            slashCommands: slashCommands,
-            status: status,
-            stopRequested: stopRequested,
-            threadID: threadID,
-            tokenUsage: tokenUsage,
-            updatedAt: updatedAt
-        )
     }
 }
 
@@ -210,64 +38,113 @@ extension SlashCommand {
     }
 }
 
-extension Thread {
-    init(
-        createdAt: Date,
-        cwd: String?,
-        id: String,
-        latestTurn: Turn?,
-        modelSelection: ModelSelection?,
-        plan: Plan?,
-        providerInstanceID: String?,
-        session: SessionBinding?,
-        timeline: [TimelineEntry],
-        title: String,
-        updatedAt: Date
-    ) {
+/// A command is exactly one of its fields: each initializer sets one.
+extension CommandParams {
+    private init() {
         self.init(
-            additionalDirectories: nil,
-            createdAt: createdAt,
-            cwd: cwd,
-            id: id,
-            latestTurn: latestTurn,
-            modelSelection: modelSelection,
-            plan: plan,
-            previousTurns: nil,
-            providerInstanceID: providerInstanceID,
-            queuedPrompts: nil,
-            session: session,
-            timeline: timeline,
-            title: title,
-            updatedAt: updatedAt
+            addParticipant: nil,
+            cancelDelivery: nil,
+            commandParamsContinue: nil,
+            createThread: nil,
+            deleteThread: nil,
+            deliver: nil,
+            forkThread: nil,
+            interrupt: nil,
+            key: nil,
+            moveDelivery: nil,
+            respond: nil,
+            retryDelivery: nil,
+            spawn: nil,
+            steerDelivery: nil,
+            stop: nil,
+            stopItem: nil,
+            updateParticipant: nil,
+            updateThread: nil
         )
     }
-}
 
-extension ThreadListEntry {
-    init(
-        createdAt: Date,
-        cwd: String?,
-        hasPendingApprovals: Bool,
-        id: String,
-        latestTurn: Turn?,
-        modelSelection: ModelSelection?,
-        providerInstanceID: String?,
-        session: SessionBinding?,
-        title: String,
-        updatedAt: Date
-    ) {
-        self.init(
-            additionalDirectories: nil,
-            createdAt: createdAt,
-            cwd: cwd,
-            hasPendingApprovals: hasPendingApprovals,
-            id: id,
-            latestTurn: latestTurn,
-            modelSelection: modelSelection,
-            providerInstanceID: providerInstanceID,
-            session: session,
-            title: title,
-            updatedAt: updatedAt
-        )
+    init(addParticipant: AddParticipant) {
+        self.init()
+        self.addParticipant = addParticipant
+    }
+
+    init(cancelDelivery: CancelDelivery) {
+        self.init()
+        self.cancelDelivery = cancelDelivery
+    }
+
+    init(commandParamsContinue: Continue) {
+        self.init()
+        self.commandParamsContinue = commandParamsContinue
+    }
+
+    init(createThread: CreateThread) {
+        self.init()
+        self.createThread = createThread
+    }
+
+    init(deleteThread: DeleteThread) {
+        self.init()
+        self.deleteThread = deleteThread
+    }
+
+    init(deliver: Deliver) {
+        self.init()
+        self.deliver = deliver
+    }
+
+    init(forkThread: ForkThread) {
+        self.init()
+        self.forkThread = forkThread
+    }
+
+    init(interrupt: Interrupt) {
+        self.init()
+        self.interrupt = interrupt
+    }
+
+    init(moveDelivery: MoveDelivery) {
+        self.init()
+        self.moveDelivery = moveDelivery
+    }
+
+    init(respond: Respond) {
+        self.init()
+        self.respond = respond
+    }
+
+    init(retryDelivery: RetryDelivery) {
+        self.init()
+        self.retryDelivery = retryDelivery
+    }
+
+    init(spawn: Spawn) {
+        self.init()
+        self.spawn = spawn
+    }
+
+    init(steerDelivery: SteerDelivery) {
+        self.init()
+        self.steerDelivery = steerDelivery
+    }
+
+    init(stop: Stop) {
+        self.init()
+        self.stop = stop
+    }
+
+    init(stopItem: StopItem) {
+        self.init()
+        self.stopItem = stopItem
+    }
+
+    init(updateParticipant: UpdateParticipant) {
+        self.init()
+        self.updateParticipant = updateParticipant
+    }
+
+    init(updateThread: UpdateThread) {
+        self.init()
+        self.updateThread = updateThread
     }
 }

@@ -15,7 +15,7 @@ struct DraftPromptView: View {
 
             VStack {
                 if let fork = model.fork {
-                    DraftForkHeader(sourceTitle: fork.sourceTitle, discard: model.discardFork)
+                    DraftForkHeader(fork: fork, discard: model.discardFork)
                 } else if model.hasWorkingDirectory {
                     Text("What should we build in \(Text(model.directoryLabel).underline())?")
                         .font(.largeTitle)
@@ -107,7 +107,7 @@ struct DraftSessionControlsView: View {
             Label(model.providerLabel, systemImage: "server.rack")
                 .lineLimit(1)
         }
-        .disabled(model.isSending || !model.hasProviderChoices)
+        .disabled(model.isSending || !model.hasProviderChoices || model.fork != nil)
         .accessibilityLabel("Provider")
         .sheet(isPresented: $isProviderSelectionPresented) {
             SearchableSelectionSheet(
@@ -135,7 +135,7 @@ struct DraftSessionControlsView: View {
             Label(model.directoryLabel, systemImage: "folder")
                 .lineLimit(1)
         }
-        .disabled(model.isSending)
+        .disabled(model.isSending || model.fork != nil)
         .accessibilityLabel("Working directory")
         .sheet(isPresented: $isFolderSelectionPresented) {
             FolderSelectionSheet(
@@ -182,7 +182,7 @@ struct DraftSessionControlsView: View {
                 )
                 .lineLimit(1)
             }
-            .disabled(model.isSending)
+            .disabled(model.isSending || model.fork != nil)
             .accessibilityLabel("Additional project folders")
             .sheet(isPresented: $isAdditionalFolderSelectionPresented) {
                 FolderSelectionSheet(

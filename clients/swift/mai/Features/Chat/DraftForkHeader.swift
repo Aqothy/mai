@@ -1,20 +1,19 @@
 import SwiftUI
 
-/// Heads a new chat that forks another: the agent gets the earlier
-/// conversation as text with the first message, since it can't fork its own
-/// sessions.
+/// Heads a new chat that continues another; the fork is made when its first
+/// message is sent.
 struct DraftForkHeader: View {
-    let sourceTitle: String
+    let fork: ForkDraft
     let discard: () -> Void
 
     var body: some View {
         VStack {
-            Text("Continue “\(sourceTitle)”")
+            Text(fork.throughTurnID == nil ? "Start “\(fork.sourceTitle)” over" : "Continue “\(fork.sourceTitle)”")
                 .font(.largeTitle)
                 .multilineTextAlignment(.center)
                 .accessibilityHeading(.h1)
 
-            Text("The earlier conversation goes to the agent with your first message.")
+            Text(subtitle)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -23,11 +22,32 @@ struct DraftForkHeader: View {
                 .buttonStyle(.bordered)
         }
     }
+
+    private var subtitle: String {
+        if fork.throughTurnID == nil {
+            return "A new chat in the same folders. Nothing is made until you send."
+        }
+        if fork.native {
+            return "The agent picks up its own conversation where you forked it. Nothing is made until you send."
+        }
+        return "The conversation so far is in your message below: edit it, add to it, and send. Nothing is made until you send."
+    }
 }
 
 #if DEBUG
     #Preview("Fork Draft Header") {
-        DraftForkHeader(sourceTitle: "Fix the flaky test", discard: {})
-            .padding()
+        DraftForkHeader(
+            fork: ForkDraft(
+                sourceThreadID: "chat",
+                sourceTitle: "Fix the flaky test",
+                throughTurnID: "turn",
+                native: false,
+                agentID: "claude-code",
+                cwd: "/tmp/project",
+                additionalDirectories: []
+            ),
+            discard: {}
+        )
+        .padding()
     }
 #endif

@@ -12,10 +12,15 @@ extension ThreadRPCClient {
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
 
-    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item { throw unavailable }
-    func getAttachment(_ input: GetAttachmentInput) async throws -> Attachment { throw unavailable }
+    func unsubscribeThread(_ threadID: String) async throws {}
+    func syncThread(_ threadID: String) async throws {}
+    func threadTurns(_ input: ThreadTurnsParams) async throws -> ThreadTurnsResult { throw unavailable }
+    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry { throw unavailable }
+    func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview { throw unavailable }
+    func getAttachment(_ id: String) async throws -> Attachment { throw unavailable }
     func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws { throw unavailable }
-    func uploadAttachment(_ input: AttachmentUploadParams) async throws { throw unavailable }
+    func uploadAttachment(_ data: String) async throws -> String { throw unavailable }
+    func command(_ params: CommandParams) async throws -> CommandResult { throw unavailable }
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         throw unavailable
     }
@@ -30,14 +35,7 @@ extension ThreadRPCClient {
         throw unavailable
     }
     func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo { throw unavailable }
-    func importProviderSession(_ input: ProviderImportSessionParams) async throws
-        -> ProviderImportSessionResult
-    { throw unavailable }
-    func forkProviderThread(_ input: ProviderForkThreadParams) async throws -> ProviderForkThreadResult {
-        throw unavailable
-    }
     func deleteProviderSession(_ input: ProviderSessionParams) async throws { throw unavailable }
-    func closeProviderSession(_ input: ProviderSessionParams) async throws { throw unavailable }
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
         throw unavailable
     }
@@ -50,6 +48,5 @@ extension ThreadRPCClient {
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
         throw unavailable
     }
-    func completeCommand(_ input: CompleteCommandInput) async throws -> [CommandCompletion] { [] }
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult { throw unavailable }
+    func completeCommand(_ input: ProviderCompleteCommandParams) async throws -> [CommandCompletion] { [] }
 }

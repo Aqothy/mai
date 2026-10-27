@@ -4,22 +4,20 @@ import SwiftUI
 /// to answer, a link to open, or a plan to review. It shows the request's
 /// message and details, and once answered, the action chosen and the answers.
 struct ChatRequestRow: View {
-    let approval: Approval
+    let request: ChatRequest
 
-    @State private var model: ChatRequestModel?
+    @State private var model: ChatRequestModel
 
-    init(approval: Approval, threadID: String, store: ThreadStore) {
-        self.approval = approval
+    init(request: ChatRequest, threadID: String, store: ThreadStore) {
+        self.request = request
         _model = State(
-            initialValue: approval.request.map { request in
-                ChatRequestModel(request: request) { action, answers in
-                    try await store.respondToApproval(
-                        threadID: threadID,
-                        requestID: approval.requestID,
-                        actionID: action.id,
-                        answers: answers
-                    )
-                }
+            initialValue: ChatRequestModel(request: request.ask) { action, answers in
+                try await store.respondToRequest(
+                    threadID: threadID,
+                    requestID: request.id,
+                    actionID: action.id,
+                    answers: answers
+                )
             })
     }
 
@@ -33,14 +31,14 @@ struct ChatRequestRow: View {
                     .bold()
             }
 
-            if let messageText = model?.messageText {
+            if let messageText = model.messageText {
                 Text(messageText)
                     .textSelection(.enabled)
             }
 
-            if let args = approval.args {
+            if let details = request.ask.details {
                 DisclosureGroup("Details") {
-                    Text(ChatTimelineText.encoded(args.value))
+                    Text(ChatTimelineText.encoded(details.value))
                         .font(.callout.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -48,23 +46,21 @@ struct ChatRequestRow: View {
                 .font(.callout)
             }
 
-            if approval.approvalStatus == .pending, let model {
+            if request.isOpen {
                 ChatRequestForm(model: model)
                     // Answered here or by another client; the agent hasn't
                     // taken the answer yet.
-                    .disabled(approval.actionID != nil)
+                    .disabled(request.actionID != nil)
             } else {
-                if let model {
-                    ForEach(model.submittedAnswers(approval.answers ?? [:])) { answer in
-                        LabeledContent(answer.title, value: answer.answer)
-                    }
+                ForEach(model.submittedAnswers(request.answers ?? [:])) { answer in
+                    LabeledContent(answer.title, value: answer.answer)
                 }
                 Text(resolutionLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if let errorMessage = model?.errorMessage {
+            if let errorMessage = model.errorMessage {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -76,29 +72,20 @@ struct ChatRequestRow: View {
     }
 
     private var asksQuestions: Bool {
-        guard let request = approval.request else { return false }
-        return !(request.questions ?? []).isEmpty || request.url != nil
+        !(request.ask.questions ?? []).isEmpty || request.ask.url != nil
     }
 
-    /// What the user chose, named after the action unless it accepted by
-    /// submitting answers or opening a link; for a request that ended
-    /// without a choice, what happened to it.
+    /// What was chosen, named after the action unless it accepted by
+    /// submitting answers or opening a link; a request that ended without a
+    /// choice was cancelled.
     private var resolutionLabel: String {
-        if let actionID = approval.actionID,
-            let action = approval.request?.actions.first(where: { $0.id == actionID })
-        {
-            if action.approvalDecision == .accept {
-                if action.submit == true { return String(localized: "Answered") }
-                if approval.request?.url != nil { return String(localized: "Link opened") }
-            }
-            return action.label
+        guard let actionID = request.actionID,
+            let action = request.ask.actions.first(where: { $0.id == actionID })
+        else { return String(localized: "Cancelled") }
+        if action.approvalDecision == .accept {
+            if action.submit == true { return String(localized: "Answered") }
+            if request.ask.url != nil { return String(localized: "Link opened") }
         }
-        switch approval.decision.flatMap(MaidApprovalDecision.init(rawValue:)) {
-        case .accept: return String(localized: "Accepted")
-        case .acceptForSession: return String(localized: "Accepted for this session")
-        case .decline: return String(localized: "Declined")
-        case .cancel: return String(localized: "Cancelled")
-        case nil: return String(localized: "Resolved")
-        }
+        return action.label
     }
 }

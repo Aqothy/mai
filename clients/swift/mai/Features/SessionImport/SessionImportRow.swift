@@ -4,13 +4,11 @@ struct SessionImportRow: View {
     let entry: SessionImportEntry
     let capabilities: SessionImportCapabilities
     let isImporting: Bool
-    let maintenanceAction: SessionMaintenanceAction?
-    let isClosed: Bool
+    let isDeleting: Bool
     let importSession: () -> Void
-    let closeSession: () -> Void
     let deleteSession: () -> Void
 
-    @State private var confirmationAction: SessionMaintenanceAction?
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -30,16 +28,11 @@ struct SessionImportRow: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                if isClosed {
-                    Label("Closed", systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Spacer(minLength: 0)
 
-            if isImporting || maintenanceAction != nil {
+            if isImporting || isDeleting {
                 ProgressView()
                     .controlSize(.small)
             } else {
@@ -49,22 +42,10 @@ struct SessionImportRow: View {
                         .buttonBorderShape(.capsule)
                 }
 
-                if capabilities.canClose || capabilities.canDelete {
+                if capabilities.canDelete {
                     Menu("Session Actions", systemImage: "ellipsis") {
-                        if capabilities.canClose {
-                            Button("Close Session", systemImage: "xmark.circle") {
-                                confirmationAction = .close
-                            }
-                            .disabled(isClosed)
-                        }
-                        if capabilities.canDelete {
-                            Button(
-                                "Delete Session",
-                                systemImage: "trash",
-                                role: .destructive
-                            ) {
-                                confirmationAction = .delete
-                            }
+                        Button("Delete Session", systemImage: "trash", role: .destructive) {
+                            isConfirmingDelete = true
                         }
                     }
                     .labelStyle(.iconOnly)
@@ -78,37 +59,11 @@ struct SessionImportRow: View {
             }
         }
         .contentShape(.rect)
-        .confirmationDialog(
-            confirmationAction == .delete ? "Delete Session?" : "Close Session?",
-            isPresented: Binding(
-                get: { confirmationAction != nil },
-                set: { if !$0 { confirmationAction = nil } }
-            )
-        ) {
-            switch confirmationAction {
-            case .close:
-                Button("Close Session") {
-                    confirmationAction = nil
-                    closeSession()
-                }
-            case .delete:
-                Button("Delete Session", role: .destructive) {
-                    confirmationAction = nil
-                    deleteSession()
-                }
-            case nil:
-                EmptyView()
-            }
-            Button("Cancel", role: .cancel) {
-                confirmationAction = nil
-            }
+        .confirmationDialog("Delete Session?", isPresented: $isConfirmingDelete) {
+            Button("Delete Session", role: .destructive, action: deleteSession)
+            Button("Cancel", role: .cancel) {}
         } message: {
-            if confirmationAction == .delete {
-                Text("This permanently deletes the provider session. This action cannot be undone.")
-            } else {
-                Text("This closes the provider session without deleting its history.")
-            }
+            Text("This permanently deletes the provider session. This action cannot be undone.")
         }
-        .accessibilityValue(isClosed ? "Closed" : "")
     }
 }

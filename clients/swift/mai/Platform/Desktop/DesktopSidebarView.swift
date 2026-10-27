@@ -121,8 +121,9 @@
 
         // MARK: - Actions
 
-        private func openTerminalHereAction(for thread: ThreadListEntry) -> (() -> Void)? {
-            guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
+        private func openTerminalHereAction(for thread: ThreadSummary) -> (() -> Void)? {
+            let cwd = thread.workspace.cwd
+            guard !cwd.isEmpty else { return nil }
             return {
                 store.selectThread(nil)
                 terminalRoute = .new(
@@ -239,7 +240,7 @@
         let displayMode: ThreadListDisplayMode
         @Binding var selection: WorkspaceItemID?
         @Binding var collapsedProjects: CollapsedProjectDirectories
-        let openTerminalHere: (ThreadListEntry) -> (() -> Void)?
+        let openTerminalHere: (ThreadSummary) -> (() -> Void)?
         let deleteTerminal: (String) -> Void
 
         @State private var topAligner = DesktopSidebarTopAligner()
@@ -435,7 +436,7 @@
         let store: ThreadStore
         let item: WorkspaceListItem
         let isCompact: Bool
-        let openTerminalHere: (ThreadListEntry) -> (() -> Void)?
+        let openTerminalHere: (ThreadSummary) -> (() -> Void)?
         let deleteTerminal: (String) -> Void
 
         var body: some View {
@@ -465,7 +466,7 @@
     }
 
     private struct DesktopThreadRow: View {
-        let thread: ThreadListEntry
+        let thread: ThreadSummary
         let isUnread: Bool
         let isCompact: Bool
         let providerName: String?

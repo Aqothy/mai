@@ -234,7 +234,7 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
 
     private func waitForThread(
         matching query: String
-    ) async -> ThreadListEntry? {
+    ) async -> ThreadSummary? {
         let deadline = ContinuousClock.now + .seconds(60)
         while ContinuousClock.now < deadline {
             let threads = store.threads
@@ -258,15 +258,12 @@ struct ChatRealThreadBenchmarkRunner: ViewModifier {
     private func waitForSelectedThreadLoaded() async -> Bool {
         let deadline = ContinuousClock.now + .seconds(120)
         while ContinuousClock.now < deadline {
-            if store.selectedThreadLoadErrorMessage != nil
-                || store.selectedThreadHistoryRestoreErrorMessage != nil
-            {
+            if store.selectedThreadLoadErrorMessage != nil {
                 return false
             }
             if let thread = store.selectedThread,
-                !thread.timeline.isEmpty,
-                store.selectedThreadMarkdownSegmentCache != nil,
-                !store.isSelectedThreadRestoringHistory
+                !thread.turns.isEmpty,
+                store.selectedThreadMarkdownSegmentCache != nil
             {
                 return true
             }

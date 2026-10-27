@@ -20,11 +20,20 @@ final class ChatPromptModel {
     private(set) var isSending = false
     private(set) var isInterrupting = false
     private(set) var isForking = false
-    private(set) var isRetryingFailedTurn = false
     private(set) var settingConfigOptionIDs: Set<String> = []
     private(set) var errorMessage: String?
 
-    private var retryRequestedTurnID: String?
+    /// A send that failed without an answer, which may have reached the
+    /// daemon: sending the same message again reuses its key, so it lands
+    /// once.
+    private var unansweredSend: (attempt: SendAttempt, key: String)?
+
+    private struct SendAttempt: Equatable {
+        let text: String
+        let attachmentIDs: Set<UUID>
+        let annotationIDs: Set<String>
+        let mode: PromptSendMode
+    }
 
     private let draftStore: ThreadDraftStore
     private let attachmentsModel: ComposerAttachmentsModel
@@ -48,11 +57,13 @@ final class ChatPromptModel {
         attachmentsModel.attachments
     }
 
-    var queuedPrompts: [QueuedPrompt] {
-        store.queuedPrompts(for: threadID)
+    /// Messages waiting for the running turn, and those that didn't get
+    /// through.
+    var queue: [DeliveryView] {
+        store.queue(for: threadID)
     }
 
-    /// Queued prompts steer into a running turn, or send as the next turn.
+    /// Waiting messages steer into a running turn, or send as the next turn.
     var isTurnRunning: Bool {
         store.threadIsRunning(threadID)
     }
@@ -73,18 +84,6 @@ final class ChatPromptModel {
 
     var isPromptEnabled: Bool {
         store.connectionState == .connected && !isSending
-    }
-
-    var showsFailedTurnRetry: Bool {
-        store.failedTurnID(for: threadID) != nil
-    }
-
-    var canRetryFailedTurn: Bool {
-        guard let failedTurnID = store.failedTurnID(for: threadID) else { return false }
-        return store.connectionState == .connected
-            && retryRequestedTurnID != failedTurnID
-            && !isSending
-            && !isRetryingFailedTurn
     }
 
     var failedTurnError: String? {
@@ -109,9 +108,14 @@ final class ChatPromptModel {
         await store.refreshProvidersAfterFailure()
     }
 
-    /// A fork keeps the settled turns, so it needs no idle chat.
+    /// A fork chooses from the chat's turns and asks the daemon how it
+    /// starts; it needs no idle chat.
     var canFork: Bool {
-        store.connectionState == .connected && !isForking
+        forkSource != nil && !isForking
+    }
+
+    private var forkSource: ThreadDetail? {
+        store.selectedThreadID == threadID ? store.selectedThread : nil
     }
 
     var isErrorPresented: Bool {
@@ -123,9 +127,10 @@ final class ChatPromptModel {
         }
     }
 
-    func removeQueuedPrompt(_ messageID: String) async {
+    /// Runs a queue action, reporting its failure.
+    private func perform(_ action: () async throws -> Void) async {
         do {
-            try await store.removeQueuedPrompt(threadID: threadID, messageID: messageID)
+            try await action()
         } catch is CancellationError {
             return
         } catch {
@@ -133,14 +138,43 @@ final class ChatPromptModel {
         }
     }
 
-    func sendQueuedPrompt(_ messageID: String) async {
-        do {
-            try await store.sendQueuedPrompt(threadID: threadID, messageID: messageID)
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = error.localizedDescription
+    /// Takes back a waiting message: the agent never gets it, and a prompt of
+    /// the person's returns to the composer, ahead of what they've typed since.
+    func cancel(_ delivery: DeliveryView) async {
+        await perform {
+            try await store.cancel(delivery: delivery.id)
+            guard delivery.kind == MaidDeliveryKind.prompt.rawValue else { return }
+            text = [delivery.text ?? "", text].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            draftStore.setAnnotations(
+                (delivery.annotations ?? []).map(ChatPendingAnnotation.init) + draftStore.annotations(for: threadID),
+                for: threadID
+            )
+            addSentImages(delivery.attachments ?? [], to: attachmentsModel)
         }
+    }
+
+    func sendNow(_ delivery: DeliveryView) async {
+        await perform { try await store.sendNow(delivery: delivery.id) }
+    }
+
+    /// Sends again a message that didn't get through.
+    func retry(_ delivery: DeliveryView) async {
+        await perform { try await store.retry(delivery: delivery.id) }
+    }
+
+    /// Moves a waiting message before another, or last.
+    func move(_ delivery: DeliveryView, before: DeliveryView?) async {
+        await perform { try await store.move(delivery: delivery.id, before: before?.id) }
+    }
+
+    /// Lets the chat's held queue go on.
+    func continueThread() async {
+        await perform { try await store.continueThread(threadID: threadID) }
+    }
+
+    /// Stops this chat and every chat it started.
+    func stopTree() async {
+        await perform { try await store.stopThread(threadID: threadID) }
     }
 
     func send(_ mode: PromptSendMode) async {
@@ -155,6 +189,8 @@ final class ChatPromptModel {
         isSending = true
         defer { isSending = false }
 
+        let attempt = SendAttempt(text: submittedText, attachmentIDs: submittedAttachmentIDs, annotationIDs: submittedAnnotationIDs, mode: mode)
+        let key = unansweredSend?.attempt == attempt ? unansweredSend!.key : UUID().uuidString
         let fileLinks = store.workingDirectory(forThread: threadID).map {
             promptCompletion.fileMentionLinks(in: submittedText, directory: $0)
         } ?? []
@@ -165,8 +201,10 @@ final class ChatPromptModel {
                 text: submittedText,
                 attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
                 annotations: submittedAnnotations.map(\.promptAnnotation),
-                mode: mode
+                mode: mode,
+                key: key
             )
+            unansweredSend = nil
             promptCompletion.clearMentionedFiles()
             if text == submittedDraft,
                draftStore.text(for: threadID) == submittedDraft {
@@ -178,8 +216,9 @@ final class ChatPromptModel {
             // an exit within the save debounce cannot restore it as unsent.
             draftStore.flushPendingSave()
         } catch is CancellationError {
-            return
+            unansweredSend = (attempt, key)
         } catch {
+            unansweredSend = (attempt, key)
             errorMessage = error.localizedDescription
         }
     }
@@ -204,14 +243,14 @@ final class ChatPromptModel {
         errorMessage = error.localizedDescription
     }
 
-    func interrupt(turnID: String) async {
+    func interrupt() async {
         guard !isInterrupting, store.connectionState == .connected else { return }
 
         isInterrupting = true
         defer { isInterrupting = false }
 
         do {
-            try await store.interruptTurn(threadID: threadID, turnID: turnID)
+            try await store.interruptTurn(threadID: threadID)
         } catch is CancellationError {
             return
         } catch {
@@ -219,64 +258,69 @@ final class ChatPromptModel {
         }
     }
 
-    /// Forks this chat at `point`, into another agent when `agentID` names
-    /// one, with `prompt` waiting in the fork's composer when editing an
-    /// earlier prompt.
-    func fork(at point: ChatForkPoint, into agentID: String? = nil, editing prompt: Message? = nil) async -> ChatFork? {
-        guard canFork else { return nil }
-
-        isForking = true
-        defer { isForking = false }
-
-        do {
-            let fork = try await store.forkThread(threadID, at: point, into: agentID)
-            let composerID =
-                switch fork {
-                case .thread(let forkThreadID): forkThreadID
-                case .draft(let draft): draftStore.startForkDraft(draft)
-                }
-            if let prompt {
-                compose(prompt, in: composerID)
-            }
-            return fork
-        } catch is CancellationError {
-            return nil
-        } catch {
-            errorMessage = error.localizedDescription
-            return nil
+    /// Starts a new-chat draft that forks this chat at `point`, into another
+    /// agent when `agentID` names one. Its composer holds the conversation's
+    /// summary where the agent can't fork its own session, then `prompt` when
+    /// editing an earlier one. Nothing exists on the daemon until it is sent.
+    func fork(at point: ChatForkPoint, into agentID: String? = nil, editing prompt: ChatMessage? = nil) async -> Bool {
+        guard let source = forkSource else { return false }
+        let turns = source.turns
+        let throughTurnID: String?
+        switch point {
+        case .latest:
+            throughTurnID = turns.last { $0.state != MaidTurnState.running.rawValue }?.id
+        case .through(let turnID):
+            throughTurnID = turnID
+        case .before(let turnID):
+            let index = turns.firstIndex { $0.id == turnID }
+            throughTurnID = index.flatMap { $0 > 0 ? turns[$0 - 1].id : nil }
         }
+        var preview = ForkPreview(native: false, summary: nil)
+        if throughTurnID != nil {
+            isForking = true
+            defer { isForking = false }
+            do {
+                preview = try await store.forkPreview(threadID, throughTurnID: throughTurnID, agentID: agentID)
+            } catch is CancellationError {
+                return false
+            } catch {
+                errorMessage = error.localizedDescription
+                return false
+            }
+        }
+        let draftID = draftStore.startForkDraft(ForkDraft(
+            sourceThreadID: threadID,
+            sourceTitle: source.summary.title,
+            throughTurnID: throughTurnID,
+            native: preview.native,
+            agentID: agentID ?? source.addressee?.instance,
+            cwd: source.summary.workspace.cwd,
+            additionalDirectories: source.summary.workspace.additionalDirectories ?? []
+        ))
+        if let prompt {
+            compose(prompt, in: draftID)
+        }
+        if let summary = preview.summary, !summary.isEmpty {
+            draftStore.setText(summary + draftStore.text(for: draftID), for: draftID)
+        }
+        return true
     }
 
     /// Puts a sent prompt in another chat's composer to edit: its text, its
     /// comments, and its images, which load from this chat.
-    private func compose(_ prompt: Message, in composerID: String) {
+    private func compose(_ prompt: ChatMessage, in composerID: String) {
         draftStore.setText(prompt.text, for: composerID)
         draftStore.setAnnotations((prompt.annotations ?? []).map(ChatPendingAnnotation.init), for: composerID)
-        let images = (prompt.attachments ?? []).filter { $0.kind == MaidAttachmentKind.image.rawValue }
-        let sourceThreadID = threadID
-        draftStore.attachmentsModel(for: composerID).addSentImages(images) { [store] image in
-            if let data = image.data, !data.isEmpty { return data }
-            guard let attachmentID = image.id else { throw RPCError("“\(image.name ?? "Image")” has no data") }
-            return try await store.attachmentData(threadID: sourceThreadID, attachmentID: attachmentID)
-        }
+        addSentImages(prompt.attachments ?? [], to: draftStore.attachmentsModel(for: composerID))
     }
 
-    func retryFailedTurn() async {
-        guard canRetryFailedTurn,
-            let failedTurnID = store.failedTurnID(for: threadID)
-        else { return }
-
-        retryRequestedTurnID = failedTurnID
-        isRetryingFailedTurn = true
-        defer { isRetryingFailedTurn = false }
-
-        do {
-            try await store.retryFailedTurn(threadID: threadID)
-        } catch is CancellationError {
-            retryRequestedTurnID = nil
-        } catch {
-            retryRequestedTurnID = nil
-            errorMessage = error.localizedDescription
+    /// Adds a sent message's images to a composer, loading them from this chat.
+    private func addSentImages(_ attachments: [Attachment], to composer: ComposerAttachmentsModel) {
+        let images = attachments.filter { $0.kind == MaidAttachmentKind.image.rawValue }
+        composer.addSentImages(images) { [store] image in
+            if let data = image.data, !data.isEmpty { return data }
+            guard let attachmentID = image.id else { throw RPCError("“\(image.name ?? "Image")” has no data") }
+            return try await store.attachmentData(attachmentID: attachmentID)
         }
     }
 

@@ -16,8 +16,7 @@ final class SessionImportModel {
     private(set) var entries: [SessionImportEntry] = []
     private(set) var capabilities: SessionImportCapabilities = .unavailable
     private(set) var importingSessionIDs: Set<String> = []
-    private(set) var maintenanceBySessionID: [String: SessionMaintenanceAction] = [:]
-    private(set) var closedSessionIDs: Set<String> = []
+    private(set) var deletingSessionIDs: Set<String> = []
     private(set) var errorMessage: String?
     var selectedAgentID: String?
 
@@ -36,7 +35,6 @@ final class SessionImportModel {
         entries = previewSessions.map(SessionImportEntry.init)
         capabilities = SessionImportCapabilities(
             canImport: true,
-            canClose: true,
             canDelete: true
         )
         phase = .loaded
@@ -70,7 +68,6 @@ final class SessionImportModel {
         guard let agentID = effectiveAgentID else {
             entries = []
             capabilities = .unavailable
-            closedSessionIDs = []
             loadedAgentID = nil
             phase = .loaded
             return
@@ -78,7 +75,6 @@ final class SessionImportModel {
         if agentID != loadedAgentID {
             entries = []
             capabilities = .unavailable
-            closedSessionIDs = []
         }
         phase = .loading
         do {
@@ -87,10 +83,8 @@ final class SessionImportModel {
             entries = listed.map(SessionImportEntry.init)
             capabilities = SessionImportCapabilities(
                 canImport: store.providerSupportsSessionImport(agentID),
-                canClose: store.providerSupportsSessionClose(agentID),
                 canDelete: store.providerSupportsSessionDelete(agentID)
             )
-            closedSessionIDs = []
             loadedAgentID = agentID
             phase = .loaded
         } catch is CancellationError {
@@ -127,39 +121,18 @@ final class SessionImportModel {
         }
     }
 
-    func closeSession(_ entry: SessionImportEntry) async {
-        guard capabilities.canClose, !closedSessionIDs.contains(entry.id) else { return }
-        await maintainSession(entry, action: .close)
-    }
-
     func deleteSession(_ entry: SessionImportEntry) async {
-        guard capabilities.canDelete else { return }
-        await maintainSession(entry, action: .delete)
-    }
-
-    private func maintainSession(
-        _ entry: SessionImportEntry,
-        action: SessionMaintenanceAction
-    ) async {
-        guard let agentID = effectiveAgentID,
-              maintenanceBySessionID[entry.id] == nil,
-              !importingSessionIDs.contains(entry.id)
+        guard capabilities.canDelete,
+            let agentID = effectiveAgentID,
+            !deletingSessionIDs.contains(entry.id),
+            !importingSessionIDs.contains(entry.id)
         else { return }
-
-        maintenanceBySessionID[entry.id] = action
-        defer { maintenanceBySessionID[entry.id] = nil }
+        deletingSessionIDs.insert(entry.id)
+        defer { deletingSessionIDs.remove(entry.id) }
         do {
-            switch action {
-            case .close:
-                try await store.closeProviderSession(agentID: agentID, sessionID: entry.id)
-                guard effectiveAgentID == agentID else { return }
-                closedSessionIDs.insert(entry.id)
-            case .delete:
-                try await store.deleteProviderSession(agentID: agentID, sessionID: entry.id)
-                guard effectiveAgentID == agentID else { return }
-                entries.removeAll { $0.id == entry.id }
-                closedSessionIDs.remove(entry.id)
-            }
+            try await store.deleteProviderSession(agentID: agentID, sessionID: entry.id)
+            guard effectiveAgentID == agentID else { return }
+            entries.removeAll { $0.id == entry.id }
         } catch is CancellationError {
             return
         } catch {

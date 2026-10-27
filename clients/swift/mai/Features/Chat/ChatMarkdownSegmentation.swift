@@ -19,10 +19,10 @@ nonisolated enum ChatTextOptimizationPolicy {
         streamingTurnID: String?,
         source: String
     ) -> Bool {
-        if role == MaidMessageRole.user.rawValue {
+        if role == ChatRole.user.rawValue {
             return ChatMarkdownSegmenter.shouldOptimize(source)
         }
-        guard role == MaidMessageRole.assistant.rawValue else { return false }
+        guard role == ChatRole.assistant.rawValue else { return false }
         // Every settled assistant message uses one selectable native text host
         // per consecutive prose run. Streaming stays in one stable live row.
         return streamingTurnID == nil || messageTurnID != streamingTurnID

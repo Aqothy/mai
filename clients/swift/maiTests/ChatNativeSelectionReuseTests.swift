@@ -35,11 +35,9 @@
             let layouts = ChatTextLayoutStore()
             let cache = ChatMarkdownSegmentCache()
             let messages = (0..<40).map { index in
-                Message(
-                    annotations: nil, attachments: nil, createdAt: .now, delivery: nil, deliveryError: nil,
-                    id: "reference-message-\(index)", role: "assistant",
-                    text: "Quote \(index) café 👩🏽‍💻 [Guide][ref].\n\n[ref]: https://example.com/guide/\(index)",
-                    turnID: nil, updatedAt: .now)
+                ChatMessage(turnID: "turn", entry: ThreadFixtures.entry(
+                    ref: "reference-message-\(index)", kind: .assistantMessage,
+                    text: "Quote \(index) café 👩🏽‍💻 [Guide][ref].\n\n[ref]: https://example.com/guide/\(index)"))
             }
             let rows = ChatTimeline.renderRows(messages.map(ChatTimelineRowModel.message), streamingTurnID: nil, segmentCache: cache)
             let descriptors = try rows.map { try #require(ChatNativePreparedRow.descriptor(for: $0)) }

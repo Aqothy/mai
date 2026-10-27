@@ -8,7 +8,7 @@ struct ACPRegistryModelTests {
     func sameNamedProvidersRemainDistinguishable() async throws {
         let rpc = ACPRegistryMockRPCClient()
         rpc.providers = [try newJSONDecoder().decode(InstanceInfo.self, from: Data("""
-            {"auth":{"status":"authenticated"},"capabilities":{},"driver":"codex-app-server",
+            {"auth":{"status":"authenticated"},"capabilities":{"history":"exact","historyVersion":1},"driver":"codex-app-server",
              "instanceId":"codex-app-server","name":"Codex","status":"initialized",
              "initializedAt":"2026-09-23T00:00:00Z","startedAt":"2026-09-23T00:00:00Z"}
             """.utf8))]
@@ -148,24 +148,14 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     func disconnect() {}
     func checkConnection() {}
 
-    func subscribeThreadList() async throws -> ThreadListStreamItem {
-        ThreadListStreamItem(
-            kind: "snapshot",
-            sequence: nil,
-            snapshot: ThreadListSnapshot(
-                snapshotSequence: 0,
-                threads: [],
-                updatedAt: .now
-            ),
-            thread: nil
-        )
+    func subscribeThreadList() async throws -> ThreadListItem {
+        ThreadListItem(kind: MaidThreadListKind.snapshot.rawValue, removed: nil, seq: 0, thread: nil, threads: [])
     }
 
-    func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem {
+    func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {
         throw RPCError("Thread subscriptions are unavailable")
     }
 
-    func unsubscribeThread(_ input: SubscribeThreadInput) async throws {}
     func listProviders() async throws -> [InstanceInfo] { providers }
     func listRegistryAgents() async throws -> [ACPRegistryAgent] { registryAgents }
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { installedAgents }

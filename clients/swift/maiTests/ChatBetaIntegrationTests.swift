@@ -121,11 +121,11 @@ struct ChatBetaIntegrationTests {
     func referenceDocumentKeepsAnnotationsAndPlatformSelectionPath() throws {
         let annotation = PromptAnnotation(
             id: "comment", messageID: "earlier", note: "Explain this", quote: "quoted", role: "assistant")
-        var message = Message(
-            annotations: [annotation], attachments: nil, createdAt: .now, delivery: nil, deliveryError: nil,
-            id: "reference-message", role: "assistant",
-            text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide",
-            turnID: nil, updatedAt: .now)
+        var entry = ThreadFixtures.entry(
+            ref: "reference-message", kind: .assistantMessage,
+            text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide")
+        entry.annotations = [annotation]
+        var message = ChatMessage(turnID: "turn", entry: entry)
         let cache = ChatMarkdownSegmentCache()
         let annotated = ChatTimeline.renderRows(
             [.message(message)], streamingTurnID: nil, segmentCache: cache)
@@ -136,7 +136,7 @@ struct ChatBetaIntegrationTests {
         }
         #expect(preserved.annotations?.first?.quote == "quoted")
 
-        message.annotations = nil
+        message.entry.annotations = nil
         let rows = ChatTimeline.renderRows(
             [.message(message)], streamingTurnID: nil, segmentCache: cache)
         #if os(macOS)
@@ -155,11 +155,10 @@ struct ChatBetaIntegrationTests {
     @Test @MainActor
     func resolvedReferenceRowsKeepAttachmentsAndAvoidTextOnlyNativeHosts() throws {
         let attachment = Attachment(data: nil, kind: "image", mimeType: "image/png", name: "QA attachment", uri: "https://example.invalid/qa.png")
-        var message = Message(
-            annotations: nil, attachments: [attachment], createdAt: .now, delivery: nil, deliveryError: nil,
-            id: "reference-with-attachment", role: "assistant",
+        var message = ChatMessage(turnID: "turn", entry: ThreadFixtures.entry(
+            ref: "reference-with-attachment", kind: .assistantMessage,
             text: "[Guide][ref]\n\n```swift\nlet value = 42\n```\n\n[ref]: https://example.com/guide",
-            turnID: "turn", updatedAt: .now)
+            attachments: [attachment]))
         let cache = ChatMarkdownSegmentCache()
         let rows = ChatTimeline.renderRows([.message(message)], streamingTurnID: nil, segmentCache: cache)
         #if os(macOS)
@@ -182,7 +181,7 @@ struct ChatBetaIntegrationTests {
             }
             #expect(retained.attachments?.first?.uri == attachment.uri)
         #endif
-        message.annotations = [PromptAnnotation(id: "note", messageID: "original", note: "Explain", quote: "Guide", role: "assistant")]
+        message.entry.annotations = [PromptAnnotation(id: "note", messageID: "original", note: "Explain", quote: "Guide", role: "assistant")]
         let annotated = ChatTimeline.renderRows([.message(message)], streamingTurnID: nil, segmentCache: cache)
         #expect(annotated.count == 1)
         guard case .standard(.message(let retained)) = try #require(annotated.first) else {

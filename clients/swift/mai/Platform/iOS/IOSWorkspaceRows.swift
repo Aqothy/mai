@@ -70,8 +70,9 @@ private struct IOSWorkspaceRow: View {
         )
     }
 
-    private func openTerminalHereAction(for thread: ThreadListEntry) -> (() -> Void)? {
-        guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
+    private func openTerminalHereAction(for thread: ThreadSummary) -> (() -> Void)? {
+        let cwd = thread.workspace.cwd
+        guard !cwd.isEmpty else { return nil }
         return { openTerminalHere(cwd) }
     }
 }
@@ -79,7 +80,7 @@ private struct IOSWorkspaceRow: View {
 /// One agent-thread row's chrome, its own invalidation boundary with the
 /// context menu attached; the enclosing row supplies the List insets.
 private struct IOSThreadRowButton: View {
-    let thread: ThreadListEntry
+    let thread: ThreadSummary
     let isUnread: Bool
     let isCompact: Bool
     let providerName: String?

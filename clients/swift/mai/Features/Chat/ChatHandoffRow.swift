@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The earlier conversation a fork handed its agent as text, folded until
-/// the user opens it. Snapshots leave the text out; it loads on demand.
-struct ChatForkContextRow: View {
-    let item: Item
+/// The conversation an agent was handed as text — a fork's, or what it
+/// missed while other agents worked — folded until the user opens it.
+/// Snapshots cut long text; the whole of it loads on demand.
+struct ChatHandoffRow: View {
+    let item: ChatItem
     let threadID: String
     let store: ThreadStore
 
@@ -17,7 +18,7 @@ struct ChatForkContextRow: View {
                 isExpanded.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Label("Continued from an earlier conversation", systemImage: "arrow.triangle.branch")
+                    Label(title, systemImage: "arrow.triangle.branch")
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.semibold))
                 }
@@ -57,11 +58,22 @@ struct ChatForkContextRow: View {
         }
     }
 
+    private var title: String {
+        if let covers = item.entry.envelope?.covers, !covers.isEmpty {
+            return String(localized: "Caught up on \(covers) of this chat")
+        }
+        return String(localized: "Continued from an earlier conversation")
+    }
+
     private func loadText() async {
         errorMessage = nil
+        guard item.detailAvailable else {
+            text = item.entry.envelope?.body ?? ""
+            return
+        }
         do {
-            let detail = try await store.itemDetail(threadID: threadID, item: item)
-            text = (detail.payload?.value as? [String: Any])?["text"] as? String ?? ""
+            let entry = try await store.entryDetail(threadID: threadID, item: item)
+            text = entry.envelope?.body ?? ""
         } catch is CancellationError {
             return
         } catch {

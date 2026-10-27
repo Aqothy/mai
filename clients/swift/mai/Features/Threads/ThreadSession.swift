@@ -18,57 +18,29 @@ struct ThreadSession {
         }
     }
 
-    var thread: Thread?
+    var detail: ThreadDetail?
     /// Presentation caches survive short navigation round trips and are
     /// discarded when subscription maintenance evicts this session.
     var markdownSegmentCache = ChatMarkdownSegmentCache()
     var textLayoutStore = ChatTextLayoutStore()
-    /// Incremental section projection for the chat timeline. Every timeline
-    /// mutation below invalidates it; the chat projects lazily in `body`.
+    /// Incremental section projection for the chat timeline. Every turn
+    /// change below invalidates it; the chat projects lazily in `body`.
     var timelineProjection = ChatTimelineProjection()
-    var lastSequence = 0
     var subscriptionState: SubscriptionState = .unsubscribed
     var inactiveSince: Date?
-    var bufferedItems: [ThreadStreamItem] = []
+    /// Events that arrived while the snapshot was on its way.
+    var bufferedEvents: [ThreadEvent] = []
     var shouldRestoreAfterReconnect = false
-    var historyRestorePending = false
 
-    var isRestoringHistory: Bool {
-        historyRestorePending && historyRestoreErrorMessage == nil
-    }
-
-    var historyRestoreErrorMessage: String? {
-        guard historyRestorePending, let session = thread?.session else { return nil }
-        return switch session.sessionStatus {
-        case .error:
-            session.lastError ?? "The agent could not restore this chat."
-        case .stopped:
-            "The agent stopped before this chat was restored."
-        default:
-            nil
-        }
-    }
-
-    var canPrepareHistoryRestore: Bool {
-        historyRestorePending
-            && (thread?.session == nil || historyRestoreErrorMessage != nil)
-    }
-
+    /// A chat that runs or waits on the user stays subscribed when hidden.
     var isProtected: Bool {
-        guard let thread else { return false }
-        if thread.queuedPrompts?.isEmpty == false { return true }
-        if let turn = thread.latestTurn, turn.completedAt == nil {
-            return true
-        }
-        if thread.session?.activeTurnID != nil {
-            return true
-        }
-        return thread.timeline.contains { $0.approval?.approvalStatus == .pending }
+        guard let detail else { return false }
+        return detail.status != .idle || !detail.queue.isEmpty || detail.needsUser
     }
 
     /// Outcome of `apply`, so the caller need not re-read the session.
     struct EventApplication {
-        var applied = false
+        var change: ThreadDetail.Change = .none
         var protectionChanged = false
     }
 
@@ -76,43 +48,21 @@ struct ThreadSession {
     ///
     /// Mutating rather than read-modify-write in ThreadStore keeps the whole
     /// update inside one `_modify` window: a local `var session` would leave a
-    /// second reference to the timeline array and force a full copy.
-    mutating func apply(_ event: Event) -> EventApplication {
-        guard thread != nil, event.sequence > lastSequence else { return EventApplication() }
-        // isProtected scans the timeline for pending approvals, so evaluate it
-        // only around events that can change turn, session, or approval state —
-        // not per streamed message/item chunk.
-        let tracksProtection = Self.canChangeProtection(event.eventType)
-        let wasProtected = tracksProtection && isProtected
-        if let changedIndex = thread?.apply(event) {
-            timelineProjection.invalidate(from: changedIndex)
+    /// second reference to the turns and force a full copy.
+    mutating func apply(_ event: ThreadEvent) -> EventApplication {
+        guard detail != nil else { return EventApplication() }
+        let wasProtected = isProtected
+        let change = detail?.apply(event) ?? .none
+        switch change {
+        case .turns(let index):
+            timelineProjection.invalidate(fromTurn: index)
+        case .text(let turnID, _, _):
+            if let index = detail?.turns.lastIndex(where: { $0.id == turnID }) {
+                timelineProjection.invalidate(fromTurn: index)
+            }
+        case .none, .thread, .refresh, .removed:
+            break
         }
-        lastSequence = event.sequence
-        if event.eventType == .threadHistoryReplayCompleted {
-            historyRestorePending = false
-        }
-        return EventApplication(
-            applied: true,
-            protectionChanged: tracksProtection && isProtected != wasProtected
-        )
-    }
-
-    /// High-frequency streamed content events cannot change `isProtected`:
-    /// they never touch `latestTurn`, `session.activeTurnID`, or approvals,
-    /// and a prompt leaving the queue joins or starts a running turn.
-    /// Anything else (turn, session, approval, queue, meta, unknown) is
-    /// re-evaluated.
-    private static func canChangeProtection(_ eventType: MaidEventType?) -> Bool {
-        switch eventType {
-        case .threadMessageSent,
-            .threadItemUpserted,
-            .threadPlanUpdated,
-            .threadTokenUsageUpdated,
-            .threadGoalUpdated,
-            .threadSlashCommandsUpdated:
-            false
-        default:
-            true
-        }
+        return EventApplication(change: change, protectionChanged: isProtected != wasProtected)
     }
 }

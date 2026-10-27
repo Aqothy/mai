@@ -43,15 +43,12 @@ final class DraftPromptModel {
 
     private var optionsSessionID: String?
     private var optionsLoadAttempt = 0
-    /// The fork draft whose provider, folders and settings were applied, so
-    /// the user's later choices stand.
-    private var appliedForkDraftID: String?
-    /// The forked chat's settings and the user's changes to them; they win
-    /// over the remembered ones for the fork's provider.
-    private var forkConfigValues: [String: JSONAny] = [:]
     private var configUpdates: [ConfigUpdate] = []
     private var configUpdateTask: Task<Void, Never>?
     private var isConfiguringInitialSelection = false
+    /// The fork draft whose agent and folders were applied, so the user's
+    /// later choice of agent stands.
+    private var appliedForkDraftID: String?
 
 
     init(
@@ -123,32 +120,33 @@ final class DraftPromptModel {
         return model
     }
 
-    /// The chat this new chat continues, when its agent can't fork natively.
+    /// The chat this new chat continues.
     var fork: ForkDraft? {
         draftStore.activeFork
     }
 
-    /// Starts the new chat where the forked chat ran: its agent, folders and
-    /// settings.
+    /// The fork forks its agent's own session, with its settings: there are
+    /// none to choose.
+    var forksOwnAgent: Bool {
+        fork?.native == true && fork?.throughTurnID != nil
+    }
+
+    /// Starts the new chat with the fork's agent and the forked chat's
+    /// folders, which a fork keeps.
     private func applyFork() {
         guard let fork, let draftID = draftStore.activeDraftThreadID, appliedForkDraftID != draftID else { return }
         appliedForkDraftID = draftID
-        forkConfigValues = Dictionary(
-            (fork.configSelections ?? []).map { ($0.optionID, $0.value) },
-            uniquingKeysWith: { _, later in later }
-        )
-        guard providerIsAvailable(fork.providerInstanceID) else {
-            errorMessage = "The agent of “\(fork.sourceTitle)” is not available"
-            return
-        }
-        selectedProviderID = fork.providerInstanceID
         workingDirectory = fork.cwd
-        additionalDirectories = fork.additionalDirectories ?? []
+        additionalDirectories = fork.additionalDirectories
+        if let agentID = fork.agentID, providerIsAvailable(agentID) {
+            selectedProviderID = agentID
+        } else {
+            errorMessage = "The agent of “\(fork.sourceTitle)” is not available"
+        }
     }
 
     func discardFork() {
         draftStore.discardActiveFork()
-        forkConfigValues = [:]
     }
 
     var providerChoices: [ProviderChoice] {
@@ -257,7 +255,6 @@ final class DraftPromptModel {
     }
 
     func configureInitialSelection() {
-        if reconcileAcceptedDraft() { return }
         // An edited prompt's images may still be loading into the draft.
         _ = draftAttachments()
         guard !providerChoices.isEmpty else { return }
@@ -320,12 +317,12 @@ final class DraftPromptModel {
     }
 
     func loadOptions() async {
-        if reconcileAcceptedDraft() { return }
         optionsSessionID = nil
         clearProviderOptions()
         guard connectionState == .connected,
               let requestedProviderID = selectedProviderID,
-              !workingDirectory.isEmpty else {
+              !workingDirectory.isEmpty,
+              !forksOwnAgent else {
             optionsPhase = .unavailable
             return
         }
@@ -371,9 +368,6 @@ final class DraftPromptModel {
             providerID: providerID,
             optionID: optionID
         )
-        if providerID == fork?.providerInstanceID {
-            forkConfigValues[optionID] = value
-        }
 
         guard let optionsSessionID else { return }
         configUpdates.append(
@@ -407,13 +401,10 @@ final class DraftPromptModel {
     }
 
     func send() async {
-        // An earlier ambiguous Start may have already created this thread; open
-        // it instead of silently colliding with the idempotent thread ID.
-        if reconcileAcceptedDraft() { return }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend,
               let requestedProviderID = selectedProviderID,
-              let threadID = draftStore.activeDraftThreadID else { return }
+              let draftID = draftStore.activeDraftThreadID else { return }
 
         let requestedCwd = workingDirectory
         let requestedAdditionalDirectories = additionalDirectories
@@ -441,22 +432,38 @@ final class DraftPromptModel {
         let fileLinks = promptCompletion.fileMentionLinks(in: text, directory: requestedCwd)
 
         do {
-            try await store.startThread(
-                threadID: threadID,
-                providerInstanceID: providerID,
-                cwd: requestedCwd,
-                additionalDirectories: requestedAdditionalDirectories,
-                message: CommandMessage(
-                    annotations: submittedAnnotations.isEmpty ? nil : submittedAnnotations.map(\.promptAnnotation),
-                    attachments: submittedAttachments.compactMap(\.attachment) + fileLinks,
-                    messageID: UUID().uuidString,
-                    text: text
-                ),
-                configSelections: selections,
-                forkContext: fork?.forkContext
+            let attachments = submittedAttachments.compactMap(\.attachment) + fileLinks
+            let body = MessageBody(
+                annotations: submittedAnnotations.isEmpty ? nil : submittedAnnotations.map(\.promptAnnotation),
+                attachments: attachments.isEmpty ? nil : attachments,
+                text: text.isEmpty ? nil : text
             )
+            // The draft's ID keys the start, so retrying an ambiguous one
+            // opens the chat it made.
+            let threadID: String
+            if let fork, let throughTurnID = fork.throughTurnID {
+                let agent = forksOwnAgent
+                    ? nil
+                    : NewParticipant(instance: providerID, session: nil, settings: selections.isEmpty ? nil : selections)
+                threadID = try await store.forkThread(
+                    key: draftID,
+                    sourceThreadID: fork.sourceThreadID,
+                    throughTurnID: throughTurnID,
+                    agent: agent,
+                    body: body
+                )
+            } else {
+                threadID = try await store.startThread(
+                    key: draftID,
+                    providerInstanceID: providerID,
+                    cwd: requestedCwd,
+                    additionalDirectories: requestedAdditionalDirectories,
+                    body: body,
+                    settings: selections
+                )
+            }
             promptCompletion.clearMentionedFiles()
-            draftStore.removeDraft(for: threadID)
+            draftStore.removeDraft(for: draftID)
             store.selectThread(threadID)
         } catch is CancellationError {
             return
@@ -494,16 +501,6 @@ final class DraftPromptModel {
         if !isConfiguringInitialSelection {
             persistSelection()
         }
-    }
-
-    private func reconcileAcceptedDraft() -> Bool {
-        guard let threadID = draftStore.activeDraftThreadID,
-              store.threads.contains(where: { $0.id == threadID }) else {
-            return false
-        }
-        draftStore.removeDraft(for: threadID)
-        store.selectThread(threadID)
-        return true
     }
 
     private func receiveInvalidation(_ invalidation: ProviderOptionsInvalidated) {
@@ -599,6 +596,9 @@ final class DraftPromptModel {
     }
 
     private func persistSelection() {
+        // A fork's agent and folders are the forked chat's, not a choice to
+        // remember for new chats.
+        guard fork == nil else { return }
         draftStore.preferences.rememberSelection(
             providerID: selectedProviderID,
             workingDirectory: workingDirectory
@@ -616,9 +616,7 @@ final class DraftPromptModel {
     }
 
     private func rememberedValues(providerID: String) -> [String: JSONAny] {
-        let remembered = draftStore.preferences.configValues(providerID: providerID)
-        guard providerID == fork?.providerInstanceID else { return remembered }
-        return remembered.merging(forkConfigValues) { _, fork in fork }
+        draftStore.preferences.configValues(providerID: providerID)
     }
 
     private func currentSelections(providerID: String) -> [ConfigOptionSelection] {

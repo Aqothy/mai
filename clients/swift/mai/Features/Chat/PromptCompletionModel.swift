@@ -389,7 +389,7 @@ final class PromptCompletionModel {
     private func loadCommandInput(_ command: String, for requestedKey: SearchKey) async throws {
         guard case .thread(let threadID) = requestedKey.scope else { return }
         let completions = try await store.completeCommand(
-            CompleteCommandInput(command: command, input: requestedKey.query, threadID: threadID)
+            ProviderCompleteCommandParams(command: command, input: requestedKey.query, participant: nil, thread: threadID)
         )
         try Task.checkCancellation()
         guard searchKey == requestedKey else { return }

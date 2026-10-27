@@ -3,7 +3,7 @@
 
     enum ChatNativeTimelineItem: Identifiable {
         case historyMarker
-        case plan(Plan)
+        case plan([PlanEntry])
         case row(ChatTimelineRenderRow)
         case working(String?)
         case endMarker
@@ -23,11 +23,11 @@
         }
 
         static func items(
-            rows: [ChatTimelineRenderRow], plan: Plan?, hasEarlierSections: Bool, isStreaming: Bool
+            rows: [ChatTimelineRenderRow], plan: [PlanEntry], hasEarlierSections: Bool, isStreaming: Bool
         ) -> [Self] {
             var result: [Self] = []
             if hasEarlierSections { result.append(.historyMarker) }
-            if !hasEarlierSections, let plan, !plan.entries.isEmpty { result.append(.plan(plan)) }
+            if !hasEarlierSections, !plan.isEmpty { result.append(.plan(plan)) }
             result += rows.map(Self.row)
             if isStreaming { result.append(.working(rows.last?.id)) }
             result.append(.endMarker)

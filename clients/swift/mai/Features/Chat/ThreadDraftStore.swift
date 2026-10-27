@@ -4,7 +4,9 @@ import Observation
 /// Persistent per-chat drafts keyed independently from thread subscriptions
 /// and UI state: text, pending annotations, and (for this app session) pending
 /// attachments. `activeDraftThreadID` identifies the one provisional new chat,
-/// and `activeFork` the chat it continues, if it is a fork.
+/// and `activeFork` the chat it continues, if it is a fork; the draft's ID
+/// keys the command that starts it, so a retried Start opens the chat the
+/// first one made.
 @Observable
 final class ThreadDraftStore {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -23,8 +25,7 @@ final class ThreadDraftStore {
     private static let persistenceDelay = Duration.milliseconds(300)
 
     private(set) var activeDraftThreadID: String?
-    /// The chat the new chat forks, from an agent that can't fork its own
-    /// sessions; it belongs to `activeDraftThreadID`.
+    /// The chat the new chat continues; it belongs to `activeDraftThreadID`.
     private(set) var activeFork: ForkDraft?
 
     private var textByThreadID: [String: String]

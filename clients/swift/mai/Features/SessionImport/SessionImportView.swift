@@ -26,17 +26,13 @@ struct SessionImportView: View {
                     entry: entry,
                     capabilities: model.capabilities,
                     isImporting: model.importingSessionIDs.contains(entry.id),
-                    maintenanceAction: model.maintenanceBySessionID[entry.id],
-                    isClosed: model.closedSessionIDs.contains(entry.id),
+                    isDeleting: model.deletingSessionIDs.contains(entry.id),
                     importSession: {
                         Task {
                             if let threadID = await model.importSession(entry) {
                                 openThread(threadID)
                             }
                         }
-                    },
-                    closeSession: {
-                        Task { await model.closeSession(entry) }
                     },
                     deleteSession: {
                         Task { await model.deleteSession(entry) }
