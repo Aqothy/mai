@@ -142,7 +142,7 @@
     },
     {
       "name": "terminal.relaunch",
-      "params": "TerminalAttachParams",
+      "params": "TerminalRelaunchParams",
       "result": "TerminalAttachSnapshot"
     },
     {
@@ -173,6 +173,11 @@
     {
       "name": "terminal.resize",
       "params": "TerminalResizeParams",
+      "resultNull": true
+    },
+    {
+      "name": "terminal.focus",
+      "params": "TerminalIDParams",
       "resultNull": true
     },
     {

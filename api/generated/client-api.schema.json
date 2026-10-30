@@ -2107,6 +2107,9 @@
         },
         "appearance": {
           "$ref": "#/$defs/TerminalAppearance"
+        },
+        "focus": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -2278,6 +2281,35 @@
       ],
       "title": "TerminalProgramStatus"
     },
+    "TerminalRelaunchParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "appearance": {
+          "$ref": "#/$defs/TerminalAppearance"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "terminalId",
+        "columns",
+        "rows",
+        "attachmentId",
+        "appearance"
+      ],
+      "title": "TerminalRelaunchParams"
+    },
     "TerminalRenameParams": {
       "properties": {
         "terminalId": {
@@ -2300,9 +2332,6 @@
         "terminalId": {
           "type": "string"
         },
-        "runId": {
-          "type": "string"
-        },
         "columns": {
           "type": "integer"
         },
@@ -2317,7 +2346,6 @@
       "type": "object",
       "required": [
         "terminalId",
-        "runId",
         "columns",
         "rows",
         "appearance"
@@ -3470,6 +3498,9 @@
         "terminalAttachParams": {
           "$ref": "#/$defs/TerminalAttachParams"
         },
+        "terminalRelaunchParams": {
+          "$ref": "#/$defs/TerminalRelaunchParams"
+        },
         "terminalDetachParams": {
           "$ref": "#/$defs/TerminalDetachParams"
         },
@@ -3596,6 +3627,7 @@
         "terminalCreateParams",
         "terminalIDParams",
         "terminalAttachParams",
+        "terminalRelaunchParams",
         "terminalDetachParams",
         "terminalWriteParams",
         "terminalResizeParams",

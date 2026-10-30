@@ -35,6 +35,7 @@ nonisolated public enum MaidRPCMethod {
     public static let terminalDelete = "terminal.delete"
     public static let terminalWrite = "terminal.write"
     public static let terminalResize = "terminal.resize"
+    public static let terminalFocus = "terminal.focus"
     public static let terminalDetach = "terminal.detach"
     public static let workspaceBrowseDirectories = "workspace.browseDirectories"
     public static let workspaceSearchFiles = "workspace.searchFiles"

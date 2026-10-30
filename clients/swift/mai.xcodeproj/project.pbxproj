@@ -566,7 +566,7 @@
 			repositoryURL = "https://github.com/Aqothy/ghost-swiftly";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.2.1;
+				minimumVersion = 0.3.0;
 			};
 		};
 		F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */ = {

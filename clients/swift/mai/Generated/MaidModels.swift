@@ -5355,20 +5355,23 @@ public extension SessionSummary {
 public struct TerminalAttachParams: Codable {
     public var appearance: TerminalAppearance
     public var attachmentID: String
-    public var columns, rows: Int
+    public var columns: Int
+    public var focus: Bool?
+    public var rows: Int
     public var terminalID: String
 
     public enum CodingKeys: String, CodingKey {
         case appearance
         case attachmentID = "attachmentId"
-        case columns, rows
+        case columns, focus, rows
         case terminalID = "terminalId"
     }
 
-    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, rows: Int, terminalID: String) {
+    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, focus: Bool?, rows: Int, terminalID: String) {
         self.appearance = appearance
         self.attachmentID = attachmentID
         self.columns = columns
+        self.focus = focus
         self.rows = rows
         self.terminalID = terminalID
     }
@@ -5396,6 +5399,7 @@ public extension TerminalAttachParams {
         appearance: TerminalAppearance? = nil,
         attachmentID: String? = nil,
         columns: Int? = nil,
+        focus: Bool?? = nil,
         rows: Int? = nil,
         terminalID: String? = nil
     ) -> TerminalAttachParams {
@@ -5403,6 +5407,7 @@ public extension TerminalAttachParams {
             appearance: appearance ?? self.appearance,
             attachmentID: attachmentID ?? self.attachmentID,
             columns: columns ?? self.columns,
+            focus: focus ?? self.focus,
             rows: rows ?? self.rows,
             terminalID: terminalID ?? self.terminalID
         )
@@ -5924,6 +5929,72 @@ public extension TerminalListStreamItem {
     }
 }
 
+// MARK: - TerminalRelaunchParams
+public struct TerminalRelaunchParams: Codable {
+    public var appearance: TerminalAppearance
+    public var attachmentID: String
+    public var columns, rows: Int
+    public var terminalID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case appearance
+        case attachmentID = "attachmentId"
+        case columns, rows
+        case terminalID = "terminalId"
+    }
+
+    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, rows: Int, terminalID: String) {
+        self.appearance = appearance
+        self.attachmentID = attachmentID
+        self.columns = columns
+        self.rows = rows
+        self.terminalID = terminalID
+    }
+}
+
+// MARK: TerminalRelaunchParams convenience initializers and mutators
+
+public extension TerminalRelaunchParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalRelaunchParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appearance: TerminalAppearance? = nil,
+        attachmentID: String? = nil,
+        columns: Int? = nil,
+        rows: Int? = nil,
+        terminalID: String? = nil
+    ) -> TerminalRelaunchParams {
+        return TerminalRelaunchParams(
+            appearance: appearance ?? self.appearance,
+            attachmentID: attachmentID ?? self.attachmentID,
+            columns: columns ?? self.columns,
+            rows: rows ?? self.rows,
+            terminalID: terminalID ?? self.terminalID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - TerminalRenameParams
 public struct TerminalRenameParams: Codable {
     public var terminalID, title: String
@@ -5980,19 +6051,17 @@ public extension TerminalRenameParams {
 public struct TerminalResizeParams: Codable {
     public var appearance: TerminalAppearance
     public var columns, rows: Int
-    public var runID, terminalID: String
+    public var terminalID: String
 
     public enum CodingKeys: String, CodingKey {
         case appearance, columns, rows
-        case runID = "runId"
         case terminalID = "terminalId"
     }
 
-    public init(appearance: TerminalAppearance, columns: Int, rows: Int, runID: String, terminalID: String) {
+    public init(appearance: TerminalAppearance, columns: Int, rows: Int, terminalID: String) {
         self.appearance = appearance
         self.columns = columns
         self.rows = rows
-        self.runID = runID
         self.terminalID = terminalID
     }
 }
@@ -6019,14 +6088,12 @@ public extension TerminalResizeParams {
         appearance: TerminalAppearance? = nil,
         columns: Int? = nil,
         rows: Int? = nil,
-        runID: String? = nil,
         terminalID: String? = nil
     ) -> TerminalResizeParams {
         return TerminalResizeParams(
             appearance: appearance ?? self.appearance,
             columns: columns ?? self.columns,
             rows: rows ?? self.rows,
-            runID: runID ?? self.runID,
             terminalID: terminalID ?? self.terminalID
         )
     }

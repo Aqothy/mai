@@ -15,14 +15,17 @@ protocol TerminalRPCClient: RPCTransportClient {
 
     func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot
     func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachSnapshot
     func terminateTerminal(terminalID: String) async throws
 
     /// Fire-and-forget input bytes; the transport preserves call order.
     func writeTerminal(_ params: TerminalWriteParams)
 
-    /// Fire-and-forget grid change; sent only when rows or columns differ.
+    /// Fire-and-forget report of the grid and appearance that fit a view.
     func resizeTerminal(_ params: TerminalResizeParams)
+
+    /// Fire-and-forget: the user is using this view, which takes the size.
+    func focusTerminal(terminalID: String)
 
     /// Fire-and-forget detach; the shell keeps running on the daemon.
     func detachTerminal(_ params: TerminalDetachParams)
@@ -52,7 +55,7 @@ extension RPCClient: TerminalRPCClient {
         try await call(MaidRPCMethod.terminalAttach, params: params)
     }
 
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachSnapshot {
         try await call(MaidRPCMethod.terminalRelaunch, params: params)
     }
 
@@ -69,6 +72,10 @@ extension RPCClient: TerminalRPCClient {
 
     func resizeTerminal(_ params: TerminalResizeParams) {
         notify(MaidRPCMethod.terminalResize, params: params)
+    }
+
+    func focusTerminal(terminalID: String) {
+        notify(MaidRPCMethod.terminalFocus, params: TerminalIDParams(terminalID: terminalID))
     }
 
     func detachTerminal(_ params: TerminalDetachParams) {

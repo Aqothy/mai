@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Aqothy/ghost-swiftly",
       "state" : {
-        "revision" : "3175ae2b9c0b60e185fcb8bccdf08578ba4fec6a",
-        "version" : "0.2.1"
+        "revision" : "08fb0bf87a2f08dfa30a1d5c2f4789ec3412470a",
+        "version" : "0.3.0"
       }
     },
     {

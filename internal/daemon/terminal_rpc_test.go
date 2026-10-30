@@ -160,7 +160,7 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	client.writeTerminal(t, terminalID, runID, "printf 'RPC-%d\\n' $((40+2))\n")
 	client.waitForOutput(t, "RPC-42")
 
-	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, RunID: runID, Columns: 111, Rows: 31, Appearance: testAppearance})
+	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, Columns: 111, Rows: 31, Appearance: testAppearance})
 	client.writeTerminal(t, terminalID, runID, "printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")
 	client.waitForOutput(t, "SIZE-31x111-END")
 }

@@ -45,16 +45,17 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderQuestionAnswer, Params: "ProviderQuestionAnswerParams", ResultNull: true},
 	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachSnapshot"},
 	{Name: MethodTerminalAttach, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
-	{Name: MethodTerminalRelaunch, Params: "TerminalAttachParams", Result: "TerminalAttachSnapshot"},
+	{Name: MethodTerminalRelaunch, Params: "TerminalRelaunchParams", Result: "TerminalAttachSnapshot"},
 	{Name: MethodTerminalSubscribeList, Params: "EmptyParams", Result: "TerminalListStreamItem"},
 	{Name: MethodTerminalRename, Params: "TerminalRenameParams", Result: "TerminalSummary"},
 	{Name: MethodTerminalTerminate, Params: "TerminalIDParams", ResultNull: true},
 	{Name: MethodTerminalDelete, Params: "TerminalIDParams", ResultNull: true},
-	// Clients send terminal.write, terminal.resize, and terminal.detach as
-	// notifications; they are registered here so generated clients can name
-	// them.
+	// Clients send terminal.write, terminal.resize, terminal.focus, and
+	// terminal.detach as notifications; they are registered here so generated
+	// clients can name them.
 	{Name: MethodTerminalWrite, Params: "TerminalWriteParams", ResultNull: true},
 	{Name: MethodTerminalResize, Params: "TerminalResizeParams", ResultNull: true},
+	{Name: MethodTerminalFocus, Params: "TerminalIDParams", ResultNull: true},
 	{Name: MethodTerminalDetach, Params: "TerminalDetachParams", ResultNull: true},
 	{Name: MethodWorkspaceBrowseDirectories, Params: "WorkspaceBrowseDirectoriesParams", Result: "WorkspaceBrowseDirectoriesResult"},
 	{Name: MethodWorkspaceSearchFiles, Params: "WorkspaceSearchFilesParams", Result: "WorkspaceSearchFilesResult"},

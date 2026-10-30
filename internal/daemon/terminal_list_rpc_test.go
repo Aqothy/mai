@@ -166,7 +166,7 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 		t.Fatal("attach to stopped terminal succeeded, want relaunch requirement")
 	}
 	var relaunched wire.TerminalAttachSnapshot
-	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalAttachParams{TerminalID: restored.TerminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &relaunched)
+	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: restored.TerminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &relaunched)
 	if relaunched.RunID == created.RunID {
 		t.Fatal("relaunch after restart reused the old run id")
 	}

@@ -10,9 +10,9 @@ import SwiftUI
 /// native Ghostty snapshot, then apply only live items whose run matches and
 /// whose sequence is greater than the snapshot's (its `TerminalFeed` does the
 /// ordering, off the main actor). The view draws the daemon's grid, scaled
-/// to fit. Creating, relaunching and resizing take the size, and so does
-/// attaching while no other device has the terminal open; the view resizes
-/// before the input that takes it.
+/// to fit, and reports the grid that fits it. The daemon sizes the terminal
+/// to the view the user is using: opening, focusing, pressing or typing
+/// into a view takes the size, and closing it gives the size back.
 ///
 /// Observable properties change only on lifecycle events; output bytes go
 /// straight to the feed and never enter observation.
@@ -63,18 +63,10 @@ final class TerminalAttachment: TerminalIO {
     @ObservationIgnored let origin: TerminalOpenRequest
 
     /// The view's light or dark appearance, which the daemon answers the
-    /// program's color queries with while this view sizes the terminal.
+    /// program's color queries with while this view has the size.
     @ObservationIgnored var colorScheme: ColorScheme = .dark {
         didSet {
-            guard colorScheme != oldValue else { return }
-            // The daemon answers with the appearance of the view holding the
-            // size, which it learns from that view's resizes: while this view
-            // holds it (draws its own grid), resize to that grid. Otherwise the
-            // resize that takes the size carries the new appearance.
-            Task {
-                let grid = await terminal.grid
-                if grid == preferredGrid { requestResize(grid) }
-            }
+            if colorScheme != oldValue { reportView() }
         }
     }
 
@@ -131,28 +123,22 @@ final class TerminalAttachment: TerminalIO {
             TerminalWriteParams(data: Data(bytes).base64EncodedString(), runID: runID, terminalID: terminalID))
     }
 
-    /// The view claims the size, before the input that follows.
+    /// The grid that fits the view: the first one starts the attach.
     func requestResize(_ grid: GridSize) {
-        guard !isClosed, phase == .running, let terminalID, let runID else { return }
-        store?.rpc.resizeTerminal(
-            TerminalResizeParams(
-                appearance: MaidTerminalAppearance.wireAppearance(for: colorScheme),
-                columns: Int(grid.columns),
-                rows: Int(grid.rows),
-                runID: runID,
-                terminalID: terminalID))
+        preferredGrid = grid
+        scheduleStart()
+        reportView()
+    }
+
+    func activate() {
+        guard !isClosed, !awaitingSnapshot, let terminalID else { return }
+        store?.rpc.focusTerminal(terminalID: terminalID)
     }
 
     func handle(_ event: TerminalEvent) {
         if case .titleChanged(let title) = event {
             programTitle = title
         }
-    }
-
-    /// The first grid that fits the view starts the attach.
-    func preferredGridChanged(_ grid: GridSize) {
-        preferredGrid = grid
-        scheduleStart()
     }
 
     // MARK: - Lifecycle
@@ -205,6 +191,17 @@ final class TerminalAttachment: TerminalIO {
         }
     }
 
+    /// Tells the daemon the view's grid and appearance, once it has the view.
+    private func reportView() {
+        guard !isClosed, !awaitingSnapshot, let terminalID, let preferredGrid else { return }
+        store?.rpc.resizeTerminal(
+            TerminalResizeParams(
+                appearance: MaidTerminalAppearance.wireAppearance(for: colorScheme),
+                columns: Int(preferredGrid.columns),
+                rows: Int(preferredGrid.rows),
+                terminalID: terminalID))
+    }
+
     private func start(grid: GridSize) async {
         guard let rpc = store?.rpc else { return }
         let appearance = MaidTerminalAppearance.wireAppearance(for: colorScheme)
@@ -218,13 +215,15 @@ final class TerminalAttachment: TerminalIO {
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         cwd: cwd, rows: Int(grid.rows), title: title))
             case .attach(let terminalID):
+                // Opening the terminal takes the size; attaching again after a
+                // reconnect or another view's relaunch doesn't.
                 snapshot = try await rpc.attachTerminal(
                     TerminalAttachParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
-                        rows: Int(grid.rows), terminalID: terminalID))
+                        focus: !hasInstalledInitialSnapshot, rows: Int(grid.rows), terminalID: terminalID))
             case .relaunch(let terminalID):
                 snapshot = try await rpc.relaunchTerminal(
-                    TerminalAttachParams(
+                    TerminalRelaunchParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         rows: Int(grid.rows), terminalID: terminalID))
             }
@@ -261,6 +260,8 @@ final class TerminalAttachment: TerminalIO {
         startTask = nil
         awaitingSnapshot = false
         hasInstalledInitialSnapshot = true
+        // The view may have changed while it attached.
+        reportView()
         // The snapshot carries the title without announcing it.
         programTitle = await terminal.title
         switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {

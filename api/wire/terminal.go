@@ -6,8 +6,8 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-// Terminal thread methods. terminal.write, terminal.resize, and
-// terminal.detach are sent by clients as JSON-RPC notifications;
+// Terminal thread methods. terminal.write, terminal.resize, terminal.focus,
+// and terminal.detach are sent by clients as JSON-RPC notifications;
 // terminal.subscribe is the server-to-client stream method registered by
 // terminal.create, terminal.attach, and terminal.relaunch.
 const (
@@ -20,6 +20,7 @@ const (
 	MethodTerminalDelete        = "terminal.delete"
 	MethodTerminalWrite         = "terminal.write"
 	MethodTerminalResize        = "terminal.resize"
+	MethodTerminalFocus         = "terminal.focus"
 	MethodTerminalSubscribe     = "terminal.subscribe"
 	MethodTerminalSubscribeList = "terminal.subscribeList"
 )
@@ -96,7 +97,7 @@ type TerminalProgramStatus struct {
 
 // TerminalAppearance is a view's theme. The daemon answers the program's
 // color and light/dark queries (OSC 10/11/4, CSI ? 996 n) with the
-// appearance of the view holding the size (see TerminalResizeParams).
+// appearance of the active view (see TerminalAttachParams).
 type TerminalAppearance struct {
 	ColorScheme TerminalColorScheme `json:"colorScheme"`
 	// Foreground and Background are "#rrggbb".
@@ -150,14 +151,28 @@ type TerminalIDParams struct {
 	TerminalID string `json:"terminalId"`
 }
 
-// TerminalAttachParams attaches the calling client to a terminal (or, for
-// terminal.relaunch, to a fresh run) with the client's measured grid.
-// terminal.relaunch starts the run at that grid. terminal.attach takes the
-// size only when no other connection has the terminal open; otherwise the PTY
-// keeps its grid, which the snapshot reports. AttachmentID is client-generated
-// and names the view that owns the attachment; a connection has one
-// attachment per terminal, and a newer one replaces the older.
+// TerminalAttachParams attaches the calling client's view to a terminal with
+// the grid that fits it. A terminal has one size: the active view's. A view
+// becomes active when it creates or relaunches the terminal, attaches with
+// Focus or while no other view is attached, sends terminal.focus, or writes;
+// when it leaves, the view that was active before it takes over.
+// AttachmentID is client-generated and names the view; a connection has one
+// view per terminal, and a newer one replaces the older in its place.
 type TerminalAttachParams struct {
+	TerminalID   string             `json:"terminalId"`
+	Columns      uint16             `json:"columns"`
+	Rows         uint16             `json:"rows"`
+	AttachmentID string             `json:"attachmentId"`
+	Appearance   TerminalAppearance `json:"appearance"`
+	// Focus is set when the user opens the terminal, and not when a view
+	// attaches again (after a reconnect or another view's relaunch), so
+	// reattaching never takes the size from the device in use.
+	Focus bool `json:"focus,omitempty"`
+}
+
+// TerminalRelaunchParams starts a fresh run at the calling view's grid and
+// attaches the view to it as the active view.
+type TerminalRelaunchParams struct {
 	TerminalID   string             `json:"terminalId"`
 	Columns      uint16             `json:"columns"`
 	Rows         uint16             `json:"rows"`
@@ -186,13 +201,11 @@ type TerminalWriteParams struct {
 	Data       []byte `json:"data"`
 }
 
-// TerminalResizeParams asks for the view's grid. A resize takes the size: the
-// PTY takes the view's grid and the daemon answers queries with its
-// appearance until another view takes the size, even after this view
-// detaches.
+// TerminalResizeParams reports the grid that now fits the calling view, and
+// its appearance. The terminal takes them only while the view is active;
+// otherwise the daemon keeps them for when the view becomes active.
 type TerminalResizeParams struct {
 	TerminalID string             `json:"terminalId"`
-	RunID      string             `json:"runId"`
 	Columns    uint16             `json:"columns"`
 	Rows       uint16             `json:"rows"`
 	Appearance TerminalAppearance `json:"appearance"`

@@ -111,6 +111,7 @@ type contract struct {
 	TerminalCreateParams             wire.TerminalCreateParams             `json:"terminalCreateParams"`
 	TerminalIDParams                 wire.TerminalIDParams                 `json:"terminalIDParams"`
 	TerminalAttachParams             wire.TerminalAttachParams             `json:"terminalAttachParams"`
+	TerminalRelaunchParams           wire.TerminalRelaunchParams           `json:"terminalRelaunchParams"`
 	TerminalDetachParams             wire.TerminalDetachParams             `json:"terminalDetachParams"`
 	TerminalWriteParams              wire.TerminalWriteParams              `json:"terminalWriteParams"`
 	TerminalResizeParams             wire.TerminalResizeParams             `json:"terminalResizeParams"`

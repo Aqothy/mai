@@ -38,7 +38,7 @@ const (
 // subscriptions is the client's intent. They are all quick. Every other call
 // runs concurrently so a slow provider, registry, or terminal operation
 // cannot hold up the connection. Notifications (terminal input, resize,
-// detach) are always handled in wire order.
+// focus, detach) are always handled in wire order.
 var orderedRPCCalls = map[string]bool{
 	wire.MethodThreadCommand:         true,
 	wire.MethodThreadSubscribe:       true,
@@ -73,7 +73,6 @@ type rpcClient struct {
 	subscription *orchestration.Subscription
 
 	subscriptionsMu        sync.Mutex
-	terminalSubscriptions  map[string]string // terminal ID -> attachment ID
 	terminalListSubscribed bool
 
 	// questions are the sign-in questions this client was asked and has not
@@ -243,9 +242,8 @@ func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
 	client := &rpcClient{
 		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
-		calls:                 make(chan struct{}, rpcConcurrentCalls),
-		terminalSubscriptions: make(map[string]string),
-		questions:             make(map[string]pendingQuestion),
+		calls:     make(chan struct{}, rpcConcurrentCalls),
+		questions: make(map[string]pendingQuestion),
 	}
 	client.logger = s.logger.With("client", client.id)
 	client.subscription = s.engine.Subscribe(client)
@@ -274,8 +272,7 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	// channel. Queue overflow can close it before socket teardown reaches this
 	// path, and detaching the active sessions makes repeated cleanup harmless.
 	go s.closeClientOptionsSessions(client)
-	// Terminal subscriptions live on the connection and disappear with it;
-	// shells remain alive in the terminal service and keep their size.
+	go s.detachClientTerminals(client)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -333,51 +330,6 @@ func (c *rpcClient) subscribedTerminalList() bool {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 	return c.terminalListSubscribed
-}
-
-// subscribeTerminal makes attachmentID this connection's listener for the
-// terminal, replacing any earlier attachment. The returned undo restores the
-// previous listener, so a failed attach leaves the subscription as it found it.
-func (c *rpcClient) subscribeTerminal(terminalID, attachmentID string) (undo func()) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	previous, existed := c.terminalSubscriptions[terminalID]
-	c.terminalSubscriptions[terminalID] = attachmentID
-	return func() {
-		c.subscriptionsMu.Lock()
-		defer c.subscriptionsMu.Unlock()
-		if c.terminalSubscriptions[terminalID] != attachmentID {
-			return
-		}
-		if existed {
-			c.terminalSubscriptions[terminalID] = previous
-		} else {
-			delete(c.terminalSubscriptions, terminalID)
-		}
-	}
-}
-
-// detachTerminal removes the listener only while attachmentID is still the
-// current one, so a closed view's late detach cannot drop its replacement.
-func (c *rpcClient) detachTerminal(terminalID, attachmentID string) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	if c.terminalSubscriptions[terminalID] == attachmentID {
-		delete(c.terminalSubscriptions, terminalID)
-	}
-}
-
-func (c *rpcClient) unsubscribeTerminal(terminalID string) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	delete(c.terminalSubscriptions, terminalID)
-}
-
-func (c *rpcClient) subscribedTerminal(terminalID string) bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	_, ok := c.terminalSubscriptions[terminalID]
-	return ok
 }
 
 // ask sends this client a question an agent asks during its sign-in and
@@ -641,7 +593,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		return h.server.attachTerminal(h.client, params)
 	case wire.MethodTerminalRelaunch:
-		var params wire.TerminalAttachParams
+		var params wire.TerminalRelaunchParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
@@ -685,6 +637,13 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return nil, h.server.resizeTerminal(h.client, params)
+	case wire.MethodTerminalFocus:
+		var params wire.TerminalIDParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.server.focusTerminal(h.client, params.TerminalID)
+		return nil, nil
 	case wire.MethodWorkspaceBrowseDirectories:
 		var params wire.WorkspaceBrowseDirectoriesParams
 		if err := decodeRPCParams(req, &params); err != nil {
