@@ -10,7 +10,7 @@ require (
 	github.com/Aqothy/go-acp v0.0.0-20261027050104-d4180fbb362b
 	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0
-	go.mitchellh.com/libghostty v0.0.0-20261014030425-15bfda9e85fb
+	go.mitchellh.com/libghostty v0.0.0-20261021212106-df1957cbff56
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
 )

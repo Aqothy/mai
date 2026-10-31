@@ -64,6 +64,8 @@ func TestTerminalProgramReportsReachTheListWithoutAttaching(t *testing.T) {
 
 // Clients render the same output as the daemon but never answer it, so a
 // device attributes query gets one reply however many views are attached.
+// No view draws Kitty images, so the Kitty support query that programs send
+// before it goes unanswered, which is how they detect it isn't supported.
 func TestTerminalQueriesGetExactlyOneReply(t *testing.T) {
 	for _, viewers := range []int{0, 1, 2} {
 		t.Run(strings.Repeat("viewer", viewers), func(t *testing.T) {
@@ -80,7 +82,8 @@ func TestTerminalQueriesGetExactlyOneReply(t *testing.T) {
 
 			// Ask, wait for every reply to arrive, then read them in one go.
 			replies := filepath.Join(t.TempDir(), "replies")
-			client.writeTerminal(t, terminalID, runID, "sleep 1; stty raw -echo; printf '\\033[c'; sleep 1; "+
+			client.writeTerminal(t, terminalID, runID, "sleep 1; stty raw -echo; "+
+				"printf '\\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\\033\\\\\\033[c'; sleep 1; "+
 				"dd bs=256 count=1 2>/dev/null | od -An -tx1 > "+replies+"; stty sane\n")
 			if viewers == 0 {
 				client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})

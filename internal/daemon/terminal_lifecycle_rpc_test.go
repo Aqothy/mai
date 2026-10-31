@@ -39,7 +39,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
 	}
 	// The Ghostty commit the daemon links.
-	const wantFormat = "ghostty-gsn-v1-81598385d608dda4946093d6d6a234d204a2f225"
+	const wantFormat = "ghostty-gsn-v1-f54340ad77814fe319d136e5e915d6a48de8dd23"
 	if attach.SnapshotFormat != wantFormat {
 		t.Fatalf("snapshot format = %q, want %q", attach.SnapshotFormat, wantFormat)
 	}

@@ -160,6 +160,15 @@ func New(columns, rows uint16, maxScrollbackBytes uint, effects Effects) (*Scree
 		term.Close()
 		return nil, err
 	}
+	// No client draws Kitty images. A zero limit turns the protocol off
+	// (ghostty terminal.h, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT),
+	// so support queries go unanswered and programs fall back to text
+	// instead of sending pixels that would only be stored and snapshotted.
+	var noImages uint64
+	if err := term.SetKittyImageStorageLimit(&noImages); err != nil {
+		term.Close()
+		return nil, err
+	}
 	s.term = term
 	return s, nil
 }
@@ -208,7 +217,7 @@ func programStatus(status libghostty.ProgramStatus) ProgramStatus {
 // `make ghostty-vt` downloads Ghostty's own build of it, checked against the
 // Makefile's checksum, and requires the Go binding to build against the same
 // commit. Ghostty's build doesn't stamp its commit into the library.
-const ghosttyCommit = "81598385d608dda4946093d6d6a234d204a2f225"
+const ghosttyCommit = "f54340ad77814fe319d136e5e915d6a48de8dd23"
 
 // SnapshotFormat names the GHOSTSNP contract of the linked libghostty-vt.
 // GHOSTSNP v1 isn't stable across Ghostty commits (ghostty snapshot.h), so a

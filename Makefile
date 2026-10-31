@@ -16,7 +16,7 @@ CLIENT_GEN_STAMP := tools/client-gen/node_modules/.package-lock.json
 # Any direct `go build`/`go test` (including gopls) needs
 # PKG_CONFIG_PATH=$(GHOSTTY_VT_PKG_CONFIG) in its environment.
 GHOSTTY_VT_COMMIT := $(shell sed -n 's/^const ghosttyCommit = "\(.*\)"$$/\1/p' internal/terminal/vtscreen/vtscreen_ghostty.go)
-GHOSTTY_VT_SHA256 := 06d88f611c9496f9d6e285156ddd515a6d9420383e024f279ec904a46ff1c659
+GHOSTTY_VT_SHA256 := e70bb38e45b831a4fd28c6e3be40f3a4d0cf62eeced9c0f1fd255a0e19606379
 GHOSTTY_VT_DIR := build/ghostty-vt
 GHOSTTY_VT_STAMP := $(GHOSTTY_VT_DIR)/.$(GHOSTTY_VT_COMMIT)
 GHOSTTY_VT_PKG_CONFIG := $(CURDIR)/$(GHOSTTY_VT_DIR)/pkgconfig
