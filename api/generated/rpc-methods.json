@@ -133,17 +133,17 @@
     {
       "name": "terminal.create",
       "params": "TerminalCreateParams",
-      "result": "TerminalAttachSnapshot"
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.attach",
       "params": "TerminalAttachParams",
-      "result": "TerminalAttachSnapshot"
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.relaunch",
       "params": "TerminalRelaunchParams",
-      "result": "TerminalAttachSnapshot"
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.subscribeList",
@@ -216,10 +216,6 @@
     {
       "name": "provider.question.asked",
       "payload": "ProviderQuestion"
-    },
-    {
-      "name": "terminal.subscribe",
-      "payload": "TerminalStreamItem"
     },
     {
       "name": "terminal.subscribeList",

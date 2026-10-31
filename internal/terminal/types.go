@@ -42,19 +42,6 @@ var (
 	ErrServiceClosed     = errors.New("terminal service is closed")
 )
 
-// StreamItemKind discriminates terminal.subscribe notifications.
-type StreamItemKind string
-
-const (
-	// StreamItemOutput carries raw terminal output bytes.
-	StreamItemOutput StreamItemKind = "output"
-	// StreamItemStatus reports a lifecycle status change for a run.
-	StreamItemStatus StreamItemKind = "status"
-	// StreamItemResized reports the run's new grid at its sequence; clients
-	// resize their terminal there and keep parsing.
-	StreamItemResized StreamItemKind = "resized"
-)
-
 // ColorScheme is whether a view's theme is light or dark.
 type ColorScheme string
 
@@ -79,19 +66,19 @@ func ValidateSize(columns, rows uint16) error {
 	return nil
 }
 
-// Events receives session output and lifecycle changes. Callbacks are invoked
-// serially by the session in output order. A bounded downstream wait is
-// allowed so slow clients apply PTY backpressure instead of losing bytes.
+// Events receives a run's output and lifecycle changes. Output, Resized and
+// Exit are called in event order while the session holds its event lock, so
+// they must not block or wait for anything that calls into the session.
 type Events struct {
-	// Output delivers one ordered PTY output chunk. The slice is owned by the
-	// callee.
-	Output func(terminalID, runID string, seq uint64, data []byte)
+	// Output delivers one ordered PTY output chunk. The slice must not be
+	// modified; it may be shared read-only.
+	Output func(session *Session, data []byte)
 	// Resized reports a new grid at its place in the output.
-	Resized func(terminalID, runID string, seq uint64, columns, rows uint16)
+	Resized func(session *Session, columns, rows uint16)
 	// Exit reports the end of a run after all output has been delivered; no
-	// item follows it. exitCode is nil when the process could not report
+	// event follows it. exitCode is nil when the process could not report
 	// one.
-	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
+	Exit func(session *Session, status Status, exitCode *int)
 	// ProgramChanged reports a changed title, working directory or program
 	// status; read it with Session.Program.
 	ProgramChanged func(terminalID string)

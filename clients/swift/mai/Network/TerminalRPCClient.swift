@@ -3,8 +3,6 @@ import Foundation
 /// Terminal RPC surface. Thread and terminal stores keep separate domain
 /// protocols while sharing one RPCClient and connection lifecycle.
 protocol TerminalRPCClient: RPCTransportClient {
-    /// Receives terminal output off the main actor, in arrival order.
-    var onTerminalStreamItem: (@Sendable (TerminalStreamMessage) -> Void)? { get set }
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)? { get set }
 
     /// Returns the full snapshot and registers this connection for
@@ -13,10 +11,14 @@ protocol TerminalRPCClient: RPCTransportClient {
     func renameTerminal(_ params: TerminalRenameParams) async throws -> TerminalSummary
     func deleteTerminal(terminalID: String) async throws
 
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot
-    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachSnapshot
+    /// Each returns a ticket for the view's terminal stream.
+    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachResult
+    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachResult
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult
     func terminateTerminal(terminalID: String) async throws
+
+    /// Where views open their terminal streams, beside the RPC endpoint.
+    var terminalStreamEndpoint: URL { get }
 
     /// Fire-and-forget input bytes; the transport preserves call order.
     func writeTerminal(_ params: TerminalWriteParams)
@@ -47,15 +49,15 @@ extension RPCClient: TerminalRPCClient {
         )
     }
 
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot {
+    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalCreate, params: params)
     }
 
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
+    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalAttach, params: params)
     }
 
-    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachSnapshot {
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalRelaunch, params: params)
     }
 

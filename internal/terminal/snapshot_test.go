@@ -3,8 +3,11 @@ package terminal
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"syscall"
 	"testing"
+
+	libghostty "go.mitchellh.com/libghostty"
 )
 
 func mustSessionSnapshot(t *testing.T, session *Session) Snapshot {
@@ -60,10 +63,10 @@ func TestNaturalExitReportsOnceAndRejectsInput(t *testing.T) {
 		c.mu.Unlock()
 		t.Fatalf("exit events = %d status %s code %v, want one exited 7", c.exits, c.status, c.exitCode)
 	}
-	// The exit event carries the final sequence.
-	if c.exitSeq < c.lastSeq {
+	// The exit is the run's last event.
+	if c.outputAfterExit > 0 {
 		c.mu.Unlock()
-		t.Fatalf("exit seq %d before output seq %d", c.exitSeq, c.lastSeq)
+		t.Fatalf("%d output events after the exit", c.outputAfterExit)
 	}
 	c.mu.Unlock()
 
@@ -97,4 +100,80 @@ func TestRelaunchReplacesRun(t *testing.T) {
 	if current, err := svc.Get("t1"); err != nil || current != relaunched {
 		t.Fatal("service does not track the relaunched session")
 	}
+}
+
+// Observe's snapshot holds exactly the output delivered before it: an
+// observer that then receives the output after it neither misses nor
+// repeats any. Observed many times through a flood, where output is nearly
+// always on its way from the PTY to the run's terminal and its listeners.
+func TestObserveSnapshotHoldsExactlyTheOutputDeliveredBeforeIt(t *testing.T) {
+	svc := NewService()
+	defer svc.Close()
+	c := newCollector()
+	session, err := svc.Start("t1", SpawnSpec{
+		Cwd: t.TempDir(), Columns: 80, Rows: 24, Command: []string{"/usr/bin/seq", "-f", "LINE-%g", "1", "1000000"},
+	}, c.events())
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	const observations = 40
+	for observed := 0; observed < observations; {
+		select {
+		case <-c.exited:
+			t.Fatalf("the flood ended after %d observations, want %d during it", observed, observations)
+		default:
+		}
+		var data []byte
+		var delivered string
+		err := session.Observe(func(snapshot Snapshot) {
+			data = snapshot.Data
+			c.mu.Lock()
+			delivered = lastLine(c.output.String())
+			c.mu.Unlock()
+		})
+		if err != nil {
+			t.Fatalf("observe: %v", err)
+		}
+		if delivered == "" {
+			continue
+		}
+		if shown := lastLine(snapshotText(t, data)); shown != delivered {
+			t.Fatalf("snapshot ends at %q, but the output delivered before it ends at %q", shown, delivered)
+		}
+		observed++
+	}
+}
+
+// lastLine is text's last line that isn't empty.
+func lastLine(text string) string {
+	lines := strings.Fields(strings.ReplaceAll(text, "\r", ""))
+	if len(lines) == 0 {
+		return ""
+	}
+	return lines[len(lines)-1]
+}
+
+// snapshotText decodes a snapshot as a client does and returns its text.
+func snapshotText(t *testing.T, data []byte) string {
+	t.Helper()
+	decoder, err := libghostty.NewSnapshotDecoderBytes(data)
+	if err != nil {
+		t.Fatalf("snapshot decoder: %v", err)
+	}
+	defer decoder.Close()
+	term, err := decoder.Decode()
+	if err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	defer term.Close()
+	formatter, err := libghostty.NewFormatter(term, libghostty.WithFormatterFormat(libghostty.FormatterFormatPlain))
+	if err != nil {
+		t.Fatalf("formatter: %v", err)
+	}
+	defer formatter.Close()
+	text, err := formatter.FormatString()
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	return text
 }

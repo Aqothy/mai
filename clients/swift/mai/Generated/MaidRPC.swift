@@ -44,5 +44,4 @@ nonisolated public enum MaidRPCMethod {
     public static let providerOptionsUpdated = "provider.options.updated"
     public static let providerOptionsInvalidated = "provider.options.invalidated"
     public static let providerQuestionAsked = "provider.question.asked"
-    public static let terminalSubscribe = "terminal.subscribe"
 }

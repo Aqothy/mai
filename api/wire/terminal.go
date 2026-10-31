@@ -7,9 +7,9 @@ import (
 )
 
 // Terminal thread methods. terminal.write, terminal.resize, terminal.focus,
-// and terminal.detach are sent by clients as JSON-RPC notifications;
-// terminal.subscribe is the server-to-client stream method registered by
-// terminal.create, terminal.attach, and terminal.relaunch.
+// and terminal.detach are sent by clients as JSON-RPC notifications.
+// terminal.create, terminal.attach, and terminal.relaunch return a ticket for
+// the view's terminal stream.
 const (
 	MethodTerminalCreate        = "terminal.create"
 	MethodTerminalAttach        = "terminal.attach"
@@ -21,7 +21,6 @@ const (
 	MethodTerminalWrite         = "terminal.write"
 	MethodTerminalResize        = "terminal.resize"
 	MethodTerminalFocus         = "terminal.focus"
-	MethodTerminalSubscribe     = "terminal.subscribe"
 	MethodTerminalSubscribeList = "terminal.subscribeList"
 )
 
@@ -49,7 +48,6 @@ type TerminalListStreamItem struct {
 
 // Client-visible terminal vocabularies.
 type TerminalStatus = terminal.Status
-type TerminalStreamItemKind = terminal.StreamItemKind
 
 type TerminalProgramState = terminal.ProgramState
 type TerminalProgramNeed = terminal.ProgramNeed
@@ -108,34 +106,79 @@ type TerminalAppearance struct {
 	Palette []string `json:"palette,omitempty"`
 }
 
-// TerminalAttachSnapshot is the authoritative attach point for one run.
-// Snapshot is a complete native Ghostty terminal model captured at Sequence
-// and Columns by Rows. Clients must validate SnapshotFormat, install Snapshot
-// transactionally, then consume only live output whose run ID matches and
-// whose sequence is greater than Sequence.
-type TerminalAttachSnapshot struct {
-	Terminal       TerminalSummary `json:"terminal"`
-	RunID          string          `json:"runId"`
-	Sequence       uint64          `json:"sequence"`
-	Columns        uint16          `json:"columns"`
-	Rows           uint16          `json:"rows"`
-	SnapshotFormat string          `json:"snapshotFormat"`
-	Snapshot       []byte          `json:"snapshot"`
+// TerminalAttachResult answers terminal.create, terminal.attach and
+// terminal.relaunch. StreamTicket opens the view's terminal stream (see
+// TerminalStreamPath); it works once, within TerminalStreamTicketLifetime,
+// for a stream opened while this connection and view are still attached.
+// Issuing it closes the view's earlier stream.
+type TerminalAttachResult struct {
+	Terminal     TerminalSummary `json:"terminal"`
+	StreamTicket string          `json:"streamTicket"`
 }
 
-// TerminalStreamItem is one terminal.subscribe notification payload.
-type TerminalStreamItem struct {
-	Kind       TerminalStreamItemKind `json:"kind"`
-	TerminalID string                 `json:"terminalId"`
-	RunID      string                 `json:"runId,omitempty"`
-	Sequence   uint64                 `json:"sequence,omitempty"`
-	Data       []byte                 `json:"data,omitempty"`
-	// Columns and Rows are the grid of a resized item.
-	Columns  uint16         `json:"columns,omitempty"`
-	Rows     uint16         `json:"rows,omitempty"`
-	Status   TerminalStatus `json:"status,omitempty"`
+// The terminal stream carries one view's terminal from the daemon, separate
+// from the JSON-RPC connection so output never delays it. The client opens a
+// WebSocket at TerminalStreamPath with subprotocol TerminalStreamSubprotocol
+// and, within 5 seconds, sends one binary message: the 16 bytes of the ticket,
+// decoded from unpadded base64url. It never sends anything else. Every later
+// message is one binary record from the daemon: a TerminalStreamRecordKind
+// byte, then its payload.
+//
+// Close codes: 1000 the view ended (detached, replaced by a new ticket, or
+// its terminal deleted), don't reconnect; 1001 the daemon is shutting down or
+// the view's connection closed, the connection's reconnect reattaches; 1002 or
+// 1008 a protocol or handshake error; 1011 an internal error.
+const (
+	TerminalStreamPath           = "/terminal"
+	TerminalStreamSubprotocol    = "maid.terminal.v1"
+	TerminalStreamTicketLifetime = 30 * time.Second
+)
+
+// TerminalStreamRecordKind is the first byte of a terminal stream record.
+type TerminalStreamRecordKind byte
+
+const (
+	// TerminalRecordSnapshot's payload is a TerminalStreamSnapshot (JSON). A
+	// stream begins with one, and another can arrive at any time; it abandons
+	// a partial snapshot and replaces the terminal.
+	TerminalRecordSnapshot TerminalStreamRecordKind = 0x01
+	// TerminalRecordSnapshotData's payload is the next part of the
+	// snapshot, at most 64 KiB; the snapshot is complete once the parts add
+	// up to its Size.
+	TerminalRecordSnapshotData TerminalStreamRecordKind = 0x02
+	// TerminalRecordOutput's payload is program output, at most 64 KiB.
+	TerminalRecordOutput TerminalStreamRecordKind = 0x03
+	// TerminalRecordResized's payload is a TerminalStreamResized (JSON).
+	TerminalRecordResized TerminalStreamRecordKind = 0x04
+	// TerminalRecordExited's payload is a TerminalStreamExited (JSON). The
+	// stream stays open.
+	TerminalRecordExited TerminalStreamRecordKind = 0x05
+)
+
+// TerminalStreamSnapshot starts a terminal stream, or replaces its terminal:
+// after a relaunch, or when the client fell too far behind to be sent the
+// output it missed. The next Size bytes of snapshot data are a complete
+// native Ghostty terminal at the run's grid; clients validate SnapshotFormat
+// and install it, then apply the records that follow.
+type TerminalStreamSnapshot struct {
+	RunID          string         `json:"runId"`
+	Status         TerminalStatus `json:"status"`
+	ExitCode       *int           `json:"exitCode,omitempty"`
+	SnapshotFormat string         `json:"snapshotFormat"`
+	Size           int            `json:"size"`
+}
+
+// TerminalStreamResized is the run's new grid at its place in the output.
+type TerminalStreamResized struct {
+	Columns uint16 `json:"columns"`
+	Rows    uint16 `json:"rows"`
+}
+
+// TerminalStreamExited reports that the run ended: it exited, was stopped,
+// or failed. No output follows.
+type TerminalStreamExited struct {
+	Status   TerminalStatus `json:"status"`
 	ExitCode *int           `json:"exitCode,omitempty"`
-	Message  string         `json:"message,omitempty"`
 }
 
 type TerminalCreateParams struct {

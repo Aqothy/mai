@@ -2,11 +2,12 @@ package daemon
 
 // End-to-end terminal RPC tests use a real WebSocket client the way the Swift
 // app does: create attaches the caller, write/resize arrive as notifications,
-// and terminal.subscribe items stream back ordered by sequence.
+// and the view's terminal stream carries the terminal back.
 
 import (
+	"bytes"
 	"fmt"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func (c *recordingClient) listItemsSnapshot() []wire.TerminalListStreamItem {
 func (c *recordingClient) outputContains(marker string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return strings.Contains(c.terminalOutput.String(), marker)
+	return bytes.Contains(c.terminalOutput.Bytes(), []byte(marker))
 }
 
 func (c *recordingClient) waitForOutput(t *testing.T, marker string) {
@@ -44,18 +45,6 @@ func (c *recordingClient) outputLength() int {
 	return c.terminalOutput.Len()
 }
 
-func (c *recordingClient) largestOutputChunk() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	largest := 0
-	for _, item := range c.terminalItems {
-		if item.Kind == terminal.StreamItemOutput {
-			largest = max(largest, len(item.Data))
-		}
-	}
-	return largest
-}
-
 func (c *recordingClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -68,51 +57,16 @@ func (c *recordingClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Fatalf("timed out waiting for %d terminal output bytes; received %d", minimum, c.outputLength())
 }
 
-// waitForStatus returns the first status item the terminal stream delivers.
-func (c *recordingClient) waitForStatus(t *testing.T) wire.TerminalStreamItem {
+func createTestTerminal(t *testing.T, c *recordingClient) testView {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		c.mu.Lock()
-		for _, item := range c.terminalItems {
-			if item.Kind == terminal.StreamItemStatus {
-				c.mu.Unlock()
-				return item
-			}
-		}
-		c.mu.Unlock()
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for terminal status stream item")
-	return wire.TerminalStreamItem{}
-}
-
-// waitForStreamItem waits for a terminal.subscribe item that matches.
-func (c *recordingClient) waitForStreamItem(t *testing.T, match func(wire.TerminalStreamItem) bool) wire.TerminalStreamItem {
-	t.Helper()
-	var found wire.TerminalStreamItem
-	waitUntil(t, "terminal stream item", func() bool {
-		for _, item := range c.outputItems() {
-			if match(item) {
-				found = item
-				return true
-			}
-		}
-		return false
-	})
-	return found
-}
-
-func createTestTerminal(t *testing.T, c *recordingClient) wire.TerminalAttachSnapshot {
-	t.Helper()
-	var snapshot wire.TerminalAttachSnapshot
+	var result wire.TerminalAttachResult
 	c.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{
 		Cwd:        t.TempDir(),
 		Columns:    80,
 		Rows:       24,
 		Appearance: testAppearance,
-	}, &snapshot)
-	return snapshot
+	}, &result)
+	return c.view(t, result)
 }
 
 // testAppearance is a dark view's theme: Ghostty's default colors.
@@ -127,19 +81,19 @@ func (c *recordingClient) writeTerminal(t *testing.T, terminalID, runID, data st
 	c.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{TerminalID: terminalID, RunID: runID, Data: []byte(data)})
 }
 
-func (c *recordingClient) attachTerminal(terminalID string, columns, rows uint16) (wire.TerminalAttachSnapshot, error) {
-	var snapshot wire.TerminalAttachSnapshot
-	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: columns, Rows: rows, Appearance: testAppearance}, &snapshot)
-	return snapshot, err
+func (c *recordingClient) attachTerminal(terminalID string, columns, rows uint16) (wire.TerminalAttachResult, error) {
+	var result wire.TerminalAttachResult
+	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: columns, Rows: rows, Appearance: testAppearance}, &result)
+	return result, err
 }
 
-func (c *recordingClient) mustAttachTerminal(t *testing.T, terminalID string, columns, rows uint16) wire.TerminalAttachSnapshot {
+func (c *recordingClient) mustAttachTerminal(t *testing.T, terminalID string, columns, rows uint16) testView {
 	t.Helper()
-	snapshot, err := c.attachTerminal(terminalID, columns, rows)
+	result, err := c.attachTerminal(terminalID, columns, rows)
 	if err != nil {
 		t.Fatalf("attach %s: %v", terminalID, err)
 	}
-	return snapshot
+	return c.view(t, result)
 }
 
 func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
@@ -174,30 +128,29 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	snapshot := createTestTerminal(t, client)
 	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
 	const outputBytes = 5 * 1024 * 1024
-	const maximumNotificationBytes = 64 * 1024
 	client.writeTerminal(t, terminalID, runID, fmt.Sprintf("head -c %d /dev/zero; printf '\\nLARGE-OUTPUT-DONE\\n'\n", outputBytes))
 	client.waitForOutputLength(t, outputBytes)
 	client.waitForOutput(t, "LARGE-OUTPUT-DONE")
-	if largest := client.largestOutputChunk(); largest > maximumNotificationBytes {
-		t.Fatalf("largest terminal notification was %d bytes, want at most %d", largest, maximumNotificationBytes)
-	}
 
-	// A subsequent command proves the same attached connection remains live
-	// after the output burst instead of being overflow-closed.
+	// A subsequent command proves the same stream remains live after the
+	// output burst, and the burst came through whole, without a resync.
 	client.writeTerminal(t, terminalID, runID, "printf 'AFTER-LARGE-OUTPUT\\n'\n")
 	client.waitForOutput(t, "AFTER-LARGE-OUTPUT")
-
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	var last uint64
-	for _, item := range client.terminalItems {
-		if item.Kind != terminal.StreamItemOutput {
-			continue
+	records := snapshot.stream.snapshot()
+	if slices.IndexFunc(records[1:], isSnapshot) >= 0 {
+		t.Fatal("a reading view was resynced")
+	}
+	// The kernel hands the daemon a PTY's output about 1 KB at a time; a
+	// flood still reaches views in large messages, not one per read.
+	var messages, received int
+	for _, record := range records {
+		if record.kind == wire.TerminalRecordOutput {
+			messages++
+			received += len(record.data)
 		}
-		if last != 0 && item.Sequence != last+1 {
-			t.Fatalf("terminal output sequence jumped from %d to %d", last, item.Sequence)
-		}
-		last = item.Sequence
+	}
+	if average := received / messages; average < 32*1024 {
+		t.Fatalf("the flood arrived in %d messages averaging %d bytes, want at least 32 KiB", messages, average)
 	}
 }
 
@@ -229,4 +182,22 @@ func useQuietTestShell(t *testing.T) {
 	t.Helper()
 	t.Setenv("SHELL", "/bin/zsh")
 	t.Setenv("ZDOTDIR", t.TempDir())
+}
+
+// A program reading a line lets the user erase what they typed: Backspace
+// after "é" removes the whole character, not one of its two bytes.
+func TestTerminalLineInputErasesWholeCharacters(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+	created := createTestTerminal(t, client)
+	terminalID, runID := created.Terminal.TerminalID, created.RunID
+
+	client.writeTerminal(t, terminalID, runID, "read line; printf 'LINE[%s]%s\\n' \"$line\" END\n")
+	client.writeTerminal(t, terminalID, runID, "aé\x7f\n")
+	client.waitForOutput(t, "]END")
+	if !client.outputContains("LINE[a]END") {
+		t.Fatal("erasing after é left part of it in the line")
+	}
 }

@@ -54,9 +54,9 @@ func (svc *Service) Get(terminalID string) (*Session, error) {
 }
 
 // Relaunch replaces a terminal's run with a fresh shell: any live process
-// group is killed first, then a new session starts with a new run ID, a reset
-// sequence, and an empty attach model. Events from the old run keep their old
-// run ID and cannot affect the new shell.
+// group is killed first, then a new session starts with a new run ID and an
+// empty attach model. Events from the old run keep their old run ID and
+// cannot affect the new shell.
 func (svc *Service) Relaunch(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
 	svc.mu.Lock()
 	if svc.closed {

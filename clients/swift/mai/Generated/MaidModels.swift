@@ -5476,36 +5476,22 @@ public extension TerminalAppearance {
     }
 }
 
-// MARK: - TerminalAttachSnapshot
-public struct TerminalAttachSnapshot: Codable {
-    public var columns, rows: Int
-    public var runID: String
-    public var sequence: Int
-    public var snapshot, snapshotFormat: String
+// MARK: - TerminalAttachResult
+public struct TerminalAttachResult: Codable {
+    public var streamTicket: String
     public var terminal: TerminalSummary
 
-    public enum CodingKeys: String, CodingKey {
-        case columns, rows
-        case runID = "runId"
-        case sequence, snapshot, snapshotFormat, terminal
-    }
-
-    public init(columns: Int, rows: Int, runID: String, sequence: Int, snapshot: String, snapshotFormat: String, terminal: TerminalSummary) {
-        self.columns = columns
-        self.rows = rows
-        self.runID = runID
-        self.sequence = sequence
-        self.snapshot = snapshot
-        self.snapshotFormat = snapshotFormat
+    public init(streamTicket: String, terminal: TerminalSummary) {
+        self.streamTicket = streamTicket
         self.terminal = terminal
     }
 }
 
-// MARK: TerminalAttachSnapshot convenience initializers and mutators
+// MARK: TerminalAttachResult convenience initializers and mutators
 
-public extension TerminalAttachSnapshot {
+public extension TerminalAttachResult {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(TerminalAttachSnapshot.self, from: data)
+        self = try newJSONDecoder().decode(TerminalAttachResult.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -5520,21 +5506,11 @@ public extension TerminalAttachSnapshot {
     }
 
     func with(
-        columns: Int? = nil,
-        rows: Int? = nil,
-        runID: String? = nil,
-        sequence: Int? = nil,
-        snapshot: String? = nil,
-        snapshotFormat: String? = nil,
+        streamTicket: String? = nil,
         terminal: TerminalSummary? = nil
-    ) -> TerminalAttachSnapshot {
-        return TerminalAttachSnapshot(
-            columns: columns ?? self.columns,
-            rows: rows ?? self.rows,
-            runID: runID ?? self.runID,
-            sequence: sequence ?? self.sequence,
-            snapshot: snapshot ?? self.snapshot,
-            snapshotFormat: snapshotFormat ?? self.snapshotFormat,
+    ) -> TerminalAttachResult {
+        return TerminalAttachResult(
+            streamTicket: streamTicket ?? self.streamTicket,
             terminal: terminal ?? self.terminal
         )
     }
@@ -6107,45 +6083,22 @@ public extension TerminalResizeParams {
     }
 }
 
-// MARK: - TerminalStreamItem
-public struct TerminalStreamItem: Codable {
-    public var columns: Int?
-    public var data: String?
+// MARK: - TerminalStreamExited
+public struct TerminalStreamExited: Codable {
     public var exitCode: Int?
-    public var kind: String
-    public var message: String?
-    public var rows: Int?
-    public var runID: String?
-    public var sequence: Int?
-    public var status: String?
-    public var terminalID: String
+    public var status: String
 
-    public enum CodingKeys: String, CodingKey {
-        case columns, data, exitCode, kind, message, rows
-        case runID = "runId"
-        case sequence, status
-        case terminalID = "terminalId"
-    }
-
-    public init(columns: Int?, data: String?, exitCode: Int?, kind: String, message: String?, rows: Int?, runID: String?, sequence: Int?, status: String?, terminalID: String) {
-        self.columns = columns
-        self.data = data
+    public init(exitCode: Int?, status: String) {
         self.exitCode = exitCode
-        self.kind = kind
-        self.message = message
-        self.rows = rows
-        self.runID = runID
-        self.sequence = sequence
         self.status = status
-        self.terminalID = terminalID
     }
 }
 
-// MARK: TerminalStreamItem convenience initializers and mutators
+// MARK: TerminalStreamExited convenience initializers and mutators
 
-public extension TerminalStreamItem {
+public extension TerminalStreamExited {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(TerminalStreamItem.self, from: data)
+        self = try newJSONDecoder().decode(TerminalStreamExited.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -6160,28 +6113,124 @@ public extension TerminalStreamItem {
     }
 
     func with(
-        columns: Int?? = nil,
-        data: String?? = nil,
         exitCode: Int?? = nil,
-        kind: String? = nil,
-        message: String?? = nil,
-        rows: Int?? = nil,
-        runID: String?? = nil,
-        sequence: Int?? = nil,
-        status: String?? = nil,
-        terminalID: String? = nil
-    ) -> TerminalStreamItem {
-        return TerminalStreamItem(
-            columns: columns ?? self.columns,
-            data: data ?? self.data,
+        status: String? = nil
+    ) -> TerminalStreamExited {
+        return TerminalStreamExited(
             exitCode: exitCode ?? self.exitCode,
-            kind: kind ?? self.kind,
-            message: message ?? self.message,
-            rows: rows ?? self.rows,
+            status: status ?? self.status
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalStreamResized
+public struct TerminalStreamResized: Codable {
+    public var columns, rows: Int
+
+    public init(columns: Int, rows: Int) {
+        self.columns = columns
+        self.rows = rows
+    }
+}
+
+// MARK: TerminalStreamResized convenience initializers and mutators
+
+public extension TerminalStreamResized {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalStreamResized.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columns: Int? = nil,
+        rows: Int? = nil
+    ) -> TerminalStreamResized {
+        return TerminalStreamResized(
+            columns: columns ?? self.columns,
+            rows: rows ?? self.rows
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TerminalStreamSnapshot
+public struct TerminalStreamSnapshot: Codable {
+    public var exitCode: Int?
+    public var runID: String
+    public var size: Int
+    public var snapshotFormat, status: String
+
+    public enum CodingKeys: String, CodingKey {
+        case exitCode
+        case runID = "runId"
+        case size, snapshotFormat, status
+    }
+
+    public init(exitCode: Int?, runID: String, size: Int, snapshotFormat: String, status: String) {
+        self.exitCode = exitCode
+        self.runID = runID
+        self.size = size
+        self.snapshotFormat = snapshotFormat
+        self.status = status
+    }
+}
+
+// MARK: TerminalStreamSnapshot convenience initializers and mutators
+
+public extension TerminalStreamSnapshot {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TerminalStreamSnapshot.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        exitCode: Int?? = nil,
+        runID: String? = nil,
+        size: Int? = nil,
+        snapshotFormat: String? = nil,
+        status: String? = nil
+    ) -> TerminalStreamSnapshot {
+        return TerminalStreamSnapshot(
+            exitCode: exitCode ?? self.exitCode,
             runID: runID ?? self.runID,
-            sequence: sequence ?? self.sequence,
-            status: status ?? self.status,
-            terminalID: terminalID ?? self.terminalID
+            size: size ?? self.size,
+            snapshotFormat: snapshotFormat ?? self.snapshotFormat,
+            status: status ?? self.status
         )
     }
 

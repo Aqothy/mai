@@ -22,7 +22,6 @@ import (
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
-	"github.com/Aqothy/maiD/internal/terminal"
 	"github.com/coder/websocket"
 )
 
@@ -70,21 +69,23 @@ func newTestServerWith(t testing.TB, dir string, extra map[provider.DriverKind]p
 
 func newWSTestServer(t testing.TB, s *Server) string {
 	t.Helper()
-	server := httptest.NewServer(s.WebSocketHandler())
+	server := httptest.NewServer(s.handler())
 	t.Cleanup(server.Close)
-	return "ws" + strings.TrimPrefix(server.URL, "http")
+	return "ws" + strings.TrimPrefix(server.URL, "http") + "/rpc"
 }
 
 type recordingClient struct {
 	conn *jsonrpc2.Connection
+	url  string
 
 	mu                 sync.Mutex
 	changed            chan struct{}
 	threadEvents       []orchestration.ThreadEvent
 	listItems          []orchestration.ThreadListItem
-	terminalItems      []wire.TerminalStreamItem
 	terminalListItems  []wire.TerminalListStreamItem
 	terminalListCursor int
+	// terminalOutput is the output of every terminal stream the client
+	// opened.
 	terminalOutput     bytes.Buffer
 	providerQuestions  []wire.ProviderQuestion
 	optionsUpdates     []wire.ProviderOptionsResult
@@ -93,7 +94,7 @@ type recordingClient struct {
 
 func dialRecordingClient(t testing.TB, url string) *recordingClient {
 	t.Helper()
-	c := &recordingClient{changed: make(chan struct{})}
+	c := &recordingClient{url: url, changed: make(chan struct{})}
 	ws, _, err := websocket.Dial(context.Background(), url, nil)
 	if err != nil {
 		t.Fatalf("websocket dial: %v", err)
@@ -117,10 +118,7 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	defer func() {
-		close(c.changed)
-		c.changed = make(chan struct{})
-	}()
+	defer c.signalLocked()
 	switch req.Method {
 	case wire.MethodThreadEvent:
 		var event orchestration.ThreadEvent
@@ -134,15 +132,6 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			return nil, err
 		}
 		c.listItems = append(c.listItems, item)
-	case wire.MethodTerminalSubscribe:
-		var item wire.TerminalStreamItem
-		if err := decodeRPCParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.terminalItems = append(c.terminalItems, item)
-		if item.Kind == terminal.StreamItemOutput {
-			c.terminalOutput.Write(item.Data)
-		}
 	case wire.MethodTerminalSubscribeList:
 		var item wire.TerminalListStreamItem
 		if err := decodeRPCParams(req, &item); err != nil {
@@ -169,6 +158,12 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 		c.optionsInvalidated = append(c.optionsInvalidated, invalidated)
 	}
 	return nil, nil
+}
+
+// signalLocked wakes waiters after a change; the caller holds mu.
+func (c *recordingClient) signalLocked() {
+	close(c.changed)
+	c.changed = make(chan struct{})
 }
 
 func (c *recordingClient) callErr(method string, params any, result any) error {
@@ -291,7 +286,7 @@ func (c *recordingClient) waitSettled(t *testing.T, thread orchestration.ThreadI
 
 // waitFor waits until done holds of what the client recorded; done runs
 // under the client's lock.
-func (c *recordingClient) waitFor(t *testing.T, desc string, done func() bool) {
+func (c *recordingClient) waitFor(t testing.TB, desc string, done func() bool) {
 	t.Helper()
 	deadline := time.After(15 * time.Second)
 	for {

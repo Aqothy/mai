@@ -2123,43 +2123,22 @@
       ],
       "title": "TerminalAttachParams"
     },
-    "TerminalAttachSnapshot": {
+    "TerminalAttachResult": {
       "properties": {
         "terminal": {
           "$ref": "#/$defs/TerminalSummary"
         },
-        "runId": {
+        "streamTicket": {
           "type": "string"
-        },
-        "sequence": {
-          "type": "integer"
-        },
-        "columns": {
-          "type": "integer"
-        },
-        "rows": {
-          "type": "integer"
-        },
-        "snapshotFormat": {
-          "type": "string"
-        },
-        "snapshot": {
-          "type": "string",
-          "contentEncoding": "base64"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "terminal",
-        "runId",
-        "sequence",
-        "columns",
-        "rows",
-        "snapshotFormat",
-        "snapshot"
+        "streamTicket"
       ],
-      "title": "TerminalAttachSnapshot"
+      "title": "TerminalAttachResult"
     },
     "TerminalCreateParams": {
       "properties": {
@@ -2352,29 +2331,43 @@
       ],
       "title": "TerminalResizeParams"
     },
-    "TerminalStreamItem": {
+    "TerminalStreamExited": {
       "properties": {
-        "kind": {
+        "status": {
           "type": "string"
         },
-        "terminalId": {
-          "type": "string"
-        },
-        "runId": {
-          "type": "string"
-        },
-        "sequence": {
+        "exitCode": {
           "type": "integer"
-        },
-        "data": {
-          "type": "string",
-          "contentEncoding": "base64"
-        },
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "title": "TerminalStreamExited"
+    },
+    "TerminalStreamResized": {
+      "properties": {
         "columns": {
           "type": "integer"
         },
         "rows": {
           "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "title": "TerminalStreamResized"
+    },
+    "TerminalStreamSnapshot": {
+      "properties": {
+        "runId": {
+          "type": "string"
         },
         "status": {
           "type": "string"
@@ -2382,17 +2375,22 @@
         "exitCode": {
           "type": "integer"
         },
-        "message": {
+        "snapshotFormat": {
           "type": "string"
+        },
+        "size": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "kind",
-        "terminalId"
+        "runId",
+        "status",
+        "snapshotFormat",
+        "size"
       ],
-      "title": "TerminalStreamItem"
+      "title": "TerminalStreamSnapshot"
     },
     "TerminalSummary": {
       "properties": {
@@ -3477,11 +3475,17 @@
         "terminalSummary": {
           "$ref": "#/$defs/TerminalSummary"
         },
-        "terminalAttachSnapshot": {
-          "$ref": "#/$defs/TerminalAttachSnapshot"
+        "terminalAttachResult": {
+          "$ref": "#/$defs/TerminalAttachResult"
         },
-        "terminalStreamItem": {
-          "$ref": "#/$defs/TerminalStreamItem"
+        "terminalStreamSnapshot": {
+          "$ref": "#/$defs/TerminalStreamSnapshot"
+        },
+        "terminalStreamResized": {
+          "$ref": "#/$defs/TerminalStreamResized"
+        },
+        "terminalStreamExited": {
+          "$ref": "#/$defs/TerminalStreamExited"
         },
         "terminalListStreamItem": {
           "$ref": "#/$defs/TerminalListStreamItem"
@@ -3620,8 +3624,10 @@
         "aCPRegistryInstallParams",
         "aCPCustomAgentAddParams",
         "terminalSummary",
-        "terminalAttachSnapshot",
-        "terminalStreamItem",
+        "terminalAttachResult",
+        "terminalStreamSnapshot",
+        "terminalStreamResized",
+        "terminalStreamExited",
         "terminalListStreamItem",
         "terminalRenameParams",
         "terminalCreateParams",

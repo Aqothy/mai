@@ -104,8 +104,10 @@ type contract struct {
 	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"aCPRegistryInstallParams"`
 	ACPCustomAgentAddParams          wire.ACPCustomAgentAddParams          `json:"aCPCustomAgentAddParams"`
 	TerminalSummary                  wire.TerminalSummary                  `json:"terminalSummary"`
-	TerminalAttachSnapshot           wire.TerminalAttachSnapshot           `json:"terminalAttachSnapshot"`
-	TerminalStreamItem               wire.TerminalStreamItem               `json:"terminalStreamItem"`
+	TerminalAttachResult             wire.TerminalAttachResult             `json:"terminalAttachResult"`
+	TerminalStreamSnapshot           wire.TerminalStreamSnapshot           `json:"terminalStreamSnapshot"`
+	TerminalStreamResized            wire.TerminalStreamResized            `json:"terminalStreamResized"`
+	TerminalStreamExited             wire.TerminalStreamExited             `json:"terminalStreamExited"`
 	TerminalListStreamItem           wire.TerminalListStreamItem           `json:"terminalListStreamItem"`
 	TerminalRenameParams             wire.TerminalRenameParams             `json:"terminalRenameParams"`
 	TerminalCreateParams             wire.TerminalCreateParams             `json:"terminalCreateParams"`

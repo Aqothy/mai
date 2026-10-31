@@ -174,6 +174,10 @@ func (s *Server) doClose() error {
 	// Terminal shells never survive daemon shutdown; wait for every process
 	// group to be cleaned up before releasing clients and the store.
 	s.terminals.service.Close()
+	// Close streams before the process exits, so their clients hear why.
+	for _, stream := range s.terminals.closeStreams() {
+		<-stream.finished
+	}
 	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()

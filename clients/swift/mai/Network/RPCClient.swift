@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 final class RPCClient {
     // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
@@ -16,18 +15,16 @@ final class RPCClient {
     private static let probeTimeout: Duration = .seconds(5)
 
     var onNotification: ((String, Data) -> Void)?
-    /// Receives terminal output off the main actor, in arrival order.
-    var onTerminalStreamItem: (@Sendable (TerminalStreamMessage) -> Void)? {
-        get { terminalSink.handler }
-        set { terminalSink.handler = newValue }
-    }
-
-    /// The receive loop reads the terminal handler off the main actor.
-    private let terminalSink = TerminalSink()
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
     private let endpoint = RPCClient.configuredEndpoint
+
+    /// The terminal stream path (the daemon's `wire.TerminalStreamPath`) is
+    /// the RPC path's sibling.
+    var terminalStreamEndpoint: URL {
+        endpoint.deletingLastPathComponent().appending(path: "terminal")
+    }
     private var webSocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
@@ -55,11 +52,9 @@ final class RPCClient {
         webSocket = socket
         socket.resume()
 
-        let terminalSink = terminalSink
         receiveTask = Task { [weak self] in
             await Self.receiveMessages(
                 from: socket,
-                terminalSink: terminalSink,
                 route: { [weak self] envelope, data in self?.route(envelope, data: data) },
                 finish: { [weak self] failure in
                     self?.finishConnection(socket, error: failure.map { RPCError($0.message) })
@@ -250,13 +245,11 @@ final class RPCClient {
         }
     }
 
-    /// Receives off the main actor. Terminal output goes straight to
-    /// `terminalSink` and never touches the main actor; everything else is
-    /// routed there in arrival order.
+    /// Receives off the main actor and routes each message to the main
+    /// actor in arrival order.
     @concurrent
     private nonisolated static func receiveMessages(
         from socket: URLSessionWebSocketTask,
-        terminalSink: TerminalSink,
         route: @escaping @MainActor (Envelope, Data) -> Void,
         finish: @escaping @MainActor (ReceiveFailure?) -> Void
     ) async {
@@ -275,11 +268,7 @@ final class RPCClient {
                 }
 
                 let envelope = try WireJSON.makeDecoder().decode(Envelope.self, from: data)
-                if let item = envelope.params, let handler = terminalSink.handler {
-                    handler(item)
-                } else {
-                    await route(envelope, data)
-                }
+                await route(envelope, data)
             }
             await finish(nil)
         } catch is CancellationError {
@@ -293,15 +282,6 @@ final class RPCClient {
 
     nonisolated private struct ReceiveFailure: Error {
         let message: String
-    }
-
-    nonisolated private final class TerminalSink: Sendable {
-        private let value = Mutex<(@Sendable (TerminalStreamMessage) -> Void)?>(nil)
-
-        var handler: (@Sendable (TerminalStreamMessage) -> Void)? {
-            get { value.withLock { $0 } }
-            set { value.withLock { $0 = newValue } }
-        }
     }
 
     private func route(_ envelope: Envelope, data: Data) {
@@ -374,30 +354,9 @@ final class RPCClient {
         let params: Params
     }
 
-    /// Terminal output notifications decode their payload in the same pass as
-    /// the JSON-RPC route, avoiding a second parse of every output
-    /// frame. Malformed terminal output fails the connection instead of being
-    /// silently dropped, because one missing escape sequence can corrupt the
-    /// rendered screen.
     nonisolated private struct Envelope: Decodable, Sendable {
         let id: Int?
         let method: String?
-        let params: TerminalStreamMessage?
-
-        private enum CodingKeys: String, CodingKey {
-            case id, method, params
-        }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            id = try container.decodeIfPresent(Int.self, forKey: .id)
-            method = try container.decodeIfPresent(String.self, forKey: .method)
-            if method == MaidRPCMethod.terminalSubscribe {
-                params = try container.decode(TerminalStreamMessage.self, forKey: .params)
-            } else {
-                params = nil
-            }
-        }
     }
 
     nonisolated private struct Response<Result: Decodable>: Decodable {

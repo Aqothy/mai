@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/terminal"
 )
@@ -105,13 +107,17 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	if !stopped.UpdatedAt.Equal(renamed.UpdatedAt) {
 		t.Fatal("terminate changed updatedAt")
 	}
-	// The attached controller's stream ends with the run's stopped status.
-	if status := controller.waitForStatus(t); status.Status != terminal.StatusStopped || status.RunID != created.RunID {
-		t.Fatalf("controller status = %s run %s, want stopped run %s", status.Status, status.RunID, created.RunID)
+	// The attached controller's stream reports the run stopped, and stays
+	// open.
+	if _, exit := created.stream.waitRecord(t, "the run's exit", 1, isExited); exit.exited.Status != terminal.StatusStopped {
+		t.Fatalf("controller exit = %s, want stopped", exit.exited.Status)
 	}
 
-	// Delete removes the row and publishes a removal.
+	// Delete removes the row, publishes a removal, and ends the stream.
 	observer.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
+	if code := created.stream.waitClosed(t); code != websocket.StatusNormalClosure {
+		t.Fatalf("delete closed the stream with %v, want %v", code, websocket.StatusNormalClosure)
+	}
 	waitForListItem(t, observer, "removal", func(item wire.TerminalListStreamItem) bool {
 		return item.Kind == wire.TerminalListItemRemoved && item.TerminalID == terminalID
 	})
@@ -143,6 +149,9 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
+	if code := created.stream.waitClosed(t); code != websocket.StatusGoingAway {
+		t.Fatalf("shutdown closed the stream with %v, want %v", code, websocket.StatusGoingAway)
+	}
 
 	restarted := newTestServerAt(t, dir)
 	url2 := newWSTestServer(t, restarted)
@@ -165,8 +174,9 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	if _, err := client2.attachTerminal(restored.TerminalID, 80, 24); err == nil {
 		t.Fatal("attach to stopped terminal succeeded, want relaunch requirement")
 	}
-	var relaunched wire.TerminalAttachSnapshot
-	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: restored.TerminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &relaunched)
+	var result wire.TerminalAttachResult
+	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: restored.TerminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &result)
+	relaunched := client2.view(t, result)
 	if relaunched.RunID == created.RunID {
 		t.Fatal("relaunch after restart reused the old run id")
 	}

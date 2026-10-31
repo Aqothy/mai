@@ -16,14 +16,14 @@ import (
 
 // collector gathers ordered session events for assertions.
 type collector struct {
-	mu       sync.Mutex
-	output   bytes.Buffer
-	lastSeq  uint64
-	exits    int
-	exitSeq  uint64
-	status   Status
-	exitCode *int
-	exited   chan struct{}
+	mu     sync.Mutex
+	output bytes.Buffer
+	exits  int
+	// outputAfterExit counts output delivered after the run's exit.
+	outputAfterExit int
+	status          Status
+	exitCode        *int
+	exited          chan struct{}
 }
 
 func newCollector() *collector {
@@ -32,16 +32,17 @@ func newCollector() *collector {
 
 func (c *collector) events() Events {
 	return Events{
-		Output: func(_, _ string, seq uint64, data []byte) {
+		Output: func(_ *Session, data []byte) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.lastSeq = seq
+			if c.exits > 0 {
+				c.outputAfterExit++
+			}
 			c.output.Write(data)
 		},
-		Exit: func(_, _ string, seq uint64, status Status, exitCode *int) {
+		Exit: func(_ *Session, status Status, exitCode *int) {
 			c.mu.Lock()
 			c.exits++
-			c.exitSeq = seq
 			c.status = status
 			c.exitCode = exitCode
 			c.mu.Unlock()

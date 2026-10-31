@@ -6,10 +6,9 @@ import SwiftUI
 /// One client attachment to one terminal thread run, and the I/O of the
 /// terminal view that renders it.
 ///
-/// The attachment implements the attach contract: install the authoritative
-/// native Ghostty snapshot, then apply only live items whose run matches and
-/// whose sequence is greater than the snapshot's (its `TerminalFeed` does the
-/// ordering, off the main actor). The view draws the daemon's grid, scaled
+/// Attaching returns a ticket for the view's terminal stream, which begins
+/// with a native Ghostty snapshot and carries everything after it; its
+/// `TerminalFeed` applies it off the main actor. The view draws the daemon's grid, scaled
 /// to fit, and reports the grid that fits it. The daemon sizes the terminal
 /// to the view the user is using: opening, focusing, pressing or typing
 /// into a view takes the size, and closing it gives the size back.
@@ -72,6 +71,7 @@ final class TerminalAttachment: TerminalIO {
 
     /// Applies the stream to the terminal, off the main actor.
     @ObservationIgnored nonisolated let feed: TerminalFeed
+    /// The run the latest snapshot showed, which input goes to.
     @ObservationIgnored private(set) var runID: String?
     /// Names this view's subscription on the connection, so a detach sent
     /// after the terminal was reopened elsewhere cannot drop the new view's.
@@ -83,6 +83,8 @@ final class TerminalAttachment: TerminalIO {
     /// The grid that fits the view, which attach asks for.
     @ObservationIgnored private var preferredGrid: GridSize?
     @ObservationIgnored private var startTask: Task<Void, Never>?
+    /// The view's open stream, once attach returned its ticket.
+    @ObservationIgnored private var stream: TerminalStreamConnection?
 
     init(store: TerminalStore, origin: TerminalOpenRequest, mode: Mode) {
         self.store = store
@@ -159,6 +161,7 @@ final class TerminalAttachment: TerminalIO {
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        closeStream()
         // Once an attach RPC has been sent, let it finish so its returned
         // identity can detach the server-side subscription.
         if let terminalID {
@@ -171,21 +174,23 @@ final class TerminalAttachment: TerminalIO {
         guard !isClosed else { return }
         startTask?.cancel()
         startTask = nil
+        closeStream()
         phase = .disconnected
     }
 
-    /// Asks the daemon for a snapshot again, keeping the screen until it
-    /// arrives.
+    /// Attaches again for a fresh stream, keeping the screen until its
+    /// snapshot arrives.
     private func requestSnapshot(phase: Phase) {
         self.phase = phase
         awaitingSnapshot = true
         startTask?.cancel()
         startTask = nil
+        closeStream()
         scheduleStart()
     }
 
     private func scheduleStart() {
-        guard !isClosed, awaitingSnapshot, startTask == nil, let grid = preferredGrid else { return }
+        guard !isClosed, awaitingSnapshot, startTask == nil, stream == nil, let grid = preferredGrid else { return }
         startTask = Task { [weak self] in
             await self?.start(grid: grid)
         }
@@ -206,23 +211,22 @@ final class TerminalAttachment: TerminalIO {
         guard let rpc = store?.rpc else { return }
         let appearance = MaidTerminalAppearance.wireAppearance(for: colorScheme)
         do {
-            await feed.expectSnapshot()
-            let snapshot: TerminalAttachSnapshot
+            let result: TerminalAttachResult
             switch mode {
             case .create(let cwd, let title):
-                snapshot = try await rpc.createTerminal(
+                result = try await rpc.createTerminal(
                     TerminalCreateParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         cwd: cwd, rows: Int(grid.rows), title: title))
             case .attach(let terminalID):
                 // Opening the terminal takes the size; attaching again after a
-                // reconnect or another view's relaunch doesn't.
-                snapshot = try await rpc.attachTerminal(
+                // reconnect or a dropped stream doesn't.
+                result = try await rpc.attachTerminal(
                     TerminalAttachParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         focus: !hasInstalledInitialSnapshot, rows: Int(grid.rows), terminalID: terminalID))
             case .relaunch(let terminalID):
-                snapshot = try await rpc.relaunchTerminal(
+                result = try await rpc.relaunchTerminal(
                     TerminalRelaunchParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         rows: Int(grid.rows), terminalID: terminalID))
@@ -230,13 +234,17 @@ final class TerminalAttachment: TerminalIO {
             // A reconnect or replacement may have canceled this request while
             // the RPC completed; its response must not overwrite the newer one.
             guard !Task.isCancelled else { return }
-            terminalID = snapshot.terminal.terminalID
-            mode = .attach(terminalID: snapshot.terminal.terminalID)
+            terminalID = result.terminal.terminalID
+            mode = .attach(terminalID: result.terminal.terminalID)
             if isClosed {
-                rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: snapshot.terminal.terminalID))
+                rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: result.terminal.terminalID))
                 return
             }
-            try await install(snapshot)
+            guard let ticket = TerminalStreamConnection.ticketBytes(result.streamTicket) else {
+                throw TerminalStreamError(String(localized: "maiD returned an invalid terminal stream ticket."))
+            }
+            startTask = nil
+            await openStream(ticket: ticket, endpoint: rpc.terminalStreamEndpoint)
         } catch {
             guard !Task.isCancelled, !isClosed else { return }
             startTask = nil
@@ -244,54 +252,75 @@ final class TerminalAttachment: TerminalIO {
         }
     }
 
-    /// Installs the authoritative native model through the feed, which then
-    /// applies items above it.
-    private func install(_ snapshot: TerminalAttachSnapshot) async throws {
-        guard snapshot.snapshotFormat == Self.snapshotFormat else {
-            throw TerminalAttachError(String(localized: "The app and daemon use incompatible terminal snapshot versions."))
-        }
-        guard let data = Data(base64Encoded: snapshot.snapshot), !data.isEmpty else {
-            throw TerminalAttachError(String(localized: "The daemon returned an invalid terminal snapshot."))
-        }
-        runID = snapshot.runID
-        try await feed.install(snapshot, data: data)
-        // The feed may have asked for a newer snapshot while installing.
-        guard !isClosed, !Task.isCancelled else { return }
-        startTask = nil
-        awaitingSnapshot = false
-        hasInstalledInitialSnapshot = true
-        // The view may have changed while it attached.
-        reportView()
-        // The snapshot carries the title without announcing it.
-        programTitle = await terminal.title
-        switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
-        case .starting, .running, nil: phase = .running
-        case .exited: phase = .exited(snapshot.terminal.exitCode)
-        case .stopped: phase = .stopped
-        case .error: phase = .failed(String(localized: "The terminal failed"))
+    private func openStream(ticket: Data, endpoint: URL) async {
+        let stream = TerminalStreamConnection(endpoint: endpoint)
+        self.stream = stream
+        let feed = feed
+        await feed.expectSnapshot()
+        Task { [weak self] in
+            let (end, sawSnapshot) = await stream.run(ticket: ticket) { record in
+                try await feed.apply(record)
+            }
+            self?.streamEnded(stream, end: end, sawSnapshot: sawSnapshot)
         }
     }
 
-    /// GHOSTSNP v1 isn't stable across Ghostty commits, so the daemon and
-    /// this app must link libghostty-vt from the same one (the daemon's
-    /// `vtscreen.SnapshotFormat`).
-    private static let snapshotFormat = "ghostty-gsn-v1-" + BuildInfo.commit
+    /// The view's stream ended. A stream that never delivered a snapshot
+    /// failed the attach, with no retry; one that dropped later attaches
+    /// again, which converges.
+    private func streamEnded(_ ended: TerminalStreamConnection, end: TerminalStreamConnection.End, sawSnapshot: Bool) {
+        guard ended === stream, !isClosed else { return }
+        stream = nil
+        switch end {
+        case .closed(.normalClosure, _):
+            // The view ended on purpose: detached, replaced or deleted.
+            break
+        case .closed(.goingAway, _):
+            // The daemon is going away or dropped this connection; the
+            // connection's reconnect attaches again.
+            break
+        case .failed(let message):
+            fail(message)
+        case .closed(_, let reason) where !sawSnapshot:
+            fail(reason.isEmpty ? String(localized: "maiD refused the terminal stream.") : reason)
+        case .dropped where !sawSnapshot:
+            fail(String(localized: "The terminal stream closed before it showed the terminal."))
+        case .closed, .dropped:
+            guard phase != .disconnected else { return }
+            requestSnapshot(phase: phase)
+        }
+    }
+
+    private func closeStream() {
+        stream?.close()
+        stream = nil
+    }
 
     fileprivate func handle(_ event: TerminalFeed.Event) {
         guard !isClosed else { return }
         switch event {
-        case .ready:
-            break
-        case .status(let item):
-            switch MaidTerminalStatus(rawValue: item.status ?? "") {
-            case .exited: phase = .exited(item.exitCode)
+        case .snapshot(let runID, let status, let exitCode, let title):
+            self.runID = runID
+            awaitingSnapshot = false
+            hasInstalledInitialSnapshot = true
+            // The snapshot carries the title without announcing it.
+            programTitle = title
+            switch MaidTerminalStatus(rawValue: status) {
+            case .starting, .running, nil: phase = .running
+            case .exited: phase = .exited(exitCode)
             case .stopped: phase = .stopped
-            case .error: phase = .failed(item.message ?? String(localized: "The terminal failed"))
+            case .error: phase = .failed(String(localized: "The terminal failed"))
+            }
+            // The view may have changed while it attached.
+            reportView()
+        case .exited(let status, let exitCode):
+            switch MaidTerminalStatus(rawValue: status) {
+            case .exited: phase = .exited(exitCode)
+            case .stopped: phase = .stopped
+            case .error: phase = .failed(String(localized: "The terminal failed"))
             case .starting, .running, nil: break
             }
-        case .replacementRun, .needsSnapshot:
-            guard let terminalID else { return }
-            mode = .attach(terminalID: terminalID)
+        case .needsSnapshot:
             requestSnapshot(phase: phase == .running ? .running : .attaching)
         }
     }
@@ -299,6 +328,7 @@ final class TerminalAttachment: TerminalIO {
     private func fail(_ message: String) {
         phase = .failed(message)
         awaitingSnapshot = false
+        closeStream()
         if let terminalID {
             store?.rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: terminalID))
         }
@@ -310,10 +340,3 @@ private final class FeedEventRelay {
     weak var attachment: TerminalAttachment?
 }
 
-private struct TerminalAttachError: LocalizedError {
-    let errorDescription: String?
-
-    init(_ message: String) {
-        errorDescription = message
-    }
-}

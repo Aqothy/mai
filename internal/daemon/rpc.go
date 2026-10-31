@@ -144,9 +144,7 @@ func (s *Server) RunWebSocket(addr string) error {
 	if addr == "" {
 		addr = "127.0.0.1:8765"
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /rpc", s.WebSocketHandler())
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{Addr: addr, Handler: s.handler()}
 	s.mu.Lock()
 	s.httpServer = srv
 	stopped := s.ctx.Err() != nil
@@ -168,47 +166,53 @@ func (s *Server) RunWebSocket(addr string) error {
 	return s.fatalErr
 }
 
-func (s *Server) WebSocketHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			s.logger.Warn("websocket accept failed", "error", err)
-			return
-		}
-		// The library default (32KiB) is too small for real commands: a single
-		// image attachment on thread.turn.start can be megabytes of base64.
-		ws.SetReadLimit(maxInboundMessageBytes)
-		socket := wsJSONRPC{conn: ws}
-		reader, writer := jsonrpc2.NewWebSocketTransport(socket)
-		var client *rpcClient
-		reader = &disconnectReader{reader: reader, onDisconnect: func(error) {
-			if client != nil {
-				s.disconnectRPCClient(client)
-			}
-		}}
-		conn := jsonrpc2.NewConnection(context.Background(), jsonrpc2.ConnectionConfig{
-			Reader: reader,
-			Writer: writer,
-			Closer: socket,
-			OnInternalError: func(err error) {
-				s.logger.Error("JSON-RPC internal error", "error", err)
-			},
-			OnNotificationError: func(err error) {
-				s.logger.Warn("JSON-RPC notification failed", "error", err)
-			},
-			Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
-				client = s.registerRPCClient(c)
-				return &rpcHandler{server: s, client: client}
-			},
-		})
-		pingCtx, stopPinging := context.WithCancel(context.Background())
-		// Bind ran inside NewConnection, so client is set.
-		go s.keepAlive(pingCtx, ws, client.logger)
-		_ = conn.Wait()
-		stopPinging()
+// handler serves the JSON-RPC connection and the terminal streams beside it.
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rpc", s.serveRPC)
+	mux.HandleFunc("GET "+wire.TerminalStreamPath, s.serveTerminalStream)
+	return mux
+}
+
+func (s *Server) serveRPC(w http.ResponseWriter, r *http.Request) {
+	ws, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		s.logger.Warn("websocket accept failed", "error", err)
+		return
+	}
+	// The library default (32KiB) is too small for real commands: a single
+	// image attachment on thread.turn.start can be megabytes of base64.
+	ws.SetReadLimit(maxInboundMessageBytes)
+	socket := wsJSONRPC{conn: ws}
+	reader, writer := jsonrpc2.NewWebSocketTransport(socket)
+	var client *rpcClient
+	reader = &disconnectReader{reader: reader, onDisconnect: func(error) {
 		if client != nil {
 			s.disconnectRPCClient(client)
 		}
+	}}
+	conn := jsonrpc2.NewConnection(context.Background(), jsonrpc2.ConnectionConfig{
+		Reader: reader,
+		Writer: writer,
+		Closer: socket,
+		OnInternalError: func(err error) {
+			s.logger.Error("JSON-RPC internal error", "error", err)
+		},
+		OnNotificationError: func(err error) {
+			s.logger.Warn("JSON-RPC notification failed", "error", err)
+		},
+		Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
+			client = s.registerRPCClient(c)
+			return &rpcHandler{server: s, client: client}
+		},
+	})
+	pingCtx, stopPinging := context.WithCancel(context.Background())
+	// Bind ran inside NewConnection, so client is set.
+	go s.keepAlive(pingCtx, ws, client.logger)
+	_ = conn.Wait()
+	stopPinging()
+	if client != nil {
+		s.disconnectRPCClient(client)
 	}
 }
 

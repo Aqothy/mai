@@ -292,13 +292,6 @@ public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
     case error = "error"
 }
 
-/// Payload discriminator of a terminal.subscribe notification.
-public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable {
-    case output = "output"
-    case status = "status"
-    case resized = "resized"
-}
-
 /// Payload discriminator of a terminal.subscribeList snapshot or update.
 public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseIterable {
     case snapshot = "snapshot"

@@ -370,15 +370,6 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
-		Name:        "TerminalStreamItemKind",
-		Description: "Payload discriminator of a terminal.subscribe notification.",
-		Values: []string{
-			string(terminal.StreamItemOutput),
-			string(terminal.StreamItemStatus),
-			string(terminal.StreamItemResized),
-		},
-	},
-	{
 		Name:        "TerminalListStreamItemKind",
 		Description: "Payload discriminator of a terminal.subscribeList snapshot or update.",
 		Values: []string{
