@@ -4510,6 +4510,142 @@ public extension PlanEntry {
     }
 }
 
+// MARK: - Project
+public struct Project: Codable {
+    public var addedAt: Date
+    public var path: String
+
+    public init(addedAt: Date, path: String) {
+        self.addedAt = addedAt
+        self.path = path
+    }
+}
+
+// MARK: Project convenience initializers and mutators
+
+public extension Project {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Project.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        addedAt: Date? = nil,
+        path: String? = nil
+    ) -> Project {
+        return Project(
+            addedAt: addedAt ?? self.addedAt,
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProjectList
+public struct ProjectList: Codable {
+    public var projects: [Project]
+
+    public init(projects: [Project]) {
+        self.projects = projects
+    }
+}
+
+// MARK: ProjectList convenience initializers and mutators
+
+public extension ProjectList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProjectList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        projects: [Project]? = nil
+    ) -> ProjectList {
+        return ProjectList(
+            projects: projects ?? self.projects
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ProjectParams
+public struct ProjectParams: Codable {
+    public var path: String
+
+    public init(path: String) {
+        self.path = path
+    }
+}
+
+// MARK: ProjectParams convenience initializers and mutators
+
+public extension ProjectParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ProjectParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        path: String? = nil
+    ) -> ProjectParams {
+        return ProjectParams(
+            path: path ?? self.path
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ProviderAuthenticateParams
 public struct ProviderAuthenticateParams: Codable {
     public var instanceID, methodID: String

@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS deliveries_answers ON deliveries(answers) WHERE answers <> '';
 CREATE INDEX IF NOT EXISTS deliveries_thread ON deliveries(thread_id, state);
+CREATE TABLE IF NOT EXISTS projects (
+	path TEXT PRIMARY KEY,
+	added_at TEXT NOT NULL
+) STRICT;
 CREATE TABLE IF NOT EXISTS receipts (
 	actor TEXT NOT NULL,
 	key TEXT NOT NULL,
@@ -170,6 +174,7 @@ type state struct {
 	// deliveries are the open ones (queued, sending, refused) and messages
 	// still owed a reply.
 	deliveries []Delivery
+	projects   []Project
 }
 
 func (d *db) load(ctx context.Context) (state, error) {
@@ -202,7 +207,30 @@ func (d *db) load(ctx context.Context) (state, error) {
 		OR (kind = 'message' AND wants_reply = 1 AND state = 'delivered' AND NOT EXISTS (SELECT 1 FROM deliveries r WHERE r.answers = d.delivery_id))`); err != nil {
 		return state{}, err
 	}
+	if loaded.projects, err = d.loadProjects(ctx); err != nil {
+		return state{}, err
+	}
 	return loaded, nil
+}
+
+func (d *db) loadProjects(ctx context.Context) ([]Project, error) {
+	rows, err := d.sql.QueryContext(ctx, `SELECT path, added_at FROM projects`)
+	if err != nil {
+		return nil, fmt.Errorf("load projects: %w", err)
+	}
+	defer rows.Close()
+	var projects []Project
+	for rows.Next() {
+		var path, added string
+		if err := rows.Scan(&path, &added); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		projects = append(projects, Project{Path: path, AddedAt: decodeTime(added)})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load projects: %w", err)
+	}
+	return projects, nil
 }
 
 type scanner interface{ Scan(...any) error }
@@ -536,17 +564,19 @@ func (d *db) threadEntry(ctx context.Context, thread ThreadID, ref string) (prov
 
 // tx is one engine step's writes, committed together.
 type tx struct {
-	threads      map[ThreadID]Thread
-	deleted      []ThreadID
-	sessions     []sessionKey
-	participants map[ParticipantID]Participant
-	turns        map[TurnID]Turn
-	droppedTurns []TurnID
-	deliveries   map[DeliveryID]Delivery
-	receipts     []receiptRow
-	entries      []cachedEntry
-	rebuilds     []sessionRebuild
-	markers      map[sessionKey]marker
+	threads         map[ThreadID]Thread
+	deleted         []ThreadID
+	sessions        []sessionKey
+	participants    map[ParticipantID]Participant
+	turns           map[TurnID]Turn
+	droppedTurns    []TurnID
+	deliveries      map[DeliveryID]Delivery
+	receipts        []receiptRow
+	entries         []cachedEntry
+	rebuilds        []sessionRebuild
+	markers         map[sessionKey]marker
+	addedProjects   []Project
+	removedProjects []string
 }
 
 type sessionKey struct {
@@ -580,7 +610,8 @@ func newTx() *tx {
 
 func (t *tx) empty() bool {
 	return len(t.threads) == 0 && len(t.deleted) == 0 && len(t.participants) == 0 && len(t.turns) == 0 && len(t.droppedTurns) == 0 && len(t.deliveries) == 0 &&
-		len(t.receipts) == 0 && len(t.entries) == 0 && len(t.rebuilds) == 0 && len(t.markers) == 0
+		len(t.receipts) == 0 && len(t.entries) == 0 && len(t.rebuilds) == 0 && len(t.markers) == 0 &&
+		len(t.addedProjects) == 0 && len(t.removedProjects) == 0
 }
 
 func (d *db) commit(ctx context.Context, t *tx) error {
@@ -703,6 +734,17 @@ func writeTx(ctx context.Context, sqlTx *sql.Tx, t *tx) error {
 			ON CONFLICT (instance_id, native_session) DO UPDATE SET marker = excluded.marker, version = excluded.version, touched_at = excluded.touched_at`,
 			string(key.instance), key.session, string(marker.marker), marker.version, encodeTime(time.Now())); err != nil {
 			return fmt.Errorf("write session marker: %w", err)
+		}
+	}
+	for _, path := range t.removedProjects {
+		if _, err := sqlTx.ExecContext(ctx, `DELETE FROM projects WHERE path = ?`, path); err != nil {
+			return fmt.Errorf("remove project: %w", err)
+		}
+	}
+	for _, project := range t.addedProjects {
+		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO projects (path, added_at) VALUES (?, ?)`,
+			project.Path, encodeTime(project.AddedAt)); err != nil {
+			return fmt.Errorf("add project: %w", err)
 		}
 	}
 	return nil

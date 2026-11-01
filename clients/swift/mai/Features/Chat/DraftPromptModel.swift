@@ -17,7 +17,6 @@ final class DraftPromptModel {
 
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
     let promptCompletion: PromptCompletionModel
 
     var selectedProviderID: String? {
@@ -54,12 +53,10 @@ final class DraftPromptModel {
     init(
         store: ThreadStore,
         draftStore: ThreadDraftStore,
-        projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
         initialWorkingDirectory: String? = nil
     ) {
         self.store = store
         self.draftStore = draftStore
-        self.projectFolders = projectFolders
 
         let requestedWorkingDirectory = initialWorkingDirectory?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -285,11 +282,9 @@ final class DraftPromptModel {
         workingDirectory = directory
     }
 
-    func addProjectFolder(_ directory: String, parentDirectory: String?) {
-        guard let directory = projectFolders.add(
-            directory,
-            parentPath: parentDirectory
-        ) else { return }
+    /// Adds a browsed folder as a project and works in it.
+    func addProjectFolder(_ directory: String) async {
+        guard let directory = await addProject(directory) else { return }
         workingDirectory = directory
     }
 
@@ -300,12 +295,20 @@ final class DraftPromptModel {
         additionalDirectories.append(directory)
     }
 
-    func addAdditionalProjectFolder(_ directory: String, parentDirectory: String?) {
-        guard let directory = projectFolders.add(
-            directory,
-            parentPath: parentDirectory
-        ) else { return }
+    /// Adds a browsed folder as a project, since a chat's every folder must
+    /// be in one, and adds it to the chat.
+    func addAdditionalProjectFolder(_ directory: String) async {
+        guard let directory = await addProject(directory) else { return }
         addAdditionalDirectory(directory)
+    }
+
+    private func addProject(_ directory: String) async -> String? {
+        do {
+            return try await store.addProject(directory)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     func removeAdditionalDirectory(_ directory: String) {

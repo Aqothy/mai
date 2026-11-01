@@ -3,7 +3,6 @@ package workspacesearch
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -72,8 +71,9 @@ func NewService() *Service {
 }
 
 // Search runs one fuzzy path query against root's warm index, creating the
-// index on first use. It never blocks on a full initial scan: after
-// scanWaitBudget it reports Indexing:true instead.
+// index on first use. root is an existing directory with symlinks resolved,
+// which the caller allows, so every alias of a workspace shares one index. It never blocks on a full initial scan: after scanWaitBudget it
+// reports Indexing:true instead.
 func (s *Service) Search(ctx context.Context, root, query string, limit int) (Result, error) {
 	if len(query) > MaxQueryBytes {
 		return Result{}, ErrQueryTooLong
@@ -82,12 +82,8 @@ func (s *Service) Search(ctx context.Context, root, query string, limit int) (Re
 		limit = DefaultLimit
 	}
 	limit = min(max(limit, 1), MaxLimit)
-	canonical, err := CanonicalRoot(root)
-	if err != nil {
-		return Result{}, err
-	}
 
-	entry, err := s.entryFor(canonical)
+	entry, err := s.entryFor(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -117,26 +113,6 @@ func (s *Service) Search(ctx context.Context, root, query string, limit int) (Re
 		return Result{}, fmt.Errorf("workspacesearch: search failed: %w", err)
 	}
 	return Result{Entries: sanitizeEntries(matches)}, nil
-}
-
-// CanonicalRoot validates root as an absolute existing directory and
-// resolves symlinks so every alias of a workspace shares one index.
-func CanonicalRoot(root string) (string, error) {
-	if root == "" || !filepath.IsAbs(root) {
-		return "", fmt.Errorf("%w: %q is not an absolute path", ErrInvalidRoot, root)
-	}
-	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidRoot, err)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidRoot, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("%w: %q is not a directory", ErrInvalidRoot, root)
-	}
-	return resolved, nil
 }
 
 // entryFor returns the root's index entry, creating and initializing it for

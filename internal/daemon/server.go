@@ -90,9 +90,8 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		},
 		Gone: func(instance provider.InstanceID, generation uint64) { engine.InstanceGone(instance, generation) },
 	}, logger)
-	defaultCwd, _ := os.Getwd()
 	engine, err = orchestration.Open(orchestration.Config{
-		DB: metadata.DB(), Providers: s.providerService, DataDir: dataDir, DefaultCwd: defaultCwd, Logger: logger,
+		DB: metadata.DB(), Providers: s.providerService, DataDir: dataDir, Logger: logger,
 	})
 	if err != nil {
 		cancel()

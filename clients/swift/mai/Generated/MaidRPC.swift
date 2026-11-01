@@ -39,9 +39,13 @@ nonisolated public enum MaidRPCMethod {
     public static let terminalDetach = "terminal.detach"
     public static let workspaceBrowseDirectories = "workspace.browseDirectories"
     public static let workspaceSearchFiles = "workspace.searchFiles"
+    public static let projectAdd = "project.add"
+    public static let projectRemove = "project.remove"
+    public static let projectSubscribeList = "project.subscribeList"
     public static let threadList = "thread.list"
     public static let threadEvent = "thread.event"
     public static let providerOptionsUpdated = "provider.options.updated"
     public static let providerOptionsInvalidated = "provider.options.invalidated"
     public static let providerQuestionAsked = "provider.question.asked"
+    public static let projectList = "project.list"
 }

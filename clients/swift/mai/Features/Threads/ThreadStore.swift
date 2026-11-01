@@ -62,6 +62,9 @@ final class ThreadStore {
     /// provider account screen until answered or the sign-in ends.
     private(set) var providerQuestion: ProviderQuestion?
     private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
+    /// The daemon's project folders, newest first: one list every device
+    /// shares. Chats start only in a project or a folder inside one.
+    private(set) var projects: [String] = []
     var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
     var onProviderOptionsInvalidated: ((ProviderOptionsInvalidated) -> Void)?
 
@@ -143,6 +146,10 @@ final class ThreadStore {
     private var lastThreadListSequence = 0
     private var isLoadingThreadListSnapshot = false
     private var bufferedThreadListItems: [ThreadListItem] = []
+    /// A project list that arrived before this connection's snapshot; each
+    /// list is whole, so only the latest matters.
+    @ObservationIgnored private var isLoadingProjectList = false
+    @ObservationIgnored private var bufferedProjectList: ProjectList?
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
     /// Whole entries read on demand, by thread and row ID, with the entry
     /// revision they were read at.
@@ -229,6 +236,8 @@ final class ThreadStore {
         selectedThreadLoadErrorMessage = nil
         isLoadingThreadListSnapshot = true
         bufferedThreadListItems.removeAll()
+        isLoadingProjectList = true
+        bufferedProjectList = nil
     }
 
     private func synchronizeConnection() async throws {
@@ -236,6 +245,11 @@ final class ThreadStore {
         guard applyThreadListSnapshot(item) else {
             throw RPCError("maiD returned an invalid thread-list snapshot")
         }
+        // A list notified while the snapshot was on its way is newer.
+        let projectList = try await rpc.subscribeProjectList()
+        applyProjectList(bufferedProjectList ?? projectList)
+        bufferedProjectList = nil
+        isLoadingProjectList = false
         providers = try await rpc.listProviders()
         installedAgents = (try? await rpc.listInstalledAgents()) ?? []
         rebuildProviderCaches()
@@ -351,6 +365,34 @@ final class ThreadStore {
             ProviderOptionsSetParams(
                 optionID: optionID, optionsSessionID: optionsSessionID, value: value)
         )
+    }
+
+    // MARK: Projects
+
+    /// Adds a folder the daemon browsed as a project and returns the path the
+    /// daemon lists it under. The list itself arrives as a notification.
+    func addProject(_ path: String) async throws -> String {
+        try await rpc.addProject(path).path
+    }
+
+    /// Removes a project; its chats stay.
+    func removeProject(_ path: String) async throws {
+        try await rpc.removeProject(path)
+    }
+
+    private func receiveProjectList(_ list: ProjectList) {
+        if isLoadingProjectList {
+            bufferedProjectList = list
+        } else {
+            applyProjectList(list)
+        }
+    }
+
+    private func applyProjectList(_ list: ProjectList) {
+        let paths = list.projects.map(\.path)
+        if paths != projects {
+            projects = paths
+        }
     }
 
     func browseWorkspaceDirectories(
@@ -1274,6 +1316,9 @@ final class ThreadStore {
             case MaidRPCMethod.threadList:
                 let notification = try decoder.decode(Notification<ThreadListItem>.self, from: data)
                 receiveThreadListItem(notification.params)
+            case MaidRPCMethod.projectList:
+                let notification = try decoder.decode(Notification<ProjectList>.self, from: data)
+                receiveProjectList(notification.params)
             case MaidRPCMethod.threadEvent:
                 let notification = try decoder.decode(Notification<ThreadEvent>.self, from: data)
                 receiveThreadEvent(notification.params)

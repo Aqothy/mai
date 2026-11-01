@@ -109,6 +109,9 @@ type liveSession struct {
 }
 
 func (e *Engine) install(loaded state) {
+	for _, project := range loaded.projects {
+		e.projects[project.Path] = project.AddedAt
+	}
 	for _, thread := range loaded.threads {
 		e.threads[thread.ID] = &threadState{Thread: thread, requests: make(map[string]*pendingRequest)}
 	}

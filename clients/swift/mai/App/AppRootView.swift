@@ -3,7 +3,6 @@ import SwiftUI
 struct AppRootView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
     let terminalStore: TerminalStore
 
     var body: some View {
@@ -12,14 +11,12 @@ struct AppRootView: View {
                 DesktopAppContainer(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
                     terminalStore: terminalStore
                 )
             #else
                 IOSAppContainer(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
                     terminalStore: terminalStore
                 )
             #endif

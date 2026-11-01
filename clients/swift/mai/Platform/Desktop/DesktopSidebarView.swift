@@ -3,7 +3,6 @@
 
     struct DesktopSidebarView: View {
         @Bindable var store: ThreadStore
-        let projectFolders: ProjectFolderStore
         let terminalStore: TerminalStore
         @Binding var terminalRoute: TerminalOpenRequest?
 
@@ -56,7 +55,6 @@
             VStack(spacing: 0) {
                 DesktopSidebarHeader(
                     store: store,
-                    projectFolders: projectFolders,
                     filter: $filter,
                     terminalRoute: $terminalRoute
                 )
@@ -150,7 +148,6 @@
 
     private struct DesktopSidebarHeader: View {
         let store: ThreadStore
-        let projectFolders: ProjectFolderStore
         @Binding var filter: ThreadListFilter
         @Binding var terminalRoute: TerminalOpenRequest?
 
@@ -185,7 +182,6 @@
 
                     ThreadFilterMenu(
                         store: store,
-                        projectFolders: projectFolders,
                         filter: $filter
                     )
                     .labelStyle(.iconOnly)
@@ -514,7 +510,6 @@
             NavigationSplitView {
                 DesktopSidebarView(
                     store: PreviewData.threadStore(),
-                    projectFolders: ProjectFolderStore(defaults: nil),
                     terminalStore: TerminalStore(),
                     terminalRoute: .constant(nil)
                 )
@@ -528,7 +523,6 @@
             NavigationSplitView {
                 DesktopSidebarView(
                     store: ThreadStore(previewThreads: []),
-                    projectFolders: ProjectFolderStore(defaults: nil),
                     terminalStore: TerminalStore(),
                     terminalRoute: .constant(nil)
                 )
@@ -542,7 +536,6 @@
             NavigationSplitView {
                 DesktopSidebarView(
                     store: ThreadStore(),
-                    projectFolders: ProjectFolderStore(defaults: nil),
                     terminalStore: TerminalStore(),
                     terminalRoute: .constant(nil)
                 )

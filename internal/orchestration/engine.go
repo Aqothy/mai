@@ -27,9 +27,7 @@ type Config struct {
 	Providers Providers
 	// DataDir holds the attachment store.
 	DataDir string
-	// DefaultCwd is the workspace of a thread created without one.
-	DefaultCwd string
-	Logger     *slog.Logger
+	Logger  *slog.Logger
 	// MCP is maiD's MCP server for a participant's session; nil while maiD
 	// has none.
 	MCP func(ThreadID, ParticipantID) *provider.MCPServer
@@ -77,6 +75,8 @@ type Engine struct {
 	dispatched map[DeliveryID]bool
 	// noticed are the requests a spawner was told about (WakeNeedsInput).
 	noticed map[string]bool
+	// projects are the projects' canonical paths, with when each was added.
+	projects map[string]time.Time
 }
 
 type orphanEvent struct {
@@ -102,7 +102,7 @@ func Open(cfg Config) (*Engine, error) {
 	e := &Engine{
 		cfg: cfg, db: database, attachments: attachments, logger: cfg.Logger.With("component", "orchestration"),
 		ctx: ctx, cancel: cancel, inbox: make(chan func(*step), 1024), done: make(chan struct{}),
-		threads: make(map[ThreadID]*threadState), participants: make(map[ParticipantID]*participantState),
+		threads: make(map[ThreadID]*threadState), participants: make(map[ParticipantID]*participantState), projects: make(map[string]time.Time),
 		bySession: make(map[sessionKey]ParticipantID), subscribers: make(map[uint64]*subscriber),
 		opening: make(map[provider.InstanceID]int), published: make(map[ThreadID]ThreadSummary),
 		waits: make(map[uint64]*waiter), dispatched: make(map[DeliveryID]bool), noticed: make(map[string]bool),

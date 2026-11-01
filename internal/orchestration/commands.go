@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -340,7 +338,8 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 	if err := e.requireDevice(actor, "create a chat"); err != nil {
 		return CommandResult{}, err
 	}
-	workspace, err := e.resolveWorkspace(create.Workspace)
+	imported := create.Participant.Session != ""
+	workspace, err := e.resolveWorkspace(create.Workspace, imported)
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -367,6 +366,9 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 	}
 	if title == "" {
 		title = "Untitled thread"
+	}
+	if imported && !e.allowsRoot(workspace.Cwd) {
+		e.addProject(s, workspace.Cwd)
 	}
 	thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
 	participant := e.newParticipant(s, thread, create.Participant)
@@ -424,51 +426,45 @@ func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Work
 	return nil
 }
 
-// resolveWorkspace applies the daemon's cwd rule once: a thread's cwd
-// defaults to the daemon's working directory and must be an existing
-// absolute directory, and its additional roots are deduplicated.
-func (e *Engine) resolveWorkspace(workspace provider.Workspace) (provider.Workspace, error) {
-	cwd, err := e.resolveDirectory(workspace.Cwd)
+// resolveWorkspace applies the daemon's workspace rule once: a new chat
+// names its working directory, and it and its additional roots are
+// canonical and allowed (allowsRoot), deduplicated. An imported native
+// session already works where it does; the user importing it is what allows
+// it (createThread adds its cwd as a project).
+func (e *Engine) resolveWorkspace(workspace provider.Workspace, imported bool) (provider.Workspace, error) {
+	if workspace.Cwd == "" {
+		return provider.Workspace{}, refused(CodeInvalid, "a chat needs a working directory")
+	}
+	resolve := func(directory string) (string, error) {
+		root, err := canonicalDirectory(directory)
+		if err != nil {
+			return "", err
+		}
+		if !imported && !e.allowsRoot(root) {
+			return "", notInProject(root)
+		}
+		return root, nil
+	}
+	cwd, err := resolve(workspace.Cwd)
 	if err != nil {
 		return provider.Workspace{}, err
 	}
 	resolved := provider.Workspace{Cwd: cwd}
-	seen := map[string]bool{filepath.Clean(cwd): true}
+	seen := map[string]bool{cwd: true}
 	for _, directory := range workspace.AdditionalDirectories {
 		if directory == "" {
 			continue
 		}
-		root, err := e.resolveDirectory(directory)
+		root, err := resolve(directory)
 		if err != nil {
 			return provider.Workspace{}, err
 		}
-		root = filepath.Clean(root)
 		if !seen[root] {
 			seen[root] = true
 			resolved.AdditionalDirectories = append(resolved.AdditionalDirectories, root)
 		}
 	}
 	return resolved, nil
-}
-
-func (e *Engine) resolveDirectory(directory string) (string, error) {
-	if directory == "" {
-		directory = e.cfg.DefaultCwd
-		if directory == "" {
-			return "", refused(CodeInvalid, "a chat needs a working directory")
-		}
-	}
-	if !filepath.IsAbs(directory) {
-		return "", refused(CodeInvalid, "working directory %q must be an absolute path", directory)
-	}
-	info, err := os.Stat(directory)
-	if err != nil {
-		return "", refused(CodeInvalid, "working directory %q is not usable: %v", directory, err)
-	}
-	if !info.IsDir() {
-		return "", refused(CodeInvalid, "working directory %q is not a directory", directory)
-	}
-	return directory, nil
 }
 
 func (e *Engine) updateThread(s *step, actor Actor, update UpdateThread) error {

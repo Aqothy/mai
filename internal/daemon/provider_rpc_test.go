@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -153,7 +155,7 @@ func TestProviderSessionManagement(t *testing.T) {
 	s := newTestServer(t)
 	startFakeACPAgent(t, s, "agent")
 	client := newRecordingClient(t, s)
-	cwd := t.TempDir()
+	cwd := client.addProject(t, t.TempDir())
 	thread := client.createThread(t, "agent", cwd).Thread
 	client.subscribe(t, thread)
 	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
@@ -309,12 +311,30 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 		return result
 	}
 
-	first := get("a", "/first")
-	get("b", "/other")
-	if reused := get("a", "/first"); reused.OptionsSessionID != first.OptionsSessionID || a.openCount() != 1 || b.openCount() != 1 {
+	// A settings session runs the agent in its folder, so it is held to the
+	// project rule.
+	var refused wire.ProviderOptionsResult
+	err := client.callErr(wire.MethodProviderOptionsGet, wire.ProviderOptionsGetParams{ProviderInstanceID: "a", Cwd: t.TempDir()}, &refused)
+	if code, _ := commandCode(err); code != invalidParamsCode || a.openCount() != 0 {
+		t.Fatalf("settings outside a project = %v with %d sessions opened, want invalid params and none", err, a.openCount())
+	}
+	project := client.addProject(t, t.TempDir())
+	folder := func(name string) string {
+		t.Helper()
+		path := filepath.Join(project, name)
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	firstDir, otherDir, secondDir := folder("first"), folder("other"), folder("second")
+
+	first := get("a", firstDir)
+	get("b", otherDir)
+	if reused := get("a", firstDir); reused.OptionsSessionID != first.OptionsSessionID || a.openCount() != 1 || b.openCount() != 1 {
 		t.Fatalf("switching back opened another session: %#v then %#v", first, reused)
 	}
-	a.callback("handle-/first").Updated([]provider.ConfigOption{{ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow"}})
+	a.callback("handle-" + firstDir).Updated([]provider.ConfigOption{{ID: "model", Type: provider.ConfigOptionTypeSelect, CurrentValue: "slow"}})
 	client.waitFor(t, "the agent's own change", func() bool {
 		return slices.ContainsFunc(client.optionsUpdates, func(update wire.ProviderOptionsResult) bool {
 			return update.OptionsSessionID == first.OptionsSessionID && update.ConfigOptions[0].CurrentValue == "slow" && len(update.Skills) == 1
@@ -330,23 +350,23 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 	a.mu.Lock()
 	a.closeBlock = block
 	a.mu.Unlock()
-	replacement := get("a", "/second")
+	replacement := get("a", secondDir)
 	if replacement.OptionsSessionID == first.OptionsSessionID {
 		t.Fatal("moving the draft's folder kept the old settings session")
 	}
 	close(block)
-	if handle := <-a.closed; handle != "handle-/first" {
+	if handle := <-a.closed; handle != "handle-"+firstDir {
 		t.Fatalf("closed %q, want the old session", handle)
 	}
 
-	a.callback("handle-/second").Invalidated()
+	a.callback("handle-" + secondDir).Invalidated()
 	client.waitFor(t, "the invalidation", func() bool {
 		return slices.Contains(client.optionsInvalidated, wire.ProviderOptionsInvalidated{OptionsSessionID: replacement.OptionsSessionID})
 	})
 	if err := client.callErr(wire.MethodProviderOptionsSet, wire.ProviderOptionsSetParams{OptionsSessionID: replacement.OptionsSessionID, OptionID: "model", Value: "slow"}, nil); err == nil {
 		t.Fatal("setting an invalidated session succeeded")
 	}
-	if reopened := get("a", "/second"); reopened.OptionsSessionID == replacement.OptionsSessionID {
+	if reopened := get("a", secondDir); reopened.OptionsSessionID == replacement.OptionsSessionID {
 		t.Fatal("an invalidated session was reused")
 	}
 
@@ -362,7 +382,7 @@ func TestProviderOptionsSessionsStayWarmAndReplaceByCwd(t *testing.T) {
 			t.Fatalf("closed %v on disconnect, want each agent's session", closed)
 		}
 	}
-	if !closed["a handle-/second"] || !closed["b handle-/other"] {
+	if !closed["a handle-"+secondDir] || !closed["b handle-"+otherDir] {
 		t.Fatalf("closed %v on disconnect", closed)
 	}
 }
@@ -374,7 +394,7 @@ func TestCompleteCommandAsksTheChatsAgent(t *testing.T) {
 	s := newTestServerWith(t, t.TempDir(), set.driver())
 	startTestInstances(t, s, set)
 	client := newRecordingClient(t, s)
-	cwd := t.TempDir()
+	cwd := client.addProject(t, t.TempDir())
 	thread := client.createThread(t, "agent", cwd).Thread
 
 	var completions []wire.CommandCompletion

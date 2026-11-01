@@ -45,6 +45,7 @@ var orderedRPCCalls = map[string]bool{
 	wire.MethodThreadUnsubscribe:     true,
 	wire.MethodThreadSubscribeList:   true,
 	wire.MethodTerminalSubscribeList: true,
+	wire.MethodProjectSubscribeList:  true,
 }
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
@@ -314,15 +315,19 @@ func (c *rpcClient) writeOutbound() {
 	}
 }
 
-// ThreadEvent and ThreadList make the client an orchestration.Sink. They run
-// on the engine goroutine and never block: a client that can't keep up is
-// closed and recovers from fresh snapshots.
+// ThreadEvent, ThreadList and ProjectList make the client an
+// orchestration.Sink. They run on the engine goroutine and never block: a
+// client that can't keep up is closed and recovers from fresh snapshots.
 func (c *rpcClient) ThreadEvent(event orchestration.ThreadEvent) {
 	c.notify(wire.MethodThreadEvent, event)
 }
 
 func (c *rpcClient) ThreadList(item orchestration.ThreadListItem) {
 	c.notify(wire.MethodThreadList, item)
+}
+
+func (c *rpcClient) ProjectList(list orchestration.ProjectList) {
+	c.notify(wire.MethodProjectList, list)
 }
 
 func (c *rpcClient) subscribeTerminalList() {
@@ -449,6 +454,20 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		return nil, h.server.engine.Sync(ctx, params.Thread)
 	case wire.MethodThreadSubscribeList:
 		return h.client.subscription.List(ctx)
+	case wire.MethodProjectSubscribeList:
+		return h.client.subscription.Projects(ctx)
+	case wire.MethodProjectAdd:
+		var params wire.ProjectParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.engine.AddProject(ctx, params.Path)
+	case wire.MethodProjectRemove:
+		var params wire.ProjectParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.engine.RemoveProject(ctx, params.Path)
 	case wire.MethodThreadTurns:
 		var params wire.ThreadTurnsParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -680,6 +699,13 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params wire.Provide
 	if params.ProviderInstanceID == "" || params.Cwd == "" {
 		return wire.ProviderOptionsResult{}, fmt.Errorf("%w: provider.options.get requires providerInstanceId and cwd", jsonrpc2.ErrInvalidParams)
 	}
+	// The options session runs the agent in cwd, so it is held to the same
+	// rule as a chat's working directory.
+	cwd, err := h.server.engine.WorkspaceRoot(ctx, params.Cwd)
+	if err != nil {
+		return wire.ProviderOptionsResult{}, err
+	}
+	params.Cwd = cwd
 	h.client.optionsLifecycleMu.Lock()
 	defer h.client.optionsLifecycleMu.Unlock()
 	if err := ctx.Err(); err != nil {

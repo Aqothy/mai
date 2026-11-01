@@ -3,7 +3,6 @@ import SwiftUI
 /// View arrangement plus project and provider filters for the Threads list.
 struct ThreadFilterMenu: View {
     let store: ThreadStore
-    let projectFolders: ProjectFolderStore
     @Binding var filter: ThreadListFilter
 
     @AppStorage(ThreadListDisplayMode.appStorageKey)
@@ -17,8 +16,8 @@ struct ThreadFilterMenu: View {
         let providerName = filter.providerID.flatMap { selectedID in
             store.availableProviders.first { $0.id == selectedID }?.title
         }
-        let projectPaths = projectFolders.folders
-            + store.recentWorkingDirectories.filter { !projectFolders.contains($0) }
+        let projectPaths = store.projects
+            + store.recentWorkingDirectories.filter { !store.projects.contains($0) }
 
         Menu(
             "Filter Threads",

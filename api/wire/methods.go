@@ -59,6 +59,9 @@ var Methods = []MethodDefinition{
 	{Name: MethodTerminalDetach, Params: "TerminalDetachParams", ResultNull: true},
 	{Name: MethodWorkspaceBrowseDirectories, Params: "WorkspaceBrowseDirectoriesParams", Result: "WorkspaceBrowseDirectoriesResult"},
 	{Name: MethodWorkspaceSearchFiles, Params: "WorkspaceSearchFilesParams", Result: "WorkspaceSearchFilesResult"},
+	{Name: MethodProjectAdd, Params: "ProjectParams", Result: "Project"},
+	{Name: MethodProjectRemove, Params: "ProjectParams", ResultNull: true},
+	{Name: MethodProjectSubscribeList, Params: "EmptyParams", Result: "ProjectList"},
 }
 
 var Notifications = []NotificationDefinition{
@@ -68,4 +71,5 @@ var Notifications = []NotificationDefinition{
 	{Name: MethodProviderOptionsInvalidated, Payload: "ProviderOptionsInvalidated"},
 	{Name: MethodProviderQuestionAsked, Payload: "ProviderQuestion"},
 	{Name: MethodTerminalSubscribeList, Payload: "TerminalListStreamItem"},
+	{Name: MethodProjectList, Payload: "ProjectList"},
 }

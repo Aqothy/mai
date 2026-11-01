@@ -4,7 +4,6 @@ import SwiftUI
 struct IOSAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
     let terminalStore: TerminalStore
 
     @State private var path: [IOSNavigationRoute] = []
@@ -14,7 +13,6 @@ struct IOSAppContainer: View {
             IOSThreadListView(
                 store: store,
                 terminalStore: terminalStore,
-                projectFolders: projectFolders,
                 newChat: { workingDirectory in
                     path.append(.newChat(workingDirectory: workingDirectory))
                 },
@@ -53,7 +51,6 @@ struct IOSAppContainer: View {
                         route: route,
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders,
                         openThread: { threadID in
                             store.selectThread(threadID)
                             path.append(.thread(threadID))
@@ -93,7 +90,6 @@ struct IOSAppContainer: View {
         IOSAppContainer(
             store: PreviewData.threadStore(),
             draftStore: ThreadDraftStore(),
-            projectFolders: ProjectFolderStore(defaults: nil),
             terminalStore: TerminalStore()
         )
     }

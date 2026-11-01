@@ -4,7 +4,6 @@ import SwiftUI
 struct DesktopAppContainer: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
     let terminalStore: TerminalStore
 
     /// The open terminal, if any. Chat selection lives in ThreadStore; only
@@ -15,7 +14,6 @@ struct DesktopAppContainer: View {
         NavigationSplitView {
             DesktopSidebarView(
                 store: store,
-                projectFolders: projectFolders,
                 terminalStore: terminalStore,
                 terminalRoute: $terminalRoute
             )
@@ -36,7 +34,6 @@ struct DesktopAppContainer: View {
                 ChatView(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
                     openThread: { threadID in
                         store.selectThread(threadID)
                     },
@@ -68,7 +65,6 @@ struct DesktopAppContainer: View {
     DesktopAppContainer(
         store: PreviewData.threadStore(),
         draftStore: ThreadDraftStore(),
-        projectFolders: ProjectFolderStore(defaults: nil),
         terminalStore: TerminalStore()
     )
 }

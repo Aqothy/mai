@@ -4,29 +4,23 @@ struct FolderPickerView: View {
     let title: String
     let confirmationTitle: String
     let onCancel: (() -> Void)?
-    let onSelect: (String, String?) -> Void
+    let onSelect: (String) -> Void
 
     @State private var model: FolderPickerModel
     @Environment(\.dismiss) private var dismiss
 
     init(
         store: ThreadStore,
-        projectFolders: ProjectFolderStore,
         title: String = "Add Project Folder",
         confirmationTitle: String = "Add",
         onCancel: (() -> Void)? = nil,
-        onSelect: @escaping (String, String?) -> Void
+        onSelect: @escaping (String) -> Void
     ) {
         self.title = title
         self.confirmationTitle = confirmationTitle
         self.onCancel = onCancel
         self.onSelect = onSelect
-        _model = State(
-            initialValue: FolderPickerModel(
-                store: store,
-                projectFolders: projectFolders
-            )
-        )
+        _model = State(initialValue: FolderPickerModel(store: store))
     }
 
     var body: some View {
@@ -144,8 +138,8 @@ struct FolderPickerView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button(confirmationTitle, systemImage: "checkmark") {
-                        guard let currentPath = model.currentPath else { return }
-                        onSelect(currentPath, model.parentPath)
+                        guard let path = model.selectCurrentFolder() else { return }
+                        onSelect(path)
                         dismiss()
                     }
                     .labelStyle(.iconOnly)

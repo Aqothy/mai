@@ -22,7 +22,6 @@ struct ChatView: View {
     init(
         store: ThreadStore,
         draftStore: ThreadDraftStore,
-        projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
         initialWorkingDirectory: String? = nil,
         openThread: ((String) -> Void)? = nil,
         openDraft: (() -> Void)? = nil
@@ -35,7 +34,6 @@ struct ChatView: View {
             initialValue: DraftPromptModel(
                 store: store,
                 draftStore: draftStore,
-                projectFolders: projectFolders,
                 initialWorkingDirectory: initialWorkingDirectory
             )
         )

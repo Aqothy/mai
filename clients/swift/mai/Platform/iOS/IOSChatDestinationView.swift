@@ -5,7 +5,6 @@ struct IOSChatDestinationView: View {
     let route: IOSNavigationRoute
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
     let openThread: (String) -> Void
     let openDraft: () -> Void
 
@@ -16,7 +15,6 @@ struct IOSChatDestinationView: View {
                 ChatView(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
                     initialWorkingDirectory: workingDirectory,
                     openThread: openThread,
                     openDraft: openDraft
@@ -26,7 +24,6 @@ struct IOSChatDestinationView: View {
                     ChatView(
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders,
                         openThread: openThread,
                         openDraft: openDraft
                     )

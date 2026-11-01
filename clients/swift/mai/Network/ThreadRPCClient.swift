@@ -3,6 +3,9 @@ import Foundation
 protocol ThreadRPCClient: RPCTransportClient {
     var onNotification: ((String, Data) -> Void)? { get set }
     func subscribeThreadList() async throws -> ThreadListItem
+    func subscribeProjectList() async throws -> ProjectList
+    func addProject(_ path: String) async throws -> Project
+    func removeProject(_ path: String) async throws
     func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot
     func unsubscribeThread(_ threadID: String) async throws
     func syncThread(_ threadID: String) async throws
@@ -37,6 +40,18 @@ protocol ThreadRPCClient: RPCTransportClient {
 extension RPCClient: ThreadRPCClient {
     func subscribeThreadList() async throws -> ThreadListItem {
         try await call(MaidRPCMethod.threadSubscribeList, params: EmptyParams())
+    }
+
+    func subscribeProjectList() async throws -> ProjectList {
+        try await call(MaidRPCMethod.projectSubscribeList, params: EmptyParams())
+    }
+
+    func addProject(_ path: String) async throws -> Project {
+        try await call(MaidRPCMethod.projectAdd, params: ProjectParams(path: path))
+    }
+
+    func removeProject(_ path: String) async throws {
+        try await callVoid(MaidRPCMethod.projectRemove, params: ProjectParams(path: path))
     }
 
     func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {

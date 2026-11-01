@@ -84,6 +84,7 @@ type recordingClient struct {
 	listItems          []orchestration.ThreadListItem
 	terminalListItems  []wire.TerminalListStreamItem
 	terminalListCursor int
+	projectLists       []wire.ProjectList
 	// terminalOutput is the output of every terminal stream the client
 	// opened.
 	terminalOutput     bytes.Buffer
@@ -138,6 +139,12 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			return nil, err
 		}
 		c.terminalListItems = append(c.terminalListItems, item)
+	case wire.MethodProjectList:
+		var list wire.ProjectList
+		if err := decodeRPCParams(req, &list); err != nil {
+			return nil, err
+		}
+		c.projectLists = append(c.projectLists, list)
 	case wire.MethodProviderQuestionAsked:
 		var question wire.ProviderQuestion
 		if err := decodeRPCParams(req, &question); err != nil {
@@ -203,9 +210,20 @@ func (c *recordingClient) command(t *testing.T, params wire.CommandParams) orche
 	return result
 }
 
-// createThread starts a chat with the instance, prompted when prompt is set.
+// addProject adds dir as a project, as the app's folder picker does, and
+// returns its canonical path.
+func (c *recordingClient) addProject(t *testing.T, dir string) string {
+	t.Helper()
+	var project wire.Project
+	c.call(t, wire.MethodProjectAdd, wire.ProjectParams{Path: dir}, &project)
+	return project.Path
+}
+
+// createThread starts a chat with the instance in cwd, adding cwd as a
+// project first.
 func (c *recordingClient) createThread(t *testing.T, instance provider.InstanceID, cwd string) orchestration.CommandResult {
 	t.Helper()
+	cwd = c.addProject(t, cwd)
 	create := orchestration.CreateThread{Workspace: wire.Workspace{Cwd: cwd}, Participant: orchestration.NewParticipant{Instance: instance}}
 	return c.command(t, wire.CommandParams{CreateThread: &create})
 }

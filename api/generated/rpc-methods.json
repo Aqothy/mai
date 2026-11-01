@@ -194,6 +194,21 @@
       "name": "workspace.searchFiles",
       "params": "WorkspaceSearchFilesParams",
       "result": "WorkspaceSearchFilesResult"
+    },
+    {
+      "name": "project.add",
+      "params": "ProjectParams",
+      "result": "Project"
+    },
+    {
+      "name": "project.remove",
+      "params": "ProjectParams",
+      "resultNull": true
+    },
+    {
+      "name": "project.subscribeList",
+      "params": "EmptyParams",
+      "result": "ProjectList"
     }
   ],
   "notifications": [
@@ -220,6 +235,10 @@
     {
       "name": "terminal.subscribeList",
       "payload": "TerminalListStreamItem"
+    },
+    {
+      "name": "project.list",
+      "payload": "ProjectList"
     }
   ]
 }

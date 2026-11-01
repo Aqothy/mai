@@ -113,10 +113,14 @@ func TestEngineFailureClosesServerAndSurfacesFromRunWebSocket(t *testing.T) {
 		return s.httpServer != nil
 	})
 
+	project, err := s.engine.AddProject(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The database going away under the engine, as a full or failed disk.
 	_ = s.metadataStore.Close()
 	_, _ = s.engine.Do(context.Background(), orchestration.Command{Actor: orchestration.Person("test"), Body: orchestration.CreateThread{
-		Workspace: provider.Workspace{Cwd: t.TempDir()}, Participant: orchestration.NewParticipant{Instance: "agent"},
+		Workspace: provider.Workspace{Cwd: project.Path}, Participant: orchestration.NewParticipant{Instance: "agent"},
 	}})
 	select {
 	case err := <-runErr:

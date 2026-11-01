@@ -43,6 +43,9 @@ type contract struct {
 	TextAppend                       wire.TextAppend                       `json:"textAppend"`
 	RequestResolution                wire.RequestResolution                `json:"requestResolution"`
 	ThreadListItem                   wire.ThreadListItem                   `json:"threadListItem"`
+	Project                          wire.Project                          `json:"project"`
+	ProjectList                      wire.ProjectList                      `json:"projectList"`
+	ProjectParams                    wire.ProjectParams                    `json:"projectParams"`
 	ToolCallSummary                  wire.ToolCallSummary                  `json:"toolCallSummary"`
 	FileChangeSummary                wire.FileChangeSummary                `json:"fileChangeSummary"`
 	ToolAttachment                   wire.ToolAttachment                   `json:"toolAttachment"`

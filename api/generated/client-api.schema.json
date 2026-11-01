@@ -1387,6 +1387,53 @@
       ],
       "title": "PlanEntry"
     },
+    "Project": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "addedAt"
+      ],
+      "title": "Project"
+    },
+    "ProjectList": {
+      "properties": {
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/Project"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "projects"
+      ],
+      "title": "ProjectList"
+    },
+    "ProjectParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "title": "ProjectParams"
+    },
     "PromptAnnotation": {
       "properties": {
         "id": {
@@ -3292,6 +3339,15 @@
         "threadListItem": {
           "$ref": "#/$defs/ThreadListItem"
         },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "projectList": {
+          "$ref": "#/$defs/ProjectList"
+        },
+        "projectParams": {
+          "$ref": "#/$defs/ProjectParams"
+        },
         "toolCallSummary": {
           "$ref": "#/$defs/ToolCallSummary"
         },
@@ -3563,6 +3619,9 @@
         "textAppend",
         "requestResolution",
         "threadListItem",
+        "project",
+        "projectList",
+        "projectParams",
         "toolCallSummary",
         "fileChangeSummary",
         "toolAttachment",

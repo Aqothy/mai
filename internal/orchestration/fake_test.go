@@ -320,6 +320,12 @@ func newHarness(t *testing.T, instances ...*fakeInstance) *harness {
 	t.Helper()
 	h := &harness{t: t, dir: t.TempDir(), providers: newFakeProviders(instances...), device: Person("test-device")}
 	h.start()
+	// Chats work in a project; the harness's chats work in its directory.
+	project, err := h.engine.AddProject(context.Background(), h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.dir = project.Path
 	return h
 }
 
@@ -330,7 +336,7 @@ func (h *harness) start() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	engine, err := Open(Config{DB: handle, Providers: h.providers, DataDir: h.dir, DefaultCwd: h.dir})
+	engine, err := Open(Config{DB: handle, Providers: h.providers, DataDir: h.dir})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -426,9 +432,10 @@ func (h *harness) createThread(instance provider.InstanceID, prompt string) Comm
 }
 
 type recordingSink struct {
-	mu     sync.Mutex
-	events []ThreadEvent
-	list   []ThreadListItem
+	mu       sync.Mutex
+	events   []ThreadEvent
+	list     []ThreadListItem
+	projects []ProjectList
 }
 
 func (r *recordingSink) ThreadEvent(event ThreadEvent) {
@@ -440,6 +447,12 @@ func (r *recordingSink) ThreadEvent(event ThreadEvent) {
 func (r *recordingSink) ThreadList(item ThreadListItem) {
 	r.mu.Lock()
 	r.list = append(r.list, item)
+	r.mu.Unlock()
+}
+
+func (r *recordingSink) ProjectList(list ProjectList) {
+	r.mu.Lock()
+	r.projects = append(r.projects, list)
 	r.mu.Unlock()
 }
 

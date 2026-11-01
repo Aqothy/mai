@@ -140,15 +140,11 @@ struct DraftSessionControlsView: View {
         .sheet(isPresented: $isFolderSelectionPresented) {
             FolderSelectionSheet(
                 store: model.store,
-                projectFolders: model.projectFolders,
                 title: "Project Folder",
                 selectedFolder: model.workingDirectory,
                 onSelectExisting: model.selectWorkingDirectory,
-                onSelectBrowsed: { directory, parentDirectory in
-                    model.addProjectFolder(
-                        directory,
-                        parentDirectory: parentDirectory
-                    )
+                onSelectBrowsed: { directory in
+                    Task { await model.addProjectFolder(directory) }
                 }
             )
         }
@@ -187,15 +183,11 @@ struct DraftSessionControlsView: View {
             .sheet(isPresented: $isAdditionalFolderSelectionPresented) {
                 FolderSelectionSheet(
                     store: model.store,
-                    projectFolders: model.projectFolders,
                     title: "Additional Project Folder",
                     selectedFolder: nil,
                     onSelectExisting: model.addAdditionalDirectory,
-                    onSelectBrowsed: { directory, parentDirectory in
-                        model.addAdditionalProjectFolder(
-                            directory,
-                            parentDirectory: parentDirectory
-                        )
+                    onSelectBrowsed: { directory in
+                        Task { await model.addAdditionalProjectFolder(directory) }
                     }
                 )
             }

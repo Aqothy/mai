@@ -11,6 +11,9 @@ extension ThreadRPCClient {
     func listRegistryAgents() async throws -> [ACPRegistryAgent] { [] }
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
+    func subscribeProjectList() async throws -> ProjectList { ProjectList(projects: []) }
+    func addProject(_ path: String) async throws -> Project { throw unavailable }
+    func removeProject(_ path: String) async throws { throw unavailable }
 
     func unsubscribeThread(_ threadID: String) async throws {}
     func syncThread(_ threadID: String) async throws {}

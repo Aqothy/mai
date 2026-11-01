@@ -10,9 +10,10 @@ import (
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
 
-// searchWorkspaceFiles serves the composer `@file` picker. The search service
-// validates the root and query before creating any index. Query text is never
-// logged.
+// searchWorkspaceFiles serves the composer `@file` picker. The root is
+// canonical and allowed before the search service may create an index for
+// it: a chat's cwd, or a draft's folder the engine allows. Query text is
+// never logged.
 func (s *Server) searchWorkspaceFiles(ctx context.Context, params wire.WorkspaceSearchFilesParams) (wire.WorkspaceSearchFilesResult, error) {
 	hasThread := params.ThreadID != ""
 	hasCwd := params.Cwd != ""
@@ -20,18 +21,23 @@ func (s *Server) searchWorkspaceFiles(ctx context.Context, params wire.Workspace
 		return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: workspace.searchFiles requires exactly one of threadId or cwd", jsonrpc2.ErrInvalidParams)
 	}
 
-	root := params.Cwd
+	var root string
 	if hasThread {
 		workspace, err := s.engine.Workspace(ctx, params.ThreadID)
 		if err != nil {
 			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
 		root = workspace.Cwd
+	} else {
+		var err error
+		if root, err = s.engine.WorkspaceRoot(ctx, params.Cwd); err != nil {
+			return wire.WorkspaceSearchFilesResult{}, err
+		}
 	}
 
 	result, err := s.workspaceSearch.Search(ctx, root, params.Query, params.Limit)
 	if err != nil {
-		if errors.Is(err, workspacesearch.ErrInvalidRoot) || errors.Is(err, workspacesearch.ErrQueryTooLong) {
+		if errors.Is(err, workspacesearch.ErrQueryTooLong) {
 			return wire.WorkspaceSearchFilesResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
 		return wire.WorkspaceSearchFilesResult{}, err

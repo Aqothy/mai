@@ -126,7 +126,7 @@ func TestCommandsAreValidatedAtTheBoundary(t *testing.T) {
 	if code, reason := commandCode(err); code != commandRefusedCode || reason != orchestration.CodeNotFound {
 		t.Fatalf("deliver to a missing chat = %v (%d %q), want refused %q", err, code, reason, orchestration.CodeNotFound)
 	}
-	_, err = client.commandErr(wire.CommandParams{CreateThread: &orchestration.CreateThread{Workspace: provider.Workspace{Cwd: t.TempDir()}, Participant: orchestration.NewParticipant{Instance: "unknown"}}})
+	_, err = client.commandErr(wire.CommandParams{CreateThread: &orchestration.CreateThread{Workspace: provider.Workspace{Cwd: client.addProject(t, t.TempDir())}, Participant: orchestration.NewParticipant{Instance: "unknown"}}})
 	if code, reason := commandCode(err); code != commandRefusedCode || reason != orchestration.CodeAgentUnavailable {
 		t.Fatalf("chat with an unknown agent = %v (%d %q), want refused %q", err, code, reason, orchestration.CodeAgentUnavailable)
 	}
@@ -344,7 +344,8 @@ func TestAgentMetadataReachesClients(t *testing.T) {
 }
 
 // A native session the agent kept opens as a chat once, showing what the
-// agent replays of it; an agent that can't reopen sessions refuses it.
+// agent replays of it, and its folder becomes a project; an agent that can't
+// reopen sessions refuses it.
 func TestImportedSessionShowsItsHistory(t *testing.T) {
 	s := newTestServer(t)
 	history := t.TempDir()
@@ -354,11 +355,16 @@ func TestImportedSessionShowsItsHistory(t *testing.T) {
 	startFakeACPAgent(t, s, "agent", "-history", history)
 	startFakeACPAgent(t, s, "list-only", "-list-only")
 	client := newRecordingClient(t, s)
-	cwd := t.TempDir()
+	cwd := canonicalTempDir(t)
 	importing := orchestration.CreateThread{Title: "Imported", Workspace: provider.Workspace{Cwd: cwd}, Participant: orchestration.NewParticipant{Instance: "agent", Session: "external-session"}}
 	imported := client.command(t, wire.CommandParams{CreateThread: &importing})
 	if again := client.command(t, wire.CommandParams{CreateThread: &importing}); again.Thread != imported.Thread {
 		t.Fatalf("importing again made %q, want the chat %q", again.Thread, imported.Thread)
+	}
+	var projects wire.ProjectList
+	client.call(t, wire.MethodProjectSubscribeList, wire.EmptyParams{}, &projects)
+	if !slices.Equal(projectPaths(projects), []string{cwd}) {
+		t.Fatalf("projects after importing = %+v, want the session's folder %s", projects.Projects, cwd)
 	}
 
 	want := []string{"user_message: earlier prompt", "assistant_message: replayed"}

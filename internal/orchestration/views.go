@@ -234,12 +234,14 @@ type ThreadListItem struct {
 type Sink interface {
 	ThreadEvent(ThreadEvent)
 	ThreadList(ThreadListItem)
+	ProjectList(ProjectList)
 }
 
 type subscriber struct {
-	sink    Sink
-	list    bool
-	threads map[ThreadID]bool
+	sink     Sink
+	list     bool
+	projects bool
+	threads  map[ThreadID]bool
 }
 
 // Subscription is one client's updates.
@@ -249,7 +251,7 @@ type Subscription struct {
 }
 
 // Subscribe registers a sink that gets nothing until it subscribes to the
-// list or threads.
+// thread list, the project list or threads.
 func (e *Engine) Subscribe(sink Sink) *Subscription {
 	id, _ := call(context.Background(), e, func(s *step) (uint64, error) {
 		e.nextSub++
