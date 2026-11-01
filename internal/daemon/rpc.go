@@ -19,93 +19,68 @@ import (
 	"github.com/coder/websocket"
 )
 
-const (
-	// Local handler/test names point at the canonical api/wire registry.
-	RPCMethodOrchestrationDispatchCommand     = wire.MethodOrchestrationDispatchCommand
-	RPCMethodOrchestrationSubscribeThreadList = wire.MethodOrchestrationSubscribeThreadList
-	RPCMethodOrchestrationSubscribeThread     = wire.MethodOrchestrationSubscribeThread
-	RPCMethodOrchestrationUnsubscribeThread   = wire.MethodOrchestrationUnsubscribeThread
-	RPCMethodOrchestrationGetItemDetail       = wire.MethodOrchestrationGetItemDetail
-
-	RPCMethodProviderStart         = wire.MethodProviderStart
-	RPCMethodProviderList          = wire.MethodProviderList
-	RPCMethodACPRegistryList       = wire.MethodACPRegistryList
-	RPCMethodACPRegistryInstalled  = wire.MethodACPRegistryInstalled
-	RPCMethodACPRegistryInstall    = wire.MethodACPRegistryInstall
-	RPCMethodACPRegistryAddCustom  = wire.MethodACPRegistryAddCustom
-	RPCMethodACPRegistryStart      = wire.MethodACPRegistryStart
-	RPCMethodProviderAuthenticate  = wire.MethodProviderAuthenticate
-	RPCMethodProviderLogout        = wire.MethodProviderLogout
-	RPCMethodProviderListSessions  = wire.MethodProviderListSessions
-	RPCMethodProviderImportSession = wire.MethodProviderImportSession
-	RPCMethodProviderDeleteSession = wire.MethodProviderDeleteSession
-	RPCMethodProviderCloseSession  = wire.MethodProviderCloseSession
-	RPCMethodProviderOptionsGet    = wire.MethodProviderOptionsGet
-	RPCMethodProviderOptionsSet    = wire.MethodProviderOptionsSet
-
-	RPCMethodTerminalCreate        = wire.MethodTerminalCreate
-	RPCMethodTerminalAttach        = wire.MethodTerminalAttach
-	RPCMethodTerminalRelaunch      = wire.MethodTerminalRelaunch
-	RPCMethodTerminalDetach        = wire.MethodTerminalDetach
-	RPCMethodTerminalRename        = wire.MethodTerminalRename
-	RPCMethodTerminalTerminate     = wire.MethodTerminalTerminate
-	RPCMethodTerminalDelete        = wire.MethodTerminalDelete
-	RPCMethodTerminalWrite         = wire.MethodTerminalWrite
-	RPCMethodTerminalResize        = wire.MethodTerminalResize
-	RPCMethodTerminalSubscribe     = wire.MethodTerminalSubscribe
-	RPCMethodTerminalSubscribeList = wire.MethodTerminalSubscribeList
-
-	RPCMethodWorkspaceBrowseDirectories = wire.MethodWorkspaceBrowseDirectories
-	RPCMethodWorkspaceSearchFiles       = wire.MethodWorkspaceSearchFiles
+var (
+	nextRPCClientID atomic.Uint64
+	nextQuestionID  atomic.Uint64
 )
 
-type providerStartRPCParams = wire.ProviderStartParams
-type acpRegistryStartParams = wire.ACPRegistryStartParams
-type acpRegistryInstallParams = wire.ACPRegistryInstallParams
-type acpCustomAgentAddParams = wire.ACPCustomAgentAddParams
-type providerAuthenticateParams = wire.ProviderAuthenticateParams
-type providerInstanceParams = wire.ProviderInstanceParams
-type providerListSessionsParams = wire.ProviderListSessionsParams
-type providerSessionParams = wire.ProviderSessionParams
-type providerImportSessionParams = wire.ProviderImportSessionParams
-type providerImportSessionResult = wire.ProviderImportSessionResult
-type providerOptionsGetParams = wire.ProviderOptionsGetParams
-type providerOptionsSetParams = wire.ProviderOptionsSetParams
-type providerOptionsResult = wire.ProviderOptionsResult
-type terminalCreateParams = wire.TerminalCreateParams
-type terminalIDParams = wire.TerminalIDParams
-type terminalAttachParams = wire.TerminalAttachParams
-type terminalDetachParams = wire.TerminalDetachParams
-type terminalRenameParams = wire.TerminalRenameParams
-type terminalWriteParams = wire.TerminalWriteParams
-type terminalResizeParams = wire.TerminalResizeParams
-type workspaceBrowseDirectoriesParams = wire.WorkspaceBrowseDirectoriesParams
-type workspaceSearchFilesParams = wire.WorkspaceSearchFilesParams
-
-var nextRPCClientID atomic.Uint64
-
 const (
-	rpcOutboundQueueSize = 1024
+	// rpcOutboundQueueSize absorbs an agent's burst (thousands of tool
+	// updates at once, which the engine turns into events faster than a
+	// socket writes them) without closing a client that keeps up on average.
+	rpcOutboundQueueSize = 4096
+	// rpcConcurrentCalls bounds the calls one connection runs at once; a
+	// further call waits in the connection's queue for a free slot.
+	rpcConcurrentCalls = 32
 )
+
+// orderedRPCCalls run one at a time in wire order: the order of commands and
+// subscriptions is the client's intent. They are all quick. Every other call
+// runs concurrently so a slow provider, registry, or terminal operation
+// cannot hold up the connection. Notifications (terminal input, resize,
+// focus, detach) are always handled in wire order.
+var orderedRPCCalls = map[string]bool{
+	wire.MethodThreadCommand:         true,
+	wire.MethodThreadSubscribe:       true,
+	wire.MethodThreadUnsubscribe:     true,
+	wire.MethodThreadSubscribeList:   true,
+	wire.MethodTerminalSubscribeList: true,
+	wire.MethodProjectSubscribeList:  true,
+}
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
 // attachments are the big case). Outbound frames are unaffected.
 const maxInboundMessageBytes = 32 << 20
 
+// rpcPingInterval is how often the daemon pings each client, and how long it
+// waits for the pong. TCP can't tell a half-open link (a phone that changed
+// networks, a suspended app, a stalled proxy) from an idle one, so without a
+// ping the daemon keeps a dead client's subscriptions and blocks on writes to
+// it forever. Closing on a missed pong also bounds how late a request still
+// buffered on that link can arrive.
+const rpcPingInterval = 15 * time.Second
+
 type rpcClient struct {
 	id     string
 	conn   *jsonrpc2.Connection
+	socket *websocket.Conn
 	logger *slog.Logger
 
 	outbound chan rpcOutbound
 	done     chan struct{}
 	closed   atomic.Bool
+	calls    chan struct{} // slots for concurrently running calls
+
+	// subscription is the client's thread list and thread updates.
+	subscription *orchestration.Subscription
 
 	subscriptionsMu        sync.Mutex
-	threadSubscriptions    map[orchestration.ThreadID]struct{}
-	terminalSubscriptions  map[string]struct{}
-	threadListSubscribed   bool
 	terminalListSubscribed bool
+
+	// questions are the sign-in questions this client was asked and has not
+	// answered, by request ID.
+	questionsMu sync.Mutex
+	questions   map[string]pendingQuestion
 
 	optionsLifecycleMu   sync.Mutex
 	optionsMu            sync.Mutex
@@ -119,6 +94,7 @@ type clientOptionsSession struct {
 	handle             string
 	cwd                string
 	configOptions      []provider.ConfigOption
+	skills             []provider.Skill
 }
 
 type rpcOutbound struct {
@@ -129,9 +105,6 @@ type rpcOutbound struct {
 type rpcHandler struct {
 	server *Server
 	client *rpcClient
-
-	// afterThreadSnapshot is a test hook used to exercise subscribe snapshot/live-event ordering.
-	afterThreadSnapshot func(orchestration.ThreadID)
 }
 
 type wsJSONRPC struct{ conn *websocket.Conn }
@@ -163,7 +136,7 @@ type disconnectReader struct {
 
 func (r *disconnectReader) Read(ctx context.Context) (jsonrpc2.Message, error) {
 	msg, err := r.reader.Read(ctx)
-	if err != nil && r.onDisconnect != nil {
+	if err != nil {
 		r.once.Do(func() { r.onDisconnect(err) })
 	}
 	return msg, err
@@ -173,9 +146,7 @@ func (s *Server) RunWebSocket(addr string) error {
 	if addr == "" {
 		addr = "127.0.0.1:8765"
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /rpc", s.WebSocketHandler())
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{Addr: addr, Handler: s.handler()}
 	s.mu.Lock()
 	s.httpServer = srv
 	stopped := s.ctx.Err() != nil
@@ -197,54 +168,91 @@ func (s *Server) RunWebSocket(addr string) error {
 	return s.fatalErr
 }
 
-func (s *Server) WebSocketHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			s.logger.Warn("websocket accept failed", "error", err)
-			return
-		}
-		// The library default (32KiB) is too small for real commands: a single
-		// image attachment on thread.turn.start can be megabytes of base64.
-		ws.SetReadLimit(maxInboundMessageBytes)
-		socket := wsJSONRPC{conn: ws}
-		reader, writer := jsonrpc2.NewWebSocketTransport(socket)
-		var client *rpcClient
-		reader = &disconnectReader{reader: reader, onDisconnect: func(error) {
-			if client != nil {
-				s.disconnectRPCClient(client)
-			}
-		}}
-		conn := jsonrpc2.NewConnection(context.Background(), jsonrpc2.ConnectionConfig{
-			Reader: reader,
-			Writer: writer,
-			Closer: socket,
-			OnInternalError: func(err error) {
-				s.logger.Error("JSON-RPC internal error", "error", err)
-			},
-			OnNotificationError: func(err error) {
-				s.logger.Warn("JSON-RPC notification failed", "error", err)
-			},
-			Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
-				client = s.registerRPCClient(c)
-				return &rpcHandler{server: s, client: client}
-			},
-		})
-		_ = conn.Wait()
+// handler serves the JSON-RPC connection and the terminal streams beside it.
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rpc", s.serveRPC)
+	mux.HandleFunc("GET "+wire.TerminalStreamPath, s.serveTerminalStream)
+	return mux
+}
+
+func (s *Server) serveRPC(w http.ResponseWriter, r *http.Request) {
+	ws, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		s.logger.Warn("websocket accept failed", "error", err)
+		return
+	}
+	// The library default (32KiB) is too small for real commands: a single
+	// image attachment on thread.turn.start can be megabytes of base64.
+	ws.SetReadLimit(maxInboundMessageBytes)
+	socket := wsJSONRPC{conn: ws}
+	reader, writer := jsonrpc2.NewWebSocketTransport(socket)
+	var client *rpcClient
+	reader = &disconnectReader{reader: reader, onDisconnect: func(error) {
 		if client != nil {
 			s.disconnectRPCClient(client)
+		}
+	}}
+	conn := jsonrpc2.NewConnection(context.Background(), jsonrpc2.ConnectionConfig{
+		Reader: reader,
+		Writer: writer,
+		Closer: socket,
+		OnInternalError: func(err error) {
+			s.logger.Error("JSON-RPC internal error", "error", err)
+		},
+		OnNotificationError: func(err error) {
+			s.logger.Warn("JSON-RPC notification failed", "error", err)
+		},
+		Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
+			client = s.registerRPCClient(c, ws)
+			return &rpcHandler{server: s, client: client}
+		},
+	})
+	pingCtx, stopPinging := context.WithCancel(context.Background())
+	// Bind ran inside NewConnection, so client is set.
+	go s.keepAlive(pingCtx, ws, client.logger)
+	_ = conn.Wait()
+	stopPinging()
+	if client != nil {
+		s.disconnectRPCClient(client)
+	}
+}
+
+// keepAlive closes the socket once a ping goes unanswered for one ping
+// interval. Closing the socket itself, not the JSON-RPC connection,
+// also fails writes blocked on the dead link, which the connection's own
+// Close would wait for.
+func (s *Server) keepAlive(ctx context.Context, ws *websocket.Conn, logger *slog.Logger) {
+	ticker := time.NewTicker(s.pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, s.pingInterval)
+		err := ws.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Info("client stopped answering pings; closing connection", "error", err)
+			}
+			_ = ws.CloseNow()
+			return
 		}
 	}
 }
 
-func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
+func (s *Server) registerRPCClient(conn *jsonrpc2.Connection, socket *websocket.Conn) *rpcClient {
 	client := &rpcClient{
-		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
+		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn, socket: socket,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
-		threadSubscriptions:   make(map[orchestration.ThreadID]struct{}),
-		terminalSubscriptions: make(map[string]struct{}),
+		calls:     make(chan struct{}, rpcConcurrentCalls),
+		questions: make(map[string]pendingQuestion),
 	}
 	client.logger = s.logger.With("client", client.id)
+	client.subscription = s.engine.Subscribe(client)
 	s.rpcMu.Lock()
 	s.rpcClients[client.id] = client
 	s.rpcMu.Unlock()
@@ -264,32 +272,13 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	s.rpcMu.Unlock()
 	if client.closeOutbound() {
 		client.logger.Info("client disconnected")
+		client.subscription.Close()
 	}
 	// Cleanup is deliberately independent of who first closed the outbound
 	// channel. Queue overflow can close it before socket teardown reaches this
 	// path, and detaching the active sessions makes repeated cleanup harmless.
 	go s.closeClientOptionsSessions(client)
-	// Terminal subscriptions live on the connection and disappear with it;
-	// shells remain alive in the terminal service. Each subscribed session
-	// still needs its attachment count refreshed so detached agent runs can
-	// report Done.
-	for _, terminalID := range client.terminalSubscriptionIDs() {
-		s.refreshTerminalAttachment(terminalID)
-	}
-}
-
-// refreshTerminalAttachment re-derives whether any connected client remains
-// attached to the terminal's live run.
-func (s *Server) refreshTerminalAttachment(terminalID string) {
-	rt := s.terminals
-	if rt == nil {
-		return
-	}
-	session, err := rt.service.Get(terminalID)
-	if err != nil {
-		return
-	}
-	session.SetAttached(len(s.terminalSubscribers(terminalID)) > 0)
+	go s.detachClientTerminals(client)
 }
 
 func (c *rpcClient) closeOutbound() bool {
@@ -300,16 +289,11 @@ func (c *rpcClient) closeOutbound() bool {
 	return false
 }
 
-func (c *rpcClient) overflowClose(what string) {
+// closeConnection closes a client whose outbound stream can no longer be
+// delivered in order; it recovers by reconnecting for fresh snapshots.
+func (c *rpcClient) closeConnection(reason string, attrs ...any) {
 	if c.closeOutbound() {
-		c.logger.Warn("client outbound queue full; closing connection", "method", what)
-		go func() { _ = c.conn.Close() }()
-	}
-}
-
-func (c *rpcClient) outboundWriteFailed(method string, err error) {
-	if c.closeOutbound() {
-		c.logger.Warn("client notification failed; closing connection", "method", method, "error", err)
+		c.logger.Warn(reason+"; closing connection", attrs...)
 		go func() { _ = c.conn.Close() }()
 	}
 }
@@ -323,7 +307,7 @@ func (c *rpcClient) writeOutbound() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := c.conn.Notify(ctx, msg.method, msg.params); err != nil {
 				cancel()
-				c.outboundWriteFailed(msg.method, err)
+				c.closeConnection("client notification failed", "method", msg.method, "error", err)
 				return
 			}
 			cancel()
@@ -331,35 +315,19 @@ func (c *rpcClient) writeOutbound() {
 	}
 }
 
-func (c *rpcClient) subscribeThread(threadID orchestration.ThreadID) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	c.threadSubscriptions[threadID] = struct{}{}
+// ThreadEvent, ThreadList and ProjectList make the client an
+// orchestration.Sink. They run on the engine goroutine and never block: a
+// client that can't keep up is closed and recovers from fresh snapshots.
+func (c *rpcClient) ThreadEvent(event orchestration.ThreadEvent) {
+	c.notify(wire.MethodThreadEvent, event)
 }
 
-func (c *rpcClient) unsubscribeThread(threadID orchestration.ThreadID) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	delete(c.threadSubscriptions, threadID)
+func (c *rpcClient) ThreadList(item orchestration.ThreadListItem) {
+	c.notify(wire.MethodThreadList, item)
 }
 
-func (c *rpcClient) subscribedThread(threadID orchestration.ThreadID) bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	_, ok := c.threadSubscriptions[threadID]
-	return ok
-}
-
-func (c *rpcClient) subscribeThreadList() {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	c.threadListSubscribed = true
-}
-
-func (c *rpcClient) subscribedThreadList() bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	return c.threadListSubscribed
+func (c *rpcClient) ProjectList(list orchestration.ProjectList) {
+	c.notify(wire.MethodProjectList, list)
 }
 
 func (c *rpcClient) subscribeTerminalList() {
@@ -374,38 +342,34 @@ func (c *rpcClient) subscribedTerminalList() bool {
 	return c.terminalListSubscribed
 }
 
-// subscribeTerminal adds one terminal stream listener and reports whether it
-// was newly added. The result lets failed create/relaunch calls roll back only
-// the subscription they introduced.
-func (c *rpcClient) subscribeTerminal(terminalID string) bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	_, existed := c.terminalSubscriptions[terminalID]
-	c.terminalSubscriptions[terminalID] = struct{}{}
-	return !existed
+// ask sends this client a question an agent asks during its sign-in and
+// waits for the answer, until the sign-in ends or the client goes away.
+// pendingQuestion is a sign-in question awaiting the client's answer.
+type pendingQuestion struct {
+	request provider.Request
+	answer  chan provider.RequestAnswer
 }
 
-func (c *rpcClient) unsubscribeTerminal(terminalID string) {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	delete(c.terminalSubscriptions, terminalID)
-}
-
-func (c *rpcClient) subscribedTerminal(terminalID string) bool {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	_, ok := c.terminalSubscriptions[terminalID]
-	return ok
-}
-
-func (c *rpcClient) terminalSubscriptionIDs() []string {
-	c.subscriptionsMu.Lock()
-	defer c.subscriptionsMu.Unlock()
-	ids := make([]string, 0, len(c.terminalSubscriptions))
-	for terminalID := range c.terminalSubscriptions {
-		ids = append(ids, terminalID)
+func (c *rpcClient) ask(ctx context.Context, instanceID provider.InstanceID, request provider.Request) (provider.RequestAnswer, error) {
+	requestID := fmt.Sprintf("%s-question-%d", c.id, nextQuestionID.Add(1))
+	answer := make(chan provider.RequestAnswer, 1)
+	c.questionsMu.Lock()
+	c.questions[requestID] = pendingQuestion{request: request, answer: answer}
+	c.questionsMu.Unlock()
+	defer func() {
+		c.questionsMu.Lock()
+		delete(c.questions, requestID)
+		c.questionsMu.Unlock()
+	}()
+	c.notify(wire.MethodProviderQuestionAsked, wire.ProviderQuestion{InstanceID: instanceID, RequestID: requestID, Request: request})
+	select {
+	case response := <-answer:
+		return response, nil
+	case <-ctx.Done():
+		return provider.RequestAnswer{}, ctx.Err()
+	case <-c.done:
+		return provider.RequestAnswer{}, fmt.Errorf("client disconnected")
 	}
-	return ids
 }
 
 func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
@@ -415,10 +379,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 	// results from pass-through calls like Dispatch/StartProvider on failure.
 	defer func() {
 		err = rpcError(err)
-		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond)}
-		if h.client != nil && h.client.id != "" {
-			attrs = append(attrs, "client", h.client.id)
-		}
+		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond), "client", h.client.id}
 		if err != nil {
 			result = nil
 			attrs = append(attrs, "error", compactError(err))
@@ -427,100 +388,151 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		h.server.logger.Debug("RPC completed", attrs...)
 	}()
+	if req.IsCall() && !orderedRPCCalls[req.Method] {
+		select {
+		case h.client.calls <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { <-h.client.calls }()
+		jsonrpc2.Async(ctx)
+	}
 	switch req.Method {
-	case RPCMethodOrchestrationDispatchCommand:
+	case wire.MethodThreadCommand:
 		if !req.IsCall() {
-			return nil, fmt.Errorf("%w: orchestration.dispatchCommand must be a request", jsonrpc2.ErrInvalidRequest)
+			return nil, fmt.Errorf("%w: thread.command must be a request", jsonrpc2.ErrInvalidRequest)
 		}
-		var command orchestration.Command
-		if err := decodeRPCParams(req, &command); err != nil {
-			return nil, err
-		}
-		return h.server.orchestration.Dispatch(ctx, command)
-	case RPCMethodOrchestrationSubscribeThread:
-		var params orchestration.SubscribeThreadInput
+		var params wire.CommandParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		if params.ThreadID == "" {
-			return nil, fmt.Errorf("%w: subscribeThread requires threadId", jsonrpc2.ErrInvalidParams)
-		}
-		h.client.subscribeThread(params.ThreadID)
-		snapshot, err := h.server.orchestration.SubscribeThread(params)
+		body, err := params.Body()
 		if err != nil {
-			h.client.unsubscribeThread(params.ThreadID)
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 		}
-		if h.afterThreadSnapshot != nil {
-			h.afterThreadSnapshot(params.ThreadID)
-		}
-		return snapshot, nil
-	case RPCMethodOrchestrationUnsubscribeThread:
-		var params orchestration.SubscribeThreadInput
+		return h.server.engine.Do(ctx, orchestration.Command{Key: params.Key, Actor: orchestration.Person(orchestration.DeviceID(h.client.id)), Body: body})
+	case wire.MethodAttachmentUpload:
+		var params wire.AttachmentUploadParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		if params.ThreadID == "" {
-			return nil, fmt.Errorf("%w: unsubscribeThread requires threadId", jsonrpc2.ErrInvalidParams)
+		if params.Data == "" {
+			return nil, fmt.Errorf("%w: attachment.upload requires data", jsonrpc2.ErrInvalidParams)
 		}
-		h.client.unsubscribeThread(params.ThreadID)
+		id, err := h.server.engine.StoreAttachment(params.Data)
+		if err != nil {
+			return nil, err
+		}
+		return wire.AttachmentUploadResult{ID: id}, nil
+	case wire.MethodAttachmentGet:
+		var params wire.AttachmentParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.engine.Attachment(params.ID)
+	case wire.MethodThreadSubscribe:
+		var params wire.ThreadParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.Thread == "" {
+			return nil, fmt.Errorf("%w: thread.subscribe requires thread", jsonrpc2.ErrInvalidParams)
+		}
+		return h.client.subscription.Thread(ctx, params.Thread)
+	case wire.MethodThreadUnsubscribe:
+		var params wire.ThreadParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.client.subscription.Unsubscribe(params.Thread)
 		return nil, nil
-	case RPCMethodOrchestrationGetItemDetail:
-		var params orchestration.GetItemDetailInput
+	case wire.MethodThreadSync:
+		var params wire.ThreadParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		if params.ThreadID == "" || params.ItemID == "" {
-			return nil, fmt.Errorf("%w: getItemDetail requires threadId and itemId", jsonrpc2.ErrInvalidParams)
+		return nil, h.server.engine.Sync(ctx, params.Thread)
+	case wire.MethodThreadSubscribeList:
+		return h.client.subscription.List(ctx)
+	case wire.MethodProjectSubscribeList:
+		return h.client.subscription.Projects(ctx)
+	case wire.MethodProjectAdd:
+		var params wire.ProjectParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
 		}
-		return h.server.orchestration.GetItemDetail(params)
-	case RPCMethodOrchestrationSubscribeThreadList:
-		h.client.subscribeThreadList()
-		return h.server.orchestration.ThreadListSnapshot(), nil
-	case RPCMethodProviderStart:
-		var params providerStartRPCParams
+		return h.server.engine.AddProject(ctx, params.Path)
+	case wire.MethodProjectRemove:
+		var params wire.ProjectParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return nil, h.server.engine.RemoveProject(ctx, params.Path)
+	case wire.MethodThreadTurns:
+		var params wire.ThreadTurnsParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		turns, older, err := h.server.engine.Turns(ctx, params.Thread, params.Before, params.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return wire.ThreadTurnsResult{Turns: turns, Older: older}, nil
+	case wire.MethodThreadForkPreview:
+		var params wire.ThreadForkPreviewParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.engine.ForkPreview(ctx, params.Thread, params.Through, params.Agent)
+	case wire.MethodThreadEntry:
+		var params wire.ThreadEntryParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.engine.Entry(ctx, params.Thread, params.Ref)
+	case wire.MethodProviderStart:
+		var params wire.ProviderStartParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.StartProvider(ctx, params.InstanceSpec, params.Restart)
-	case RPCMethodProviderList:
+	case wire.MethodProviderList:
 		return h.server.providerService.ListInstances(), nil
-	case RPCMethodACPRegistryList:
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
-		}
+	case wire.MethodACPRegistryList:
 		return h.server.acpRegistry.list(ctx)
-	case RPCMethodACPRegistryInstalled:
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
-		}
+	case wire.MethodACPRegistryInstalled:
 		return h.server.acpRegistry.installedAgents()
-	case RPCMethodACPRegistryInstall:
-		var params acpRegistryInstallParams
+	case wire.MethodACPRegistryInstall:
+		var params wire.ACPRegistryInstallParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		if params.RegistryID == "" {
 			return nil, fmt.Errorf("%w: acp.registry.install requires registryId", jsonrpc2.ErrInvalidParams)
 		}
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
+		installed, err := h.server.acpRegistry.install(ctx, params.RegistryID)
+		if err != nil {
+			return nil, err
 		}
-		return h.server.acpRegistry.install(ctx, params.RegistryID)
-	case RPCMethodACPRegistryAddCustom:
-		var params acpCustomAgentAddParams
+		spec, err := h.server.acpRegistry.instanceSpec(installed.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.server.providerService.RegisterManifestInstance(spec); err != nil {
+			return nil, err
+		}
+		return installed, nil
+	case wire.MethodACPRegistryAddCustom:
+		var params wire.ACPCustomAgentAddParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(params.Name) == "" || strings.TrimSpace(params.Command) == "" {
 			return nil, fmt.Errorf("%w: acp.registry.addCustom requires name and command", jsonrpc2.ErrInvalidParams)
 		}
-		if h.server.acpRegistry == nil {
-			return nil, fmt.Errorf("ACP registry is unavailable")
-		}
 		return h.server.acpRegistry.addCustom(params)
-	case RPCMethodACPRegistryStart:
-		var params acpRegistryStartParams
+	case wire.MethodACPRegistryStart:
+		var params wire.ACPRegistryStartParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
@@ -528,123 +540,148 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, fmt.Errorf("%w: acp.registry.start requires registryId", jsonrpc2.ErrInvalidParams)
 		}
 		return h.server.StartACPRegistryProvider(ctx, params.RegistryID, params.Restart)
-	case RPCMethodProviderAuthenticate:
-		var params providerAuthenticateParams
+	case wire.MethodProviderAuthenticate:
+		var params wire.ProviderAuthenticateParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.providerService.Authenticate(ctx, params.InstanceID, params.MethodID)
-	case RPCMethodProviderLogout:
-		var params providerInstanceParams
+		return h.server.authenticateProvider(ctx, params.InstanceID, provider.AuthenticateInput{
+			MethodID: params.MethodID,
+			Secret:   params.Secret,
+			Ask: func(ctx context.Context, request provider.Request) (provider.RequestAnswer, error) {
+				return h.client.ask(ctx, params.InstanceID, request)
+			},
+		})
+	case wire.MethodProviderQuestionAnswer:
+		var params wire.ProviderQuestionAnswerParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.client.questionsMu.Lock()
+		defer h.client.questionsMu.Unlock()
+		pending, ok := h.client.questions[params.RequestID]
+		if !ok {
+			return nil, fmt.Errorf("%w: question %q is not pending", jsonrpc2.ErrInvalidParams, params.RequestID)
+		}
+		action, ok := pending.request.Action(params.ActionID)
+		if !ok {
+			return nil, fmt.Errorf("%w: action %q was not offered for question %q", jsonrpc2.ErrInvalidParams, params.ActionID, params.RequestID)
+		}
+		if len(params.Answers) > 0 && !action.Submit {
+			return nil, fmt.Errorf("%w: action %q of question %q takes no answers", jsonrpc2.ErrInvalidParams, params.ActionID, params.RequestID)
+		}
+		delete(h.client.questions, params.RequestID)
+		pending.answer <- provider.RequestAnswer{Action: action, Answers: params.Answers}
+		return nil, nil
+	case wire.MethodProviderLogout:
+		var params wire.ProviderInstanceParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.providerService.Logout(ctx, params.InstanceID)
-	case RPCMethodProviderListSessions:
-		var params providerListSessionsParams
+	case wire.MethodProviderListSessions:
+		var params wire.ProviderListSessionsParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.providerService.ListSessions(ctx, params.InstanceID, params.Cwd)
-	case RPCMethodProviderImportSession:
-		var params providerImportSessionParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		threadID, imported, err := h.server.ImportProviderSession(ctx, params.InstanceID, params.Session)
-		if err != nil {
-			return nil, err
-		}
-		return providerImportSessionResult{ThreadID: threadID, Imported: imported}, nil
-	case RPCMethodProviderDeleteSession:
-		var params providerSessionParams
+		sessions, err := h.server.providerService.Sessions(ctx, params.InstanceID, params.Cwd)
+		return append([]provider.SessionSummary{}, sessions...), err
+	case wire.MethodProviderDeleteSession:
+		var params wire.ProviderSessionParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return nil, h.server.providerService.DeleteSession(ctx, params.InstanceID, params.SessionID)
-	case RPCMethodProviderCloseSession:
-		var params providerSessionParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return nil, h.server.providerService.CloseSession(ctx, params.InstanceID, params.SessionID)
-	case RPCMethodProviderOptionsGet:
-		var params providerOptionsGetParams
+	case wire.MethodProviderOptionsGet:
+		var params wire.ProviderOptionsGetParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.getProviderOptions(ctx, params)
-	case RPCMethodProviderOptionsSet:
-		var params providerOptionsSetParams
+	case wire.MethodProviderOptionsSet:
+		var params wire.ProviderOptionsSetParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.setProviderOption(ctx, params)
-	case RPCMethodTerminalCreate:
-		var params terminalCreateParams
+	case wire.MethodTerminalCreate:
+		var params wire.TerminalCreateParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.createTerminal(h.client, params)
-	case RPCMethodTerminalAttach:
-		var params terminalAttachParams
+	case wire.MethodTerminalAttach:
+		var params wire.TerminalAttachParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.attachTerminal(h.client, params)
-	case RPCMethodTerminalRelaunch:
-		var params terminalAttachParams
+	case wire.MethodTerminalRelaunch:
+		var params wire.TerminalRelaunchParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.relaunchTerminal(h.client, params)
-	case RPCMethodTerminalDetach:
-		var params terminalDetachParams
+	case wire.MethodTerminalDetach:
+		var params wire.TerminalDetachParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		h.server.detachTerminal(h.client, params)
 		return nil, nil
-	case RPCMethodTerminalSubscribeList:
+	case wire.MethodTerminalSubscribeList:
 		return h.server.subscribeTerminalList(h.client), nil
-	case RPCMethodTerminalRename:
-		var params terminalRenameParams
+	case wire.MethodTerminalRename:
+		var params wire.TerminalRenameParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.renameTerminal(params)
-	case RPCMethodTerminalDelete:
-		var params terminalIDParams
+	case wire.MethodTerminalDelete:
+		var params wire.TerminalIDParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return nil, h.server.deleteTerminal(params.TerminalID)
-	case RPCMethodTerminalTerminate:
-		var params terminalIDParams
+	case wire.MethodTerminalTerminate:
+		var params wire.TerminalIDParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return nil, h.server.terminateTerminal(params.TerminalID)
-	case RPCMethodTerminalWrite:
-		var params terminalWriteParams
+	case wire.MethodTerminalWrite:
+		var params wire.TerminalWriteParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return nil, h.server.writeTerminal(h.client, params)
-	case RPCMethodTerminalResize:
-		var params terminalResizeParams
+	case wire.MethodTerminalResize:
+		var params wire.TerminalResizeParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return nil, h.server.resizeTerminal(h.client, params)
-	case RPCMethodWorkspaceBrowseDirectories:
-		var params workspaceBrowseDirectoriesParams
+	case wire.MethodTerminalFocus:
+		var params wire.TerminalIDParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		h.server.focusTerminal(h.client, params.TerminalID)
+		return nil, nil
+	case wire.MethodWorkspaceBrowseDirectories:
+		var params wire.WorkspaceBrowseDirectoriesParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
 		return h.server.browseWorkspaceDirectories(params)
-	case RPCMethodWorkspaceSearchFiles:
-		var params workspaceSearchFilesParams
+	case wire.MethodProviderCompleteCommand:
+		var params wire.ProviderCompleteCommandParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		return h.server.completeCommand(ctx, params)
+	case wire.MethodWorkspaceSearchFiles:
+		var params wire.WorkspaceSearchFilesParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
@@ -658,17 +695,24 @@ func (c *rpcClient) newOptionsSessionID() string {
 	return fmt.Sprintf("%s-options-session-%d", c.id, c.nextOptionsSessionID.Add(1))
 }
 
-func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOptionsGetParams) (providerOptionsResult, error) {
+func (h *rpcHandler) getProviderOptions(ctx context.Context, params wire.ProviderOptionsGetParams) (wire.ProviderOptionsResult, error) {
 	if params.ProviderInstanceID == "" || params.Cwd == "" {
-		return providerOptionsResult{}, fmt.Errorf("%w: provider.options.get requires providerInstanceId and cwd", jsonrpc2.ErrInvalidParams)
+		return wire.ProviderOptionsResult{}, fmt.Errorf("%w: provider.options.get requires providerInstanceId and cwd", jsonrpc2.ErrInvalidParams)
 	}
+	// The options session runs the agent in cwd, so it is held to the same
+	// rule as a chat's working directory.
+	cwd, err := h.server.engine.WorkspaceRoot(ctx, params.Cwd)
+	if err != nil {
+		return wire.ProviderOptionsResult{}, err
+	}
+	params.Cwd = cwd
 	h.client.optionsLifecycleMu.Lock()
 	defer h.client.optionsLifecycleMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return providerOptionsResult{}, err
+		return wire.ProviderOptionsResult{}, err
 	}
 	if h.client.closed.Load() {
-		return providerOptionsResult{}, fmt.Errorf("client disconnected")
+		return wire.ProviderOptionsResult{}, fmt.Errorf("client disconnected")
 	}
 
 	h.client.optionsMu.Lock()
@@ -677,9 +721,10 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOpti
 	}
 	current := h.client.optionsSessions[params.ProviderInstanceID]
 	if current != nil && current.cwd == params.Cwd {
-		result := providerOptionsResult{
+		result := wire.ProviderOptionsResult{
 			OptionsSessionID: current.optionsSessionID,
-			ConfigOptions:    append([]provider.ConfigOption(nil), current.configOptions...),
+			ConfigOptions:    append([]provider.ConfigOption{}, current.configOptions...),
+			Skills:           append([]provider.Skill(nil), current.skills...),
 		}
 		h.client.optionsMu.Unlock()
 		return result, nil
@@ -699,29 +744,34 @@ func (h *rpcHandler) getProviderOptions(ctx context.Context, params providerOpti
 			h.invalidateOptionsSession(params.ProviderInstanceID, optionsSessionID)
 		},
 	}
-	opened, err := h.server.providerService.OpenOptionsSession(ctx, params.ProviderInstanceID, params.Cwd, callbacks)
+	opened, err := h.server.providerService.OpenOptions(ctx, params.ProviderInstanceID, params.Cwd, callbacks)
 	if err != nil {
-		return providerOptionsResult{}, err
+		return wire.ProviderOptionsResult{}, err
 	}
 	entry := &clientOptionsSession{
 		optionsSessionID: optionsSessionID, providerInstanceID: params.ProviderInstanceID,
 		handle: opened.Handle, cwd: params.Cwd,
 		configOptions: append([]provider.ConfigOption(nil), opened.ConfigOptions...),
+		skills:        append([]provider.Skill(nil), opened.Skills...),
 	}
 	h.client.optionsMu.Lock()
 	if h.client.closed.Load() {
 		h.client.optionsMu.Unlock()
 		go h.closeOptionsSession(*entry)
-		return providerOptionsResult{}, fmt.Errorf("client disconnected")
+		return wire.ProviderOptionsResult{}, fmt.Errorf("client disconnected")
 	}
 	h.client.optionsSessions[params.ProviderInstanceID] = entry
 	h.client.optionsMu.Unlock()
-	return providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: opened.ConfigOptions}, nil
+	return wire.ProviderOptionsResult{
+		OptionsSessionID: optionsSessionID,
+		ConfigOptions:    append([]provider.ConfigOption{}, opened.ConfigOptions...),
+		Skills:           append([]provider.Skill(nil), opened.Skills...),
+	}, nil
 }
 
-func (h *rpcHandler) setProviderOption(ctx context.Context, params providerOptionsSetParams) (providerOptionsResult, error) {
+func (h *rpcHandler) setProviderOption(ctx context.Context, params wire.ProviderOptionsSetParams) (wire.ProviderOptionsResult, error) {
 	if params.OptionsSessionID == "" || params.OptionID == "" {
-		return providerOptionsResult{}, fmt.Errorf("%w: provider.options.set requires optionsSessionId and optionId", jsonrpc2.ErrInvalidParams)
+		return wire.ProviderOptionsResult{}, fmt.Errorf("%w: provider.options.set requires optionsSessionId and optionId", jsonrpc2.ErrInvalidParams)
 	}
 	h.client.optionsLifecycleMu.Lock()
 	defer h.client.optionsLifecycleMu.Unlock()
@@ -736,36 +786,47 @@ func (h *rpcHandler) setProviderOption(ctx context.Context, params providerOptio
 	}
 	if entry == nil {
 		h.client.optionsMu.Unlock()
-		return providerOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
+		return wire.ProviderOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
 	}
 	snapshot := *entry
 	h.client.optionsMu.Unlock()
 
-	options, err := h.server.providerService.SetOptionsSessionValue(ctx, snapshot.providerInstanceID, snapshot.handle, params.OptionID, params.Value)
+	options, err := h.server.providerService.SetOption(ctx, snapshot.providerInstanceID, snapshot.handle, params.OptionID, params.Value)
 	if err != nil {
-		return providerOptionsResult{}, err
+		return wire.ProviderOptionsResult{}, err
 	}
 	h.client.optionsMu.Lock()
 	current := h.client.optionsSessions[snapshot.providerInstanceID]
 	if current != entry || current.optionsSessionID != snapshot.optionsSessionID {
 		h.client.optionsMu.Unlock()
-		return providerOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
+		return wire.ProviderOptionsResult{}, fmt.Errorf("options session %q is no longer active", params.OptionsSessionID)
 	}
 	current.configOptions = append([]provider.ConfigOption(nil), options...)
+	skills := append([]provider.Skill(nil), current.skills...)
 	h.client.optionsMu.Unlock()
-	return providerOptionsResult{OptionsSessionID: snapshot.optionsSessionID, ConfigOptions: options}, nil
+	return wire.ProviderOptionsResult{
+		OptionsSessionID: snapshot.optionsSessionID,
+		ConfigOptions:    append([]provider.ConfigOption{}, options...),
+		Skills:           skills,
+	}, nil
 }
 
 func (h *rpcHandler) publishOptionsUpdate(instanceID provider.InstanceID, optionsSessionID string, options []provider.ConfigOption) {
 	h.client.optionsMu.Lock()
 	current := h.client.optionsSessions[instanceID]
 	active := current != nil && current.optionsSessionID == optionsSessionID
+	var skills []provider.Skill
 	if active {
 		current.configOptions = append([]provider.ConfigOption(nil), options...)
+		skills = append([]provider.Skill(nil), current.skills...)
 	}
 	h.client.optionsMu.Unlock()
 	if active {
-		h.client.notify(wire.MethodProviderOptionsUpdated, providerOptionsResult{OptionsSessionID: optionsSessionID, ConfigOptions: options})
+		h.client.notify(wire.MethodProviderOptionsUpdated, wire.ProviderOptionsResult{
+			OptionsSessionID: optionsSessionID,
+			ConfigOptions:    append([]provider.ConfigOption{}, options...),
+			Skills:           skills,
+		})
 	}
 }
 
@@ -785,7 +846,7 @@ func (h *rpcHandler) invalidateOptionsSession(instanceID provider.InstanceID, op
 func (h *rpcHandler) closeOptionsSession(entry clientOptionsSession) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := h.server.providerService.CloseOptionsSession(ctx, entry.providerInstanceID, entry.handle); err != nil {
+	if err := h.server.providerService.CloseOptions(ctx, entry.providerInstanceID, entry.handle); err != nil {
 		h.client.logger.Debug("close disposable options session", "provider", entry.providerInstanceID, "error", compactError(err))
 	}
 }
@@ -803,7 +864,7 @@ func (s *Server) closeClientOptionsSessions(client *rpcClient) {
 	client.optionsMu.Unlock()
 	for _, entry := range entries {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := s.providerService.CloseOptionsSession(ctx, entry.providerInstanceID, entry.handle); err != nil {
+		if err := s.providerService.CloseOptions(ctx, entry.providerInstanceID, entry.handle); err != nil {
 			client.logger.Debug("close disposable options session", "provider", entry.providerInstanceID, "error", compactError(err))
 		}
 		cancel()
@@ -826,8 +887,23 @@ func rpcError(err error) error {
 	if agentErr, ok := errors.AsType[*provider.RequestError](err); ok {
 		return &jsonrpc2.WireError{Code: int64(agentErr.Code), Message: agentErr.Message, Data: agentErr.Data}
 	}
+	if refusal, ok := errors.AsType[*orchestration.CommandError](err); ok {
+		code := commandRefusedCode
+		if refusal.Code == orchestration.CodeInvalid {
+			code = invalidParamsCode
+		}
+		data, _ := json.Marshal(map[string]orchestration.ErrorCode{"code": refusal.Code})
+		return &jsonrpc2.WireError{Code: code, Message: refusal.Message, Data: data}
+	}
 	return err
 }
+
+// JSON-RPC codes of a refused command; data.code says why
+// (wire CommandErrorCode).
+const (
+	invalidParamsCode  int64 = -32602
+	commandRefusedCode int64 = -32001
+)
 
 func decodeRPCParams(req *jsonrpc2.Request, dst any) error {
 	if len(req.Params) == 0 {
@@ -839,104 +915,8 @@ func decodeRPCParams(req *jsonrpc2.Request, dst any) error {
 	return nil
 }
 
-// publishOrchestrationEvent runs on the engine worker for EVERY event
-// (including each streamed assistant delta), so it must stay cheap:
-//   - collect subscribers first and bail before building anything nobody wants;
-//   - marshal each notification ONCE and fan out the bytes, instead of
-//     re-marshaling per client;
-//   - collapse provider history replay into one authoritative snapshot. A
-//     replay can contain thousands of intermediate item updates even when its
-//     final timeline has only a few dozen entries; sending those transient
-//     states can overflow a healthy client's bounded outbound queue and make
-//     the UI repeatedly render content that is immediately replaced.
-func (s *Server) publishOrchestrationEvent(event orchestration.Event) {
-	threadID := event.ThreadID()
-	if threadID == "" {
-		return
-	}
-
-	beginsHistoryReplay := event.Type == orchestration.EventThreadSessionPrepareRequested &&
-		s.orchestration.ThreadHistoryRestorePending(threadID)
-	endsHistoryReplay := event.EndsHistoryReplay()
-
-	s.rpcMu.Lock()
-	if beginsHistoryReplay {
-		s.historyReplayCoalescing[threadID] = struct{}{}
-	}
-	_, suppressForHistoryReplay := s.historyReplayCoalescing[threadID]
-	refreshAfterHistoryReplay := suppressForHistoryReplay && endsHistoryReplay
-	if refreshAfterHistoryReplay {
-		delete(s.historyReplayCoalescing, threadID)
-	}
-
-	var threadClients, threadListClients []*rpcClient
-	for _, client := range s.rpcClients {
-		if client.subscribedThread(threadID) {
-			threadClients = append(threadClients, client)
-		}
-		if client.subscribedThreadList() {
-			threadListClients = append(threadListClients, client)
-		}
-	}
-	s.rpcMu.Unlock()
-
-	if suppressForHistoryReplay && !refreshAfterHistoryReplay {
-		return
-	}
-	if len(threadClients) == 0 && len(threadListClients) == 0 {
-		return
-	}
-
-	if refreshAfterHistoryReplay {
-		s.publishThreadRefresh(threadID, event.Sequence, threadClients, threadListClients)
-		return
-	}
-
-	if len(threadClients) > 0 {
-		clientEvent := orchestration.ProjectEventForClient(event)
-		if params, ok := s.marshalNotification(orchestration.ThreadStreamItem{Kind: orchestration.StreamItemEvent, Event: &clientEvent}, RPCMethodOrchestrationSubscribeThread); ok {
-			for _, client := range threadClients {
-				client.notify(RPCMethodOrchestrationSubscribeThread, params)
-			}
-		}
-	}
-	if len(threadListClients) == 0 || !orchestration.ThreadListVisible(event) {
-		return
-	}
-	s.publishThreadListUpsert(threadID, event.Sequence, threadListClients)
-}
-
-// publishThreadRefresh replaces every suppressed replay update with one final
-// detail snapshot and one sidebar upsert. Internal engine listeners still see
-// every replay event; only the client transport is coalesced.
-func (s *Server) publishThreadRefresh(threadID orchestration.ThreadID, sequence uint64, threadClients, threadListClients []*rpcClient) {
-	if len(threadClients) > 0 {
-		item, err := s.orchestration.SubscribeThread(orchestration.SubscribeThreadInput{ThreadID: threadID})
-		if err != nil {
-			s.logger.Error("history replay snapshot failed", "thread", threadID, "error", err)
-		} else if params, ok := s.marshalNotification(item, RPCMethodOrchestrationSubscribeThread); ok {
-			for _, client := range threadClients {
-				client.notify(RPCMethodOrchestrationSubscribeThread, params)
-			}
-		}
-	}
-	if len(threadListClients) > 0 {
-		s.publishThreadListUpsert(threadID, sequence, threadListClients)
-	}
-}
-
-func (s *Server) publishThreadListUpsert(threadID orchestration.ThreadID, sequence uint64, clients []*rpcClient) {
-	entry, ok := s.orchestration.ThreadListEntry(threadID)
-	if !ok {
-		return
-	}
-	if params, ok := s.marshalNotification(orchestration.ThreadListStreamItem{Kind: orchestration.StreamItemThreadUpserted, Sequence: sequence, Thread: &entry}, RPCMethodOrchestrationSubscribeThreadList); ok {
-		for _, client := range clients {
-			client.notify(RPCMethodOrchestrationSubscribeThreadList, params)
-		}
-	}
-}
-
+// marshalNotification encodes a notification's params once for every
+// subscriber.
 func (s *Server) marshalNotification(item any, method string) (json.RawMessage, bool) {
 	params, err := json.Marshal(item)
 	if err != nil {
@@ -951,6 +931,6 @@ func (c *rpcClient) notify(method string, params any) {
 	case <-c.done:
 	case c.outbound <- rpcOutbound{method: method, params: params}:
 	default:
-		c.overflowClose(method)
+		c.closeConnection("client outbound queue full", "method", method)
 	}
 }

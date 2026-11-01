@@ -1,5 +1,9 @@
 import SwiftUI
-import UIKit
+#if os(macOS)
+    import AppKit
+#else
+    import UIKit
+#endif
 
 /// Shared clipboard feedback for rich Markdown blocks.
 struct ChatCopyButton: View {
@@ -30,7 +34,12 @@ struct ChatCopyButton: View {
     }
 
     private func copy() {
-        UIPasteboard.general.string = text
+        #if os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        #else
+            UIPasteboard.general.string = text
+        #endif
         copied = true
     }
 }

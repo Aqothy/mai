@@ -48,7 +48,7 @@ func Corpus(tb testing.TB, fileCount int) string {
 }
 
 // ReportPercentiles attaches p50/p95/p99 latency metrics (in milliseconds)
-// to a benchmark, sorting the samples in place. The plan's budgets are
+// to a benchmark, sorting the samples in place. The budgets are
 // stated as percentiles, so ns/op alone cannot check them.
 func ReportPercentiles(b *testing.B, samples []time.Duration) {
 	if len(samples) == 0 {

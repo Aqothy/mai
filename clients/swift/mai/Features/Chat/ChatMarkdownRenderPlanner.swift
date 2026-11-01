@@ -17,7 +17,9 @@ nonisolated enum ChatMarkdownRenderPlanner {
                     .prose(
                         ChatMarkdownProseRun(
                             source: source,
-                            pieces: [.text(AttributedString(source))]
+                            text: ChatMarkdownText(
+                                ChatMarkdownTextRenderer.plainAttributedString(source)
+                            )
                         )
                     )
                 ]
@@ -35,7 +37,7 @@ nonisolated enum ChatMarkdownRenderPlanner {
             lineStarts.append(offset + 1)
         }
 
-        let document = Markdown.Document(parsing: source)
+        let document = Markdown.Document(chatSource: source)
         var locatedChildren: [(offset: Int, block: Markup)] = []
         locatedChildren.reserveCapacity(document.childCount)
 
@@ -63,7 +65,11 @@ nonisolated enum ChatMarkdownRenderPlanner {
             result.append(
                 ParsedBlock(
                     utf8Offset: child.offset,
-                    block: render(child.block, source: blockSource)
+                    block: render(
+                        child.block,
+                        blockSource: blockSource,
+                        documentSource: source
+                    )
                 )
             )
         }
@@ -72,28 +78,15 @@ nonisolated enum ChatMarkdownRenderPlanner {
 
     private static func render(
         _ block: Markup,
-        source: String
+        blockSource: String,
+        documentSource: String
     ) -> ChatMarkdownRenderPlan.Block {
         switch block {
-        case let quote as BlockQuote:
-            return .prose(
-                ChatMarkdownProseRun(
-                    source: source,
-                    pieces: [
-                        .quote(
-                            ChatMarkdownAttributedStringRenderer
-                                .attributedString(fromQuoteContents: quote)
-                        )
-                    ]
-                )
-            )
-
         case let codeBlock as CodeBlock:
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: codeBlock.code),
-                    language: codeBlock.language,
-                    kind: .fenced
+                    language: codeBlock.language
                 )
             )
 
@@ -101,32 +94,23 @@ nonisolated enum ChatMarkdownRenderPlanner {
             return .code(
                 ChatMarkdownCodeBlock(
                     code: removingOneTrailingNewline(from: htmlBlock.rawHTML),
-                    language: "html",
-                    kind: .html
+                    language: "html"
                 )
             )
 
         case let table as Markdown.Table:
             return .table(render(table))
 
-        case is ThematicBreak:
-            return .prose(
-                ChatMarkdownProseRun(
-                    source: source,
-                    pieces: [.thematicBreak]
-                )
-            )
-
         default:
             return .prose(
                 ChatMarkdownProseRun(
-                    source: source,
-                    pieces: [
-                        .text(
-                            ChatMarkdownAttributedStringRenderer
-                                .attributedString(from: block)
+                    source: blockSource,
+                    text: ChatMarkdownText(
+                        ChatMarkdownTextRenderer.attributedString(
+                            blocks: [block],
+                            source: documentSource
                         )
-                    ]
+                    )
                 )
             )
         }
@@ -150,12 +134,12 @@ nonisolated enum ChatMarkdownRenderPlanner {
             }
         }
 
-        let header = renderCells(in: table.head.children)
-        var rows: [[AttributedString]] = []
+        let header = renderCells(in: table.head.children, isHeader: true)
+        var rows: [[ChatMarkdownText]] = []
         rows.reserveCapacity(table.body.childCount)
         for child in table.body.children {
             guard let row = child as? Markdown.Table.Row else { continue }
-            rows.append(renderCells(in: row.children))
+            rows.append(renderCells(in: row.children, isHeader: false))
         }
 
         return ChatMarkdownTable(
@@ -166,12 +150,16 @@ nonisolated enum ChatMarkdownRenderPlanner {
     }
 
     private static func renderCells(
-        in children: MarkupChildren
-    ) -> [AttributedString] {
+        in children: MarkupChildren,
+        isHeader: Bool
+    ) -> [ChatMarkdownText] {
         children.compactMap { child in
             guard let cell = child as? Markdown.Table.Cell else { return nil }
-            return ChatMarkdownAttributedStringRenderer.attributedString(
-                fromInlineChildren: cell.children
+            return ChatMarkdownText(
+                ChatMarkdownTextRenderer.attributedString(
+                    tableCell: cell.children,
+                    isHeader: isHeader
+                )
             )
         }
     }

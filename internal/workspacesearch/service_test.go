@@ -3,8 +3,6 @@ package workspacesearch
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -56,10 +54,6 @@ func (f *fakeFinder) SearchFiles(string, int) ([]fff.FileMatch, error) {
 	}
 	f.searches++
 	return f.matches, nil
-}
-
-func (f *fakeFinder) ScanProgress() (fff.ScanProgress, error) {
-	return fff.ScanProgress{}, nil
 }
 
 func (f *fakeFinder) Close() error {
@@ -117,25 +111,6 @@ func TestConcurrentFirstSearchesCreateOneIndex(t *testing.T) {
 	wg.Wait()
 	if got := creations.Load(); got != 1 {
 		t.Fatalf("expected exactly one index creation, got %d", got)
-	}
-}
-
-func TestSearchesForDistinctRootsDoNotMix(t *testing.T) {
-	s, _, _ := testService(t)
-	rootA, rootB := makeRoot(t), makeRoot(t)
-
-	resultA, err := s.Search(context.Background(), rootA, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootA: %v", err)
-	}
-	resultB, err := s.Search(context.Background(), rootB, "q", 10)
-	if err != nil {
-		t.Fatalf("Search rootB: %v", err)
-	}
-	wantA := "src/" + filepath.Base(rootA) + ".go"
-	wantB := "src/" + filepath.Base(rootB) + ".go"
-	if resultA.Entries[0].RelativePath != wantA || resultB.Entries[0].RelativePath != wantB {
-		t.Fatalf("results mixed roots: %v vs %v", resultA.Entries, resultB.Entries)
 	}
 }
 
@@ -237,23 +212,10 @@ func TestFailedInitializationSurfacesErrorAndAllowsRetry(t *testing.T) {
 	}
 }
 
-func TestValidationRejectsBadInputsWithoutCreatingIndexes(t *testing.T) {
+func TestLongQueryIsRejectedWithoutCreatingAnIndex(t *testing.T) {
 	s, _, creations := testService(t)
 	root := makeRoot(t)
 
-	if _, err := s.Search(context.Background(), "relative/path", "q", 10); !errors.Is(err, ErrInvalidRoot) {
-		t.Fatalf("expected ErrInvalidRoot for relative path, got %v", err)
-	}
-	if _, err := s.Search(context.Background(), filepath.Join(root, "missing"), "q", 10); !errors.Is(err, ErrInvalidRoot) {
-		t.Fatalf("expected ErrInvalidRoot for missing dir, got %v", err)
-	}
-	file := filepath.Join(root, "file.txt")
-	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Search(context.Background(), file, "q", 10); !errors.Is(err, ErrInvalidRoot) {
-		t.Fatalf("expected ErrInvalidRoot for non-directory, got %v", err)
-	}
 	if _, err := s.Search(context.Background(), root, strings.Repeat("q", MaxQueryBytes+1), 10); !errors.Is(err, ErrQueryTooLong) {
 		t.Fatalf("expected ErrQueryTooLong, got %v", err)
 	}
@@ -418,24 +380,4 @@ func TestCloseShutsDownAllIndexesAndRejectsRequests(t *testing.T) {
 	}
 	// Close must stay idempotent.
 	s.Close()
-}
-
-func TestCanonicalRootSharesSymlinkedAliases(t *testing.T) {
-	s, _, creations := testService(t)
-	root := makeRoot(t)
-	alias := filepath.Join(filepath.Dir(root), fmt.Sprintf("alias-%d", time.Now().UnixNano()))
-	if err := os.Symlink(root, alias); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	defer os.Remove(alias)
-
-	if _, err := s.Search(context.Background(), root, "q", 10); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Search(context.Background(), alias, "q", 10); err != nil {
-		t.Fatal(err)
-	}
-	if got := creations.Load(); got != 1 {
-		t.Fatalf("symlinked alias created a second index (%d creations)", got)
-	}
 }

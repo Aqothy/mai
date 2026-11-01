@@ -1,42 +1,55 @@
 package daemon
 
-// Increment 5 tests: the terminal list stream, identity persistence, and the
+// Terminal list tests: the list stream, identity persistence, and the
 // rename/terminate/delete actions.
 
 import (
-	"bytes"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-func subscribeTerminalListSnapshot(t *testing.T, c *terminalTestClient) wire.TerminalListStreamItem {
+func subscribeTerminalListSnapshot(t *testing.T, c *recordingClient) wire.TerminalListStreamItem {
 	t.Helper()
 	var snapshot wire.TerminalListStreamItem
-	c.call(t, RPCMethodTerminalSubscribeList, wire.EmptyParams{}, &snapshot)
+	c.call(t, wire.MethodTerminalSubscribeList, wire.EmptyParams{}, &snapshot)
 	if snapshot.Kind != wire.TerminalListItemSnapshot {
 		t.Fatalf("subscribeList kind = %s, want snapshot", snapshot.Kind)
 	}
 	return snapshot
 }
 
-func waitForListUpsert(t *testing.T, c *terminalTestClient, match func(wire.TerminalSummary) bool) wire.TerminalSummary {
+// waitForListItem consumes list notifications in arrival order until one
+// matches, so successive waits observe successive items.
+func waitForListItem(t *testing.T, c *recordingClient, desc string, match func(wire.TerminalListStreamItem) bool) wire.TerminalListStreamItem {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, item := range c.listItemsSnapshot() {
-			if item.Kind == wire.TerminalListItemUpserted && item.Terminal != nil && match(*item.Terminal) {
-				return *item.Terminal
+		c.mu.Lock()
+		for c.terminalListCursor < len(c.terminalListItems) {
+			item := c.terminalListItems[c.terminalListCursor]
+			c.terminalListCursor++
+			if match(item) {
+				c.mu.Unlock()
+				return item
 			}
 		}
+		c.mu.Unlock()
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("timed out waiting for terminal list upsert")
-	return wire.TerminalSummary{}
+	t.Fatalf("timed out waiting for terminal list %s", desc)
+	return wire.TerminalListStreamItem{}
+}
+
+func waitForListUpsert(t *testing.T, c *recordingClient, match func(wire.TerminalSummary) bool) wire.TerminalSummary {
+	t.Helper()
+	return *waitForListItem(t, c, "upsert", func(item wire.TerminalListStreamItem) bool {
+		return item.Kind == wire.TerminalListItemUpserted && item.Terminal != nil && match(*item.Terminal)
+	}).Terminal
 }
 
 func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
@@ -45,12 +58,12 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	defer s.Close()
 	url := newWSTestServer(t, s)
 
-	observer := dialTerminalClient(t, url)
+	observer := dialRecordingClient(t, url)
 	if snapshot := subscribeTerminalListSnapshot(t, observer); len(snapshot.Terminals) != 0 {
 		t.Fatalf("initial snapshot has %d terminals, want 0", len(snapshot.Terminals))
 	}
 
-	controller := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
 	created := createTestTerminal(t, controller)
 	terminalID := created.Terminal.TerminalID
 
@@ -64,7 +77,7 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 
 	// Rename returns and publishes the new title with a bumped updatedAt.
 	var renamed wire.TerminalSummary
-	observer.call(t, RPCMethodTerminalRename, wire.TerminalRenameParams{
+	observer.call(t, wire.MethodTerminalRename, wire.TerminalRenameParams{
 		TerminalID: terminalID,
 		Title:      "Build terminal",
 	}, &renamed)
@@ -80,81 +93,69 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 
 	// Ordinary output must not publish list updates or bump updatedAt.
 	before := len(observer.listItemsSnapshot())
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: terminalID,
-		RunID:      created.RunID,
-		Data:       []byte("printf 'NOISE-%d\\n' $((3+4))\n"),
-	})
+	controller.writeTerminal(t, terminalID, created.RunID, "printf 'NOISE-%d\\n' $((3+4))\n")
 	controller.waitForOutput(t, "NOISE-7")
 	if after := len(observer.listItemsSnapshot()); after != before {
 		t.Fatalf("raw output published %d list updates", after-before)
 	}
 
 	// Terminate publishes a stopped upsert without changing updatedAt.
-	observer.call(t, RPCMethodTerminalTerminate, wire.TerminalIDParams{TerminalID: terminalID}, nil)
+	observer.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: terminalID}, nil)
 	stopped := waitForListUpsert(t, observer, func(s wire.TerminalSummary) bool {
 		return s.TerminalID == terminalID && s.Status == terminal.StatusStopped
 	})
 	if !stopped.UpdatedAt.Equal(renamed.UpdatedAt) {
 		t.Fatal("terminate changed updatedAt")
 	}
+	// The attached controller's stream reports the run stopped, and stays
+	// open.
+	if _, exit := created.stream.waitRecord(t, "the run's exit", 1, isExited); exit.exited.Status != terminal.StatusStopped {
+		t.Fatalf("controller exit = %s, want stopped", exit.exited.Status)
+	}
 
-	// Delete removes the row and publishes a removal.
-	observer.call(t, RPCMethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		removed := false
-		for _, item := range observer.listItemsSnapshot() {
-			if item.Kind == wire.TerminalListItemRemoved && item.TerminalID == terminalID {
-				removed = true
-			}
-		}
-		if removed {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for terminal removal")
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Delete removes the row, publishes a removal, and ends the stream.
+	observer.call(t, wire.MethodTerminalDelete, wire.TerminalIDParams{TerminalID: terminalID}, nil)
+	if code := created.stream.waitClosed(t); code != websocket.StatusNormalClosure {
+		t.Fatalf("delete closed the stream with %v, want %v", code, websocket.StatusNormalClosure)
+	}
+	waitForListItem(t, observer, "removal", func(item wire.TerminalListStreamItem) bool {
+		return item.Kind == wire.TerminalListItemRemoved && item.TerminalID == terminalID
+	})
+	// The identity is gone: attach and rename both fail.
+	if _, err := observer.attachTerminal(terminalID, 80, 24); err == nil {
+		t.Fatal("attach to deleted terminal succeeded")
+	}
+	if err := observer.callErr(wire.MethodTerminalRename, wire.TerminalRenameParams{TerminalID: terminalID, Title: "ghost"}, nil); err == nil {
+		t.Fatal("rename of deleted terminal succeeded")
 	}
 }
 
 func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 	useQuietTestShell(t)
-	path := filepath.Join(t.TempDir(), "maid.db")
-	metadata, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	s := newServer(newLoggerFromEnv(), metadata)
+	dir := t.TempDir()
+	s := newTestServerAt(t, dir)
 	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := dialRecordingClient(t, url)
 
 	created := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalRename, wire.TerminalRenameParams{
+	client.call(t, wire.MethodTerminalRename, wire.TerminalRenameParams{
 		TerminalID: created.Terminal.TerminalID,
 		Title:      "Survivor",
 	}, nil)
 	// A distinctive marker proves later that no pre-restart output can
 	// reach a post-restart attach.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: created.Terminal.TerminalID,
-		RunID:      created.RunID,
-		Data:       []byte("printf 'OLD-RUN-%d\\n' $((100+23))\n"),
-	})
+	client.writeTerminal(t, created.Terminal.TerminalID, created.RunID, "printf 'OLD-RUN-%d\\n' $((100+23))\n")
 	client.waitForOutput(t, "OLD-RUN-123")
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-
-	metadata2, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
+	if code := created.stream.waitClosed(t); code != websocket.StatusGoingAway {
+		t.Fatalf("shutdown closed the stream with %v, want %v", code, websocket.StatusGoingAway)
 	}
-	restarted := newServer(newLoggerFromEnv(), metadata2)
-	defer restarted.Close()
+
+	restarted := newTestServerAt(t, dir)
 	url2 := newWSTestServer(t, restarted)
-	client2 := dialTerminalClient(t, url2)
+	client2 := dialRecordingClient(t, url2)
 
 	snapshot := subscribeTerminalListSnapshot(t, client2)
 	if len(snapshot.Terminals) != 1 {
@@ -170,46 +171,18 @@ func TestTerminalMetadataSurvivesDaemonRestartAsStopped(t *testing.T) {
 
 	// The old run's process and output are gone by design: attach requires a
 	// relaunch, which starts a fresh shell in the persisted cwd.
-	if _, err := attachOnce(client2, restored.TerminalID); err == nil {
+	if _, err := client2.attachTerminal(restored.TerminalID, 80, 24); err == nil {
 		t.Fatal("attach to stopped terminal succeeded, want relaunch requirement")
 	}
-	var relaunched wire.TerminalAttachSnapshot
-	client2.call(t, RPCMethodTerminalRelaunch, wire.TerminalAttachParams{
-		TerminalID: restored.TerminalID,
-		Columns:    80,
-		Rows:       24,
-	}, &relaunched)
+	var result wire.TerminalAttachResult
+	client2.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: restored.TerminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &result)
+	relaunched := client2.view(t, result)
 	if relaunched.RunID == created.RunID {
 		t.Fatal("relaunch after restart reused the old run id")
 	}
 	// A native snapshot of the fresh shell carries terminal state, but never
 	// the previous run's output.
-	if bytes.Contains(relaunched.Snapshot, []byte("OLD-RUN-123")) {
+	if containsBytes(relaunched.Snapshot, "OLD-RUN-123") {
 		t.Fatal("old output survived the daemon restart")
-	}
-}
-
-func TestTerminalDeleteWhileRunningTerminatesProcess(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
-
-	created := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalDelete, wire.TerminalIDParams{TerminalID: created.Terminal.TerminalID}, nil)
-
-	// The identity is gone: attach and rename both fail.
-	if _, err := attachOnce(client, created.Terminal.TerminalID); err == nil {
-		t.Fatal("attach to deleted terminal succeeded")
-	}
-	var renamed wire.TerminalSummary
-	ctx, cancel := timeout15()
-	defer cancel()
-	if err := client.conn.Call(ctx, RPCMethodTerminalRename, wire.TerminalRenameParams{
-		TerminalID: created.Terminal.TerminalID,
-		Title:      "ghost",
-	}).Await(ctx, &renamed); err == nil {
-		t.Fatal("rename of deleted terminal succeeded")
 	}
 }

@@ -1,10 +1,12 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSChatDestinationView: View {
     let route: IOSNavigationRoute
     let store: ThreadStore
     let draftStore: ThreadDraftStore
-    let projectFolders: ProjectFolderStore
+    let openThread: (String) -> Void
+    let openDraft: () -> Void
 
     var body: some View {
         Group {
@@ -13,15 +15,17 @@ struct IOSChatDestinationView: View {
                 ChatView(
                     store: store,
                     draftStore: draftStore,
-                    projectFolders: projectFolders,
-                    initialWorkingDirectory: workingDirectory
+                    initialWorkingDirectory: workingDirectory,
+                    openThread: openThread,
+                    openDraft: openDraft
                 )
             case .thread(let threadID):
                 if store.selectedThreadID == threadID {
                     ChatView(
                         store: store,
                         draftStore: draftStore,
-                        projectFolders: projectFolders
+                        openThread: openThread,
+                        openDraft: openDraft
                     )
                 } else {
                     ProgressView("Opening Chat…")
@@ -39,7 +43,7 @@ struct IOSChatDestinationView: View {
         .task(id: route) {
             switch route {
             case .newChat:
-                store.startNewDraft()
+                store.selectThread(nil)
             case .thread(let threadID):
                 guard store.selectedThreadID != threadID else { return }
                 store.selectThread(threadID)
@@ -47,5 +51,15 @@ struct IOSChatDestinationView: View {
                 break
             }
         }
+        // Going back leaves the chat: what finishes in it afterwards is
+        // unread. A chat pushed on top selects itself first, so this is a
+        // no-op then.
+        .onDisappear {
+            if case .thread(let threadID) = route, store.selectedThreadID == threadID {
+                store.selectThread(nil)
+            }
+        }
     }
 }
+
+#endif

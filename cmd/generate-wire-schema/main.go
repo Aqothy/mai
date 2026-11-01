@@ -17,65 +17,106 @@ import (
 // cross-language generators one stable input document.
 type contract struct {
 	EmptyParams                      wire.EmptyParams                      `json:"emptyParams"`
-	Command                          wire.Command                          `json:"command"`
-	CommandMessage                   wire.CommandMessage                   `json:"commandMessage"`
-	DispatchResult                   wire.DispatchResult                   `json:"dispatchResult"`
-	SubscribeThreadParams            wire.SubscribeThreadParams            `json:"subscribeThreadParams"`
-	GetItemDetailParams              wire.GetItemDetailParams              `json:"getItemDetailParams"`
-	ThreadStreamItem                 wire.ThreadStreamItem                 `json:"threadStreamItem"`
-	ThreadListStreamItem             wire.ThreadListStreamItem             `json:"threadListStreamItem"`
-	ThreadDetailSnapshot             wire.ThreadDetailSnapshot             `json:"threadDetailSnapshot"`
-	ThreadListSnapshot               wire.ThreadListSnapshot               `json:"threadListSnapshot"`
-	ThreadListEntry                  wire.ThreadListEntry                  `json:"threadListEntry"`
-	Event                            wire.Event                            `json:"event"`
-	EventMetadata                    wire.EventMetadata                    `json:"eventMetadata"`
-	EventPayload                     wire.EventPayload                     `json:"eventPayload"`
-	ApprovalEvent                    wire.ApprovalEvent                    `json:"approvalEvent"`
-	Thread                           wire.Thread                           `json:"thread"`
-	Turn                             wire.Turn                             `json:"turn"`
-	Message                          wire.Message                          `json:"message"`
-	Approval                         wire.Approval                         `json:"approval"`
-	SessionBinding                   wire.SessionBinding                   `json:"sessionBinding"`
-	Item                             wire.Item                             `json:"item"`
+	CommandParams                    wire.CommandParams                    `json:"commandParams"`
+	CommandResult                    wire.CommandResult                    `json:"commandResult"`
+	ThreadParams                     wire.ThreadParams                     `json:"threadParams"`
+	ThreadTurnsParams                wire.ThreadTurnsParams                `json:"threadTurnsParams"`
+	ThreadTurnsResult                wire.ThreadTurnsResult                `json:"threadTurnsResult"`
+	ThreadEntryParams                wire.ThreadEntryParams                `json:"threadEntryParams"`
+	ThreadForkPreviewParams          wire.ThreadForkPreviewParams          `json:"threadForkPreviewParams"`
+	ForkPreview                      wire.ForkPreview                      `json:"forkPreview"`
+	AttachmentUploadParams           wire.AttachmentUploadParams           `json:"attachmentUploadParams"`
+	AttachmentUploadResult           wire.AttachmentUploadResult           `json:"attachmentUploadResult"`
+	AttachmentParams                 wire.AttachmentParams                 `json:"attachmentParams"`
+	ThreadSummary                    wire.ThreadSummary                    `json:"threadSummary"`
+	OriginSummary                    wire.OriginSummary                    `json:"originSummary"`
+	ParticipantSummary               wire.ParticipantSummary               `json:"participantSummary"`
+	ParticipantView                  wire.ParticipantView                  `json:"participantView"`
+	Attention                        wire.Attention                        `json:"attention"`
+	ThreadSnapshot                   wire.ThreadSnapshot                   `json:"threadSnapshot"`
+	TurnView                         wire.TurnView                         `json:"turnView"`
+	EntryView                        wire.EntryView                        `json:"entryView"`
+	DeliveryView                     wire.DeliveryView                     `json:"deliveryView"`
+	ActorView                        wire.ActorView                        `json:"actorView"`
+	RequestView                      wire.RequestView                      `json:"requestView"`
+	ThreadEvent                      wire.ThreadEvent                      `json:"threadEvent"`
+	TextAppend                       wire.TextAppend                       `json:"textAppend"`
+	RequestResolution                wire.RequestResolution                `json:"requestResolution"`
+	ThreadListItem                   wire.ThreadListItem                   `json:"threadListItem"`
+	Project                          wire.Project                          `json:"project"`
+	ProjectList                      wire.ProjectList                      `json:"projectList"`
+	ProjectParams                    wire.ProjectParams                    `json:"projectParams"`
 	ToolCallSummary                  wire.ToolCallSummary                  `json:"toolCallSummary"`
 	FileChangeSummary                wire.FileChangeSummary                `json:"fileChangeSummary"`
-	ToolAttachmentSummary            wire.ToolAttachmentSummary            `json:"toolAttachmentSummary"`
-	TimelineEntry                    wire.TimelineEntry                    `json:"timelineEntry"`
-	Plan                             wire.Plan                             `json:"plan"`
+	ToolAttachment                   wire.ToolAttachment                   `json:"toolAttachment"`
+	ForkPoint                        wire.ForkPoint                        `json:"forkPoint"`
+	TreePolicy                       wire.TreePolicy                       `json:"treePolicy"`
+	MessageBody                      wire.MessageBody                      `json:"messageBody"`
+	NewParticipant                   wire.NewParticipant                   `json:"newParticipant"`
+	CreateThread                     wire.CreateThread                     `json:"createThread"`
+	UpdateThread                     wire.UpdateThread                     `json:"updateThread"`
+	DeleteThread                     wire.DeleteThread                     `json:"deleteThread"`
+	ForkThread                       wire.ForkThread                       `json:"forkThread"`
+	Spawn                            wire.Spawn                            `json:"spawn"`
+	AddParticipant                   wire.AddParticipant                   `json:"addParticipant"`
+	UpdateParticipant                wire.UpdateParticipant                `json:"updateParticipant"`
+	Deliver                          wire.Deliver                          `json:"deliver"`
+	CancelDelivery                   wire.CancelDelivery                   `json:"cancelDelivery"`
+	MoveDelivery                     wire.MoveDelivery                     `json:"moveDelivery"`
+	SteerDelivery                    wire.SteerDelivery                    `json:"steerDelivery"`
+	RetryDelivery                    wire.RetryDelivery                    `json:"retryDelivery"`
+	Interrupt                        wire.Interrupt                        `json:"interrupt"`
+	Stop                             wire.Stop                             `json:"stop"`
+	Continue                         wire.Continue                         `json:"continue"`
+	Respond                          wire.Respond                          `json:"respond"`
+	StopItem                         wire.StopItem                         `json:"stopItem"`
 	InstanceInfo                     wire.InstanceInfo                     `json:"instanceInfo"`
+	AuthenticationResult             wire.AuthenticationResult             `json:"authenticationResult"`
 	SessionSummary                   wire.SessionSummary                   `json:"sessionSummary"`
 	Attachment                       wire.Attachment                       `json:"attachment"`
-	ModelSelection                   wire.ModelSelection                   `json:"modelSelection"`
+	PromptAnnotation                 wire.PromptAnnotation                 `json:"promptAnnotation"`
 	ConfigOption                     wire.ConfigOption                     `json:"configOption"`
 	ConfigChoice                     wire.ConfigChoice                     `json:"configChoice"`
 	ConfigOptionSelection            wire.ConfigOptionSelection            `json:"configOptionSelection"`
 	SlashCommand                     wire.SlashCommand                     `json:"slashCommand"`
+	ProviderCompleteCommandParams    wire.ProviderCompleteCommandParams    `json:"providerCompleteCommandParams"`
+	CommandCompletion                wire.CommandCompletion                `json:"commandCompletion"`
+	Skill                            wire.Skill                            `json:"skill"`
 	TokenUsage                       wire.TokenUsage                       `json:"tokenUsage"`
-	ApprovalOption                   wire.ApprovalOption                   `json:"approvalOption"`
+	Goal                             wire.Goal                             `json:"goal"`
+	RequestAction                    wire.RequestAction                    `json:"requestAction"`
+	Entry                            wire.Entry                            `json:"entry"`
+	Envelope                         wire.Envelope                         `json:"envelope"`
+	RequestRecord                    wire.RequestRecord                    `json:"requestRecord"`
+	Workspace                        wire.Workspace                        `json:"workspace"`
+	PlanEntry                        wire.PlanEntry                        `json:"planEntry"`
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
-	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"acpRegistryStartParams"`
+	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"aCPRegistryStartParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`
 	ProviderInstanceParams           wire.ProviderInstanceParams           `json:"providerInstanceParams"`
 	ProviderListSessionsParams       wire.ProviderListSessionsParams       `json:"providerListSessionsParams"`
 	ProviderSessionParams            wire.ProviderSessionParams            `json:"providerSessionParams"`
-	ProviderImportSessionParams      wire.ProviderImportSessionParams      `json:"providerImportSessionParams"`
-	ProviderImportSessionResult      wire.ProviderImportSessionResult      `json:"providerImportSessionResult"`
 	ProviderOptionsGetParams         wire.ProviderOptionsGetParams         `json:"providerOptionsGetParams"`
 	ProviderOptionsSetParams         wire.ProviderOptionsSetParams         `json:"providerOptionsSetParams"`
 	ProviderOptionsResult            wire.ProviderOptionsResult            `json:"providerOptionsResult"`
 	ProviderOptionsInvalidated       wire.ProviderOptionsInvalidated       `json:"providerOptionsInvalidated"`
-	ACPRegistryAgent                 wire.ACPRegistryAgent                 `json:"acpRegistryAgent"`
-	ACPRegistryInstalledAgent        wire.ACPRegistryInstalledAgent        `json:"acpRegistryInstalledAgent"`
-	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"acpRegistryInstallParams"`
-	ACPCustomAgentAddParams          wire.ACPCustomAgentAddParams          `json:"acpCustomAgentAddParams"`
+	ProviderQuestion                 wire.ProviderQuestion                 `json:"providerQuestion"`
+	ProviderQuestionAnswerParams     wire.ProviderQuestionAnswerParams     `json:"providerQuestionAnswerParams"`
+	ACPRegistryAgent                 wire.ACPRegistryAgent                 `json:"aCPRegistryAgent"`
+	ACPRegistryInstalledAgent        wire.ACPRegistryInstalledAgent        `json:"aCPRegistryInstalledAgent"`
+	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"aCPRegistryInstallParams"`
+	ACPCustomAgentAddParams          wire.ACPCustomAgentAddParams          `json:"aCPCustomAgentAddParams"`
 	TerminalSummary                  wire.TerminalSummary                  `json:"terminalSummary"`
-	TerminalAttachSnapshot           wire.TerminalAttachSnapshot           `json:"terminalAttachSnapshot"`
-	TerminalStreamItem               wire.TerminalStreamItem               `json:"terminalStreamItem"`
+	TerminalAttachResult             wire.TerminalAttachResult             `json:"terminalAttachResult"`
+	TerminalStreamSnapshot           wire.TerminalStreamSnapshot           `json:"terminalStreamSnapshot"`
+	TerminalStreamResized            wire.TerminalStreamResized            `json:"terminalStreamResized"`
+	TerminalStreamExited             wire.TerminalStreamExited             `json:"terminalStreamExited"`
 	TerminalListStreamItem           wire.TerminalListStreamItem           `json:"terminalListStreamItem"`
 	TerminalRenameParams             wire.TerminalRenameParams             `json:"terminalRenameParams"`
 	TerminalCreateParams             wire.TerminalCreateParams             `json:"terminalCreateParams"`
-	TerminalIDParams                 wire.TerminalIDParams                 `json:"terminalIdParams"`
+	TerminalIDParams                 wire.TerminalIDParams                 `json:"terminalIDParams"`
 	TerminalAttachParams             wire.TerminalAttachParams             `json:"terminalAttachParams"`
+	TerminalRelaunchParams           wire.TerminalRelaunchParams           `json:"terminalRelaunchParams"`
 	TerminalDetachParams             wire.TerminalDetachParams             `json:"terminalDetachParams"`
 	TerminalWriteParams              wire.TerminalWriteParams              `json:"terminalWriteParams"`
 	TerminalResizeParams             wire.TerminalResizeParams             `json:"terminalResizeParams"`
@@ -109,49 +150,30 @@ func main() {
 		definition.Title = name
 	}
 
-	data, err := json.MarshalIndent(schema, "", "  ")
+	writeJSON(*out, schema)
+	writeJSON(*methodsOut, struct {
+		Methods       []wire.MethodDefinition       `json:"methods"`
+		Notifications []wire.NotificationDefinition `json:"notifications"`
+	}{wire.Methods, wire.Notifications})
+	// Closed string vocabularies are emitted separately: the JSON Schema
+	// reflector sees only `string` for Go named-string constants, so without
+	// this every client would re-type the literals by hand.
+	writeJSON(*vocabularyOut, struct {
+		Vocabularies []wire.VocabularyDefinition `json:"vocabularies"`
+	}{wire.Vocabularies})
+}
+
+// writeJSON writes v as indented JSON with a trailing newline.
+func writeJSON(path string, v any) {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		fatal(err)
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fatal(err)
 	}
-	if err := os.WriteFile(*out, data, 0o644); err != nil {
-		fatal(err)
-	}
-
-	methods := struct {
-		Methods       []wire.MethodDefinition       `json:"methods"`
-		Notifications []wire.NotificationDefinition `json:"notifications"`
-	}{wire.Methods, wire.Notifications}
-	methodData, err := json.MarshalIndent(methods, "", "  ")
-	if err != nil {
-		fatal(err)
-	}
-	methodData = append(methodData, '\n')
-	if err := os.MkdirAll(filepath.Dir(*methodsOut), 0o755); err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(*methodsOut, methodData, 0o644); err != nil {
-		fatal(err)
-	}
-
-	// Closed string vocabularies are emitted separately: the JSON Schema
-	// reflector sees only `string` for Go named-string constants, so without
-	// this every client would re-type the literals by hand.
-	vocabularies := struct {
-		Vocabularies []wire.VocabularyDefinition `json:"vocabularies"`
-	}{wire.Vocabularies}
-	vocabularyData, err := json.MarshalIndent(vocabularies, "", "  ")
-	if err != nil {
-		fatal(err)
-	}
-	vocabularyData = append(vocabularyData, '\n')
-	if err := os.MkdirAll(filepath.Dir(*vocabularyOut), 0o755); err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(*vocabularyOut, vocabularyData, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		fatal(err)
 	}
 }

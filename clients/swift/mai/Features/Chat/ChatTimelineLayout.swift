@@ -1,69 +1,83 @@
 import Foundation
 
-/// Builds the flat row list the chat `List` renders from the wire timeline.
+/// Builds the flat row list the chat `List` renders from a thread's turns.
 ///
-/// The daemon appends timeline entries in canonical order and stamps a
-/// `turnId` on every live item, message, and approval, so contiguous scanning
-/// is enough to reconstruct turns. Restored history replays without turn ids;
-/// those entries fall back to sections split on user messages.
-///
-/// Layout rules:
+/// Each turn is one section, in the daemon's order. Layout rules:
 /// - User messages and the turn's final assistant message are always visible.
 /// - Reasoning renders as plain dimmed text rows, not as steps among tools.
-/// - Consecutive activity items (tools, commands, file changes) merge into
+/// - Consecutive activity entries (tools, commands, file changes) merge into
 ///   one compact `ChatActivityGroup`.
-/// - A finished turn folds everything else — activity, thoughts, and
+/// - A settled turn folds everything else — activity, thoughts, and
 ///   intermediate assistant segments — behind a single `ChatTurnActivity`
 ///   header row ("Worked for 42s") until the user expands that section.
 /// - The running turn's content is always visible.
-/// - Warnings, errors, and pending approvals never fold.
+/// - Warnings, errors, open requests, what other agents said, and running
+///   background tasks never fold.
+/// - A settled turn ends with its fork actions.
 nonisolated enum ChatTimelineLayout {
-    static func rows(
-        timeline: [TimelineEntry],
-        streamingTurnID: String?,
-        latestTurn: Turn?,
-        expandedSectionIDs: Set<String>
-    ) -> [ChatTimelineRowModel] {
-        rows(
-            sections: sections(timeline: timeline),
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
-            expandedSectionIDs: expandedSectionIDs
-        )
-    }
-
-    /// Emits rows from an already projected timeline. Keeping these sections
-    /// as the List input prevents a live view from retaining the generated
-    /// model's large `TimelineEntry` array while the store appends text to its
-    /// last entry.
+    /// Emits rows from projected sections. Requests still open show at the
+    /// end of their turn's section, those of no loaded turn at the end.
+    /// `liveTurnID` keeps a turn that just settled presented as running
+    /// until its settled rows are prepared.
     static func rows(
         sections: [Section],
-        streamingTurnID: String?,
-        latestTurn: Turn?,
+        requests: [ChatRequest] = [],
+        liveTurnID: String? = nil,
         expandedSectionIDs: Set<String>
     ) -> [ChatTimelineRowModel] {
+        var requestsByTurn: [String: [ChatRequest]] = [:]
+        var unplaced: [ChatRequest] = []
+        let loadedTurns = Set(sections.map(\.id))
+        // A request's record joins its turn just before the request leaves
+        // the open ones.
+        let recorded = Set(sections.flatMap { section in
+            section.blocks.compactMap { block -> String? in
+                if case .request(let request) = block.row { return request.id }
+                return nil
+            }
+        })
+        for request in requests where !recorded.contains(request.id) {
+            if let turnID = request.turnID, loadedTurns.contains(turnID) {
+                requestsByTurn[turnID, default: []].append(request)
+            } else {
+                unplaced.append(request)
+            }
+        }
         var rows: [ChatTimelineRowModel] = []
         for section in sections {
             appendRows(
                 for: section,
                 into: &rows,
-                streamingTurnID: streamingTurnID,
-                latestTurn: latestTurn,
+                isRunning: section.isRunning || section.id == liveTurnID,
                 isExpanded: expandedSectionIDs.contains(section.id)
             )
+            // Why a turn stopped when no one stopped it: maiD itself did.
+            if section.turn.turnState == .interrupted, let error = section.turn.error, !error.isEmpty {
+                rows.append(.stopNote(ChatTurnStopNote(turnID: section.id, text: error)))
+            }
+            rows.append(contentsOf: (requestsByTurn[section.id] ?? []).map(ChatTimelineRowModel.request))
+            // Any settled turn forks; one a prompt started also edits it.
+            if section.turn.turnState?.isSettled == true {
+                rows.append(.turnFork(ChatTurnFork(turnID: section.id, prompt: section.prompt)))
+            }
         }
+        rows.append(contentsOf: unplaced.map(ChatTimelineRowModel.request))
         return rows
     }
 
     // MARK: Sections
 
-    /// One turn's worth of contiguous timeline entries.
+    /// One turn's rows, before folding.
     struct Section {
+        /// The turn's ID.
         var id: String
-        var turnID: String?
+        /// The turn without its entries, which the blocks carry.
+        var turn: TurnView
         var blocks: [Block] = []
-        var earliest: Date?
-        var latest: Date?
+        /// The prompt that started the turn.
+        var prompt: ChatMessage?
+
+        var isRunning: Bool { turn.turnState == .running }
     }
 
     /// A section entry tagged with whether it can hide behind the turn fold.
@@ -72,129 +86,91 @@ nonisolated enum ChatTimelineLayout {
         var isFoldable: Bool
     }
 
-    static func sections(timeline: [TimelineEntry]) -> [Section] {
-        var sections: [Section] = []
-
-        for entry in timeline {
-            let turnID = entryTurnID(entry)
-            let isUserMessage =
-                entry.message?.role == MaidMessageRole.user.rawValue
-
-            var startsNewSection = sections.isEmpty
-            if let current = sections.last, !startsNewSection {
-                if isUserMessage {
-                    // A user message starts the next turn unless it was
-                    // steering the turn this section already covers.
-                    startsNewSection = turnID == nil || turnID != current.turnID
-                } else if let turnID, let currentTurnID = current.turnID {
-                    startsNewSection = turnID != currentTurnID
-                }
-            }
-
-            if startsNewSection {
-                sections.append(
-                    Section(
-                        id: turnID ?? "local-\(entryIdentity(entry))",
-                        turnID: turnID
-                    )
-                )
-            }
-
-            var section = sections.removeLast()
-            if section.turnID == nil {
-                section.turnID = turnID
-            }
-            append(entry, to: &section)
-            sections.append(section)
+    static func section(for turn: TurnView) -> Section {
+        var header = turn
+        header.entries = []
+        var section = Section(id: turn.id, turn: header)
+        section.blocks.reserveCapacity(turn.entries.count)
+        for entry in turn.entries {
+            append(entry, of: turn.id, to: &section)
         }
-
-        return sections
+        return section
     }
 
-    /// Returns the newest complete turn sections, counting sections that
-    /// contain a user message as page boundaries. Any trailing activity-only
-    /// sections stay attached to the newest page.
+    static func sections(turns: [TurnView]) -> [Section] {
+        turns.map(section(for:))
+    }
+
+    /// The newest sections holding up to `userMessageLimit` prompts; the
+    /// first page of a long chat.
     static func paginatedSections<Sections: RandomAccessCollection>(
         _ sections: Sections,
         userMessageLimit: Int
     ) -> [Section] where Sections.Element == Section {
         guard userMessageLimit > 0 else { return [] }
-
-        var remainingUserMessages = userMessageLimit
+        var remaining = userMessageLimit
         var startIndex = sections.endIndex
         while startIndex > sections.startIndex {
-            let candidateIndex = sections.index(before: startIndex)
-            let section = sections[candidateIndex]
-            startIndex = candidateIndex
-
-            let containsUserMessage = section.blocks.contains { block in
-                guard case .message(let message) = block.row else {
-                    return false
-                }
-                return message.role == MaidMessageRole.user.rawValue
-            }
-            if containsUserMessage {
-                remainingUserMessages -= 1
-                if remainingUserMessages == 0 {
-                    break
-                }
+            startIndex = sections.index(before: startIndex)
+            if sections[startIndex].prompt != nil {
+                remaining -= 1
+                if remaining == 0 { break }
             }
         }
         return Array(sections[startIndex...])
     }
 
-    private static func append(_ entry: TimelineEntry, to section: inout Section) {
-        switch entry.entryKind {
-        case .message:
-            guard let message = entry.message else { return }
-            note(created: message.createdAt, updated: message.updatedAt, in: &section)
+    private static func append(_ entry: EntryView, of turnID: String, to section: inout Section) {
+        switch entry.itemKind {
+        case .userMessage:
+            let message = ChatMessage(turnID: turnID, entry: entry)
+            if section.prompt == nil { section.prompt = message }
+            section.blocks.append(Block(row: .message(message), isFoldable: false))
+        case .assistantMessage:
             // Empty segments would render as blank padded rows.
-            guard !message.text.isEmpty || message.attachments?.isEmpty == false else {
-                return
-            }
+            guard entry.text?.isEmpty == false || entry.attachments?.isEmpty == false else { return }
             // Intermediate assistant segments fold with the activity; the
             // last one in the section is exempted at emission time.
-            let isAssistant = message.role == MaidMessageRole.assistant.rawValue
-            section.blocks.append(Block(row: .message(message), isFoldable: isAssistant))
-        case .approval:
-            guard let approval = entry.approval else { return }
-            note(created: approval.createdAt, updated: approval.updatedAt, in: &section)
-            // A resolved approval is part of the finished work; a pending one
-            // needs the user's attention and must stay visible.
-            let isResolved = approval.approvalStatus == .resolved
-            section.blocks.append(
-                Block(row: .approval(approval), isFoldable: isResolved)
-            )
-        case .item:
-            guard let item = entry.item else { return }
-            note(created: item.createdAt, updated: item.updatedAt, in: &section)
-            switch item.itemKind {
-            case .warning, .error:
-                section.blocks.append(Block(row: .notice(item), isFoldable: false))
-            case .reasoning:
-                section.blocks.append(Block(row: .thought(item), isFoldable: true))
-            default:
-                if var group = section.blocks.last?.activityGroup {
-                    group.items.append(item)
-                    section.blocks[section.blocks.count - 1] =
-                        Block(row: .activityGroup(group), isFoldable: true)
-                } else {
-                    section.blocks.append(
-                        Block(
-                            row: .activityGroup(ChatActivityGroup(items: [item])),
-                            isFoldable: true
-                        )
-                    )
-                }
+            section.blocks.append(Block(row: .message(ChatMessage(turnID: turnID, entry: entry)), isFoldable: true))
+        case .reasoning:
+            section.blocks.append(Block(row: .thought(ChatItem(turnID: turnID, entry: entry)), isFoldable: true))
+        case .warning, .error:
+            section.blocks.append(Block(row: .notice(ChatItem(turnID: turnID, entry: entry)), isFoldable: false))
+        case .envelope:
+            switch entry.envelopeKind {
+            case .handoff:
+                section.blocks.append(Block(row: .handoff(ChatItem(turnID: turnID, entry: entry)), isFoldable: false))
+            case .message, .reply, .notice:
+                section.blocks.append(Block(row: .envelope(ChatItem(turnID: turnID, entry: entry)), isFoldable: false))
+            case .instructions, nil:
+                // A chat's instructions are for the agent; quotes show on
+                // the message they annotate.
+                break
             }
-        case nil:
-            break
+        case .request:
+            guard let record = entry.request else { return }
+            section.blocks.append(
+                Block(row: .request(ChatRequest(record: record, turnID: turnID)), isFoldable: true)
+            )
+        default:
+            let item = ChatItem(turnID: turnID, entry: entry)
+            // A background task can outlive its turn; while it runs it
+            // stays in view on its own row, where it can be stopped.
+            if item.isRunningInBackground {
+                section.blocks.append(
+                    Block(row: .activityGroup(ChatActivityGroup(items: [item])), isFoldable: false)
+                )
+            } else if section.blocks.last?.isFoldable == true,
+                var group = section.blocks.last?.activityGroup
+            {
+                group.items.append(item)
+                section.blocks[section.blocks.count - 1] = Block(row: .activityGroup(group), isFoldable: true)
+            } else {
+                section.blocks.append(
+                    Block(row: .activityGroup(ChatActivityGroup(items: [item])), isFoldable: true)
+                )
+            }
         }
-    }
-
-    private static func note(created: Date, updated: Date, in section: inout Section) {
-        section.earliest = section.earliest.map { min($0, created) } ?? created
-        section.latest = section.latest.map { max($0, updated) } ?? updated
     }
 
     // MARK: Row emission
@@ -202,11 +178,9 @@ nonisolated enum ChatTimelineLayout {
     private static func appendRows(
         for section: Section,
         into rows: inout [ChatTimelineRowModel],
-        streamingTurnID: String?,
-        latestTurn: Turn?,
+        isRunning: Bool,
         isExpanded: Bool
     ) {
-        let isRunning = streamingTurnID != nil && section.turnID == streamingTurnID
         let showsFoldedContent = isRunning || isExpanded
         let finalMessageIndex = section.blocks.lastIndex { block in
             if case .message = block.row { return block.isFoldable }
@@ -214,12 +188,7 @@ nonisolated enum ChatTimelineLayout {
         }
         var didInsertHeader = false
         let header = ChatTimelineRowModel.turnActivity(
-            turnActivity(
-                for: section,
-                latestTurn: latestTurn,
-                isRunning: isRunning,
-                isExpanded: isExpanded
-            )
+            turnActivity(for: section, isRunning: isRunning, isExpanded: isExpanded)
         )
 
         for (index, block) in section.blocks.enumerated() {
@@ -235,115 +204,144 @@ nonisolated enum ChatTimelineLayout {
                 rows.append(block.row)
             }
         }
-
-        // A running turn shows its header from the start, even before the
-        // first tool call or thought arrives.
-        if isRunning, !didInsertHeader {
+        // A running turn shows its header from the start, before its first
+        // tool call or thought.
+        if isRunning && !didInsertHeader {
             rows.append(header)
         }
     }
 
-    private static func turnActivity(
-        for section: Section,
-        latestTurn: Turn?,
-        isRunning: Bool,
-        isExpanded: Bool
-    ) -> ChatTurnActivity {
+    private static func turnActivity(for section: Section, isRunning: Bool, isExpanded: Bool) -> ChatTurnActivity {
         var stepCount = 0
         var hasFailure = false
-        var wasInterrupted = false
+        var wasInterrupted = section.turn.turnState == .interrupted
         for block in section.blocks where block.isFoldable {
             switch block.row {
             case .activityGroup(let group):
                 stepCount += group.items.count
                 hasFailure = hasFailure || group.hasFailure
-                wasInterrupted = wasInterrupted
-                    || group.items.contains { $0.itemStatus == .interrupted }
-            case .approval:
+                wasInterrupted = wasInterrupted || group.items.contains { $0.itemStatus == .interrupted }
+            case .request:
                 stepCount += 1
             default:
                 break
             }
         }
-        if latestTurn?.turnID == section.turnID,
-            latestTurn?.turnState == .interrupted
-        {
-            wasInterrupted = true
-        }
         return ChatTurnActivity(
             sectionID: section.id,
             stepCount: stepCount,
-            duration: isRunning ? nil : sectionDuration(section, latestTurn: latestTurn),
+            duration: isRunning ? nil : duration(of: section.turn),
             isRunning: isRunning,
-            startedAt: isRunning && latestTurn?.turnID == section.turnID
-                ? latestTurn?.startedAt ?? latestTurn?.requestedAt
-                : nil,
+            startedAt: isRunning ? section.turn.startedAt : nil,
             isExpanded: isExpanded,
             hasFailure: hasFailure,
             wasInterrupted: wasInterrupted
         )
     }
 
-    /// The latest turn keeps authoritative timestamps; older turns are gone
-    /// from the wire model, so their span is derived from entry timestamps.
-    /// Restored history re-stamps entries at replay time, so those turns
-    /// genuinely have no duration to show.
-    private static func sectionDuration(
-        _ section: Section,
-        latestTurn: Turn?
-    ) -> Duration? {
-        var interval: TimeInterval?
-        if let latestTurn,
-            latestTurn.turnID == section.turnID,
-            let completedAt = latestTurn.completedAt
-        {
-            interval = completedAt.timeIntervalSince(
-                latestTurn.startedAt ?? latestTurn.requestedAt
-            )
-        } else if let earliest = section.earliest, let latest = section.latest {
-            interval = latest.timeIntervalSince(earliest)
-        }
-        guard let interval, interval >= 1 else { return nil }
+    private static func duration(of turn: TurnView) -> Duration? {
+        guard let settledAt = turn.settledAt else { return nil }
+        let interval = settledAt.timeIntervalSince(turn.startedAt)
+        guard interval >= 1 else { return nil }
         return .seconds(interval)
     }
 
-    // MARK: Entry projections
-
-    static func entryTurnID(_ entry: TimelineEntry) -> String? {
-        let turnID = entry.message?.turnID
-            ?? entry.item?.turnID
-            ?? entry.approval?.turnID
-        return turnID?.isEmpty == false ? turnID : nil
-    }
-
-    private static func entryIdentity(_ entry: TimelineEntry) -> String {
-        entry.message?.id
-            ?? entry.item?.id
-            ?? entry.approval?.requestID
-            ?? entry.kind
-    }
-
-    /// `JSONAny` is main-actor isolated, so payload text extraction stays on
-    /// the main actor; the layout pass itself never reads payloads.
     /// Streamed reasoning often carries leading/trailing newlines that would
     /// render as blank space, so the text is trimmed.
-    @MainActor
-    static func reasoningText(_ item: Item) -> String? {
-        guard let text = (item.payload?.value as? [String: Any])?["text"] as? String
-        else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func reasoningText(_ item: ChatItem) -> String? {
+        let trimmed = (item.entry.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Who a chat message is from.
+nonisolated enum ChatRole: String {
+    case user
+    case assistant
+}
+
+/// A user or assistant message of a turn.
+nonisolated struct ChatMessage: Identifiable {
+    let turnID: String
+    var entry: EntryView
+
+    /// Unique in the chat: refs are unique only within a session.
+    var id: String { "\(turnID)|\(entry.ref)" }
+    var role: String { entry.itemKind == .userMessage ? ChatRole.user.rawValue : ChatRole.assistant.rawValue }
+    var text: String { entry.text ?? "" }
+    var attachments: [Attachment]? { entry.attachments }
+    var annotations: [PromptAnnotation]? { entry.annotations }
+}
+
+/// Any other entry of a turn: a tool call, a thought, a notice, a message
+/// between agents.
+nonisolated struct ChatItem: Identifiable {
+    let turnID: String
+    var entry: EntryView
+
+    var id: String { "\(turnID)|\(entry.ref)" }
+    var ref: String { entry.ref }
+    var kind: String { entry.kind }
+    var itemKind: MaidItemKind? { entry.itemKind }
+    var itemStatus: MaidItemStatus? { entry.itemStatus }
+    var title: String? { entry.title }
+    var text: String? { entry.text }
+    var tool: ToolCallSummary? { entry.tool }
+    var detailAvailable: Bool { entry.detailAvailable == true }
+
+    /// A background task its provider can stop, still running.
+    var isRunningInBackground: Bool {
+        itemStatus == .inProgress && tool?.background == true
+    }
+}
+
+/// An agent's request: open, from the thread's requests, or answered, from
+/// its record in the turn.
+nonisolated struct ChatRequest: Identifiable {
+    let id: String
+    let ask: Request
+    let turnID: String?
+    /// Whether it still waits for an answer.
+    let isOpen: Bool
+    /// The action chosen: by the answer, or, while open, the one an answer
+    /// chose that the agent hasn't taken yet.
+    let actionID: String?
+    let answers: [String: [String]]?
+
+    init(open request: RequestView) {
+        id = request.id
+        ask = request.ask
+        turnID = request.turn
+        isOpen = true
+        actionID = request.answering
+        answers = nil
+    }
+
+    init(record: RequestRecord, turnID: String) {
+        id = record.request
+        ask = record.ask
+        self.turnID = turnID
+        isOpen = false
+        actionID = record.action
+        answers = record.answers
     }
 }
 
 /// One rendered row in the chat timeline.
 nonisolated enum ChatTimelineRowModel: Identifiable {
-    case message(Message)
-    case thought(Item)
+    case message(ChatMessage)
+    case thought(ChatItem)
     case turnActivity(ChatTurnActivity)
     case activityGroup(ChatActivityGroup)
-    case notice(Item)
-    case approval(Approval)
+    case notice(ChatItem)
+    case request(ChatRequest)
+    /// The conversation an agent was handed as text: a fork's, or what it
+    /// missed while another agent worked.
+    case handoff(ChatItem)
+    /// What another agent or maiD said to this one.
+    case envelope(ChatItem)
+    case stopNote(ChatTurnStopNote)
+    case turnFork(ChatTurnFork)
 
     var id: String {
         switch self {
@@ -352,9 +350,22 @@ nonisolated enum ChatTimelineRowModel: Identifiable {
         case .turnActivity(let activity): activity.id
         case .activityGroup(let group): group.id
         case .notice(let item): "notice-\(item.id)"
-        case .approval(let approval): "approval-\(approval.requestID)"
+        case .request(let request): "request-\(request.id)"
+        case .handoff(let item): "handoff-\(item.id)"
+        case .envelope(let item): "envelope-\(item.id)"
+        case .stopNote(let note): note.id
+        case .turnFork(let fork): fork.id
         }
     }
+}
+
+/// What the daemon recorded about a turn it cut off, such as maiD stopping
+/// while it ran.
+nonisolated struct ChatTurnStopNote: Identifiable, Equatable {
+    let turnID: String
+    let text: String
+
+    var id: String { "stop-note-\(turnID)" }
 }
 
 /// The turn's work header: a live "Working" timer while the turn runs, and
@@ -394,9 +405,9 @@ nonisolated struct ChatTurnActivity: Identifiable, Equatable {
     }
 }
 
-/// A run of consecutive activity items rendered as one compact line.
+/// A run of consecutive activity entries rendered as one compact line.
 nonisolated struct ChatActivityGroup: Identifiable {
-    var items: [Item]
+    var items: [ChatItem]
 
     var id: String { "group-\(items.first?.id ?? "empty")" }
 
@@ -404,19 +415,15 @@ nonisolated struct ChatActivityGroup: Identifiable {
         items.contains { $0.itemStatus == .failed }
     }
 
-    var isInProgress: Bool {
-        items.contains { $0.itemStatus == .inProgress }
-    }
+    /// At most this many distinct tool names appear before "+N more".
+    static let maxToolNames = 3
 
-    /// A Codex-style phrase such as "Read 2 files, ran a command".
+    /// A phrase built only from what providers stated, such as
+    /// "Read files, ran a command, WebFetch, github · list_issues".
     var summary: String {
         var counts: [(verb: ChatActivityVerb, count: Int)] = []
-        var toolName: String?
         for item in items {
             let verb = ChatActivityVerb(item: item)
-            if verb == .tool, toolName == nil {
-                toolName = item.toolCallSummary?.name ?? item.title
-            }
             if let index = counts.firstIndex(where: { $0.verb == verb }) {
                 counts[index].count += 1
             } else {
@@ -424,83 +431,96 @@ nonisolated struct ChatActivityGroup: Identifiable {
             }
         }
 
-        let phrases = counts.map { verb, count in
-            verb.phrase(count: count, toolName: toolName)
+        var phrases: [String] = []
+        var toolNameCount = 0
+        for (verb, count) in counts {
+            if case .tool = verb {
+                toolNameCount += 1
+                guard toolNameCount <= Self.maxToolNames else { continue }
+            }
+            phrases.append(verb.phrase(count: count, leading: phrases.isEmpty))
         }
-        guard let first = phrases.first else { return "" }
-        return ([first.capitalizedFirst] + phrases.dropFirst())
-            .joined(separator: ", ")
+        if toolNameCount > Self.maxToolNames {
+            phrases.append("+\(toolNameCount - Self.maxToolNames) more")
+        }
+        return phrases.joined(separator: ", ")
     }
 }
 
-/// Provider-neutral verb bucket used to summarize grouped activity.
+/// What a provider stated about one activity entry, used to summarize
+/// groups. Only stated facts count: the entry kind, or a read/search action
+/// the provider declared. Any other tool is identified by its raw name.
 nonisolated enum ChatActivityVerb: Equatable {
     case thought
     case read
     case searched
     case edited
     case ranCommand
-    case fetched
-    case tool
+    /// A tool with no stated action, by its raw (namespaced) name.
+    case tool(String)
 
-    init(item: Item) {
-        switch item.itemKind {
-        case .reasoning:
-            self = .thought
-            return
-        case .commandExecution:
-            self = .ranCommand
-            return
-        case .fileChange:
-            self = .edited
-            return
-        default:
-            break
-        }
-        switch item.toolCallSummary.flatMap({ MaidToolAction(rawValue: $0.action) }) {
-        case .read, .view: self = .read
-        case .search: self = .searched
-        case .edit, .delete, .move: self = .edited
-        case .execute: self = .ranCommand
-        case .think: self = .thought
-        case .fetch: self = .fetched
-        default: self = .tool
+    init(item: ChatItem) {
+        let summary = item.tool
+        switch summary?.action.flatMap(MaidToolAction.init(rawValue:)) {
+        case .read:
+            self = .read
+        case .search:
+            self = .searched
+        case nil:
+            switch item.itemKind {
+            case .reasoning: self = .thought
+            case .commandExecution: self = .ranCommand
+            case .fileChange: self = .edited
+            default: self = .tool(Self.toolName(summary: summary, item: item))
+            }
         }
     }
 
-    func phrase(count: Int, toolName: String?) -> String {
+    /// The provider's own tool name, qualified by its namespace (an MCP
+    /// server, for example), falling back to the entry title and kind.
+    private static func toolName(summary: ToolCallSummary?, item: ChatItem) -> String {
+        if let name = summary?.name, !name.isEmpty {
+            if let namespace = summary?.namespace, !namespace.isEmpty {
+                return "\(namespace) · \(name)"
+            }
+            return name
+        }
+        if let title = item.title, !title.isEmpty {
+            return title
+        }
+        return item.kind
+    }
+
+    /// The phrase for one or more such entries, without counts. `leading`
+    /// capitalizes a verb that starts a sentence; raw tool names are never
+    /// reformatted.
+    func phrase(count: Int, leading: Bool = false) -> String {
+        let text: String
         switch self {
         case .thought:
-            return "thought"
+            text = "thought"
         case .read:
-            return count == 1 ? "read a file" : "read \(count) files"
+            text = count == 1 ? "read a file" : "read files"
         case .searched:
-            return count == 1 ? "searched" : "ran \(count) searches"
+            text = "searched"
         case .edited:
-            return count == 1 ? "edited a file" : "edited \(count) files"
+            text = count == 1 ? "edited a file" : "edited files"
         case .ranCommand:
-            return count == 1 ? "ran a command" : "ran \(count) commands"
-        case .fetched:
-            return count == 1 ? "fetched a page" : "fetched \(count) pages"
-        case .tool:
-            if count == 1, let toolName, !toolName.isEmpty {
-                return "used \(toolName)"
-            }
-            return count == 1 ? "used a tool" : "used \(count) tools"
+            text = count == 1 ? "ran a command" : "ran commands"
+        case .tool(let name):
+            return name
         }
+        return leading ? text.prefix(1).uppercased() + text.dropFirst() : text
     }
+}
+
+extension MaidTurnState {
+    nonisolated var isSettled: Bool { self != .running }
 }
 
 extension ChatTimelineLayout.Block {
     fileprivate nonisolated var activityGroup: ChatActivityGroup? {
         if case .activityGroup(let group) = row { return group }
         return nil
-    }
-}
-
-extension String {
-    nonisolated var capitalizedFirst: String {
-        guard let first = first else { return self }
-        return first.uppercased() + dropFirst()
     }
 }

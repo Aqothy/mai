@@ -3,7 +3,6 @@ import Foundation
 /// Terminal RPC surface. Thread and terminal stores keep separate domain
 /// protocols while sharing one RPCClient and connection lifecycle.
 protocol TerminalRPCClient: RPCTransportClient {
-    var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)? { get set }
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)? { get set }
 
     /// Returns the full snapshot and registers this connection for
@@ -12,56 +11,26 @@ protocol TerminalRPCClient: RPCTransportClient {
     func renameTerminal(_ params: TerminalRenameParams) async throws -> TerminalSummary
     func deleteTerminal(terminalID: String) async throws
 
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot
+    /// Each returns a ticket for the view's terminal stream.
+    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachResult
+    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachResult
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult
     func terminateTerminal(terminalID: String) async throws
+
+    /// Where views open their terminal streams, beside the RPC endpoint.
+    var terminalStreamEndpoint: URL { get }
 
     /// Fire-and-forget input bytes; the transport preserves call order.
     func writeTerminal(_ params: TerminalWriteParams)
 
-    /// Fire-and-forget grid change; sent only when rows or columns differ.
+    /// Fire-and-forget report of the grid and appearance that fit a view.
     func resizeTerminal(_ params: TerminalResizeParams)
+
+    /// Fire-and-forget: the user is using this view, which takes the size.
+    func focusTerminal(terminalID: String)
 
     /// Fire-and-forget detach; the shell keeps running on the daemon.
     func detachTerminal(_ params: TerminalDetachParams)
-}
-
-// Default implementations let test doubles override only what they exercise.
-extension TerminalRPCClient {
-    func subscribeTerminalList() async throws -> TerminalListStreamItem {
-        throw RPCError(code: nil, message: "Terminal list is unavailable", data: nil)
-    }
-
-    func renameTerminal(_ params: TerminalRenameParams) async throws -> TerminalSummary {
-        throw RPCError(code: nil, message: "Terminal rename is unavailable", data: nil)
-    }
-
-    func deleteTerminal(terminalID: String) async throws {
-        throw RPCError(code: nil, message: "Terminal deletion is unavailable", data: nil)
-    }
-
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal creation is unavailable", data: nil)
-    }
-
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal attach is unavailable", data: nil)
-    }
-
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
-        throw RPCError(code: nil, message: "Terminal relaunch is unavailable", data: nil)
-    }
-
-    func terminateTerminal(terminalID: String) async throws {
-        throw RPCError(code: nil, message: "Terminal termination is unavailable", data: nil)
-    }
-
-    func writeTerminal(_ params: TerminalWriteParams) {}
-
-    func resizeTerminal(_ params: TerminalResizeParams) {}
-
-    func detachTerminal(_ params: TerminalDetachParams) {}
 }
 
 extension RPCClient: TerminalRPCClient {
@@ -80,15 +49,15 @@ extension RPCClient: TerminalRPCClient {
         )
     }
 
-    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachSnapshot {
+    func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalCreate, params: params)
     }
 
-    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
+    func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalAttach, params: params)
     }
 
-    func relaunchTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachSnapshot {
+    func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalRelaunch, params: params)
     }
 
@@ -105,6 +74,10 @@ extension RPCClient: TerminalRPCClient {
 
     func resizeTerminal(_ params: TerminalResizeParams) {
         notify(MaidRPCMethod.terminalResize, params: params)
+    }
+
+    func focusTerminal(terminalID: String) {
+        notify(MaidRPCMethod.terminalFocus, params: TerminalIDParams(terminalID: terminalID))
     }
 
     func detachTerminal(_ params: TerminalDetachParams) {

@@ -36,26 +36,19 @@ var (
 	ErrInvalidCwd        = errors.New("terminal cwd is not an existing directory")
 	ErrInvalidDimensions = errors.New("terminal dimensions out of range")
 	ErrNotRunning        = errors.New("terminal is not running")
+	ErrInputQueueFull    = errors.New("terminal input dropped: the program is not reading input")
 	ErrAlreadyExists     = errors.New("terminal session already exists; use relaunch")
 	ErrAlreadyRunning    = errors.New("terminal already has a live run")
 	ErrServiceClosed     = errors.New("terminal service is closed")
 )
 
-// StreamItemKind discriminates terminal.subscribe notifications.
-type StreamItemKind string
+// ColorScheme is whether a view's theme is light or dark.
+type ColorScheme string
 
 const (
-	// StreamItemOutput carries raw terminal output bytes.
-	StreamItemOutput StreamItemKind = "output"
-	// StreamItemStatus reports a lifecycle status change for a run.
-	StreamItemStatus StreamItemKind = "status"
+	ColorSchemeLight ColorScheme = "light"
+	ColorSchemeDark  ColorScheme = "dark"
 )
-
-// GhosttySnapshotFormat identifies the exact native snapshot contract shared
-// by the daemon and client binary. GHOSTSNP v1 is intentionally not stable
-// across arbitrary Ghostty revisions, so compatibility is pinned to the core
-// commit used by both builds.
-const GhosttySnapshotFormat = "ghostty-gsn-v1-7a9c369cf5da72d41946f683c48b0466a210cb7e"
 
 const (
 	minColumns = 2
@@ -73,18 +66,20 @@ func ValidateSize(columns, rows uint16) error {
 	return nil
 }
 
-// Events receives session output and lifecycle changes. Callbacks are invoked
-// serially by the session in output order. A bounded downstream wait is
-// allowed so slow clients apply PTY backpressure instead of losing bytes.
+// Events receives a run's output and lifecycle changes. Output, Resized and
+// Exit are called in event order while the session holds its event lock, so
+// they must not block or wait for anything that calls into the session.
 type Events struct {
-	// Output delivers one ordered PTY output chunk. The slice is owned by the
-	// callee.
-	Output func(terminalID, runID string, seq uint64, data []byte)
-	// Exit reports the end of a run after all output has been delivered.
-	// exitCode is nil when the process could not report one.
-	Exit func(terminalID, runID string, seq uint64, status Status, exitCode *int)
-	// Agent reports a changed semantic agent state. Reports carry only the
-	// normalized title and semantic fields, never screen evidence, and are
-	// already deduplicated by the detector.
-	Agent func(terminalID, runID string, report AgentReport)
+	// Output delivers one ordered PTY output chunk. The slice must not be
+	// modified; it may be shared read-only.
+	Output func(session *Session, data []byte)
+	// Resized reports a new grid at its place in the output.
+	Resized func(session *Session, columns, rows uint16)
+	// Exit reports the end of a run after all output has been delivered; no
+	// event follows it. exitCode is nil when the process could not report
+	// one.
+	Exit func(session *Session, status Status, exitCode *int)
+	// ProgramChanged reports a changed title, working directory or program
+	// status; read it with Session.Program.
+	ProgramChanged func(terminalID string)
 }

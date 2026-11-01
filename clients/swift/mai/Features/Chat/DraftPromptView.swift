@@ -11,13 +11,13 @@ struct DraftPromptView: View {
             // view in draft
             ScrollView {
             }
-            .scrollDismissesKeyboard(.interactively)
+            .dismissesKeyboardInteractively()
 
             VStack {
-                if model.hasWorkingDirectory {
-                    (Text("What should we build in ")
-                        + Text(model.directoryLabel).underline()
-                        + Text("?"))
+                if let fork = model.fork {
+                    DraftForkHeader(fork: fork, discard: model.discardFork)
+                } else if model.hasWorkingDirectory {
+                    Text("What should we build in \(Text(model.directoryLabel).underline())?")
                         .font(.largeTitle)
                         .multilineTextAlignment(.center)
                         .accessibilityHeading(.h1)
@@ -98,6 +98,7 @@ struct DraftSessionControlsView: View {
 
     @State private var isProviderSelectionPresented = false
     @State private var isFolderSelectionPresented = false
+    @State private var isAdditionalFolderSelectionPresented = false
 
     var body: some View {
         Button {
@@ -106,7 +107,7 @@ struct DraftSessionControlsView: View {
             Label(model.providerLabel, systemImage: "server.rack")
                 .lineLimit(1)
         }
-        .disabled(model.isSending || !model.hasProviderChoices)
+        .disabled(model.isSending || !model.hasProviderChoices || model.fork != nil)
         .accessibilityLabel("Provider")
         .sheet(isPresented: $isProviderSelectionPresented) {
             SearchableSelectionSheet(
@@ -115,7 +116,7 @@ struct DraftSessionControlsView: View {
                     SearchableSelectionChoice(
                         id: provider.id,
                         title: provider.name,
-                        subtitle: nil,
+                        subtitle: provider.kind,
                         systemImage: "server.rack"
                     )
                 },
@@ -134,22 +135,62 @@ struct DraftSessionControlsView: View {
             Label(model.directoryLabel, systemImage: "folder")
                 .lineLimit(1)
         }
-        .disabled(model.isSending)
+        .disabled(model.isSending || model.fork != nil)
         .accessibilityLabel("Working directory")
         .sheet(isPresented: $isFolderSelectionPresented) {
             FolderSelectionSheet(
                 store: model.store,
-                projectFolders: model.projectFolders,
                 title: "Project Folder",
                 selectedFolder: model.workingDirectory,
                 onSelectExisting: model.selectWorkingDirectory,
-                onSelectBrowsed: { directory, parentDirectory in
-                    model.addProjectFolder(
-                        directory,
-                        parentDirectory: parentDirectory
-                    )
+                onSelectBrowsed: { directory in
+                    Task { await model.addProjectFolder(directory) }
                 }
             )
+        }
+
+        if model.supportsAdditionalDirectories || !model.additionalDirectories.isEmpty {
+            Menu {
+                ForEach(model.additionalDirectories, id: \.self) { directory in
+                    Button(
+                        "Remove \(URL(filePath: directory).lastPathComponent)",
+                        systemImage: "xmark"
+                    ) {
+                        model.removeAdditionalDirectory(directory)
+                    }
+                }
+                if !model.additionalDirectories.isEmpty,
+                    model.supportsAdditionalDirectories
+                {
+                    Divider()
+                }
+                if model.supportsAdditionalDirectories {
+                    Button("Add Folder", systemImage: "folder.badge.plus") {
+                        isAdditionalFolderSelectionPresented = true
+                    }
+                }
+            } label: {
+                Label(
+                    model.additionalDirectories.isEmpty
+                        ? "Add folder"
+                        : "\(model.additionalDirectories.count + 1) folders",
+                    systemImage: "folder.badge.plus"
+                )
+                .lineLimit(1)
+            }
+            .disabled(model.isSending || model.fork != nil)
+            .accessibilityLabel("Additional project folders")
+            .sheet(isPresented: $isAdditionalFolderSelectionPresented) {
+                FolderSelectionSheet(
+                    store: model.store,
+                    title: "Additional Project Folder",
+                    selectedFolder: nil,
+                    onSelectExisting: model.addAdditionalDirectory,
+                    onSelectBrowsed: { directory in
+                        Task { await model.addAdditionalProjectFolder(directory) }
+                    }
+                )
+            }
         }
     }
 }

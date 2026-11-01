@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class DraftPreferencesStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private struct StoredPreferences: Codable {
         var providerID: String?
         var workingDirectory: String?

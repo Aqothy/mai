@@ -1,112 +1,166 @@
 {
   "vocabularies": [
     {
-      "name": "EventType",
-      "description": "Type discriminator of a thread event delivered on orchestration.subscribeThread.",
+      "name": "CommandErrorCode",
+      "description": "Why thread.command refused a command: the data.code of its JSON-RPC error.",
       "values": [
-        "thread.created",
-        "thread.imported",
-        "thread.meta-updated",
-        "thread.message-sent",
-        "thread.turn-start-requested",
-        "thread.turn-interrupt-requested",
-        "thread.turn-interrupt-confirmed",
-        "thread.turn-interrupt-failed",
-        "thread.approval-response-requested",
-        "thread.session-prepare-requested",
-        "thread.session-stop-requested",
-        "thread.session-stop-failed",
-        "thread.config-option-set-requested",
-        "thread.session-status-set",
-        "thread.item-upserted",
-        "thread.plan-updated",
-        "thread.approval-opened",
-        "thread.approval-resolved",
-        "thread.config-options-updated",
-        "thread.slash-commands-updated",
-        "thread.token-usage-updated",
-        "thread.history-replay-completed"
+        "out_of_scope",
+        "ceiling_exceeded",
+        "depth_exceeded",
+        "agent_unavailable",
+        "not_found",
+        "not_running",
+        "permission_request",
+        "invalid"
       ]
     },
     {
-      "name": "CommandType",
-      "description": "Type discriminator of a client command sent to orchestration.dispatchCommand.",
+      "name": "ThreadStatus",
+      "description": "What a thread is doing, derived from its turns, requests and queue.",
       "values": [
-        "thread.create",
-        "thread.start",
-        "thread.meta.update",
-        "thread.turn.start",
-        "thread.turn.retry",
-        "thread.turn.interrupt",
-        "thread.approval.respond",
-        "thread.session.prepare",
-        "thread.session.stop",
-        "thread.config-option.set"
+        "running",
+        "waiting",
+        "held",
+        "idle"
       ]
     },
     {
-      "name": "StreamItemKind",
-      "description": "Payload discriminator of a subscription snapshot or update.",
+      "name": "OriginKind",
+      "description": "How a thread began: a person's chat, a spawned child, or a provider's own subagent.",
       "values": [
-        "snapshot",
-        "event",
-        "thread-upserted"
+        "user",
+        "spawn",
+        "native"
+      ]
+    },
+    {
+      "name": "Hold",
+      "description": "Why a thread's queue waits, and so who may release it; absent when nothing holds it.",
+      "values": [
+        "stoppedPerson",
+        "stoppedAgent",
+        "failed",
+        "hops"
+      ]
+    },
+    {
+      "name": "StartedBy",
+      "description": "What started a turn.",
+      "values": [
+        "delivery",
+        "provider",
+        "found"
+      ]
+    },
+    {
+      "name": "DeliveryKind",
+      "description": "Who a delivery is from: a person's prompt, an agent's message, a reply, a daemon notice.",
+      "values": [
+        "prompt",
+        "message",
+        "reply",
+        "notice"
+      ]
+    },
+    {
+      "name": "DeliveryMode",
+      "description": "How a delivery goes: as the next turn, or into the running one.",
+      "values": [
+        "queue",
+        "steer"
+      ]
+    },
+    {
+      "name": "DeliveryState",
+      "description": "Where a delivery is on its way to the agent.",
+      "values": [
+        "queued",
+        "sending",
+        "delivered",
+        "refused",
+        "cancelled"
       ]
     },
     {
       "name": "ActorKind",
-      "description": "Origin of a thread event.",
+      "description": "Who sent a delivery or issued a command.",
       "values": [
-        "client",
-        "server",
-        "provider"
+        "device",
+        "agent",
+        "daemon"
       ]
     },
     {
-      "name": "TimelineEntryKind",
-      "description": "Which payload of a timeline entry's tagged union is populated.",
+      "name": "WakeMode",
+      "description": "When a spawned thread's parent hears from it.",
       "values": [
-        "message",
-        "item",
-        "approval"
+        "settled",
+        "needsInput"
       ]
     },
     {
-      "name": "MessageRole",
-      "description": "Author of a timeline message.",
+      "name": "ThreadEventKind",
+      "description": "Which change a thread.event notification carries.",
       "values": [
-        "user",
-        "assistant"
+        "entry",
+        "text",
+        "turn",
+        "delivery",
+        "request",
+        "resolved",
+        "participant",
+        "thread",
+        "child",
+        "plan",
+        "refresh",
+        "removed"
+      ]
+    },
+    {
+      "name": "ThreadListKind",
+      "description": "Whether a thread.list item is the snapshot, an upsert or a removal.",
+      "values": [
+        "snapshot",
+        "upsert",
+        "remove"
       ]
     },
     {
       "name": "TurnState",
-      "description": "Lifecycle state of a thread's latest turn.",
+      "description": "Lifecycle state of a turn.",
       "values": [
         "running",
-        "interrupted",
         "completed",
-        "error"
+        "failed",
+        "interrupted"
       ]
     },
     {
-      "name": "SessionStatus",
-      "description": "Status of a thread's provider session binding.",
+      "name": "StreamKind",
+      "description": "What streamed text adds to.",
       "values": [
-        "starting",
-        "running",
-        "ready",
-        "interrupted",
-        "stopped",
-        "error"
+        "assistant",
+        "reasoning"
       ]
     },
     {
-      "name": "ApprovalStatus",
-      "description": "Whether an approval request is still awaiting a decision.",
+      "name": "EnvelopeKind",
+      "description": "What a block maiD wrapped around text it sent an agent carries.",
       "values": [
-        "pending",
-        "resolved"
+        "handoff",
+        "message",
+        "reply",
+        "notice",
+        "instructions"
+      ]
+    },
+    {
+      "name": "HistoryQuality",
+      "description": "How well a provider rebuilds a session run outside maiD from its own record.",
+      "values": [
+        "none",
+        "lossy",
+        "exact"
       ]
     },
     {
@@ -120,18 +174,64 @@
       ]
     },
     {
-      "name": "RequestType",
-      "description": "What an approval request is asking permission for.",
+      "name": "AuthKind",
+      "description": "How a sign-in method or challenge proceeds.",
       "values": [
-        "command_execution_approval",
-        "file_read_approval",
-        "file_change_approval",
-        "dynamic_tool_call"
+        "browser",
+        "device-code",
+        "secret",
+        "terminal"
+      ]
+    },
+    {
+      "name": "AttachmentKind",
+      "description": "What a message or tool attachment carries.",
+      "values": [
+        "image",
+        "audio",
+        "resource",
+        "resource_link"
+      ]
+    },
+    {
+      "name": "StopReason",
+      "description": "Why a completed turn ended early; absent when it finished normally.",
+      "values": [
+        "max_tokens",
+        "max_turn_requests",
+        "refusal"
+      ]
+    },
+    {
+      "name": "OutputFormat",
+      "description": "How to render tool output; absent means plain text.",
+      "values": [
+        "markdown"
+      ]
+    },
+    {
+      "name": "QuestionKind",
+      "description": "Input a user-input question takes.",
+      "values": [
+        "text",
+        "number",
+        "integer",
+        "choice"
+      ]
+    },
+    {
+      "name": "AccessLevel",
+      "description": "How much a session may do without asking, from read_only to full; absent when its mode isn't mapped.",
+      "values": [
+        "read_only",
+        "ask",
+        "edit",
+        "full"
       ]
     },
     {
       "name": "ItemKind",
-      "description": "Kind of a non-message timeline item.",
+      "description": "Kind of an entry of a session's conversation.",
       "values": [
         "user_message",
         "assistant_message",
@@ -141,12 +241,18 @@
         "mcp_tool_call",
         "tool_call",
         "warning",
-        "error"
+        "error",
+        "web_search",
+        "image_view",
+        "image_generation",
+        "context_compaction",
+        "envelope",
+        "request"
       ]
     },
     {
       "name": "ItemStatus",
-      "description": "Lifecycle status of a timeline item.",
+      "description": "Lifecycle status of an entry.",
       "values": [
         "in_progress",
         "completed",
@@ -156,21 +262,23 @@
       ]
     },
     {
+      "name": "GoalStatus",
+      "description": "Status of the goal a provider pursues over its turns.",
+      "values": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ]
+    },
+    {
       "name": "ToolAction",
-      "description": "Provider-neutral semantic action performed by a tool call.",
+      "description": "Action a provider explicitly stated for a tool call; absent when it stated none.",
       "values": [
         "read",
-        "edit",
-        "delete",
-        "move",
-        "search",
-        "execute",
-        "think",
-        "fetch",
-        "switch_mode",
-        "delegate",
-        "view",
-        "other"
+        "search"
       ]
     },
     {
@@ -239,14 +347,6 @@
       ]
     },
     {
-      "name": "ModelSwitchSupport",
-      "description": "Whether a provider can change the active model for a thread.",
-      "values": [
-        "unsupported",
-        "in-session"
-      ]
-    },
-    {
       "name": "TerminalStatus",
       "description": "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
       "values": [
@@ -255,14 +355,6 @@
         "exited",
         "stopped",
         "error"
-      ]
-    },
-    {
-      "name": "TerminalStreamItemKind",
-      "description": "Payload discriminator of a terminal.subscribe notification.",
-      "values": [
-        "output",
-        "status"
       ]
     },
     {
@@ -275,15 +367,31 @@
       ]
     },
     {
-      "name": "TerminalAgentActivity",
-      "description": "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
+      "name": "TerminalProgramState",
+      "description": "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
       "values": [
-        "none",
         "idle",
         "working",
-        "blocked",
         "done",
-        "unknown"
+        "blocked",
+        "error"
+      ]
+    },
+    {
+      "name": "TerminalProgramNeed",
+      "description": "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
+      "values": [
+        "permission",
+        "answer",
+        "auth"
+      ]
+    },
+    {
+      "name": "TerminalColorScheme",
+      "description": "Whether a terminal view's theme is light or dark.",
+      "values": [
+        "light",
+        "dark"
       ]
     }
   ]

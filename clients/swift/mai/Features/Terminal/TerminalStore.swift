@@ -2,11 +2,12 @@ import Foundation
 
 /// Owns terminal domain state and this window's active attachment. Connection
 /// lifecycle is shared with ThreadStore through RPCConnectionCoordinator. Raw
-/// output bytes flow straight from the transport to the attachment's session
-/// controller and never enter observation.
+/// output arrives on each attachment's own stream and never enters
+/// observation.
 @Observable
 final class TerminalStore {
-    typealias SnapshotRestorer = (TerminalSessionController, Data) async throws -> Void
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
 
     /// Terminal summaries ordered by updatedAt descending, then id — the
     /// same deterministic order the daemon persists.
@@ -18,27 +19,19 @@ final class TerminalStore {
 
     @ObservationIgnored let rpc: any TerminalRPCClient
     @ObservationIgnored private let connection: RPCConnectionCoordinator
-    @ObservationIgnored private let snapshotRestorer: SnapshotRestorer
     @ObservationIgnored private var isAwaitingListSnapshot = false
     @ObservationIgnored private var bufferedListItems: [TerminalListStreamItem] = []
     @ObservationIgnored private var listSubscriptionGeneration = 0
 
     init(
         rpc: any TerminalRPCClient = RPCClient(),
-        connection: RPCConnectionCoordinator? = nil,
-        snapshotRestorer: @escaping SnapshotRestorer = { controller, data in
-            try await controller.restore(snapshot: data)
-        }
+        connection: RPCConnectionCoordinator? = nil
     ) {
         let connection = connection ?? RPCConnectionCoordinator(rpc: rpc)
         precondition(connection.uses(rpc), "TerminalStore must use the coordinator's RPC client")
         self.rpc = rpc
         self.connection = connection
-        self.snapshotRestorer = snapshotRestorer
 
-        rpc.onTerminalStreamItem = { [weak self] item in
-            self?.receiveStreamItem(item)
-        }
         rpc.onTerminalListItem = { [weak self] item in
             self?.receiveListItem(item)
         }
@@ -53,7 +46,7 @@ final class TerminalStore {
             connected: { [weak self] in
                 self?.connectionDidConnect()
             },
-            disconnected: { [weak self] _ in
+            disconnected: { [weak self] in
                 self?.connectionDidDisconnect()
             }
         )
@@ -121,7 +114,7 @@ final class TerminalStore {
             guard let terminalID = item.terminalID else { return }
             terminals.removeAll { $0.terminalID == terminalID }
             if let active = activeAttachment, active.terminalID == terminalID {
-                closeActiveAttachment()
+                closeActiveTerminal()
             }
         case nil:
             // Unknown future kinds must not crash the client.
@@ -160,12 +153,11 @@ final class TerminalStore {
                 mode = .attach(terminalID: terminalID)
             }
         }
-        closeActiveAttachment()
+        closeActiveTerminal()
         let attachment = TerminalAttachment(
             store: self,
             origin: request,
-            mode: mode,
-            snapshotRestorer: snapshotRestorer
+            mode: mode
         )
         activeAttachment = attachment
         return attachment
@@ -175,7 +167,8 @@ final class TerminalStore {
     /// state: containers call this when the visible content is no longer a
     /// terminal.
     func closeActiveTerminal() {
-        closeActiveAttachment()
+        activeAttachment?.close()
+        activeAttachment = nil
     }
 
     /// Replaces the active attachment with a fresh run of the same terminal.
@@ -186,12 +179,11 @@ final class TerminalStore {
         guard let active = activeAttachment, let terminalID = active.terminalID else {
             return nil
         }
-        closeActiveAttachment()
+        closeActiveTerminal()
         let attachment = TerminalAttachment(
             store: self,
             origin: active.origin,
-            mode: .relaunch(terminalID: terminalID),
-            snapshotRestorer: snapshotRestorer
+            mode: .relaunch(terminalID: terminalID)
         )
         activeAttachment = attachment
         return attachment
@@ -227,15 +219,11 @@ final class TerminalStore {
     func deleteTerminal(terminalID: String) async throws {
         try await rpc.deleteTerminal(terminalID: terminalID)
         if let active = activeAttachment, active.terminalID == terminalID {
-            closeActiveAttachment()
+            closeActiveTerminal()
         }
     }
 
     // MARK: - Transport events
-
-    private func receiveStreamItem(_ item: TerminalStreamMessage) {
-        activeAttachment?.receive(item)
-    }
 
     private func connectionDidConnect() {
         guard activeAttachment?.phase == .disconnected else { return }
@@ -247,10 +235,5 @@ final class TerminalStore {
         isAwaitingListSnapshot = false
         bufferedListItems.removeAll(keepingCapacity: true)
         activeAttachment?.connectionLost()
-    }
-
-    private func closeActiveAttachment() {
-        activeAttachment?.close()
-        activeAttachment = nil
     }
 }

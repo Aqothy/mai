@@ -1,0 +1,82 @@
+import Foundation
+import Testing
+
+@testable import mai
+
+struct ChatRequestModelTests {
+    private static let submit = RequestAction(decision: MaidApprovalDecision.accept.rawValue, id: "accept", label: "Submit", submit: true)
+
+    /// The request in the JSON, answered by one action that submits.
+    private func request(_ json: String) throws -> Request {
+        var request = try newJSONDecoder().decode(Request.self, from: Data(json.utf8))
+        request.actions = [Self.submit]
+        return request
+    }
+
+    @Test
+    func defaultsPrefillAndAnswersKeepOptionOrder() throws {
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Configure","questions":[
+              {"id":"tags","kind":"choice","multiSelect":true,"default":["b"],
+               "options":[{"value":"a","label":"A"},{"value":"b","label":"B"},{"value":"c","label":"C"}]},
+              {"id":"name","kind":"text","default":["maiD"]}
+            ]}
+            """), send: { _, _ in })
+        let tags = model.questions[0]
+        // Selecting in reverse order still answers in the options' order.
+        model.toggle(tags.options![2], in: tags)
+        model.toggle(tags.options![0], in: tags)
+        #expect(model.answers == ["tags": ["a", "b", "c"], "name": ["maiD"]])
+        #expect(model.canChoose(Self.submit))
+    }
+
+    @Test
+    func requiredAndNumericAnswersBlockSubmit() throws {
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Count","questions":[{"id":"count","kind":"integer","required":true}]}
+            """), send: { _, _ in })
+        let count = model.questions[0]
+        #expect(model.validationMessage(for: count) != nil)
+
+        model.setTextAnswer("2.5", for: count)
+        #expect(!model.canChoose(Self.submit))
+
+        model.setTextAnswer(" 3 ", for: count)
+        #expect(model.validationMessage(for: count) == nil)
+        #expect(model.answers == ["count": ["3"]])
+    }
+
+    @Test
+    func typedAnswerReplacesSingleChoice() throws {
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Pick","questions":[{"id":"q","kind":"choice","allowsFreeText":true,"required":true,
+              "options":[{"value":"A","label":"A"},{"value":"B","label":"B"}]}]}
+            """), send: { _, _ in })
+        let question = model.questions[0]
+        model.toggle(question.options![0], in: question)
+        model.setTextAnswer("Neither", for: question)
+        #expect(!model.isSelected(question.options![0], in: question))
+        #expect(model.answers == ["q": ["Neither"]])
+        model.toggle(question.options![1], in: question)
+        #expect(model.answers == ["q": ["B"]])
+    }
+
+    @Test
+    func submittedAnswersShowOptionLabels() throws {
+        let model = ChatRequestModel(request: try request("""
+            {"actions":[],"message":"Pick","questions":[
+              {"id":"color","kind":"choice","title":"Color","options":[{"value":"b","label":"Blue"}]},
+              {"id":"note","kind":"text"}
+            ]}
+            """), send: { _, _ in })
+        let shown = model.submittedAnswers(["note": ["Thanks"], "color": ["b"]])
+        #expect(shown.map(\.title) == ["Color", "note"])
+        #expect(shown.map(\.answer) == ["Blue", "Thanks"])
+    }
+
+    @Test
+    func urlRequestsOnlyAcceptWebLinks() throws {
+        #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Sign in","url":"https://xn--80ak6aa92e.com/a"}"#), send: { _, _ in }).hasSuspiciousHost)
+        #expect(ChatRequestModel(request: try request(#"{"actions":[],"message":"Run","url":"file:///etc/passwd"}"#), send: { _, _ in }).url == nil)
+    }
+}

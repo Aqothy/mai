@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -18,20 +20,28 @@ import (
 )
 
 const (
-	ptyReadBufferSize       = 32 * 1024
-	outputBatchSize         = 64 * 1024
-	outputBatchMaximumDelay = 8 * time.Millisecond
-	outputReadQueueSize     = 32
-	// attachScrollbackBytes bounds the attach model's retained scrollback.
-	attachScrollbackBytes = 2 * 1024 * 1024
+	// outputBatchSize caps one burst of output published at once.
+	outputBatchSize = 64 * 1024
+	// inputQueueSize bounds input waiting for a program that is not reading
+	// stdin. Each item is one client write (a keystroke or a paste).
+	inputQueueSize = 256
+	// scrollbackBytes bounds the run terminal's retained scrollback, which
+	// every attach snapshot carries (about 1 MB at this limit).
+	scrollbackBytes = 10_000_000
+	maxPwdScalars   = 1024
 )
 
 // Session is one live PTY run. All mutating operations are serialized on mu;
-// PTY writes use a dedicated mutex so a blocked write cannot deadlock resize
-// or termination.
+// PTY writes happen on the run's own writer goroutine so a program that stops
+// reading stdin cannot block callers, resize, or termination.
 type Session struct {
 	TerminalID string
 	RunID      string
+
+	// emit orders the run's events: output, resizes and the exit are applied
+	// and published while holding it, and Observe snapshots under it, so an
+	// observer gets every event after its snapshot and none before.
+	emit sync.Mutex
 
 	mu       sync.Mutex
 	ptyFile  *os.File
@@ -39,33 +49,42 @@ type Session struct {
 	status   Status
 	columns  uint16
 	rows     uint16
-	seq      uint64
 	exitCode *int
 	events   Events
-	// attachVT is the passive terminal model exported for attach. It retains
-	// bounded scrollback and is fed under mu in sequence order so native
-	// snapshots are atomic with the sequence counter. Nil only after the run's
-	// attach state has been released.
-	attachVT vtscreen.SnapshotScreen
+	// vt is the run's terminal: it answers the program's queries and is
+	// the attach model. It is fed under emit and mu, so a snapshot taken
+	// under emit describes exactly the events published before it. Nil only
+	// after the run's attach state has been released.
+	vt *vtscreen.Screen
+	// Set by vt's effects during a feed, under mu.
+	title          string
+	pwd            string
+	programs       programRecords
+	programChanged bool
+	// replies are vt's answers to the program, queued during a feed and
+	// written after it: effects run under mu and must never block on the
+	// PTY.
+	replies [][]byte
 
-	writeMu sync.Mutex
-
-	// detector derives shared agent state from the same output stream the
-	// clients render. It lives outside mu; its own lock serializes it.
-	detector *Detector
+	input chan []byte
 
 	// done closes after the child has been reaped and the PTY closed.
 	done          chan struct{}
 	terminateOnce sync.Once
 }
 
-// SpawnSpec describes one shell launch.
+// SpawnSpec describes one terminal launch: the user's login shell, or
+// Command when set.
 type SpawnSpec struct {
 	// Cwd is resolved to the user's home directory when empty. It must name
 	// an existing directory.
 	Cwd     string
 	Columns uint16
 	Rows    uint16
+	// Command is the argv to run instead of the login shell.
+	Command []string
+	// Env adds KEY=VALUE entries, overriding same-named variables.
+	Env []string
 }
 
 func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
@@ -77,12 +96,18 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		return nil, err
 	}
 
-	shell := resolveShell()
-	cmd := exec.Command(shell)
-	// The dash-prefixed argv[0] asks the shell to behave as a login shell.
-	cmd.Args = []string{"-" + filepath.Base(shell)}
+	var cmd *exec.Cmd
+	if len(spec.Command) > 0 {
+		cmd = exec.Command(spec.Command[0], spec.Command[1:]...)
+	} else {
+		shell := resolveShell()
+		cmd = exec.Command(shell)
+		// The dash-prefixed argv[0] asks the shell to behave as a login shell.
+		cmd.Args = []string{"-" + filepath.Base(shell)}
+	}
 	cmd.Dir = cwd
-	cmd.Env = sessionEnv()
+	// exec keeps the last value of a duplicated key, so spec.Env overrides.
+	cmd.Env = append(sessionEnv(), spec.Env...)
 
 	s := &Session{
 		TerminalID: terminalID,
@@ -92,121 +117,95 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		columns:    spec.Columns,
 		rows:       spec.Rows,
 		events:     events,
+		programs:   programRecords{},
+		input:      make(chan []byte, inputQueueSize),
 		done:       make(chan struct{}),
 	}
 
-	// The attach model is the source of attach state; a session cannot run
-	// without it. Failure here means a misbuilt daemon, not a user error.
-	attachVT, err := vtscreen.NewSnapshot(spec.Columns, spec.Rows, attachScrollbackBytes)
+	// The run's terminal is the source of attach state and query answers; a
+	// session cannot run without it. Failure here means a misbuilt daemon,
+	// not a user error.
+	vt, err := vtscreen.New(spec.Columns, spec.Rows, scrollbackBytes, s.terminalEffects())
 	if err != nil {
-		return nil, fmt.Errorf("terminal attach model: %w", err)
+		return nil, fmt.Errorf("terminal model: %w", err)
 	}
-	s.attachVT = attachVT
+	s.vt = vt
 
-	// creack/pty starts the child with Setsid, so the shell leads its own
-	// session and process group; group signals reach every descendant.
-	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: spec.Rows, Cols: spec.Columns})
+	ptyFile, err := startPTY(cmd, spec.Columns, spec.Rows)
 	if err != nil {
-		attachVT.Close()
-		return nil, fmt.Errorf("spawn %s: %w", shell, err)
+		vt.Close()
+		return nil, fmt.Errorf("spawn %s: %w", cmd.Path, err)
 	}
 	s.ptyFile = ptyFile
 	s.status = StatusRunning
-	// A failed detection screen degrades to process and OSC evidence; the
-	// terminal itself is unaffected.
-	screen, screenErr := vtscreen.New(spec.Columns, spec.Rows)
-	if screenErr != nil {
-		screen = nil
-	}
-	s.detector = newDetector(detectorConfig{
-		shellPGID: cmd.Process.Pid,
-		foregroundPGID: func() (int, bool) {
-			return foregroundProcessGroup(ptyFile)
-		},
-		inspectGroup: inspectProcessGroup,
-		screen:       screen,
-		publish: func(report AgentReport) {
-			if events.Agent != nil {
-				events.Agent(s.TerminalID, s.RunID, report)
-			}
-		},
-	})
 	go s.readLoop()
+	go s.writeLoop()
 	return s, nil
 }
 
-// readLoop batches the small reads commonly produced by a PTY before sending
-// them over RPC. This keeps fast output from becoming thousands of tiny JSON
-// and renderer operations. A batch is published when it reaches the byte cap
-// or has waited eight milliseconds, whichever comes first. The bounded read
-// queue prevents unbounded intermediate allocations if local processing
-// cannot keep up with the PTY.
-func (s *Session) readLoop() {
-	reads := make(chan []byte, outputReadQueueSize)
-	go s.readPTY(reads)
-
-	pending := make([]byte, 0, outputBatchSize)
-	flushTimer := time.NewTimer(outputBatchMaximumDelay)
-	if !flushTimer.Stop() {
-		<-flushTimer.C
-	}
-	defer flushTimer.Stop()
-	var flushTimerChannel <-chan time.Time
-
-	stopTimer := func() {
-		if flushTimerChannel == nil {
-			return
-		}
-		if !flushTimer.Stop() {
-			select {
-			case <-flushTimer.C:
-			default:
+// terminalEffects records what the program asks of its terminal. They run
+// inside vt.Feed under mu, so they only record; feed and readBurst act after.
+func (s *Session) terminalEffects() vtscreen.Effects {
+	return vtscreen.Effects{
+		Reply: func(data []byte) { s.replies = append(s.replies, data) },
+		TitleChanged: func(title string) {
+			if title := normalizeTitle(title); title != s.title {
+				s.title = title
+				s.programChanged = true
 			}
-		}
-		flushTimerChannel = nil
+		},
+		PwdChanged: func(pwd string) {
+			if pwd := displayText(pwd, maxPwdScalars); pwd != s.pwd {
+				s.pwd = pwd
+				s.programChanged = true
+			}
+		},
+		ProgramStatus: func(status vtscreen.ProgramStatus) {
+			s.programs.apply(status, time.Now().UTC())
+			s.programChanged = true
+		},
+		// A new prompt means the program that was working or waiting is
+		// gone (the protocol's rule).
+		PromptStarted: func() {
+			if len(s.programs) > 0 {
+				s.programs.remove(ProgramWorking, ProgramBlocked)
+				s.programChanged = true
+			}
+		},
 	}
+}
 
-	publish := func() {
-		stopTimer()
-		if len(pending) == 0 {
-			return
-		}
-		data := pending
-		pending = make([]byte, 0, outputBatchSize)
-		s.publishOutput(data)
+// writeLoop is the sole PTY writer. A write blocked on a full PTY buffer ends
+// when the run exits.
+func (s *Session) writeLoop() {
+	raw, err := s.ptyFile.SyscallConn()
+	if err != nil {
+		return
 	}
-
-drainReads:
 	for {
 		select {
-		case data, ok := <-reads:
-			if !ok {
-				publish()
-				break drainReads
+		case <-s.done:
+			return
+		case data := <-s.input:
+			if err := writePTY(raw, data); err != nil {
+				return
 			}
-			for len(data) > 0 {
-				available := outputBatchSize - len(pending)
-				if available > len(data) {
-					available = len(data)
-				}
-				pending = append(pending, data[:available]...)
-				data = data[available:]
-				if len(pending) == outputBatchSize {
-					publish()
-				} else if flushTimerChannel == nil {
-					flushTimer.Reset(outputBatchMaximumDelay)
-					flushTimerChannel = flushTimer.C
-				}
-			}
-		case <-flushTimerChannel:
-			flushTimerChannel = nil
-			publish()
 		}
+	}
+}
+
+// readLoop publishes the program's output a burst at a time.
+func (s *Session) readLoop() {
+	buf := make([]byte, outputBatchSize)
+	raw, err := s.ptyFile.SyscallConn()
+	for err == nil {
+		err = s.readBurst(raw, buf)
 	}
 
 	waitErr := s.cmd.Wait()
 	code, hasCode := exitCode(waitErr)
 
+	s.emit.Lock()
 	s.mu.Lock()
 	if s.status == StatusRunning || s.status == StatusStarting {
 		s.status = StatusExited
@@ -217,74 +216,85 @@ drainReads:
 	if s.status == StatusStopped {
 		// Explicit termination discards attach state; a natural exit keeps
 		// it viewable until relaunch, delete, or daemon shutdown.
-		if s.attachVT != nil {
-			s.attachVT.Close()
-			s.attachVT = nil
+		if s.vt != nil {
+			s.vt.Close()
+			s.vt = nil
 		}
 	}
+	// Nothing is working or waiting once the run is over.
+	s.programs.remove(ProgramWorking, ProgramBlocked)
 	status := s.status
 	exitPtr := s.exitCode
-	s.seq++
-	seq := s.seq
 	s.mu.Unlock()
+	// The exit is the run's last event: output has drained and resizes
+	// refuse a run that isn't running.
+	if s.events.Exit != nil {
+		s.events.Exit(s, status, exitPtr)
+	}
+	s.emit.Unlock()
 
-	// The detector stops before the PTY closes so its foreground probes
-	// never race a closing descriptor. Its last report stays readable for
-	// list summaries until relaunch or delete replaces the session.
-	s.detector.Stop()
 	_ = s.ptyFile.Close()
 	close(s.done)
-	if s.events.Exit != nil {
-		s.events.Exit(s.TerminalID, s.RunID, seq, status, exitPtr)
-	}
 }
 
-// readPTY is the sole PTY reader. Its bounded destination is deliberate: once
-// the publisher and queue fill, this goroutine stops reading and the kernel's
-// PTY buffer naturally slows the child instead of dropping output.
-func (s *Session) readPTY(reads chan<- []byte) {
-	defer close(reads)
-	buf := make([]byte, ptyReadBufferSize)
-	for {
-		n, readErr := s.ptyFile.Read(buf)
-		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			reads <- data
-		}
-		if readErr != nil {
-			// EOF or EIO: the child side of the PTY is gone.
-			return
-		}
+// readBurst waits for output, then feeds the run's terminal each read as it
+// arrives and reads on without waiting, until the program is idle (see
+// idleReads) or buf is full, and publishes the burst as one batch. A flood
+// becomes few large batches, so streams send few large messages; a lone echo
+// is published as soon as the reads behind it come up empty. emit is held
+// from the first feed to the publish, so a snapshot never holds output that
+// observers are still to be sent; it is never held while waiting. Once the
+// kernel's PTY buffer is full the program waits, so output never piles up
+// here.
+func (s *Session) readBurst(raw syscall.RawConn, buf []byte) error {
+	n, err := readPTY(raw, buf, true)
+	if n == 0 {
+		return err
 	}
-}
-
-func (s *Session) publishOutput(data []byte) {
+	s.emit.Lock()
+	defer s.emit.Unlock()
+	s.feed(buf[:n])
+	for err == nil && n < len(buf) {
+		var m int
+		if m, err = readPTY(raw, buf[n:], false); m == 0 {
+			break
+		}
+		s.feed(buf[n : n+m])
+		n += m
+	}
 	s.mu.Lock()
-	s.seq++
-	seq := s.seq
-	// Feeding the attach model under the same lock that assigns its
-	// sequence makes Snapshot atomic: attach state always describes exactly
-	// the snapshot sequence, so an attach can neither lose nor duplicate
-	// output.
-	if s.attachVT != nil {
-		s.attachVT.Feed(data)
-	}
+	changed := s.programChanged
+	s.programChanged = false
 	s.mu.Unlock()
-	// The detector sees the original bytes once, in output order, before
-	// client fanout; both sides parse the same stream independently.
-	s.detector.ObserveOutput(data)
 	if s.events.Output != nil {
-		s.events.Output(s.TerminalID, s.RunID, seq, data)
+		s.events.Output(s, bytes.Clone(buf[:n]))
+	}
+	if changed && s.events.ProgramChanged != nil {
+		s.events.ProgramChanged(s.TerminalID)
+	}
+	return err
+}
+
+// feed applies output to the run's terminal and sends the program the
+// terminal's answers to its queries.
+func (s *Session) feed(data []byte) {
+	s.mu.Lock()
+	if s.vt != nil {
+		s.vt.Feed(data)
+	}
+	replies := s.replies
+	s.replies = nil
+	s.mu.Unlock()
+	for _, reply := range replies {
+		s.queueInput(reply)
 	}
 }
 
 // Snapshot is the authoritative attach point for one run. Data is a complete
-// native Ghostty model captured atomically at Sequence; clients restore it
-// before applying live items with a greater sequence.
+// native Ghostty model; taken by Observe, it is followed by exactly the
+// events after it.
 type Snapshot struct {
 	RunID          string
-	Sequence       uint64
 	Status         Status
 	Columns        uint16
 	Rows           uint16
@@ -293,90 +303,143 @@ type Snapshot struct {
 	Data           []byte
 }
 
-// Snapshot atomically captures attach state and the last assigned sequence.
+// Snapshot captures the run's attach state.
 func (s *Session) Snapshot() (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot := Snapshot{
 		RunID:    s.RunID,
-		Sequence: s.seq,
 		Status:   s.status,
 		Columns:  s.columns,
 		Rows:     s.rows,
 		ExitCode: s.exitCode,
 	}
-	if s.attachVT == nil {
+	if s.vt == nil {
 		return snapshot, ErrNotRunning
 	}
-	data, err := s.attachVT.Snapshot()
+	data, err := s.vt.Snapshot()
 	if err != nil {
 		return snapshot, fmt.Errorf("terminal snapshot encode: %w", err)
 	}
-	snapshot.SnapshotFormat = GhosttySnapshotFormat
+	snapshot.SnapshotFormat = vtscreen.SnapshotFormat
 	snapshot.Data = data
 	return snapshot, nil
+}
+
+// Observe calls register with a snapshot while holding the run's event
+// order, so whatever register subscribes receives every event after the
+// snapshot and none it already holds. register runs under emit: it must not
+// call back into the session's event path.
+func (s *Session) Observe(register func(Snapshot)) error {
+	s.emit.Lock()
+	defer s.emit.Unlock()
+	snapshot, err := s.Snapshot()
+	if err != nil {
+		return err
+	}
+	register(snapshot)
+	return nil
 }
 
 // Release frees the attach model's native resources once no future attach
 // can need them: after relaunch, removal, or service shutdown. Idempotent.
 func (s *Session) Release() {
 	s.mu.Lock()
-	if s.attachVT != nil {
-		s.attachVT.Close()
-		s.attachVT = nil
+	if s.vt != nil {
+		s.vt.Close()
+		s.vt = nil
 	}
 	s.mu.Unlock()
 }
 
-// Write sends input bytes to the shell.
+// Write queues input for the PTY without blocking. Input beyond the queue is
+// dropped with ErrInputQueueFull rather than stalling the caller.
 func (s *Session) Write(data []byte) error {
+	s.mu.Lock()
+	running := s.status == StatusRunning
+	s.mu.Unlock()
+	if !running {
+		return ErrNotRunning
+	}
+	if !s.queueInput(data) {
+		return ErrInputQueueFull
+	}
+	return nil
+}
+
+// queueInput hands bytes to the PTY writer without blocking. Query answers
+// share the queue with input; a program that isn't reading stdin couldn't
+// read either.
+func (s *Session) queueInput(data []byte) bool {
+	select {
+	case s.input <- data:
+		return true
+	default:
+		return false
+	}
+}
+
+// SetAppearance makes the run's terminal answer color and light/dark
+// queries with a view's theme.
+func (s *Session) SetAppearance(appearance vtscreen.Appearance) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.vt == nil {
+		return ErrNotRunning
+	}
+	return s.vt.SetAppearance(appearance)
+}
+
+// Program returns what the program says about itself.
+func (s *Session) Program() ProgramInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return ProgramInfo{Title: s.title, Pwd: s.pwd, Status: s.programs.pressing()}
+}
+
+// Seen records that someone looked at the terminal: finished and failed
+// statuses have been seen and go away (the protocol's rule). Reports
+// whether the program info changed.
+func (s *Session) Seen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := len(s.programs)
+	s.programs.remove(ProgramDone, ProgramError)
+	return len(s.programs) != before
+}
+
+// Resize applies a changed grid size to a running PTY and its terminal, and
+// publishes it in order with the output, so every client resizes at the same
+// point in the output. A run that ended keeps its last grid, which
+// views draw scaled. Unchanged dimensions are not re-applied.
+func (s *Session) Resize(columns, rows uint16) error {
+	if err := ValidateSize(columns, rows); err != nil {
+		return err
+	}
+	s.emit.Lock()
+	defer s.emit.Unlock()
 	s.mu.Lock()
 	if s.status != StatusRunning {
 		s.mu.Unlock()
 		return ErrNotRunning
 	}
-	f := s.ptyFile
-	s.mu.Unlock()
-
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("terminal write: %w", err)
-	}
-	return nil
-}
-
-// Resize applies a changed grid size to a running PTY and its passive models.
-// After a natural exit, the retained attach model can still reflow to an
-// attaching client's grid even though there is no longer a PTY to resize.
-// Unchanged dimensions are deduplicated and not re-applied.
-func (s *Session) Resize(columns, rows uint16) error {
-	if err := ValidateSize(columns, rows); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.status != StatusRunning && (s.status != StatusExited || s.attachVT == nil) {
-		return ErrNotRunning
-	}
 	if s.columns == columns && s.rows == rows {
+		s.mu.Unlock()
 		return nil
 	}
-	if s.status == StatusRunning {
-		if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
-			return fmt.Errorf("terminal resize: %w", err)
-		}
+	if err := pty.Setsize(s.ptyFile, &pty.Winsize{Rows: rows, Cols: columns}); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("terminal resize: %w", err)
 	}
-	if s.attachVT != nil {
-		if err := s.attachVT.Resize(columns, rows); err != nil {
-			return fmt.Errorf("terminal model resize: %w", err)
-		}
+	if err := s.vt.Resize(columns, rows); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("terminal model resize: %w", err)
 	}
 	s.columns = columns
 	s.rows = rows
-	// The detector is relevant only while the run is live.
-	if s.status == StatusRunning {
-		s.detector.ResizeScreen(columns, rows)
+	s.mu.Unlock()
+	if s.events.Resized != nil {
+		s.events.Resized(s, columns, rows)
 	}
 	return nil
 }
@@ -454,23 +517,6 @@ func (s *Session) ExitCode() (code int, ok bool) {
 // Done closes after the run has fully ended and its resources are released.
 func (s *Session) Done() <-chan struct{} { return s.done }
 
-// AgentReport returns the run's last published agent state.
-func (s *Session) AgentReport() AgentReport { return s.detector.Report() }
-
-// SetAttached tells the run's detector whether any client is attached.
-// Attaching acknowledges a pending done state.
-func (s *Session) SetAttached(attached bool) { s.detector.SetAttached(attached) }
-
-// PID exposes the shell leader's pid for tests.
-func (s *Session) PID() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cmd.Process == nil {
-		return 0
-	}
-	return s.cmd.Process.Pid
-}
-
 // ResolveCwd normalizes and validates a working directory. An empty value
 // resolves to the user's home directory. Invalid paths return ErrInvalidCwd
 // rather than silently falling back.
@@ -543,11 +589,7 @@ func NewID() string {
 
 func newRunID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail on supported platforms; keep IDs unique
-		// enough for one process if it ever does.
-		return fmt.Sprintf("run-%d", time.Now().UnixNano())
-	}
+	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
 

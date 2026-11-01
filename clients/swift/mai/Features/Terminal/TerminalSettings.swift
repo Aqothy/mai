@@ -4,6 +4,9 @@ import Foundation
 /// live here; rendering, shaping, and zoom gestures belong to the package.
 @Observable
 final class TerminalSettings {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     static let shared = TerminalSettings()
 
     static let defaultFontSize: Float = 12

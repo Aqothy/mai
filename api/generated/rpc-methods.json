@@ -1,29 +1,54 @@
 {
   "methods": [
     {
-      "name": "orchestration.dispatchCommand",
-      "params": "Command",
-      "result": "DispatchResult"
+      "name": "thread.command",
+      "params": "CommandParams",
+      "result": "CommandResult"
     },
     {
-      "name": "orchestration.subscribeThreadList",
+      "name": "thread.subscribeList",
       "params": "EmptyParams",
-      "result": "ThreadListStreamItem"
+      "result": "ThreadListItem"
     },
     {
-      "name": "orchestration.subscribeThread",
-      "params": "SubscribeThreadInput",
-      "result": "ThreadStreamItem"
+      "name": "thread.subscribe",
+      "params": "ThreadParams",
+      "result": "ThreadSnapshot"
     },
     {
-      "name": "orchestration.unsubscribeThread",
-      "params": "SubscribeThreadInput",
+      "name": "thread.unsubscribe",
+      "params": "ThreadParams",
       "resultNull": true
     },
     {
-      "name": "orchestration.getItemDetail",
-      "params": "GetItemDetailInput",
-      "result": "Item"
+      "name": "thread.sync",
+      "params": "ThreadParams",
+      "resultNull": true
+    },
+    {
+      "name": "thread.turns",
+      "params": "ThreadTurnsParams",
+      "result": "ThreadTurnsResult"
+    },
+    {
+      "name": "thread.entry",
+      "params": "ThreadEntryParams",
+      "result": "Entry"
+    },
+    {
+      "name": "thread.forkPreview",
+      "params": "ThreadForkPreviewParams",
+      "result": "ForkPreview"
+    },
+    {
+      "name": "attachment.upload",
+      "params": "AttachmentUploadParams",
+      "result": "AttachmentUploadResult"
+    },
+    {
+      "name": "attachment.get",
+      "params": "AttachmentParams",
+      "result": "Attachment"
     },
     {
       "name": "provider.start",
@@ -66,7 +91,7 @@
     {
       "name": "provider.authenticate",
       "params": "ProviderAuthenticateParams",
-      "result": "InstanceInfo"
+      "result": "AuthenticationResult"
     },
     {
       "name": "provider.logout",
@@ -80,17 +105,7 @@
       "resultArray": true
     },
     {
-      "name": "provider.importSession",
-      "params": "ProviderImportSessionParams",
-      "result": "ProviderImportSessionResult"
-    },
-    {
       "name": "provider.deleteSession",
-      "params": "ProviderSessionParams",
-      "resultNull": true
-    },
-    {
-      "name": "provider.closeSession",
       "params": "ProviderSessionParams",
       "resultNull": true
     },
@@ -100,24 +115,35 @@
       "result": "ProviderOptionsResult"
     },
     {
+      "name": "provider.completeCommand",
+      "params": "ProviderCompleteCommandParams",
+      "result": "CommandCompletion",
+      "resultArray": true
+    },
+    {
       "name": "provider.options.set",
       "params": "ProviderOptionsSetParams",
       "result": "ProviderOptionsResult"
     },
     {
+      "name": "provider.question.answer",
+      "params": "ProviderQuestionAnswerParams",
+      "resultNull": true
+    },
+    {
       "name": "terminal.create",
       "params": "TerminalCreateParams",
-      "result": "TerminalAttachSnapshot"
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.attach",
       "params": "TerminalAttachParams",
-      "result": "TerminalAttachSnapshot"
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.relaunch",
-      "params": "TerminalAttachParams",
-      "result": "TerminalAttachSnapshot"
+      "params": "TerminalRelaunchParams",
+      "result": "TerminalAttachResult"
     },
     {
       "name": "terminal.subscribeList",
@@ -150,6 +176,11 @@
       "resultNull": true
     },
     {
+      "name": "terminal.focus",
+      "params": "TerminalIDParams",
+      "resultNull": true
+    },
+    {
       "name": "terminal.detach",
       "params": "TerminalDetachParams",
       "resultNull": true
@@ -163,16 +194,31 @@
       "name": "workspace.searchFiles",
       "params": "WorkspaceSearchFilesParams",
       "result": "WorkspaceSearchFilesResult"
+    },
+    {
+      "name": "project.add",
+      "params": "ProjectParams",
+      "result": "Project"
+    },
+    {
+      "name": "project.remove",
+      "params": "ProjectParams",
+      "resultNull": true
+    },
+    {
+      "name": "project.subscribeList",
+      "params": "EmptyParams",
+      "result": "ProjectList"
     }
   ],
   "notifications": [
     {
-      "name": "orchestration.subscribeThreadList",
-      "payload": "ThreadListStreamItem"
+      "name": "thread.list",
+      "payload": "ThreadListItem"
     },
     {
-      "name": "orchestration.subscribeThread",
-      "payload": "ThreadStreamItem"
+      "name": "thread.event",
+      "payload": "ThreadEvent"
     },
     {
       "name": "provider.options.updated",
@@ -183,12 +229,16 @@
       "payload": "ProviderOptionsInvalidated"
     },
     {
-      "name": "terminal.subscribe",
-      "payload": "TerminalStreamItem"
+      "name": "provider.question.asked",
+      "payload": "ProviderQuestion"
     },
     {
       "name": "terminal.subscribeList",
       "payload": "TerminalListStreamItem"
+    },
+    {
+      "name": "project.list",
+      "payload": "ProjectList"
     }
   ]
 }

@@ -4,19 +4,28 @@ import Observation
 struct ProviderChoice: Identifiable, Equatable {
     let id: String
     let name: String
+    /// Where the provider runtime comes from. Several instances can share a
+    /// display name, such as the built-in Codex and Codex ACP agents.
+    let kind: String
+    /// `name`, qualified with `kind` only when another provider shares it.
+    var title: String
+
+    init(id: String, name: String, kind: String) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        title = name
+    }
 }
 
-struct QueuedChatPrompt: Identifiable {
-    let id: String
-    let text: String
-    let attachments: [Attachment]
-}
-
-/// Stable text storage for one actively streaming timeline entry. The thread
-/// projection still records every chunk for restore, while the visible leaf
-/// row observes this reference directly.
+/// Stable text storage for one actively streaming entry. The thread detail
+/// still records every chunk, while the visible leaf row observes this
+/// reference directly.
 @Observable
 final class ThreadStreamingText {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var text: String
     /// Cheap task identity that avoids hashing the growing text on every chunk.
     private(set) var revision = 0
@@ -34,29 +43,28 @@ final class ThreadStreamingText {
 
 @Observable
 final class ThreadStore {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     typealias ConnectionState = RPCConnectionCoordinator.State
 
-    struct CachePolicy {
-        var maximumInactiveSubscriptions = 5
-        var inactiveSubscriptionLifetime: TimeInterval = 30 * 60
-    }
+    /// Recently viewed chats stay subscribed in the background, bounded by
+    /// count and by time since they were last visible.
+    private static let maximumInactiveSubscriptions = 5
+    private static let inactiveSubscriptionLifetime: TimeInterval = 30 * 60
 
-    private enum StreamingTextKind: Hashable {
-        case assistantMessage
-        case reasoningItem
-    }
-
-    private struct StreamingTextID: Hashable {
-        let kind: StreamingTextKind
-        let entryID: String
-    }
-
-    private(set) var threads: [ThreadListEntry] = []
+    private(set) var threads: [ThreadSummary] = []
     private(set) var selectedThreadID: String?
     private(set) var errorMessage: String?
     private(set) var selectedThreadLoadErrorMessage: String?
     private(set) var providers: [InstanceInfo] = []
+    /// A question an agent asks while the user signs in to it, shown on the
+    /// provider account screen until answered or the sign-in ends.
+    private(set) var providerQuestion: ProviderQuestion?
     private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
+    /// The daemon's project folders, newest first: one list every device
+    /// shares. Chats start only in a project or a folder inside one.
+    private(set) var projects: [String] = []
     var onProviderOptionsUpdated: ((ProviderOptionsResult) -> Void)?
     var onProviderOptionsInvalidated: ((ProviderOptionsInvalidated) -> Void)?
 
@@ -70,20 +78,20 @@ final class ThreadStore {
     /// Mirrors `threads.isEmpty` so chrome that only needs the empty bit does
     /// not depend on the whole collection.
     private(set) var isThreadListEmpty = true
-    /// Cached title of the selected thread: the live session snapshot's title
-    /// when one exists, falling back to the thread-list entry's. nil when no
-    /// thread is selected.
+    /// Cached title of the selected thread: the live detail's title when one
+    /// exists, falling back to the thread list's. nil when none is selected.
     private(set) var selectedThreadTitle: String?
+    /// Whether the selected chat is loading its older turns.
+    private(set) var isLoadingOlderTurns = false
 
     var connectionState: ConnectionState { connection.state }
-    var reconnectAttempt: Int { connection.reconnectAttempt }
     var nextReconnectAt: Date? { connection.nextReconnectAt }
-    var automaticReconnectsExhausted: Bool { connection.automaticReconnectsExhausted }
+    var connectionFailure: String? { connection.failure }
 
-    var selectedThread: Thread? {
+    var selectedThread: ThreadDetail? {
         _ = selectedSessionGeneration
         guard let selectedThreadID else { return nil }
-        return sessionsByID[selectedThreadID]?.thread
+        return sessionsByID[selectedThreadID]?.detail
     }
 
     var selectedThreadMarkdownSegmentCache: ChatMarkdownSegmentCache? {
@@ -98,6 +106,12 @@ final class ThreadStore {
         return sessionsByID[selectedThreadID]?.textLayoutStore
     }
 
+    var selectedThreadTimelineProjection: ChatTimelineProjection? {
+        _ = selectedSessionGeneration
+        guard let selectedThreadID else { return nil }
+        return sessionsByID[selectedThreadID]?.timelineProjection
+    }
+
     func resetSelectedThreadTextLayoutStore() {
         guard let selectedThreadID,
             var session = sessionsByID[selectedThreadID]
@@ -108,32 +122,15 @@ final class ThreadStore {
         noteSelectedSessionChanged(selectedThreadID)
     }
 
-    var selectedThreadSequence: Int {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return 0 }
-        return sessionsByID[selectedThreadID]?.lastSequence ?? 0
-    }
-
-    var isSelectedThreadRestoringHistory: Bool {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return false }
-        return sessionsByID[selectedThreadID]?.isRestoringHistory == true
-    }
-
-    var selectedThreadHistoryRestoreErrorMessage: String? {
-        _ = selectedSessionGeneration
-        guard let selectedThreadID else { return nil }
-        return sessionsByID[selectedThreadID]?.historyRestoreErrorMessage
-    }
-
     private let rpc: any ThreadRPCClient
     private let connection: RPCConnectionCoordinator
-    private let cachePolicy: CachePolicy
-    private let readState: ThreadReadStateStore
+    /// Chats a read command is on its way for, so a burst of updates sends
+    /// one.
+    @ObservationIgnored private var markingRead: Set<String> = []
     private let now: () -> Date
     // Reused across notifications: receiveNotification runs on every streamed
     // event, and a fresh JSONDecoder per frame is pure allocation.
-    private let decoder = newJSONDecoder()
+    private let decoder = WireJSON.makeDecoder()
     // sessionsByID is deliberately outside observation: it mutates on every
     // streamed event of every subscribed thread, and @Observable treats the
     // dictionary as one unit — a hidden thread's stream would invalidate every
@@ -144,16 +141,22 @@ final class ThreadStore {
     @ObservationIgnored private var sessionsByID: [String: ThreadSession] = [:]
     private var selectedSessionGeneration = 0
     /// Stable reference models let live leaf rows update independently of the
-    /// value-typed thread snapshot and its full timeline projection.
-    @ObservationIgnored private var streamingTextByThreadID:
-        [String: [StreamingTextID: ThreadStreamingText]] = [:]
+    /// value-typed thread detail and its timeline projection, by row ID.
+    @ObservationIgnored private var streamingTextByThreadID: [String: [String: ThreadStreamingText]] = [:]
     private var lastThreadListSequence = 0
     private var isLoadingThreadListSnapshot = false
-    private var bufferedThreadListItems: [ThreadListStreamItem] = []
+    private var bufferedThreadListItems: [ThreadListItem] = []
+    /// A project list that arrived before this connection's snapshot; each
+    /// list is whole, so only the latest matters.
+    @ObservationIgnored private var isLoadingProjectList = false
+    @ObservationIgnored private var bufferedProjectList: ProjectList?
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
-    private var itemDetailsByID: [ItemDetailID: CachedItemDetail] = [:]
-    private var queuedPromptsByThreadID: [String: [QueuedChatPrompt]] = [:]
-    private var dispatchingQueuedPromptThreadIDs: Set<String> = []
+    /// Whole entries read on demand, by thread and row ID, with the entry
+    /// revision they were read at.
+    private var entryDetailsByID: [EntryDetailID: CachedEntryDetail] = [:]
+    /// Counts each entry's events, so a detail read during one isn't kept.
+    @ObservationIgnored private var entryRevisions: [EntryDetailID: Int] = [:]
+    @ObservationIgnored private var refreshingProviderIDs: Set<String> = []
     private var maintenanceTask: Task<Void, Never>?
 
     convenience init() {
@@ -163,16 +166,12 @@ final class ThreadStore {
     init(
         rpc: any ThreadRPCClient,
         connection: RPCConnectionCoordinator? = nil,
-        cachePolicy: CachePolicy = CachePolicy(),
-        readState: ThreadReadStateStore = ThreadReadStateStore(defaults: nil),
         now: @escaping () -> Date = Date.init
     ) {
         let connection = connection ?? RPCConnectionCoordinator(rpc: rpc)
         precondition(connection.uses(rpc), "ThreadStore must use the coordinator's RPC client")
         self.rpc = rpc
         self.connection = connection
-        self.cachePolicy = cachePolicy
-        self.readState = readState
         self.now = now
 
         rpc.onNotification = { [weak self] method, data in
@@ -186,33 +185,29 @@ final class ThreadStore {
                 try await self?.synchronizeConnection()
             },
             connected: { [weak self] in
-                self?.connectionDidConnect()
+                await self?.restoreSubscriptions()
             },
-            disconnected: { [weak self] error in
-                self?.connectionDidDisconnect(error)
+            disconnected: { [weak self] in
+                self?.connectionDidDisconnect()
             }
         )
     }
 
     #if DEBUG
         init(
-            previewThreads: [ThreadListEntry],
-            selectedThread: Thread? = nil,
-            providers: [InstanceInfo] = [],
+            previewThreads: [ThreadSummary],
+            selectedThread: ThreadDetail? = nil,
             installedAgents: [ACPRegistryInstalledAgent] = []
         ) {
             let rpc = RPCClient()
             self.rpc = rpc
             connection = RPCConnectionCoordinator(rpc: rpc, initiallyConnected: true)
-            cachePolicy = CachePolicy()
-            readState = ThreadReadStateStore(defaults: nil)
             now = Date.init
             threads = previewThreads
-            self.providers = providers
             self.installedAgents = installedAgents
             selectedThreadID = selectedThread?.id
             if let selectedThread {
-                var session = ThreadSession(thread: selectedThread)
+                var session = ThreadSession(detail: selectedThread)
                 session.subscriptionState = .visible
                 session.shouldRestoreAfterReconnect = true
                 sessionsByID[selectedThread.id] = session
@@ -232,17 +227,7 @@ final class ThreadStore {
             return
         }
         guard let selectedThreadID else { return }
-
         selectedThreadLoadErrorMessage = nil
-        if let session = sessionsByID[selectedThreadID],
-            session.subscriptionState.isSubscribed,
-            session.canPrepareHistoryRestore
-        {
-            Task {
-                await prepareSelectedRestoredThreadIfNeeded(selectedThreadID)
-            }
-            return
-        }
         ensureSubscribed(selectedThreadID)
     }
 
@@ -251,34 +236,120 @@ final class ThreadStore {
         selectedThreadLoadErrorMessage = nil
         isLoadingThreadListSnapshot = true
         bufferedThreadListItems.removeAll()
+        isLoadingProjectList = true
+        bufferedProjectList = nil
     }
 
     private func synchronizeConnection() async throws {
         let item = try await rpc.subscribeThreadList()
         guard applyThreadListSnapshot(item) else {
-            throw RPCError(
-                code: nil,
-                message: "maiD returned an invalid thread-list snapshot",
-                data: nil
-            )
+            throw RPCError("maiD returned an invalid thread-list snapshot")
         }
+        // A list notified while the snapshot was on its way is newer.
+        let projectList = try await rpc.subscribeProjectList()
+        applyProjectList(bufferedProjectList ?? projectList)
+        bufferedProjectList = nil
+        isLoadingProjectList = false
         providers = try await rpc.listProviders()
         installedAgents = (try? await rpc.listInstalledAgents()) ?? []
         rebuildProviderCaches()
     }
 
-    private func connectionDidConnect() {
-        Task { [weak self] in
-            await self?.restoreSubscriptions()
+    // MARK: Providers
+
+    func providerSupportsAdditionalDirectories(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.additionalDirectories == true
+    }
+
+    func providerInfo(for providerID: String) -> InstanceInfo? {
+        if let instance = instancesByID[providerID] {
+            return instance
+        }
+        guard
+            let instanceID = installedAgents.first(where: {
+                $0.id == providerID || $0.instanceID == providerID
+            })?.instanceID
+        else { return nil }
+        return instancesByID[instanceID]
+    }
+
+    /// Whether a session the agent kept opens as a chat: it reopens sessions
+    /// with their memory.
+    func providerSupportsSessionImport(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.resume == true
+    }
+
+    func providerSupportsSessionDelete(_ providerID: String) -> Bool {
+        providerInfo(for: providerID)?.capabilities.delete == true
+    }
+
+    /// Starts a cold provider if needed and returns its current account state.
+    func prepareProviderAccount(_ providerID: String) async throws -> InstanceInfo {
+        let instanceID = try await ensureProviderAvailable(providerID)
+        guard let instance = providerInfo(for: instanceID) else {
+            throw RPCError("Provider account information is unavailable")
+        }
+        return instance
+    }
+
+    /// Re-reads provider state after an out-of-process browser or device-code
+    /// login completes.
+    func refreshProviderAccount(_ providerID: String) async throws -> InstanceInfo {
+        providers = try await rpc.listProviders()
+        rebuildProviderCaches()
+        guard let instance = providerInfo(for: providerID) else {
+            throw RPCError("Provider account information is unavailable")
+        }
+        return instance
+    }
+
+    func authenticateProvider(
+        providerID: String,
+        methodID: String,
+        secret: String?
+    ) async throws -> AuthenticationResult {
+        let instanceID = try await ensureProviderAvailable(providerID)
+        guard providerInfo(for: instanceID)?.capabilities.auth == true else {
+            throw RPCError("This provider does not support sign in")
+        }
+        defer { providerQuestion = nil }
+        let result = try await rpc.authenticateProvider(
+            ProviderAuthenticateParams(
+                instanceID: instanceID,
+                methodID: methodID,
+                secret: secret
+            )
+        )
+        replaceProvider(result.instance)
+        return result
+    }
+
+    func answerProviderQuestion(
+        _ action: RequestAction,
+        answers: [String: [String]]?
+    ) async throws {
+        guard let question = providerQuestion else { return }
+        try await rpc.answerProviderQuestion(
+            ProviderQuestionAnswerParams(
+                actionID: action.id,
+                answers: answers,
+                requestID: question.requestID
+            ))
+        if providerQuestion?.requestID == question.requestID {
+            providerQuestion = nil
         }
     }
 
-    func ensureProviderAvailable(_ requestedID: String) async throws -> String {
-        try await resolveProvider(requestedID)
-    }
-
-    func providerSupportsConfigOptions(_ providerID: String) -> Bool {
-        providers.first { $0.instanceID == providerID }?.capabilities.configOptions == true
+    func logoutProvider(_ providerID: String) async throws -> InstanceInfo {
+        let instanceID = try await ensureProviderAvailable(providerID)
+        guard providerInfo(for: instanceID)?.capabilities.logout == true else {
+            throw RPCError("This provider does not support sign out")
+        }
+        let instance = try await rpc.logoutProvider(
+            ProviderInstanceParams(instanceID: instanceID)
+        )
+        replaceProvider(instance)
+        return instance
     }
 
     func getProviderOptions(providerID: String, cwd: String) async throws -> ProviderOptionsResult {
@@ -296,6 +367,34 @@ final class ThreadStore {
         )
     }
 
+    // MARK: Projects
+
+    /// Adds a folder the daemon browsed as a project and returns the path the
+    /// daemon lists it under. The list itself arrives as a notification.
+    func addProject(_ path: String) async throws -> String {
+        try await rpc.addProject(path).path
+    }
+
+    /// Removes a project; its chats stay.
+    func removeProject(_ path: String) async throws {
+        try await rpc.removeProject(path)
+    }
+
+    private func receiveProjectList(_ list: ProjectList) {
+        if isLoadingProjectList {
+            bufferedProjectList = list
+        } else {
+            applyProjectList(list)
+        }
+    }
+
+    private func applyProjectList(_ list: ProjectList) {
+        let paths = list.projects.map(\.path)
+        if paths != projects {
+            projects = paths
+        }
+    }
+
     func browseWorkspaceDirectories(
         at path: String?
     ) async throws -> WorkspaceBrowseDirectoriesResult {
@@ -310,6 +409,10 @@ final class ThreadStore {
         try await rpc.searchWorkspaceFiles(input)
     }
 
+    func completeCommand(_ input: ProviderCompleteCommandParams) async throws -> [CommandCompletion] {
+        try await rpc.completeCommand(input)
+    }
+
     /// Fetches the public ACP registry index. Network-backed; callers own
     /// loading and error presentation.
     func fetchRegistryAgents() async throws -> [ACPRegistryAgent] {
@@ -322,25 +425,11 @@ final class ThreadStore {
     }
 
     /// Installs (or updates) a registry agent at its current registry version.
-    /// A running process is restarted to adopt an update; a cold agent stays
-    /// cold until it is selected.
+    /// The daemon adopts the update on the next agent launch. A running
+    /// process keeps its current version so updating cannot interrupt a turn.
     func installRegistryAgent(id: String) async throws -> ACPRegistryInstalledAgent {
         let installed = try await rpc.installRegistryAgent(id)
-        installedAgents.removeAll { $0.id == installed.id }
-        installedAgents.append(installed)
-        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        rebuildProviderCaches()
-        if providers.contains(where: {
-            $0.instanceID == installed.instanceID && $0.instanceStatus == .initialized
-        }) {
-            let started = try await rpc.startRegistryAgent(
-                installed.id,
-                restart: true
-            )
-            providers.removeAll { $0.instanceID == started.instanceID }
-            providers.append(started)
-            rebuildProviderCaches()
-        }
+        upsertInstalledAgent(installed)
         return installed
     }
 
@@ -357,225 +446,406 @@ final class ThreadStore {
                 name: configuration.name
             )
         )
-        installedAgents.removeAll { $0.id == installed.id }
-        installedAgents.append(installed)
-        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        rebuildProviderCaches()
+        upsertInstalledAgent(installed)
         return installed
     }
 
-    /// Lists importable sessions reported by an agent, starting it first when
-    /// needed. Network-backed; callers own loading and error presentation.
+    /// Lists sessions reported by an agent, starting it first when needed.
+    /// Import and delete remain independently capability-gated.
     func fetchProviderSessions(agentID: String) async throws -> [SessionSummary] {
         let instanceID = try await ensureProviderAvailable(agentID)
-        guard let provider = providers.first(where: { $0.instanceID == instanceID }),
-            provider.capabilities.sessionList == true
+        guard let provider = providerInfo(for: instanceID),
+            provider.capabilities.sessions == true
         else {
-            throw RPCError(
-                code: nil, message: "This agent does not support listing sessions", data: nil)
-        }
-        guard provider.capabilities.loadReplay == true || provider.capabilities.resume == true
-        else {
-            throw RPCError(
-                code: nil, message: "This agent does not support restoring sessions", data: nil)
+            throw RPCError("This agent does not support listing sessions")
         }
         return try await rpc.listProviderSessions(
             ProviderListSessionsParams(cwd: nil, instanceID: instanceID)
         )
     }
 
-    /// Imports an agent session as a thread and returns its thread id.
-    /// Importing a session that was already imported returns the existing
-    /// thread. The imported thread reaches `threads` through the thread-list
-    /// stream; its history is replayed when it is first selected.
+    /// Opens an agent's session as a chat and returns its thread id. A
+    /// session already open as a chat returns that chat. The chat shows the
+    /// agent's history once it is opened.
     func importProviderSession(agentID: String, session: SessionSummary) async throws -> String {
         let instanceID = try await ensureProviderAvailable(agentID)
-        let result = try await rpc.importProviderSession(
-            ProviderImportSessionParams(instanceID: instanceID, session: session)
-        )
-        return result.threadID
-    }
-
-    func startThread(
-        threadID: String,
-        providerInstanceID: String,
-        cwd: String,
-        message: CommandMessage,
-        configSelections: [ConfigOptionSelection]
-    ) async throws {
-        let command = Command(
-            commandID: UUID().uuidString,
-            configSelections: configSelections,
-            createdAt: now(),
-            cwd: cwd,
-            decision: nil,
-            message: message,
-            modelSelection: nil,
-            optionID: nil,
-            providerInstanceID: providerInstanceID,
-            requestID: nil,
-            threadID: threadID,
-            title: nil,
-            turnID: nil,
-            type: MaidCommandType.threadStart.rawValue,
-            value: nil
-        )
-        _ = try await rpc.dispatchCommand(command)
-        prepareThreadSubscription(threadID)
-        await subscriptionTasks[threadID]?.task.value
-    }
-
-    func submitTurn(
-        threadID: String,
-        text: String,
-        attachments: [Attachment] = []
-    ) async throws {
-        let prompt = try validatedPrompt(
-            text: text,
-            attachments: attachments,
-            messageID: UUID().uuidString
-        )
-        let isRunning = sessionsByID[threadID]?.thread?.latestTurn?.turnState == .running
-        let hasQueue = !(queuedPromptsByThreadID[threadID] ?? []).isEmpty
-        let isDispatchingQueue = dispatchingQueuedPromptThreadIDs.contains(threadID)
-
-        if isRunning || hasQueue || isDispatchingQueue {
-            enqueue(prompt, threadID: threadID)
-        } else {
-            try await dispatchTurn(threadID: threadID, prompt: prompt)
+        guard providerSupportsSessionImport(instanceID) else {
+            throw RPCError("This agent does not support restoring sessions")
         }
+        guard let cwd = session.cwd, !cwd.isEmpty else {
+            throw RPCError("The agent didn't say where this session works")
+        }
+        let create = CreateThread(
+            participant: NewParticipant(instance: instanceID, session: session.sessionID, settings: nil),
+            prompt: nil,
+            title: session.title,
+            workspace: Workspace(additionalDirectories: session.additionalDirectories, cwd: cwd)
+        )
+        guard let threadID = try await command(CommandParams(createThread: create)).thread else {
+            throw RPCError("maiD returned no chat for the session")
+        }
+        return threadID
     }
 
-    func queuedPrompts(for threadID: String) -> [QueuedChatPrompt] {
-        queuedPromptsByThreadID[threadID] ?? []
+    func deleteProviderSession(agentID: String, sessionID: String) async throws {
+        let instanceID = try await ensureProviderAvailable(agentID)
+        guard providerSupportsSessionDelete(instanceID) else {
+            throw RPCError("This agent does not support deleting sessions")
+        }
+        try await rpc.deleteProviderSession(
+            ProviderSessionParams(instanceID: instanceID, sessionID: sessionID)
+        )
     }
 
-    /// Dispatches a queued prompt into the running turn immediately, removing
-    /// it from the queue once the dispatch succeeds.
-    func steerQueuedPrompt(threadID: String, promptID: String) async throws {
-        guard
-            let prompt = queuedPromptsByThreadID[threadID]?
-                .first(where: { $0.id == promptID }),
-            !dispatchingQueuedPromptThreadIDs.contains(threadID)
+    // MARK: Chat state
+
+    func threadIsRunning(_ threadID: String) -> Bool {
+        sessionsByID[threadID]?.detail?.status == .running
+    }
+
+    /// The latest turn when it failed.
+    private func failedTurn(_ threadID: String) -> TurnView? {
+        guard let turn = sessionsByID[threadID]?.detail?.latestTurn, turn.turnState == .failed else { return nil }
+        return turn
+    }
+
+    func failedTurnID(for threadID: String) -> String? {
+        failedTurn(threadID)?.id
+    }
+
+    func failedTurnError(for threadID: String) -> String? {
+        failedTurn(threadID)?.error
+    }
+
+    /// The chat's agent when it reports being signed out, which is the one
+    /// failure the user can fix from the chat.
+    func signedOutProviderID(for threadID: String) -> String? {
+        guard let instance = sessionsByID[threadID]?.detail?.addressee?.instance,
+            providerInfo(for: instance)?.auth.status == MaidAuthStatus.unauthenticated.rawValue
+        else { return nil }
+        return instance
+    }
+
+    /// Re-reads provider state after a failure, since it may be the provider
+    /// refusing an unauthenticated request.
+    func refreshProvidersAfterFailure() async {
+        guard connectionState == .connected,
+            let refreshed = try? await rpc.listProviders()
         else { return }
-
-        dispatchingQueuedPromptThreadIDs.insert(threadID)
-        defer { dispatchingQueuedPromptThreadIDs.remove(threadID) }
-
-        try await dispatchTurn(threadID: threadID, prompt: prompt)
-        removeQueuedPrompt(threadID: threadID, promptID: promptID)
+        providers = refreshed
+        rebuildProviderCaches()
     }
 
-    func removeQueuedPrompt(threadID: String, promptID: String) {
-        queuedPromptsByThreadID[threadID]?.removeAll { $0.id == promptID }
-        if queuedPromptsByThreadID[threadID]?.isEmpty == true {
-            queuedPromptsByThreadID[threadID] = nil
-            sessionsByID[threadID]?.hasQueuedPrompts = false
-            reconcileSubscriptionState(threadID, at: now())
-        }
-        performSubscriptionMaintenance()
+    /// Why the thread's latest turn ended early, when it completed early.
+    func completedTurnStopReason(for threadID: String) -> MaidStopReason? {
+        guard let turn = sessionsByID[threadID]?.detail?.latestTurn,
+            turn.turnState == .completed
+        else { return nil }
+        return turn.stopReason.flatMap(MaidStopReason.init(rawValue:))
+    }
+
+    /// The directory a thread's workspace file search, and so its file
+    /// mentions, are relative to.
+    func workingDirectory(forThread threadID: String) -> String? {
+        sessionsByID[threadID]?.detail?.summary.workspace.cwd
+            ?? threads.first { $0.id == threadID }?.workspace.cwd
+    }
+
+    /// The agent the thread talks to.
+    func providerID(for thread: ThreadSummary) -> String? {
+        (thread.participants.first { $0.id == thread.address } ?? thread.participants.first)?.instance
+    }
+
+    func providerDisplayName(for thread: ThreadSummary) -> String? {
+        let participant = thread.participants.first { $0.id == thread.address } ?? thread.participants.first
+        guard let participant else { return nil }
+        let name = participant.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? participant.instance : name
     }
 
     func promptContentCapabilities(
         for providerInstanceID: String?
     ) -> PromptContentCapabilities? {
         guard let providerInstanceID else { return nil }
-        return providers.first { $0.instanceID == providerInstanceID }?
-            .capabilities.promptContent
+        return providerInfo(for: providerInstanceID)?.capabilities.promptContent
     }
 
-    func interruptTurn(threadID: String, turnID: String) async throws {
-        _ = try await rpc.dispatchCommand(
-            command(
-                type: MaidCommandType.threadTurnInterrupt.rawValue,
-                threadID: threadID,
-                turnID: turnID
-            )
+    /// The daemon's: a turn settled since someone last read the chat, on
+    /// any device.
+    func isThreadUnread(_ id: String) -> Bool {
+        threads.first { $0.id == id }?.attention.unread == true
+    }
+
+    func markThreadRead(_ id: String) {
+        setRead(true, for: id)
+    }
+
+    func markThreadUnread(_ id: String) {
+        setRead(false, for: id)
+    }
+
+    private func setRead(_ read: Bool, for id: String) {
+        guard connectionState == .connected, !markingRead.contains(id) else { return }
+        markingRead.insert(id)
+        Task {
+            defer { markingRead.remove(id) }
+            // A lost one shows the chat as it was; the next view or toggle
+            // sends it again.
+            _ = try? await command(CommandParams(updateThread: UpdateThread(policy: nil, read: read, thread: id, title: nil)))
+        }
+    }
+
+    // MARK: Commands
+
+    /// Sends a command, keyed so a retry after a dropped connection doesn't
+    /// run it twice.
+    @discardableResult
+    private func command(_ params: CommandParams) async throws -> CommandResult {
+        var params = params
+        params.key = params.key ?? UUID().uuidString
+        return try await rpc.command(params)
+    }
+
+    /// Starts a chat with an agent and its first message; returns once the
+    /// chat's snapshot arrived. The same key starts one chat however often
+    /// it is sent.
+    func startThread(
+        key: String,
+        providerInstanceID: String,
+        cwd: String,
+        additionalDirectories: [String] = [],
+        body: MessageBody,
+        settings: [ConfigOptionSelection]
+    ) async throws -> String {
+        let create = CreateThread(
+            participant: NewParticipant(instance: providerInstanceID, session: nil, settings: settings.isEmpty ? nil : settings),
+            prompt: try await uploadingAttachmentData(of: body),
+            title: nil,
+            workspace: Workspace(additionalDirectories: additionalDirectories.isEmpty ? nil : additionalDirectories, cwd: cwd)
         )
+        var params = CommandParams(createThread: create)
+        params.key = key
+        guard let threadID = try await command(params).thread else {
+            throw RPCError("maiD returned no chat")
+        }
+        prepareThreadSubscription(threadID)
+        await subscriptionTasks[threadID]?.task.value
+        return threadID
     }
 
+    /// Sends a prompt. The daemon starts a turn with it, or, while the chat
+    /// is busy, queues it for when the running turn ends or steers it into
+    /// that turn. Sending again with the same `key` lands it once.
+    func submitTurn(
+        threadID: String,
+        text: String,
+        attachments: [Attachment] = [],
+        annotations: [PromptAnnotation] = [],
+        mode: PromptSendMode,
+        key: String = UUID().uuidString
+    ) async throws {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !attachments.isEmpty || !annotations.isEmpty else {
+            throw RPCError("Sending a message requires text, an attachment, or an annotation")
+        }
+        let body = try await uploadingAttachmentData(
+            of: MessageBody(
+                annotations: annotations.isEmpty ? nil : annotations,
+                attachments: attachments.isEmpty ? nil : attachments,
+                text: text.isEmpty ? nil : text
+            ))
+        let deliver = Deliver(
+            body: body,
+            mode: mode == .steer ? MaidDeliveryMode.steer.rawValue : MaidDeliveryMode.queue.rawValue,
+            thread: threadID,
+            to: nil,
+            wantsReply: nil
+        )
+        var params = CommandParams(deliver: deliver)
+        params.key = key
+        try await command(params)
+    }
+
+    /// Uploads each attachment's data on its own and lists the attachment by
+    /// ID, so a message stays small however many images it carries.
+    private func uploadingAttachmentData(of body: MessageBody) async throws -> MessageBody {
+        var body = body
+        for index in body.attachments?.indices ?? 0..<0 {
+            guard let data = body.attachments?[index].data, !data.isEmpty else { continue }
+            body.attachments?[index].id = try await rpc.uploadAttachment(data)
+            body.attachments?[index].data = nil
+        }
+        return body
+    }
+
+    /// One attachment's data, which thread snapshots leave out.
+    func attachmentData(attachmentID: String) async throws -> String {
+        let attachment = try await rpc.getAttachment(attachmentID)
+        guard let data = attachment.data, !data.isEmpty else {
+            throw RPCError("The attachment has no data")
+        }
+        return data
+    }
+
+    /// Messages waiting for the chat's running turn to end, and those that
+    /// didn't get through.
+    func queue(for threadID: String) -> [DeliveryView] {
+        sessionsByID[threadID]?.detail?.queue ?? []
+    }
+
+    /// Sends a waiting message now: steered into the running turn, or as the
+    /// next turn when nothing runs.
+    func sendNow(delivery: String) async throws {
+        try await command(CommandParams(steerDelivery: SteerDelivery(delivery: delivery)))
+    }
+
+    func cancel(delivery: String) async throws {
+        try await command(CommandParams(cancelDelivery: CancelDelivery(delivery: delivery)))
+    }
+
+    /// Moves a waiting message before another, or last.
+    func move(delivery: String, before: String?) async throws {
+        try await command(CommandParams(moveDelivery: MoveDelivery(before: before, delivery: delivery)))
+    }
+
+    /// Sends a message again: one that didn't get through, or the prompt of
+    /// the chat's failed last turn.
+    func retry(delivery: String) async throws {
+        guard connectionState == .connected else {
+            throw RPCError("Reconnect before retrying this message")
+        }
+        try await command(CommandParams(retryDelivery: RetryDelivery(delivery: delivery)))
+    }
+
+    func interruptTurn(threadID: String) async throws {
+        try await command(CommandParams(interrupt: Interrupt(thread: threadID)))
+    }
+
+    /// Stops the chat and every chat it started, and holds their queues.
+    func stopThread(threadID: String) async throws {
+        try await command(CommandParams(stop: Stop(thread: threadID)))
+    }
+
+    /// Lets a held chat's queue go on.
+    func continueThread(threadID: String) async throws {
+        try await command(CommandParams(commandParamsContinue: Continue(thread: threadID)))
+    }
+
+    /// Stops a background task, such as a command a tool left running. The
+    /// provider then settles the entry through the thread's events.
+    func stopItem(threadID: String, ref: String) async throws {
+        try await command(CommandParams(stopItem: StopItem(item: ref, thread: threadID)))
+    }
+
+    /// Sets one of the agent's settings.
     func setThreadConfigOption(
         threadID: String,
         optionID: String,
         value: JSONAny
     ) async throws {
-        _ = try await rpc.dispatchCommand(
-            command(
-                type: MaidCommandType.threadConfigOptionSet.rawValue,
-                threadID: threadID,
-                optionID: optionID,
-                value: value
-            )
+        guard let participant = sessionsByID[threadID]?.detail?.addressee else {
+            throw RPCError("This chat has no agent")
+        }
+        let setting = ConfigOptionSelection(category: nil, optionID: optionID, value: value)
+        try await command(CommandParams(updateParticipant: UpdateParticipant(participant: participant.id, setting: setting)))
+    }
+
+    /// Renames a thread. The daemon also names the provider's own session
+    /// where sessions have names (Claude Code, Codex). A blank title is
+    /// ignored.
+    func renameThread(threadID: String, title: String) async throws {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        try await command(
+            CommandParams(updateThread: UpdateThread(policy: nil, read: nil, thread: threadID, title: title))
         )
     }
 
-    func respondToApproval(
+    func respondToRequest(
         threadID: String,
         requestID: String,
-        decision: MaidApprovalDecision,
-        optionID: String?
+        actionID: String,
+        answers: [String: [String]]?
     ) async throws {
-        _ = try await rpc.dispatchCommand(
-            Command(
-                commandID: UUID().uuidString,
-                configSelections: nil,
-                createdAt: now(),
-                cwd: nil,
-                decision: decision.rawValue,
-                message: nil,
-                modelSelection: nil,
-                optionID: optionID,
-                providerInstanceID: nil,
-                requestID: requestID,
-                threadID: threadID,
-                title: nil,
-                turnID: nil,
-                type: MaidCommandType.threadApprovalRespond.rawValue,
-                value: nil
-            )
-        )
+        let respond = Respond(action: actionID, answers: answers, request: requestID, thread: threadID, why: nil)
+        try await command(CommandParams(respond: respond))
     }
 
-    func itemDetail(threadID: String, item: Item) async throws -> Item {
-        let id = ItemDetailID(threadID: threadID, itemID: item.id)
-        let requestedSequence =
-            currentItem(threadID: threadID, itemID: item.id)?.sequence
-            ?? item.sequence
-        if let requestedSequence,
-            let cached = itemDetailsByID[id],
-            cached.sequence == requestedSequence
-        {
-            return cached.item
-        }
+    /// How a fork of a chat through a turn starts, into another agent when
+    /// `agentID` names one: its agent's own session forked, or a summary of
+    /// the conversation for the first message.
+    func forkPreview(_ sourceThreadID: String, throughTurnID: String?, agentID: String?) async throws -> ForkPreview {
+        try await rpc.forkPreview(ThreadForkPreviewParams(agent: agentID, thread: sourceThreadID, through: throughTurnID))
+    }
 
+    /// Forks a chat through a turn into a new chat that starts with `body`,
+    /// and returns it once its snapshot arrived: its agent's session forked,
+    /// when `agent` is nil, or `agent` starting a session of its own, whose
+    /// first message, `body`, carries the conversation (`forkPreview`).
+    /// `key` is the draft's.
+    func forkThread(
+        key: String,
+        sourceThreadID: String,
+        throughTurnID: String,
+        agent: NewParticipant?,
+        body: MessageBody
+    ) async throws -> String {
+        let fork = ForkThread(agent: agent, prompt: try await uploadingAttachmentData(of: body), thread: sourceThreadID, through: throughTurnID)
+        var params = CommandParams(forkThread: fork)
+        params.key = key
+        guard let threadID = try await command(params).thread else {
+            throw RPCError("maiD returned no chat for the fork")
+        }
+        prepareThreadSubscription(threadID)
+        await subscriptionTasks[threadID]?.task.value
+        return threadID
+    }
+
+    /// Loads the selected chat's turns before the oldest one it shows.
+    func loadOlderTurns() async {
+        guard let threadID = selectedThreadID,
+            let older = sessionsByID[threadID]?.detail?.older,
+            !isLoadingOlderTurns
+        else { return }
+        isLoadingOlderTurns = true
+        defer { isLoadingOlderTurns = false }
+        do {
+            let page = try await rpc.threadTurns(ThreadTurnsParams(before: older, limit: nil, thread: threadID))
+            guard sessionsByID[threadID]?.detail?.older == older else { return }
+            sessionsByID[threadID]?.detail?.prepend(page)
+            sessionsByID[threadID]?.timelineProjection.invalidateAll()
+            noteSelectedSessionChanged(threadID)
+        } catch is CancellationError {
+            return
+        } catch {
+            if selectedThreadID == threadID {
+                selectedThreadLoadErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// An entry whole: a tool's full input and output, a handoff's text.
+    func entryDetail(threadID: String, item: ChatItem) async throws -> Entry {
+        let id = EntryDetailID(threadID: threadID, rowID: item.id)
         while true {
-            let detail = try await rpc.getItemDetail(
-                GetItemDetailInput(itemID: item.id, threadID: threadID)
-            )
-            guard detail.id == item.id else {
-                throw ThreadStoreError.invalidItemDetail
+            let revision = entryRevisions[id, default: 0]
+            if let cached = entryDetailsByID[id], cached.revision == revision {
+                return cached.entry
             }
-
-            // Item events and RPC responses use independent WebSocket writes.
-            // Keep reading until the detail has caught up with the row state.
-            if let currentSequence = currentItem(
-                threadID: threadID,
-                itemID: item.id
-            )?.sequence,
-                let detailSequence = detail.sequence,
-                detailSequence < currentSequence
-            {
-                continue
+            let entry = try await rpc.threadEntry(ThreadEntryParams(ref: item.ref, thread: threadID))
+            guard entry.ref == item.ref else {
+                throw ThreadStoreError.invalidEntryDetail
             }
-
-            itemDetailsByID[id] = CachedItemDetail(item: detail, sequence: detail.sequence)
-            return detail
+            // Entry events and RPC responses are independent writes: an
+            // event during the read may be newer than what it returned.
+            if entryRevisions[id, default: 0] == revision {
+                entryDetailsByID[id] = CachedEntryDetail(entry: entry, revision: revision)
+                return entry
+            }
         }
     }
 
-    func startNewDraft() {
-        selectThread(nil)
-    }
+    // MARK: Selection and subscriptions
 
     /// Starts a snapshot without publishing selection. New-thread creation
     /// uses this to await its authoritative model before revealing the chat.
@@ -594,8 +864,8 @@ final class ThreadStore {
     }
 
     func selectThread(_ id: String?) {
-        if let id {
-            readState.markRead(id)
+        if let id, isThreadUnread(id) {
+            markThreadRead(id)
         }
         guard selectedThreadID != id else { return }
 
@@ -612,11 +882,14 @@ final class ThreadStore {
             session.inactiveSince = nil
             if session.subscriptionState.isSubscribed {
                 session.subscriptionState = .visible
+                // Still watched, but turns may have run in the CLI meanwhile;
+                // what the check finds comes back as a refresh.
+                Task { [rpc] in try? await rpc.syncThread(id) }
             }
             sessionsByID[id] = session
 
-            if connectionState == .connected,
-                !session.subscriptionState.isSubscribed,
+            if !session.subscriptionState.isSubscribed,
+                connectionState == .connected,
                 !isSubscribing(session.subscriptionState)
             {
                 ensureSubscribed(id)
@@ -625,48 +898,6 @@ final class ThreadStore {
 
         recomputeSelectedThreadTitle()
         performSubscriptionMaintenance(at: timestamp)
-    }
-
-    func providerID(for thread: ThreadListEntry) -> String? {
-        if let providerID = thread.providerInstanceID?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !providerID.isEmpty
-        {
-            return providerID
-        }
-        let providerID = thread.session?.providerInstanceID
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let providerID, !providerID.isEmpty else { return nil }
-        return providerID
-    }
-
-    func providerDisplayName(for thread: ThreadListEntry) -> String? {
-        if let sessionName = thread.session?.providerName?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !sessionName.isEmpty
-        {
-            return sessionName
-        }
-        guard let providerID = providerID(for: thread) else { return nil }
-        if let instanceName = instancesByID[providerID]?.name
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !instanceName.isEmpty
-        {
-            return instanceName
-        }
-        return availableProviders.first { $0.id == providerID }?.name ?? providerID
-    }
-
-    func isThreadUnread(_ id: String) -> Bool {
-        readState.isUnread(id)
-    }
-
-    func markThreadRead(_ id: String) {
-        readState.markRead(id)
-    }
-
-    func markThreadUnread(_ id: String) {
-        readState.markUnread(id)
     }
 
     func performSubscriptionMaintenance(at timestamp: Date? = nil) {
@@ -684,12 +915,12 @@ final class ThreadStore {
         }
 
         let expiredIDs = inactive.compactMap { id, inactiveSince in
-            timestamp.timeIntervalSince(inactiveSince) >= cachePolicy.inactiveSubscriptionLifetime
+            timestamp.timeIntervalSince(inactiveSince) >= Self.inactiveSubscriptionLifetime
                 ? id
                 : nil
         }
         let remaining = inactive.filter { !expiredIDs.contains($0.0) }
-        let overage = max(0, remaining.count - cachePolicy.maximumInactiveSubscriptions)
+        let overage = max(0, remaining.count - Self.maximumInactiveSubscriptions)
         let countEvictedIDs = remaining.prefix(overage).map(\.0)
 
         for id in Set(expiredIDs + countEvictedIDs) {
@@ -708,6 +939,38 @@ final class ThreadStore {
     /// Cached; recomputed in rebuildProviderCaches().
     private var instancesByID: [String: InstanceInfo] = [:]
 
+    private func upsertInstalledAgent(_ installed: ACPRegistryInstalledAgent) {
+        installedAgents.removeAll { $0.id == installed.id }
+        installedAgents.append(installed)
+        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        rebuildProviderCaches()
+    }
+
+    private func replaceProvider(_ provider: InstanceInfo) {
+        providers.removeAll { $0.instanceID == provider.instanceID }
+        providers.append(provider)
+        rebuildProviderCaches()
+    }
+
+    /// A chat can start its agent entirely inside the daemon. Refresh the
+    /// catalog once the agent is live so capability-gated controls do not
+    /// keep consulting the configured instance's cold capability set.
+    private func refreshProviderAfterAgentStarted(_ providerID: String) {
+        guard providerInfo(for: providerID)?.instanceStatus != .initialized,
+            refreshingProviderIDs.insert(providerID).inserted
+        else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { refreshingProviderIDs.remove(providerID) }
+            guard connectionState == .connected,
+                let refreshed = try? await rpc.listProviders()
+            else { return }
+            providers = refreshed
+            rebuildProviderCaches()
+        }
+    }
+
     /// Recomputes every cache derived from `providers` and `installedAgents`.
     /// Must be called after each mutation of either input.
     private func rebuildProviderCaches() {
@@ -716,16 +979,19 @@ final class ThreadStore {
             uniquingKeysWith: { first, _ in first }
         )
         let nativeProviders = providers.filter { !isACPProvider($0) }.map {
-            ProviderChoice(id: $0.instanceID, name: $0.name)
+            ProviderChoice(id: $0.instanceID, name: $0.name, kind: String(localized: "Built-in"))
         }
         let installedACPProviders = installedAgents.map { agent in
             ProviderChoice(
                 id: agent.instanceID,
-                name: agent.name
+                name: agent.name,
+                kind: agent.source == "custom"
+                    ? String(localized: "Custom ACP")
+                    : String(localized: "ACP Registry")
             )
         }
         var seenProviderIDs: Set<String> = []
-        availableProviders = (nativeProviders + installedACPProviders).filter {
+        var choices = (nativeProviders + installedACPProviders).filter {
             seenProviderIDs.insert($0.id).inserted
         }.sorted {
             let nameOrder = $0.name.localizedStandardCompare($1.name)
@@ -734,6 +1000,11 @@ final class ThreadStore {
             }
             return nameOrder == .orderedAscending
         }
+        let nameCounts = Dictionary(choices.map { ($0.name, 1) }, uniquingKeysWith: +)
+        for index in choices.indices where nameCounts[choices[index].name, default: 0] > 1 {
+            choices[index].title = "\(choices[index].name) (\(choices[index].kind))"
+        }
+        availableProviders = choices
     }
 
     /// Recomputes every cache derived from `threads`. Must be called after
@@ -742,7 +1013,8 @@ final class ThreadStore {
         isThreadListEmpty = threads.isEmpty
         var seen: Set<String> = []
         recentWorkingDirectories = threads.compactMap { thread in
-            guard let cwd = thread.cwd, seen.insert(cwd).inserted else { return nil }
+            let cwd = thread.workspace.cwd
+            guard !cwd.isEmpty, seen.insert(cwd).inserted else { return nil }
             return cwd
         }
         recomputeSelectedThreadTitle()
@@ -754,11 +1026,11 @@ final class ThreadStore {
             return
         }
         selectedThreadTitle =
-            sessionsByID[selectedThreadID]?.thread?.title
+            sessionsByID[selectedThreadID]?.detail?.summary.title
             ?? threads.first { $0.id == selectedThreadID }?.title
     }
 
-    private func resolveProvider(_ preferredID: String) async throws -> String {
+    func ensureProviderAvailable(_ preferredID: String) async throws -> String {
         if let provider = providers.first(where: { $0.instanceID == preferredID }),
             provider.instanceStatus == .initialized
         {
@@ -771,136 +1043,20 @@ final class ThreadStore {
             $0.instanceID == preferredID || $0.id == preferredID
         }) {
             let started = try await rpc.startRegistryAgent(agent.id, restart: false)
-            providers.removeAll { $0.instanceID == started.instanceID }
-            providers.append(started)
-            rebuildProviderCaches()
+            replaceProvider(started)
             return started.instanceID
         }
 
         if let provider = providers.first(where: { $0.instanceID == preferredID }) {
             let started = try await rpc.startProvider(provider.instanceID)
-            providers.removeAll { $0.instanceID == started.instanceID }
-            providers.append(started)
-            rebuildProviderCaches()
+            replaceProvider(started)
             return started.instanceID
         }
 
-        throw RPCError(code: nil, message: "No agent is available", data: nil)
+        throw RPCError("No agent is available")
     }
 
-    private func validatedPrompt(
-        text: String,
-        attachments: [Attachment],
-        messageID: String
-    ) throws -> QueuedChatPrompt {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty else {
-            throw RPCError(
-                code: nil,
-                message: "Sending a message requires text or an attachment",
-                data: nil
-            )
-        }
-        return QueuedChatPrompt(id: messageID, text: text, attachments: attachments)
-    }
-
-    private func enqueue(_ prompt: QueuedChatPrompt, threadID: String) {
-        queuedPromptsByThreadID[threadID, default: []].append(prompt)
-        var session = sessionsByID[threadID] ?? ThreadSession()
-        session.hasQueuedPrompts = true
-        sessionsByID[threadID] = session
-        reconcileSubscriptionState(threadID, at: now())
-        dispatchNextQueuedPromptIfPossible(threadID)
-    }
-
-    private func dispatchTurn(threadID: String, prompt: QueuedChatPrompt) async throws {
-        _ = try await rpc.dispatchCommand(
-            command(
-                type: MaidCommandType.threadTurnStart.rawValue,
-                threadID: threadID,
-                message: CommandMessage(
-                    attachments: prompt.attachments.isEmpty ? nil : prompt.attachments,
-                    messageID: prompt.id,
-                    text: prompt.text
-                )
-            )
-        )
-    }
-
-    private func dispatchNextQueuedPromptIfPossible(_ threadID: String) {
-        guard connectionState == .connected,
-            !dispatchingQueuedPromptThreadIDs.contains(threadID),
-            let thread = sessionsByID[threadID]?.thread,
-            thread.latestTurn?.turnState != .running,
-            thread.session?.sessionStatus == .ready
-                || thread.session?.sessionStatus == .interrupted,
-            let prompt = queuedPromptsByThreadID[threadID]?.first
-        else {
-            return
-        }
-
-        let turnBeforeDispatch = thread.latestTurn?.turnID
-        dispatchingQueuedPromptThreadIDs.insert(threadID)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await dispatchTurn(threadID: threadID, prompt: prompt)
-                if queuedPromptsByThreadID[threadID]?.first?.id == prompt.id {
-                    queuedPromptsByThreadID[threadID]?.removeFirst()
-                } else {
-                    queuedPromptsByThreadID[threadID]?.removeAll { $0.id == prompt.id }
-                }
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-                if queuedPromptsByThreadID[threadID]?.isEmpty == true {
-                    queuedPromptsByThreadID[threadID] = nil
-                    sessionsByID[threadID]?.hasQueuedPrompts = false
-                    reconcileSubscriptionState(threadID, at: now())
-                }
-                performSubscriptionMaintenance()
-
-                let currentTurn = sessionsByID[threadID]?.thread?.latestTurn
-                if currentTurn?.turnID != turnBeforeDispatch,
-                    currentTurn?.turnState != .running
-                {
-                    dispatchNextQueuedPromptIfPossible(threadID)
-                }
-            } catch is CancellationError {
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-            } catch {
-                dispatchingQueuedPromptThreadIDs.remove(threadID)
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func command(
-        type: String,
-        threadID: String,
-        message: CommandMessage? = nil,
-        turnID: String? = nil,
-        optionID: String? = nil,
-        value: JSONAny? = nil
-    ) -> Command {
-        Command(
-            commandID: UUID().uuidString,
-            configSelections: nil,
-            createdAt: now(),
-            cwd: nil,
-            decision: nil,
-            message: message,
-            modelSelection: nil,
-            optionID: optionID,
-            providerInstanceID: nil,
-            requestID: nil,
-            threadID: threadID,
-            title: nil,
-            turnID: turnID,
-            type: type,
-            value: value
-        )
-    }
-
-    private func connectionDidDisconnect(_ error: (any Error)?) {
+    private func connectionDidDisconnect() {
         isLoadingThreadListSnapshot = false
         bufferedThreadListItems.removeAll()
         selectedThreadLoadErrorMessage = nil
@@ -910,7 +1066,6 @@ final class ThreadStore {
             subscriptionTask.task.cancel()
         }
         subscriptionTasks.removeAll()
-        dispatchingQueuedPromptThreadIDs.removeAll()
 
         for id in sessionsByID.keys {
             guard var session = sessionsByID[id] else { continue }
@@ -918,12 +1073,8 @@ final class ThreadStore {
                 session.shouldRestoreAfterReconnect
                 || session.subscriptionState != .unsubscribed
             session.subscriptionState = .unsubscribed
-            session.bufferedItems.removeAll()
+            session.bufferedEvents.removeAll()
             sessionsByID[id] = session
-        }
-
-        if let error {
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -931,15 +1082,8 @@ final class ThreadStore {
         let timestamp = now()
         performSubscriptionMaintenance(at: timestamp)
 
-        if let selectedThreadID {
-            await subscribe(selectedThreadID)
-        }
-
         let protectedIDs = sessionsByID.compactMap { id, session in
             id != selectedThreadID && session.isProtected ? id : nil
-        }
-        for id in protectedIDs {
-            ensureSubscribed(id)
         }
 
         let inactiveIDs = sessionsByID.compactMap { id, session -> (String, Date)? in
@@ -948,17 +1092,21 @@ final class ThreadStore {
                 session.shouldRestoreAfterReconnect,
                 let inactiveSince = session.inactiveSince,
                 timestamp.timeIntervalSince(inactiveSince)
-                    < cachePolicy.inactiveSubscriptionLifetime
+                    < Self.inactiveSubscriptionLifetime
             else {
                 return nil
             }
             return (id, inactiveSince)
         }.sorted { $0.1 > $1.1 }
-            .prefix(cachePolicy.maximumInactiveSubscriptions)
+            .prefix(Self.maximumInactiveSubscriptions)
             .map(\.0)
 
-        for id in inactiveIDs {
+        let restoredIDs = [selectedThreadID].compactMap(\.self) + protectedIDs + inactiveIDs
+        for id in restoredIDs {
             ensureSubscribed(id)
+        }
+        for id in restoredIDs {
+            await subscriptionTasks[id]?.task.value
         }
     }
 
@@ -976,7 +1124,7 @@ final class ThreadStore {
         let task = Task { [weak self] in
             await previousTask?.value
             guard !Task.isCancelled else { return }
-            await self?.subscribe(id)
+            await self?.subscribe(id, operationID: operationID)
             self?.finishSubscriptionTask(id, operationID: operationID)
         }
         subscriptionTasks[id] = SubscriptionTask(
@@ -986,7 +1134,7 @@ final class ThreadStore {
         )
     }
 
-    private func subscribe(_ id: String) async {
+    private func subscribe(_ id: String, operationID: UUID) async {
         guard connectionState == .connected else { return }
 
         if selectedThreadID == id {
@@ -995,23 +1143,22 @@ final class ThreadStore {
         let recoveryID = UUID()
         var session = sessionsByID[id] ?? ThreadSession()
         session.subscriptionState = .subscribing(recoveryID)
-        session.bufferedItems.removeAll()
+        session.bufferedEvents.removeAll()
         sessionsByID[id] = session
 
         do {
-            let item = try await rpc.subscribeThread(
-                SubscribeThreadInput(threadID: id)
-            )
+            // Caught up first (turns run in the CLI, a rebuild), so the chat
+            // shows as its agent's session has it; a failure leaves the
+            // daemon's copy, which subscribing reports on its own.
+            try? await rpc.syncThread(id)
+            let snapshot = try await rpc.subscribeThread(id)
             guard connectionState == .connected,
                 var current = sessionsByID[id],
                 case .subscribing(recoveryID) = current.subscriptionState
             else {
                 return
             }
-            guard item.streamKind == .snapshot,
-                let snapshot = item.snapshot,
-                snapshot.thread.id == id
-            else {
+            guard snapshot.thread.id == id else {
                 throw ThreadStoreError.invalidSnapshot
             }
 
@@ -1025,14 +1172,13 @@ final class ThreadStore {
             reconcileSubscriptionState(id, at: now())
 
             guard var recovered = sessionsByID[id] else { return }
-            let buffered = recovered.bufferedItems
-            recovered.bufferedItems.removeAll()
+            let buffered = recovered.bufferedEvents
+            recovered.bufferedEvents.removeAll()
             sessionsByID[id] = recovered
-            for bufferedItem in buffered.sorted(by: threadStreamSequenceAscending) {
-                applyThreadStreamItem(bufferedItem)
+            for event in buffered.sorted(by: { $0.seq < $1.seq }) {
+                applyThreadEvent(event)
             }
             performSubscriptionMaintenance()
-            await prepareSelectedRestoredThreadIfNeeded(id)
         } catch is CancellationError {
             return
         } catch {
@@ -1040,28 +1186,12 @@ final class ThreadStore {
                 case .subscribing(recoveryID) = failed.subscriptionState
             else { return }
             failed.subscriptionState = .unsubscribed
-            failed.bufferedItems.removeAll()
+            failed.bufferedEvents.removeAll()
             sessionsByID[id] = failed
             if selectedThreadID == id {
-                selectedThreadLoadErrorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func prepareSelectedRestoredThreadIfNeeded(_ id: String) async {
-        guard connectionState == .connected,
-            selectedThreadID == id,
-            let session = sessionsByID[id],
-            session.canPrepareHistoryRestore
-        else {
-            return
-        }
-        do {
-            _ = try await rpc.dispatchCommand(
-                command(type: MaidCommandType.threadSessionPrepare.rawValue, threadID: id)
-            )
-        } catch {
-            if selectedThreadID == id {
+                // Publish retryable failure only after the task slot is free;
+                // retry() may run as soon as observers see this error.
+                finishSubscriptionTask(id, operationID: operationID)
                 selectedThreadLoadErrorMessage = error.localizedDescription
             }
         }
@@ -1069,9 +1199,10 @@ final class ThreadStore {
 
     private func markInactive(_ id: String, at timestamp: Date) {
         guard var session = sessionsByID[id] else { return }
-        session.inactiveSince = session.isProtected ? nil : timestamp
+        let isProtected = session.isProtected
+        session.inactiveSince = isProtected ? nil : timestamp
         if session.subscriptionState.isSubscribed {
-            session.subscriptionState = session.isProtected ? .protected : .inactive
+            session.subscriptionState = isProtected ? .protected : .inactive
         }
         sessionsByID[id] = session
     }
@@ -1107,13 +1238,14 @@ final class ThreadStore {
 
         session.subscriptionState = .unsubscribed
         session.shouldRestoreAfterReconnect = false
-        // Presentation caches are useful for recent back-navigation, but an
-        // evicted inactive session should not retain prepared content forever.
+        // Unwatched, its content goes stale: reopening it waits for the
+        // daemon's caught-up snapshot rather than showing it first.
+        session.detail = nil
         session.markdownSegmentCache = ChatMarkdownSegmentCache()
         session.textLayoutStore.deactivateTextViewReuse()
         session.textLayoutStore = ChatTextLayoutStore()
         sessionsByID[id] = session
-        removeItemDetails(for: id)
+        removeEntryDetails(for: id)
         streamingTextByThreadID[id] = nil
 
         guard connectionState == .connected else { return }
@@ -1122,9 +1254,7 @@ final class ThreadStore {
         let task = Task { [weak self] in
             await previousTask?.value
             guard let self, !Task.isCancelled else { return }
-            try? await rpc.unsubscribeThread(
-                SubscribeThreadInput(threadID: id)
-            )
+            try? await rpc.unsubscribeThread(id)
             finishSubscriptionTask(id, operationID: operationID)
         }
         subscriptionTasks[id] = SubscriptionTask(
@@ -1134,13 +1264,23 @@ final class ThreadStore {
         )
     }
 
+    /// Subscribes again for a fresh snapshot, keeping what the chat shows
+    /// until it arrives.
+    private func resubscribe(_ id: String) {
+        guard var session = sessionsByID[id], session.subscriptionState.isSubscribed else { return }
+        session.subscriptionState = .unsubscribed
+        sessionsByID[id] = session
+        ensureSubscribed(id)
+    }
+
     private func finishSubscriptionTask(_ id: String, operationID: UUID) {
         guard subscriptionTasks[id]?.id == operationID else { return }
         subscriptionTasks[id] = nil
     }
 
-    private func removeItemDetails(for threadID: String) {
-        itemDetailsByID = itemDetailsByID.filter { $0.key.threadID != threadID }
+    private func removeEntryDetails(for threadID: String) {
+        entryDetailsByID = entryDetailsByID.filter { $0.key.threadID != threadID }
+        entryRevisions = entryRevisions.filter { $0.key.threadID != threadID }
     }
 
     private func scheduleMaintenance() {
@@ -1153,7 +1293,7 @@ final class ThreadStore {
             guard case .inactive = session.subscriptionState,
                 let inactiveSince = session.inactiveSince
             else { return nil }
-            return inactiveSince.addingTimeInterval(cachePolicy.inactiveSubscriptionLifetime)
+            return inactiveSince.addingTimeInterval(Self.inactiveSubscriptionLifetime)
         }.min()
         guard let nextExpiration else { return }
 
@@ -1168,33 +1308,29 @@ final class ThreadStore {
         }
     }
 
+    // MARK: Notifications
+
     private func receiveNotification(method: String, data: Data) {
         do {
             switch method {
-            case MaidRPCMethod.orchestrationSubscribeThreadList:
-                let notification = try decoder.decode(
-                    Notification<ThreadListStreamItem>.self,
-                    from: data
-                )
+            case MaidRPCMethod.threadList:
+                let notification = try decoder.decode(Notification<ThreadListItem>.self, from: data)
                 receiveThreadListItem(notification.params)
-            case MaidRPCMethod.orchestrationSubscribeThread:
-                let notification = try decoder.decode(
-                    Notification<ThreadStreamItem>.self,
-                    from: data
-                )
-                receiveThreadItem(notification.params)
+            case MaidRPCMethod.projectList:
+                let notification = try decoder.decode(Notification<ProjectList>.self, from: data)
+                receiveProjectList(notification.params)
+            case MaidRPCMethod.threadEvent:
+                let notification = try decoder.decode(Notification<ThreadEvent>.self, from: data)
+                receiveThreadEvent(notification.params)
             case MaidRPCMethod.providerOptionsUpdated:
-                let notification = try decoder.decode(
-                    Notification<ProviderOptionsResult>.self,
-                    from: data
-                )
+                let notification = try decoder.decode(Notification<ProviderOptionsResult>.self, from: data)
                 onProviderOptionsUpdated?(notification.params)
             case MaidRPCMethod.providerOptionsInvalidated:
-                let notification = try decoder.decode(
-                    Notification<ProviderOptionsInvalidated>.self,
-                    from: data
-                )
+                let notification = try decoder.decode(Notification<ProviderOptionsInvalidated>.self, from: data)
                 onProviderOptionsInvalidated?(notification.params)
+            case MaidRPCMethod.providerQuestionAsked:
+                let notification = try decoder.decode(Notification<ProviderQuestion>.self, from: data)
+                providerQuestion = notification.params
             default:
                 break
             }
@@ -1203,91 +1339,101 @@ final class ThreadStore {
         }
     }
 
-    private func receiveThreadItem(_ item: ThreadStreamItem) {
-        guard let threadID = item.snapshot?.thread.id
-            ?? item.event?.payload.threadID,
-            var session = sessionsByID[threadID]
-        else { return }
+    private func receiveThreadEvent(_ event: ThreadEvent) {
+        guard var session = sessionsByID[event.thread] else { return }
         if case .subscribing = session.subscriptionState {
-            session.bufferedItems.append(item)
-            sessionsByID[threadID] = session
+            session.bufferedEvents.append(event)
+            sessionsByID[event.thread] = session
         } else {
-            applyThreadStreamItem(item)
-        }
-    }
-
-    private func applyThreadStreamItem(_ item: ThreadStreamItem) {
-        switch item.streamKind {
-        case .snapshot:
-            guard let snapshot = item.snapshot else { return }
-            applyThreadRefreshSnapshot(snapshot)
-        case .event:
-            guard let event = item.event else { return }
             applyThreadEvent(event)
-        default:
-            break
         }
     }
 
-    private func applyThreadRefreshSnapshot(_ snapshot: ThreadDetailSnapshot) {
-        let threadID = snapshot.thread.id
-        guard var session = sessionsByID[threadID],
-            snapshot.snapshotSequence > session.lastSequence
-        else { return }
-
-        replaceThreadContents(with: snapshot, session: &session)
-        sessionsByID[threadID] = session
-        noteSelectedSessionChanged(threadID)
-        if selectedThreadID == threadID {
-            selectedThreadLoadErrorMessage = nil
-        }
-        reconcileSubscriptionState(threadID, at: now())
-        performSubscriptionMaintenance()
-        dispatchNextQueuedPromptIfPossible(threadID)
-    }
-
-    /// Replaces only server-owned thread data, preserving local subscription,
-    /// presentation-cache, and queued-prompt state.
+    /// Replaces only server-owned thread data, preserving local subscription
+    /// and presentation-cache state.
     private func replaceThreadContents(
-        with snapshot: ThreadDetailSnapshot,
+        with snapshot: ThreadSnapshot,
         session: inout ThreadSession
     ) {
         let threadID = snapshot.thread.id
-        removeItemDetails(for: threadID)
+        removeEntryDetails(for: threadID)
         streamingTextByThreadID[threadID] = nil
-        session.thread = snapshot.thread
-        session.lastSequence = snapshot.snapshotSequence
-        session.historyRestorePending = snapshot.historyRestorePending == true
+        session.detail = ThreadDetail(snapshot)
+        // The turns were replaced, not appended to.
+        session.timelineProjection.invalidateAll()
     }
 
-    private func applyThreadEvent(_ event: Event) {
-        guard let threadID = event.payload.threadID else { return }
-        let hadActiveTurn = hasActiveTurn(sessionsByID[threadID])
+    #if DEBUG
+        func insertSyntheticBenchmarkThread(_ detail: ThreadDetail) {
+            guard detail.id.hasPrefix("synthetic-benchmark-") else { return }
+            var session = ThreadSession(detail: detail)
+            session.subscriptionState = .inactive
+            session.inactiveSince = now()
+            sessionsByID[detail.id] = session
+            threads.append(detail.summary)
+            noteThreadsChanged()
+        }
+
+        func applySyntheticBenchmarkEvent(_ event: ThreadEvent) {
+            guard selectedThreadID == ChatSyntheticBenchmarkThread.threadID,
+                event.thread == ChatSyntheticBenchmarkThread.threadID
+            else { return }
+            applyThreadEvent(event)
+        }
+    #endif
+
+    private func applyThreadEvent(_ event: ThreadEvent) {
+        let threadID = event.thread
         // Straight through the subscript: a local copy of the session would
-        // defeat copy-on-write and duplicate the timeline on every chunk.
-        guard let result = sessionsByID[threadID]?.apply(event), result.applied else { return }
-        let isLeafOnlyStreamingUpdate = updateStreamingText(
-            for: event,
-            threadID: threadID
-        )
-        let hasActiveTurn = hasActiveTurn(sessionsByID[threadID])
-        if hadActiveTurn && !hasActiveTurn {
-            streamingTextByThreadID[threadID] = nil
+        // defeat copy-on-write and duplicate the turns on every chunk.
+        guard let result = sessionsByID[threadID]?.apply(event) else { return }
+        switch result.change {
+        case .none:
+            return
+        case .refresh:
+            resubscribe(threadID)
+            return
+        case .removed:
+            removeThread(threadID)
+            return
+        case .text(let turnID, let entryRef, let delta):
+            if updateStreamingText(threadID: threadID, turnID: turnID, entryRef: entryRef, delta: delta) {
+                return
+            }
+        case .turns:
+            if let turn = event.turn, let entry = event.entry {
+                let rowID = "\(turn.id)|\(entry.ref)"
+                streamingTextByThreadID[threadID]?[rowID] = nil
+                entryRevisions[EntryDetailID(threadID: threadID, rowID: rowID), default: 0] += 1
+            }
+            if event.turn?.turnState?.isSettled == true {
+                streamingTextByThreadID[threadID] = nil
+            }
+        case .thread:
+            if let participant = event.participant, participant.live {
+                refreshProviderAfterAgentStarted(participant.instance)
+            }
         }
-        if !isLeafOnlyStreamingUpdate {
-            noteSelectedSessionChanged(threadID)
+        noteSelectedSessionChanged(threadID)
+        if threadID == selectedThreadID, sessionsByID[threadID]?.detail?.summary.attention.unread == true {
+            // What finished while it was open has been seen.
+            markThreadRead(threadID)
         }
-        updateReadState(
-            for: event,
-            threadID: threadID,
-            hadActiveTurn: hadActiveTurn,
-            hasActiveTurn: hasActiveTurn
-        )
         if result.protectionChanged {
             reconcileSubscriptionState(threadID, at: now())
             performSubscriptionMaintenance()
         }
-        dispatchNextQueuedPromptIfPossible(threadID)
+    }
+
+    private func removeThread(_ threadID: String) {
+        sessionsByID[threadID] = nil
+        streamingTextByThreadID[threadID] = nil
+        removeEntryDetails(for: threadID)
+        if selectedThreadID == threadID {
+            selectedThreadID = nil
+            selectedThreadLoadErrorMessage = nil
+            recomputeSelectedThreadTitle()
+        }
     }
 
     /// Invalidates observers of the selected-thread computed properties when a
@@ -1300,140 +1446,28 @@ final class ThreadStore {
         }
     }
 
-    /// Updates an existing live row without publishing the enclosing thread.
-    /// Returns true only when the event changes text and nothing structural.
-    private func updateStreamingText(
-        for event: Event,
-        threadID: String
-    ) -> Bool {
-        switch event.eventType {
-        case .threadMessageSent:
-            guard event.payload.role == MaidMessageRole.assistant.rawValue,
-                let messageID = event.payload.messageID,
-                let delta = event.payload.text,
-                !delta.isEmpty
-            else { return false }
-
-            let id = StreamingTextID(
-                kind: .assistantMessage,
-                entryID: messageID
-            )
-            if let streamingText = streamingTextByThreadID[threadID]?[id] {
-                streamingText.append(delta)
-                return event.payload.attachments?.isEmpty != false
-            }
-
-            guard
-                let text = sessionsByID[threadID]?.thread?.timeline
-                    .last(where: { $0.message?.id == messageID })?.message?.text
-            else { return false }
-            streamingTextByThreadID[threadID, default: [:]][id] =
-                ThreadStreamingText(text: text)
-            return false
-
-        case .threadItemUpserted:
-            guard let item = event.payload.item,
-                item.itemKind == .reasoning
-            else { return false }
-
-            let id = StreamingTextID(
-                kind: .reasoningItem,
-                entryID: item.id
-            )
-            guard let delta = item.textDelta, !delta.isEmpty,
-                item.itemStatus == .inProgress
-            else {
-                streamingTextByThreadID[threadID]?[id] = nil
-                return false
-            }
-
-            if let streamingText = streamingTextByThreadID[threadID]?[id] {
-                streamingText.append(delta)
-                return true
-            }
-
-            guard
-                let text = currentReasoningText(
-                    threadID: threadID,
-                    itemID: item.id
-                )
-            else { return false }
-            streamingTextByThreadID[threadID, default: [:]][id] =
-                ThreadStreamingText(text: text)
-            return false
-
-        default:
-            return false
-        }
-    }
-
-    private func currentReasoningText(
-        threadID: String,
-        itemID: String
-    ) -> String? {
-        guard
-            let item = sessionsByID[threadID]?.thread?.timeline
-                .last(where: { $0.item?.id == itemID })?.item,
-            let object = item.payload?.value as? [String: Any]
-        else { return nil }
-        return object["text"] as? String
-    }
-
-    func streamingMessageText(
-        threadID: String,
-        messageID: String
-    ) -> ThreadStreamingText? {
-        streamingTextByThreadID[threadID]?[
-            StreamingTextID(kind: .assistantMessage, entryID: messageID)
-        ]
-    }
-
-    func streamingReasoningText(
-        threadID: String,
-        itemID: String
-    ) -> ThreadStreamingText? {
-        streamingTextByThreadID[threadID]?[
-            StreamingTextID(kind: .reasoningItem, entryID: itemID)
-        ]
-    }
-
-    private func hasActiveTurn(_ session: ThreadSession?) -> Bool {
-        guard let thread = session?.thread else { return false }
-        if thread.session?.activeTurnID != nil {
+    /// Appends streamed text to the live leaf row showing it. Returns true when
+    /// the leaf took it, so nothing structural needs publishing.
+    private func updateStreamingText(threadID: String, turnID: String, entryRef: String, delta: String) -> Bool {
+        let rowID = "\(turnID)|\(entryRef)"
+        if let streamingText = streamingTextByThreadID[threadID]?[rowID] {
+            streamingText.append(delta)
             return true
         }
-        return thread.latestTurn.map { $0.completedAt == nil } ?? false
+        guard let turn = sessionsByID[threadID]?.detail?.turns.last(where: { $0.id == turnID }),
+            let entry = turn.entries.last(where: { $0.ref == entryRef }),
+            entry.itemKind == .assistantMessage || entry.itemKind == .reasoning
+        else { return false }
+        streamingTextByThreadID[threadID, default: [:]][rowID] = ThreadStreamingText(text: entry.text ?? "")
+        return false
     }
 
-    private func currentItem(threadID: String, itemID: String) -> Item? {
-        sessionsByID[threadID]?.thread?.timeline.last {
-            $0.item?.id == itemID
-        }?.item
+    /// The live text of a streaming row, by its row ID.
+    func streamingText(threadID: String, rowID: String) -> ThreadStreamingText? {
+        streamingTextByThreadID[threadID]?[rowID]
     }
 
-    private func updateReadState(
-        for event: Event,
-        threadID: String,
-        hadActiveTurn: Bool,
-        hasActiveTurn: Bool
-    ) {
-        guard selectedThreadID != threadID else { return }
-
-        let completedFinalQueuedTurn =
-            hadActiveTurn
-            && !hasActiveTurn
-            && queuedPromptsByThreadID[threadID]?.isEmpty != false
-        let requiresAttention =
-            event.eventType == .threadApprovalOpened
-            || event.eventType == .threadSessionStatusSet
-                && event.payload.session?.sessionStatus == .error
-
-        if completedFinalQueuedTurn || requiresAttention {
-            readState.markUnread(threadID)
-        }
-    }
-
-    private func receiveThreadListItem(_ item: ThreadListStreamItem) {
+    private func receiveThreadListItem(_ item: ThreadListItem) {
         if isLoadingThreadListSnapshot {
             bufferedThreadListItems.append(item)
         } else {
@@ -1441,49 +1475,51 @@ final class ThreadStore {
         }
     }
 
-    private func applyThreadListSnapshot(_ item: ThreadListStreamItem) -> Bool {
-        guard item.streamKind == .snapshot, let snapshot = item.snapshot else {
+    private func applyThreadListSnapshot(_ item: ThreadListItem) -> Bool {
+        guard MaidThreadListKind(rawValue: item.kind) == .snapshot else {
             errorMessage = "maiD returned an invalid thread-list snapshot"
             isLoadingThreadListSnapshot = false
             bufferedThreadListItems.removeAll()
             return false
         }
 
-        lastThreadListSequence = snapshot.snapshotSequence
-        threads = snapshot.threads
+        let snapshot = item.threads ?? []
+        lastThreadListSequence = item.seq
+        threads = snapshot
         sortThreads()
-        readState.retainThreadIDs(Set(snapshot.threads.map(\.id)))
         if let selectedThreadID,
-            !snapshot.threads.contains(where: { $0.id == selectedThreadID })
+            !snapshot.contains(where: { $0.id == selectedThreadID })
         {
-            self.selectedThreadID = nil
-            selectedThreadLoadErrorMessage = nil
-            sessionsByID[selectedThreadID] = nil
-            streamingTextByThreadID[selectedThreadID] = nil
+            removeThread(selectedThreadID)
         }
         noteThreadsChanged()
         isLoadingThreadListSnapshot = false
 
         let bufferedItems = bufferedThreadListItems
         bufferedThreadListItems.removeAll()
-        for bufferedItem in bufferedItems.sorted(by: streamSequenceAscending) {
+        for bufferedItem in bufferedItems.sorted(by: { $0.seq < $1.seq }) {
             applyThreadListUpdate(bufferedItem)
         }
         return true
     }
 
-    private func applyThreadListUpdate(_ item: ThreadListStreamItem) {
-        guard let sequence = item.sequence, sequence > lastThreadListSequence else { return }
-        lastThreadListSequence = sequence
+    private func applyThreadListUpdate(_ item: ThreadListItem) {
+        guard item.seq > lastThreadListSequence else { return }
+        lastThreadListSequence = item.seq
 
-        switch item.streamKind {
-        case .threadUpserted:
+        switch MaidThreadListKind(rawValue: item.kind) {
+        case .upsert:
             guard let thread = item.thread else { return }
             threads.removeAll { $0.id == thread.id }
             threads.append(thread)
             sortThreads()
             noteThreadsChanged()
-        default:
+        case .remove:
+            guard let removed = item.removed else { return }
+            threads.removeAll { $0.id == removed }
+            removeThread(removed)
+            noteThreadsChanged()
+        case .snapshot, nil:
             break
         }
     }
@@ -1497,33 +1533,13 @@ final class ThreadStore {
         return false
     }
 
-    private func threadStreamSequenceAscending(
-        _ left: ThreadStreamItem,
-        _ right: ThreadStreamItem
-    ) -> Bool {
-        let leftSequence = left.snapshot?.snapshotSequence
-            ?? left.event?.sequence
-            ?? .min
-        let rightSequence = right.snapshot?.snapshotSequence
-            ?? right.event?.sequence
-            ?? .min
-        return leftSequence < rightSequence
-    }
-
-    private func streamSequenceAscending(
-        _ left: ThreadListStreamItem,
-        _ right: ThreadListStreamItem
-    ) -> Bool {
-        (left.sequence ?? .min) < (right.sequence ?? .min)
-    }
-
     #if DEBUG
         var cachedThreadIDs: Set<String> {
-            Set(sessionsByID.compactMap { $0.value.thread == nil ? nil : $0.key })
+            Set(sessionsByID.compactMap { $0.value.detail == nil ? nil : $0.key })
         }
 
-        func cachedThread(for id: String) -> Thread? {
-            sessionsByID[id]?.thread
+        func cachedThread(for id: String) -> ThreadDetail? {
+            sessionsByID[id]?.detail
         }
 
         var subscribedThreadIDs: Set<String> {
@@ -1564,25 +1580,25 @@ final class ThreadStore {
 
     private enum ThreadStoreError: LocalizedError {
         case invalidSnapshot
-        case invalidItemDetail
+        case invalidEntryDetail
 
         var errorDescription: String? {
             switch self {
             case .invalidSnapshot:
                 "maiD returned an invalid authoritative thread snapshot"
-            case .invalidItemDetail:
-                "maiD returned an invalid item detail"
+            case .invalidEntryDetail:
+                "maiD returned an invalid entry"
             }
         }
     }
 }
 
-private struct ItemDetailID: Hashable {
+private struct EntryDetailID: Hashable {
     let threadID: String
-    let itemID: String
+    let rowID: String
 }
 
-private struct CachedItemDetail {
-    let item: Item
-    let sequence: Int?
+private struct CachedEntryDetail {
+    let entry: Entry
+    let revision: Int
 }

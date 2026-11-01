@@ -2,10 +2,19 @@ import Foundation
 
 protocol ThreadRPCClient: RPCTransportClient {
     var onNotification: ((String, Data) -> Void)? { get set }
-    func subscribeThreadList() async throws -> ThreadListStreamItem
-    func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem
-    func unsubscribeThread(_ input: SubscribeThreadInput) async throws
-    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item
+    func subscribeThreadList() async throws -> ThreadListItem
+    func subscribeProjectList() async throws -> ProjectList
+    func addProject(_ path: String) async throws -> Project
+    func removeProject(_ path: String) async throws
+    func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot
+    func unsubscribeThread(_ threadID: String) async throws
+    func syncThread(_ threadID: String) async throws
+    func threadTurns(_ input: ThreadTurnsParams) async throws -> ThreadTurnsResult
+    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry
+    func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview
+    func getAttachment(_ id: String) async throws -> Attachment
+    func uploadAttachment(_ data: String) async throws -> String
+    func command(_ params: CommandParams) async throws -> CommandResult
     func listProviders() async throws -> [InstanceInfo]
     func listRegistryAgents() async throws -> [ACPRegistryAgent]
     func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent]
@@ -13,98 +22,76 @@ protocol ThreadRPCClient: RPCTransportClient {
     func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
     func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary]
-    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult
+    func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws
     func browseWorkspaceDirectories(
         _ input: WorkspaceBrowseDirectoriesParams
     ) async throws -> WorkspaceBrowseDirectoriesResult
     func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult
-}
-
-extension ThreadRPCClient {
-    func listProviders() async throws -> [InstanceInfo] { [] }
-    func listRegistryAgents() async throws -> [ACPRegistryAgent] { [] }
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
-
-    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
-        throw RPCError(code: nil, message: "Agent installation is unavailable", data: nil)
-    }
-
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
-        throw RPCError(code: nil, message: "Adding custom agents is unavailable", data: nil)
-    }
-
-    func startProvider(_ instanceID: String) async throws -> InstanceInfo {
-        throw RPCError(code: nil, message: "Provider startup is unavailable", data: nil)
-    }
-
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
-        throw RPCError(code: nil, message: "Agent startup is unavailable", data: nil)
-    }
-
-    func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
-
-    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
-        throw RPCError(code: nil, message: "Session import is unavailable", data: nil)
-    }
-
-    func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
-        throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
-    }
-
-    func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
-        throw RPCError(code: nil, message: "Provider settings are unavailable", data: nil)
-    }
-
-    func browseWorkspaceDirectories(
-        _ input: WorkspaceBrowseDirectoriesParams
-    ) async throws -> WorkspaceBrowseDirectoriesResult {
-        throw RPCError(code: nil, message: "Workspace folder browsing is unavailable", data: nil)
-    }
-
-    func searchWorkspaceFiles(_ input: WorkspaceSearchFilesParams) async throws -> WorkspaceSearchFilesResult {
-        throw RPCError(code: nil, message: "Workspace file search is unavailable", data: nil)
-    }
-
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult {
-        throw RPCError(code: nil, message: "Command dispatch is unavailable", data: nil)
-    }
-
-    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
-        throw RPCError(code: nil, message: "Item details are unavailable", data: nil)
-    }
+    func completeCommand(_ input: ProviderCompleteCommandParams) async throws -> [CommandCompletion]
 }
 
 extension RPCClient: ThreadRPCClient {
-    func subscribeThreadList() async throws -> ThreadListStreamItem {
-        try await call(
-            MaidRPCMethod.orchestrationSubscribeThreadList,
-            params: EmptyParams()
-        )
+    func subscribeThreadList() async throws -> ThreadListItem {
+        try await call(MaidRPCMethod.threadSubscribeList, params: EmptyParams())
     }
 
-    func subscribeThread(_ input: SubscribeThreadInput) async throws -> ThreadStreamItem {
-        try await call(
-            MaidRPCMethod.orchestrationSubscribeThread,
-            params: input
-        )
+    func subscribeProjectList() async throws -> ProjectList {
+        try await call(MaidRPCMethod.projectSubscribeList, params: EmptyParams())
     }
 
-    func unsubscribeThread(_ input: SubscribeThreadInput) async throws {
-        try await callVoid(
-            MaidRPCMethod.orchestrationUnsubscribeThread,
-            params: input
-        )
+    func addProject(_ path: String) async throws -> Project {
+        try await call(MaidRPCMethod.projectAdd, params: ProjectParams(path: path))
     }
 
-    func getItemDetail(_ input: GetItemDetailInput) async throws -> Item {
-        try await call(
-            MaidRPCMethod.orchestrationGetItemDetail,
-            params: input
+    func removeProject(_ path: String) async throws {
+        try await callVoid(MaidRPCMethod.projectRemove, params: ProjectParams(path: path))
+    }
+
+    func subscribeThread(_ threadID: String) async throws -> ThreadSnapshot {
+        try await call(MaidRPCMethod.threadSubscribe, params: ThreadParams(thread: threadID))
+    }
+
+    func unsubscribeThread(_ threadID: String) async throws {
+        try await callVoid(MaidRPCMethod.threadUnsubscribe, params: ThreadParams(thread: threadID))
+    }
+
+    func syncThread(_ threadID: String) async throws {
+        try await callVoid(MaidRPCMethod.threadSync, params: ThreadParams(thread: threadID))
+    }
+
+    func threadTurns(_ input: ThreadTurnsParams) async throws -> ThreadTurnsResult {
+        try await call(MaidRPCMethod.threadTurns, params: input)
+    }
+
+    func forkPreview(_ input: ThreadForkPreviewParams) async throws -> ForkPreview {
+        try await call(MaidRPCMethod.threadForkPreview, params: input)
+    }
+
+    func threadEntry(_ input: ThreadEntryParams) async throws -> Entry {
+        try await call(MaidRPCMethod.threadEntry, params: input)
+    }
+
+    func getAttachment(_ id: String) async throws -> Attachment {
+        try await call(MaidRPCMethod.attachmentGet, params: AttachmentParams(id: id))
+    }
+
+    func uploadAttachment(_ data: String) async throws -> String {
+        let result: AttachmentUploadResult = try await call(
+            MaidRPCMethod.attachmentUpload,
+            params: AttachmentUploadParams(data: data)
         )
+        return result.id
+    }
+
+    func command(_ params: CommandParams) async throws -> CommandResult {
+        try await call(MaidRPCMethod.threadCommand, params: params)
     }
 
     func listProviders() async throws -> [InstanceInfo] {
@@ -150,12 +137,22 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
+    func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
+        -> AuthenticationResult
+    {
+        try await call(MaidRPCMethod.providerAuthenticate, params: input)
+    }
+
+    func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo {
+        try await call(MaidRPCMethod.providerLogout, params: input)
+    }
+
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] {
         try await call(MaidRPCMethod.providerListSessions, params: input)
     }
 
-    func importProviderSession(_ input: ProviderImportSessionParams) async throws -> ProviderImportSessionResult {
-        try await call(MaidRPCMethod.providerImportSession, params: input)
+    func deleteProviderSession(_ input: ProviderSessionParams) async throws {
+        try await callVoid(MaidRPCMethod.providerDeleteSession, params: input)
     }
 
     func getProviderOptions(_ input: ProviderOptionsGetParams) async throws -> ProviderOptionsResult {
@@ -164,6 +161,10 @@ extension RPCClient: ThreadRPCClient {
 
     func setProviderOption(_ input: ProviderOptionsSetParams) async throws -> ProviderOptionsResult {
         try await call(MaidRPCMethod.providerOptionsSet, params: input)
+    }
+
+    func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws {
+        try await callVoid(MaidRPCMethod.providerQuestionAnswer, params: input)
     }
 
     func browseWorkspaceDirectories(
@@ -176,7 +177,7 @@ extension RPCClient: ThreadRPCClient {
         try await call(MaidRPCMethod.workspaceSearchFiles, params: input)
     }
 
-    func dispatchCommand(_ command: Command) async throws -> DispatchResult {
-        try await call(MaidRPCMethod.orchestrationDispatchCommand, params: command)
+    func completeCommand(_ input: ProviderCompleteCommandParams) async throws -> [CommandCompletion] {
+        try await call(MaidRPCMethod.providerCompleteCommand, params: input)
     }
 }

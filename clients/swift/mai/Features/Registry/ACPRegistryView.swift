@@ -5,6 +5,7 @@ struct ACPRegistryView: View {
 
     @State private var model: ACPRegistryModel
     @State private var isCustomAgentFormPresented = false
+    @State private var areProviderAccountsPresented = false
 
     init(store: ThreadStore) {
         self.store = store
@@ -21,14 +22,18 @@ struct ACPRegistryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            ForEach(model.entries) { entry in
-                ACPRegistryRow(
-                    entry: entry,
-                    isInstalling: model.installingIDs.contains(entry.id),
-                    install: {
-                        Task { await model.install(entry) }
-                    }
-                )
+            Section {
+                ForEach(model.entries) { entry in
+                    ACPRegistryRow(
+                        entry: entry,
+                        isInstalling: model.installingIDs.contains(entry.id),
+                        install: {
+                            Task { await model.install(entry) }
+                        }
+                    )
+                }
+            } footer: {
+                Text("Updates apply the next time the agent starts. Active chats keep running.")
             }
         }
         .listStyle(.plain)
@@ -40,9 +45,12 @@ struct ACPRegistryView: View {
             ACPRegistryStatusView(model: model)
         }
         .navigationTitle("Agent Registry")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button("Provider Accounts", systemImage: "person.crop.circle") {
+                    areProviderAccountsPresented = true
+                }
                 Button("Add Custom Agent", systemImage: "plus") {
                     isCustomAgentFormPresented = true
                 }
@@ -57,6 +65,11 @@ struct ACPRegistryView: View {
         .sheet(isPresented: $isCustomAgentFormPresented) {
             NavigationStack {
                 CustomACPAgentForm(store: store)
+            }
+        }
+        .sheet(isPresented: $areProviderAccountsPresented) {
+            NavigationStack {
+                ProviderAccountsView(store: store)
             }
         }
         .alert("Agent Registry Error", isPresented: $model.isErrorPresented) {

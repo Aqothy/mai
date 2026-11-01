@@ -2,11 +2,10 @@ import SwiftUI
 
 struct FolderSelectionSheet: View {
     let store: ThreadStore
-    let projectFolders: ProjectFolderStore
     let title: String
     let selectedFolder: String?
     let onSelectExisting: (String) -> Void
-    let onSelectBrowsed: (String, String?) -> Void
+    let onSelectBrowsed: (String) -> Void
 
     @State private var isBrowsing = false
 
@@ -14,7 +13,6 @@ struct FolderSelectionSheet: View {
         if isBrowsing {
             FolderPickerView(
                 store: store,
-                projectFolders: projectFolders,
                 title: "Choose Folder",
                 confirmationTitle: "Choose",
                 onCancel: { isBrowsing = false },
@@ -23,7 +21,7 @@ struct FolderSelectionSheet: View {
         } else {
             SearchableSelectionSheet(
                 title: title,
-                choices: projectFolders.folders.map { path in
+                choices: store.projects.map { path in
                     SearchableSelectionChoice(
                         id: path,
                         title: URL(filePath: path).lastPathComponent,

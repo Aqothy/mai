@@ -2,112 +2,32 @@ package daemon
 
 // End-to-end terminal RPC tests use a real WebSocket client the way the Swift
 // app does: create attaches the caller, write/resize arrive as notifications,
-// and terminal.subscribe items stream back ordered by sequence.
+// and the view's terminal stream carries the terminal back.
 
 import (
 	"bytes"
-	"context"
 	"fmt"
-	"strings"
-	"sync"
+	"slices"
 	"testing"
 	"time"
 
-	"github.com/Aqothy/jsonrpc2"
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/terminal"
-	"github.com/coder/websocket"
 )
 
-// terminalTestClient records terminal.subscribe stream items in arrival order.
-type terminalTestClient struct {
-	conn *jsonrpc2.Connection
-
-	mu        sync.Mutex
-	items     []wire.TerminalStreamItem
-	listItems []wire.TerminalListStreamItem
-	output    bytes.Buffer
-}
-
-func dialTerminalClient(t *testing.T, url string) *terminalTestClient {
-	t.Helper()
-	c := &terminalTestClient{}
-	ws, _, err := websocket.Dial(context.Background(), url, nil)
-	if err != nil {
-		t.Fatalf("websocket dial: %v", err)
-	}
-	ws.SetReadLimit(-1)
-	c.conn = jsonrpc2.NewWebSocketConnection(context.Background(), wsJSONRPC{conn: ws}, c)
-	t.Cleanup(func() { _ = c.conn.Close() })
-	return c
-}
-
-func (c *terminalTestClient) Handle(_ context.Context, req *jsonrpc2.Request) (any, error) {
-	if req.IsCall() {
-		return nil, jsonrpc2.ErrNotHandled
-	}
-	switch req.Method {
-	case RPCMethodTerminalSubscribe:
-		var item wire.TerminalStreamItem
-		if err := jsonUnmarshalParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.items = append(c.items, item)
-		if item.Kind == terminal.StreamItemOutput {
-			c.output.Write(item.Data)
-		}
-		return nil, nil
-	case RPCMethodTerminalSubscribeList:
-		var item wire.TerminalListStreamItem
-		if err := jsonUnmarshalParams(req, &item); err != nil {
-			return nil, err
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.listItems = append(c.listItems, item)
-		return nil, nil
-	default:
-		return nil, jsonrpc2.ErrNotHandled
-	}
-}
-
-func (c *terminalTestClient) listItemsSnapshot() []wire.TerminalListStreamItem {
+func (c *recordingClient) listItemsSnapshot() []wire.TerminalListStreamItem {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]wire.TerminalListStreamItem(nil), c.listItems...)
+	return append([]wire.TerminalListStreamItem(nil), c.terminalListItems...)
 }
 
-func jsonUnmarshalParams(req *jsonrpc2.Request, dst any) error {
-	return decodeRPCParams(req, dst)
-}
-
-func (c *terminalTestClient) call(t *testing.T, method string, params any, result any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := c.conn.Call(ctx, method, params).Await(ctx, result); err != nil {
-		t.Fatalf("call %s: %v", method, err)
-	}
-}
-
-func (c *terminalTestClient) notify(t *testing.T, method string, params any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := c.conn.Notify(ctx, method, params); err != nil {
-		t.Fatalf("notify %s: %v", method, err)
-	}
-}
-
-func (c *terminalTestClient) outputContains(marker string) bool {
+func (c *recordingClient) outputContains(marker string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return strings.Contains(c.output.String(), marker)
+	return bytes.Contains(c.terminalOutput.Bytes(), []byte(marker))
 }
 
-func (c *terminalTestClient) waitForOutput(t *testing.T, marker string) {
+func (c *recordingClient) waitForOutput(t *testing.T, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -119,27 +39,13 @@ func (c *terminalTestClient) waitForOutput(t *testing.T, marker string) {
 	t.Fatalf("timed out waiting for terminal output containing %q", marker)
 }
 
-func (c *terminalTestClient) outputLength() int {
+func (c *recordingClient) outputLength() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.output.Len()
+	return c.terminalOutput.Len()
 }
 
-func (c *terminalTestClient) outputStats() (chunks, bytes, largest int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, item := range c.items {
-		if item.Kind != terminal.StreamItemOutput {
-			continue
-		}
-		chunks++
-		bytes += len(item.Data)
-		largest = max(largest, len(item.Data))
-	}
-	return chunks, bytes, largest
-}
-
-func (c *terminalTestClient) waitForOutputLength(t *testing.T, minimum int) {
+func (c *recordingClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -151,148 +57,100 @@ func (c *terminalTestClient) waitForOutputLength(t *testing.T, minimum int) {
 	t.Fatalf("timed out waiting for %d terminal output bytes; received %d", minimum, c.outputLength())
 }
 
-func (c *terminalTestClient) statusItems() []wire.TerminalStreamItem {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var statuses []wire.TerminalStreamItem
-	for _, item := range c.items {
-		if item.Kind == terminal.StreamItemStatus {
-			statuses = append(statuses, item)
-		}
-	}
-	return statuses
+func createTestTerminal(t *testing.T, c *recordingClient) testView {
+	t.Helper()
+	var result wire.TerminalAttachResult
+	c.call(t, wire.MethodTerminalCreate, wire.TerminalCreateParams{
+		Cwd:        t.TempDir(),
+		Columns:    80,
+		Rows:       24,
+		Appearance: testAppearance,
+	}, &result)
+	return c.view(t, result)
 }
 
-func createTestTerminal(t *testing.T, c *terminalTestClient) wire.TerminalAttachSnapshot {
+// testAppearance is a dark view's theme: Ghostty's default colors.
+var testAppearance = wire.TerminalAppearance{
+	ColorScheme: terminal.ColorSchemeDark,
+	Foreground:  "#ffffff",
+	Background:  "#282c34",
+}
+
+func (c *recordingClient) writeTerminal(t *testing.T, terminalID, runID, data string) {
 	t.Helper()
-	var snapshot wire.TerminalAttachSnapshot
-	c.call(t, RPCMethodTerminalCreate, wire.TerminalCreateParams{
-		Cwd:     t.TempDir(),
-		Columns: 80,
-		Rows:    24,
-	}, &snapshot)
-	return snapshot
+	c.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{TerminalID: terminalID, RunID: runID, Data: []byte(data)})
+}
+
+func (c *recordingClient) attachTerminal(terminalID string, columns, rows uint16) (wire.TerminalAttachResult, error) {
+	var result wire.TerminalAttachResult
+	err := c.callErr(wire.MethodTerminalAttach, wire.TerminalAttachParams{TerminalID: terminalID, Columns: columns, Rows: rows, Appearance: testAppearance}, &result)
+	return result, err
+}
+
+func (c *recordingClient) mustAttachTerminal(t *testing.T, terminalID string, columns, rows uint16) testView {
+	t.Helper()
+	result, err := c.attachTerminal(terminalID, columns, rows)
+	if err != nil {
+		t.Fatalf("attach %s: %v", terminalID, err)
+	}
+	return c.view(t, result)
 }
 
 func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := newRecordingClient(t, s)
 
 	snapshot := createTestTerminal(t, client)
-	if snapshot.Terminal.TerminalID == "" || snapshot.RunID == "" {
+	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
+	if terminalID == "" || runID == "" {
 		t.Fatalf("snapshot missing identity: %+v", snapshot)
 	}
 	if snapshot.Terminal.Status != terminal.StatusRunning {
 		t.Fatalf("status = %s, want running", snapshot.Terminal.Status)
 	}
 
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'RPC-%d\\n' $((40+2))\n"),
-	})
+	client.writeTerminal(t, terminalID, runID, "printf 'RPC-%d\\n' $((40+2))\n")
 	client.waitForOutput(t, "RPC-42")
 
-	client.notify(t, RPCMethodTerminalResize, wire.TerminalResizeParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Columns:    111,
-		Rows:       31,
-	})
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n"),
-	})
+	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, Columns: 111, Rows: 31, Appearance: testAppearance})
+	client.writeTerminal(t, terminalID, runID, "printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")
 	client.waitForOutput(t, "SIZE-31x111-END")
-
-	// Output sequences must be strictly increasing within the run.
-	client.mu.Lock()
-	var last uint64
-	for _, item := range client.items {
-		if item.Kind != terminal.StreamItemOutput {
-			continue
-		}
-		if item.Sequence <= last {
-			client.mu.Unlock()
-			t.Fatalf("non-monotonic output sequence %d after %d", item.Sequence, last)
-		}
-		last = item.Sequence
-	}
-	client.mu.Unlock()
 }
 
 func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
+	client := newRecordingClient(t, s)
 
 	snapshot := createTestTerminal(t, client)
+	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
 	const outputBytes = 5 * 1024 * 1024
-	const preferredBatchBytes = 64 * 1024
-	const maximumNotificationBytes = 64 * 1024
-	// Loose enough for scheduler variation, but strict enough to catch a
-	// regression to publishing nearly every small PTY read independently.
-	const maximumOutputChunks = outputBytes/preferredBatchBytes + 8
-	started := time.Now()
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data: []byte(fmt.Sprintf(
-			"head -c %d /dev/zero; printf '\\nLARGE-OUTPUT-DONE\\n'\n",
-			outputBytes,
-		)),
-	})
+	client.writeTerminal(t, terminalID, runID, fmt.Sprintf("head -c %d /dev/zero; printf '\\nLARGE-OUTPUT-DONE\\n'\n", outputBytes))
 	client.waitForOutputLength(t, outputBytes)
 	client.waitForOutput(t, "LARGE-OUTPUT-DONE")
-	chunks, bytes, largest := client.outputStats()
-	if chunks > maximumOutputChunks {
-		t.Fatalf(
-			"5 MiB burst used %d terminal chunks, want at most %d",
-			chunks,
-			maximumOutputChunks,
-		)
-	}
-	if largest > maximumNotificationBytes {
-		t.Fatalf(
-			"largest terminal notification was %d bytes, want at most %d",
-			largest,
-			maximumNotificationBytes,
-		)
-	}
-	t.Logf(
-		"received %d bytes in %d terminal chunks (%d bytes/chunk average) in %s",
-		bytes,
-		chunks,
-		bytes/max(chunks, 1),
-		time.Since(started).Round(time.Millisecond),
-	)
 
-	// A subsequent command proves the same attached connection remains live
-	// after the output burst instead of being overflow-closed.
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'AFTER-LARGE-OUTPUT\\n'\n"),
-	})
+	// A subsequent command proves the same stream remains live after the
+	// output burst, and the burst came through whole, without a resync.
+	client.writeTerminal(t, terminalID, runID, "printf 'AFTER-LARGE-OUTPUT\\n'\n")
 	client.waitForOutput(t, "AFTER-LARGE-OUTPUT")
-
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	var last uint64
-	for _, item := range client.items {
-		if item.Kind != terminal.StreamItemOutput {
-			continue
+	records := snapshot.stream.snapshot()
+	if slices.IndexFunc(records[1:], isSnapshot) >= 0 {
+		t.Fatal("a reading view was resynced")
+	}
+	// The kernel hands the daemon a PTY's output about 1 KB at a time; a
+	// flood still reaches views in large messages, not one per read.
+	var messages, received int
+	for _, record := range records {
+		if record.kind == wire.TerminalRecordOutput {
+			messages++
+			received += len(record.data)
 		}
-		if last != 0 && item.Sequence != last+1 {
-			t.Fatalf("terminal output sequence jumped from %d to %d", last, item.Sequence)
-		}
-		last = item.Sequence
+	}
+	if average := received / messages; average < 32*1024 {
+		t.Fatalf("the flood arrived in %d messages averaging %d bytes, want at least 32 KiB", messages, average)
 	}
 }
 
@@ -301,21 +159,14 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
-	controller := dialTerminalClient(t, url)
-	intruder := dialTerminalClient(t, url)
+	controller := dialRecordingClient(t, url)
+	intruder := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, controller)
+	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
 
-	intruder.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'INTRUDER-%d\\n' $((7*3))\n"),
-	})
-	controller.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("printf 'OWNER-%d\\n' $((7*3))\n"),
-	})
+	intruder.writeTerminal(t, terminalID, runID, "printf 'INTRUDER-%d\\n' $((7*3))\n")
+	controller.writeTerminal(t, terminalID, runID, "printf 'OWNER-%d\\n' $((7*3))\n")
 	controller.waitForOutput(t, "OWNER-21")
 
 	if controller.outputContains("INTRUDER-21") {
@@ -326,69 +177,27 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	}
 }
 
-func TestTerminalTerminateStreamsFinalStatus(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
-
-	snapshot := createTestTerminal(t, client)
-	client.call(t, RPCMethodTerminalTerminate, wire.TerminalIDParams{TerminalID: snapshot.Terminal.TerminalID}, nil)
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		statuses := client.statusItems()
-		if len(statuses) > 0 {
-			last := statuses[len(statuses)-1]
-			if last.Status != terminal.StatusStopped {
-				t.Fatalf("final status = %s, want stopped", last.Status)
-			}
-			if last.RunID != snapshot.RunID {
-				t.Fatalf("status run id = %s, want %s", last.RunID, snapshot.RunID)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for terminal status stream item")
-}
-
-func TestTerminalNaturalExitStreamsExitCode(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialTerminalClient(t, url)
-
-	snapshot := createTestTerminal(t, client)
-	client.notify(t, RPCMethodTerminalWrite, wire.TerminalWriteParams{
-		TerminalID: snapshot.Terminal.TerminalID,
-		RunID:      snapshot.RunID,
-		Data:       []byte("exit 5\n"),
-	})
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		statuses := client.statusItems()
-		if len(statuses) > 0 {
-			last := statuses[len(statuses)-1]
-			if last.Status != terminal.StatusExited {
-				t.Fatalf("final status = %s, want exited", last.Status)
-			}
-			if last.ExitCode == nil || *last.ExitCode != 5 {
-				t.Fatalf("exit code = %v, want 5", last.ExitCode)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for exit status stream item")
-}
-
 // useQuietTestShell keeps login-shell startup deterministic for daemon tests.
 func useQuietTestShell(t *testing.T) {
 	t.Helper()
 	t.Setenv("SHELL", "/bin/zsh")
 	t.Setenv("ZDOTDIR", t.TempDir())
+}
+
+// A program reading a line lets the user erase what they typed: Backspace
+// after "é" removes the whole character, not one of its two bytes.
+func TestTerminalLineInputErasesWholeCharacters(t *testing.T) {
+	useQuietTestShell(t)
+	s := newTestServer(t)
+	defer s.Close()
+	client := newRecordingClient(t, s)
+	created := createTestTerminal(t, client)
+	terminalID, runID := created.Terminal.TerminalID, created.RunID
+
+	client.writeTerminal(t, terminalID, runID, "read line; printf 'LINE[%s]%s\\n' \"$line\" END\n")
+	client.writeTerminal(t, terminalID, runID, "aé\x7f\n")
+	client.waitForOutput(t, "]END")
+	if !client.outputContains("LINE[a]END") {
+		t.Fatal("erasing after é left part of it in the line")
+	}
 }

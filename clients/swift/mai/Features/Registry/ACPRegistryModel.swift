@@ -3,6 +3,9 @@ import Observation
 
 @Observable
 final class ACPRegistryModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     enum Phase: Equatable {
         case loading
         case loaded
@@ -26,6 +29,9 @@ final class ACPRegistryModel {
 
     private let store: ThreadStore
     private var registryAgents: [ACPRegistryAgent] = []
+    #if DEBUG
+        private var usesPreviewAgents = false
+    #endif
 
     init(store: ThreadStore) {
         self.store = store
@@ -36,6 +42,7 @@ final class ACPRegistryModel {
     init(store: ThreadStore, previewAgents: [ACPRegistryAgent]) {
         self.store = store
         registryAgents = previewAgents
+        usesPreviewAgents = true
         phase = .loaded
         rebuildEntries()
     }
@@ -103,6 +110,9 @@ final class ACPRegistryModel {
     }
 
     func load() async {
+        #if DEBUG
+            guard !usesPreviewAgents else { return }
+        #endif
         if phase != .loaded {
             phase = .loading
         }

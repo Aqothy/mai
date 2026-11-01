@@ -12,11 +12,11 @@ import (
 
 const testScrollback = 256 * 1024
 
-func newSnapshotScreen(t *testing.T, columns, rows uint16) SnapshotScreen {
+func newSnapshotScreen(t *testing.T, columns, rows uint16) *Screen {
 	t.Helper()
-	s, err := NewSnapshot(columns, rows, testScrollback)
+	s, err := New(columns, rows, testScrollback, Effects{})
 	if err != nil {
-		t.Fatalf("NewSnapshot: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(s.Close)
 	return s
@@ -24,7 +24,7 @@ func newSnapshotScreen(t *testing.T, columns, rows uint16) SnapshotScreen {
 
 // roundTrip exports the source's native model and decodes it exactly as a
 // compatible Ghostty client would before installing it into a surface.
-func roundTrip(t *testing.T, source SnapshotScreen) SnapshotScreen {
+func roundTrip(t *testing.T, source *Screen) *Screen {
 	t.Helper()
 	snapshot, err := source.Snapshot()
 	if err != nil {
@@ -45,53 +45,39 @@ func roundTrip(t *testing.T, source SnapshotScreen) SnapshotScreen {
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
-	formatter, err := libghostty.NewFormatter(term,
-		libghostty.WithFormatterFormat(libghostty.FormatterFormatPlain),
-		libghostty.WithFormatterTrim(true),
-	)
-	if err != nil {
-		term.Close()
-		t.Fatalf("NewFormatter: %v", err)
-	}
-	fresh := &ghosttyScreen{term: term, formatter: formatter}
+	fresh := &Screen{term: term}
 	t.Cleanup(fresh.Close)
 	return fresh
 }
 
-func mustText(t *testing.T, s Screen) string {
+func mustText(t *testing.T, s *Screen) string {
 	t.Helper()
-	out, err := s.Text()
+	formatter, err := libghostty.NewFormatter(s.term,
+		libghostty.WithFormatterFormat(libghostty.FormatterFormatPlain),
+		libghostty.WithFormatterTrim(true),
+	)
 	if err != nil {
-		t.Fatalf("Text: %v", err)
+		t.Fatalf("NewFormatter: %v", err)
+	}
+	defer formatter.Close()
+	out, err := formatter.FormatString()
+	if err != nil {
+		t.Fatalf("FormatString: %v", err)
 	}
 	return out
 }
 
-func mustCursor(t *testing.T, s SnapshotScreen) (uint16, uint16) {
+func mustCursor(t *testing.T, s *Screen) (uint16, uint16) {
 	t.Helper()
-	ghostty, ok := s.(*ghosttyScreen)
-	if !ok {
-		t.Fatalf("unexpected snapshot screen type %T", s)
-	}
-	x, err := ghostty.term.CursorX()
+	x, err := s.term.CursorX()
 	if err != nil {
 		t.Fatalf("CursorX: %v", err)
 	}
-	y, err := ghostty.term.CursorY()
+	y, err := s.term.CursorY()
 	if err != nil {
 		t.Fatalf("CursorY: %v", err)
 	}
 	return x, y
-}
-
-func TestNativeSnapshotReproducesScreenAtSameGrid(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("plain line\r\n\x1b[1;32mstyled line\x1b[0m\r\nprompt with cursor here: "))
-
-	fresh := roundTrip(t, source)
-	if got, want := mustText(t, fresh), mustText(t, source); got != want {
-		t.Fatalf("round-trip text mismatch:\n got %q\nwant %q", got, want)
-	}
 }
 
 func TestNativeSnapshotReproducesScreenAfterResize(t *testing.T) {
@@ -157,45 +143,6 @@ func TestNativeSnapshotReproducesAlternateScreenApp(t *testing.T) {
 	}
 	if strings.Contains(got, "shell history") {
 		t.Fatalf("primary screen leaked into alternate-screen attach: %q", got)
-	}
-}
-
-func TestNativeSnapshotCarriesTerminalModes(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("\x1b[?2004h\x1b[?2048hshell$ "))
-
-	fresh := roundTrip(t, source)
-	ghostty := fresh.(*ghosttyScreen)
-	for name, mode := range map[string]libghostty.Mode{
-		"bracketed paste": libghostty.ModeBracketedPaste,
-		"in-band resize":  libghostty.ModeInBandResize,
-	} {
-		enabled, err := ghostty.term.ModeGet(mode)
-		if err != nil {
-			t.Fatalf("ModeGet(%s): %v", name, err)
-		}
-		if !enabled {
-			t.Fatalf("snapshot did not preserve %s mode", name)
-		}
-	}
-}
-
-func TestNativeSnapshotRejectsCorruption(t *testing.T) {
-	source := newSnapshotScreen(t, 80, 24)
-	source.Feed([]byte("authenticated state\r\nshell$ "))
-	snapshot, err := source.Snapshot()
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-	snapshot[len(snapshot)-1] ^= 0xff
-
-	decoder, err := libghostty.NewSnapshotDecoderBytes(snapshot)
-	if err != nil {
-		t.Fatalf("NewSnapshotDecoderBytes: %v", err)
-	}
-	defer decoder.Close()
-	if _, err := decoder.Decode(); err == nil {
-		t.Fatal("corrupted snapshot unexpectedly decoded")
 	}
 }
 

@@ -12,15 +12,11 @@ struct ChatWorkingIndicator: View {
         HStack(spacing: 8) {
             Image(systemName: "sparkle")
                 .font(.caption)
-                .symbolEffect(.pulse, options: .repeating)
 
             Text(phrase)
-                .id(phrase)
-                .transition(.blurReplace)
         }
         .font(.callout)
         .foregroundStyle(.secondary)
-        .animation(.smooth(duration: 0.6), value: phrase)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Agent working")

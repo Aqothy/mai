@@ -1,9 +1,9 @@
+#if os(iOS)
 import SwiftUI
 
 struct IOSThreadListView: View {
     let store: ThreadStore
     let terminalStore: TerminalStore
-    let projectFolders: ProjectFolderStore
     let newChat: (String?) -> Void
     let newTerminal: (TerminalOpenRequest) -> Void
     let selectThread: (String) -> Void
@@ -13,6 +13,7 @@ struct IOSThreadListView: View {
 
     @State private var filter = ThreadListFilter()
     @State private var isTerminalFolderSelectionPresented = false
+    @State private var projectErrorMessage: String?
 
     @AppStorage(ThreadListDisplayMode.appStorageKey)
     private var displayModeRaw = ThreadListDisplayMode.recent.rawValue
@@ -27,7 +28,7 @@ struct IOSThreadListView: View {
     var body: some View {
         // Hoisted so the filter/merge runs once per body evaluation; the
         // overlay below reads it as well.
-        let items = self.filteredItems
+        let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
         List {
             switch displayMode {
             case .recent:
@@ -35,7 +36,7 @@ struct IOSThreadListView: View {
             case .byProject:
                 let groups = WorkspaceListGroups(
                     items: items,
-                    projectDirectories: projectFolders.folders
+                    projectDirectories: store.projects
                 )
                 workspaceRows(items: groups.ungrouped, isCompact: true)
                 ForEach(groups.projects) { section in
@@ -53,7 +54,7 @@ struct IOSThreadListView: View {
                         IOSProjectSectionHeader(
                             name: section.name,
                             isExpanded: collapsedProjects.isExpanded(section.id),
-                            isSaved: projectFolders.contains(section.id),
+                            isSaved: store.projects.contains(section.id),
                             toggle: {
                                 withAnimation(.snappy(duration: 0.2)) {
                                     collapsedProjects.setExpanded(
@@ -66,7 +67,7 @@ struct IOSThreadListView: View {
                                 newChat(section.id)
                             },
                             remove: {
-                                projectFolders.remove(section.id)
+                                removeProject(section.id)
                             }
                         )
                     }
@@ -95,7 +96,6 @@ struct IOSThreadListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 ThreadFilterMenu(
                     store: store,
-                    projectFolders: projectFolders,
                     filter: $filter
                 )
             }
@@ -126,23 +126,38 @@ struct IOSThreadListView: View {
                 store: store,
                 contentIsEmpty: store.threads.isEmpty
                     && terminalStore.terminals.isEmpty
-                    && (displayMode != .byProject || projectFolders.folders.isEmpty)
+                    && (displayMode != .byProject || store.projects.isEmpty)
             )
         )
         .sheet(isPresented: $isTerminalFolderSelectionPresented) {
             FolderSelectionSheet(
                 store: store,
-                projectFolders: projectFolders,
                 title: "New Terminal",
                 selectedFolder: nil,
                 onSelectExisting: openNewTerminal(at:),
-                onSelectBrowsed: { directory, parentDirectory in
-                    if let parentDirectory {
-                        projectFolders.rememberParentFolder(parentDirectory)
-                    }
-                    openNewTerminal(at: directory)
-                }
+                onSelectBrowsed: openNewTerminal(at:)
             )
+        }
+        .alert(
+            "Couldn’t Remove Project",
+            isPresented: Binding(
+                get: { projectErrorMessage != nil },
+                set: { if !$0 { projectErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(projectErrorMessage ?? "")
+        }
+    }
+
+    private func removeProject(_ path: String) {
+        Task {
+            do {
+                try await store.removeProject(path)
+            } catch {
+                projectErrorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -166,15 +181,6 @@ struct IOSThreadListView: View {
         )
     }
 
-    private var filteredItems: [WorkspaceListItem] {
-        WorkspaceListItem.merged(
-            threads: filter.apply(
-                to: store.threads,
-                providerID: store.providerID(for:)
-            ),
-            terminals: filter.apply(toTerminals: terminalStore.terminals)
-        )
-    }
 }
 
 /// A tappable project header carrying the fold chevron.
@@ -222,7 +228,6 @@ private struct IOSProjectSectionHeader: View {
             IOSThreadListView(
                 store: PreviewData.threadStore(),
                 terminalStore: TerminalStore(),
-                projectFolders: ProjectFolderStore(defaults: nil),
                 newChat: { _ in },
                 newTerminal: { _ in },
                 selectThread: { _ in },
@@ -238,7 +243,6 @@ private struct IOSProjectSectionHeader: View {
             IOSThreadListView(
                 store: ThreadStore(),
                 terminalStore: TerminalStore(),
-                projectFolders: ProjectFolderStore(defaults: nil),
                 newChat: { _ in },
                 newTerminal: { _ in },
                 selectThread: { _ in },
@@ -248,4 +252,6 @@ private struct IOSProjectSectionHeader: View {
             )
         }
     }
+#endif
+
 #endif

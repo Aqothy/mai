@@ -1,15 +1,17 @@
-// Session lifecycle for the ACP adapter: materializing the ACP session
-// behind a thread (in-process reuse -> session/load / session/resume ->
-// session/new), the session-management surface (session/list, /delete,
-// /close), and per-session configuration state (config options, modes,
-// model/mode preference application).
+// Session lifecycle for the ACP adapter: opening sessions (session/new,
+// session/resume, session/load), their history from the mirror, session
+// management (session/list, /delete, /close), and per-session configuration
+// (config options, modes).
 package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	acp "github.com/Aqothy/go-acp"
@@ -17,75 +19,353 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-// acpSession owns all per-session state for one live ACP session binding: the
-// thread route, the ordered update stream, the registered turn, cached
-// config/modes, the item-id scope, per-item tool reconciliation state, the
-// load-replay flag, and pending permission requests. Unbinding a session is
-// deleting this one entry (plus the thread index). All fields are guarded by
-// Instance.mu.
+// acpSession is one live ACP session: its ordered update stream, its
+// mapper, the prompt in flight, cached configuration, pending requests. Fields
+// are guarded by Instance.mu, except that record holds recordMu around the
+// mapper so a session's events go out in frame order.
 type acpSession struct {
-	id       string
-	threadID string
-	stream   *sessionStream
-	// collector is the registered (newest) turn on the session; the in-flight
-	// prompt's collector may lag it while a follow-up turn is queued (see
-	// updateCollectorLocked).
-	collector *promptCollector
-	// scope prefixes ACP item ids before orchestration sees them; random so a
-	// re-materialized session can never collide with an earlier binding.
-	scope string
+	id     string
+	stream *sessionStream
+	// options is set for an options session, which reports to it instead of
+	// emitting events.
+	options *provider.OptionsSessionCallbacks
+
 	// config/hasConfig cache the session's config options; hasConfig
 	// distinguishes an explicit empty option set from "agent uses Session
 	// Modes instead" (modes).
 	config    []provider.ConfigOption
 	hasConfig bool
 	modes     *schema.SessionModeState
-	// replayEvents is non-nil while session/load is collecting its ordered
-	// update stream. StartSession returns the complete batch for display restore
-	// and discards it for ordinary process recovery.
-	replayEvents       []provider.RuntimeEvent
-	toolStates         map[string]toolState
+	commands  []provider.SlashCommand
+
+	recordMu sync.Mutex
+	mapper   *mapper
+	// prompt is the turn whose prompt the agent runs; empty when none runs.
+	prompt string
+	// capture, while non-nil, collects a session/load replay's updates
+	// instead of mapping them live.
+	capture []json.RawMessage
+
 	pendingPermissions map[string]*pendingPermission
-	optionsCallbacks   *provider.OptionsSessionCallbacks
 }
 
-func (h *Instance) OpenOptionsSession(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+// Open opens a session: resumed when the agent can (session/resume, else
+// session/load), otherwise a new one.
+func (h *Instance) Open(ctx context.Context, in provider.OpenInput) (provider.Opened, error) {
+	opened, err := h.open(ctx, in)
+	h.noteAuthRequired(err)
+	return opened, err
+}
+
+func (h *Instance) open(ctx context.Context, in provider.OpenInput) (provider.Opened, error) {
+	if in.Workspace.Cwd == "" {
+		return provider.Opened{}, fmt.Errorf("ACP session requires a cwd")
+	}
+	if in.Session != "" {
+		if h.live(in.Session) {
+			return h.opened(in.Session), nil
+		}
+		switch err := h.resume(ctx, in); {
+		case err == nil:
+			h.applySettings(ctx, in.Session, in.Settings)
+			return h.opened(in.Session), nil
+		case !errors.Is(err, provider.ErrSessionNotFound):
+			return provider.Opened{}, err
+		}
+		// The agent no longer has the session: a new one takes its place.
+	}
+	// Started, not created then attached: the agent may send the session's
+	// commands and modes the moment it answers.
+	active, err := h.agentPeer.StartSession(ctx, schema.NewSessionRequest{
+		CWD:                   in.Workspace.Cwd,
+		AdditionalDirectories: h.supportedAdditionalDirectories(in.Workspace.AdditionalDirectories),
+		MCPServers:            h.mcpServers(in.MCP),
+	})
+	if err != nil {
+		return provider.Opened{}, acpRequestError(err)
+	}
+	resp := active.NewSessionResponse()
+	if resp.SessionID == "" {
+		active.Dispose()
+		return provider.Opened{}, fmt.Errorf("ACP session/new returned an empty session id")
+	}
+	sessionID := string(resp.SessionID)
+	h.attach(sessionID, active, &mapper{}, nil)
+	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
+	h.applySettings(ctx, sessionID, in.Settings)
+	return h.opened(sessionID), nil
+}
+
+// resume reopens a session the agent kept. Its mapper first replays the
+// mirror so it continues where the session's frames left off. Without
+// session/resume, session/load replays the conversation, which becomes the
+// mirror's frames when there are none yet (a session maiD hasn't seen).
+func (h *Instance) resume(ctx context.Context, in provider.OpenInput) error {
+	frames, err := h.frames(ctx, in.Session)
+	if err != nil {
+		return err
+	}
+	restored, _ := history(frames)
+	request := struct {
+		cwd         string
+		directories []string
+		mcp         []schema.McpServer
+	}{in.Workspace.Cwd, h.supportedAdditionalDirectories(in.Workspace.AdditionalDirectories), h.mcpServers(in.MCP)}
+	if h.sessionCapabilities().Resume != nil {
+		stream := h.attach(in.Session, nil, restored, nil)
+		resp, err := h.agentPeer.ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(in.Session), CWD: request.cwd, AdditionalDirectories: request.directories, MCPServers: request.mcp})
+		if err == nil {
+			// Updates the agent sent before answering are delivered first.
+			err = h.awaitSessionBarrier(ctx, stream, nil)
+		}
+		if err != nil {
+			h.detach(in.Session)
+			return sessionError(err)
+		}
+		h.cacheSessionState(in.Session, resp.ConfigOptions, resp.Modes)
+		return nil
+	}
+	if !h.supportsLoadSession() {
+		return provider.ErrSessionNotFound
+	}
+	baseline := len(frames) == 0
+	if err := h.load(ctx, in.Session, request.cwd, request.directories, request.mcp, baseline); err != nil {
+		return err
+	}
+	if !baseline {
+		h.mu.Lock()
+		if session := h.sessions[in.Session]; session != nil {
+			session.mapper = restored
+		}
+		h.mu.Unlock()
+	}
+	return nil
+}
+
+// load runs session/load. With baseline its replay becomes the session's
+// first frames; otherwise the mirror already holds them and the replay is
+// dropped.
+func (h *Instance) load(ctx context.Context, sessionID, cwd string, directories []string, servers []schema.McpServer, baseline bool) error {
+	stream := h.attach(sessionID, nil, &mapper{}, []json.RawMessage{})
+	resp, err := h.agentPeer.LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: cwd, AdditionalDirectories: directories, MCPServers: servers})
+	var replay []json.RawMessage
+	if err == nil {
+		err = h.awaitSessionBarrier(ctx, stream, func() {
+			h.mu.Lock()
+			if session := h.sessions[sessionID]; session != nil {
+				replay, session.capture = session.capture, nil
+			}
+			h.mu.Unlock()
+		})
+	}
+	if err != nil {
+		h.detach(sessionID)
+		return sessionError(err)
+	}
+	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
+	if !baseline {
+		return nil
+	}
+	at := time.Now()
+	frames := make([]json.RawMessage, 0, len(replay)+1)
+	for _, update := range replay {
+		frames = append(frames, encodeFrame(frame{At: at, Update: update}))
+	}
+	h.mu.Lock()
+	session := h.sessions[sessionID]
+	h.mu.Unlock()
+	if session == nil {
+		return provider.ErrSessionNotFound
+	}
+	session.recordMu.Lock()
+	defer session.recordMu.Unlock()
+	for _, raw := range frames {
+		var f frame
+		_ = json.Unmarshal(raw, &f)
+		session.mapper.apply(f)
+	}
+	// The replay's last turn ends with it.
+	if turn := session.mapper.turn; turn != "" {
+		stop := encodeFrame(frame{At: at, Stop: &stopFrame{Turn: turn, State: provider.TurnCompleted}})
+		var f frame
+		_ = json.Unmarshal(stop, &f)
+		session.mapper.apply(f)
+		frames = append(frames, stop)
+	}
+	if h.host.Mirror != nil {
+		h.host.Mirror.Append(sessionID, frames)
+	}
+	return nil
+}
+
+// History maps the session's frames to turns. A session maiD never ran has
+// none until session/load gives them: the session is loaded once, its replay
+// kept as its first frames, and closed again where the agent allows.
+func (h *Instance) History(ctx context.Context, sessionID string, workspace provider.Workspace, after provider.Marker) (provider.HistoryPage, error) {
+	frames, err := h.frames(ctx, sessionID)
+	if err != nil {
+		return provider.HistoryPage{}, err
+	}
+	if len(frames) == 0 && !h.live(sessionID) && h.supportsLoadSession() && h.host.Mirror != nil {
+		if err := h.load(ctx, sessionID, workspace.Cwd, h.supportedAdditionalDirectories(workspace.AdditionalDirectories), []schema.McpServer{}, true); err != nil {
+			return provider.HistoryPage{}, err
+		}
+		h.closeAgentSession(ctx, sessionID)
+		if frames, err = h.frames(ctx, sessionID); err != nil {
+			return provider.HistoryPage{}, err
+		}
+	}
+	_, turns := history(frames)
+	return provider.After(turns, after), nil
+}
+
+// Delivered finds the prompt frame of the delivery: taken once the agent
+// answered after it, not known while the prompt is the session's last frame.
+func (h *Instance) Delivered(ctx context.Context, sessionID string, probe provider.DeliveryProbe) (provider.Tri, error) {
+	if h.host.Mirror == nil {
+		return provider.TriUnknown, nil
+	}
+	frames, err := h.frames(ctx, sessionID)
+	if err != nil {
+		return provider.TriUnknown, err
+	}
+	for index, raw := range frames {
+		var f frame
+		if json.Unmarshal(raw, &f) != nil || f.Prompt == nil || f.Prompt.Turn != probe.Delivery {
+			continue
+		}
+		if index == len(frames)-1 {
+			return provider.TriUnknown, nil
+		}
+		return provider.TriYes, nil
+	}
+	return provider.TriNo, nil
+}
+
+func (h *Instance) frames(ctx context.Context, sessionID string) ([]json.RawMessage, error) {
+	if h.host.Mirror == nil {
+		return nil, nil
+	}
+	return h.host.Mirror.Load(ctx, sessionID)
+}
+
+// Release ends the live session: a running prompt is cancelled, and the agent
+// closes the session where it allows.
+func (h *Instance) Release(ctx context.Context, sessionID string) error {
+	if !h.live(sessionID) {
+		return nil
+	}
+	h.mu.Lock()
+	session := h.sessions[sessionID]
+	prompt := session.prompt
+	h.mu.Unlock()
+	if prompt != "" {
+		if err := h.Interrupt(ctx, sessionID, prompt); err != nil {
+			return err
+		}
+	}
+	h.closeAgentSession(ctx, sessionID)
+	h.detach(sessionID)
+	// The prompt's own end can't arrive once the stream is gone.
+	h.settlePrompt(session, schema.PromptResponse{StopReason: schema.StopReasonCancelled}, nil)
+	return nil
+}
+
+func (h *Instance) closeAgentSession(ctx context.Context, sessionID string) {
+	if h.sessionCapabilities().Close != nil {
+		_, _ = h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)})
+	}
+}
+
+func (h *Instance) Sessions(ctx context.Context, cwd string) ([]provider.SessionSummary, error) {
+	if h.sessionCapabilities().List == nil {
+		return nil, provider.ErrUnsupported
+	}
+	req := schema.ListSessionsRequest{}
+	if cwd != "" {
+		req.CWD = &cwd
+	}
+	var sessions []provider.SessionSummary
+	seenCursors := make(map[string]struct{})
+	for {
+		resp, err := h.agentPeer.ListSessions(ctx, req)
+		if err != nil {
+			return nil, acpRequestError(err)
+		}
+		sessions = append(sessions, sessionSummariesFromACP(resp.Sessions)...)
+		if resp.NextCursor == nil || *resp.NextCursor == "" {
+			return sessions, nil
+		}
+		if _, seen := seenCursors[*resp.NextCursor]; seen {
+			return nil, fmt.Errorf("ACP session/list repeated cursor %q", *resp.NextCursor)
+		}
+		seenCursors[*resp.NextCursor] = struct{}{}
+		cursor := *resp.NextCursor
+		req.Cursor = &cursor
+	}
+}
+
+func (h *Instance) Delete(ctx context.Context, sessionID string) error {
+	if h.sessionCapabilities().Delete == nil {
+		return provider.ErrUnsupported
+	}
+	if h.live(sessionID) {
+		if err := h.Release(ctx, sessionID); err != nil {
+			return err
+		}
+	}
+	if _, err := h.agentPeer.DeleteSession(ctx, schema.DeleteSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil && !sessionNotFoundError(err) {
+		return acpRequestError(err)
+	}
+	if h.host.Mirror != nil {
+		return h.host.Mirror.Delete(ctx, sessionID)
+	}
+	return nil
+}
+
+// Configure sets a config option (model, reasoning level, mode, …) and
+// reports the refreshed options.
+func (h *Instance) Configure(ctx context.Context, sessionID string, setting provider.ConfigOptionSelection) error {
+	if !h.live(sessionID) {
+		return fmt.Errorf("ACP session %q is not open", sessionID)
+	}
+	if err := h.setSessionConfigOptionValue(ctx, sessionID, setting.OptionID, setting.Value); err != nil {
+		return err
+	}
+	h.emitConfigOptions(sessionID)
+	return nil
+}
+
+func (h *Instance) OpenOptions(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
+	opened, err := h.openOptions(ctx, cwd, callbacks)
+	h.noteAuthRequired(err)
+	return opened, err
+}
+
+func (h *Instance) openOptions(ctx context.Context, cwd string, callbacks provider.OptionsSessionCallbacks) (provider.OptionsSession, error) {
 	if cwd == "" {
 		return provider.OptionsSession{}, fmt.Errorf("provider options session requires cwd")
 	}
-	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: cwd, MCPServers: []schema.McpServer{}})
+	active, err := h.agentPeer.StartSession(ctx, schema.NewSessionRequest{CWD: cwd, MCPServers: []schema.McpServer{}})
 	if err != nil {
 		return provider.OptionsSession{}, acpRequestError(err)
 	}
+	resp := active.NewSessionResponse()
 	sessionID := string(resp.SessionID)
 	if sessionID == "" {
+		active.Dispose()
 		return provider.OptionsSession{}, fmt.Errorf("ACP session/new returned an empty session id")
 	}
-	if err := h.bindSession("", sessionID); err != nil {
-		// The fresh session was never exposed; close it best-effort rather than
-		// leaking it in the agent process.
-		if h.sessionCapabilities().Close != nil {
-			_, _ = h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)})
-		}
-		return provider.OptionsSession{}, err
-	}
+	h.attach(sessionID, active, &mapper{}, nil)
 	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil {
-		copied := callbacks
-		session.optionsCallbacks = &copied
-	}
+	h.sessions[sessionID].options = &callbacks
 	h.mu.Unlock()
-	h.ensureSessionStream(sessionID)
 	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
 	return provider.OptionsSession{Handle: sessionID, ConfigOptions: h.combinedConfigOptions(sessionID)}, nil
 }
 
-func (h *Instance) SetOptionsSessionValue(ctx context.Context, handle string, optionID string, value any) ([]provider.ConfigOption, error) {
-	h.mu.Lock()
-	session := h.sessionLocked(handle)
-	isOptionsSession := session != nil && session.threadID == "" && session.optionsCallbacks != nil
-	h.mu.Unlock()
-	if !isOptionsSession {
+func (h *Instance) SetOption(ctx context.Context, handle string, optionID string, value any) ([]provider.ConfigOption, error) {
+	if !h.isOptionsSession(handle) {
 		return nil, fmt.Errorf("ACP options session %q is not active", handle)
 	}
 	if err := h.setSessionConfigOptionValue(ctx, handle, optionID, value); err != nil {
@@ -94,206 +374,175 @@ func (h *Instance) SetOptionsSessionValue(ctx context.Context, handle string, op
 	return h.combinedConfigOptions(handle), nil
 }
 
-func (h *Instance) CloseOptionsSession(ctx context.Context, handle string) error {
-	h.mu.Lock()
-	session := h.sessionLocked(handle)
-	isOptionsSession := session != nil && session.threadID == "" && session.optionsCallbacks != nil
-	h.mu.Unlock()
-	if !isOptionsSession {
+func (h *Instance) CloseOptions(ctx context.Context, handle string) error {
+	if !h.isOptionsSession(handle) {
 		return nil
 	}
 	var closeErr error
 	if h.sessionCapabilities().Close != nil {
-		if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(handle)}); err != nil {
+		if _, err := h.agentPeer.CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(handle)}); err != nil {
 			closeErr = acpRequestError(err)
 		}
 	}
-	h.unbindSessionID(handle)
+	h.detach(handle)
 	return closeErr
 }
 
-// sessionLocked returns the session struct for an ACP session id. h.mu must be
-// held. Returns nil for unbound sessions — callers must treat that as "state
-// must not be re-created" (stray updates can drain from a disposed stream
-// after unbind).
-func (h *Instance) sessionLocked(sessionID string) *acpSession {
-	return h.sessions[sessionID]
-}
-
-func (h *Instance) sessionForThreadLocked(threadID string) *acpSession {
-	sessionID := h.sessionsByThread[threadID]
-	if sessionID == "" {
-		return nil
-	}
-	return h.sessions[sessionID]
-}
-
-// StartSession resolves the ACP session backing a thread:
-//
-//  1. In-process resume — if this thread already has a live ACP session on this
-//     connection, reuse it. An ACP session lives for the whole connection, so a
-//     turn error/interrupt/re-start does NOT need a new session; only StopSession
-//     unbinds.
-//  2. Display restore — ReplayHistory prefers session/load and returns its replay.
-//  3. Ordinary recovery — prefer session/resume, otherwise session/load while
-//     dropping replay because orchestration already has the projection.
-//  4. Otherwise create a new session.
-func (h *Instance) StartSession(ctx context.Context, input provider.StartSessionInput) (provider.StartSessionResult, error) {
-	if input.ThreadID == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("provider session start requires threadId")
-	}
-
-	if existing := h.sessionIDForThread(input.ThreadID); existing != "" {
-		// StartSession is called before every prompt; once a thread has a live ACP
-		// session, its provider-side config options are authoritative. Reapplying
-		// runtime/default mode aliases here would overwrite user-selected options.
-		// The stored model preference is best-effort here for the same reason the
-		// new/load/resume paths downgrade it to a warning: failing hard would
-		// brick the thread with the same error on every subsequent prompt.
-		h.applyModelSelectionPreference(ctx, existing, input)
-		return h.startWithoutHistory(input, h.sessionProjection(input, existing)), nil
-	}
-
-	sessionID := resumeSessionID(input.ResumeCursor)
-	if sessionID == "" {
-		sessionID = input.ProviderSessionID
-	}
-	if sessionID != "" {
-		if input.ReplayHistory {
-			if h.supportsLoadSession() {
-				if result, err := h.loadSession(ctx, input, sessionID); err == nil {
-					return result, nil
-				} else if !sessionNotFoundError(err) {
-					return provider.StartSessionResult{}, err
-				}
-			}
-			if h.supportsResumeSession() {
-				if session, err := h.resumeSession(ctx, input, sessionID); err == nil {
-					return h.startWithoutHistory(input, session), nil
-				} else if !sessionNotFoundError(err) {
-					return provider.StartSessionResult{}, err
-				}
-			}
-		} else {
-			if h.supportsResumeSession() {
-				if session, err := h.resumeSession(ctx, input, sessionID); err == nil {
-					return provider.StartSessionResult{Session: session}, nil
-				} else if !sessionNotFoundError(err) {
-					return provider.StartSessionResult{}, err
-				}
-			}
-			if h.supportsLoadSession() {
-				if result, err := h.loadSession(ctx, input, sessionID); err == nil {
-					result.Replay = nil
-					return result, nil
-				} else if !sessionNotFoundError(err) {
-					return provider.StartSessionResult{}, err
-				}
-			}
-		}
-		// Prior session is gone: fall through and create a fresh one. Other
-		// load failures (auth/cwd/transport/transient) are surfaced so callers
-		// do not silently lose provider context.
-	}
-
-	resp, err := h.agent().NewSession(ctx, schema.NewSessionRequest{CWD: input.Cwd, MCPServers: []schema.McpServer{}})
-	if err != nil {
-		return provider.StartSessionResult{}, acpRequestError(err)
-	}
-	if resp.SessionID == "" {
-		return provider.StartSessionResult{}, fmt.Errorf("ACP session/new returned an empty session id")
-	}
-	sessionID = string(resp.SessionID)
-	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
-		return provider.StartSessionResult{}, err
-	}
-	h.ensureSessionStream(sessionID)
-	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
-	h.applyInitialSessionPreferences(ctx, sessionID, input)
-	return h.startWithoutHistory(input, h.sessionProjection(input, sessionID)), nil
-}
-
-func (h *Instance) startWithoutHistory(input provider.StartSessionInput, session provider.Session) provider.StartSessionResult {
-	return provider.StartSessionResult{Session: session, HistoryUnavailable: input.ReplayHistory}
-}
-
-// loadSession resumes a prior ACP session via session/load. The thread->session
-// route is bound and the session stream attached BEFORE awaiting the load so
-// replayed session/update notifications resolve to this session. A barrier
-// marker pushed after the load resolves marks the end of replay in-stream.
-func (h *Instance) loadSession(ctx context.Context, input provider.StartSessionInput, sessionID string) (provider.StartSessionResult, error) {
-	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
-		return provider.StartSessionResult{}, err
-	}
-	stream, _ := h.ensureSessionStream(sessionID)
-	h.beginSessionLoad(sessionID)
-	resp, err := h.agent().LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
-	if err != nil {
-		h.unbindSessionID(sessionID)
-		return provider.StartSessionResult{}, acpRequestError(err)
-	}
-	// Drain load replay before applying preferences, but keep capture active:
-	// preference requests can themselves emit config updates or warnings and
-	// those setup events must not overtake the returned history batch.
-	if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
-		h.unbindSessionID(sessionID)
-		return provider.StartSessionResult{}, fmt.Errorf("await ACP session/load replay drain: %w", err)
-	}
-	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
-	h.applyInitialSessionPreferences(ctx, sessionID, input)
-	var replay []provider.RuntimeEvent
-	if err := h.awaitSessionBarrier(ctx, stream, func() { replay = h.finishSessionLoad(sessionID) }); err != nil {
-		h.unbindSessionID(sessionID)
-		return provider.StartSessionResult{}, fmt.Errorf("await ACP session setup drain: %w", err)
-	}
-	separateReplayReasoningBlocks(replay)
-	return provider.StartSessionResult{Session: h.sessionProjection(input, sessionID), Replay: replay}, nil
-}
-
-// in session/load agents emits the replayed thoughts without separators
-// compared to live which does emit separators. this causes multi line thought
-// chunks to be 1 paragraph so need to this patch to separate them back into
-// multi line
-func separateReplayReasoningBlocks(events []provider.RuntimeEvent) {
-	for idx := range events {
-		event := &events[idx]
-		if event.Type != provider.RuntimeEventContentDelta ||
-			event.Payload.StreamKind != provider.RuntimeContentReasoningText {
-			continue
-		}
-		if event.Payload.Delta == "" || strings.HasSuffix(event.Payload.Delta, "\n") {
-			continue
-		}
-		event.Payload.Delta += "\n\n"
-	}
-}
-
-func (h *Instance) beginSessionLoad(sessionID string) {
+func (h *Instance) isOptionsSession(handle string) bool {
 	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil {
-		session.replayEvents = make([]provider.RuntimeEvent, 0)
+	defer h.mu.Unlock()
+	session := h.sessions[handle]
+	return session != nil && session.options != nil
+}
+
+func (h *Instance) live(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session := h.sessions[sessionID]
+	return session != nil && session.stream != nil && !session.stream.closed
+}
+
+// opened is a live session's state for Open's result. It is read after the
+// state it reports changed, so an event the daemon gets before the result
+// changes nothing the result doesn't already have.
+func (h *Instance) opened(sessionID string) provider.Opened {
+	options := h.combinedConfigOptions(sessionID)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	opened := provider.Opened{Session: sessionID, Options: options}
+	if session := h.sessions[sessionID]; session != nil {
+		opened.Commands = slices.Clone(session.commands)
+	}
+	return opened
+}
+
+// attach makes sessionID live with its update stream: active, the stream
+// StartSession made for a new session, or else a subscription made before
+// the call that opens the session is awaited, so updates the agent sends
+// during it are routed. A non-nil capture collects them unmapped.
+func (h *Instance) attach(sessionID string, active *acp.ActiveSession, restored *mapper, capture []json.RawMessage) *sessionStream {
+	h.mu.Lock()
+	session := h.sessions[sessionID]
+	if session == nil {
+		session = &acpSession{id: sessionID, pendingPermissions: make(map[string]*pendingPermission)}
+		h.sessions[sessionID] = session
+	}
+	session.mapper = restored
+	session.capture = capture
+	if session.stream != nil && !session.stream.closed {
+		stream := session.stream
+		h.mu.Unlock()
+		if active != nil {
+			active.Dispose()
+		}
+		return stream
+	}
+	if active == nil {
+		active = h.agentPeer.AttachSession(schema.SessionId(sessionID))
+	}
+	stream := &sessionStream{
+		sessionID: sessionID,
+		session:   active,
+		barriers:  make(map[string]*sessionBarrier),
+	}
+	session.stream = stream
+	h.mu.Unlock()
+	go h.consumeSessionStream(stream)
+	return stream
+}
+
+// detach forgets a live session and disposes its stream.
+func (h *Instance) detach(sessionID string) {
+	h.mu.Lock()
+	session := h.sessions[sessionID]
+	delete(h.sessions, sessionID)
+	var stream *sessionStream
+	if session != nil {
+		stream = session.stream
+		if stream != nil {
+			stream.closed = true
+			if stream.closeErr == nil {
+				stream.closeErr = errSessionStreamClosed
+			}
+		}
 	}
 	h.mu.Unlock()
+	if stream != nil {
+		stream.session.Dispose()
+	}
 }
 
-func (h *Instance) finishSessionLoad(sessionID string) []provider.RuntimeEvent {
-	var events []provider.RuntimeEvent
-	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil {
-		events = session.replayEvents
-		session.replayEvents = nil
+// sessionError reports a session the agent no longer has as
+// provider.ErrSessionNotFound.
+func sessionError(err error) error {
+	if sessionNotFoundError(err) {
+		return fmt.Errorf("%w: %v", provider.ErrSessionNotFound, acpRequestError(err))
 	}
-	h.mu.Unlock()
-	return events
+	if errors.Is(err, provider.ErrSessionNotFound) {
+		return err
+	}
+	return acpRequestError(err)
 }
 
 // sessionNotFoundError reports whether the agent said the session no longer
-// exists (ACP Resource not found, -32002). It is the trigger for every
-// stale-session fallback: resume->load->new during StartSession, and unbinding a
-// live-bound session whose prompt the agent rejected.
+// exists (ACP Resource not found, -32002).
 func sessionNotFoundError(err error) bool {
 	var providerErr *provider.RequestError
 	return errors.As(acpRequestError(err), &providerErr) && int64(providerErr.Code) == acp.CodeResourceNotFound
+}
+
+// mcpServers are the servers a session gets: maiD's own, over HTTP when the
+// agent takes it, else as a stdio relay.
+func (h *Instance) mcpServers(server *provider.MCPServer) []schema.McpServer {
+	servers := []schema.McpServer{}
+	if server == nil {
+		return servers
+	}
+	if server.URL != "" && h.Info().Capabilities.MCP.HTTP {
+		kind := schema.McpServerTypeHTTP
+		url := server.URL
+		headers := []schema.HttpHeader{}
+		for name, value := range server.Headers {
+			headers = append(headers, schema.HttpHeader{Name: name, Value: value})
+		}
+		slices.SortFunc(headers, func(a, b schema.HttpHeader) int { return strings.Compare(a.Name, b.Name) })
+		return append(servers, schema.McpServer{Name: server.Name, Type: &kind, URL: &url, Headers: headers})
+	}
+	if server.Stdio == nil || len(server.Stdio.Argv) == 0 {
+		return servers
+	}
+	command := server.Stdio.Argv[0]
+	env := []schema.EnvVariable{}
+	for _, pair := range server.Stdio.Env {
+		name, value, _ := strings.Cut(pair, "=")
+		env = append(env, schema.EnvVariable{Name: name, Value: value})
+	}
+	return append(servers, schema.McpServer{Name: server.Name, Command: &command, Args: append([]string{}, server.Stdio.Argv[1:]...), Env: env})
+}
+
+func (h *Instance) agentCapabilities() schema.AgentCapabilities {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return agentCapabilitiesValue(h.initialize.AgentCapabilities)
+}
+
+func (h *Instance) sessionCapabilities() schema.SessionCapabilities {
+	capabilities := h.agentCapabilities()
+	if capabilities.SessionCapabilities == nil {
+		return schema.SessionCapabilities{}
+	}
+	return *capabilities.SessionCapabilities
+}
+
+func (h *Instance) supportsLoadSession() bool {
+	return boolValue(h.agentCapabilities().LoadSession)
+}
+
+func (h *Instance) supportedAdditionalDirectories(directories []string) []string {
+	if h.sessionCapabilities().AdditionalDirectories == nil || len(directories) == 0 {
+		return nil
+	}
+	return append([]string(nil), directories...)
 }
 
 const acpSessionModeOptionID = "acp.session-mode"
@@ -301,7 +550,7 @@ const acpSessionModeOptionID = "acp.session-mode"
 func (h *Instance) cacheSessionState(sessionID string, configOptions []schema.SessionConfigOption, modes *schema.SessionModeState) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	session := h.sessionLocked(sessionID)
+	session := h.sessions[sessionID]
 	if session == nil {
 		// A stray config_option_update draining from a disposed stream must
 		// not re-materialize state for an unbound session.
@@ -326,7 +575,7 @@ func (h *Instance) cacheSessionState(sessionID string, configOptions []schema.Se
 
 func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOption {
 	h.mu.Lock()
-	session := h.sessionLocked(sessionID)
+	session := h.sessions[sessionID]
 	var options []provider.ConfigOption
 	present := false
 	var modes schema.SessionModeState
@@ -342,304 +591,46 @@ func (h *Instance) combinedConfigOptions(sessionID string) []provider.ConfigOpti
 		return append([]provider.ConfigOption{}, options...)
 	}
 	if !hasModes {
-		return nil
+		return []provider.ConfigOption{}
 	}
 	choices := make([]provider.ConfigChoice, 0, len(modes.AvailableModes))
 	for _, mode := range modes.AvailableModes {
-		choices = append(choices, provider.ConfigChoice{Value: string(mode.ID), Label: mode.Name})
+		description := ""
+		if mode.Description != nil {
+			description = *mode.Description
+		}
+		choices = append(choices, provider.ConfigChoice{Value: string(mode.ID), Label: mode.Name, Description: description})
 	}
 	return []provider.ConfigOption{{ID: acpSessionModeOptionID, Type: provider.ConfigOptionTypeSelect, Category: provider.ConfigOptionCategoryMode, Label: "Mode", Choices: choices, CurrentValue: string(modes.CurrentModeID)}}
 }
 
-func (h *Instance) sessionProjection(input provider.StartSessionInput, sessionID string) provider.Session {
-	info := h.Info()
-	return provider.Session{
-		Provider:           DriverKind,
-		ProviderInstanceID: info.InstanceID,
-		ProviderSessionID:  sessionID,
-		ProviderName:       info.Name,
-		Cwd:                input.Cwd,
-		ThreadID:           input.ThreadID,
-		ResumeCursor:       marshalRaw(map[string]string{"sessionId": sessionID}),
-		ConfigOptions:      h.combinedConfigOptions(sessionID),
-	}
-}
-
-func (h *Instance) StopSession(ctx context.Context, input provider.StopSessionInput) error {
-	sessionID := h.sessionIDForThread(input.ThreadID)
-	if sessionID == "" {
-		return nil
-	}
-	h.mu.Lock()
-	session := h.sessionLocked(sessionID)
-	idle := session != nil && session.collector == nil && (session.stream == nil || (session.stream.active == nil && len(session.stream.queued) == 0))
-	h.mu.Unlock()
-	if idle {
-		if h.sessionCapabilities().Close != nil {
-			if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
-				return acpRequestError(err)
-			}
-		}
-		h.unbindSessionID(sessionID)
-		return nil
-	}
-	if err := h.agent().Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
-		// Keep both the binding and live turn state so callers can retry
-		// cancellation without the adapter reporting a cancellation that the
-		// agent never received.
-		return acpRequestError(err)
-	}
-	cancels, dropped, stream := h.markPromptCancelled(sessionID, "")
-	for _, cancel := range cancels {
-		cancel()
-	}
-	if dropped != nil {
-		h.settlePrompt(stream, dropped, schema.PromptResponse{}, nil)
-	}
-	h.unbindSessionID(sessionID)
-	return nil
-}
-
-// ACP session-management calls are capability-gated; unsupported methods fail
-// without contacting the agent. session/fork remains unstable and unsupported.
-func (h *Instance) ListSessions(ctx context.Context, cwd string) ([]provider.SessionSummary, error) {
-	if h.sessionCapabilities().List == nil {
-		return nil, fmt.Errorf("ACP agent does not advertise session/list support")
-	}
-	req := schema.ListSessionsRequest{}
-	if cwd != "" {
-		req.CWD = &cwd
-	}
-	var sessions []provider.SessionSummary
-	seenCursors := make(map[string]struct{})
-	for {
-		resp, err := h.agent().ListSessions(ctx, req)
-		if err != nil {
-			return nil, acpRequestError(err)
-		}
-		sessions = append(sessions, sessionSummariesFromACP(resp.Sessions)...)
-		if resp.NextCursor == nil || *resp.NextCursor == "" {
-			return sessions, nil
-		}
-		if _, seen := seenCursors[*resp.NextCursor]; seen {
-			return nil, fmt.Errorf("ACP session/list repeated cursor %q", *resp.NextCursor)
-		}
-		seenCursors[*resp.NextCursor] = struct{}{}
-		cursor := *resp.NextCursor
-		req.Cursor = &cursor
-	}
-}
-
-func (h *Instance) DeleteSession(ctx context.Context, sessionID string) error {
-	if h.sessionCapabilities().Delete == nil {
-		return fmt.Errorf("ACP agent does not advertise session/delete support")
-	}
-	if threadID := h.threadIDForSession(sessionID); threadID != "" {
-		return fmt.Errorf("cannot delete ACP session %q while it is bound to thread %q", sessionID, threadID)
-	}
-	if _, err := h.agent().DeleteSession(ctx, schema.DeleteSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
-		return acpRequestError(err)
-	}
-	h.unbindSessionID(sessionID)
-	return nil
-}
-
-func (h *Instance) CloseSession(ctx context.Context, sessionID string) error {
-	if h.sessionCapabilities().Close == nil {
-		return fmt.Errorf("ACP agent does not advertise session/close support")
-	}
-	if threadID := h.threadIDForSession(sessionID); threadID != "" {
-		return fmt.Errorf("cannot close ACP session %q while it is bound to thread %q", sessionID, threadID)
-	}
-	if _, err := h.agent().CloseSession(ctx, schema.CloseSessionRequest{SessionID: schema.SessionId(sessionID)}); err != nil {
-		return acpRequestError(err)
-	}
-	h.unbindSessionID(sessionID)
-	return nil
-}
-
-func (h *Instance) resumeSession(ctx context.Context, input provider.StartSessionInput, sessionID string) (provider.Session, error) {
-	if input.ThreadID == "" {
-		return provider.Session{}, fmt.Errorf("provider session resume requires threadId")
-	}
-	// Bind and attach the session stream before awaiting session/resume so any
-	// in-flight session/update notifications can be routed to the thread,
-	// matching the session/load replay barrier.
-	if err := h.bindSession(input.ThreadID, sessionID); err != nil {
-		return provider.Session{}, err
-	}
-	stream, _ := h.ensureSessionStream(sessionID)
-	resp, err := h.agent().ResumeSession(ctx, schema.ResumeSessionRequest{SessionID: schema.SessionId(sessionID), CWD: input.Cwd, MCPServers: []schema.McpServer{}})
-	if err != nil {
-		h.unbindSessionID(sessionID)
-		return provider.Session{}, acpRequestError(err)
-	}
-	// Drain any updates the agent emitted before resolving the resume, so they
-	// are delivered (routed to the thread) before the session is reported ready.
-	if err := h.awaitSessionBarrier(ctx, stream, nil); err != nil {
-		h.unbindSessionID(sessionID)
-		return provider.Session{}, fmt.Errorf("await ACP session/resume drain: %w", err)
-	}
-	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
-	h.applyInitialSessionPreferences(ctx, sessionID, input)
-	return h.sessionProjection(input, sessionID), nil
-}
-
-func (h *Instance) agentCapabilities() schema.AgentCapabilities {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return agentCapabilitiesValue(h.initialize.AgentCapabilities)
-}
-
-func (h *Instance) sessionCapabilities() schema.SessionCapabilities {
-	capabilities := h.agentCapabilities()
-	if capabilities.SessionCapabilities == nil {
-		return schema.SessionCapabilities{}
-	}
-	return *capabilities.SessionCapabilities
-}
-
-func (h *Instance) supportsLoadSession() bool {
-	return boolValue(h.agentCapabilities().LoadSession)
-}
-
-func (h *Instance) supportsResumeSession() bool {
-	return h.sessionCapabilities().Resume != nil
-}
-
-// unbindSessionLocked drops the session's entire state — one sessions entry
-// plus the thread index — and marks its stream disposed. h.mu must be held;
-// the caller disposes the returned stream outside the lock.
-func (h *Instance) unbindSessionLocked(sessionID string) *sessionStream {
-	session := h.sessionLocked(sessionID)
-	if session == nil {
-		return nil
-	}
-	delete(h.sessions, sessionID)
-	if session.threadID != "" && h.sessionsByThread[session.threadID] == sessionID {
-		delete(h.sessionsByThread, session.threadID)
-	}
-	stream := session.stream
-	if stream != nil {
-		stream.closed = true
-		if stream.closeErr == nil {
-			stream.closeErr = errSessionStreamClosed
-		}
-	}
-	return stream
-}
-
-func (h *Instance) unbindSessionID(sessionID string) {
-	h.mu.Lock()
-	stream := h.unbindSessionLocked(sessionID)
-	h.mu.Unlock()
-	if stream != nil {
-		stream.session.Dispose()
-	}
-}
-
-func (h *Instance) applyInitialSessionPreferences(ctx context.Context, sessionID string, input provider.StartSessionInput) {
-	// Model changes may replace the provider's advertised option set, so resolve
-	// and apply the model before replaying selections against the refreshed set.
-	selections := h.configSelectionsWithInferredCategories(sessionID, input.ConfigSelections)
-	hasModelSelection := input.ModelSelection != nil && strings.TrimSpace(input.ModelSelection.Model) != ""
-	h.applyModelSelectionPreference(ctx, sessionID, input)
-	if !hasModelSelection {
-		for _, selection := range selections {
-			if selection.Category == provider.ConfigOptionCategoryModel {
-				h.applyConfigSelectionPreference(ctx, sessionID, input.ThreadID, selection)
-			}
-		}
-	}
-	for _, selection := range selections {
-		if selection.Category == provider.ConfigOptionCategoryModel {
-			continue
-		}
-		h.applyConfigSelectionPreference(ctx, sessionID, input.ThreadID, selection)
-	}
-}
-
-func (h *Instance) configSelectionsWithInferredCategories(sessionID string, selections []provider.ConfigOptionSelection) []provider.ConfigOptionSelection {
+// applySettings applies a session's chosen settings, the model first: a
+// model can change which other options exist. A setting the agent refuses
+// shows as a warning instead of failing the session.
+func (h *Instance) applySettings(ctx context.Context, sessionID string, settings []provider.ConfigOptionSelection) {
 	categories := make(map[string]provider.ConfigOptionCategory)
 	for _, option := range h.combinedConfigOptions(sessionID) {
-		if option.ID != "" && option.Category != "" {
-			categories[option.ID] = option.Category
+		categories[option.ID] = option.Category
+	}
+	ordered := slices.Clone(settings)
+	slices.SortStableFunc(ordered, func(a, b provider.ConfigOptionSelection) int {
+		aModel, bModel := categories[a.OptionID] == provider.ConfigOptionCategoryModel, categories[b.OptionID] == provider.ConfigOptionCategoryModel
+		switch {
+		case aModel && !bModel:
+			return -1
+		case bModel && !aModel:
+			return 1
+		}
+		return 0
+	})
+	for _, setting := range ordered {
+		if h.sessionConfigOptionAlreadyCurrent(sessionID, setting.OptionID, setting.Value) {
+			continue
+		}
+		if err := h.setSessionConfigOptionValue(ctx, sessionID, setting.OptionID, setting.Value); err != nil {
+			h.emit(sessionID, provider.Warning{Message: fmt.Sprintf("config option %q not restored: %v", setting.OptionID, err)})
 		}
 	}
-	resolved := append([]provider.ConfigOptionSelection(nil), selections...)
-	for index := range resolved {
-		if resolved[index].Category == "" {
-			resolved[index].Category = categories[resolved[index].OptionID]
-		}
-	}
-	return resolved
-}
-
-func (h *Instance) applyConfigSelectionPreference(ctx context.Context, sessionID string, threadID string, selection provider.ConfigOptionSelection) {
-	if err := h.setSessionConfigOptionValue(ctx, sessionID, selection.OptionID, selection.Value); err != nil {
-		h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-			EventID:   provider.RuntimeEventID(newID()),
-			Type:      provider.RuntimeEventRuntimeWarning,
-			Provider:  DriverKind,
-			ThreadID:  threadID,
-			CreatedAt: time.Now(),
-			Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("config option %q not restored: %v", selection.OptionID, err)},
-		})
-	}
-}
-
-// applyModelSelectionPreference applies the thread's stored model preference
-// best-effort: a preference the agent cannot satisfy surfaces as a runtime
-// warning instead of failing session materialization (which would fail every
-// prompt on the thread). The explicit SetConfigOption command path still fails
-// loudly.
-func (h *Instance) applyModelSelectionPreference(ctx context.Context, sessionID string, input provider.StartSessionInput) {
-	if err := h.applyModelSelection(ctx, sessionID, input.ModelSelection); err != nil {
-		h.emitRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-			EventID:   provider.RuntimeEventID(newID()),
-			Type:      provider.RuntimeEventRuntimeWarning,
-			Provider:  DriverKind,
-			ThreadID:  input.ThreadID,
-			CreatedAt: time.Now(),
-			Payload:   provider.RuntimeEventPayload{Message: fmt.Sprintf("model preference not applied to session: %v", err)},
-		})
-	}
-}
-
-func (h *Instance) applyModelSelection(ctx context.Context, sessionID string, selection *provider.ModelSelection) error {
-	if selection == nil {
-		return nil
-	}
-	model := strings.TrimSpace(selection.Model)
-	if model == "" {
-		return nil
-	}
-	optionID, value, ok := h.resolveModelConfigChoice(sessionID, model)
-	if !ok {
-		return fmt.Errorf("no ACP model config option matches model %q", model)
-	}
-	if h.sessionConfigOptionAlreadyCurrent(sessionID, optionID, value) {
-		return nil
-	}
-	return h.setSessionConfigOptionValue(ctx, sessionID, optionID, value)
-}
-
-// SetConfigOption sets a session configuration option (model, reasoning level,
-// ...) via the stable session/set_config_option method and re-publishes the
-// refreshed option set.
-func (h *Instance) SetConfigOption(ctx context.Context, input provider.SetConfigOptionInput) error {
-	if input.ThreadID == "" || input.OptionID == "" {
-		return fmt.Errorf("provider set config option requires threadId and optionId")
-	}
-	sessionID := h.sessionIDForThread(input.ThreadID)
-	if sessionID == "" {
-		return fmt.Errorf("thread %q has no ACP session", input.ThreadID)
-	}
-	if err := h.setSessionConfigOptionValue(ctx, sessionID, input.OptionID, input.Value); err != nil {
-		return err
-	}
-	h.emitConfigOptions(sessionID, h.combinedConfigOptions(sessionID))
-	return nil
 }
 
 func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID string, optionID string, value any) error {
@@ -658,12 +649,12 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 	switch value.(type) {
 	case string:
 	case bool:
-		optionType := schema.SetSessionConfigOptionRequestTypeBoolean
-		request.Type = &optionType
+		booleanType := schema.SetSessionConfigOptionRequestTypeBoolean
+		request.Type = &booleanType
 	default:
 		return fmt.Errorf("ACP config option %q requires a string or boolean value", optionID)
 	}
-	resp, err := h.agent().SetSessionConfigOption(ctx, request)
+	resp, err := h.agentPeer.SetSessionConfigOption(ctx, request)
 	if err != nil {
 		return acpRequestError(err)
 	}
@@ -671,65 +662,50 @@ func (h *Instance) setSessionConfigOptionValue(ctx context.Context, sessionID st
 	return nil
 }
 
+// applyCurrentMode records an agent-initiated mode change. Agents that expose
+// their mode as a config option may still report a change only through
+// current_mode_update, so the mode-category option offering that mode is
+// updated too. It reports whether any state changed.
+func (h *Instance) applyCurrentMode(sessionID string, modeID schema.SessionModeId) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session := h.sessions[sessionID]
+	if session == nil {
+		return false
+	}
+	if session.modes != nil {
+		session.modes.CurrentModeID = modeID
+		return true
+	}
+	for i := range session.config {
+		option := &session.config[i]
+		if option.Category != provider.ConfigOptionCategoryMode || option.Type != provider.ConfigOptionTypeSelect {
+			continue
+		}
+		for _, choice := range option.Choices {
+			if choice.Value == string(modeID) {
+				option.CurrentValue = choice.Value
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (h *Instance) setSessionModeValue(ctx context.Context, sessionID string, modeID schema.SessionModeId) error {
-	if _, err := h.agent().SetSessionMode(ctx, schema.SetSessionModeRequest{SessionID: schema.SessionId(sessionID), ModeID: modeID}); err != nil {
+	if _, err := h.agentPeer.SetSessionMode(ctx, schema.SetSessionModeRequest{SessionID: schema.SessionId(sessionID), ModeID: modeID}); err != nil {
 		return acpRequestError(err)
 	}
 	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil && session.modes != nil {
+	if session := h.sessions[sessionID]; session != nil && session.modes != nil {
 		session.modes.CurrentModeID = modeID
 	}
 	h.mu.Unlock()
 	return nil
 }
 
-func (h *Instance) resolveModelConfigChoice(sessionID string, model string) (string, string, bool) {
-	return h.resolveConfigChoice(sessionID, provider.ConfigOptionCategoryModel, []string{model})
-}
-
-func (h *Instance) resolveConfigChoice(sessionID string, category provider.ConfigOptionCategory, aliases []string) (string, string, bool) {
-	var options []provider.ConfigOption
-	h.mu.Lock()
-	if session := h.sessionLocked(sessionID); session != nil {
-		options = append(options, session.config...)
-	}
-	h.mu.Unlock()
-	for _, option := range options {
-		if option.Category != category || option.ID == "" {
-			continue
-		}
-		if value, ok := configChoiceValue(option, aliases); ok {
-			return option.ID, value, true
-		}
-	}
-	return "", "", false
-}
-
-func configChoiceValue(option provider.ConfigOption, aliases []string) (string, bool) {
-	for _, alias := range aliases {
-		if alias == "" {
-			continue
-		}
-		for _, choice := range option.Choices {
-			if strings.EqualFold(choice.Value, alias) || strings.EqualFold(choice.Label, alias) {
-				return choice.Value, true
-			}
-		}
-		if current, ok := option.CurrentValue.(string); ok && strings.EqualFold(current, alias) {
-			return current, true
-		}
-	}
-	return "", false
-}
-
 func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID string, value any) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	session := h.sessionLocked(sessionID)
-	if session == nil {
-		return false
-	}
-	for _, option := range session.config {
+	for _, option := range h.combinedConfigOptions(sessionID) {
 		if option.ID == optionID && option.CurrentValue == value {
 			return true
 		}
@@ -737,71 +713,31 @@ func (h *Instance) sessionConfigOptionAlreadyCurrent(sessionID string, optionID 
 	return false
 }
 
-func (h *Instance) emitConfigOptions(sessionID string, options []provider.ConfigOption) {
-	if options == nil {
-		options = []provider.ConfigOption{}
-	}
+// emitConfigOptions reports the session's options: to an options session's
+// callbacks, otherwise as an event.
+func (h *Instance) emitConfigOptions(sessionID string) {
+	options := h.combinedConfigOptions(sessionID)
 	h.mu.Lock()
 	var updated func([]provider.ConfigOption)
-	if session := h.sessionLocked(sessionID); session != nil && session.optionsCallbacks != nil {
-		updated = session.optionsCallbacks.Updated
+	if session := h.sessions[sessionID]; session != nil && session.options != nil {
+		updated = session.options.Updated
 	}
 	h.mu.Unlock()
 	if updated != nil {
-		updated(append([]provider.ConfigOption(nil), options...))
+		updated(options)
 		return
 	}
-	h.emitBoundRuntimeEventForSession(sessionID, provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(newID()),
-		Type:      provider.RuntimeEventConfigOptionsUpdated,
-		Provider:  DriverKind,
-		CreatedAt: time.Now(),
-		Payload:   provider.RuntimeEventPayload{ConfigOptions: options},
-	})
+	h.emit(sessionID, provider.ConfigChanged{Options: options})
 }
 
-// bindSession materializes a thread↔session binding without stealing a native
-// session from another thread. Per-session state (scope, tool states, pending
-// permissions) lives on the struct, so cross-thread rebinding would also move
-// live state away from the route that still owns it.
-func (h *Instance) bindSession(threadID string, sessionID string) error {
+// emit reports one event of a live session that isn't an options session.
+func (h *Instance) emit(sessionID string, body provider.EventBody) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if threadID != "" {
-		if existingSessionID := h.sessionsByThread[threadID]; existingSessionID != "" && existingSessionID != sessionID {
-			return fmt.Errorf("thread %q is already bound to ACP session %q", threadID, existingSessionID)
-		}
+	session := h.sessions[sessionID]
+	options := session != nil && session.options != nil
+	h.mu.Unlock()
+	if session == nil || options || h.host.Emit == nil {
+		return
 	}
-	session := h.sessionLocked(sessionID)
-	if session != nil && session.threadID != "" && session.threadID != threadID {
-		return fmt.Errorf("ACP session %q is already bound to thread %q", sessionID, session.threadID)
-	}
-	if session == nil {
-		session = &acpSession{
-			id:                 sessionID,
-			toolStates:         make(map[string]toolState),
-			pendingPermissions: make(map[string]*pendingPermission),
-		}
-		h.sessions[sessionID] = session
-	}
-	session.threadID = threadID
-	if threadID != "" {
-		h.sessionsByThread[threadID] = sessionID
-	}
-	return nil
-}
-
-func (h *Instance) sessionIDForThread(threadID string) string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.sessionsByThread[threadID]
-}
-
-func (h *Instance) threadIDForSession(sessionID string) string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if session := h.sessionLocked(sessionID); session != nil {
-		return session.threadID
-	}
-	return ""
+	h.host.Emit(provider.Event{Session: sessionID, At: time.Now(), Body: body})
 }

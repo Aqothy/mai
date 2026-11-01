@@ -6,29 +6,19 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"slices"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters/acp"
+	"github.com/Aqothy/maiD/internal/adapters/claudecode"
+	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
 	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
-
-// openProviderInstance maps a configured provider driver to its adapter.
-// New drivers get a case here; providerservice supplies the runtime event sink.
-func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
-	switch spec.Driver {
-	case acp.DriverKind:
-		return acp.OpenInstance(ctx, spec, emit)
-	default:
-		return nil, fmt.Errorf("unsupported provider driver %q", spec.Driver)
-	}
-}
 
 type Server struct {
 	logger *slog.Logger
@@ -41,13 +31,8 @@ type Server struct {
 
 	providerService *providerservice.Service
 	acpRegistry     *acpRegistry
-	orchestration   *orchestration.Engine
-	ingestion       *orchestration.ProviderRuntimeIngestion
-	reactor         *orchestration.ProviderEventReactor
-
-	metadataStore    *store.SQLite
-	threadMetaWriter *threadMetaWriter
-	importMu         sync.Mutex
+	engine          *orchestration.Engine
+	metadataStore   *store.SQLite
 
 	terminals *terminalRuntime
 
@@ -55,56 +40,74 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
-	rpcMu                  sync.Mutex
-	rpcClients             map[string]*rpcClient
-	historyReplayCoalescing map[orchestration.ThreadID]struct{}
+	pingInterval time.Duration
+
+	rpcMu      sync.Mutex
+	rpcClients map[string]*rpcClient
 
 	closeOnce sync.Once
 	closeErr  error
-	// fatalErr, guarded by mu, records an orchestration invariant violation;
-	// RunWebSocket returns it so main owns the process exit.
+	// fatalErr, guarded by mu, records the error that stopped the
+	// orchestration engine; RunWebSocket returns it so main owns the exit.
 	fatalErr error
 }
 
-func NewServer() *Server {
+// NewServer opens the data directory and starts the daemon's services.
+func NewServer() (*Server, error) {
 	logger := newLoggerFromEnv()
-	return newServer(logger, openMetadataStore(logger))
+	dir, err := maidDataDir()
+	if err != nil {
+		return nil, err
+	}
+	return newServer(logger, dir, drivers)
 }
 
-func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
+// newServer starts the daemon on a data directory with drivers.
+func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverKind]provider.Driver) (*Server, error) {
+	metadata, err := store.Open(filepath.Join(dataDir, "maid.db"))
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("data directory opened", "path", dataDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		logger:                  logger,
-		rpcClients:              make(map[string]*rpcClient),
-		historyReplayCoalescing: make(map[orchestration.ThreadID]struct{}),
-		ctx:                     ctx,
-		ctxCancel:               cancel,
-		metadataStore:           metadata,
-		acpRegistry:             newACPRegistry(),
+		logger:        logger,
+		pingInterval:  rpcPingInterval,
+		rpcClients:    make(map[string]*rpcClient),
+		ctx:           ctx,
+		ctxCancel:     cancel,
+		metadataStore: metadata,
+		acpRegistry:   newACPRegistry(),
 	}
-	var terminalMeta store.TerminalStore
-	if metadata != nil {
-		terminalMeta = metadata
-	}
-	s.terminals = newTerminalRuntime(terminalMeta, logger)
+	s.terminals = newTerminalRuntime(metadata, logger)
 	s.workspaceSearch = workspacesearch.NewService()
-	s.orchestration = orchestration.NewEngine()
-	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
-	if metadata != nil {
-		count, err := restorePersistedThreads(s.orchestration, metadata, metadata, logger)
-		if err != nil {
-			logger.Warn("restore persisted threads", "error", err)
-		} else {
-			logger.Info("restored persisted threads", "count", count)
+	// The engine and the providers need each other: the providers report to
+	// the engine, which they don't call until it has started.
+	var engine *orchestration.Engine
+	s.providerService = providerservice.New(drivers, metadata, func(id provider.InstanceID) provider.Mirror { return engine.Mirror(id) }, providerservice.Sink{
+		Event: func(instance provider.InstanceID, generation uint64, event provider.Event) {
+			engine.ProviderEvent(instance, generation, event)
+		},
+		Gone: func(instance provider.InstanceID, generation uint64) { engine.InstanceGone(instance, generation) },
+	}, logger)
+	engine, err = orchestration.Open(orchestration.Config{
+		DB: metadata.DB(), Providers: s.providerService, DataDir: dataDir, Logger: logger,
+	})
+	if err != nil {
+		cancel()
+		_ = metadata.Close()
+		return nil, err
+	}
+	s.engine = engine
+	go s.watchEngine()
+	for _, spec := range []provider.InstanceSpec{
+		{InstanceID: "codex-app-server", Name: "Codex", Driver: codexapp.DriverKind},
+		{InstanceID: "claude-code", Name: "Claude Code", Driver: claudecode.DriverKind},
+	} {
+		if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+			logger.Warn("register provider", "provider", spec.InstanceID, "error", err)
 		}
 	}
-	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
-	var providerOptions []providerservice.Option
-	if metadata != nil {
-		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
-		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
-	}
-	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
 	} else {
@@ -114,16 +117,21 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			}
 		}
 	}
-	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
-	go s.ingestion.Run(ctx, s.providerService.Events())
-	s.orchestration.OnEvent(func(event orchestration.Event) {
-		s.logEvent(event)
-		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
-			s.threadMetaWriter.markDirty(event.ThreadID())
+	return s, nil
+}
+
+// watchEngine shuts the daemon down when the engine stops on its own: its
+// state can no longer be trusted, and main owns the process exit.
+func (s *Server) watchEngine() {
+	<-s.engine.Done()
+	if err := s.engine.Err(); err != nil {
+		s.mu.Lock()
+		if s.fatalErr == nil {
+			s.fatalErr = err
 		}
-		s.publishOrchestrationEvent(event)
-	})
-	return s
+		s.mu.Unlock()
+		go s.Close()
+	}
 }
 
 func newLoggerFromEnv() *slog.Logger {
@@ -139,78 +147,6 @@ func newLoggerFromEnv() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 }
 
-// logEvent deliberately records only correlation metadata. Event payloads can
-// contain prompts, tool output, attachments, and secrets and do not belong in
-// routine daemon logs. The daemon intentionally retains no historical event
-// payloads; clients recover from authoritative snapshots.
-func (s *Server) logEvent(event orchestration.Event) {
-	// Runs on the engine worker for every event, including each streamed
-	// flush, so do not build the attribute slice unless it will be used.
-	if !s.logger.Enabled(context.Background(), slog.LevelDebug) {
-		return
-	}
-	attrs := []any{
-		"sequence", event.Sequence,
-		"event", event.Type,
-		"actor", event.Actor,
-		"thread", event.ThreadID(),
-	}
-	if event.CommandID != "" {
-		attrs = append(attrs, "command", event.CommandID)
-	}
-
-	// Streamed text and reasoning chunks are intentionally absent. They are
-	// high-volume, may contain private content, and their lifecycle boundaries
-	// are already represented by turn/session events.
-	switch event.Type {
-	case orchestration.EventThreadMessageSent:
-		return
-	case orchestration.EventThreadItemUpserted:
-		item := event.Payload.Item
-		if item == nil || item.TextDelta != "" {
-			return
-		}
-		attrs = append(attrs, "item", item.ID, "kind", item.Kind, "status", item.Status, "turn", item.TurnID)
-	case orchestration.EventThreadSessionStatusSet:
-		if session := event.Payload.Session; session != nil {
-			attrs = append(attrs, "provider", session.ProviderInstanceID, "status", session.Status, "turn", session.ActiveTurnID, "generation", session.ProviderGeneration)
-		}
-	case orchestration.EventThreadTurnStartRequested,
-		orchestration.EventThreadTurnInterruptRequested,
-		orchestration.EventThreadTurnInterruptConfirmed,
-		orchestration.EventThreadTurnInterruptFailed:
-		attrs = append(attrs, "turn", event.Payload.TurnID)
-	case orchestration.EventThreadApprovalOpened, orchestration.EventThreadApprovalResolved:
-		if approval := event.Payload.Approval; approval != nil {
-			attrs = append(attrs, "request", approval.RequestID, "turn", approval.TurnID, "kind", approval.RequestType, "decision", approval.Decision)
-		}
-	case orchestration.EventThreadPlanUpdated:
-		if plan := event.Payload.Plan; plan != nil {
-			attrs = append(attrs, "entries", len(plan.Entries))
-		}
-	case orchestration.EventThreadConfigOptionsUpdated:
-		attrs = append(attrs, "options", len(event.Payload.ConfigOptions))
-	case orchestration.EventThreadSlashCommandsUpdated:
-		attrs = append(attrs, "commands", len(event.Payload.SlashCommands))
-	case orchestration.EventThreadTokenUsageUpdated:
-		if usage := event.Payload.TokenUsage; usage != nil {
-			attrs = append(attrs, "usedTokens", usage.UsedTokens)
-		}
-	}
-	s.logger.Debug("orchestration event", attrs...)
-}
-
-// handleInvariantViolation preserves main's ownership of process exit while
-// using normal shutdown to kill every group-isolated provider process.
-func (s *Server) handleInvariantViolation(err *orchestration.InvariantViolationError) {
-	s.mu.Lock()
-	if s.fatalErr == nil {
-		s.fatalErr = err
-	}
-	s.mu.Unlock()
-	_ = s.Close()
-}
-
 // Close shuts the daemon down exactly once; concurrent callers block until the
 // full shutdown has completed. The blocking matters: closing the HTTP listener
 // makes RunWebSocket return and the process exit, so a second Close that
@@ -222,9 +158,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) doClose() error {
-	if s.ctxCancel != nil {
-		s.ctxCancel()
-	}
+	s.ctxCancel()
 
 	s.mu.Lock()
 	httpServer := s.httpServer
@@ -234,20 +168,19 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	if s.orchestration != nil {
-		s.orchestration.Close()
+	// Agents and terminal shells never survive daemon shutdown. Stop them at
+	// once, so shutdown takes one grace, and wait for every process group to be
+	// cleaned up before releasing clients and the store.
+	var stopped sync.WaitGroup
+	stopped.Go(s.terminals.service.Close)
+	s.providerService.Close()
+	s.engine.Close()
+	stopped.Wait()
+	// Close streams before the process exits, so their clients hear why.
+	for _, stream := range s.terminals.closeStreams() {
+		<-stream.finished
 	}
-	if s.providerService != nil {
-		s.providerService.Close()
-	}
-	// Terminal shells never survive daemon shutdown; wait for every process
-	// group to be cleaned up before releasing clients and the store.
-	if s.terminals != nil {
-		s.terminals.close()
-	}
-	if s.workspaceSearch != nil {
-		s.workspaceSearch.Close()
-	}
+	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()
 	clients := make([]*rpcClient, 0, len(s.rpcClients))
@@ -257,128 +190,66 @@ func (s *Server) doClose() error {
 	s.rpcClients = make(map[string]*rpcClient)
 	s.rpcMu.Unlock()
 
+	// Close the sockets first: a client that stopped reading blocks the
+	// connection's writes, and the connection's own Close waits for them.
+	for _, client := range clients {
+		_ = client.socket.CloseNow()
+	}
 	for _, client := range clients {
 		_ = client.conn.Close()
 		client.closeOutbound()
 	}
-
-	if s.threadMetaWriter != nil {
-		<-s.orchestration.Stopped()
-		s.threadMetaWriter.Close()
-	}
-	if s.metadataStore != nil {
-		_ = s.metadataStore.Close()
-	}
+	_ = s.metadataStore.Close()
 	return err
 }
 
-// ImportProviderSession persists an explicitly selected provider session and
-// installs its empty, replay-pending thread stub in the live engine. Import is
-// serialized so duplicate requests always observe the first completed stub.
-func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
-	if s.metadataStore == nil {
-		return "", false, fmt.Errorf("provider session import requires metadata persistence")
+// authenticateProvider signs in to a provider. A provider whose sign-in is an
+// interactive program gets it run in a maiD terminal the client then opens;
+// once it exits successfully the provider restarts, as soon as no turn is
+// running on it, so it picks up the new credentials.
+func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+	result, err := s.providerService.Authenticate(ctx, instanceID, input)
+	if err != nil || result.Terminal == nil {
+		return result, err
 	}
-	if instanceID == "" || summary.SessionID == "" {
-		return "", false, fmt.Errorf("provider session import requires instanceId and session.sessionId")
-	}
-	info, err := s.providerService.Info(instanceID)
+	terminalID, err := s.startCommandTerminal("Sign in to "+result.Instance.Name, *result.Terminal, func(exitCode *int) {
+		if exitCode == nil || *exitCode != 0 {
+			s.logger.Info("terminal sign-in did not succeed", "provider", instanceID, "exitCode", exitCode)
+			return
+		}
+		s.restartProviderWhenIdle(instanceID)
+	})
 	if err != nil {
-		return "", false, err
+		return provider.AuthenticationResult{}, err
 	}
-	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
-		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
-	}
+	result.Challenge = &provider.AuthChallenge{Kind: provider.AuthKindTerminal, TerminalID: terminalID}
+	return result, nil
+}
 
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+// providerIdlePollInterval is how often a pending provider restart checks
+// whether the provider's turns have finished.
+const providerIdlePollInterval = time.Second
 
-	cwd, err := s.orchestration.ResolveThreadCwd(summary.Cwd)
-	if err != nil {
-		return "", false, err
-	}
-	summary.Cwd = cwd
-
-	now := time.Now()
-	updatedAt := now
-	if summary.UpdatedAt != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, summary.UpdatedAt); err == nil {
-			updatedAt = parsed
+// restartProviderWhenIdle restarts a provider once no turn runs on it, so a
+// restart never cuts off another thread's turn.
+func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID) {
+	ticker := time.NewTicker(providerIdlePollInterval)
+	defer ticker.Stop()
+	for s.engine.InstanceBusy(s.ctx, instanceID) {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
-	threadID := orchestration.NewThreadID()
-	startInput := provider.StartSessionInput{
-		ThreadID:           string(threadID),
-		ProviderInstanceID: instanceID,
-		Cwd:                summary.Cwd,
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
+	defer cancel()
+	if _, err := s.providerService.RestartInstance(ctx, instanceID); err != nil {
+		s.logger.Warn("restart provider after terminal sign-in", "provider", instanceID, "error", err)
 	}
-	meta := store.ThreadMeta{
-		ThreadID:           string(threadID),
-		Title:              summary.Title,
-		Cwd:                summary.Cwd,
-		ProviderInstanceID: instanceID,
-		CreatedAt:          updatedAt,
-		UpdatedAt:          updatedAt,
-	}
-	route := store.RouteRecord{
-		InstanceID:        instanceID,
-		ProviderSessionID: summary.SessionID,
-		StartInput:        startInput,
-	}
-	persistedThreadID, imported, err := s.metadataStore.ImportThread(meta, route)
-	if err != nil {
-		return "", false, err
-	}
-	threadID = orchestration.ThreadID(persistedThreadID)
-	if !imported {
-		// Use the committed row rather than caller-supplied duplicate metadata.
-		// This also repairs live state after a prior import committed just as the
-		// daemon shut down.
-		metas, err := s.metadataStore.ListThreads()
-		if err != nil {
-			return "", false, err
-		}
-		metaIndex := slices.IndexFunc(metas, func(stored store.ThreadMeta) bool { return stored.ThreadID == persistedThreadID })
-		if metaIndex >= 0 {
-			meta = metas[metaIndex]
-		}
-		routes, err := s.metadataStore.LoadRoutes()
-		if err != nil {
-			return "", false, err
-		}
-		var foundRoute bool
-		route, foundRoute = routes[persistedThreadID]
-		if metaIndex < 0 || !foundRoute {
-			return "", false, fmt.Errorf("imported thread %q has incomplete persisted metadata", persistedThreadID)
-		}
-	}
-	startInput = route.StartInput
-	startInput.ThreadID = persistedThreadID
-	startInput.ProviderInstanceID = route.InstanceID
-	if err := s.providerService.RegisterImportedSession(persistedThreadID, route.InstanceID, route.ProviderSessionID, startInput); err != nil {
-		return "", false, err
-	}
-	// Once SQLite commits, finish live reconciliation even if the requesting
-	// client disconnects. A canceled RPC must not leave the durable import
-	// invisible until the next daemon restart.
-	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
-		ThreadID:           threadID,
-		Title:              meta.Title,
-		Cwd:                meta.Cwd,
-		ProviderInstanceID: meta.ProviderInstanceID,
-		ModelSelection:     meta.ModelSelection,
-		CreatedAt:          meta.CreatedAt,
-		UpdatedAt:          meta.UpdatedAt,
-	}); err != nil {
-		return "", false, err
-	}
-	return threadID, imported, nil
 }
 
 func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
-	if s.acpRegistry == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
-	}
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
@@ -388,9 +259,7 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
-	}
+	s.logProviderStarted(spec, restart, started, err)
 	return info, err
 }
 
@@ -398,19 +267,19 @@ func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, 
 	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
 		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
 	}
-	return s.startProvider(ctx, spec, restart, 30*time.Second)
-}
-
-func (s *Server) startProvider(ctx context.Context, spec provider.InstanceSpec, restart bool, timeout time.Duration) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	started := time.Now()
 	info, err := s.providerService.StartInstance(ctx, spec, restart)
+	s.logProviderStarted(spec, restart, started, err)
+	return info, err
+}
+
+func (s *Server) logProviderStarted(spec provider.InstanceSpec, restart bool, started time.Time, err error) {
 	if err == nil {
 		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
 	}
-	return info, err
 }

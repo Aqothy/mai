@@ -49,10 +49,34 @@ nonisolated final class ChatMarkdownRenderCache: Sendable {
     }
 
     /// Awaitable preparation used before an older transcript page is inserted.
+    ///
+    /// Returns only once every request is cached (or the task is cancelled).
+    /// Requests claimed by a concurrent — possibly cancelled — prime are not
+    /// this call's to parse, but they still must be present before this call
+    /// finishes, or a caller signals readiness while plans are missing and
+    /// those messages parse synchronously on the main thread mid-scroll.
     func prime(requests: [ChatMarkdownRenderRequest]) async {
-        let pending = claim(requests)
-        guard !pending.isEmpty else { return }
+        var remaining = requests
+        while !remaining.isEmpty, !Task.isCancelled {
+            let pending = claim(remaining)
+            if !pending.isEmpty {
+                await parseAndStore(pending)
+            }
+            remaining = remaining.filter {
+                cachedPlan(messageID: $0.messageID, source: $0.source) == nil
+            }
+            if remaining.isEmpty || Task.isCancelled { break }
+            if pending.isEmpty {
+                // Another prime holds the claims; it releases them when its
+                // worker settles, cancelled or not.
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+        }
+    }
 
+    private func parseAndStore(
+        _ pending: [ChatMarkdownRenderRequest]
+    ) async {
         let worker = Task.detached(priority: .userInitiated) {
             var values: [(ChatMarkdownRenderRequest, ChatMarkdownRenderPlan)] = []
             values.reserveCapacity(pending.count)

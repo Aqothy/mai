@@ -23,13 +23,16 @@ struct ThreadListFilter: Equatable {
         providerID = nil
     }
 
+    /// Chats an agent started show under the chat that started them, so
+    /// the list holds top-level chats only, unless a search looks for any.
     func apply(
-        to threads: [ThreadListEntry],
-        providerID providerIDForThread: (ThreadListEntry) -> String?
-    ) -> [ThreadListEntry] {
+        to threads: [ThreadSummary],
+        providerID providerIDForThread: (ThreadSummary) -> String?
+    ) -> [ThreadSummary] {
         let query = trimmedQuery
         return threads.filter { thread in
-            (projectCwd == nil || thread.cwd == projectCwd)
+            (thread.origin.parent == nil || !query.isEmpty)
+                && (projectCwd == nil || thread.workspace.cwd == projectCwd)
                 && (providerID == nil || providerIDForThread(thread) == providerID)
                 && (query.isEmpty || thread.title.localizedStandardContains(query))
         }
@@ -44,7 +47,15 @@ struct ThreadListFilter: Equatable {
             (projectCwd == nil || terminal.cwd == projectCwd)
                 && (query.isEmpty
                     || terminal.displayTitle.localizedStandardContains(query)
-                    || terminal.observedTitle?.localizedStandardContains(query) == true)
+                    || terminal.programTitle?.localizedStandardContains(query) == true)
         }
+    }
+
+    /// The filtered agent threads and terminals merged into one list.
+    func workspaceItems(store: ThreadStore, terminalStore: TerminalStore) -> [WorkspaceListItem] {
+        WorkspaceListItem.merged(
+            threads: apply(to: store.threads, providerID: store.providerID(for:)),
+            terminals: apply(toTerminals: terminalStore.terminals)
+        )
     }
 }

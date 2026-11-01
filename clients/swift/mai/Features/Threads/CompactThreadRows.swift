@@ -4,7 +4,7 @@ import SwiftUI
 /// header carries project context and the row stays quiet: title, plus live
 /// status (or recency when idle) at the trailing edge.
 struct CompactThreadRow: View {
-    let thread: ThreadListEntry
+    let thread: ThreadSummary
     let isUnread: Bool
 
     var body: some View {
@@ -88,21 +88,26 @@ struct ThreadRowTimestampText: View {
     }
 }
 
-extension ThreadListEntry {
+extension ThreadSummary {
     /// The same status precedence ThreadRow renders, exposed for row
-    /// variants that live outside that view.
+    /// variants that live outside that view. A chat, or one it started,
+    /// that needs the user comes first.
     var rowIndicatorStatus: ThreadRowIndicatorStatus? {
-        if hasPendingApprovals {
+        if attention.needsInput {
             return .needsInput
         }
-        if latestTurn?.turnState == .running {
+        switch threadStatus {
+        case .running:
             return .working
-        }
-        if latestTurn?.turnState == .error || session?.sessionStatus == .error {
-            return .failed
-        }
-        if latestTurn?.turnState == .interrupted {
+        case .waiting:
+            return .needsInput
+        case .held:
             return .interrupted
+        case .idle, nil:
+            break
+        }
+        if attention.failed {
+            return .failed
         }
         return nil
     }
