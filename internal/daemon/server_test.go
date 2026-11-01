@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -88,15 +89,7 @@ func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
 	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner}), false); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	waitForFile(t, pidPath)
-	raw, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatalf("pid %q: %v", raw, err)
-	}
+	pid := readPID(t, pidPath)
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("wrapped agent %d not alive before close: %v", pid, err)
 	}
@@ -181,4 +174,62 @@ func TestCloseDoesNotWaitForAClientThatStoppedReading(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close is still waiting for the client that stopped reading")
 	}
+}
+
+// Closing the daemon stops agents and terminals at the same time, each
+// within its grace: the terminal's program hears its hangup while an agent
+// is still stopping, not after, and Close is done once the slowest is.
+func TestCloseStopsAgentsAndTerminalsTogether(t *testing.T) {
+	dir := t.TempDir()
+	shell := filepath.Join(dir, "shell")
+	script := fmt.Sprintf("#!/bin/sh\necho $$ > '%[1]s/shell.pid'\ntrap 'echo hup >> %[1]s/hup' HUP\ntrap '' TERM\nwhile :; do sleep 0.05; done\n", dir)
+	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	s := newTestServer(t)
+	// An agent that ignores stdin closing and SIGTERM takes both of its
+	// one-second graces before it is killed.
+	startFakeACPAgent(t, s, "agent", "-linger", "-ignore-term", "-pidfile", filepath.Join(dir, "agent.pid"))
+	createTestTerminal(t, newRecordingClient(t, s))
+	agent, shellPID := readPID(t, filepath.Join(dir, "agent.pid")), readPID(t, filepath.Join(dir, "shell.pid"))
+
+	started := time.Now()
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	waitForFile(t, filepath.Join(dir, "hup"))
+	if syscall.Kill(agent, 0) != nil {
+		t.Fatal("the terminal heard its hangup only after the agent was gone")
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	if elapsed := time.Since(started); elapsed < 2*time.Second || elapsed > 3*time.Second {
+		t.Fatalf("Close took %v, want the agent's two 1 s graces (2 s), with the terminal's 1 s alongside", elapsed)
+	}
+	for name, pid := range map[string]int{"agent": agent, "terminal program": shellPID} {
+		if syscall.Kill(pid, 0) == nil {
+			t.Fatalf("the %s (pid %d) outlived Close", name, pid)
+		}
+	}
+}
+
+func readPID(t *testing.T, path string) int {
+	t.Helper()
+	waitForFile(t, path)
+	var pid int
+	waitUntil(t, path+" to hold a pid", func() bool {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(strings.TrimSpace(string(raw)))
+		return err == nil
+	})
+	return pid
 }

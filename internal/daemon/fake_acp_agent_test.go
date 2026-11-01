@@ -7,10 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 //
 //	-list-only       advertise session/list without load/resume/close
 //	-linger          ignore stdin EOF, like real agents that only die with their process group
+//	-ignore-term     ignore SIGTERM too, so only SIGKILL ends it
 //	-pidfile <path>  write the agent's pid at startup
 //	-login           act as the terminal sign-in program: exit 0 at once
 //	-ask-to-sign-in  offer an "ask-login" method that asks for a code (a
@@ -64,11 +67,15 @@ func TestHelperProcess(t *testing.T) {
 	flags := flag.NewFlagSet("fake-acp-agent", flag.ExitOnError)
 	listOnly := flags.Bool("list-only", false, "")
 	linger := flags.Bool("linger", false, "")
+	ignoreTerm := flags.Bool("ignore-term", false, "")
 	pidPath := flags.String("pidfile", "", "")
 	login := flags.Bool("login", false, "")
 	askToSignIn := flags.Bool("ask-to-sign-in", false, "")
 	history := flags.String("history", "", "")
 	_ = flags.Parse(args)
+	if *ignoreTerm {
+		signal.Ignore(syscall.SIGTERM)
+	}
 	if *login {
 		fmt.Println("signed in")
 		os.Exit(0)
