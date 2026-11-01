@@ -83,6 +83,7 @@ final class ThreadStore {
 
     var connectionState: ConnectionState { connection.state }
     var nextReconnectAt: Date? { connection.nextReconnectAt }
+    var connectionFailure: String? { connection.failure }
 
     var selectedThread: ThreadDetail? {
         _ = selectedSessionGeneration
@@ -179,8 +180,8 @@ final class ThreadStore {
             connected: { [weak self] in
                 await self?.restoreSubscriptions()
             },
-            disconnected: { [weak self] error in
-                self?.connectionDidDisconnect(error)
+            disconnected: { [weak self] in
+                self?.connectionDidDisconnect()
             }
         )
     }
@@ -1013,7 +1014,7 @@ final class ThreadStore {
         throw RPCError("No agent is available")
     }
 
-    private func connectionDidDisconnect(_ error: (any Error)?) {
+    private func connectionDidDisconnect() {
         isLoadingThreadListSnapshot = false
         bufferedThreadListItems.removeAll()
         selectedThreadLoadErrorMessage = nil
@@ -1032,10 +1033,6 @@ final class ThreadStore {
             session.subscriptionState = .unsubscribed
             session.bufferedEvents.removeAll()
             sessionsByID[id] = session
-        }
-
-        if let error {
-            errorMessage = error.localizedDescription
         }
     }
 

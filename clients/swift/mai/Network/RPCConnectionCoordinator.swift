@@ -30,10 +30,13 @@ final class RPCConnectionCoordinator {
         let prepare: () -> Void
         let synchronize: () async throws -> Void
         let connected: () async -> Void
-        let disconnected: ((any Error)?) -> Void
+        let disconnected: () -> Void
     }
 
     private(set) var state: State
+    /// Why the connection last failed, kept until one succeeds so it stays
+    /// visible while retries come and go.
+    private(set) var failure: String?
     private var reconnectAttempt = 0
     private(set) var nextReconnectAt: Date?
 
@@ -63,7 +66,7 @@ final class RPCConnectionCoordinator {
         prepare: @escaping () -> Void,
         synchronize: @escaping () async throws -> Void,
         connected: @escaping () async -> Void,
-        disconnected: @escaping ((any Error)?) -> Void
+        disconnected: @escaping () -> Void
     ) {
         participants.append(
             Participant(
@@ -116,6 +119,7 @@ final class RPCConnectionCoordinator {
             attemptID = nil
             connectionID = id
             state = .connected
+            failure = nil
             reconnectTask?.cancel()
             reconnectTask = nil
             nextReconnectAt = nil
@@ -174,8 +178,9 @@ final class RPCConnectionCoordinator {
         attemptID = nil
         connectionID = nil
         state = .disconnected
+        failure = error?.localizedDescription ?? "maiD closed the connection."
         for participant in participants {
-            participant.disconnected(error)
+            participant.disconnected()
         }
         if disconnectTransport {
             rpc.disconnect()

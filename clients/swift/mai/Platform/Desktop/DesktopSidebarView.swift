@@ -248,47 +248,41 @@
         var body: some View {
             let items = filter.workspaceItems(store: store, terminalStore: terminalStore)
             List(selection: $selection) {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                } else {
-                    switch displayMode {
-                    case .recent:
-                        ForEach(items) { item in
-                            DesktopWorkspaceRow(
-                                store: store,
-                                item: item,
-                                isCompact: false,
-                                openTerminalHere: openTerminalHere,
-                                deleteTerminal: deleteTerminal
-                            )
-                        }
-                    case .byProject:
-                        let groups = WorkspaceListGroups(items: items)
-                        ForEach(groups.ungrouped) { item in
-                            DesktopWorkspaceRow(
-                                store: store,
-                                item: item,
-                                isCompact: true,
-                                openTerminalHere: openTerminalHere,
-                                deleteTerminal: deleteTerminal
-                            )
-                        }
-                        ForEach(groups.projects) { section in
-                            Section(isExpanded: expansionBinding(for: section.id)) {
-                                ForEach(section.items) { item in
-                                    DesktopWorkspaceRow(
-                                        store: store,
-                                        item: item,
-                                        isCompact: true,
-                                        openTerminalHere: openTerminalHere,
-                                        deleteTerminal: deleteTerminal
-                                    )
-                                }
-                            } header: {
-                                Text(section.name)
+                switch displayMode {
+                case .recent:
+                    ForEach(items) { item in
+                        DesktopWorkspaceRow(
+                            store: store,
+                            item: item,
+                            isCompact: false,
+                            openTerminalHere: openTerminalHere,
+                            deleteTerminal: deleteTerminal
+                        )
+                    }
+                case .byProject:
+                    let groups = WorkspaceListGroups(items: items)
+                    ForEach(groups.ungrouped) { item in
+                        DesktopWorkspaceRow(
+                            store: store,
+                            item: item,
+                            isCompact: true,
+                            openTerminalHere: openTerminalHere,
+                            deleteTerminal: deleteTerminal
+                        )
+                    }
+                    ForEach(groups.projects) { section in
+                        Section(isExpanded: expansionBinding(for: section.id)) {
+                            ForEach(section.items) { item in
+                                DesktopWorkspaceRow(
+                                    store: store,
+                                    item: item,
+                                    isCompact: true,
+                                    openTerminalHere: openTerminalHere,
+                                    deleteTerminal: deleteTerminal
+                                )
                             }
+                        } header: {
+                            Text(section.name)
                         }
                     }
                 }
@@ -323,10 +317,6 @@
                     contentIsEmpty: !hasUnfilteredItems
                 )
             )
-        }
-
-        private var isLoading: Bool {
-            !hasUnfilteredItems && store.connectionState != .connected
         }
 
         private var hasUnfilteredItems: Bool {

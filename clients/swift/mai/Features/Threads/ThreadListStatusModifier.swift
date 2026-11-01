@@ -9,7 +9,12 @@ struct ThreadListStatusModifier: ViewModifier {
         content
             .overlay {
                 if contentIsEmpty ?? store.isThreadListEmpty {
-                    ThreadListEmptyStateView()
+                    // An empty list means no chats only once maiD sent it.
+                    if store.connectionState == .connected {
+                        ThreadListEmptyStateView()
+                    } else if let failure = store.connectionFailure {
+                        ThreadListConnectionFailureView(failure: failure)
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {

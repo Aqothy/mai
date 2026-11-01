@@ -46,7 +46,7 @@ final class TerminalStore {
             connected: { [weak self] in
                 self?.connectionDidConnect()
             },
-            disconnected: { [weak self] _ in
+            disconnected: { [weak self] in
                 self?.connectionDidDisconnect()
             }
         )
