@@ -1,4 +1,4 @@
-// Package fff wraps the vendored FFF C library (third_party/fff) behind a
+// Package fff wraps the FFF C library (`make fff`, pinned in the Makefile) behind a
 // narrow, memory-safe Go API. Only the path-search lifecycle needed by the
 // composer file picker is exposed; glob, grep, directory, and query-history
 // APIs stay unwrapped until a feature requires them. No C type or pointer

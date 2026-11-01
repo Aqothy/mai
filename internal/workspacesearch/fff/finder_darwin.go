@@ -3,8 +3,11 @@
 package fff
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../../third_party/fff/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/fff/lib/darwin-arm64 -lfff_c -Wl,-rpath,${SRCDIR}/../../../third_party/fff/lib/darwin-arm64
+// The FFF release is the version in these paths (make fff reads it from
+// here): a new one changes this file, so Go rebuilds the package against
+// its header instead of reusing one built against the old.
+#cgo CFLAGS: -I${SRCDIR}/../../../build/fff/v0.11.0/include
+#cgo LDFLAGS: -L${SRCDIR}/../../../build/fff/v0.11.0/lib -lfff_c -Wl,-rpath,${SRCDIR}/../../../build/fff/v0.11.0/lib
 
 #include <stdlib.h>
 #include "fff.h"

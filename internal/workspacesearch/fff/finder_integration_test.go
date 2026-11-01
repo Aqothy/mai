@@ -1,6 +1,6 @@
 //go:build darwin && arm64 && cgo
 
-// Integration tests against the real vendored FFF library. They cover the
+// Integration tests against the real FFF library. They cover the
 // ownership and lifecycle rules the wrapper promises: ranking, ignore rules,
 // Unicode paths, empty results, repeated search stability, watcher
 // convergence, and close behavior under concurrency.

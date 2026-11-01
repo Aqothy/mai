@@ -1,4 +1,4 @@
-// Command fff-smoke proves the vendored FFF dylib loads and serves a real
+// Command fff-smoke proves the pinned FFF dylib loads and serves a real
 // search through internal/workspacesearch/fff. `make fff-verify` stages this
 // binary next to the dylib in an empty directory to verify relocatable
 // (@loader_path) loading outside the repository.
