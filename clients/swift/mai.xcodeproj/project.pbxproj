@@ -8,8 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		F30691CA302E5503007A8505 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = F30691C9302E5503007A8505 /* Markdown */; };
-		F363015D30966C400098C348 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F363015C30966C400098C348 /* GhosttyTerminal */; };
-		F363015F30966C400098C348 /* GhosttyVT in Frameworks */ = {isa = PBXBuildFile; productRef = F363015E30966C400098C348 /* GhosttyVT */; };
+		F32BC7393096EEB700B9516F /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F32BC7383096EEB700B9516F /* GhosttyTerminal */; };
+		F32BC73B3096EEB700B9516F /* GhosttyVT in Frameworks */ = {isa = PBXBuildFile; productRef = F32BC73A3096EEB700B9516F /* GhosttyVT */; };
 		F38633F5302D118B00319432 /* Highlighter in Frameworks */ = {isa = PBXBuildFile; productRef = F38633F4302D118B00319432 /* Highlighter */; };
 		F3C9400B30958CF0002FD146 /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = F3C9400A30958CF0002FD146 /* GhosttyTerminal */; };
 		F3C9400D30958CF0002FD146 /* GhosttyVT in Frameworks */ = {isa = PBXBuildFile; productRef = F3C9400C30958CF0002FD146 /* GhosttyVT */; };
@@ -64,12 +64,12 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				F363015D30966C400098C348 /* GhosttyTerminal in Frameworks */,
+				F32BC7393096EEB700B9516F /* GhosttyTerminal in Frameworks */,
 				F30691CA302E5503007A8505 /* Markdown in Frameworks */,
 				F3C9400D30958CF0002FD146 /* GhosttyVT in Frameworks */,
 				F3C9400B30958CF0002FD146 /* GhosttyTerminal in Frameworks */,
 				F38633F5302D118B00319432 /* Highlighter in Frameworks */,
-				F363015F30966C400098C348 /* GhosttyVT in Frameworks */,
+				F32BC73B3096EEB700B9516F /* GhosttyVT in Frameworks */,
 			);
 		};
 		F3C108CC300EB34000EF5F93 /* Frameworks */ = {
@@ -121,8 +121,8 @@
 				F30691C9302E5503007A8505 /* Markdown */,
 				F3C9400A30958CF0002FD146 /* GhosttyTerminal */,
 				F3C9400C30958CF0002FD146 /* GhosttyVT */,
-				F363015C30966C400098C348 /* GhosttyTerminal */,
-				F363015E30966C400098C348 /* GhosttyVT */,
+				F32BC7383096EEB700B9516F /* GhosttyTerminal */,
+				F32BC73A3096EEB700B9516F /* GhosttyVT */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* mai.app */;
@@ -180,7 +180,7 @@
 			packageReferences = (
 				F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */,
 				F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */,
-				F363015B30966C400098C348 /* XCRemoteSwiftPackageReference "ghost-swiftly" */,
+				F32BC7373096EEB700B9516F /* XCRemoteSwiftPackageReference "ghost-swiftly" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -567,12 +567,12 @@
 				minimumVersion = 0.8.0;
 			};
 		};
-		F363015B30966C400098C348 /* XCRemoteSwiftPackageReference "ghost-swiftly" */ = {
+		F32BC7373096EEB700B9516F /* XCRemoteSwiftPackageReference "ghost-swiftly" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Aqothy/ghost-swiftly";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.2;
+				minimumVersion = 0.3.3;
 			};
 		};
 		F38633F3302D118B00319432 /* XCRemoteSwiftPackageReference "HighlighterSwift" */ = {
@@ -591,14 +591,14 @@
 			package = F30691C8302E5503007A8505 /* XCRemoteSwiftPackageReference "swift-markdown" */;
 			productName = Markdown;
 		};
-		F363015C30966C400098C348 /* GhosttyTerminal */ = {
+		F32BC7383096EEB700B9516F /* GhosttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F363015B30966C400098C348 /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
+			package = F32BC7373096EEB700B9516F /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
 			productName = GhosttyTerminal;
 		};
-		F363015E30966C400098C348 /* GhosttyVT */ = {
+		F32BC73A3096EEB700B9516F /* GhosttyVT */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F363015B30966C400098C348 /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
+			package = F32BC7373096EEB700B9516F /* XCRemoteSwiftPackageReference "ghost-swiftly" */;
 			productName = GhosttyVT;
 		};
 		F38633F4302D118B00319432 /* Highlighter */ = {
