@@ -30,15 +30,15 @@ func TestOutputWrittenBeforeExitIsRead(t *testing.T) {
 	}
 }
 
-// Stop lets an agent that exits on stdin EOF finish on its own, and kills
-// one that does not.
+// Stop lets an agent that exits on stdin EOF finish on its own, sends one
+// that doesn't SIGTERM so it can clean up, and kills one that ignores that.
 func TestStopIsGracefulThenKills(t *testing.T) {
 	polite, err := Start(exec.Command("/bin/sh", "-c", "cat >/dev/null; echo bye"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(polite.Stdout())
-	polite.Stop(5 * time.Second)
+	polite.Stop()
 	if line, _ := reader.ReadString('\n'); line != "bye\n" {
 		t.Fatalf("graceful exit output = %q", line)
 	}
@@ -46,13 +46,23 @@ func TestStopIsGracefulThenKills(t *testing.T) {
 		t.Fatalf("graceful exit error = %v", polite.Err())
 	}
 
-	stubborn, err := Start(exec.Command("/bin/sh", "-c", "trap '' HUP; exec sleep 60"))
+	busy, err := Start(exec.Command("/bin/sh", "-c", "trap 'echo cleaned up; exit 0' TERM; while :; do sleep 0.05; done"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader = bufio.NewReader(busy.Stdout())
+	busy.Stop()
+	if line, _ := reader.ReadString('\n'); line != "cleaned up\n" {
+		t.Fatalf("output after SIGTERM = %q", line)
+	}
+
+	stubborn, err := Start(exec.Command("/bin/sh", "-c", "trap '' HUP TERM; exec sleep 60"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	stubborn.Stop(100 * time.Millisecond)
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	stubborn.Stop()
+	if elapsed := time.Since(start); elapsed > 2*stopGrace+time.Second {
 		t.Fatalf("Stop took %v", elapsed)
 	}
 }

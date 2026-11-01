@@ -62,6 +62,7 @@ const rpcPingInterval = 15 * time.Second
 type rpcClient struct {
 	id     string
 	conn   *jsonrpc2.Connection
+	socket *websocket.Conn
 	logger *slog.Logger
 
 	outbound chan rpcOutbound
@@ -202,7 +203,7 @@ func (s *Server) serveRPC(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("JSON-RPC notification failed", "error", err)
 		},
 		Bind: func(c *jsonrpc2.Connection) jsonrpc2.Handler {
-			client = s.registerRPCClient(c)
+			client = s.registerRPCClient(c, ws)
 			return &rpcHandler{server: s, client: client}
 		},
 	})
@@ -242,9 +243,9 @@ func (s *Server) keepAlive(ctx context.Context, ws *websocket.Conn, logger *slog
 	}
 }
 
-func (s *Server) registerRPCClient(conn *jsonrpc2.Connection) *rpcClient {
+func (s *Server) registerRPCClient(conn *jsonrpc2.Connection, socket *websocket.Conn) *rpcClient {
 	client := &rpcClient{
-		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn,
+		id: fmt.Sprintf("client-%d", nextRPCClientID.Add(1)), conn: conn, socket: socket,
 		outbound: make(chan rpcOutbound, rpcOutboundQueueSize), done: make(chan struct{}),
 		calls:     make(chan struct{}, rpcConcurrentCalls),
 		questions: make(map[string]pendingQuestion),

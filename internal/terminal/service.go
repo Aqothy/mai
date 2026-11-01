@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// terminateGrace bounds how long a process group gets to exit after SIGTERM
-// before it is killed.
-const terminateGrace = 3 * time.Second
+// terminateGrace bounds how long a process group gets to exit after SIGHUP
+// and SIGTERM before it is killed. Shells exit on SIGHUP at once; the grace
+// is for a program that saves its state on hangup.
+const terminateGrace = time.Second
 
 // Service owns every live terminal session for one daemon run. It knows
 // nothing about RPC clients, rendering, or persistence.

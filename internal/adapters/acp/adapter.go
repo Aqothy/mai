@@ -94,7 +94,8 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider
 	logger := slog.Default().With("component", "acp-sdk", "providerInstance", spec.InstanceID)
 	if err := h.connectClient(acp.Combine(process.Stdout(), process.Stdin()), logger); err != nil {
 		h.cancel()
-		process.Stop(0)
+		process.Kill()
+		<-process.Exited()
 		_ = process.Close()
 		return nil, err
 	}
@@ -103,7 +104,8 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider
 	if err != nil {
 		h.cancel()
 		_ = h.conn.Close()
-		process.Stop(0)
+		process.Kill()
+		<-process.Exited()
 		_ = process.Close()
 		return nil, err
 	}
@@ -302,9 +304,6 @@ func (h *Instance) Logout(ctx context.Context) (provider.InstanceInfo, error) {
 	return cloneInstanceInfo(h.info), nil
 }
 
-// stopGrace is how long the agent gets to exit on its own once stdin closes.
-const stopGrace = 5 * time.Second
-
 // drainTimeout bounds reading what an exited agent wrote last.
 const drainTimeout = 2 * time.Second
 
@@ -314,7 +313,7 @@ func (h *Instance) Close() error {
 			h.cancel()
 		}
 		if h.process != nil {
-			h.process.Stop(stopGrace)
+			h.process.Stop()
 		}
 		if h.conn != nil {
 			_ = h.conn.Close()

@@ -179,10 +179,6 @@ type Instance struct {
 	closeErr        error
 }
 
-// stopGrace is how long app-server gets to exit on its own once stdin
-// closes; it ends the commands it runs then, which a kill would orphan.
-const stopGrace = 5 * time.Second
-
 // drainTimeout bounds reading what an exited app-server wrote last.
 const drainTimeout = 2 * time.Second
 
@@ -393,7 +389,7 @@ func (h *Instance) Close() error {
 		h.mu.Unlock()
 		h.cancelPendingApprovals("")
 		h.cancel()
-		h.process.Stop(stopGrace)
+		h.process.Stop()
 		<-h.processDone
 		h.mu.Lock()
 		if !intentional {

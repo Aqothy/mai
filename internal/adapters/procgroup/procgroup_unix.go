@@ -25,3 +25,8 @@ func Kill(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	_ = cmd.Process.Kill()
 }
+
+// terminate asks cmd's process group to exit.
+func terminate(cmd *exec.Cmd) {
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+}

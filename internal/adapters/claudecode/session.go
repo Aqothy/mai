@@ -272,7 +272,7 @@ func (h *Instance) stopProcess(session *claudeSession) {
 	}
 	proc.closing = true
 	h.mu.Unlock()
-	proc.process.Stop(stopGrace)
+	proc.process.Stop()
 	<-proc.done
 }
 

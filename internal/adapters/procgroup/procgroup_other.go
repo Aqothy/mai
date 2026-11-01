@@ -11,3 +11,6 @@ func Kill(cmd *exec.Cmd) {
 		_ = cmd.Process.Kill()
 	}
 }
+
+// terminate does nothing: without signals, Stop goes on to kill.
+func terminate(*exec.Cmd) {}

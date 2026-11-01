@@ -267,10 +267,6 @@ func (h *Instance) startCLI(cwd string, extra []string) (*procgroup.Process, *st
 	return process, newStreamClient(process.Stdout(), process.Stdin()), nil
 }
 
-// stopGrace is how long a stopped CLI gets to exit on its own after stdin
-// closes; it flushes the session transcript then (as the SDKs wait for).
-const stopGrace = 5 * time.Second
-
 // drainTimeout bounds reading what an exited CLI wrote last.
 const drainTimeout = 2 * time.Second
 

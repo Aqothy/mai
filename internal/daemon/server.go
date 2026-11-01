@@ -169,11 +169,14 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
+	// Agents and terminal shells never survive daemon shutdown. Stop them at
+	// once, so shutdown takes one grace, and wait for every process group to be
+	// cleaned up before releasing clients and the store.
+	var stopped sync.WaitGroup
+	stopped.Go(s.terminals.service.Close)
 	s.providerService.Close()
 	s.engine.Close()
-	// Terminal shells never survive daemon shutdown; wait for every process
-	// group to be cleaned up before releasing clients and the store.
-	s.terminals.service.Close()
+	stopped.Wait()
 	// Close streams before the process exits, so their clients hear why.
 	for _, stream := range s.terminals.closeStreams() {
 		<-stream.finished
@@ -188,6 +191,11 @@ func (s *Server) doClose() error {
 	s.rpcClients = make(map[string]*rpcClient)
 	s.rpcMu.Unlock()
 
+	// Close the sockets first: a client that stopped reading blocks the
+	// connection's writes, and the connection's own Close waits for them.
+	for _, client := range clients {
+		_ = client.socket.CloseNow()
+	}
 	for _, client := range clients {
 		_ = client.conn.Close()
 		client.closeOutbound()

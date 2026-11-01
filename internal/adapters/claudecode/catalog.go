@@ -38,7 +38,7 @@ func (h *Instance) probe(ctx context.Context) error {
 	}
 	client.start()
 	defer func() {
-		process.Stop(0)
+		process.Kill()
 		process.Drain(client.done, drainTimeout)
 	}()
 	var response initializeResponse

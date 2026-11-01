@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/coder/websocket"
 )
 
 func TestProviderStartValidation(t *testing.T) {
@@ -133,5 +135,50 @@ func TestEngineFailureClosesServerAndSurfacesFromRunWebSocket(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("a second Close = %v, want nil", err)
+	}
+}
+
+// Closing the daemon doesn't wait for a client that stopped reading, such as
+// a suspended phone: the daemon's writes to it block, and only the pings
+// would have given up on it.
+func TestCloseDoesNotWaitForAClientThatStoppedReading(t *testing.T) {
+	s := newTestServer(t)
+	s.pingInterval = time.Hour
+	attachment, err := s.engine.StoreAttachment(strings.Repeat("a", 4<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _, err := websocket.Dial(context.Background(), newWSTestServer(t, s), nil)
+	if err != nil {
+		t.Fatalf("websocket dial: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	for id := range 16 {
+		request := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{"id":%q}}`, id+1, wire.MethodAttachmentGet, attachment)
+		if err := ws.Write(context.Background(), websocket.MessageText, []byte(request)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitUntil(t, "the daemon's writes to the client to block", func() bool {
+		s.rpcMu.Lock()
+		defer s.rpcMu.Unlock()
+		for _, client := range s.rpcClients {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			err := client.conn.Notify(ctx, wire.MethodThreadList, nil)
+			cancel()
+			return errors.Is(err, context.DeadlineExceeded)
+		}
+		return false
+	})
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close is still waiting for the client that stopped reading")
 	}
 }

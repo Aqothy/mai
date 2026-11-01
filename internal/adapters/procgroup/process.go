@@ -92,19 +92,43 @@ func (p *Process) Kill() {
 	}
 }
 
-// Stop closes stdin, which agents take as the signal to finish up and exit,
-// gives the process grace to do so (Claude Code flushes its transcript then),
-// and kills the group if it is still running. It returns once the process
-// has exited.
-func (p *Process) Stop(grace time.Duration) {
+// stopGrace is how long Stop waits for each step to end the process. An
+// idle agent exits within a quarter second of stdin closing (Claude Code
+// after flushing its transcript, measured 0.24 s; app-server 0.04 s), and
+// Claude Code in a turn ignores the close and exits within 0.2 s of
+// SIGTERM, so a longer grace would only delay shutdown.
+const stopGrace = time.Second
+
+// Stop closes stdin, which agents take as the signal to finish up and exit.
+// One still running, such as Claude Code in a turn, is sent SIGTERM, then the
+// group is killed: an agent stops the tool processes it started in their own
+// process groups on SIGTERM, and they outlive a SIGKILL. The Claude Agent SDK
+// closes the CLI the same way (SubprocessCLITransport.close). It returns once
+// the process has exited.
+func (p *Process) Stop() {
 	_ = p.stdin.Close()
-	select {
-	case <-p.exited:
+	if p.exitsWithinGrace() {
 		return
-	case <-time.After(grace):
+	}
+	p.mu.Lock()
+	if !p.reaped {
+		terminate(p.cmd)
+	}
+	p.mu.Unlock()
+	if p.exitsWithinGrace() {
+		return
 	}
 	p.Kill()
 	<-p.exited
+}
+
+func (p *Process) exitsWithinGrace() bool {
+	select {
+	case <-p.exited:
+		return true
+	case <-time.After(stopGrace):
+		return false
+	}
 }
 
 // Drain waits, after the process exited, for the reader of its stdout to
