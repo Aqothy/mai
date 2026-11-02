@@ -13,13 +13,13 @@ final class ACPRegistryModel {
     }
 
     private(set) var phase: Phase = .loading
-    /// Agents an install, update or removal is running on.
+    /// Agents a call to the daemon is on its way for. The daemon's list says
+    /// what it is doing with them.
     private(set) var busyIDs: Set<String> = []
     private(set) var errorMessage: String?
-    /// Cached so body evaluations don't re-run the merge/sort/filter pipeline
-    /// and don't depend on the store's whole installed-agents collection.
-    /// Rebuilt whenever the filter, search text, registry agents, or installed
-    /// agents change.
+    /// Cached so body evaluations don't re-run the filter pipeline and don't
+    /// depend on the store's whole agent list.
+    /// Rebuilt whenever the filter, search text or the daemon's list changes.
     private(set) var entries: [ACPRegistryEntry] = []
     var filter: ACPRegistryFilter = .all {
         didSet { rebuildEntries() }
@@ -29,7 +29,6 @@ final class ACPRegistryModel {
     }
 
     private let store: ThreadStore
-    private var registryAgents: [ACPRegistryAgent] = []
     #if DEBUG
         private var usesPreviewAgents = false
     #endif
@@ -40,9 +39,8 @@ final class ACPRegistryModel {
     }
 
     #if DEBUG
-    init(store: ThreadStore, previewAgents: [ACPRegistryAgent]) {
+    init(previewStore store: ThreadStore) {
         self.store = store
-        registryAgents = previewAgents
         usesPreviewAgents = true
         phase = .loaded
         rebuildEntries()
@@ -50,37 +48,7 @@ final class ACPRegistryModel {
     #endif
 
     func rebuildEntries() {
-        let installedByID = Dictionary(
-            uniqueKeysWithValues: store.installedAgents.map { ($0.id, $0) }
-        )
-        var entries = registryAgents.map { agent in
-            ACPRegistryEntry(
-                id: agent.id,
-                name: agent.name,
-                description: agent.description,
-                iconURL: agent.icon.flatMap { URL(string: $0) },
-                source: .registry,
-                availableVersion: agent.version,
-                installedVersion: installedByID[agent.id]?.version
-            )
-        }
-        // Installed agents stay visible if the registry no longer lists them.
-        let registryIDs = Set(registryAgents.map(\.id))
-        entries += store.installedAgents
-            .filter { !registryIDs.contains($0.id) }
-            .map { agent in
-                let source = ACPRegistryEntry.Source(rawValue: agent.source) ?? .registry
-                return ACPRegistryEntry(
-                    id: agent.id,
-                    name: agent.name,
-                    description: agent.description,
-                    iconURL: agent.icon.flatMap { URL(string: $0) },
-                    source: source,
-                    availableVersion: nil,
-                    installedVersion: source == .custom ? nil : agent.version
-                )
-            }
-        entries.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        var entries = store.registryAgents.map(ACPRegistryEntry.init)
         switch filter {
         case .all:
             break
@@ -114,15 +82,13 @@ final class ACPRegistryModel {
             phase = .loading
         }
         do {
-            try await store.refreshInstalledAgents()
-            rebuildEntries()
-            registryAgents = try await store.fetchRegistryAgents()
+            try await store.refreshRegistry()
             rebuildEntries()
             phase = .loaded
         } catch is CancellationError {
             return
         } catch {
-            if registryAgents.isEmpty && store.installedAgents.isEmpty {
+            if store.registryAgents.isEmpty {
                 phase = .failed(error.localizedDescription)
             } else {
                 phase = .loaded
@@ -131,17 +97,13 @@ final class ACPRegistryModel {
         }
     }
 
+    /// Asks the daemon to install, update or retry. The row shows the rest
+    /// through the daemon's list.
     func install(_ entry: ACPRegistryEntry) async {
         guard busyIDs.insert(entry.id).inserted else { return }
-        // Rebuilding in the defer covers every exit; the store mutates
-        // installedAgents before a later await in installRegistryAgent can
-        // throw or get cancelled.
-        defer {
-            busyIDs.remove(entry.id)
-            rebuildEntries()
-        }
+        defer { busyIDs.remove(entry.id) }
         do {
-            _ = try await store.installRegistryAgent(id: entry.id)
+            try await store.installRegistryAgent(id: entry.id)
         } catch is CancellationError {
             return
         } catch {
@@ -151,10 +113,7 @@ final class ACPRegistryModel {
 
     func remove(_ entry: ACPRegistryEntry) async {
         guard busyIDs.insert(entry.id).inserted else { return }
-        defer {
-            busyIDs.remove(entry.id)
-            rebuildEntries()
-        }
+        defer { busyIDs.remove(entry.id) }
         do {
             try await store.removeInstalledAgent(id: entry.id)
         } catch is CancellationError {

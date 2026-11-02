@@ -8,7 +8,8 @@ import (
 
 func maidDataDir() (string, error) {
 	if dir := os.Getenv("MAID_DATA_DIR"); dir != "" {
-		return dir, nil
+		// Absolute, since agents run elsewhere and are given paths inside it.
+		return filepath.Abs(dir)
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {

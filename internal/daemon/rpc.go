@@ -40,12 +40,13 @@ const (
 // cannot hold up the connection. Notifications (terminal input, resize,
 // focus, detach) are always handled in wire order.
 var orderedRPCCalls = map[string]bool{
-	wire.MethodThreadCommand:         true,
-	wire.MethodThreadSubscribe:       true,
-	wire.MethodThreadUnsubscribe:     true,
-	wire.MethodThreadSubscribeList:   true,
-	wire.MethodTerminalSubscribeList: true,
-	wire.MethodProjectSubscribeList:  true,
+	wire.MethodThreadCommand:            true,
+	wire.MethodThreadSubscribe:          true,
+	wire.MethodThreadUnsubscribe:        true,
+	wire.MethodThreadSubscribeList:      true,
+	wire.MethodTerminalSubscribeList:    true,
+	wire.MethodProjectSubscribeList:     true,
+	wire.MethodACPRegistrySubscribeList: true,
 }
 
 // maxInboundMessageBytes bounds a single client->daemon frame (commands with
@@ -74,8 +75,9 @@ type rpcClient struct {
 	// subscription is the client's thread list and thread updates.
 	subscription *orchestration.Subscription
 
-	subscriptionsMu        sync.Mutex
-	terminalListSubscribed bool
+	subscriptionsMu           sync.Mutex
+	terminalListSubscribed    bool
+	acpRegistryListSubscribed bool
 
 	// questions are the sign-in questions this client was asked and has not
 	// answered, by request ID.
@@ -330,6 +332,18 @@ func (c *rpcClient) ProjectList(list orchestration.ProjectList) {
 	c.notify(wire.MethodProjectList, list)
 }
 
+func (c *rpcClient) subscribeACPRegistryList() {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	c.acpRegistryListSubscribed = true
+}
+
+func (c *rpcClient) subscribedACPRegistryList() bool {
+	c.subscriptionsMu.Lock()
+	defer c.subscriptionsMu.Unlock()
+	return c.acpRegistryListSubscribed
+}
+
 func (c *rpcClient) subscribeTerminalList() {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
@@ -498,10 +512,11 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		return h.server.StartProvider(ctx, params.InstanceSpec, params.Restart)
 	case wire.MethodProviderList:
 		return h.server.providerService.ListInstances(), nil
-	case wire.MethodACPRegistryList:
-		return h.server.acpRegistry.list(ctx)
-	case wire.MethodACPRegistryInstalled:
-		return h.server.acpRegistry.installedAgents()
+	case wire.MethodACPRegistrySubscribeList:
+		h.client.subscribeACPRegistryList()
+		return h.server.acpRegistry.snapshot()
+	case wire.MethodACPRegistryRefresh:
+		return h.server.acpRegistry.refresh(ctx)
 	case wire.MethodACPRegistryInstall:
 		var params wire.ACPRegistryInstallParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -510,14 +525,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if params.RegistryID == "" {
 			return nil, fmt.Errorf("%w: acp.registry.install requires registryId", jsonrpc2.ErrInvalidParams)
 		}
-		installed, err := h.server.acpRegistry.install(ctx, params.RegistryID)
-		if err != nil {
-			return nil, err
-		}
-		if err := h.server.registerACPAgent(installed.ID); err != nil {
-			return nil, err
-		}
-		return installed, nil
+		return nil, h.server.installACPAgent(ctx, params.RegistryID)
 	case wire.MethodACPRegistryAddCustom:
 		var params wire.ACPCustomAgentAddParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -553,7 +561,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if params.RegistryID == "" {
 			return nil, fmt.Errorf("%w: acp.registry.start requires registryId", jsonrpc2.ErrInvalidParams)
 		}
-		return h.server.StartACPRegistryProvider(ctx, params.RegistryID, params.Restart)
+		return h.server.StartACPRegistryProvider(ctx, params.RegistryID, params.Cwd)
 	case wire.MethodProviderAuthenticate:
 		var params wire.ProviderAuthenticateParams
 		if err := decodeRPCParams(req, &params); err != nil {
@@ -592,7 +600,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.providerService.Logout(ctx, params.InstanceID)
+		return h.server.logoutProvider(ctx, params.InstanceID)
 	case wire.MethodProviderListSessions:
 		var params wire.ProviderListSessionsParams
 		if err := decodeRPCParams(req, &params); err != nil {

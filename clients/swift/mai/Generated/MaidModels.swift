@@ -132,25 +132,45 @@ public extension ACPCustomAgentUpdateParams {
 // MARK: - ACPRegistryAgent
 public struct ACPRegistryAgent: Codable {
     public var args: [String]?
-    public var description, icon: String?
-    public var id, instanceID, name, package: String
-    public var version: String?
+    public var availableReleasedAt: Date?
+    public var availableVersion, blocker, command, description: String?
+    public var envNames: [String]?
+    public var error, icon: String?
+    public var id: String
+    public var installedVersion: String?
+    public var instanceID: String
+    public var licenseURL: String?
+    public var name: String
+    public var repository: String?
+    public var source, state: String
+    public var website: String?
 
     public enum CodingKeys: String, CodingKey {
-        case args, description, icon, id
+        case args, availableReleasedAt, availableVersion, blocker, command, description, envNames, error, icon, id, installedVersion
         case instanceID = "instanceId"
-        case name, package, version
+        case licenseURL = "licenseUrl"
+        case name, repository, source, state, website
     }
 
-    public init(args: [String]?, description: String?, icon: String?, id: String, instanceID: String, name: String, package: String, version: String?) {
+    public init(args: [String]?, availableReleasedAt: Date?, availableVersion: String?, blocker: String?, command: String?, description: String?, envNames: [String]?, error: String?, icon: String?, id: String, installedVersion: String?, instanceID: String, licenseURL: String?, name: String, repository: String?, source: String, state: String, website: String?) {
         self.args = args
+        self.availableReleasedAt = availableReleasedAt
+        self.availableVersion = availableVersion
+        self.blocker = blocker
+        self.command = command
         self.description = description
+        self.envNames = envNames
+        self.error = error
         self.icon = icon
         self.id = id
+        self.installedVersion = installedVersion
         self.instanceID = instanceID
+        self.licenseURL = licenseURL
         self.name = name
-        self.package = package
-        self.version = version
+        self.repository = repository
+        self.source = source
+        self.state = state
+        self.website = website
     }
 }
 
@@ -174,23 +194,43 @@ public extension ACPRegistryAgent {
 
     func with(
         args: [String]?? = nil,
+        availableReleasedAt: Date?? = nil,
+        availableVersion: String?? = nil,
+        blocker: String?? = nil,
+        command: String?? = nil,
         description: String?? = nil,
+        envNames: [String]?? = nil,
+        error: String?? = nil,
         icon: String?? = nil,
         id: String? = nil,
+        installedVersion: String?? = nil,
         instanceID: String? = nil,
+        licenseURL: String?? = nil,
         name: String? = nil,
-        package: String? = nil,
-        version: String?? = nil
+        repository: String?? = nil,
+        source: String? = nil,
+        state: String? = nil,
+        website: String?? = nil
     ) -> ACPRegistryAgent {
         return ACPRegistryAgent(
             args: args ?? self.args,
+            availableReleasedAt: availableReleasedAt ?? self.availableReleasedAt,
+            availableVersion: availableVersion ?? self.availableVersion,
+            blocker: blocker ?? self.blocker,
+            command: command ?? self.command,
             description: description ?? self.description,
+            envNames: envNames ?? self.envNames,
+            error: error ?? self.error,
             icon: icon ?? self.icon,
             id: id ?? self.id,
+            installedVersion: installedVersion ?? self.installedVersion,
             instanceID: instanceID ?? self.instanceID,
+            licenseURL: licenseURL ?? self.licenseURL,
             name: name ?? self.name,
-            package: package ?? self.package,
-            version: version ?? self.version
+            repository: repository ?? self.repository,
+            source: source ?? self.source,
+            state: state ?? self.state,
+            website: website ?? self.website
         )
     }
 
@@ -251,44 +291,20 @@ public extension ACPRegistryInstallParams {
     }
 }
 
-// MARK: - ACPRegistryInstalledAgent
-public struct ACPRegistryInstalledAgent: Codable {
-    public var args: [String]?
-    public var command, description: String?
-    public var envNames: [String]?
-    public var icon: String?
-    public var id: String
-    public var installedAt: Date
-    public var instanceID, name, package, source: String
-    public var version: String
+// MARK: - ACPRegistryList
+public struct ACPRegistryList: Codable {
+    public var agents: [ACPRegistryAgent]
 
-    public enum CodingKeys: String, CodingKey {
-        case args, command, description, envNames, icon, id, installedAt
-        case instanceID = "instanceId"
-        case name, package, source, version
-    }
-
-    public init(args: [String]?, command: String?, description: String?, envNames: [String]?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, source: String, version: String) {
-        self.args = args
-        self.command = command
-        self.description = description
-        self.envNames = envNames
-        self.icon = icon
-        self.id = id
-        self.installedAt = installedAt
-        self.instanceID = instanceID
-        self.name = name
-        self.package = package
-        self.source = source
-        self.version = version
+    public init(agents: [ACPRegistryAgent]) {
+        self.agents = agents
     }
 }
 
-// MARK: ACPRegistryInstalledAgent convenience initializers and mutators
+// MARK: ACPRegistryList convenience initializers and mutators
 
-public extension ACPRegistryInstalledAgent {
+public extension ACPRegistryList {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(ACPRegistryInstalledAgent.self, from: data)
+        self = try newJSONDecoder().decode(ACPRegistryList.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -303,32 +319,10 @@ public extension ACPRegistryInstalledAgent {
     }
 
     func with(
-        args: [String]?? = nil,
-        command: String?? = nil,
-        description: String?? = nil,
-        envNames: [String]?? = nil,
-        icon: String?? = nil,
-        id: String? = nil,
-        installedAt: Date? = nil,
-        instanceID: String? = nil,
-        name: String? = nil,
-        package: String? = nil,
-        source: String? = nil,
-        version: String? = nil
-    ) -> ACPRegistryInstalledAgent {
-        return ACPRegistryInstalledAgent(
-            args: args ?? self.args,
-            command: command ?? self.command,
-            description: description ?? self.description,
-            envNames: envNames ?? self.envNames,
-            icon: icon ?? self.icon,
-            id: id ?? self.id,
-            installedAt: installedAt ?? self.installedAt,
-            instanceID: instanceID ?? self.instanceID,
-            name: name ?? self.name,
-            package: package ?? self.package,
-            source: source ?? self.source,
-            version: version ?? self.version
+        agents: [ACPRegistryAgent]? = nil
+    ) -> ACPRegistryList {
+        return ACPRegistryList(
+            agents: agents ?? self.agents
         )
     }
 
@@ -391,17 +385,17 @@ public extension ACPRegistryRemoveParams {
 
 // MARK: - ACPRegistryStartParams
 public struct ACPRegistryStartParams: Codable {
+    public var cwd: String?
     public var registryID: String
-    public var restart: Bool?
 
     public enum CodingKeys: String, CodingKey {
+        case cwd
         case registryID = "registryId"
-        case restart
     }
 
-    public init(registryID: String, restart: Bool?) {
+    public init(cwd: String?, registryID: String) {
+        self.cwd = cwd
         self.registryID = registryID
-        self.restart = restart
     }
 }
 
@@ -424,12 +418,12 @@ public extension ACPRegistryStartParams {
     }
 
     func with(
-        registryID: String? = nil,
-        restart: Bool?? = nil
+        cwd: String?? = nil,
+        registryID: String? = nil
     ) -> ACPRegistryStartParams {
         return ACPRegistryStartParams(
-            registryID: registryID ?? self.registryID,
-            restart: restart ?? self.restart
+            cwd: cwd ?? self.cwd,
+            registryID: registryID ?? self.registryID
         )
     }
 

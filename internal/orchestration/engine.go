@@ -15,9 +15,9 @@ import (
 
 // Providers gives the engine provider instances.
 type Providers interface {
-	// Instance returns the running instance, starting it when it isn't, and
-	// its process generation.
-	Instance(ctx context.Context, id provider.InstanceID) (provider.Instance, uint64, error)
+	// Instance returns the running process that serves folder, starting one
+	// when there is none, and its generation.
+	Instance(ctx context.Context, id provider.InstanceID, folder string) (provider.Instance, uint64, error)
 	// Info describes a configured instance, running or not.
 	Info(id provider.InstanceID) (provider.InstanceInfo, bool)
 }

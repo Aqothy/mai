@@ -14,6 +14,9 @@ type Driver struct {
 	// Static is what is known of an instance before it runs: its access modes
 	// and the capabilities that don't wait for what it reports on start.
 	Static func(spec InstanceSpec) InstanceInfo
+	// PerFolder runs a process per working folder instead of one for every
+	// folder.
+	PerFolder bool
 }
 
 // Host is what the daemon gives an instance.
@@ -23,6 +26,9 @@ type Host struct {
 	// Mirror keeps native frames of sessions the provider may lose or can't
 	// replay. Nil when the daemon keeps none (tests).
 	Mirror Mirror
+	// Folder is the working folder this process of a Driver.PerFolder provider
+	// serves. Empty for work that belongs to no folder, such as signing in.
+	Folder string
 }
 
 // Mirror is durable, append-only storage of a session's native frames (the

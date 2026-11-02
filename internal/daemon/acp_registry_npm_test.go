@@ -16,7 +16,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 
 	"github.com/Aqothy/maiD/api/wire"
@@ -24,8 +23,8 @@ import (
 )
 
 // Opt-in because this exercises the installed npm executable. Every package,
-// registry response, prefix, cache and provider is disposable and local. The
-// acquired package only launches this package's existing ACP protocol helper.
+// registry response, install and provider is disposable and local. The acquired
+// package only launches this package's existing ACP protocol helper.
 func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if os.Getenv("MAID_REGISTRY_NPM_QA") != "1" {
 		t.Skip("set MAID_REGISTRY_NPM_QA=1 to exercise local npm acquisition")
@@ -67,8 +66,6 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"version": "1", "agents": []any{map[string]any{
 				"id": "qa-agent", "name": "QA Agent", "version": v,
 				"distribution": map[string]any{"npx": map[string]any{"package": "maid-qa-agent@" + v, "env": map[string]string{
-					"npm_config_registry": registryURL, "npm_config_userconfig": config, "npm_config_globalconfig": globalConfig,
-					"npm_config_audit": "false", "npm_config_fund": "false",
 					"MAID_DAEMON_ACP_HELPER": "1", "QA_HELPER": os.Args[0], "QA_LAUNCH_LOG": launchLog,
 				}}},
 			}}})
@@ -92,55 +89,64 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	}))
 	defer server.Close()
 	registryURL = server.URL
-	// Keep npm configuration isolated even for the CLI's startup phase.
+	// Keep npm on the fake registry: the daemon's environment is npm's, and the
+	// index's env never reaches it.
 	t.Setenv("NPM_CONFIG_USERCONFIG", config)
 	t.Setenv("NPM_CONFIG_GLOBALCONFIG", globalConfig)
 	t.Setenv("NPM_CONFIG_REGISTRY", registryURL)
-	s := newTestServer(t)
+	// node without npm beside it, for launches to run with.
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	onlyNode := t.TempDir()
+	if err := os.Symlink(node, filepath.Join(onlyNode, "node")); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(dir, "data")
+	s := newTestServerAt(t, dataDir)
 	defer s.Close()
-	s.acpRegistry = &acpRegistry{url: registryURL + "/acp.json", client: server.Client(), dataDir: filepath.Join(dir, "data"), npm: npm}
+	s.acpRegistry.url, s.acpRegistry.client = registryURL+"/acp.json", server.Client()
 	client := dialRecordingClient(t, newWSTestServer(t, s))
-	var catalog []wire.ACPRegistryAgent
-	client.call(t, wire.MethodACPRegistryList, nil, &catalog)
-	var installed wire.ACPRegistryInstalledAgent
-	client.call(t, wire.MethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
-	if installed.Version != "1.0.0" {
-		t.Fatalf("initial version=%s", installed.Version)
+	subscribeACP(t, client)
+	refreshACP(t, client)
+	installACP(t, client, "qa-agent")
+	if row := client.waitACPState(t, "qa-agent", wire.ACPAgentInstalled); row.InstalledVersion != "1.0.0" {
+		t.Fatalf("row after install = %#v", row)
 	}
-	var foundCold bool
-	for _, instance := range s.providerService.ListInstances() {
-		if instance.InstanceID == installed.InstanceID && instance.Status == provider.InstanceStatusConfigured {
-			foundCold = true
-		}
+	// The private cache went with the install.
+	if dirs := installDirs(t, dataDir, "qa-agent"); len(dirs) != 1 {
+		t.Fatalf("install dirs = %v", dirs)
+	} else if _, err := os.Stat(filepath.Join(dataDir, "agents", "registry", "qa-agent", dirs[0], ".npm-cache")); !os.IsNotExist(err) {
+		t.Fatalf("npm cache: stat err = %v, want not exist", err)
 	}
-	if !foundCold {
-		t.Fatal("install should register a cold provider")
-	}
+	t.Setenv("PATH", onlyNode+string(os.PathListSeparator)+"/usr/bin:/bin")
 	var info provider.InstanceInfo
-	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
+	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent", Cwd: client.addProject(t, dir)}, &info)
 	firstPID := info.PID
 	thread := client.createThread(t, info.InstanceID, dir).Thread
 	client.subscribe(t, thread)
 	blocked := client.deliver(t, thread, "block "+dir).Delivery
 	waitForFile(t, filepath.Join(dir, "ready"))
+	if launches, err := os.ReadFile(launchLog); err != nil || string(launches) != "1.0.0\n" {
+		t.Fatalf("launch log=%q error=%v", launches, err)
+	}
+
+	// The update needs npm again. The running turn doesn't notice.
+	t.Setenv("PATH", filepath.Dir(npm)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	mu.Lock()
 	ceiling = "2.0.0"
 	mu.Unlock()
-	client.call(t, wire.MethodACPRegistryList, nil, &catalog)
-	client.call(t, wire.MethodACPRegistryInstall, wire.ACPRegistryInstallParams{RegistryID: "qa-agent"}, &installed)
-	if installed.Version != "2.0.0" {
-		t.Fatalf("updated version=%s", installed.Version)
+	refreshACP(t, client)
+	installACP(t, client, "qa-agent")
+	if row := client.waitACPRow(t, "qa-agent", "updated", func(row wire.ACPRegistryAgent) bool { return row.InstalledVersion == "2.0.0" }); row.State == wire.ACPAgentFailed {
+		t.Fatalf("row after update = %#v", row)
 	}
-	client.call(t, wire.MethodACPRegistryStart, wire.ACPRegistryStartParams{RegistryID: "qa-agent"}, &info)
-	if info.PID != firstPID {
+	if current, _ := s.providerService.Info(info.InstanceID); current.PID != firstPID {
 		t.Fatal("update replaced the running provider")
 	}
 	if turns := client.subscribe(t, thread).Turns; len(turns) != 1 || turns[0].State != provider.TurnRunning {
 		t.Fatalf("active turn interrupted: %#v", turns)
-	}
-	launches, err := os.ReadFile(launchLog)
-	if err != nil || string(launches) != "1.0.0\n" {
-		t.Fatalf("active launch log=%q error=%v", launches, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "release"), []byte("finish"), 0600); err != nil {
 		t.Fatal(err)
@@ -149,33 +155,18 @@ func TestACPRegistryNPMUpdatePreservesActiveTurn(t *testing.T) {
 	if want := []string{"user_message: block " + dir, "assistant_message: hi"}; turn.State != provider.TurnCompleted || !slices.Equal(entryTexts(turn), want) {
 		t.Fatalf("turn after update = %s %q, want completed %q", turn.State, entryTexts(turn), want)
 	}
-	// End only the owned, now-idle process group. The chat's next message
-	// must start the saved update, not silently respawn the old version.
-	if err := syscall.Kill(-firstPID, syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, "the old version to exit", func() bool {
-		current, ok := s.providerService.Info(info.InstanceID)
-		return ok && current.Status == provider.InstanceStatusExited
+	waitUntil(t, "the new version to run and the old one's files to go", func() bool {
+		launches, _ := os.ReadFile(launchLog)
+		return string(launches) == "1.0.0\n2.0.0\n" && len(installDirs(t, dataDir, "qa-agent")) == 1
 	})
 	if turn := client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery); turn.State != provider.TurnCompleted {
 		t.Fatalf("turn on the update = %s, want completed", turn.State)
-	}
-	launches, err = os.ReadFile(launchLog)
-	if err != nil || string(launches) != "1.0.0\n2.0.0\n" {
-		t.Fatalf("recovery launch log=%q error=%v", launches, err)
-	}
-	reloaded := &acpRegistry{dataDir: s.acpRegistry.dataDir, npm: npm}
-	records, err := reloaded.installedAgents()
-	if err != nil || len(records) != 1 || records[0].Version != "2.0.0" {
-		t.Fatalf("reloaded manifest=%v error=%v", records, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if downloads["1.0.0"] != 1 || downloads["2.0.0"] != 1 {
 		t.Fatalf("downloads=%v", downloads)
 	}
-	t.Log("PASS: local npm ceiling, cold install, active-turn update, unchanged PID, exact completion, next-launch version and manifest reload")
 }
 
 func registryQAPackage(t *testing.T, version string) []byte {

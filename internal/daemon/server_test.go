@@ -46,8 +46,9 @@ func TestProviderRestartEndsTheOldProcessesTurnsAndRequests(t *testing.T) {
 	s := newTestServer(t)
 	startFakeACPAgent(t, s, "agent")
 	client := newRecordingClient(t, s)
-	blockedThread := client.createThread(t, "agent", t.TempDir()).Thread
-	askingThread := client.createThread(t, "agent", t.TempDir()).Thread
+	folder := t.TempDir()
+	blockedThread := client.createThread(t, "agent", folder).Thread
+	askingThread := client.createThread(t, "agent", folder).Thread
 	client.subscribe(t, blockedThread)
 	client.subscribe(t, askingThread)
 	gate := t.TempDir()

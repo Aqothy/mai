@@ -29,6 +29,27 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
+		Name:        "ACPAgentSource",
+		Description: "Where an ACP agent's definition comes from.",
+		Values:      []string{string(ACPAgentSourceRegistry), string(ACPAgentSourceCustom)},
+	},
+	{
+		Name:        "ACPAgentState",
+		Description: "What the daemon is doing with an ACP agent's files. Failed says the last install or update failed; an installed version keeps working.",
+		Values: []string{
+			string(ACPAgentNotInstalled),
+			string(ACPAgentInstalling),
+			string(ACPAgentInstalled),
+			string(ACPAgentUpdating),
+			string(ACPAgentFailed),
+		},
+	},
+	{
+		Name:        "ACPAgentBlocker",
+		Description: "Why an ACP agent can't be installed on the daemon's machine.",
+		Values:      []string{string(ACPAgentNeedsPlatform), string(ACPAgentNeedsNode), string(ACPAgentNeedsUV)},
+	},
+	{
 		Name:        "ThreadStatus",
 		Description: "What a thread is doing, derived from its turns, requests and queue.",
 		Values: []string{

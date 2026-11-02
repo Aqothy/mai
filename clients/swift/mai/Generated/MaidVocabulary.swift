@@ -17,6 +17,28 @@ public enum MaidCommandErrorCode: String, Codable, Sendable, CaseIterable {
     case invalid = "invalid"
 }
 
+/// Where an ACP agent's definition comes from.
+public enum MaidACPAgentSource: String, Codable, Sendable, CaseIterable {
+    case registry = "registry"
+    case custom = "custom"
+}
+
+/// What the daemon is doing with an ACP agent's files. Failed says the last install or update failed; an installed version keeps working.
+public enum MaidACPAgentState: String, Codable, Sendable, CaseIterable {
+    case notInstalled = "notInstalled"
+    case installing = "installing"
+    case installed = "installed"
+    case updating = "updating"
+    case failed = "failed"
+}
+
+/// Why an ACP agent can't be installed on the daemon's machine.
+public enum MaidACPAgentBlocker: String, Codable, Sendable, CaseIterable {
+    case platform = "platform"
+    case node = "node"
+    case uv = "uv"
+}
+
 /// What a thread is doing, derived from its turns, requests and queue.
 public enum MaidThreadStatus: String, Codable, Sendable, CaseIterable {
     case running = "running"

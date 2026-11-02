@@ -58,13 +58,13 @@ func (s *step) providerCall(participant *participantState, call func(ctx context
 	if participant.worker == nil {
 		participant.worker = &worker{}
 	}
-	w, id, instanceID := participant.worker, participant.ID, participant.Instance
+	w, id, instanceID, folder := participant.worker, participant.ID, participant.Instance, e.threads[participant.Thread].Workspace.Cwd
 	s.after(func() {
 		w.enqueue(func() {
 			ctx, cancel := context.WithTimeout(e.ctx, providerCallTimeout)
 			defer cancel()
 			var apply func(*step)
-			if instance, generation, err := e.cfg.Providers.Instance(ctx, instanceID); err != nil {
+			if instance, generation, err := e.cfg.Providers.Instance(ctx, instanceID, folder); err != nil {
 				apply = func(s *step) { unavailable(s, err) }
 			} else {
 				apply = call(ctx, instance, generation)

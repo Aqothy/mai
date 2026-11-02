@@ -31,6 +31,19 @@ struct ACPRegistryRow: View {
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
+                if let blockerMessage = entry.blockerMessage {
+                    Text(blockerMessage)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if entry.state == .failed, let errorMessage = entry.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                        .foregroundStyle(.red)
+                }
+                ACPRegistryRowLinks(entry: entry)
             }
 
             Spacer(minLength: 0)
@@ -44,6 +57,35 @@ struct ACPRegistryRow: View {
             )
         }
         .contentShape(.rect)
+    }
+}
+
+private struct ACPRegistryRowLinks: View {
+    let entry: ACPRegistryEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let url = entry.repositoryURL {
+                link("Repository", systemImage: "chevron.left.forwardslash.chevron.right", url)
+            }
+            if let url = entry.websiteURL {
+                link("Website", systemImage: "globe", url)
+            }
+            if let url = entry.licenseURL {
+                link("License", systemImage: "doc.text", url)
+            }
+        }
+        .font(.caption)
+        .buttonStyle(.borderless)
+    }
+
+    private func link(_ title: LocalizedStringKey, systemImage: String, _ url: URL) -> some View {
+        Link(destination: url) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .help(title)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -171,15 +213,10 @@ struct ACPRegistryRowAction: View {
     let remove: () -> Void
 
     var body: some View {
-        if isBusy {
-            ProgressView()
-                .controlSize(.small)
-        } else {
-            HStack(spacing: 8) {
-                status
-                if entry.isInstalled {
-                    manageMenu
-                }
+        HStack(spacing: 8) {
+            status
+            if entry.isInstalled {
+                manageMenu
             }
         }
     }
@@ -195,24 +232,47 @@ struct ACPRegistryRowAction: View {
         .menuIndicator(.hidden)
         .buttonStyle(.borderless)
         .fixedSize()
+        .disabled(isBusy)
     }
 
     @ViewBuilder
     private var status: some View {
-        if !entry.isInstalled {
-            Button("Install", action: install)
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .disabled(entry.availableVersion == nil)
+        if entry.isWorking {
+            ProgressView {
+                Text(entry.state == .updating ? "Updating…" : "Installing…")
+                    .font(.caption)
+            }
+            .controlSize(.small)
+        } else if isBusy {
+            ProgressView()
+                .controlSize(.small)
+        } else if entry.state == .failed, entry.availableVersion != nil {
+            actionButton("Retry", prominent: false)
+        } else if !entry.isInstalled {
+            actionButton("Install", prominent: false)
         } else if entry.hasUpdate {
-            Button("Update", action: install)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
+            actionButton("Update", prominent: true)
         } else {
             Label("Installed", systemImage: "checkmark")
                 .labelStyle(.iconOnly)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Installed")
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ title: LocalizedStringKey, prominent: Bool) -> some View {
+        let isAvailable = entry.availableVersion != nil && entry.blocker == nil
+        if prominent {
+            Button(title, action: install)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(!isAvailable)
+        } else {
+            Button(title, action: install)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .disabled(!isAvailable)
         }
     }
 }

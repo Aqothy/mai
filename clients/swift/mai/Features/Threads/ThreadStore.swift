@@ -61,7 +61,14 @@ final class ThreadStore {
     /// A question an agent asks while the user signs in to it, shown on the
     /// provider account screen until answered or the sign-in ends.
     private(set) var providerQuestion: ProviderQuestion?
-    private(set) var installedAgents: [ACPRegistryInstalledAgent] = []
+    /// Every agent the daemon knows of, one row each: the daemon owns their
+    /// state and every device shows the one list.
+    private(set) var registryAgents: [ACPRegistryAgent] = []
+    /// Changes with every list, so the registry page rebuilds without depending
+    /// on the collection.
+    private(set) var registryListRevision = 0
+    /// The agents in `registryAgents` a chat can use.
+    private(set) var installedAgents: [ACPRegistryAgent] = []
     /// The daemon's project folders, newest first: one list every device
     /// shares. Chats start only in a project or a folder inside one.
     private(set) var projects: [String] = []
@@ -150,6 +157,8 @@ final class ThreadStore {
     /// list is whole, so only the latest matters.
     @ObservationIgnored private var isLoadingProjectList = false
     @ObservationIgnored private var bufferedProjectList: ProjectList?
+    @ObservationIgnored private var isLoadingRegistryList = false
+    @ObservationIgnored private var bufferedRegistryList: ACPRegistryList?
     private var subscriptionTasks: [String: SubscriptionTask] = [:]
     /// Whole entries read on demand, by thread and row ID, with the entry
     /// revision they were read at.
@@ -197,13 +206,14 @@ final class ThreadStore {
         init(
             previewThreads: [ThreadSummary],
             selectedThread: ThreadDetail? = nil,
-            installedAgents: [ACPRegistryInstalledAgent] = []
+            installedAgents: [ACPRegistryAgent] = []
         ) {
             let rpc = RPCClient()
             self.rpc = rpc
             connection = RPCConnectionCoordinator(rpc: rpc, initiallyConnected: true)
             now = Date.init
             threads = previewThreads
+            registryAgents = installedAgents
             self.installedAgents = installedAgents
             selectedThreadID = selectedThread?.id
             if let selectedThread {
@@ -238,6 +248,8 @@ final class ThreadStore {
         bufferedThreadListItems.removeAll()
         isLoadingProjectList = true
         bufferedProjectList = nil
+        isLoadingRegistryList = true
+        bufferedRegistryList = nil
     }
 
     private func synchronizeConnection() async throws {
@@ -251,7 +263,13 @@ final class ThreadStore {
         bufferedProjectList = nil
         isLoadingProjectList = false
         providers = try await rpc.listProviders()
-        installedAgents = (try? await rpc.listInstalledAgents()) ?? []
+        // Chats work without the list, which a corrupt manifest would fail.
+        let registryList = try? await rpc.subscribeRegistryList()
+        if let list = bufferedRegistryList ?? registryList {
+            applyRegistryList(list)
+        }
+        bufferedRegistryList = nil
+        isLoadingRegistryList = false
         rebuildProviderCaches()
     }
 
@@ -388,6 +406,27 @@ final class ThreadStore {
         }
     }
 
+    private func receiveRegistryList(_ list: ACPRegistryList) {
+        if isLoadingRegistryList {
+            bufferedRegistryList = list
+        } else {
+            applyRegistryList(list)
+        }
+    }
+
+    private func applyRegistryList(_ list: ACPRegistryList) {
+        let wasInstalled = Set(installedAgents.map(\.instanceID))
+        registryAgents = list.agents
+        registryListRevision += 1
+        installedAgents = list.agents.filter {
+            MaidACPAgentSource(rawValue: $0.source) == .custom || $0.installedVersion != nil
+        }
+        // A removed agent's instance no longer exists on the daemon.
+        let removed = wasInstalled.subtracting(installedAgents.map(\.instanceID))
+        providers.removeAll { removed.contains($0.instanceID) }
+        rebuildProviderCaches()
+    }
+
     private func applyProjectList(_ list: ProjectList) {
         let paths = list.projects.map(\.path)
         if paths != projects {
@@ -414,31 +453,27 @@ final class ThreadStore {
     }
 
     /// Fetches the public ACP registry index. Network-backed; callers own
-    /// loading and error presentation.
-    func fetchRegistryAgents() async throws -> [ACPRegistryAgent] {
-        try await rpc.listRegistryAgents()
-    }
-
-    func refreshInstalledAgents() async throws {
-        installedAgents = try await rpc.listInstalledAgents()
-        rebuildProviderCaches()
+    /// loading and error presentation. A list notified while this was on its
+    /// way is at least as new as the reply, which then says nothing more.
+    func refreshRegistry() async throws {
+        let revision = registryListRevision
+        let list = try await rpc.refreshRegistry()
+        if registryListRevision == revision {
+            applyRegistryList(list)
+        }
     }
 
     /// Installs (or updates) a registry agent at its current registry version.
-    /// The daemon adopts the update on the next agent launch. A running
-    /// process keeps its current version so updating cannot interrupt a turn.
-    func installRegistryAgent(id: String) async throws -> ACPRegistryInstalledAgent {
-        let installed = try await rpc.installRegistryAgent(id)
-        upsertInstalledAgent(installed)
-        return installed
+    /// This only starts the daemon's job; its state arrives in the list. A
+    /// running agent moves over once no turn runs on it.
+    func installRegistryAgent(id: String) async throws {
+        try await rpc.installRegistryAgent(id)
     }
 
     /// Adds a custom ACP definition to the daemon-owned agent manifest. The
     /// provider remains cold until a thread or session action needs it.
-    func addCustomACPAgent(
-        _ configuration: CustomACPAgentConfiguration
-    ) async throws -> ACPRegistryInstalledAgent {
-        let installed = try await rpc.addCustomACPAgent(
+    func addCustomACPAgent(_ configuration: CustomACPAgentConfiguration) async throws {
+        _ = try await rpc.addCustomACPAgent(
             ACPCustomAgentAddParams(
                 args: configuration.arguments.isEmpty ? nil : configuration.arguments,
                 command: configuration.command,
@@ -446,8 +481,6 @@ final class ThreadStore {
                 name: configuration.name
             )
         )
-        upsertInstalledAgent(installed)
-        return installed
     }
 
     /// Replaces a custom agent's definition. The daemon moves a running agent
@@ -456,16 +489,14 @@ final class ThreadStore {
         id: String,
         configuration: CustomACPAgentConfiguration
     ) async throws {
-        upsertInstalledAgent(
-            try await rpc.updateCustomACPAgent(
-                ACPCustomAgentUpdateParams(
-                    args: configuration.arguments.isEmpty ? nil : configuration.arguments,
-                    command: configuration.command,
-                    env: configuration.environment.isEmpty ? nil : configuration.environment,
-                    keepEnv: configuration.keptEnvironment.isEmpty ? nil : configuration.keptEnvironment,
-                    name: configuration.name,
-                    registryID: id
-                )
+        _ = try await rpc.updateCustomACPAgent(
+            ACPCustomAgentUpdateParams(
+                args: configuration.arguments.isEmpty ? nil : configuration.arguments,
+                command: configuration.command,
+                env: configuration.environment.isEmpty ? nil : configuration.environment,
+                keepEnv: configuration.keptEnvironment.isEmpty ? nil : configuration.keptEnvironment,
+                name: configuration.name,
+                registryID: id
             )
         )
     }
@@ -473,10 +504,6 @@ final class ThreadStore {
     /// Removes an installed agent. The daemon refuses while a turn runs on it.
     func removeInstalledAgent(id: String) async throws {
         try await rpc.removeInstalledAgent(id)
-        let instanceID = installedAgents.first { $0.id == id }?.instanceID
-        installedAgents.removeAll { $0.id == id }
-        providers.removeAll { $0.instanceID == instanceID }
-        rebuildProviderCaches()
     }
 
     /// Lists sessions reported by an agent, starting it first when needed.
@@ -968,13 +995,6 @@ final class ThreadStore {
     /// Cached; recomputed in rebuildProviderCaches().
     private var instancesByID: [String: InstanceInfo] = [:]
 
-    private func upsertInstalledAgent(_ installed: ACPRegistryInstalledAgent) {
-        installedAgents.removeAll { $0.id == installed.id }
-        installedAgents.append(installed)
-        installedAgents.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        rebuildProviderCaches()
-    }
-
     private func replaceProvider(_ provider: InstanceInfo) {
         providers.removeAll { $0.instanceID == provider.instanceID }
         providers.append(provider)
@@ -1014,7 +1034,7 @@ final class ThreadStore {
             ProviderChoice(
                 id: agent.instanceID,
                 name: agent.name,
-                kind: agent.source == "custom"
+                kind: MaidACPAgentSource(rawValue: agent.source) == .custom
                     ? String(localized: "Custom ACP")
                     : String(localized: "ACP Registry")
             )
@@ -1059,7 +1079,10 @@ final class ThreadStore {
             ?? threads.first { $0.id == selectedThreadID }?.title
     }
 
-    func ensureProviderAvailable(_ preferredID: String) async throws -> String {
+    /// Starts a cold provider. An agent runs in the folder it works in, so a
+    /// caller that knows the folder names it, which spares starting the agent
+    /// twice.
+    func ensureProviderAvailable(_ preferredID: String, cwd: String? = nil) async throws -> String {
         if let provider = providers.first(where: { $0.instanceID == preferredID }),
             provider.instanceStatus == .initialized
         {
@@ -1071,7 +1094,7 @@ final class ThreadStore {
         if let agent = installedAgents.first(where: {
             $0.instanceID == preferredID || $0.id == preferredID
         }) {
-            let started = try await rpc.startRegistryAgent(agent.id, restart: false)
+            let started = try await rpc.startRegistryAgent(agent.id, cwd: cwd)
             replaceProvider(started)
             return started.instanceID
         }
@@ -1348,6 +1371,9 @@ final class ThreadStore {
             case MaidRPCMethod.projectList:
                 let notification = try decoder.decode(Notification<ProjectList>.self, from: data)
                 receiveProjectList(notification.params)
+            case MaidRPCMethod.acpRegistryList:
+                let notification = try decoder.decode(Notification<ACPRegistryList>.self, from: data)
+                receiveRegistryList(notification.params)
             case MaidRPCMethod.threadEvent:
                 let notification = try decoder.decode(Notification<ThreadEvent>.self, from: data)
                 receiveThreadEvent(notification.params)

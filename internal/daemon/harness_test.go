@@ -28,6 +28,11 @@ import (
 // TestMain points MAID_DATA_DIR at a temporary directory, so code that
 // resolves it (NewServer, the ACP registry) never touches the user's.
 func TestMain(m *testing.M) {
+	// The fake ACP agent is this binary, and it ends by being killed, which
+	// would leave its directory behind. It has no use for one.
+	if os.Getenv("MAID_DAEMON_ACP_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
 	dataDir, err := os.MkdirTemp("", "maid-daemon-tests-")
 	if err != nil {
 		panic(err)
@@ -85,6 +90,7 @@ type recordingClient struct {
 	terminalListItems  []wire.TerminalListStreamItem
 	terminalListCursor int
 	projectLists       []wire.ProjectList
+	acpLists           []wire.ACPRegistryList
 	// terminalOutput is the output of every terminal stream the client
 	// opened.
 	terminalOutput     bytes.Buffer
@@ -145,6 +151,12 @@ func (c *recordingClient) Handle(ctx context.Context, req *jsonrpc2.Request) (an
 			return nil, err
 		}
 		c.projectLists = append(c.projectLists, list)
+	case wire.MethodACPRegistryList:
+		var list wire.ACPRegistryList
+		if err := decodeRPCParams(req, &list); err != nil {
+			return nil, err
+		}
+		c.acpLists = append(c.acpLists, list)
 	case wire.MethodProviderQuestionAsked:
 		var question wire.ProviderQuestion
 		if err := decodeRPCParams(req, &question); err != nil {

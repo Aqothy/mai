@@ -62,31 +62,29 @@
       "resultArray": true
     },
     {
-      "name": "acp.registry.list",
+      "name": "acp.registry.subscribeList",
       "params": "EmptyParams",
-      "result": "ACPRegistryAgent",
-      "resultArray": true
+      "result": "ACPRegistryList"
     },
     {
-      "name": "acp.registry.installed",
+      "name": "acp.registry.refresh",
       "params": "EmptyParams",
-      "result": "ACPRegistryInstalledAgent",
-      "resultArray": true
+      "result": "ACPRegistryList"
     },
     {
       "name": "acp.registry.install",
       "params": "ACPRegistryInstallParams",
-      "result": "ACPRegistryInstalledAgent"
+      "resultNull": true
     },
     {
       "name": "acp.registry.addCustom",
       "params": "ACPCustomAgentAddParams",
-      "result": "ACPRegistryInstalledAgent"
+      "result": "ACPRegistryAgent"
     },
     {
       "name": "acp.registry.updateCustom",
       "params": "ACPCustomAgentUpdateParams",
-      "result": "ACPRegistryInstalledAgent"
+      "result": "ACPRegistryAgent"
     },
     {
       "name": "acp.registry.remove",
@@ -244,6 +242,10 @@
     {
       "name": "project.list",
       "payload": "ProjectList"
+    },
+    {
+      "name": "acp.registry.list",
+      "payload": "ACPRegistryList"
     }
   ]
 }

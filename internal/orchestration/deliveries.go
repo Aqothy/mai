@@ -74,6 +74,11 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 	if e.opening[participant.Instance]--; e.opening[participant.Instance] <= 0 {
 		delete(e.opening, participant.Instance)
 	}
+	// A session key names one chat, and the ledger enforces it. An agent breaking
+	// ACP's unique session IDs costs this message, not the daemon.
+	if owner, taken := e.bySession[sessionKey{participant.Instance, opened.Session}]; err == nil && taken && owner != id {
+		err = errors.New("it gave this chat's session the ID of another chat's")
+	}
 	if err != nil {
 		// A message that never reached the provider was not delivered.
 		for _, delivery := range slices.Clone(thread.queue) {

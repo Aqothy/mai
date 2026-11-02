@@ -202,34 +202,8 @@ struct DraftSessionControlsView: View {
                 store: ThreadStore(
                     previewThreads: PreviewData.threads,
                     installedAgents: [
-                        ACPRegistryInstalledAgent(
-                            args: nil,
-                            command: nil,
-                            description: nil,
-                            envNames: nil,
-                            icon: nil,
-                            id: "claude-code",
-                            installedAt: .now,
-                            instanceID: "claude-code",
-                            name: "Claude",
-                            package: "claude-code-acp@1.0.0",
-                            source: "registry",
-                            version: "1.0.0"
-                        ),
-                        ACPRegistryInstalledAgent(
-                            args: nil,
-                            command: nil,
-                            description: nil,
-                            envNames: nil,
-                            icon: nil,
-                            id: "codex",
-                            installedAt: .now,
-                            instanceID: "codex",
-                            name: "Codex",
-                            package: "codex-acp@1.0.0",
-                            source: "registry",
-                            version: "1.0.0"
-                        ),
+                        ACPRegistryAgent.preview(id: "claude-code", instanceID: "claude-code", name: "Claude", source: .registry, installedVersion: "1.0.0"),
+                        ACPRegistryAgent.preview(id: "codex", instanceID: "codex", name: "Codex", source: .registry, installedVersion: "1.0.0"),
                     ]
                 ),
                 draftStore: ThreadDraftStore()

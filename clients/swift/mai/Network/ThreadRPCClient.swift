@@ -16,14 +16,14 @@ protocol ThreadRPCClient: RPCTransportClient {
     func uploadAttachment(_ data: String) async throws -> String
     func command(_ params: CommandParams) async throws -> CommandResult
     func listProviders() async throws -> [InstanceInfo]
-    func listRegistryAgents() async throws -> [ACPRegistryAgent]
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent]
-    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent
-    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryInstalledAgent
+    func subscribeRegistryList() async throws -> ACPRegistryList
+    func refreshRegistry() async throws -> ACPRegistryList
+    func installRegistryAgent(_ registryID: String) async throws
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryAgent
+    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryAgent
     func removeInstalledAgent(_ registryID: String) async throws
     func startProvider(_ instanceID: String) async throws -> InstanceInfo
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo
+    func startRegistryAgent(_ registryID: String, cwd: String?) async throws -> InstanceInfo
     func authenticateProvider(_ input: ProviderAuthenticateParams) async throws
         -> AuthenticationResult
     func logoutProvider(_ input: ProviderInstanceParams) async throws -> InstanceInfo
@@ -100,26 +100,26 @@ extension RPCClient: ThreadRPCClient {
         try await call(MaidRPCMethod.providerList, params: EmptyParams())
     }
 
-    func listRegistryAgents() async throws -> [ACPRegistryAgent] {
-        try await call(MaidRPCMethod.acpRegistryList, params: EmptyParams())
+    func subscribeRegistryList() async throws -> ACPRegistryList {
+        try await call(MaidRPCMethod.acpRegistrySubscribeList, params: EmptyParams())
     }
 
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] {
-        try await call(MaidRPCMethod.acpRegistryInstalled, params: EmptyParams())
+    func refreshRegistry() async throws -> ACPRegistryList {
+        try await call(MaidRPCMethod.acpRegistryRefresh, params: EmptyParams())
     }
 
-    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
-        try await call(
+    func installRegistryAgent(_ registryID: String) async throws {
+        try await callVoid(
             MaidRPCMethod.acpRegistryInstall,
             params: ACPRegistryInstallParams(registryID: registryID)
         )
     }
 
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryAgent {
         try await call(MaidRPCMethod.acpRegistryAddCustom, params: input)
     }
 
-    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryInstalledAgent {
+    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryAgent {
         try await call(MaidRPCMethod.acpRegistryUpdateCustom, params: input)
     }
 
@@ -140,10 +140,10 @@ extension RPCClient: ThreadRPCClient {
         )
     }
 
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
+    func startRegistryAgent(_ registryID: String, cwd: String?) async throws -> InstanceInfo {
         try await call(
             MaidRPCMethod.acpRegistryStart,
-            params: ACPRegistryStartParams(registryID: registryID, restart: restart ? true : nil)
+            params: ACPRegistryStartParams(cwd: cwd, registryID: registryID)
         )
     }
 

@@ -15,6 +15,9 @@ import (
 // define it; coverage is then derived from the source.
 var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
 	"CommandErrorCode":           {"../../internal/orchestration", "ErrorCode"},
+	"ACPAgentSource":             {".", "ACPAgentSource"},
+	"ACPAgentState":              {".", "ACPAgentState"},
+	"ACPAgentBlocker":            {".", "ACPAgentBlocker"},
 	"ThreadStatus":               {"../../internal/orchestration", "ThreadStatus"},
 	"OriginKind":                 {"../../internal/orchestration", "OriginKind"},
 	"Hold":                       {"../../internal/orchestration", "Hold"},

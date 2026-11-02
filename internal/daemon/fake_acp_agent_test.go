@@ -31,6 +31,10 @@ import (
 //	                 session-less elicitation) and succeeds only with 1234
 //	-history <dir>   keep each session's prompts in dir, across agent
 //	                 processes, and replay them on session/load
+//	-sessions <path> append a fakeSessionRecord for each session opened
+//
+// Session ids count from sess-1 in each process, so two processes break ACP's
+// unique session IDs unless -history makes them unique.
 //
 // Per-turn behavior is scripted by the prompt text; see fakeACPAgent.prompt.
 func fakeACPAgentCommand(flags ...string) []string {
@@ -72,6 +76,7 @@ func TestHelperProcess(t *testing.T) {
 	login := flags.Bool("login", false, "")
 	askToSignIn := flags.Bool("ask-to-sign-in", false, "")
 	history := flags.String("history", "", "")
+	sessions := flags.String("sessions", "", "")
 	_ = flags.Parse(args)
 	if *ignoreTerm {
 		signal.Ignore(syscall.SIGTERM)
@@ -90,6 +95,7 @@ func TestHelperProcess(t *testing.T) {
 		listOnly:    *listOnly,
 		askToSignIn: *askToSignIn,
 		history:     *history,
+		sessions:    *sessions,
 		out:         json.NewEncoder(os.Stdout),
 		cwds:        map[string]string{},
 		parked:      map[string]string{},
@@ -127,6 +133,7 @@ type fakeACPAgent struct {
 	listOnly    bool
 	askToSignIn bool
 	history     string
+	sessions    string
 	// signIn is the authenticate request waiting on its elicitation.
 	signIn json.RawMessage
 
@@ -201,7 +208,31 @@ func (a *fakeACPAgent) chunk(sessionID string, text string) {
 	a.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}})
 }
 
+// fakeSessionRecord is one line of -sessions: the agent's process, the folder
+// it runs in and the session it opened.
+type fakeSessionRecord struct {
+	PID        int    `json:"pid"`
+	ProcessCwd string `json:"processCwd"`
+	SessionCwd string `json:"sessionCwd"`
+	Session    string `json:"session"`
+}
+
 func (a *fakeACPAgent) trackSession(sessionID string, cwd string) {
+	if a.sessions != "" {
+		processCwd, err := os.Getwd()
+		if err != nil {
+			fakeAgentFail("getwd: %v", err)
+		}
+		line, _ := json.Marshal(fakeSessionRecord{PID: os.Getpid(), ProcessCwd: processCwd, SessionCwd: cwd, Session: sessionID})
+		file, err := os.OpenFile(a.sessions, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			fakeAgentFail("open sessions log: %v", err)
+		}
+		defer file.Close()
+		if _, err := file.Write(append(line, '\n')); err != nil {
+			fakeAgentFail("write sessions log: %v", err)
+		}
+	}
 	if _, ok := a.cwds[sessionID]; !ok {
 		a.order = append(a.order, sessionID)
 	}

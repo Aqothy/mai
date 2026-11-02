@@ -111,13 +111,13 @@ func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
-	var started provider.InstanceInfo
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, &started)
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, nil)
 	thread := client.createThread(t, "agent", t.TempDir()).Thread
 	client.subscribe(t, thread)
 	gate := t.TempDir()
 	blocked := client.deliver(t, thread, "block "+gate).Delivery
 	waitForFile(t, gate+"/ready")
+	before, _ := s.providerService.Info("agent")
 
 	var result provider.AuthenticationResult
 	client.call(t, wire.MethodProviderAuthenticate, wire.ProviderAuthenticateParams{InstanceID: "agent", MethodID: "terminal-login"}, &result)
@@ -135,15 +135,15 @@ func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	// A restart that wrongly ran mid-turn would end it: give a pending one a
 	// few polls to do so.
 	time.Sleep(3 * providerIdlePollInterval)
-	if now := pid(); now != started.PID {
-		t.Fatalf("provider restarted (pid %d -> %d) while a turn ran", started.PID, now)
+	if now := pid(); now != before.PID {
+		t.Fatalf("provider restarted (pid %d -> %d) while a turn ran", before.PID, now)
 	}
 
 	client.command(t, wire.CommandParams{Interrupt: &orchestration.Interrupt{Thread: thread}})
 	client.waitSettled(t, thread, blocked)
 	waitUntil(t, "the provider restarted once idle", func() bool {
 		info, _ := s.providerService.Info("agent")
-		return info.PID != started.PID && info.Status == provider.InstanceStatusInitialized
+		return info.PID != before.PID && info.Status == provider.InstanceStatusInitialized
 	})
 }
 

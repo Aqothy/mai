@@ -192,7 +192,7 @@ func TestFailedRestartKeepsTheRunningProcess(t *testing.T) {
 	if _, err := service.RestartInstance(context.Background(), "agent"); err == nil {
 		t.Fatal("restart succeeded")
 	}
-	instance, _, err := service.Instance(context.Background(), "agent")
+	instance, _, err := service.Instance(context.Background(), "agent", "")
 	if err != nil || instance != driver.instances()[0] || driver.instances()[0].closed() {
 		t.Fatalf("instance = %v, %v; want the first process still running", instance, err)
 	}
@@ -214,7 +214,7 @@ func TestARemovedInstanceStaysGone(t *testing.T) {
 	if err := s.RegisterManifestInstance(definition); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartConfiguredInstance(context.Background(), definition.InstanceID); err != nil {
+	if _, err := s.StartConfiguredInstance(context.Background(), definition.InstanceID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RemoveInstance(definition.InstanceID); err != nil {
@@ -223,7 +223,7 @@ func TestARemovedInstanceStaysGone(t *testing.T) {
 	if !driver.instances()[0].closed() {
 		t.Fatal("removal left the process running")
 	}
-	if _, err := s.start(context.Background(), definition, false, false); !errors.Is(err, errNotInstalled) {
+	if _, err := s.start(context.Background(), definition, "", false, false); !errors.Is(err, errNotInstalled) {
 		t.Fatalf("start with the old spec = %v, want %v", err, errNotInstalled)
 	}
 	if opened := len(driver.instances()); opened != 1 {
@@ -243,7 +243,7 @@ func TestExitedInstanceRestartsWhenNeeded(t *testing.T) {
 	exited := driver.instances()[0]
 	_ = exited.Close()
 	exited.host.Emit(provider.Event{Body: provider.InstanceChanged{Info: exited.Info()}})
-	instance, _, err := service.Instance(context.Background(), "agent")
+	instance, _, err := service.Instance(context.Background(), "agent", "")
 	if err != nil || len(driver.instances()) != 2 || instance != driver.instances()[1] {
 		t.Fatalf("instance = %v, %v after %d opens; want a new process", instance, err, len(driver.instances()))
 	}

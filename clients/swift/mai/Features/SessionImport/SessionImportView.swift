@@ -135,20 +135,7 @@ struct SessionImportStatusView: View {
         let store = ThreadStore(
             previewThreads: [],
             installedAgents: [
-                ACPRegistryInstalledAgent(
-                    args: nil,
-                    command: nil,
-                    description: nil,
-                    envNames: nil,
-                    icon: nil,
-                    id: "claude-code",
-                    installedAt: .now,
-                    instanceID: "registry-claude-code",
-                    name: "Claude Code",
-                    package: "claude-code-acp@1.0.0",
-                    source: "registry",
-                    version: "1.0.0"
-                )
+                ACPRegistryAgent.preview(id: "claude-code", instanceID: "registry-claude-code", name: "Claude Code", source: .registry, installedVersion: "1.0.0")
             ]
         )
         NavigationStack {

@@ -105,7 +105,7 @@ type contract struct {
 	ProviderQuestion                 wire.ProviderQuestion                 `json:"providerQuestion"`
 	ProviderQuestionAnswerParams     wire.ProviderQuestionAnswerParams     `json:"providerQuestionAnswerParams"`
 	ACPRegistryAgent                 wire.ACPRegistryAgent                 `json:"aCPRegistryAgent"`
-	ACPRegistryInstalledAgent        wire.ACPRegistryInstalledAgent        `json:"aCPRegistryInstalledAgent"`
+	ACPRegistryList                  wire.ACPRegistryList                  `json:"aCPRegistryList"`
 	ACPRegistryInstallParams         wire.ACPRegistryInstallParams         `json:"aCPRegistryInstallParams"`
 	ACPCustomAgentAddParams          wire.ACPCustomAgentAddParams          `json:"aCPCustomAgentAddParams"`
 	TerminalSummary                  wire.TerminalSummary                  `json:"terminalSummary"`

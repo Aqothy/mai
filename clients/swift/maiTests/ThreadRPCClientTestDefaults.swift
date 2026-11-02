@@ -8,8 +8,8 @@ extension ThreadRPCClient {
     }
 
     func listProviders() async throws -> [InstanceInfo] { [] }
-    func listRegistryAgents() async throws -> [ACPRegistryAgent] { [] }
-    func listInstalledAgents() async throws -> [ACPRegistryInstalledAgent] { [] }
+    func subscribeRegistryList() async throws -> ACPRegistryList { ACPRegistryList(agents: []) }
+    func refreshRegistry() async throws -> ACPRegistryList { ACPRegistryList(agents: []) }
     func listProviderSessions(_ input: ProviderListSessionsParams) async throws -> [SessionSummary] { [] }
     func subscribeProjectList() async throws -> ProjectList { ProjectList(projects: []) }
     func addProject(_ path: String) async throws -> Project { throw unavailable }
@@ -24,18 +24,16 @@ extension ThreadRPCClient {
     func answerProviderQuestion(_ input: ProviderQuestionAnswerParams) async throws { throw unavailable }
     func uploadAttachment(_ data: String) async throws -> String { throw unavailable }
     func command(_ params: CommandParams) async throws -> CommandResult { throw unavailable }
-    func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
-        throw unavailable
-    }
-    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryInstalledAgent {
+    func installRegistryAgent(_ registryID: String) async throws { throw unavailable }
+    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryAgent {
         throw unavailable
     }
     func removeInstalledAgent(_ registryID: String) async throws { throw unavailable }
-    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
+    func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryAgent {
         throw unavailable
     }
     func startProvider(_ instanceID: String) async throws -> InstanceInfo { throw unavailable }
-    func startRegistryAgent(_ registryID: String, restart: Bool) async throws -> InstanceInfo {
+    func startRegistryAgent(_ registryID: String, cwd: String?) async throws -> InstanceInfo {
         throw unavailable
     }
     func authenticateProvider(_ input: ProviderAuthenticateParams) async throws -> AuthenticationResult {

@@ -82,63 +82,10 @@
         "name": {
           "type": "string"
         },
-        "version": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "icon": {
-          "type": "string"
-        },
-        "package": {
-          "type": "string"
-        },
-        "args": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "id",
-        "instanceId",
-        "name",
-        "package"
-      ],
-      "title": "ACPRegistryAgent"
-    },
-    "ACPRegistryInstallParams": {
-      "properties": {
-        "registryId": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "registryId"
-      ],
-      "title": "ACPRegistryInstallParams"
-    },
-    "ACPRegistryInstalledAgent": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "instanceId": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
         "source": {
           "type": "string"
         },
-        "version": {
+        "state": {
           "type": "string"
         },
         "description": {
@@ -147,7 +94,29 @@
         "icon": {
           "type": "string"
         },
-        "package": {
+        "repository": {
+          "type": "string"
+        },
+        "website": {
+          "type": "string"
+        },
+        "licenseUrl": {
+          "type": "string"
+        },
+        "installedVersion": {
+          "type": "string"
+        },
+        "availableVersion": {
+          "type": "string"
+        },
+        "availableReleasedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "blocker": {
+          "type": "string"
+        },
+        "error": {
           "type": "string"
         },
         "command": {
@@ -164,10 +133,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "installedAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false,
@@ -177,11 +142,38 @@
         "instanceId",
         "name",
         "source",
-        "version",
-        "package",
-        "installedAt"
+        "state"
       ],
-      "title": "ACPRegistryInstalledAgent"
+      "title": "ACPRegistryAgent"
+    },
+    "ACPRegistryInstallParams": {
+      "properties": {
+        "registryId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "registryId"
+      ],
+      "title": "ACPRegistryInstallParams"
+    },
+    "ACPRegistryList": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/ACPRegistryAgent"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "agents"
+      ],
+      "title": "ACPRegistryList"
     },
     "ACPRegistryRemoveParams": {
       "properties": {
@@ -201,8 +193,8 @@
         "registryId": {
           "type": "string"
         },
-        "restart": {
-          "type": "boolean"
+        "cwd": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -3586,8 +3578,8 @@
         "aCPRegistryAgent": {
           "$ref": "#/$defs/ACPRegistryAgent"
         },
-        "aCPRegistryInstalledAgent": {
-          "$ref": "#/$defs/ACPRegistryInstalledAgent"
+        "aCPRegistryList": {
+          "$ref": "#/$defs/ACPRegistryList"
         },
         "aCPRegistryInstallParams": {
           "$ref": "#/$defs/ACPRegistryInstallParams"
@@ -3748,7 +3740,7 @@
         "providerQuestion",
         "providerQuestionAnswerParams",
         "aCPRegistryAgent",
-        "aCPRegistryInstalledAgent",
+        "aCPRegistryList",
         "aCPRegistryInstallParams",
         "aCPCustomAgentAddParams",
         "terminalSummary",

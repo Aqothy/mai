@@ -15,6 +15,34 @@
       ]
     },
     {
+      "name": "ACPAgentSource",
+      "description": "Where an ACP agent's definition comes from.",
+      "values": [
+        "registry",
+        "custom"
+      ]
+    },
+    {
+      "name": "ACPAgentState",
+      "description": "What the daemon is doing with an ACP agent's files. Failed says the last install or update failed; an installed version keeps working.",
+      "values": [
+        "notInstalled",
+        "installing",
+        "installed",
+        "updating",
+        "failed"
+      ]
+    },
+    {
+      "name": "ACPAgentBlocker",
+      "description": "Why an ACP agent can't be installed on the daemon's machine.",
+      "values": [
+        "platform",
+        "node",
+        "uv"
+      ]
+    },
+    {
       "name": "ThreadStatus",
       "description": "What a thread is doing, derived from its turns, requests and queue.",
       "values": [

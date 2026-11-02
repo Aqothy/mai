@@ -7,7 +7,7 @@ struct CustomACPAgentForm: View {
     @State private var model: CustomACPAgentFormModel
     @FocusState private var isTextFieldFocused: Bool
 
-    init(store: ThreadStore, editing agent: ACPRegistryInstalledAgent? = nil) {
+    init(store: ThreadStore, editing agent: ACPRegistryAgent? = nil) {
         _model = State(initialValue: CustomACPAgentFormModel(store: store, editing: agent))
     }
 
@@ -115,7 +115,7 @@ private final class CustomACPAgentFormModel {
 
     var isEditing: Bool { editedID != nil }
 
-    init(store: ThreadStore, editing agent: ACPRegistryInstalledAgent?) {
+    init(store: ThreadStore, editing agent: ACPRegistryAgent?) {
         self.store = store
         editedID = agent?.id
         guard let agent else { return }
@@ -139,7 +139,7 @@ private final class CustomACPAgentFormModel {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         return store.installedAgents.first {
-            $0.source == ACPRegistryEntry.Source.custom.rawValue && $0.name == name && $0.id != editedID
+            $0.source == MaidACPAgentSource.custom.rawValue && $0.name == name && $0.id != editedID
         }?.name
     }
 
@@ -177,7 +177,7 @@ private final class CustomACPAgentFormModel {
             if let editedID {
                 try await store.updateCustomACPAgent(id: editedID, configuration: configuration)
             } else {
-                _ = try await store.addCustomACPAgent(configuration)
+                try await store.addCustomACPAgent(configuration)
             }
             return true
         } catch is CancellationError {

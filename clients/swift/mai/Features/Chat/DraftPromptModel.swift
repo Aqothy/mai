@@ -333,7 +333,7 @@ final class DraftPromptModel {
         let requestedCwd = workingDirectory
         optionsPhase = .loading
         do {
-            let providerID = try await store.ensureProviderAvailable(requestedProviderID)
+            let providerID = try await store.ensureProviderAvailable(requestedProviderID, cwd: requestedCwd)
             try Task.checkCancellation()
             guard selectionMatches(providerID: requestedProviderID, cwd: requestedCwd) else {
                 return
@@ -419,7 +419,7 @@ final class DraftPromptModel {
 
         let providerID: String
         do {
-            providerID = try await store.ensureProviderAvailable(requestedProviderID)
+            providerID = try await store.ensureProviderAvailable(requestedProviderID, cwd: requestedCwd)
         } catch {
             showError(error)
             return

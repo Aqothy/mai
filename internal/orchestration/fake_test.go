@@ -281,7 +281,7 @@ func newFakeProviders(instances ...*fakeInstance) *fakeProviders {
 	return providers
 }
 
-func (p *fakeProviders) Instance(_ context.Context, id provider.InstanceID) (provider.Instance, uint64, error) {
+func (p *fakeProviders) Instance(_ context.Context, id provider.InstanceID, _ string) (provider.Instance, uint64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	instance := p.instances[id]

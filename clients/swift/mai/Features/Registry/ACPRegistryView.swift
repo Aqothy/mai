@@ -5,7 +5,7 @@ struct ACPRegistryView: View {
 
     @State private var model: ACPRegistryModel
     @State private var isCustomAgentFormPresented = false
-    @State private var agentBeingEdited: ACPRegistryInstalledAgent?
+    @State private var agentBeingEdited: ACPRegistryAgent?
     @State private var agentToRemove: ACPRegistryEntry?
     @State private var areProviderAccountsPresented = false
 
@@ -24,22 +24,18 @@ struct ACPRegistryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            Section {
-                ForEach(model.entries) { entry in
-                    ACPRegistryRow(
-                        entry: entry,
-                        isBusy: model.busyIDs.contains(entry.id),
-                        install: {
-                            Task { await model.install(entry) }
-                        },
-                        edit: {
-                            agentBeingEdited = store.installedAgents.first { $0.id == entry.id }
-                        },
-                        remove: { agentToRemove = entry }
-                    )
-                }
-            } footer: {
-                Text("Updates apply the next time the agent starts. Active chats keep running.")
+            ForEach(model.entries) { entry in
+                ACPRegistryRow(
+                    entry: entry,
+                    isBusy: model.busyIDs.contains(entry.id),
+                    install: {
+                        Task { await model.install(entry) }
+                    },
+                    edit: {
+                        agentBeingEdited = store.installedAgents.first { $0.id == entry.id }
+                    },
+                    remove: { agentToRemove = entry }
+                )
             }
         }
         .listStyle(.plain)
@@ -67,7 +63,7 @@ struct ACPRegistryView: View {
         }
         .task { await model.load() }
         .refreshable { await model.load() }
-        .modifier(ACPRegistryInstalledAgentsSync(store: store, model: model))
+        .modifier(ACPRegistryListSync(store: store, model: model))
         .sheet(isPresented: $isCustomAgentFormPresented) {
             NavigationStack {
                 CustomACPAgentForm(store: store)
@@ -111,40 +107,20 @@ struct ACPRegistryView: View {
     }
 }
 
-extension ACPRegistryInstalledAgent: Identifiable {}
+extension ACPRegistryAgent: Identifiable {}
 
-/// Rebuilds the cached entries when the store refreshes installed agents
-/// outside the registry model (e.g. on reconnect). Lives in its own modifier
-/// so only this lightweight body — not the whole registry screen — depends on
-/// the installed-agents collection.
-private struct ACPRegistryInstalledAgentsSync: ViewModifier {
+/// Rebuilds the cached entries whenever the daemon's list changes, from any
+/// device. Lives in its own modifier so only this lightweight body — not the
+/// whole registry screen — depends on the list.
+private struct ACPRegistryListSync: ViewModifier {
     let store: ThreadStore
     let model: ACPRegistryModel
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: store.installedAgents.map(InstalledAgentSnapshot.init)) {
+            .onChange(of: store.registryListRevision) {
                 model.rebuildEntries()
             }
-    }
-}
-
-/// Only the installed-agent fields that affect registry rows.
-private struct InstalledAgentSnapshot: Equatable {
-    let id: String
-    let name: String
-    let description: String?
-    let icon: String?
-    let source: String
-    let version: String
-
-    init(_ agent: ACPRegistryInstalledAgent) {
-        id = agent.id
-        name = agent.name
-        description = agent.description
-        icon = agent.icon
-        source = agent.source
-        version = agent.version
     }
 }
 
@@ -213,65 +189,28 @@ struct ACPRegistryStatusView: View {
         let store = ThreadStore(
             previewThreads: [],
             installedAgents: [
-                ACPRegistryInstalledAgent(
-                    args: nil,
-                    command: nil,
-                    description: nil,
-                    envNames: nil,
-                    icon: nil,
-                    id: "claude-code",
-                    installedAt: .now,
-                    instanceID: "registry-claude-code",
-                    name: "Claude Code",
-                    package: "claude-code-acp@1.0.0",
-                    source: "registry",
-                    version: "1.0.0"
+                .preview(
+                    id: "claude-code", name: "Claude Code", description: "Use Claude Code from any ACP client.",
+                    installedVersion: "1.0.0", availableVersion: "1.2.0",
+                    availableReleasedAt: .now.addingTimeInterval(-3 * 86400)
                 ),
-                ACPRegistryInstalledAgent(
-                    args: nil,
-                    command: nil,
-                    description: nil,
-                    envNames: nil,
-                    icon: nil,
-                    id: "my-codex",
-                    installedAt: .now,
-                    instanceID: "custom-my-codex",
-                    name: "My Codex",
-                    package: "",
-                    source: "custom",
-                    version: ""
+                .preview(
+                    id: "codex", name: "Codex", state: .installing, description: "OpenAI Codex agent.",
+                    availableVersion: "0.4.1"
                 ),
+                .preview(
+                    id: "goose", name: "Goose", state: .failed, description: "An open source agent.",
+                    availableVersion: "1.0.0", error: "npm install failed: EACCES: permission denied"
+                ),
+                .preview(
+                    id: "kimi", name: "Kimi", state: .notInstalled, description: "Only for another platform.",
+                    availableVersion: "1.0.0", blocker: .platform
+                ),
+                .preview(id: "my-codex", name: "My Codex", source: .custom),
             ]
         )
         NavigationStack {
-            ACPRegistryView(
-                store: store,
-                model: ACPRegistryModel(
-                    store: store,
-                    previewAgents: [
-                        ACPRegistryAgent(
-                            args: nil,
-                            description: "Use Claude Code from any ACP client.",
-                            icon: nil,
-                            id: "claude-code",
-                            instanceID: "registry-claude-code",
-                            name: "Claude Code",
-                            package: "claude-code-acp@1.2.0",
-                            version: "1.2.0"
-                        ),
-                        ACPRegistryAgent(
-                            args: nil,
-                            description: "OpenAI Codex agent.",
-                            icon: nil,
-                            id: "codex",
-                            instanceID: "registry-codex",
-                            name: "Codex",
-                            package: "codex-acp@0.4.1",
-                            version: "0.4.1"
-                        ),
-                    ]
-                )
-            )
+            ACPRegistryView(store: store, model: ACPRegistryModel(previewStore: store))
         }
     }
 #endif

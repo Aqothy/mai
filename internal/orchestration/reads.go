@@ -47,6 +47,30 @@ func (e *Engine) ParticipantSession(ctx context.Context, id ThreadID, participan
 	})
 }
 
+// ProcessBusy reports whether a turn or a message on its way to one needs the
+// instance's process of generation.
+func (e *Engine) ProcessBusy(ctx context.Context, instance provider.InstanceID, generation uint64) bool {
+	// Busy when the engine can't answer, so nothing ends on a guess.
+	busy, err := call(ctx, e, func(s *step) (bool, error) {
+		needs := func(id ParticipantID) bool {
+			participant := e.participants[id]
+			return participant != nil && participant.Instance == instance && participant.live != nil && participant.live.generation == generation
+		}
+		for _, thread := range e.threads {
+			if running := thread.runningTurn(); running != nil && needs(running.Participant) {
+				return true, nil
+			}
+			for _, delivery := range thread.queue {
+				if delivery.State == DeliverySending && needs(delivery.To) {
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	})
+	return busy || err != nil
+}
+
 // InstanceBusy reports whether a turn runs on the instance.
 func (e *Engine) InstanceBusy(ctx context.Context, instance provider.InstanceID) bool {
 	busy, _ := call(ctx, e, func(s *step) (bool, error) {

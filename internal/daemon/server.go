@@ -78,8 +78,8 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		ctx:           ctx,
 		ctxCancel:     cancel,
 		metadataStore: metadata,
-		acpRegistry:   newACPRegistry(),
 	}
+	s.acpRegistry = newACPRegistry(ctx, dataDir, logger, s.publishACPRegistryList)
 	s.terminals = newTerminalRuntime(metadata, logger)
 	s.workspaceSearch = workspacesearch.NewService()
 	// The engine and the providers need each other: the providers report to
@@ -101,6 +101,7 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 	}
 	s.engine = engine
 	go s.watchEngine()
+	go s.stopIdleProviders()
 	for _, spec := range []provider.InstanceSpec{
 		{InstanceID: "codex-app-server", Name: "Codex", Driver: codexapp.DriverKind},
 		{InstanceID: "claude-code", Name: "Claude Code", Driver: claudecode.DriverKind},
@@ -177,6 +178,7 @@ func (s *Server) doClose() error {
 	// cleaned up before releasing clients and the store.
 	var stopped sync.WaitGroup
 	stopped.Go(s.terminals.service.Close)
+	stopped.Go(s.acpRegistry.waitForJobs)
 	s.providerService.Close()
 	s.engine.Close()
 	stopped.Wait()
@@ -213,8 +215,12 @@ func (s *Server) doClose() error {
 // running on it, so it picks up the new credentials.
 func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
 	result, err := s.providerService.Authenticate(ctx, instanceID, input)
-	if err != nil || result.Terminal == nil {
+	if err != nil {
 		return result, err
+	}
+	if result.Terminal == nil {
+		s.spreadAccountChange(instanceID)
+		return result, nil
 	}
 	terminalID, err := s.startCommandTerminal("Sign in to "+result.Instance.Name, *result.Terminal, func(exitCode *int) {
 		if exitCode == nil || *exitCode != 0 {
@@ -231,6 +237,51 @@ func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.I
 	}
 	result.Challenge = &provider.AuthChallenge{Kind: provider.AuthKindTerminal, TerminalID: terminalID}
 	return result, nil
+}
+
+// logoutProvider signs out of a provider.
+func (s *Server) logoutProvider(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
+	info, err := s.providerService.Logout(ctx, instanceID)
+	if err == nil {
+		s.spreadAccountChange(instanceID)
+	}
+	return info, err
+}
+
+// spreadAccountChange restarts the instance's processes once idle when it has
+// several: a sign-in or sign-out reaches only the process it ran on, and another
+// folder's may keep the old account until it starts again.
+func (s *Server) spreadAccountChange(instanceID provider.InstanceID) {
+	if s.providerService.ProcessCount(instanceID) < 2 {
+		return
+	}
+	go s.restartProviderWhenIdle(instanceID, func(ctx context.Context) error {
+		_, err := s.providerService.RestartInstance(ctx, instanceID)
+		return err
+	})
+}
+
+// A process serving a folder stops after this long without work. Long enough
+// for a conversation's pauses, since the next message then waits for a new
+// process and session/resume.
+const (
+	providerIdleTimeout       = 10 * time.Minute
+	providerIdleCheckInterval = time.Minute
+)
+
+func (s *Server) stopIdleProviders() {
+	ticker := time.NewTicker(providerIdleCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case now := <-ticker.C:
+			s.providerService.StopIdle(now.Add(-providerIdleTimeout), func(id provider.InstanceID, generation uint64) bool {
+				return s.engine.ProcessBusy(s.ctx, id, generation)
+			})
+		}
+	}
 }
 
 // providerIdlePollInterval is how often a pending provider restart checks
@@ -261,47 +312,76 @@ func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID, restart
 	}
 }
 
-// registerACPAgent makes an installed agent available to start.
-func (s *Server) registerACPAgent(id string) error {
-	spec, err := s.acpRegistry.instanceSpec(id)
-	if err != nil {
-		return err
+// publishACPRegistryList tells every subscribed client. It never blocks: a
+// client that can't keep up is closed and recovers from a fresh snapshot.
+func (s *Server) publishACPRegistryList(list wire.ACPRegistryList) {
+	s.rpcMu.Lock()
+	defer s.rpcMu.Unlock()
+	for _, client := range s.rpcClients {
+		if client.subscribedACPRegistryList() {
+			client.notify(wire.MethodACPRegistryList, list)
+		}
 	}
-	if err := s.providerService.RegisterManifestInstance(spec); err != nil {
-		return err
-	}
-	return s.requireACPAgentInstalled(id, spec.InstanceID)
 }
 
-// requireACPAgentInstalled undoes a registration or start that read the
-// manifest before a removal finished. The manifest decides: the agent goes
-// away again.
+// installACPAgent starts or joins the job bringing an agent to the version the
+// registry lists. The job outlives the call.
+func (s *Server) installACPAgent(ctx context.Context, id string) error {
+	job, err := s.acpRegistry.startInstall(ctx, id)
+	if err != nil || job == nil {
+		return err
+	}
+	go s.runACPInstall(job)
+	return nil
+}
+
+// runACPInstall builds the new version and makes it the agent's definition
+// before saying it is installed, so a client that sees that can start it.
+func (s *Server) runACPInstall(job *acpInstallJob) {
+	record, err := s.acpRegistry.build(job)
+	if err == nil {
+		err = s.providerService.RegisterManifestInstance(s.acpRegistry.instanceSpecForAgent(record))
+	}
+	s.acpRegistry.finish(job, err)
+	if err != nil {
+		s.logger.Warn("install ACP agent", "agent", job.agent.ID, "error", err)
+		return
+	}
+	s.logger.Info("ACP agent installed", "agent", record.ID, "version", record.Version)
+	// A running agent moves over once it has no turn. Only then is nothing
+	// running from the old version, which can go.
+	s.restartProviderWhenIdle(record.InstanceID, func(ctx context.Context) error {
+		if err := s.providerService.ApplyPending(ctx, record.InstanceID); err != nil {
+			return err
+		}
+		return s.acpRegistry.pruneAgent(record.ID)
+	})
+}
+
+// requireACPAgentInstalled undoes a start that read the manifest before a
+// removal finished. The manifest decides: the agent goes away again, and the
+// removal deletes its files.
 func (s *Server) requireACPAgentInstalled(id string, instanceID provider.InstanceID) error {
 	_, installed, err := s.acpRegistry.installedAgent(id)
 	if err != nil || installed {
 		return err
 	}
-	if err := s.forgetACPAgent(instanceID); err != nil {
+	if err := s.providerService.RemoveInstance(instanceID); err != nil {
 		return err
 	}
 	return fmt.Errorf("ACP agent %q was removed", id)
 }
 
-// forgetACPAgent stops a removed agent, then deletes its files.
-func (s *Server) forgetACPAgent(instanceID provider.InstanceID) error {
-	if err := s.providerService.RemoveInstance(instanceID); err != nil {
-		return err
-	}
-	return s.acpRegistry.pruneFiles()
-}
-
+// removeACPAgent stops a removed agent, then deletes its files. The id comes
+// from a client, so only the manifest's id for it may name a directory; an
+// agent that isn't installed has at most a failure or a first install to end.
 func (s *Server) removeACPAgent(id string) error {
 	agent, installed, err := s.acpRegistry.installedAgent(id)
 	if err != nil {
 		return err
 	}
 	if !installed {
-		return s.acpRegistry.pruneFiles()
+		return s.acpRegistry.remove(id)
 	}
 	if s.engine.InstanceBusy(s.ctx, agent.InstanceID) {
 		return &orchestration.CommandError{Code: orchestration.CodeInvalid, Message: fmt.Sprintf("%s is working on a turn. Stop it before removing the agent.", agent.Name)}
@@ -310,18 +390,28 @@ func (s *Server) removeACPAgent(id string) error {
 		return err
 	}
 	s.logger.Info("ACP agent removed", "provider", agent.InstanceID)
-	return s.forgetACPAgent(agent.InstanceID)
+	if err := s.providerService.RemoveInstance(agent.InstanceID); err != nil {
+		return err
+	}
+	return s.acpRegistry.pruneAgent(agent.ID)
 }
 
 // updateCustomACPAgent saves a new definition, and moves a running agent onto
 // it once its turns finish.
-func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryInstalledAgent, error) {
+func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryAgent, error) {
 	updated, err := s.acpRegistry.updateCustom(params)
 	if err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+		return wire.ACPRegistryAgent{}, err
 	}
-	if err := s.registerACPAgent(updated.ID); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+	spec, err := s.acpRegistry.instanceSpec(updated.ID)
+	if err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	if err := s.requireACPAgentInstalled(updated.ID, updated.InstanceID); err != nil {
+		return wire.ACPRegistryAgent{}, err
 	}
 	go s.restartProviderWhenIdle(updated.InstanceID, func(ctx context.Context) error {
 		return s.providerService.ApplyPending(ctx, updated.InstanceID)
@@ -329,17 +419,24 @@ func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (w
 	return updated, nil
 }
 
-func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
+// StartACPRegistryProvider starts an installed agent's process for cwd, or for
+// no folder when cwd is empty. Installing is a job of its own, so this only ever
+// launches what is on disk.
+func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID, cwd string) (provider.InstanceInfo, error) {
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	// npm may need to acquire the package before the agent can initialize.
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+	// The agent runs in cwd, so it is held to the same rule as a chat's working
+	// directory.
+	if cwd != "" {
+		if cwd, err = s.engine.WorkspaceRoot(ctx, cwd); err != nil {
+			return provider.InstanceInfo{}, err
+		}
+	}
 	started := time.Now()
-	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
-	s.logProviderStarted(spec, restart, started, err)
+	info, err := s.providerService.StartManifestInstance(ctx, spec, cwd)
+	s.logProviderStarted(spec, false, started, err)
 	if removed := s.requireACPAgentInstalled(registryID, spec.InstanceID); removed != nil {
 		return provider.InstanceInfo{}, removed
 	}
@@ -348,7 +445,7 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 
 func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
 	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
-		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
+		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID, "")
 	}
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")

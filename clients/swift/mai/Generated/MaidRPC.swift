@@ -13,8 +13,8 @@ nonisolated public enum MaidRPCMethod {
     public static let attachmentGet = "attachment.get"
     public static let providerStart = "provider.start"
     public static let providerList = "provider.list"
-    public static let acpRegistryList = "acp.registry.list"
-    public static let acpRegistryInstalled = "acp.registry.installed"
+    public static let acpRegistrySubscribeList = "acp.registry.subscribeList"
+    public static let acpRegistryRefresh = "acp.registry.refresh"
     public static let acpRegistryInstall = "acp.registry.install"
     public static let acpRegistryAddCustom = "acp.registry.addCustom"
     public static let acpRegistryUpdateCustom = "acp.registry.updateCustom"
@@ -49,4 +49,5 @@ nonisolated public enum MaidRPCMethod {
     public static let providerOptionsInvalidated = "provider.options.invalidated"
     public static let providerQuestionAsked = "provider.question.asked"
     public static let projectList = "project.list"
+    public static let acpRegistryList = "acp.registry.list"
 }

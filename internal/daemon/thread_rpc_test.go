@@ -409,9 +409,14 @@ func TestForkOfAnAgentThatCantForkSendsThePreviewedSummary(t *testing.T) {
 	fork := client.command(t, wire.CommandParams{ForkThread: &orchestration.ForkThread{
 		Thread: source.Thread, Agent: &orchestration.NewParticipant{Instance: "agent"}, Prompt: orchestration.MessageBody{Text: prompt},
 	}})
-	client.subscribe(t, fork.Thread)
-	if turn := client.waitSettled(t, fork.Thread, fork.Delivery); turn.State != provider.TurnCompleted {
-		t.Fatalf("fork turn = %s, want completed", turn.State)
+	// Its turn may have started before this can subscribe, so it reads the state.
+	var turns []orchestration.TurnView
+	waitUntil(t, "the fork's turn to settle", func() bool {
+		turns = client.subscribe(t, fork.Thread).Turns
+		return len(turns) == 1 && turns[0].State.Settled()
+	})
+	if turns[0].State != provider.TurnCompleted {
+		t.Fatalf("fork turn = %s, want completed", turns[0].State)
 	}
 
 	files, err := filepath.Glob(filepath.Join(history, "*.json"))
@@ -559,11 +564,11 @@ func TestSlowCallDoesNotBlockConnection(t *testing.T) {
 	defer registry.Close()
 	defer close(release)
 	s := newTestServer(t)
-	s.acpRegistry = &acpRegistry{url: registry.URL, client: registry.Client(), dataDir: t.TempDir(), npm: "npm"}
+	s.acpRegistry.url, s.acpRegistry.client = registry.URL, registry.Client()
 	client := newRecordingClient(t, s)
 
 	slow := make(chan error, 1)
-	go func() { slow <- client.callErr(wire.MethodACPRegistryList, nil, nil) }()
+	go func() { slow <- client.callErr(wire.MethodACPRegistryRefresh, nil, nil) }()
 	<-fetching
 	var list []provider.InstanceInfo
 	client.call(t, wire.MethodProviderList, nil, &list)

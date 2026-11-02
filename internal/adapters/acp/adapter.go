@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,10 @@ const DriverKind provider.DriverKind = "acp"
 type Config struct {
 	Command []string          `json:"command"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Dir is where a process that serves no folder runs: agents may write
+	// files where they start, which mustn't land in whatever folder the daemon
+	// was launched from.
+	Dir string `json:"dir,omitempty"`
 }
 
 // historyVersion changes whenever the mapper maps frames differently.
@@ -52,6 +57,8 @@ var Driver = provider.Driver{
 	Static: func(provider.InstanceSpec) provider.InstanceInfo {
 		return provider.InstanceInfo{Capabilities: provider.Capabilities{HistoryVersion: historyVersion}}
 	},
+	// As under Zed, the reference client, which starts an agent in its project.
+	PerFolder: true,
 }
 
 // OpenInstance decodes the ACP configuration, starts the agent and
@@ -75,7 +82,21 @@ func OpenInstance(ctx context.Context, spec provider.InstanceSpec, host provider
 	}
 
 	startedAt := time.Now()
-	cmd := exec.Command(config.Command[0], config.Command[1:]...)
+	command := config.Command[0]
+	// A relative path means from where the daemon runs, not from the folder
+	// the agent runs in.
+	if strings.ContainsRune(command, filepath.Separator) {
+		absolute, err := filepath.Abs(command)
+		if err != nil {
+			return nil, fmt.Errorf("resolve ACP command: %w", err)
+		}
+		command = absolute
+	}
+	cmd := exec.Command(command, config.Command[1:]...)
+	cmd.Dir = config.Dir
+	if host.Folder != "" {
+		cmd.Dir = host.Folder
+	}
 	cmd.Stderr = os.Stderr
 	if len(config.Env) > 0 {
 		cmd.Env = append([]string(nil), os.Environ()...)

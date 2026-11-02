@@ -7,104 +7,147 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Aqothy/maiD/api/wire"
+	"github.com/Aqothy/maiD/internal/adapters/acp"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
 const defaultACPRegistryURL = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
 
-const (
-	acpAgentSourceRegistry = "registry"
-	acpAgentSourceCustom   = "custom"
-)
-
+// acpRegistryAgent is one entry of the registry index, resolved for the
+// daemon's platform. A nil distribution has no build for it.
 type acpRegistryAgent struct {
-	wire.ACPRegistryAgent
-	Env map[string]string `json:"-"`
+	ID, Name, Version                               string
+	Description, Icon, Repository, Website, License string
+	Distribution                                    acpDistribution
+	Args                                            []string
+	Env                                             map[string]string
+	Blocker                                         wire.ACPAgentBlocker
 }
 
-// acpInstalledAgent is one registry or custom definition in the backend-owned
-// manifest. Package acquisition remains npm-owned for registry entries and
-// happens lazily when the agent starts. Launch details stay server-side.
+func (a acpRegistryAgent) instanceID() provider.InstanceID {
+	return provider.InstanceID("registry-" + a.ID)
+}
+
+// acpInstalledAgent is one registry or custom definition in the daemon-owned
+// manifest, which alone decides what is installed.
 type acpInstalledAgent struct {
-	wire.ACPRegistryInstalledAgent
-	Env map[string]string `json:"env,omitempty"`
-}
-
-// public is what clients see of the agent: a custom agent's environment by
-// name only, since its values may be secrets.
-func (a acpInstalledAgent) public() wire.ACPRegistryInstalledAgent {
-	public := a.ACPRegistryInstalledAgent
-	if a.Source == acpAgentSourceCustom {
-		public.EnvNames = slices.Sorted(maps.Keys(a.Env))
-	}
-	return public
+	ID          string              `json:"id"`
+	InstanceID  provider.InstanceID `json:"instanceId"`
+	Name        string              `json:"name"`
+	Source      wire.ACPAgentSource `json:"source"`
+	Version     string              `json:"version,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Icon        string              `json:"icon,omitempty"`
+	Repository  string              `json:"repository,omitempty"`
+	Website     string              `json:"website,omitempty"`
+	LicenseURL  string              `json:"licenseUrl,omitempty"`
+	// Dir is a registry agent's install directory. Command is relative to it,
+	// and runs on node when Node is set; a custom agent's is as the user wrote it.
+	Dir     string            `json:"dir,omitempty"`
+	Node    bool              `json:"node,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 type acpRegistryIndex struct {
-	Version string `json:"version"`
-	Agents  []struct {
+	Agents []struct {
 		ID           string `json:"id"`
 		Name         string `json:"name"`
 		Version      string `json:"version"`
 		Description  string `json:"description"`
 		Icon         string `json:"icon"`
+		Repository   string `json:"repository"`
+		Website      string `json:"website"`
+		LicenseURL   string `json:"license_url"`
 		Distribution struct {
-			NPX *struct {
-				Package string            `json:"package"`
-				Args    []string          `json:"args"`
-				Env     map[string]string `json:"env"`
-			} `json:"npx"`
+			Binary map[string]acpIndexTarget `json:"binary"`
+			NPX    *acpIndexPackage          `json:"npx"`
+			UVX    *acpIndexPackage          `json:"uvx"`
 		} `json:"distribution"`
 	} `json:"agents"`
+}
+
+type acpIndexTarget struct {
+	Archive string            `json:"archive"`
+	Cmd     string            `json:"cmd"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+	SHA256  string            `json:"sha256"`
+}
+
+type acpIndexPackage struct {
+	Package string            `json:"package"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
 }
 
 type acpRegistry struct {
 	url     string
 	client  *http.Client
 	dataDir string
-	npm     string
+	logger  *slog.Logger
+	// ctx ends with the daemon, and every install and lookup with it.
+	ctx context.Context
+	// publish tells clients the list changed. It runs under mu, which keeps
+	// lists in order, and must not block.
+	publish func(wire.ACPRegistryList)
 
-	mu     sync.Mutex
-	agents []acpRegistryAgent // snapshot of the last successful fetch
-
-	// installMu guards the installed-agent manifest.
-	installMu       sync.Mutex
+	// mu guards everything below and the manifest on disk. It is never held
+	// across a process, a network call or a recursive delete.
+	mu              sync.Mutex
+	catalog         []acpRegistryAgent // the last successful fetch
 	installed       []acpInstalledAgent
 	installedLoaded bool
+	jobs            map[string]*acpInstallJob
+	failures        map[string]string
+	// released holds update release dates by agent and version. A zero time is
+	// a lookup that is running or found no date.
+	released map[string]time.Time
 }
 
-func newACPRegistry() *acpRegistry {
-	dataDir, _ := maidDataDir()
+func newACPRegistry(ctx context.Context, dataDir string, logger *slog.Logger, publish func(wire.ACPRegistryList)) *acpRegistry {
 	return &acpRegistry{
-		url:     defaultACPRegistryURL,
-		client:  &http.Client{Timeout: 15 * time.Second},
-		dataDir: dataDir,
-		npm:     "npm",
+		url:      defaultACPRegistryURL,
+		client:   &http.Client{Timeout: 15 * time.Second},
+		dataDir:  dataDir,
+		logger:   logger,
+		ctx:      ctx,
+		publish:  publish,
+		jobs:     make(map[string]*acpInstallJob),
+		failures: make(map[string]string),
+		released: make(map[string]time.Time),
 	}
 }
 
-// list fetches the registry index on demand. The in-memory snapshot lets a
-// subsequent install use the version the user just saw without a second fetch.
-func (r *acpRegistry) list(ctx context.Context) ([]acpRegistryAgent, error) {
+// refresh fetches the registry index. The snapshot lets a later install use
+// the version the user just saw without a second fetch.
+func (r *acpRegistry) refresh(ctx context.Context) (wire.ACPRegistryList, error) {
 	agents, err := r.fetch(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load ACP registry: %w", err)
+		return wire.ACPRegistryList{}, fmt.Errorf("load ACP registry: %w", err)
 	}
 	r.mu.Lock()
-	r.agents = agents
-	r.mu.Unlock()
-	return agents, nil
+	defer r.mu.Unlock()
+	r.catalog = agents
+	if err := r.loadInstalledLocked(); err != nil {
+		return wire.ACPRegistryList{}, err
+	}
+	list := r.listLocked()
+	r.publish(list)
+	r.lookUpReleaseDatesLocked()
+	return list, nil
 }
 
 func (r *acpRegistry) fetch(ctx context.Context) ([]acpRegistryAgent, error) {
@@ -139,11 +182,10 @@ func parseACPRegistry(raw []byte) ([]acpRegistryAgent, error) {
 	agents := make([]acpRegistryAgent, 0, len(index.Agents))
 	seen := make(map[string]struct{})
 	for _, entry := range index.Agents {
-		npx := entry.Distribution.NPX
 		id := strings.TrimSpace(entry.ID)
 		// The id comes from a remote index and names the agent's directory,
-		// which removing the agent deletes.
-		if npx == nil || id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
+		// which removing the agent deletes. Dot names are the daemon's own.
+		if id == "" || strings.HasPrefix(id, ".") || strings.ContainsAny(id, "/\\\x00") || entry.Version == "" {
 			continue
 		}
 		if _, exists := seen[id]; exists {
@@ -154,137 +196,190 @@ func parseACPRegistry(raw []byte) ([]acpRegistryAgent, error) {
 		if name == "" {
 			name = id
 		}
-		agents = append(agents, acpRegistryAgent{
-			ACPRegistryAgent: wire.ACPRegistryAgent{
-				ID: id, InstanceID: provider.InstanceID("registry-" + id), Name: name,
-				Version: entry.Version, Description: entry.Description, Icon: entry.Icon,
-				Package: npx.Package, Args: append([]string(nil), npx.Args...),
-			},
-			Env: npx.Env,
-		})
+		agent := acpRegistryAgent{
+			ID: id, Name: name, Version: entry.Version, Description: entry.Description, Icon: entry.Icon,
+			Repository: entry.Repository, Website: entry.Website, License: entry.LicenseURL,
+			Blocker: wire.ACPAgentNeedsPlatform,
+		}
+		// A build for this platform needs no runtime, so it comes first, as in
+		// Zed. Python packages are the last resort: Zed has no such kind.
+		distribution := entry.Distribution
+		if target, ok := distribution.Binary[acpPlatform()]; ok {
+			agent.Distribution = acpBinaryArchive{url: target.Archive, command: target.Cmd, sha256: target.SHA256}
+			agent.Args, agent.Env = target.Args, target.Env
+		} else if npm := parseNPMPackage(distribution.NPX, entry.Version); npm != nil {
+			agent.Distribution = npm
+			agent.Args, agent.Env = distribution.NPX.Args, distribution.NPX.Env
+		} else if uv := parseUVPackage(distribution.UVX, entry.Version); uv != nil {
+			agent.Distribution = uv
+			agent.Args, agent.Env = distribution.UVX.Args, distribution.UVX.Env
+		}
+		if agent.Distribution != nil {
+			agent.Blocker = agent.Distribution.blocker()
+		}
+		agents = append(agents, agent)
 	}
-	sort.Slice(agents, func(i, j int) bool { return strings.ToLower(agents[i].Name) < strings.ToLower(agents[j].Name) })
 	if len(agents) == 0 {
-		return nil, fmt.Errorf("registry contains no supported npx agents")
+		return nil, fmt.Errorf("registry contains no agents")
 	}
 	return agents, nil
+}
+
+// snapshot is the list as it stands, without touching the network.
+func (r *acpRegistry) snapshot() (wire.ACPRegistryList, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.loadInstalledLocked(); err != nil {
+		return wire.ACPRegistryList{}, err
+	}
+	return r.listLocked(), nil
+}
+
+// listLocked derives every row from what the daemon knows: the registry's
+// entry, the manifest's and the running job or last failure. Installed agents
+// stay listed when the registry drops them.
+func (r *acpRegistry) listLocked() wire.ACPRegistryList {
+	agents := make([]wire.ACPRegistryAgent, 0, len(r.catalog)+len(r.installed))
+	for i := range r.installed {
+		agent := &r.installed[i]
+		row := wire.ACPRegistryAgent{
+			ID: agent.ID, InstanceID: agent.InstanceID, Name: agent.Name, State: wire.ACPAgentInstalled,
+			Description: agent.Description, Icon: agent.Icon, Repository: agent.Repository, Website: agent.Website, LicenseURL: agent.LicenseURL,
+		}
+		if agent.custom() {
+			row.Source, row.Command, row.Args = wire.ACPAgentSourceCustom, agent.Command, agent.Args
+			row.EnvNames = slices.Sorted(maps.Keys(agent.Env))
+		} else {
+			row.Source, row.InstalledVersion = wire.ACPAgentSourceRegistry, agent.Version
+		}
+		if listed, ok := findRegistryAgent(r.catalog, agent.ID); ok && !agent.custom() {
+			row.Name, row.Description, row.Icon, row.Repository, row.Website, row.LicenseURL = listed.Name, listed.Description, listed.Icon, listed.Repository, listed.Website, listed.License
+			if listed.Version != agent.Version {
+				row.AvailableVersion, row.Blocker = listed.Version, listed.Blocker
+				if at := r.released[releaseKey(listed.ID, listed.Version)]; !at.IsZero() {
+					row.AvailableReleasedAt = &at
+				}
+			}
+		}
+		agents = append(agents, r.withJobStateLocked(row))
+	}
+	for _, listed := range r.catalog {
+		if slices.ContainsFunc(r.installed, func(agent acpInstalledAgent) bool { return agent.ID == listed.ID }) {
+			continue
+		}
+		agents = append(agents, r.withJobStateLocked(wire.ACPRegistryAgent{
+			ID: listed.ID, InstanceID: listed.instanceID(), Name: listed.Name, Source: wire.ACPAgentSourceRegistry, State: wire.ACPAgentNotInstalled,
+			Description: listed.Description, Icon: listed.Icon, Repository: listed.Repository, Website: listed.Website, LicenseURL: listed.License,
+			AvailableVersion: listed.Version, Blocker: listed.Blocker,
+		}))
+	}
+	slices.SortFunc(agents, func(a, b wire.ACPRegistryAgent) int {
+		if order := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); order != 0 {
+			return order
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return wire.ACPRegistryList{Agents: agents}
+}
+
+func (r *acpRegistry) withJobStateLocked(row wire.ACPRegistryAgent) wire.ACPRegistryAgent {
+	if job, running := r.jobs[row.ID]; running {
+		row.State = wire.ACPAgentInstalling
+		if job.updating {
+			row.State = wire.ACPAgentUpdating
+		}
+		return row
+	}
+	if failure, failed := r.failures[row.ID]; failed {
+		row.State, row.Error = wire.ACPAgentFailed, failure
+	}
+	return row
+}
+
+func (r *acpRegistry) publishLocked() {
+	r.publish(r.listLocked())
 }
 
 // registryAgent resolves an id against the last fetched snapshot, fetching
 // once if the snapshot has nothing for it.
 func (r *acpRegistry) registryAgent(ctx context.Context, id string) (acpRegistryAgent, error) {
 	r.mu.Lock()
-	agent, ok := findRegistryAgent(r.agents, id)
+	agent, ok := findRegistryAgent(r.catalog, id)
 	r.mu.Unlock()
 	if ok {
 		return agent, nil
 	}
-	agents, err := r.list(ctx)
-	if err != nil {
+	if _, err := r.refresh(ctx); err != nil {
 		return acpRegistryAgent{}, err
 	}
-	if agent, ok := findRegistryAgent(agents, id); ok {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if agent, ok := findRegistryAgent(r.catalog, id); ok {
 		return agent, nil
 	}
-	return acpRegistryAgent{}, fmt.Errorf("ACP registry agent %q not found or does not support npx", id)
+	return acpRegistryAgent{}, fmt.Errorf("ACP registry agent %q not found", id)
 }
 
 func findRegistryAgent(agents []acpRegistryAgent, id string) (acpRegistryAgent, bool) {
 	for _, agent := range agents {
-		if agent.ID == id || string(agent.InstanceID) == id {
+		if agent.ID == id {
 			return agent, true
 		}
 	}
 	return acpRegistryAgent{}, false
 }
 
-// install records the registry metadata selected by the user. npm owns package
-// acquisition and caching when the agent is started.
-func (r *acpRegistry) install(ctx context.Context, id string) (wire.ACPRegistryInstalledAgent, error) {
-	agent, err := r.registryAgent(ctx, id)
-	if err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
-	}
-	if r.dataDir == "" {
-		return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("resolve maiD data directory")
-	}
-
-	record := acpInstalledAgent{
-		ACPRegistryInstalledAgent: wire.ACPRegistryInstalledAgent{
-			ID: agent.ID, InstanceID: agent.InstanceID, Name: agent.Name,
-			Source:  acpAgentSourceRegistry,
-			Version: agent.Version, Description: agent.Description, Icon: agent.Icon,
-			Package: agent.Package, Args: append([]string(nil), agent.Args...),
-			InstalledAt: time.Now().UTC(),
-		},
-		Env: agent.Env,
-	}
-
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
-	if err := r.loadInstalledLocked(); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
-	}
-	installed := upsertInstalledAgent(append([]acpInstalledAgent(nil), r.installed...), record)
-	if err := r.saveInstalledLocked(installed); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
-	}
-	r.installed = installed
-	return record.ACPRegistryInstalledAgent, nil
-}
-
 // addCustom records a user-supplied ACP command in the same manifest as
 // registry installations. Its id and instance id never change, so its chats
 // survive a rename.
-func (r *acpRegistry) addCustom(params wire.ACPCustomAgentAddParams) (wire.ACPRegistryInstalledAgent, error) {
+func (r *acpRegistry) addCustom(params wire.ACPCustomAgentAddParams) (wire.ACPRegistryAgent, error) {
 	record, err := parseCustomAgent(params)
 	if err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+		return wire.ACPRegistryAgent{}, err
 	}
 	record.ID = rand.Text()
 	record.InstanceID = provider.InstanceID("custom-" + record.ID)
-	record.InstalledAt = time.Now().UTC()
 
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.loadInstalledLocked(); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+		return wire.ACPRegistryAgent{}, err
 	}
 	return r.saveCustomLocked(record)
 }
 
 // updateCustom replaces a custom agent's definition. Clients never see the
 // environment's values, so KeepEnv names the variables that stay as they are.
-func (r *acpRegistry) updateCustom(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryInstalledAgent, error) {
+func (r *acpRegistry) updateCustom(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryAgent, error) {
 	record, err := parseCustomAgent(params.ACPCustomAgentAddParams)
 	if err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+		return wire.ACPRegistryAgent{}, err
 	}
 
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.loadInstalledLocked(); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+		return wire.ACPRegistryAgent{}, err
 	}
 	index := slices.IndexFunc(r.installed, func(agent acpInstalledAgent) bool { return agent.ID == params.RegistryID })
 	if index < 0 {
-		return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("ACP agent %q is not installed", params.RegistryID)
+		return wire.ACPRegistryAgent{}, fmt.Errorf("ACP agent %q is not installed", params.RegistryID)
 	}
 	current := r.installed[index]
-	if current.Source != acpAgentSourceCustom {
-		return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("%s comes from the agent registry and can't be edited", current.Name)
+	if !current.custom() {
+		return wire.ACPRegistryAgent{}, fmt.Errorf("%s comes from the agent registry and can't be edited", current.Name)
 	}
 	for _, name := range params.KeepEnv {
 		value, ok := current.Env[name]
 		if !ok {
-			return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("custom ACP agent has no environment variable %q to keep", name)
+			return wire.ACPRegistryAgent{}, fmt.Errorf("custom ACP agent has no environment variable %q to keep", name)
 		}
 		if _, replaced := record.Env[name]; replaced {
-			return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("custom ACP agent both keeps and sets environment variable %q", name)
+			return wire.ACPRegistryAgent{}, fmt.Errorf("custom ACP agent both keeps and sets environment variable %q", name)
 		}
 		record.Env[name] = value
 	}
-	record.ID, record.InstanceID, record.InstalledAt = current.ID, current.InstanceID, current.InstalledAt
+	record.ID, record.InstanceID = current.ID, current.InstanceID
 	return r.saveCustomLocked(record)
 }
 
@@ -325,51 +420,59 @@ func parseCustomAgent(params wire.ACPCustomAgentAddParams) (acpInstalledAgent, e
 		}
 		env[key] = value
 	}
-	return acpInstalledAgent{
-		ACPRegistryInstalledAgent: wire.ACPRegistryInstalledAgent{
-			Name: name, Source: acpAgentSourceCustom, Command: command, Args: args,
-		},
-		Env: env,
-	}, nil
+	return acpInstalledAgent{Name: name, Source: wire.ACPAgentSourceCustom, Command: command, Args: args, Env: env}, nil
 }
 
 // saveCustomLocked writes a custom definition whose name no other custom agent
 // uses. A registry agent may share it: the picker tells them apart.
-func (r *acpRegistry) saveCustomLocked(record acpInstalledAgent) (wire.ACPRegistryInstalledAgent, error) {
+func (r *acpRegistry) saveCustomLocked(record acpInstalledAgent) (wire.ACPRegistryAgent, error) {
 	for _, installed := range r.installed {
-		if installed.Source == acpAgentSourceCustom && installed.Name == record.Name && installed.ID != record.ID {
-			return wire.ACPRegistryInstalledAgent{}, fmt.Errorf("an ACP agent named %q already exists", record.Name)
+		if installed.custom() && installed.Name == record.Name && installed.ID != record.ID {
+			return wire.ACPRegistryAgent{}, fmt.Errorf("an ACP agent named %q already exists", record.Name)
 		}
 	}
-	installed := upsertInstalledAgent(append([]acpInstalledAgent(nil), r.installed...), record)
-	if err := r.saveInstalledLocked(installed); err != nil {
-		return wire.ACPRegistryInstalledAgent{}, err
+	if err := r.saveInstalledLocked(upsertInstalledAgent(slices.Clone(r.installed), record)); err != nil {
+		return wire.ACPRegistryAgent{}, err
 	}
-	r.installed = installed
-	return record.public(), nil
+	list := r.listLocked()
+	r.publish(list)
+	return list.Agents[slices.IndexFunc(list.Agents, func(row wire.ACPRegistryAgent) bool { return row.ID == record.ID })], nil
 }
 
-// remove takes the agent out of the manifest, which is what decides it is
-// gone: pruneFiles deletes its files after its process stops, or at the next
-// startup if the daemon dies first.
+// remove ends any job on the agent and takes it out of the manifest, which is
+// what decides it is gone. A job that started meanwhile is ended too, so the
+// removal holds when it returns. The caller deletes the files once the agent's
+// process has stopped.
 func (r *acpRegistry) remove(id string) error {
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
-	if err := r.loadInstalledLocked(); err != nil {
-		return err
+	for {
+		r.mu.Lock()
+		job, running := r.jobs[id]
+		if !running {
+			defer r.mu.Unlock()
+			if err := r.loadInstalledLocked(); err != nil {
+				return err
+			}
+			installed := slices.DeleteFunc(slices.Clone(r.installed), func(agent acpInstalledAgent) bool { return agent.ID == id })
+			if err := r.saveInstalledLocked(installed); err != nil {
+				return err
+			}
+			delete(r.failures, id)
+			r.publishLocked()
+			return nil
+		}
+		job.cancel()
+		r.mu.Unlock()
+		<-job.done
 	}
-	installed := slices.DeleteFunc(slices.Clone(r.installed), func(agent acpInstalledAgent) bool { return agent.ID == id })
-	if err := r.saveInstalledLocked(installed); err != nil {
-		return err
-	}
-	r.installed = installed
-	return nil
 }
 
-// pruneFiles deletes the directories of agents the manifest doesn't list.
+// pruneFiles deletes everything in the agents' directory that neither the
+// manifest nor a job needs, including what an interrupted install or delete
+// left. It runs before any agent starts: while one runs, its old version may
+// be in use, so only pruneAgent is safe.
 func (r *acpRegistry) pruneFiles() error {
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.loadInstalledLocked(); err != nil {
 		return err
 	}
@@ -382,46 +485,99 @@ func (r *acpRegistry) pruneFiles() error {
 	}
 	var failed error
 	for _, entry := range entries {
-		if slices.ContainsFunc(r.installed, func(agent acpInstalledAgent) bool { return agent.ID == entry.Name() }) {
-			continue
-		}
-		if err := os.RemoveAll(r.agentPrefixDir(entry.Name())); err != nil {
-			failed = errors.Join(failed, fmt.Errorf("delete agent files: %w", err))
+		if entry.Name() != acpTrashDir {
+			failed = errors.Join(failed, r.pruneAgentLocked(entry.Name()))
 		}
 	}
+	// What a daemon that died left in the trash. Deleting what this just moved
+	// there a second time is harmless.
+	leftovers, err := os.ReadDir(r.trashDir())
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Join(failed, fmt.Errorf("list deleted agent files: %w", err))
+	}
+	go func() {
+		for _, leftover := range leftovers {
+			r.deleteFile(filepath.Join(r.trashDir(), leftover.Name()))
+		}
+	}()
 	return failed
 }
 
-// installedAgents lists the manifest without touching the network.
-func (r *acpRegistry) installedAgents() ([]wire.ACPRegistryInstalledAgent, error) {
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
+// pruneAgent deletes the agent's install directories that neither the manifest
+// nor a job needs. Its caller knows no process runs from an old one.
+func (r *acpRegistry) pruneAgent(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.loadInstalledLocked(); err != nil {
-		return nil, err
+		return err
 	}
-	agents := make([]wire.ACPRegistryInstalledAgent, 0, len(r.installed))
-	for _, agent := range r.installed {
-		agents = append(agents, agent.public())
+	return r.pruneAgentLocked(id)
+}
+
+func (r *acpRegistry) pruneAgentLocked(id string) error {
+	entries, err := os.ReadDir(r.agentDir(id))
+	if os.IsNotExist(err) {
+		return nil
 	}
-	return agents, nil
+	if err != nil {
+		return fmt.Errorf("list agent files: %w", err)
+	}
+	var keep []string
+	if i := slices.IndexFunc(r.installed, func(agent acpInstalledAgent) bool { return agent.ID == id }); i >= 0 {
+		keep = append(keep, filepath.Join(r.agentDir(id), r.installed[i].Dir))
+	}
+	if job, running := r.jobs[id]; running {
+		keep = append(keep, job.dir)
+	}
+	var failed error
+	for _, entry := range entries {
+		if dir := filepath.Join(r.agentDir(id), entry.Name()); !slices.Contains(keep, dir) {
+			failed = errors.Join(failed, r.discardLocked(dir))
+		}
+	}
+	// Fails while a version remains, which is the point.
+	_ = os.Remove(r.agentDir(id))
+	return failed
+}
+
+// discardLocked moves path to the trash and deletes it in the background: a
+// big agent takes seconds to delete, which must hold up neither mu nor shutdown.
+// A delete shutdown cuts short finishes at the next startup.
+func (r *acpRegistry) discardLocked(path string) error {
+	if err := os.MkdirAll(r.trashDir(), 0o755); err != nil {
+		return fmt.Errorf("delete agent files: %w", err)
+	}
+	trashed := filepath.Join(r.trashDir(), rand.Text())
+	if err := os.Rename(path, trashed); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("delete agent files: %w", err)
+	}
+	go r.deleteFile(trashed)
+	return nil
+}
+
+func (r *acpRegistry) deleteFile(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		r.logger.Warn("delete agent files", "error", err)
+	}
 }
 
 func (r *acpRegistry) installedAgent(id string) (acpInstalledAgent, bool, error) {
-	r.installMu.Lock()
-	defer r.installMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.loadInstalledLocked(); err != nil {
 		return acpInstalledAgent{}, false, err
 	}
 	for _, agent := range r.installed {
-		if agent.ID == id || string(agent.InstanceID) == id {
+		if agent.ID == id {
 			return agent, true, nil
 		}
 	}
 	return acpInstalledAgent{}, false, nil
 }
 
-// instanceSpec lets npm select the newest available package version up to the
-// version advertised by the registry when the user installed or updated it.
 func (r *acpRegistry) instanceSpec(id string) (provider.InstanceSpec, error) {
 	agent, ok, err := r.installedAgent(id)
 	if err != nil {
@@ -430,73 +586,54 @@ func (r *acpRegistry) instanceSpec(id string) (provider.InstanceSpec, error) {
 	if !ok {
 		return provider.InstanceSpec{}, fmt.Errorf("ACP agent %q is not installed; install it from the agent registry first", id)
 	}
-	return r.instanceSpecForAgent(agent)
+	return r.instanceSpecForAgent(agent), nil
 }
 
 func (r *acpRegistry) instanceSpecs() ([]provider.InstanceSpec, error) {
-	r.installMu.Lock()
+	r.mu.Lock()
 	if err := r.loadInstalledLocked(); err != nil {
-		r.installMu.Unlock()
+		r.mu.Unlock()
 		return nil, err
 	}
-	agents := append([]acpInstalledAgent(nil), r.installed...)
-	r.installMu.Unlock()
+	agents := slices.Clone(r.installed)
+	r.mu.Unlock()
 
 	specs := make([]provider.InstanceSpec, 0, len(agents))
 	for _, agent := range agents {
-		spec, err := r.instanceSpecForAgent(agent)
-		if err != nil {
-			return nil, err
-		}
-		specs = append(specs, spec)
+		specs = append(specs, r.instanceSpecForAgent(agent))
 	}
 	return specs, nil
 }
 
-func (r *acpRegistry) instanceSpecForAgent(agent acpInstalledAgent) (provider.InstanceSpec, error) {
-	if agent.Source == acpAgentSourceCustom {
-		command := strings.TrimSpace(agent.Command)
-		if command == "" {
-			return provider.InstanceSpec{}, fmt.Errorf("custom ACP agent %q has no command", agent.ID)
+// instanceSpecForAgent is how an agent launches. The registry's environment
+// reaches only this: never npm or uv, where it could redirect the install.
+func (r *acpRegistry) instanceSpecForAgent(agent acpInstalledAgent) provider.InstanceSpec {
+	config := acp.Config{Command: []string{agent.Command}, Env: agent.Env}
+	if !agent.custom() {
+		config.Dir = filepath.Join(r.agentDir(agent.ID), agent.Dir)
+		entry := filepath.Join(config.Dir, agent.Command)
+		config.Command = []string{entry}
+		if agent.Node {
+			config.Command = []string{"node", entry}
 		}
-		config, err := json.Marshal(map[string]any{
-			"command": append([]string{command}, agent.Args...),
-			"env":     agent.Env,
-		})
-		if err != nil {
-			return provider.InstanceSpec{}, err
-		}
-		return provider.InstanceSpec{InstanceID: agent.InstanceID, Name: agent.Name, Driver: "acp", Config: config}, nil
 	}
-	if r.dataDir == "" {
-		return provider.InstanceSpec{}, fmt.Errorf("resolve maiD data directory")
-	}
-	prefix := r.agentPrefixDir(agent.ID)
-	cache := r.npmCacheDir(agent.ID)
-	if err := os.MkdirAll(prefix, 0o755); err != nil {
-		return provider.InstanceSpec{}, fmt.Errorf("create agent directory: %w", err)
-	}
-	if err := os.MkdirAll(cache, 0o755); err != nil {
-		return provider.InstanceSpec{}, fmt.Errorf("create npm cache: %w", err)
-	}
-	command := []string{r.npm, "--prefix", prefix, "exec", "--cache=" + cache, "--yes", "--", boundedNPMPackageSpec(agent.Package, agent.Version)}
-	command = append(command, agent.Args...)
-	config, err := json.Marshal(map[string]any{"command": command, "env": agent.Env})
+	config.Command = append(config.Command, agent.Args...)
+	encoded, err := json.Marshal(config)
 	if err != nil {
-		return provider.InstanceSpec{}, err
+		panic(err) // Strings can't fail to encode.
 	}
-	return provider.InstanceSpec{InstanceID: agent.InstanceID, Name: agent.Name, Driver: "acp", Config: config}, nil
+	return provider.InstanceSpec{InstanceID: agent.InstanceID, Name: agent.Name, Driver: acp.DriverKind, Config: encoded}
+}
+
+func (a acpInstalledAgent) custom() bool {
+	return a.Source == wire.ACPAgentSourceCustom
 }
 
 func (r *acpRegistry) loadInstalledLocked() error {
 	if r.installedLoaded {
 		return nil
 	}
-	path := r.installedManifestPath()
-	if path == "" {
-		return fmt.Errorf("resolve maiD data directory")
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(r.installedManifestPath())
 	if os.IsNotExist(err) {
 		r.installedLoaded = true
 		return nil
@@ -513,11 +650,10 @@ func (r *acpRegistry) loadInstalledLocked() error {
 	return nil
 }
 
+// saveInstalledLocked replaces the manifest atomically: it is the commit point
+// of every install, update and removal.
 func (r *acpRegistry) saveInstalledLocked(agents []acpInstalledAgent) error {
 	path := r.installedManifestPath()
-	if path == "" {
-		return fmt.Errorf("resolve maiD data directory")
-	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create agents directory: %w", err)
@@ -539,44 +675,34 @@ func (r *acpRegistry) saveInstalledLocked(agents []acpInstalledAgent) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("write installed agents: %w", err)
 	}
+	r.installed = agents
 	return nil
 }
 
 func upsertInstalledAgent(agents []acpInstalledAgent, record acpInstalledAgent) []acpInstalledAgent {
 	if i := slices.IndexFunc(agents, func(agent acpInstalledAgent) bool { return agent.ID == record.ID }); i >= 0 {
 		agents[i] = record
-	} else {
-		agents = append(agents, record)
+		return agents
 	}
-	sort.Slice(agents, func(i, j int) bool { return strings.ToLower(agents[i].Name) < strings.ToLower(agents[j].Name) })
-	return agents
+	return append(agents, record)
 }
 
+// acpTrashDir holds directories on their way out. Registry ids can't start
+// with a dot, so it can't be an agent's.
+const acpTrashDir = ".trash"
+
 func (r *acpRegistry) installedManifestPath() string {
-	if r.dataDir == "" {
-		return ""
-	}
 	return filepath.Join(r.dataDir, "agents", "installed.json")
 }
 
 func (r *acpRegistry) agentsDir() string {
-	return filepath.Join(r.dataDir, "agents", "registry", "npx")
+	return filepath.Join(r.dataDir, "agents", "registry")
 }
 
-func (r *acpRegistry) agentPrefixDir(id string) string {
+func (r *acpRegistry) trashDir() string {
+	return filepath.Join(r.agentsDir(), acpTrashDir)
+}
+
+func (r *acpRegistry) agentDir(id string) string {
 	return filepath.Join(r.agentsDir(), id)
-}
-
-// npmCacheDir is per agent so that removing one reclaims everything npm
-// downloaded for it.
-func (r *acpRegistry) npmCacheDir(id string) string {
-	return filepath.Join(r.agentPrefixDir(id), "npm-cache")
-}
-
-func boundedNPMPackageSpec(spec, version string) string {
-	name := spec
-	if at, slash := strings.LastIndex(spec, "@"), strings.LastIndex(spec, "/"); at > slash {
-		name = spec[:at]
-	}
-	return name + "@0.0.0 - " + version
 }
