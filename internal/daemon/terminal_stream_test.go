@@ -27,7 +27,6 @@ import (
 // delivered its first snapshot.
 type testView struct {
 	Terminal       wire.TerminalSummary
-	RunID          string
 	SnapshotFormat string
 	Snapshot       []byte
 	// Columns and Rows are the snapshot's grid, decoded as a client does.
@@ -43,7 +42,6 @@ type testRecord struct {
 	// data is output, or a snapshot's data.
 	data    []byte
 	resized wire.TerminalStreamResized
-	exited  wire.TerminalStreamExited
 }
 
 // testStream reads one terminal stream into its client. Its fields are
@@ -122,7 +120,6 @@ func (c *recordingClient) view(t testing.TB, result wire.TerminalAttachResult) t
 	}
 	return testView{
 		Terminal:       result.Terminal,
-		RunID:          first.snapshot.RunID,
 		SnapshotFormat: first.snapshot.SnapshotFormat,
 		Snapshot:       first.data,
 		Columns:        columns,
@@ -185,9 +182,6 @@ func (s *testStream) apply(message []byte) error {
 		s.client.terminalOutput.Write(payload)
 	case wire.TerminalRecordResized:
 		err = json.Unmarshal(payload, &record.resized)
-		s.records = append(s.records, record)
-	case wire.TerminalRecordExited:
-		err = json.Unmarshal(payload, &record.exited)
 		s.records = append(s.records, record)
 	default:
 		return fmt.Errorf("unknown record kind %#x", kind)
@@ -346,7 +340,7 @@ func TestTerminalStreamContinuesItsSnapshotWithoutGapOrDuplicate(t *testing.T) {
 	first := dialRecordingClient(t, url)
 	created := createTestTerminal(t, first)
 	terminalID := created.Terminal.TerminalID
-	first.writeTerminal(t, terminalID, created.RunID, "printf 'HISTORY-%d\\n' $((80+8)); "+
+	first.writeTerminal(t, terminalID, "printf 'HISTORY-%d\\n' $((80+8)); "+
 		"perl -e '$|=1; for (1..4000) { print \"LINE-$_\\n\"; select(undef, undef, undef, 0.0005) }'; "+
 		"printf 'DONE-%d\\n' $((1+1)); exec sleep 600\n")
 	created.stream.waitOutput(t, 1, "LINE-400")
@@ -380,7 +374,7 @@ func TestTerminalSlowStreamResyncsWithoutHoldingAnyoneBack(t *testing.T) {
 	view := healthy.mustAttachTerminal(t, terminalID, 80, 24)
 
 	const flood = 64 << 20
-	healthy.writeTerminal(t, terminalID, view.RunID, fmt.Sprintf(
+	healthy.writeTerminal(t, terminalID, fmt.Sprintf(
 		"head -c %d /dev/zero; seq -f 'ROW-%%g' 1 60; printf 'FLOOD-%%d\\n' $((6*7)); exec sleep 600\n", flood))
 	view.stream.waitOutput(t, 1, "FLOOD-42")
 	var summary wire.TerminalListStreamItem
@@ -395,9 +389,6 @@ func TestTerminalSlowStreamResyncsWithoutHoldingAnyoneBack(t *testing.T) {
 	resync := slices.IndexFunc(records[1:], isSnapshot)
 	if resync < 0 {
 		t.Fatalf("the stalled view never resynced; it got %d records", len(records))
-	}
-	if records[resync+1].snapshot.RunID != view.RunID {
-		t.Fatalf("resync snapshot run = %s, want %s", records[resync+1].snapshot.RunID, view.RunID)
 	}
 	if got, want := stream.screen(t), sessionScreen(t, s, terminalID); got != want {
 		t.Fatalf("resynced terminal differs from the daemon's:\n got %q\nwant %q", tail(got), tail(want))

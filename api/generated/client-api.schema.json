@@ -2360,35 +2360,6 @@
       ],
       "title": "TerminalProgramStatus"
     },
-    "TerminalRelaunchParams": {
-      "properties": {
-        "terminalId": {
-          "type": "string"
-        },
-        "columns": {
-          "type": "integer"
-        },
-        "rows": {
-          "type": "integer"
-        },
-        "attachmentId": {
-          "type": "string"
-        },
-        "appearance": {
-          "$ref": "#/$defs/TerminalAppearance"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "terminalId",
-        "columns",
-        "rows",
-        "attachmentId",
-        "appearance"
-      ],
-      "title": "TerminalRelaunchParams"
-    },
     "TerminalRenameParams": {
       "properties": {
         "terminalId": {
@@ -2431,22 +2402,6 @@
       ],
       "title": "TerminalResizeParams"
     },
-    "TerminalStreamExited": {
-      "properties": {
-        "status": {
-          "type": "string"
-        },
-        "exitCode": {
-          "type": "integer"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "status"
-      ],
-      "title": "TerminalStreamExited"
-    },
     "TerminalStreamResized": {
       "properties": {
         "columns": {
@@ -2466,15 +2421,6 @@
     },
     "TerminalStreamSnapshot": {
       "properties": {
-        "runId": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "exitCode": {
-          "type": "integer"
-        },
         "snapshotFormat": {
           "type": "string"
         },
@@ -2485,8 +2431,6 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "runId",
-        "status",
         "snapshotFormat",
         "size"
       ],
@@ -2502,12 +2446,6 @@
         },
         "cwd": {
           "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "exitCode": {
-          "type": "integer"
         },
         "createdAt": {
           "type": "string",
@@ -2533,7 +2471,6 @@
         "terminalId",
         "title",
         "cwd",
-        "status",
         "createdAt",
         "updatedAt"
       ],
@@ -2542,9 +2479,6 @@
     "TerminalWriteParams": {
       "properties": {
         "terminalId": {
-          "type": "string"
-        },
-        "runId": {
           "type": "string"
         },
         "data": {
@@ -2556,7 +2490,6 @@
       "type": "object",
       "required": [
         "terminalId",
-        "runId",
         "data"
       ],
       "title": "TerminalWriteParams"
@@ -3599,9 +3532,6 @@
         "terminalStreamResized": {
           "$ref": "#/$defs/TerminalStreamResized"
         },
-        "terminalStreamExited": {
-          "$ref": "#/$defs/TerminalStreamExited"
-        },
         "terminalListStreamItem": {
           "$ref": "#/$defs/TerminalListStreamItem"
         },
@@ -3616,9 +3546,6 @@
         },
         "terminalAttachParams": {
           "$ref": "#/$defs/TerminalAttachParams"
-        },
-        "terminalRelaunchParams": {
-          "$ref": "#/$defs/TerminalRelaunchParams"
         },
         "terminalDetachParams": {
           "$ref": "#/$defs/TerminalDetachParams"
@@ -3747,13 +3674,11 @@
         "terminalAttachResult",
         "terminalStreamSnapshot",
         "terminalStreamResized",
-        "terminalStreamExited",
         "terminalListStreamItem",
         "terminalRenameParams",
         "terminalCreateParams",
         "terminalIDParams",
         "terminalAttachParams",
-        "terminalRelaunchParams",
         "terminalDetachParams",
         "terminalWriteParams",
         "terminalResizeParams",

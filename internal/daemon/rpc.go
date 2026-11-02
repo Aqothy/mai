@@ -638,12 +638,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return h.server.attachTerminal(h.client, params)
-	case wire.MethodTerminalRelaunch:
-		var params wire.TerminalRelaunchParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return h.server.relaunchTerminal(h.client, params)
 	case wire.MethodTerminalDetach:
 		var params wire.TerminalDetachParams
 		if err := decodeRPCParams(req, &params); err != nil {

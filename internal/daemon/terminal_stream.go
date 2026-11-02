@@ -98,9 +98,9 @@ func (s *Server) serveTerminalStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // openTerminalStream redeems a ticket and makes stream its view's stream,
-// starting from a snapshot of the current run. The ticket is used up even
-// when the stream can't open. Holding the terminal's operations keeps the
-// view and run from changing until the stream follows them.
+// starting from a snapshot of the terminal. The ticket is used up even when
+// the stream can't open. Holding the terminal's operations keeps the view from
+// changing until the stream follows it.
 func (s *Server) openTerminalStream(ticket [16]byte, stream *terminalStream) error {
 	rt := s.terminals
 	rt.mu.Lock()
@@ -145,9 +145,7 @@ type terminalStream struct {
 	// finished closes once the connection has closed and the writer is done.
 	finished chan struct{}
 
-	mu sync.Mutex
-	// runID is the run the stream follows; events of other runs skip it.
-	runID string
+	mu    sync.Mutex
 	queue []streamRecord
 	// queuedOutput counts output bytes in queue.
 	queuedOutput int
@@ -167,14 +165,10 @@ func newTerminalStream(ws *websocket.Conn, connected context.Context) *terminalS
 	return &terminalStream{ws: ws, connected: connected, wake: make(chan struct{}, 1), finished: make(chan struct{})}
 }
 
-// resync replaces whatever the stream had queued with a snapshot of run, and
-// follows that run from here on. The snapshot holds everything the queue
-// did.
+// resync replaces whatever the stream had queued with a snapshot, which holds
+// everything the queue did.
 func (s *terminalStream) resync(snapshot terminal.Snapshot) {
 	header, err := json.Marshal(wire.TerminalStreamSnapshot{
-		RunID:          snapshot.RunID,
-		Status:         snapshot.Status,
-		ExitCode:       snapshot.ExitCode,
 		SnapshotFormat: snapshot.SnapshotFormat,
 		Size:           len(snapshot.Data),
 	})
@@ -187,20 +181,19 @@ func (s *terminalStream) resync(snapshot terminal.Snapshot) {
 	if s.closed {
 		return
 	}
-	s.runID = snapshot.RunID
 	clear(s.queue)
 	s.queue = append(s.queue[:0], streamRecord{kind: wire.TerminalRecordSnapshot, payload: header, data: snapshot.Data})
 	s.queuedOutput = 0
 	s.signal()
 }
 
-// output queues run's output, shared read-only with other streams. It
+// output queues the program's output, shared read-only with other streams. It
 // reports false when the stream has fallen too far behind and needs resync
 // instead.
-func (s *terminalStream) output(runID string, data []byte) bool {
+func (s *terminalStream) output(data []byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.runID != runID {
+	if s.closed {
 		return true
 	}
 	if s.queuedOutput+len(data) > streamResyncBytes {
@@ -212,14 +205,14 @@ func (s *terminalStream) output(runID string, data []byte) bool {
 	return true
 }
 
-// record queues a lifecycle record of run.
-func (s *terminalStream) record(runID string, kind wire.TerminalStreamRecordKind, payload []byte) {
+// resized queues the terminal's new grid at its place in the output.
+func (s *terminalStream) resized(payload []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.runID != runID {
+	if s.closed {
 		return
 	}
-	s.queue = append(s.queue, streamRecord{kind: kind, payload: payload})
+	s.queue = append(s.queue, streamRecord{kind: wire.TerminalRecordResized, payload: payload})
 	s.signal()
 }
 
@@ -324,23 +317,6 @@ func (s *terminalStream) write(batch []streamRecord, message []byte) error {
 	return flush()
 }
 
-// publishTerminalStreams gives every view's stream that follows the
-// session's run a record. Runs under the session's emit.
-func (s *Server) publishTerminalStreams(session *terminal.Session, kind wire.TerminalStreamRecordKind, payload any) {
-	entry := s.terminals.entry(session.TerminalID)
-	if entry == nil {
-		return
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		s.logger.Error("terminal stream record encoding failed", "terminal", session.TerminalID, "error", err)
-		return
-	}
-	entry.views.eachStream(func(stream *terminalStream) {
-		stream.record(session.RunID, kind, data)
-	})
-}
-
 func (s *Server) publishTerminalOutput(session *terminal.Session, data []byte) {
 	entry := s.terminals.entry(session.TerminalID)
 	if entry == nil {
@@ -348,7 +324,7 @@ func (s *Server) publishTerminalOutput(session *terminal.Session, data []byte) {
 	}
 	var resync *terminal.Snapshot
 	entry.views.eachStream(func(stream *terminalStream) {
-		if stream.output(session.RunID, data) {
+		if stream.output(data) {
 			return
 		}
 		// Too far behind to be sent what it missed: the client jumps to
@@ -367,5 +343,14 @@ func (s *Server) publishTerminalOutput(session *terminal.Session, data []byte) {
 }
 
 func (s *Server) publishTerminalResized(session *terminal.Session, columns, rows uint16) {
-	s.publishTerminalStreams(session, wire.TerminalRecordResized, wire.TerminalStreamResized{Columns: columns, Rows: rows})
+	entry := s.terminals.entry(session.TerminalID)
+	if entry == nil {
+		return
+	}
+	data, err := json.Marshal(wire.TerminalStreamResized{Columns: columns, Rows: rows})
+	if err != nil {
+		s.logger.Error("terminal stream record encoding failed", "terminal", session.TerminalID, "error", err)
+		return
+	}
+	entry.views.eachStream(func(stream *terminalStream) { stream.resized(data) })
 }

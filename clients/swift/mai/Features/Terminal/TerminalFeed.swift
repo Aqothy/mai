@@ -3,16 +3,13 @@ import GhosttyVT
 
 /// Applies one view's stream records to its terminal, off the main actor and
 /// in stream order. A snapshot replaces the terminal once all its data has
-/// arrived; output and resizes apply on top of it; lifecycle changes go to
-/// `events`. The daemon registers the stream atomically with its snapshot,
-/// so there is nothing to order, buffer or deduplicate here.
+/// arrived; output and resizes apply on top of it; what the view must act on
+/// goes to `events`. The daemon registers the stream atomically with its
+/// snapshot, so there is nothing to order, buffer or deduplicate here.
 actor TerminalFeed {
     enum Event: Sendable {
-        /// A snapshot of the run is installed; `status` is the run's at
-        /// that point, and `title` the program's.
-        case snapshot(runID: String, status: String, exitCode: Int?, title: String)
-        /// The run ended; the stream stays open.
-        case exited(status: String, exitCode: Int?)
+        /// A snapshot is installed; `title` is the program's at that point.
+        case snapshot(title: String)
         /// History no longer applies after a resize; attach again for a
         /// fresh snapshot.
         case needsSnapshot
@@ -75,9 +72,7 @@ actor TerminalFeed {
             await terminal.feed(data)
         case (.resized(let size), .live):
             try await terminal.resize(to: GridSize(columns: UInt16(size.columns), rows: UInt16(size.rows)))
-        case (.exited(let exited), .live):
-            await send(.exited(status: exited.status, exitCode: exited.exitCode))
-        case (.snapshotData, _), (.output, _), (.resized, _), (.exited, _):
+        case (.snapshotData, _), (.output, _), (.resized, _):
             throw TerminalStreamError(String(localized: "maiD sent a terminal record out of order."))
         }
     }
@@ -103,7 +98,7 @@ actor TerminalFeed {
             }
         }
         let title = await terminal.title
-        await send(.snapshot(runID: header.runID, status: header.status, exitCode: header.exitCode, title: title))
+        await send(.snapshot(title: title))
     }
 
     private func send(_ event: Event) async {

@@ -573,7 +573,7 @@ func TestSlowCallDoesNotBlockConnection(t *testing.T) {
 	var list []provider.InstanceInfo
 	client.call(t, wire.MethodProviderList, nil, &list)
 	created := createTestTerminal(t, client)
-	client.writeTerminal(t, created.Terminal.TerminalID, created.RunID, "printf 'NOT-BLOCKED-%d\\n' $((6*7))\n")
+	client.writeTerminal(t, created.Terminal.TerminalID, "printf 'NOT-BLOCKED-%d\\n' $((6*7))\n")
 	client.waitForOutput(t, "NOT-BLOCKED-42")
 	select {
 	case err := <-slow:

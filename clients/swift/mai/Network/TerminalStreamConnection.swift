@@ -13,7 +13,6 @@ nonisolated final class TerminalStreamConnection: Sendable {
         case snapshotData(Data)
         case output(Data)
         case resized(TerminalStreamResized)
-        case exited(TerminalStreamExited)
     }
 
     /// How a stream ended.
@@ -89,7 +88,6 @@ nonisolated final class TerminalStreamConnection: Sendable {
         case 0x02: return .snapshotData(payload)
         case 0x03: return .output(payload)
         case 0x04: return .resized(try decode(TerminalStreamResized.self))
-        case 0x05: return .exited(try decode(TerminalStreamExited.self))
         default:
             // Both sides ship together and the subprotocol names the version,
             // so an unknown record means the screen can't be trusted.

@@ -45,10 +45,6 @@ struct TerminalThreadRow: View {
     }
 
     private var accessibilityText: String {
-        var parts = ["Terminal", summary.displayTitle]
-        if let statusLabel = summary.statusLabel {
-            parts.append(statusLabel)
-        }
-        return parts.joined(separator: ", ")
+        ["Terminal", summary.displayTitle, summary.statusLabel].compactMap(\.self).joined(separator: ", ")
     }
 }

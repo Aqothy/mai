@@ -21,7 +21,6 @@ type collector struct {
 	exits  int
 	// outputAfterExit counts output delivered after the run's exit.
 	outputAfterExit int
-	status          Status
 	exitCode        *int
 	exited          chan struct{}
 }
@@ -40,10 +39,9 @@ func (c *collector) events() Events {
 			}
 			c.output.Write(data)
 		},
-		Exit: func(_ *Session, status Status, exitCode *int) {
+		Exit: func(_ *Session, exitCode *int) {
 			c.mu.Lock()
 			c.exits++
-			c.status = status
 			c.exitCode = exitCode
 			c.mu.Unlock()
 			close(c.exited)
@@ -194,9 +192,6 @@ func TestTerminateKillsProcessGroup(t *testing.T) {
 	waitFor(t, "process death", func() bool {
 		return syscall.Kill(pid, 0) != nil
 	})
-	if session.Status() != StatusStopped {
-		t.Fatalf("status = %s, want stopped", session.Status())
-	}
 	// Explicit termination discards the attach model.
 	if _, err := session.Snapshot(); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("terminated session snapshot error = %v, want ErrNotRunning", err)
@@ -253,9 +248,6 @@ func TestServiceCloseTerminatesAllSessions(t *testing.T) {
 	}
 	if _, err := svc.Start("late", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrServiceClosed) {
 		t.Fatalf("start after close err = %v, want ErrServiceClosed", err)
-	}
-	if _, err := svc.Relaunch("t0", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrServiceClosed) {
-		t.Fatalf("relaunch after close err = %v, want ErrServiceClosed", err)
 	}
 }
 

@@ -25,11 +25,11 @@ func TestTerminalProgramReportsReachTheListWithoutAttaching(t *testing.T) {
 	subscribeTerminalListSnapshot(t, observer)
 	controller := dialRecordingClient(t, url)
 	created := createTestTerminal(t, controller)
-	terminalID, runID := created.Terminal.TerminalID, created.RunID
+	terminalID := created.Terminal.TerminalID
 
 	// A right-to-left override in the message must not reach the list.
 	message := base64.StdEncoding.EncodeToString([]byte("Apply\u202e patch?"))
-	controller.writeTerminal(t, terminalID, runID,
+	controller.writeTerminal(t, terminalID,
 		`printf '\033]0;✳ refactor task\007\033]7;file:///tmp/project\007`+
 			`\033]7501;state=blocked:kind=permission:app=codex:msg=`+message+`\033\\'`+"\n")
 	blocked := waitForListUpsert(t, observer, func(summary wire.TerminalSummary) bool {
@@ -48,7 +48,7 @@ func TestTerminalProgramReportsReachTheListWithoutAttaching(t *testing.T) {
 	}
 
 	// Done stays until someone looks: attaching clears it.
-	controller.writeTerminal(t, terminalID, runID, `printf '\033]7501;state=done\033\\'`+"\n")
+	controller.writeTerminal(t, terminalID, `printf '\033]7501;state=done\033\\'`+"\n")
 	waitForListUpsert(t, observer, func(summary wire.TerminalSummary) bool {
 		return summary.TerminalID == terminalID && summary.ProgramStatus != nil &&
 			summary.ProgramStatus.State == terminal.ProgramDone
@@ -75,14 +75,14 @@ func TestTerminalQueriesGetExactlyOneReply(t *testing.T) {
 			url := newWSTestServer(t, s)
 			client := dialRecordingClient(t, url)
 			created := createTestTerminal(t, client)
-			terminalID, runID := created.Terminal.TerminalID, created.RunID
+			terminalID := created.Terminal.TerminalID
 			if viewers == 2 {
 				dialRecordingClient(t, url).mustAttachTerminal(t, terminalID, 80, 24)
 			}
 
 			// Ask, wait for every reply to arrive, then read them in one go.
 			replies := filepath.Join(t.TempDir(), "replies")
-			client.writeTerminal(t, terminalID, runID, "sleep 1; stty raw -echo; "+
+			client.writeTerminal(t, terminalID, "sleep 1; stty raw -echo; "+
 				"printf '\\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\\033\\\\\\033[c'; sleep 1; "+
 				"dd bs=256 count=1 2>/dev/null | od -An -tx1 > "+replies+"; stty sane\n")
 			if viewers == 0 {
@@ -126,7 +126,7 @@ func TestTerminalTitleAnimationsDontChurnTheList(t *testing.T) {
 	} {
 		script.WriteString(`printf '\033]0;` + title + `\007'; sleep 0.05; `)
 	}
-	controller.writeTerminal(t, terminalID, created.RunID, script.String()+"\n")
+	controller.writeTerminal(t, terminalID, script.String()+"\n")
 	waitForListUpsert(t, observer, func(summary wire.TerminalSummary) bool {
 		return summary.TerminalID == terminalID && summary.ProgramTitle == "end"
 	})

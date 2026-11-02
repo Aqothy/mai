@@ -3,8 +3,8 @@ import GhosttyTerminal
 import GhosttyVT
 import SwiftUI
 
-/// One client attachment to one terminal thread run, and the I/O of the
-/// terminal view that renders it.
+/// One client attachment to one terminal thread, and the I/O of the terminal
+/// view that renders it.
 ///
 /// Attaching returns a ticket for the view's terminal stream, which begins
 /// with a native Ghostty snapshot and carries everything after it; its
@@ -24,19 +24,13 @@ final class TerminalAttachment: TerminalIO {
     enum Mode: Equatable {
         /// Create a new terminal in the given working directory.
         case create(cwd: String, title: String?)
-        /// Attach to an existing terminal with a live run.
+        /// Attach to an existing terminal.
         case attach(terminalID: String)
-        /// Start a fresh run for an existing terminal (stopped rows, or the
-        /// explicit Relaunch action). If another client already did, this
-        /// joins its shell.
-        case relaunch(terminalID: String)
     }
 
     enum Phase: Equatable {
         case attaching
         case running
-        case exited(Int?)
-        case stopped
         case failed(String)
         case disconnected
     }
@@ -47,7 +41,7 @@ final class TerminalAttachment: TerminalIO {
     /// rendered screen visible while a replacement snapshot is in flight.
     private(set) var hasInstalledInitialSnapshot = false
 
-    /// Known immediately for attach/relaunch; assigned by the create snapshot.
+    /// Known immediately for attach; assigned by the create result.
     private(set) var terminalID: String?
 
     /// The title the program set, frame by frame: the open terminal shows
@@ -58,8 +52,7 @@ final class TerminalAttachment: TerminalIO {
     /// SwiftUI updates never recreate the surface.
     @ObservationIgnored let terminal: Terminal
 
-    /// The navigation request this attachment serves. Preserved across
-    /// relaunch replacement so a screen opened via `.new` keeps matching.
+    /// The navigation request this attachment serves.
     @ObservationIgnored let origin: TerminalOpenRequest
 
     /// The view's light or dark appearance, which the daemon answers the
@@ -72,8 +65,6 @@ final class TerminalAttachment: TerminalIO {
 
     /// Applies the stream to the terminal, off the main actor.
     @ObservationIgnored nonisolated let feed: TerminalFeed
-    /// The run the latest snapshot showed, which input goes to.
-    @ObservationIgnored private(set) var runID: String?
     /// Names this view's subscription on the connection, so a detach sent
     /// after the terminal was reopened elsewhere cannot drop the new view's.
     @ObservationIgnored private let attachmentID = UUID().uuidString
@@ -100,7 +91,7 @@ final class TerminalAttachment: TerminalIO {
         switch mode {
         case .create:
             terminalID = nil
-        case .attach(let terminalID), .relaunch(let terminalID):
+        case .attach(let terminalID):
             self.terminalID = terminalID
         }
         relay.attachment = self
@@ -119,11 +110,11 @@ final class TerminalAttachment: TerminalIO {
     // MARK: - TerminalIO
 
     /// The user's input. Every attached view may write to the shared PTY;
-    /// input is dropped unless this attachment is on a running shell.
+    /// input is dropped until this attachment shows the shell.
     func send(_ bytes: [UInt8]) {
-        guard !isClosed, phase == .running, !awaitingSnapshot, let terminalID, let runID else { return }
+        guard !isClosed, phase == .running, !awaitingSnapshot, let terminalID else { return }
         store?.rpc.writeTerminal(
-            TerminalWriteParams(data: Data(bytes).base64EncodedString(), runID: runID, terminalID: terminalID))
+            TerminalWriteParams(data: Data(bytes).base64EncodedString(), terminalID: terminalID))
     }
 
     /// The grid that fits the view: the first one starts the attach.
@@ -146,15 +137,16 @@ final class TerminalAttachment: TerminalIO {
 
     // MARK: - Lifecycle
 
-    /// Re-runs the attach flow over a fresh connection. The last rendered
-    /// screen stays visible until the new snapshot replaces it.
-    func reattachAfterReconnect() {
+    /// Re-runs the attach flow, after a reconnect or when the user retries a
+    /// failed attach. The last rendered screen stays visible until the new
+    /// snapshot replaces it.
+    func reattach() {
         guard !isClosed else { return }
         if let terminalID {
             mode = .attach(terminalID: terminalID)
         }
         // Without an identity the original create never completed; retry it
-        // unchanged on the fresh connection.
+        // unchanged.
         requestSnapshot(phase: .attaching)
     }
 
@@ -226,11 +218,6 @@ final class TerminalAttachment: TerminalIO {
                     TerminalAttachParams(
                         appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
                         focus: !hasInstalledInitialSnapshot, rows: Int(grid.rows), terminalID: terminalID))
-            case .relaunch(let terminalID):
-                result = try await rpc.relaunchTerminal(
-                    TerminalRelaunchParams(
-                        appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
-                        rows: Int(grid.rows), terminalID: terminalID))
             }
             // A reconnect or replacement may have canceled this request while
             // the RPC completed; its response must not overwrite the newer one.
@@ -300,27 +287,14 @@ final class TerminalAttachment: TerminalIO {
     fileprivate func handle(_ event: TerminalFeed.Event) {
         guard !isClosed else { return }
         switch event {
-        case .snapshot(let runID, let status, let exitCode, let title):
-            self.runID = runID
+        case .snapshot(let title):
             awaitingSnapshot = false
             hasInstalledInitialSnapshot = true
             // The snapshot carries the title without announcing it.
             programTitle = title
-            switch MaidTerminalStatus(rawValue: status) {
-            case .starting, .running, nil: phase = .running
-            case .exited: phase = .exited(exitCode)
-            case .stopped: phase = .stopped
-            case .error: phase = .failed(String(localized: "The terminal failed"))
-            }
+            phase = .running
             // The view may have changed while it attached.
             reportView()
-        case .exited(let status, let exitCode):
-            switch MaidTerminalStatus(rawValue: status) {
-            case .exited: phase = .exited(exitCode)
-            case .stopped: phase = .stopped
-            case .error: phase = .failed(String(localized: "The terminal failed"))
-            case .starting, .running, nil: break
-            }
         case .needsSnapshot:
             requestSnapshot(phase: phase == .running ? .running : .attaching)
         }

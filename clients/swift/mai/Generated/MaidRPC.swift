@@ -30,7 +30,6 @@ nonisolated public enum MaidRPCMethod {
     public static let providerQuestionAnswer = "provider.question.answer"
     public static let terminalCreate = "terminal.create"
     public static let terminalAttach = "terminal.attach"
-    public static let terminalRelaunch = "terminal.relaunch"
     public static let terminalSubscribeList = "terminal.subscribeList"
     public static let terminalRename = "terminal.rename"
     public static let terminalDelete = "terminal.delete"

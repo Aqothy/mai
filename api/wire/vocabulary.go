@@ -380,17 +380,6 @@ var Vocabularies = []VocabularyDefinition{
 		},
 	},
 	{
-		Name:        "TerminalStatus",
-		Description: "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
-		Values: []string{
-			string(terminal.StatusStarting),
-			string(terminal.StatusRunning),
-			string(terminal.StatusExited),
-			string(terminal.StatusStopped),
-			string(terminal.StatusError),
-		},
-	},
-	{
 		Name:        "TerminalListStreamItemKind",
 		Description: "Payload discriminator of a terminal.subscribeList snapshot or update.",
 		Values: []string{

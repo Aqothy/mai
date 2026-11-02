@@ -305,15 +305,6 @@ public enum MaidAuthStatus: String, Codable, Sendable, CaseIterable {
     case unauthenticated = "unauthenticated"
 }
 
-/// Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.
-public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
-    case starting = "starting"
-    case running = "running"
-    case exited = "exited"
-    case stopped = "stopped"
-    case error = "error"
-}
-
 /// Payload discriminator of a terminal.subscribeList snapshot or update.
 public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseIterable {
     case snapshot = "snapshot"

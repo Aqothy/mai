@@ -5782,26 +5782,23 @@ public extension TerminalAttachResult {
 public struct TerminalSummary: Codable {
     public var createdAt: Date
     public var cwd: String
-    public var exitCode: Int?
     public var programStatus: TerminalProgramStatus?
     public var programTitle, pwd: String?
-    public var status, terminalID, title: String
+    public var terminalID, title: String
     public var updatedAt: Date
 
     public enum CodingKeys: String, CodingKey {
-        case createdAt, cwd, exitCode, programStatus, programTitle, pwd, status
+        case createdAt, cwd, programStatus, programTitle, pwd
         case terminalID = "terminalId"
         case title, updatedAt
     }
 
-    public init(createdAt: Date, cwd: String, exitCode: Int?, programStatus: TerminalProgramStatus?, programTitle: String?, pwd: String?, status: String, terminalID: String, title: String, updatedAt: Date) {
+    public init(createdAt: Date, cwd: String, programStatus: TerminalProgramStatus?, programTitle: String?, pwd: String?, terminalID: String, title: String, updatedAt: Date) {
         self.createdAt = createdAt
         self.cwd = cwd
-        self.exitCode = exitCode
         self.programStatus = programStatus
         self.programTitle = programTitle
         self.pwd = pwd
-        self.status = status
         self.terminalID = terminalID
         self.title = title
         self.updatedAt = updatedAt
@@ -5829,11 +5826,9 @@ public extension TerminalSummary {
     func with(
         createdAt: Date? = nil,
         cwd: String? = nil,
-        exitCode: Int?? = nil,
         programStatus: TerminalProgramStatus?? = nil,
         programTitle: String?? = nil,
         pwd: String?? = nil,
-        status: String? = nil,
         terminalID: String? = nil,
         title: String? = nil,
         updatedAt: Date? = nil
@@ -5841,11 +5836,9 @@ public extension TerminalSummary {
         return TerminalSummary(
             createdAt: createdAt ?? self.createdAt,
             cwd: cwd ?? self.cwd,
-            exitCode: exitCode ?? self.exitCode,
             programStatus: programStatus ?? self.programStatus,
             programTitle: programTitle ?? self.programTitle,
             pwd: pwd ?? self.pwd,
-            status: status ?? self.status,
             terminalID: terminalID ?? self.terminalID,
             title: title ?? self.title,
             updatedAt: updatedAt ?? self.updatedAt
@@ -6159,72 +6152,6 @@ public extension TerminalListStreamItem {
     }
 }
 
-// MARK: - TerminalRelaunchParams
-public struct TerminalRelaunchParams: Codable {
-    public var appearance: TerminalAppearance
-    public var attachmentID: String
-    public var columns, rows: Int
-    public var terminalID: String
-
-    public enum CodingKeys: String, CodingKey {
-        case appearance
-        case attachmentID = "attachmentId"
-        case columns, rows
-        case terminalID = "terminalId"
-    }
-
-    public init(appearance: TerminalAppearance, attachmentID: String, columns: Int, rows: Int, terminalID: String) {
-        self.appearance = appearance
-        self.attachmentID = attachmentID
-        self.columns = columns
-        self.rows = rows
-        self.terminalID = terminalID
-    }
-}
-
-// MARK: TerminalRelaunchParams convenience initializers and mutators
-
-public extension TerminalRelaunchParams {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(TerminalRelaunchParams.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        appearance: TerminalAppearance? = nil,
-        attachmentID: String? = nil,
-        columns: Int? = nil,
-        rows: Int? = nil,
-        terminalID: String? = nil
-    ) -> TerminalRelaunchParams {
-        return TerminalRelaunchParams(
-            appearance: appearance ?? self.appearance,
-            attachmentID: attachmentID ?? self.attachmentID,
-            columns: columns ?? self.columns,
-            rows: rows ?? self.rows,
-            terminalID: terminalID ?? self.terminalID
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - TerminalRenameParams
 public struct TerminalRenameParams: Codable {
     public var terminalID, title: String
@@ -6337,54 +6264,6 @@ public extension TerminalResizeParams {
     }
 }
 
-// MARK: - TerminalStreamExited
-public struct TerminalStreamExited: Codable {
-    public var exitCode: Int?
-    public var status: String
-
-    public init(exitCode: Int?, status: String) {
-        self.exitCode = exitCode
-        self.status = status
-    }
-}
-
-// MARK: TerminalStreamExited convenience initializers and mutators
-
-public extension TerminalStreamExited {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(TerminalStreamExited.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        exitCode: Int?? = nil,
-        status: String? = nil
-    ) -> TerminalStreamExited {
-        return TerminalStreamExited(
-            exitCode: exitCode ?? self.exitCode,
-            status: status ?? self.status
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - TerminalStreamResized
 public struct TerminalStreamResized: Codable {
     public var columns, rows: Int
@@ -6434,23 +6313,12 @@ public extension TerminalStreamResized {
 
 // MARK: - TerminalStreamSnapshot
 public struct TerminalStreamSnapshot: Codable {
-    public var exitCode: Int?
-    public var runID: String
     public var size: Int
-    public var snapshotFormat, status: String
+    public var snapshotFormat: String
 
-    public enum CodingKeys: String, CodingKey {
-        case exitCode
-        case runID = "runId"
-        case size, snapshotFormat, status
-    }
-
-    public init(exitCode: Int?, runID: String, size: Int, snapshotFormat: String, status: String) {
-        self.exitCode = exitCode
-        self.runID = runID
+    public init(size: Int, snapshotFormat: String) {
         self.size = size
         self.snapshotFormat = snapshotFormat
-        self.status = status
     }
 }
 
@@ -6473,18 +6341,12 @@ public extension TerminalStreamSnapshot {
     }
 
     func with(
-        exitCode: Int?? = nil,
-        runID: String? = nil,
         size: Int? = nil,
-        snapshotFormat: String? = nil,
-        status: String? = nil
+        snapshotFormat: String? = nil
     ) -> TerminalStreamSnapshot {
         return TerminalStreamSnapshot(
-            exitCode: exitCode ?? self.exitCode,
-            runID: runID ?? self.runID,
             size: size ?? self.size,
-            snapshotFormat: snapshotFormat ?? self.snapshotFormat,
-            status: status ?? self.status
+            snapshotFormat: snapshotFormat ?? self.snapshotFormat
         )
     }
 
@@ -6499,17 +6361,15 @@ public extension TerminalStreamSnapshot {
 
 // MARK: - TerminalWriteParams
 public struct TerminalWriteParams: Codable {
-    public var data, runID, terminalID: String
+    public var data, terminalID: String
 
     public enum CodingKeys: String, CodingKey {
         case data
-        case runID = "runId"
         case terminalID = "terminalId"
     }
 
-    public init(data: String, runID: String, terminalID: String) {
+    public init(data: String, terminalID: String) {
         self.data = data
-        self.runID = runID
         self.terminalID = terminalID
     }
 }
@@ -6534,12 +6394,10 @@ public extension TerminalWriteParams {
 
     func with(
         data: String? = nil,
-        runID: String? = nil,
         terminalID: String? = nil
     ) -> TerminalWriteParams {
         return TerminalWriteParams(
             data: data ?? self.data,
-            runID: runID ?? self.runID,
             terminalID: terminalID ?? self.terminalID
         )
     }

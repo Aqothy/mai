@@ -36,21 +36,20 @@ const (
 // reading stdin cannot block callers, resize, or termination.
 type Session struct {
 	TerminalID string
-	RunID      string
 
 	// emit orders the run's events: output, resizes and the exit are applied
 	// and published while holding it, and Observe snapshots under it, so an
 	// observer gets every event after its snapshot and none before.
 	emit sync.Mutex
 
-	mu       sync.Mutex
-	ptyFile  *os.File
-	cmd      *exec.Cmd
-	status   Status
-	columns  uint16
-	rows     uint16
-	exitCode *int
-	events   Events
+	mu      sync.Mutex
+	ptyFile *os.File
+	cmd     *exec.Cmd
+	// ended is set once the program is over, or when Terminate ends it.
+	ended   bool
+	columns uint16
+	rows    uint16
+	events  Events
 	// vt is the run's terminal: it answers the program's queries and is
 	// the attach model. It is fed under emit and mu, so a snapshot taken
 	// under emit describes exactly the events published before it. Nil only
@@ -111,9 +110,7 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 
 	s := &Session{
 		TerminalID: terminalID,
-		RunID:      newRunID(),
 		cmd:        cmd,
-		status:     StatusStarting,
 		columns:    spec.Columns,
 		rows:       spec.Rows,
 		events:     events,
@@ -137,7 +134,6 @@ func startSession(terminalID string, spec SpawnSpec, events Events) (*Session, e
 		return nil, fmt.Errorf("spawn %s: %w", cmd.Path, err)
 	}
 	s.ptyFile = ptyFile
-	s.status = StatusRunning
 	go s.readLoop()
 	go s.writeLoop()
 	return s, nil
@@ -207,29 +203,24 @@ func (s *Session) readLoop() {
 
 	s.emit.Lock()
 	s.mu.Lock()
-	if s.status == StatusRunning || s.status == StatusStarting {
-		s.status = StatusExited
-	}
-	if hasCode {
-		s.exitCode = &code
-	}
-	if s.status == StatusStopped {
-		// Explicit termination discards attach state; a natural exit keeps
-		// it viewable until relaunch, delete, or daemon shutdown.
-		if s.vt != nil {
-			s.vt.Close()
-			s.vt = nil
-		}
+	exited := !s.ended
+	s.ended = true
+	if !exited && s.vt != nil {
+		// Explicit termination discards attach state.
+		s.vt.Close()
+		s.vt = nil
 	}
 	// Nothing is working or waiting once the run is over.
 	s.programs.remove(ProgramWorking, ProgramBlocked)
-	status := s.status
-	exitPtr := s.exitCode
 	s.mu.Unlock()
 	// The exit is the run's last event: output has drained and resizes
 	// refuse a run that isn't running.
-	if s.events.Exit != nil {
-		s.events.Exit(s, status, exitPtr)
+	if exited && s.events.Exit != nil {
+		var exitPtr *int
+		if hasCode {
+			exitPtr = &code
+		}
+		s.events.Exit(s, exitPtr)
 	}
 	s.emit.Unlock()
 
@@ -294,11 +285,8 @@ func (s *Session) feed(data []byte) {
 // native Ghostty model; taken by Observe, it is followed by exactly the
 // events after it.
 type Snapshot struct {
-	RunID          string
-	Status         Status
 	Columns        uint16
 	Rows           uint16
-	ExitCode       *int
 	SnapshotFormat string
 	Data           []byte
 }
@@ -307,13 +295,7 @@ type Snapshot struct {
 func (s *Session) Snapshot() (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snapshot := Snapshot{
-		RunID:    s.RunID,
-		Status:   s.status,
-		Columns:  s.columns,
-		Rows:     s.rows,
-		ExitCode: s.exitCode,
-	}
+	snapshot := Snapshot{Columns: s.columns, Rows: s.rows}
 	if s.vt == nil {
 		return snapshot, ErrNotRunning
 	}
@@ -342,7 +324,7 @@ func (s *Session) Observe(register func(Snapshot)) error {
 }
 
 // Release frees the attach model's native resources once no future attach
-// can need them: after relaunch, removal, or service shutdown. Idempotent.
+// can need them: after removal or service shutdown. Idempotent.
 func (s *Session) Release() {
 	s.mu.Lock()
 	if s.vt != nil {
@@ -356,9 +338,9 @@ func (s *Session) Release() {
 // dropped with ErrInputQueueFull rather than stalling the caller.
 func (s *Session) Write(data []byte) error {
 	s.mu.Lock()
-	running := s.status == StatusRunning
+	ended := s.ended
 	s.mu.Unlock()
-	if !running {
+	if ended {
 		return ErrNotRunning
 	}
 	if !s.queueInput(data) {
@@ -419,7 +401,7 @@ func (s *Session) Resize(columns, rows uint16) error {
 	s.emit.Lock()
 	defer s.emit.Unlock()
 	s.mu.Lock()
-	if s.status != StatusRunning {
+	if s.ended {
 		s.mu.Unlock()
 		return ErrNotRunning
 	}
@@ -453,10 +435,8 @@ func (s *Session) Resize(columns, rows uint16) error {
 func (s *Session) Terminate(grace time.Duration) {
 	s.terminateOnce.Do(func() {
 		s.mu.Lock()
-		alive := s.status == StatusRunning || s.status == StatusStarting
-		if alive {
-			s.status = StatusStopped
-		}
+		alive := !s.ended
+		s.ended = true
 		pid := 0
 		if s.cmd.Process != nil {
 			pid = s.cmd.Process.Pid
@@ -490,28 +470,11 @@ func (s *Session) Terminate(grace time.Duration) {
 	<-s.done
 }
 
-// Status returns the current lifecycle status.
-func (s *Session) Status() Status {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.status
-}
-
 // Size returns the last applied grid dimensions.
 func (s *Session) Size() (columns, rows uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.columns, s.rows
-}
-
-// ExitCode returns the child's exit code when it has one.
-func (s *Session) ExitCode() (code int, ok bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.exitCode == nil {
-		return 0, false
-	}
-	return *s.exitCode, true
 }
 
 // Done closes after the run has fully ended and its resources are released.
@@ -584,13 +547,9 @@ func sessionEnv() []string {
 
 // NewID returns a unique terminal thread id.
 func NewID() string {
-	return "terminal-" + newRunID()
-}
-
-func newRunID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	return "terminal-" + hex.EncodeToString(b[:])
 }
 
 func exitCode(waitErr error) (code int, ok bool) {

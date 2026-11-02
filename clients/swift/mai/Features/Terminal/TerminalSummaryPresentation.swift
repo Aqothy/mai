@@ -7,8 +7,6 @@ extension TerminalSummary: Equatable {
         lhs.terminalID == rhs.terminalID
             && lhs.title == rhs.title
             && lhs.cwd == rhs.cwd
-            && lhs.status == rhs.status
-            && lhs.exitCode == rhs.exitCode
             && lhs.createdAt == rhs.createdAt
             && lhs.updatedAt == rhs.updatedAt
             && lhs.programTitle == rhs.programTitle
@@ -33,10 +31,6 @@ extension TerminalProgramStatus: Equatable {
 /// these derived values, never live output or store objects. Program text
 /// comes from the program, sanitized by the daemon.
 extension TerminalSummary {
-    var terminalStatus: MaidTerminalStatus? {
-        MaidTerminalStatus(rawValue: status)
-    }
-
     /// What the program reports doing; nil when it reports nothing, or a
     /// future state, which renders neutrally.
     var programState: MaidTerminalProgramState? {
@@ -69,26 +63,10 @@ extension TerminalSummary {
         return workingDirectoryName
     }
 
-    /// Compact status for list rows: while running, what the program
-    /// reports; otherwise the lifecycle.
-    var statusLabel: String? {
-        if isRunning, let programLabel {
-            return programLabel
-        }
-        return lifecycleLabel
-    }
-
-    /// Shared thread-list indicator. Running shells without a report stay
-    /// quiet; reports use the same visuals as agent rows.
+    /// Shared thread-list indicator. A terminal without a report stays quiet;
+    /// reports use the same visuals as agent rows.
     var rowIndicatorStatus: ThreadRowIndicatorStatus? {
-        guard isRunning else {
-            return switch terminalStatus {
-            case .error: .failed
-            case .stopped: .interrupted
-            case .starting, .running, .exited, nil: nil
-            }
-        }
-        return switch programState {
+        switch programState {
         case .blocked: .needsInput
         case .working: .working
         case .done: .done
@@ -97,7 +75,8 @@ extension TerminalSummary {
         }
     }
 
-    private var programLabel: String? {
+    /// Compact status for list rows: what the program reports, if anything.
+    var statusLabel: String? {
         switch programState {
         case .blocked:
             switch programStatus?.need.flatMap(MaidTerminalProgramNeed.init(rawValue:)) {
@@ -116,29 +95,6 @@ extension TerminalSummary {
         case .error: String(localized: "Failed")
         case .idle: String(localized: "Ready")
         case nil: nil
-        }
-    }
-
-    private var lifecycleLabel: String? {
-        switch terminalStatus {
-        case .starting, .running: String(localized: "Running")
-        case .exited: String(localized: "Exited")
-        case .stopped: String(localized: "Stopped")
-        case .error: String(localized: "Error")
-        case nil: nil
-        }
-    }
-
-    /// Whether a live shell can accept input right now.
-    var isRunning: Bool {
-        terminalStatus == .running || terminalStatus == .starting
-    }
-
-    /// Stopped and error rows need a fresh run rather than an attach.
-    var needsRelaunchToOpen: Bool {
-        switch terminalStatus {
-        case .stopped, .error: true
-        case .starting, .running, .exited, nil: false
         }
     }
 }

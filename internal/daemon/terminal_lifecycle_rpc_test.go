@@ -1,8 +1,8 @@
 package daemon
 
 // Terminal lifecycle tests: reattach snapshot ordering, detach without
-// termination, relaunch run fencing, and shared multi-client attachment, all
-// through real WebSocket clients.
+// termination, and shared multi-client attachment, all through real WebSocket
+// clients.
 
 import (
 	"bytes"
@@ -32,14 +32,11 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'HISTORY-%d\\n' $((80+8))\n")
+	first.writeTerminal(t, terminalID, "printf 'HISTORY-%d\\n' $((80+8))\n")
 	first.waitForOutput(t, "HISTORY-88")
 
 	second := dialRecordingClient(t, url)
 	attach := second.mustAttachTerminal(t, terminalID, 96, 31)
-	if attach.RunID != snapshot.RunID {
-		t.Fatalf("attach run id = %s, want %s", attach.RunID, snapshot.RunID)
-	}
 	// The Ghostty commit the daemon links.
 	const wantFormat = "ghostty-gsn-v1-f54340ad77814fe319d136e5e915d6a48de8dd23"
 	if attach.SnapshotFormat != wantFormat {
@@ -50,7 +47,7 @@ func TestTerminalReattachReceivesSnapshotThenLive(t *testing.T) {
 	}
 
 	// The new listener can write, and its stream carries the output.
-	second.writeTerminal(t, terminalID, attach.RunID, "printf 'LIVE-%d\\n' $((60+6))\n")
+	second.writeTerminal(t, terminalID, "printf 'LIVE-%d\\n' $((60+6))\n")
 	attach.stream.waitOutput(t, 1, "LIVE-66")
 }
 
@@ -64,15 +61,15 @@ func TestTerminalMultipleAttachedClientsShareInputOutputAndResize(t *testing.T) 
 
 	snapshot := createTestTerminal(t, first)
 	terminalID := snapshot.Terminal.TerminalID
-	attach := second.mustAttachTerminal(t, terminalID, 80, 24)
+	second.mustAttachTerminal(t, terminalID, 80, 24)
 
 	// Both attached clients may write, and each sees the resulting shared
 	// stream from the one PTY.
-	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'FIRST-%d\\n' $((9*9))\n")
+	first.writeTerminal(t, terminalID, "printf 'FIRST-%d\\n' $((9*9))\n")
 	first.waitForOutput(t, "FIRST-81")
 	second.waitForOutput(t, "FIRST-81")
 
-	second.writeTerminal(t, terminalID, attach.RunID, "printf 'SECOND-%d\\n' $((9*9))\n")
+	second.writeTerminal(t, terminalID, "printf 'SECOND-%d\\n' $((9*9))\n")
 	first.waitForOutput(t, "SECOND-81")
 	second.waitForOutput(t, "SECOND-81")
 
@@ -105,8 +102,8 @@ func TestTerminalSizeFollowsTheActiveView(t *testing.T) {
 	url := newWSTestServer(t, s)
 	laptop := dialRecordingClient(t, url)
 	phone := dialRecordingClient(t, url)
-	printSize := func(c *recordingClient, terminalID, runID, label string) {
-		c.writeTerminal(t, terminalID, runID, "printf '"+label+"-%s\\n' \"$(stty size)\"\n")
+	printSize := func(c *recordingClient, terminalID, label string) {
+		c.writeTerminal(t, terminalID, "printf '"+label+"-%s\\n' \"$(stty size)\"\n")
 	}
 	attach := func(c *recordingClient, terminalID, attachmentID string, columns, rows uint16, focus bool) testView {
 		var result wire.TerminalAttachResult
@@ -122,7 +119,7 @@ func TestTerminalSizeFollowsTheActiveView(t *testing.T) {
 		Cwd: t.TempDir(), Columns: 120, Rows: 40, AttachmentID: "laptop", Appearance: testAppearance,
 	}, &result)
 	created := laptop.view(t, result)
-	terminalID, runID := created.Terminal.TerminalID, created.RunID
+	terminalID := created.Terminal.TerminalID
 
 	// A view reattaching keeps the laptop's grid, which its snapshot is at.
 	reattached := attach(phone, terminalID, "phone-1", 41, 32, false)
@@ -131,16 +128,16 @@ func TestTerminalSizeFollowsTheActiveView(t *testing.T) {
 	}
 	// Input alone doesn't take the size: it may be a report the program
 	// asked for, such as focus out when the phone locks.
-	printSize(phone, terminalID, runID, "INPUT")
+	printSize(phone, terminalID, "INPUT")
 	phone.waitForOutput(t, "INPUT-40 120")
 	phone.notify(t, wire.MethodTerminalFocus, wire.TerminalIDParams{TerminalID: terminalID})
-	printSize(phone, terminalID, runID, "FOCUSED")
+	printSize(phone, terminalID, "FOCUSED")
 	phone.waitForOutput(t, "FOCUSED-32 41")
 
 	// The laptop's window changing while the phone is active only records
 	// the laptop's grid; focusing the laptop then takes it.
 	laptop.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, Columns: 100, Rows: 30, Appearance: testAppearance})
-	printSize(phone, terminalID, runID, "STILL")
+	printSize(phone, terminalID, "STILL")
 	still := reattached.stream.waitOutput(t, 0, "STILL-32 41")
 	// Records arrive in order, so a resize to the laptop's grid would have
 	// come before that output.
@@ -166,7 +163,7 @@ func TestTerminalSizeFollowsTheActiveView(t *testing.T) {
 	created.stream.waitRecord(t, "resize back to the laptop's grid", seen, resizedTo(100, 30))
 }
 
-func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testing.T) {
+func TestInvalidAttachDimensionsDoNotAffectExistingAttachment(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
@@ -179,14 +176,8 @@ func TestInvalidAttachDimensionsDoNotAffectExistingAttachmentOrRelaunch(t *testi
 	if _, err := second.attachTerminal(terminalID, 1, 24); err == nil {
 		t.Fatal("attach with invalid dimensions succeeded")
 	}
-	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n")
+	first.writeTerminal(t, terminalID, "printf 'AFTER-BAD-ATTACH-%d\\n' $((4+3))\n")
 	first.waitForOutput(t, "AFTER-BAD-ATTACH-7")
-
-	if err := second.callErr(wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: terminalID, Columns: 80, Rows: 301, Appearance: testAppearance}, nil); err == nil {
-		t.Fatal("relaunch with invalid dimensions succeeded")
-	}
-	first.writeTerminal(t, terminalID, snapshot.RunID, "printf 'AFTER-BAD-RELAUNCH-%d\\n' $((4+4))\n")
-	first.waitForOutput(t, "AFTER-BAD-RELAUNCH-8")
 }
 
 // TestTerminalDetachAndDisconnectKeepShellRunning covers both ways a client
@@ -201,19 +192,16 @@ func TestTerminalDetachAndDisconnectKeepShellRunning(t *testing.T) {
 
 	snapshot := createTestTerminal(t, client)
 	terminalID := snapshot.Terminal.TerminalID
-	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'BEFORE-%d\\n' $((10+1))\n")
+	client.writeTerminal(t, terminalID, "printf 'BEFORE-%d\\n' $((10+1))\n")
 	client.waitForOutput(t, "BEFORE-11")
 
 	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
 	if code := snapshot.stream.waitClosed(t); code != websocket.StatusNormalClosure {
 		t.Fatalf("detach closed the stream with %v, want %v", code, websocket.StatusNormalClosure)
 	}
-	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'DETACHED-%d\\n' $((10+2))\n")
+	client.writeTerminal(t, terminalID, "printf 'DETACHED-%d\\n' $((10+2))\n")
 
 	reattach := client.mustAttachTerminal(t, terminalID, 80, 24)
-	if reattach.RunID != snapshot.RunID {
-		t.Fatal("detach terminated the shell")
-	}
 	if !containsBytes(reattach.Snapshot, "BEFORE-11") {
 		t.Fatal("snapshot lost pre-detach output")
 	}
@@ -234,7 +222,7 @@ func TestTerminalDetachAndDisconnectKeepShellRunning(t *testing.T) {
 		return len(entry.views.list) == 0
 	})
 	next := dialRecordingClient(t, url)
-	if attach := next.mustAttachTerminal(t, terminalID, 80, 24); attach.RunID != snapshot.RunID {
+	if attach := next.mustAttachTerminal(t, terminalID, 80, 24); !containsBytes(attach.Snapshot, "BEFORE-11") {
 		t.Fatal("client disconnect terminated the shell")
 	}
 }
@@ -260,86 +248,8 @@ func TestTerminalLateDetachKeepsReplacementAttachment(t *testing.T) {
 	}
 	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: terminalID})
 
-	client.writeTerminal(t, terminalID, reopened.RunID, "printf 'REOPENED-%d\\n' $((30+3))\n")
+	client.writeTerminal(t, terminalID, "printf 'REOPENED-%d\\n' $((30+3))\n")
 	reopened.stream.waitOutput(t, 1, "REOPENED-33")
-}
-
-// Relaunching from one view gives that view a new stream on the new run,
-// and moves every other view's open stream to the new run with a snapshot.
-func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	client := dialRecordingClient(t, url)
-	other := dialRecordingClient(t, url)
-
-	snapshot := createTestTerminal(t, client)
-	terminalID := snapshot.Terminal.TerminalID
-	watching := other.mustAttachTerminal(t, terminalID, 80, 24)
-	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'OLDRUN-%d\\n' $((20+2))\n")
-	watched := watching.stream.waitOutput(t, 1, "OLDRUN-22")
-	// A run the daemon ended keeps its terminal and its views; a relaunch only
-	// replaces a run that is over.
-	running, err := s.terminals.service.Get(terminalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	running.Terminate(time.Second)
-
-	var result wire.TerminalAttachResult
-	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: terminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &result)
-	if code := snapshot.stream.waitClosed(t); code != websocket.StatusNormalClosure {
-		t.Fatalf("relaunching view's old stream closed with %v, want %v", code, websocket.StatusNormalClosure)
-	}
-	relaunched := client.view(t, result)
-	if relaunched.RunID == snapshot.RunID {
-		t.Fatal("relaunch reused the old run id")
-	}
-	if containsBytes(relaunched.Snapshot, "OLDRUN-22") {
-		t.Fatal("relaunch kept the old run's snapshot")
-	}
-	_, moved := watching.stream.waitRecord(t, "the other view's snapshot of the new run", watched, isSnapshot)
-	if moved.snapshot.RunID != relaunched.RunID {
-		t.Fatalf("other view moved to run %s, want %s", moved.snapshot.RunID, relaunched.RunID)
-	}
-	if containsBytes(moved.data, "OLDRUN-22") {
-		t.Fatal("the other view's new snapshot kept the old run's output")
-	}
-
-	// Stale input carrying the old run id cannot reach the new shell.
-	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'STALERUN-%d\\n' $((40+4))\n")
-	client.writeTerminal(t, terminalID, relaunched.RunID, "printf 'FRESH-%d\\n' $((40+5))\n")
-	relaunched.stream.waitOutput(t, 1, "FRESH-45")
-	if client.outputContains("STALERUN-44") {
-		t.Fatal("stale run input reached the relaunched shell")
-	}
-}
-
-// A relaunch never ends a running shell, whatever the caller last saw: it joins
-// the shell instead.
-func TestTerminalRelaunchJoinsARunningShell(t *testing.T) {
-	useQuietTestShell(t)
-	s := newTestServer(t)
-	defer s.Close()
-	url := newWSTestServer(t, s)
-	first := dialRecordingClient(t, url)
-	second := dialRecordingClient(t, url)
-
-	created := createTestTerminal(t, first)
-	terminalID := created.Terminal.TerminalID
-	// Only this shell knows the variable, so reading it back proves the shell
-	// survived and wasn't replaced by another.
-	first.writeTerminal(t, terminalID, created.RunID, "MARK=SURVIVOR-$((30+7))\n")
-
-	var joined wire.TerminalAttachResult
-	second.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: terminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &joined)
-	view := second.view(t, joined)
-	if view.RunID != created.RunID {
-		t.Fatalf("relaunch put the view on run %s, want the running %s", view.RunID, created.RunID)
-	}
-	first.writeTerminal(t, terminalID, created.RunID, "printf 'STILL-%s\\n' \"$MARK\"\n")
-	view.stream.waitOutput(t, 1, "STILL-SURVIVOR-37")
 }
 
 // A shell that ends by itself, as with exit or Ctrl-D, takes its terminal with
@@ -364,7 +274,7 @@ func TestTerminalShellExitRemovesTheTerminal(t *testing.T) {
 	}
 
 	opened := createTestTerminal(t, client)
-	client.writeTerminal(t, opened.Terminal.TerminalID, opened.RunID, "exit 4\n")
+	client.writeTerminal(t, opened.Terminal.TerminalID, "exit 4\n")
 	if code := opened.stream.waitClosed(t); code != websocket.StatusNormalClosure {
 		t.Fatalf("exit closed the stream with %v, want %v", code, websocket.StatusNormalClosure)
 	}
@@ -373,7 +283,7 @@ func TestTerminalShellExitRemovesTheTerminal(t *testing.T) {
 	// Input needs an attached view, so this shell is told to exit before the
 	// view leaves.
 	background := createTestTerminal(t, client)
-	client.writeTerminal(t, background.Terminal.TerminalID, background.RunID, "sleep 1; exit\n")
+	client.writeTerminal(t, background.Terminal.TerminalID, "sleep 1; exit\n")
 	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: background.Terminal.TerminalID})
 	removed(background.Terminal.TerminalID)
 
@@ -401,11 +311,11 @@ func TestTerminalInputToProgramNotReadingDoesNotBlockConnection(t *testing.T) {
 
 	created := createTestTerminal(t, client)
 	terminalID := created.Terminal.TerminalID
-	client.writeTerminal(t, terminalID, created.RunID, "printf 'SLEEPING-%d\\n' $((5+5)); exec sleep 600\n")
+	client.writeTerminal(t, terminalID, "printf 'SLEEPING-%d\\n' $((5+5)); exec sleep 600\n")
 	client.waitForOutput(t, "SLEEPING-10")
 	paste := strings.Repeat(strings.Repeat("x", 63)+"\n", 16)
 	for range 256 {
-		client.writeTerminal(t, terminalID, created.RunID, paste)
+		client.writeTerminal(t, terminalID, paste)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -425,7 +335,7 @@ func TestTerminalExitDuringResizesFinishes(t *testing.T) {
 	client := dialRecordingClient(t, url)
 	for range 20 {
 		created := createTestTerminal(t, client)
-		terminalID, runID := created.Terminal.TerminalID, created.RunID
+		terminalID := created.Terminal.TerminalID
 		stop := make(chan struct{})
 		resized := make(chan struct{})
 		go func() {
@@ -443,7 +353,7 @@ func TestTerminalExitDuringResizesFinishes(t *testing.T) {
 				cancel()
 			}
 		}()
-		client.writeTerminal(t, terminalID, runID, "exit\n")
+		client.writeTerminal(t, terminalID, "exit\n")
 		created.stream.waitClosed(t)
 		close(stop)
 		<-resized

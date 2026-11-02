@@ -11,24 +11,6 @@ import (
 	"fmt"
 )
 
-// Status describes the lifecycle of one terminal run.
-type Status string
-
-const (
-	// StatusStarting means shell spawn is in progress.
-	StatusStarting Status = "starting"
-	// StatusRunning means the PTY accepts input.
-	StatusRunning Status = "running"
-	// StatusExited means the process ended by itself, which removes the
-	// terminal.
-	StatusExited Status = "exited"
-	// StatusStopped means no live run exists because the daemon ended it,
-	// normally by restarting; a relaunch starts a new one.
-	StatusStopped Status = "stopped"
-	// StatusError means spawn or a PTY operation failed.
-	StatusError Status = "error"
-)
-
 // Typed errors for stable RPC mapping. Messages must stay useful to a person
 // and must never include terminal input or output contents.
 var (
@@ -37,8 +19,7 @@ var (
 	ErrInvalidDimensions = errors.New("terminal dimensions out of range")
 	ErrNotRunning        = errors.New("terminal is not running")
 	ErrInputQueueFull    = errors.New("terminal input dropped: the program is not reading input")
-	ErrAlreadyExists     = errors.New("terminal session already exists; use relaunch")
-	ErrAlreadyRunning    = errors.New("terminal already has a live run")
+	ErrAlreadyExists     = errors.New("terminal session already exists")
 	ErrServiceClosed     = errors.New("terminal service is closed")
 )
 
@@ -75,10 +56,11 @@ type Events struct {
 	Output func(session *Session, data []byte)
 	// Resized reports a new grid at its place in the output.
 	Resized func(session *Session, columns, rows uint16)
-	// Exit reports the end of a run after all output has been delivered; no
-	// event follows it. exitCode is nil when the process could not report
-	// one.
-	Exit func(session *Session, status Status, exitCode *int)
+	// Exit reports that the program ended by itself, after all output has
+	// been delivered; no event follows it. A run ended by Terminate doesn't
+	// report it: whoever ended it knows. exitCode is nil when the process
+	// could not report one.
+	Exit func(session *Session, exitCode *int)
 	// ProgramChanged reports a changed title, working directory or program
 	// status; read it with Session.Program.
 	ProgramChanged func(terminalID string)

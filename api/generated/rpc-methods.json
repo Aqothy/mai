@@ -149,11 +149,6 @@
       "result": "TerminalAttachResult"
     },
     {
-      "name": "terminal.relaunch",
-      "params": "TerminalRelaunchParams",
-      "result": "TerminalAttachResult"
-    },
-    {
       "name": "terminal.subscribeList",
       "params": "EmptyParams",
       "result": "TerminalListStreamItem"

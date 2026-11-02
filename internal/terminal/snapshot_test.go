@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"strings"
-	"syscall"
 	"testing"
 
 	libghostty "go.mitchellh.com/libghostty"
@@ -44,8 +43,7 @@ func TestSnapshotAfterLargeOutputIsCappedAndTruncated(t *testing.T) {
 }
 
 // A naturally exited run reports its exit code once and rejects input and
-// restarts. The retained final model at a new grid is owned by the daemon
-// attach-after-exit test.
+// restarts.
 func TestNaturalExitReportsOnceAndRejectsInput(t *testing.T) {
 	useQuietZsh(t)
 	svc := NewService()
@@ -59,9 +57,9 @@ func TestNaturalExitReportsOnceAndRejectsInput(t *testing.T) {
 	<-session.Done()
 
 	c.mu.Lock()
-	if c.exits != 1 || c.status != StatusExited || c.exitCode == nil || *c.exitCode != 7 {
+	if c.exits != 1 || c.exitCode == nil || *c.exitCode != 7 {
 		c.mu.Unlock()
-		t.Fatalf("exit events = %d status %s code %v, want one exited 7", c.exits, c.status, c.exitCode)
+		t.Fatalf("exit events = %d code %v, want one with code 7", c.exits, c.exitCode)
 	}
 	// The exit is the run's last event.
 	if c.outputAfterExit > 0 {
@@ -75,30 +73,6 @@ func TestNaturalExitReportsOnceAndRejectsInput(t *testing.T) {
 	}
 	if _, err := svc.Start("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 80, Rows: 24}, Events{}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("start over exited session error = %v, want ErrAlreadyExists", err)
-	}
-}
-
-// Run fencing and fresh output are owned by the daemon relaunch test; this
-// covers the old process and the service's session tracking.
-func TestRelaunchReplacesRun(t *testing.T) {
-	useQuietZsh(t)
-	svc := NewService()
-	defer svc.Close()
-	session, _ := startTestSession(t, svc, "t1")
-	oldPID := shellPID(session)
-
-	relaunched, err := svc.Relaunch("t1", SpawnSpec{Cwd: t.TempDir(), Columns: 90, Rows: 30}, Events{})
-	if err != nil {
-		t.Fatalf("relaunch: %v", err)
-	}
-	t.Cleanup(func() { relaunched.Terminate(terminateGrace) })
-
-	waitFor(t, "old shell death", func() bool { return syscall.Kill(oldPID, 0) != nil })
-	if snapshot := mustSessionSnapshot(t, relaunched); snapshot.Columns != 90 || snapshot.Rows != 30 {
-		t.Fatalf("relaunch size = %dx%d, want 90x30", snapshot.Columns, snapshot.Rows)
-	}
-	if current, err := svc.Get("t1"); err != nil || current != relaunched {
-		t.Fatal("service does not track the relaunched session")
 	}
 }
 

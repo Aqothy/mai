@@ -51,7 +51,6 @@ var goVocabularyTypes = map[string]struct{ pkgDir, typeName string }{
 	"PlanEntryPriority":          {"../../internal/provider", "PlanEntryPriority"},
 	"InstanceStatus":             {"../../internal/provider", "InstanceStatus"},
 	"AuthStatus":                 {"../../internal/provider", "AuthStatus"},
-	"TerminalStatus":             {"../../internal/terminal", "Status"},
 	"TerminalListStreamItemKind": {".", "TerminalListStreamItemKind"},
 	"TerminalProgramState":       {"../../internal/terminal", "ProgramState"},
 	"TerminalProgramNeed":        {"../../internal/terminal", "ProgramNeed"},

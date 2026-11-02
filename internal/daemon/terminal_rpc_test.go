@@ -76,9 +76,9 @@ var testAppearance = wire.TerminalAppearance{
 	Background:  "#282c34",
 }
 
-func (c *recordingClient) writeTerminal(t *testing.T, terminalID, runID, data string) {
+func (c *recordingClient) writeTerminal(t *testing.T, terminalID, data string) {
 	t.Helper()
-	c.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{TerminalID: terminalID, RunID: runID, Data: []byte(data)})
+	c.notify(t, wire.MethodTerminalWrite, wire.TerminalWriteParams{TerminalID: terminalID, Data: []byte(data)})
 }
 
 func (c *recordingClient) attachTerminal(terminalID string, columns, rows uint16) (wire.TerminalAttachResult, error) {
@@ -103,19 +103,16 @@ func TestTerminalCreateWriteResizeRoundTrip(t *testing.T) {
 	client := newRecordingClient(t, s)
 
 	snapshot := createTestTerminal(t, client)
-	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
-	if terminalID == "" || runID == "" {
+	terminalID := snapshot.Terminal.TerminalID
+	if terminalID == "" {
 		t.Fatalf("snapshot missing identity: %+v", snapshot)
 	}
-	if snapshot.Terminal.Status != terminal.StatusRunning {
-		t.Fatalf("status = %s, want running", snapshot.Terminal.Status)
-	}
 
-	client.writeTerminal(t, terminalID, runID, "printf 'RPC-%d\\n' $((40+2))\n")
+	client.writeTerminal(t, terminalID, "printf 'RPC-%d\\n' $((40+2))\n")
 	client.waitForOutput(t, "RPC-42")
 
 	client.notify(t, wire.MethodTerminalResize, wire.TerminalResizeParams{TerminalID: terminalID, Columns: 111, Rows: 31, Appearance: testAppearance})
-	client.writeTerminal(t, terminalID, runID, "printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")
+	client.writeTerminal(t, terminalID, "printf 'SIZE-%s-END\\n' \"$(stty size | tr ' ' 'x')\"\n")
 	client.waitForOutput(t, "SIZE-31x111-END")
 }
 
@@ -126,15 +123,15 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	client := newRecordingClient(t, s)
 
 	snapshot := createTestTerminal(t, client)
-	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
+	terminalID := snapshot.Terminal.TerminalID
 	const outputBytes = 5 * 1024 * 1024
-	client.writeTerminal(t, terminalID, runID, fmt.Sprintf("head -c %d /dev/zero; printf '\\nLARGE-OUTPUT-DONE\\n'\n", outputBytes))
+	client.writeTerminal(t, terminalID, fmt.Sprintf("head -c %d /dev/zero; printf '\\nLARGE-OUTPUT-DONE\\n'\n", outputBytes))
 	client.waitForOutputLength(t, outputBytes)
 	client.waitForOutput(t, "LARGE-OUTPUT-DONE")
 
 	// A subsequent command proves the same stream remains live after the
 	// output burst, and the burst came through whole, without a resync.
-	client.writeTerminal(t, terminalID, runID, "printf 'AFTER-LARGE-OUTPUT\\n'\n")
+	client.writeTerminal(t, terminalID, "printf 'AFTER-LARGE-OUTPUT\\n'\n")
 	client.waitForOutput(t, "AFTER-LARGE-OUTPUT")
 	records := snapshot.stream.snapshot()
 	if slices.IndexFunc(records[1:], isSnapshot) >= 0 {
@@ -163,10 +160,10 @@ func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
 	intruder := dialRecordingClient(t, url)
 
 	snapshot := createTestTerminal(t, controller)
-	terminalID, runID := snapshot.Terminal.TerminalID, snapshot.RunID
+	terminalID := snapshot.Terminal.TerminalID
 
-	intruder.writeTerminal(t, terminalID, runID, "printf 'INTRUDER-%d\\n' $((7*3))\n")
-	controller.writeTerminal(t, terminalID, runID, "printf 'OWNER-%d\\n' $((7*3))\n")
+	intruder.writeTerminal(t, terminalID, "printf 'INTRUDER-%d\\n' $((7*3))\n")
+	controller.writeTerminal(t, terminalID, "printf 'OWNER-%d\\n' $((7*3))\n")
 	controller.waitForOutput(t, "OWNER-21")
 
 	if controller.outputContains("INTRUDER-21") {
@@ -192,10 +189,10 @@ func TestTerminalLineInputErasesWholeCharacters(t *testing.T) {
 	defer s.Close()
 	client := newRecordingClient(t, s)
 	created := createTestTerminal(t, client)
-	terminalID, runID := created.Terminal.TerminalID, created.RunID
+	terminalID := created.Terminal.TerminalID
 
-	client.writeTerminal(t, terminalID, runID, "read line; printf 'LINE[%s]%s\\n' \"$line\" END\n")
-	client.writeTerminal(t, terminalID, runID, "aé\x7f\n")
+	client.writeTerminal(t, terminalID, "read line; printf 'LINE[%s]%s\\n' \"$line\" END\n")
+	client.writeTerminal(t, terminalID, "aé\x7f\n")
 	client.waitForOutput(t, "]END")
 	if !client.outputContains("LINE[a]END") {
 		t.Fatal("erasing after é left part of it in the line")

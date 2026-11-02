@@ -28,8 +28,9 @@ var errTerminalClientClosed = errors.New("terminal: connection closed")
 
 // terminalRuntime composes the PTY service with RPC concerns: terminal
 // identity, views and their streams, and SQLite metadata.
-// Only identity metadata is durable; a daemon restart reports every persisted
-// terminal as stopped.
+// A terminal's shell starts when a view first attaches, so an unused terminal
+// costs nothing. Only identity metadata is durable: after a daemon restart a
+// saved terminal has no shell until someone opens it.
 type terminalRuntime struct {
 	service *terminal.Service
 	meta    store.TerminalStore // nil when metadata persistence is unavailable
@@ -55,8 +56,11 @@ type terminalEntry struct {
 	cwd        string
 	createdAt  time.Time
 	updatedAt  time.Time
-	// onExit runs once, off the event path, when the current run ends. Only
-	// command terminals set it; relaunching (to a shell) clears it.
+	// command marks a terminal running a one-off program instead of a shell.
+	// It is never saved: a restart couldn't run that program again.
+	command bool
+	// onExit runs once, off the event path, when the program ends by itself.
+	// Only command terminals set it.
 	onExit func(exitCode *int)
 }
 
@@ -74,8 +78,6 @@ func newTerminalRuntime(meta store.TerminalStore, logger *slog.Logger) *terminal
 		logger.Warn("restore persisted terminals", "error", err)
 		return rt
 	}
-	// Restored rows have no live session, so they present as stopped until
-	// the user explicitly opens (relaunches) one.
 	for _, m := range metas {
 		rt.entries[m.TerminalID] = &terminalEntry{
 			terminalID: m.TerminalID,
@@ -94,7 +96,7 @@ func newTerminalRuntime(meta store.TerminalStore, logger *slog.Logger) *terminal
 // persist writes one entry's durable metadata. Failures are logged, not
 // fatal; the in-memory terminal remains usable for this daemon run.
 func (rt *terminalRuntime) persist(entry *terminalEntry, logger *slog.Logger) {
-	if rt.meta == nil {
+	if rt.meta == nil || entry.command {
 		return
 	}
 	rt.mu.Lock()
@@ -158,6 +160,9 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	if err != nil {
 		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
 	}
+	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
+		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+	}
 	appearance, err := parseTerminalAppearance(params.Appearance)
 	if err != nil {
 		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
@@ -191,26 +196,16 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 		return wire.TerminalAttachResult{}, errTerminalClientClosed
 	}
 
-	session, err := rt.service.Start(terminalID, terminal.SpawnSpec{
+	if _, err := rt.service.Start(terminalID, terminal.SpawnSpec{
 		Cwd:     cwd,
 		Columns: params.Columns,
 		Rows:    params.Rows,
-	}, s.terminalEvents())
-	if err != nil {
-		if errors.Is(err, terminal.ErrInvalidDimensions) {
-			// Nothing useful was created; a dimension bug should not leave a
-			// ghost row.
-			rt.mu.Lock()
-			delete(rt.entries, terminalID)
-			rt.mu.Unlock()
-			entry.operations.Unlock()
-			return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
-		}
-		// Spawn failures keep the stopped metadata row so the user can retry
-		// or delete it.
-		entry.views.detach(client, params.AttachmentID)
-		rt.persist(entry, s.logger)
+	}, s.terminalEvents()); err != nil {
+		rt.mu.Lock()
+		delete(rt.entries, terminalID)
+		rt.mu.Unlock()
 		entry.operations.Unlock()
+		// A subscribe that ran meanwhile may have listed it.
 		s.publishTerminalList(terminalID)
 		return wire.TerminalAttachResult{}, fmt.Errorf("terminal spawn failed: %w", err)
 	}
@@ -220,7 +215,7 @@ func (s *Server) createTerminal(client *rpcClient, params wire.TerminalCreatePar
 	result := s.terminalAttachResult(entry, view.ticket)
 	entry.operations.Unlock()
 	s.publishTerminalList(terminalID)
-	s.logger.Info("terminal created", "terminal", terminalID, "run", session.RunID, "client", client.id,
+	s.logger.Info("terminal created", "terminal", terminalID, "client", client.id,
 		"columns", params.Columns, "rows", params.Rows)
 	return result, nil
 }
@@ -239,7 +234,7 @@ func (s *Server) startCommandTerminal(title string, command provider.TerminalCom
 	}
 	terminalID := terminal.NewID()
 	now := time.Now().UTC()
-	entry := &terminalEntry{terminalID: terminalID, title: title, cwd: cwd, createdAt: now, updatedAt: now, onExit: onExit}
+	entry := &terminalEntry{terminalID: terminalID, title: title, cwd: cwd, createdAt: now, updatedAt: now, command: true, onExit: onExit}
 	entry.operations.Lock()
 	rt.mu.Lock()
 	rt.entries[terminalID] = entry
@@ -251,7 +246,6 @@ func (s *Server) startCommandTerminal(title string, command provider.TerminalCom
 		entry.operations.Unlock()
 		return "", fmt.Errorf("start %s: %w", command.Argv[0], err)
 	}
-	rt.persist(entry, s.logger)
 	entry.operations.Unlock()
 	s.publishTerminalList(terminalID)
 	return terminalID, nil
@@ -274,29 +268,17 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	if !ok {
 		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
-	session, err := rt.service.Get(params.TerminalID)
+	defer entry.operations.Unlock()
+	session, err := s.terminalShell(entry, params.Columns, params.Rows)
 	if err != nil {
-		entry.operations.Unlock()
-		return wire.TerminalAttachResult{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
+		return wire.TerminalAttachResult{}, fmt.Errorf("terminal spawn failed: %w", err)
 	}
-	if status := session.Status(); status == terminal.StatusStopped || status == terminal.StatusError {
-		entry.operations.Unlock()
-		return wire.TerminalAttachResult{}, fmt.Errorf("%w: relaunch to start a new shell", terminal.ErrNotRunning)
-	}
-
 	view := terminalView{
 		client: client, attachmentID: params.AttachmentID,
 		columns: params.Columns, rows: params.Rows, appearance: appearance,
 		ticket: newStreamTicket(),
 	}
-	result, err := s.attachView(entry, session, view, params.Focus)
-	entry.operations.Unlock()
-	return result, err
-}
-
-// attachView adds a view to the session's run. Callers hold entry.operations.
-func (s *Server) attachView(entry *terminalEntry, session *terminal.Session, view terminalView, focus bool) (wire.TerminalAttachResult, error) {
-	if !entry.views.attach(view, focus) {
+	if !entry.views.attach(view, params.Focus) {
 		return wire.TerminalAttachResult{}, errTerminalClientClosed
 	}
 	s.sizeToActiveView(entry)
@@ -306,81 +288,38 @@ func (s *Server) attachView(entry *terminalEntry, session *terminal.Session, vie
 	if seen {
 		s.publishTerminalList(entry.terminalID)
 	}
-	s.logger.Info("terminal attached", "terminal", entry.terminalID, "run", session.RunID, "client", view.client.id,
-		"columns", view.columns, "rows", view.rows, "focus", focus)
+	s.logger.Info("terminal attached", "terminal", entry.terminalID, "client", view.client.id,
+		"columns", view.columns, "rows", view.rows, "focus", params.Focus)
 	return result, nil
 }
 
-// relaunchTerminal replaces the terminal's run with a fresh shell in the
-// persisted cwd and attaches the calling client to the new run. Other views'
-// streams follow the new run from its snapshot. A live run is another client's
-// shell, so the caller joins it instead.
-func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalRelaunchParams) (wire.TerminalAttachResult, error) {
+// terminalShell returns the terminal's shell, starting it at the given grid if
+// it has none. Callers hold entry.operations, so views attaching together share
+// one shell.
+func (s *Server) terminalShell(entry *terminalEntry, columns, rows uint16) (*terminal.Session, error) {
 	rt := s.terminals
-	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
-		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+	if session, err := rt.service.Get(entry.terminalID); err == nil {
+		return session, nil
 	}
-	appearance, err := parseTerminalAppearance(params.Appearance)
+	// A terminal whose folder is gone still opens, from the home directory.
+	cwd, err := terminal.ResolveCwd(entry.cwd)
 	if err != nil {
-		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
-	}
-	entry, ok := rt.lockEntry(params.TerminalID)
-	if !ok {
-		return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
-	}
-	view := terminalView{
-		client: client, attachmentID: params.AttachmentID,
-		columns: params.Columns, rows: params.Rows, appearance: appearance,
-		ticket: newStreamTicket(),
-	}
-	if current, err := rt.service.Get(params.TerminalID); err == nil {
-		if status := current.Status(); status == terminal.StatusRunning || status == terminal.StatusStarting {
-			result, err := s.attachView(entry, current, view, true)
-			entry.operations.Unlock()
-			return result, err
+		if cwd, err = terminal.ResolveCwd(""); err != nil {
+			return nil, err
 		}
 	}
-	if !entry.views.attach(view, true) {
-		entry.operations.Unlock()
-		return wire.TerminalAttachResult{}, errTerminalClientClosed
-	}
-	entry.onExit = nil
-	session, err := rt.service.Relaunch(params.TerminalID, terminal.SpawnSpec{
-		Cwd:     entry.cwd,
-		Columns: params.Columns,
-		Rows:    params.Rows,
-	}, s.terminalEvents())
+	session, err := rt.service.Start(entry.terminalID, terminal.SpawnSpec{Cwd: cwd, Columns: columns, Rows: rows}, s.terminalEvents())
 	if err != nil {
-		entry.views.detach(client, params.AttachmentID)
-		entry.operations.Unlock()
-		if errors.Is(err, terminal.ErrInvalidDimensions) || errors.Is(err, terminal.ErrInvalidCwd) {
-			return wire.TerminalAttachResult{}, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
-		}
-		return wire.TerminalAttachResult{}, fmt.Errorf("terminal spawn failed: %w", err)
+		return nil, err
 	}
-	// Relaunch is an identity-level action: it bumps updatedAt so the row
-	// moves to the top of the Threads list.
-	rt.mu.Lock()
-	entry.updatedAt = time.Now().UTC()
-	rt.mu.Unlock()
-	rt.persist(entry, s.logger)
-	s.sizeToActiveView(entry)
-	// The caller's view is new and has no stream yet; every other stream
-	// still follows the old run.
-	if err := session.Observe(func(snapshot terminal.Snapshot) {
-		entry.views.eachStream(func(stream *terminalStream) { stream.resync(snapshot) })
-	}); err != nil {
-		// Streams that can't follow the new run end; their clients attach
-		// again.
-		s.logger.Warn("terminal relaunch snapshot failed", "terminal", params.TerminalID, "error", err)
-		entry.views.eachStream(func(stream *terminalStream) { stream.close(websocket.StatusInternalError, "snapshot failed") })
+	if cwd != entry.cwd {
+		rt.mu.Lock()
+		entry.cwd = cwd
+		rt.mu.Unlock()
+		rt.persist(entry, s.logger)
+		s.publishTerminalList(entry.terminalID)
 	}
-	result := s.terminalAttachResult(entry, view.ticket)
-	entry.operations.Unlock()
-	s.publishTerminalList(params.TerminalID)
-	s.logger.Info("terminal relaunched", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
-		"columns", params.Columns, "rows", params.Rows)
-	return result, nil
+	return session, nil
 }
 
 // detachTerminal removes only the caller's view without touching the shell;
@@ -450,22 +389,6 @@ func (s *Server) sizeToActiveView(entry *terminalEntry) {
 
 func (s *Server) terminalAttachResult(entry *terminalEntry, ticket streamTicket) wire.TerminalAttachResult {
 	return wire.TerminalAttachResult{Terminal: s.terminalListSummary(entry), StreamTicket: ticket.String()}
-}
-
-// terminalMetaSummary carries only persisted identity; the caller overlays
-// live-run fields when a session exists. Without one the terminal is stopped.
-func (s *Server) terminalMetaSummary(entry *terminalEntry) wire.TerminalSummary {
-	rt := s.terminals
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	return wire.TerminalSummary{
-		TerminalID: entry.terminalID,
-		Title:      entry.title,
-		Cwd:        entry.cwd,
-		Status:     terminal.StatusStopped,
-		CreatedAt:  entry.createdAt,
-		UpdatedAt:  entry.updatedAt,
-	}
 }
 
 // renameTerminal is an identity-level action: it changes the persisted title
@@ -546,15 +469,20 @@ func (s *Server) subscribeTerminalList(client *rpcClient) wire.TerminalListStrea
 	return wire.TerminalListStreamItem{Kind: wire.TerminalListItemSnapshot, Terminals: summaries}
 }
 
-// terminalListSummary overlays live-run state (without replay bytes) on the
-// persisted identity for list rows.
+// terminalListSummary overlays what the program reports on the persisted
+// identity for list rows.
 func (s *Server) terminalListSummary(entry *terminalEntry) wire.TerminalSummary {
-	summary := s.terminalMetaSummary(entry)
-	if session, err := s.terminals.service.Get(entry.terminalID); err == nil {
-		summary.Status = session.Status()
-		if code, ok := session.ExitCode(); ok {
-			summary.ExitCode = &code
-		}
+	rt := s.terminals
+	rt.mu.Lock()
+	summary := wire.TerminalSummary{
+		TerminalID: entry.terminalID,
+		Title:      entry.title,
+		Cwd:        entry.cwd,
+		CreatedAt:  entry.createdAt,
+		UpdatedAt:  entry.updatedAt,
+	}
+	rt.mu.Unlock()
+	if session, err := rt.service.Get(entry.terminalID); err == nil {
 		applyProgram(&summary, session.Program())
 	}
 	return summary
@@ -629,14 +557,14 @@ func (s *Server) publishTerminalListItem(item wire.TerminalListStreamItem) {
 	}
 }
 
-// writeTerminal accepts input from any view attached to this run. Clients
+// writeTerminal accepts input from any view attached to the terminal. Clients
 // never answer the program (the daemon's terminal does), so everything they
 // send is the user's: keys, pastes, and the mouse and focus reports the
 // program asked for. Input doesn't take the size, since reports arrive
 // without the user using the view (a Mac locking reports focus out); a view
-// sends terminal.focus before what the user types. Stale-run and unattached
-// input is dropped silently as a routine lifecycle race rather than surfaced
-// as a repeating alert.
+// sends terminal.focus before what the user types. Unattached input is dropped
+// silently as a routine lifecycle race rather than surfaced as a repeating
+// alert.
 func (s *Server) writeTerminal(client *rpcClient, params wire.TerminalWriteParams) error {
 	entry, ok := s.terminals.lockEntry(params.TerminalID)
 	if !ok {
@@ -644,7 +572,7 @@ func (s *Server) writeTerminal(client *rpcClient, params wire.TerminalWriteParam
 	}
 	defer entry.operations.Unlock()
 	session, err := s.terminals.service.Get(params.TerminalID)
-	if err != nil || session.RunID != params.RunID || !entry.views.attached(client) {
+	if err != nil || !entry.views.attached(client) {
 		return nil
 	}
 	if err := session.Write(params.Data); err != nil && !errors.Is(err, terminal.ErrNotRunning) {
@@ -689,44 +617,27 @@ func (s *Server) focusTerminal(client *rpcClient, terminalID string) {
 
 func (s *Server) terminalEvents() terminal.Events {
 	return terminal.Events{
-		Output:         s.publishTerminalOutput,
-		Resized:        s.publishTerminalResized,
-		Exit:           s.publishTerminalExit,
+		Output:  s.publishTerminalOutput,
+		Resized: s.publishTerminalResized,
+		Exit: func(session *terminal.Session, exitCode *int) {
+			go s.finishTerminal(session.TerminalID, exitCode)
+		},
 		ProgramChanged: s.publishTerminalProgram,
 	}
 }
 
-// publishTerminalExit tells the run's streams it ended, under the run's
-// emit, then settles the terminal's lifecycle off the event path: that takes
-// the terminal's operations, whose holders resize through emit.
-func (s *Server) publishTerminalExit(session *terminal.Session, status terminal.Status, exitCode *int) {
-	s.publishTerminalStreams(session, wire.TerminalRecordExited, wire.TerminalStreamExited{Status: status, ExitCode: exitCode})
-	go s.finishTerminalRun(session.TerminalID, session.RunID, status, exitCode)
-}
-
-func (s *Server) finishTerminalRun(terminalID, runID string, status terminal.Status, exitCode *int) {
-	s.logger.Info("terminal run ended", "terminal", terminalID, "run", runID, "status", status)
+// finishTerminal removes a terminal whose program ended by itself, for every
+// client. It runs off the event path: it takes the terminal's operations, whose
+// holders resize through emit.
+func (s *Server) finishTerminal(terminalID string, exitCode *int) {
+	s.logger.Info("terminal program exited", "terminal", terminalID)
 	entry, ok := s.terminals.lockEntry(terminalID)
 	if !ok {
 		return
 	}
-	current, currentErr := s.terminals.service.Get(terminalID)
-	if currentErr != nil || current.RunID != runID {
-		// Relaunch already installed a replacement, whose state the list
-		// shows.
-		entry.operations.Unlock()
-		return
-	}
 	onExit := entry.onExit
-	entry.onExit = nil
-	// A shell that ended by itself is finished with. One the daemon ended, by
-	// shutting down, stays for the user to relaunch.
-	if status == terminal.StatusExited {
-		if err := s.dropTerminal(entry); err != nil {
-			s.logger.Warn("remove exited terminal", "terminal", terminalID, "error", err)
-		}
-	} else {
-		s.publishTerminalList(terminalID)
+	if err := s.dropTerminal(entry); err != nil {
+		s.logger.Warn("remove exited terminal", "terminal", terminalID, "error", err)
 	}
 	entry.operations.Unlock()
 	if onExit != nil {

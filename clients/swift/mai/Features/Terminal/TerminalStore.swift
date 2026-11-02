@@ -150,9 +150,7 @@ final class TerminalStore {
     // MARK: - Attachments
 
     /// Opens (or keeps) the attachment for the requested terminal. Any other
-    /// active attachment is detached first; its shell keeps running. Stopped
-    /// rows relaunch, which is the explicit-open acknowledgement the daemon
-    /// expects.
+    /// active attachment is detached first; its shell keeps running.
     @discardableResult
     func openTerminal(_ request: TerminalOpenRequest) -> TerminalAttachment {
         if let active = activeAttachment, active.matches(request) {
@@ -163,11 +161,7 @@ final class TerminalStore {
         case .new(let cwd, let title):
             mode = .create(cwd: cwd, title: title)
         case .existing(let terminalID):
-            if summary(for: terminalID)?.needsRelaunchToOpen == true {
-                mode = .relaunch(terminalID: terminalID)
-            } else {
-                mode = .attach(terminalID: terminalID)
-            }
+            mode = .attach(terminalID: terminalID)
         }
         closeActiveTerminal()
         let attachment = TerminalAttachment(
@@ -185,24 +179,6 @@ final class TerminalStore {
     func closeActiveTerminal() {
         activeAttachment?.close()
         activeAttachment = nil
-    }
-
-    /// Replaces the active attachment with a fresh run of the same terminal.
-    /// A new attachment (and Ghostty session) renders the new shell from a
-    /// clean state.
-    @discardableResult
-    func relaunchActiveTerminal() -> TerminalAttachment? {
-        guard let active = activeAttachment, let terminalID = active.terminalID else {
-            return nil
-        }
-        closeActiveTerminal()
-        let attachment = TerminalAttachment(
-            store: self,
-            origin: active.origin,
-            mode: .relaunch(terminalID: terminalID)
-        )
-        activeAttachment = attachment
-        return attachment
     }
 
     // MARK: - Actions
@@ -235,7 +211,7 @@ final class TerminalStore {
 
     private func connectionDidConnect() {
         guard activeAttachment?.phase == .disconnected else { return }
-        activeAttachment?.reattachAfterReconnect()
+        activeAttachment?.reattach()
     }
 
     private func connectionDidDisconnect() {

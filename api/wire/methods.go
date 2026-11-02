@@ -47,7 +47,6 @@ var Methods = []MethodDefinition{
 	{Name: MethodProviderQuestionAnswer, Params: "ProviderQuestionAnswerParams", ResultNull: true},
 	{Name: MethodTerminalCreate, Params: "TerminalCreateParams", Result: "TerminalAttachResult"},
 	{Name: MethodTerminalAttach, Params: "TerminalAttachParams", Result: "TerminalAttachResult"},
-	{Name: MethodTerminalRelaunch, Params: "TerminalRelaunchParams", Result: "TerminalAttachResult"},
 	{Name: MethodTerminalSubscribeList, Params: "EmptyParams", Result: "TerminalListStreamItem"},
 	{Name: MethodTerminalRename, Params: "TerminalRenameParams", Result: "TerminalSummary"},
 	{Name: MethodTerminalDelete, Params: "TerminalIDParams", ResultNull: true},

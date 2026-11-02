@@ -112,13 +112,11 @@ type contract struct {
 	TerminalAttachResult             wire.TerminalAttachResult             `json:"terminalAttachResult"`
 	TerminalStreamSnapshot           wire.TerminalStreamSnapshot           `json:"terminalStreamSnapshot"`
 	TerminalStreamResized            wire.TerminalStreamResized            `json:"terminalStreamResized"`
-	TerminalStreamExited             wire.TerminalStreamExited             `json:"terminalStreamExited"`
 	TerminalListStreamItem           wire.TerminalListStreamItem           `json:"terminalListStreamItem"`
 	TerminalRenameParams             wire.TerminalRenameParams             `json:"terminalRenameParams"`
 	TerminalCreateParams             wire.TerminalCreateParams             `json:"terminalCreateParams"`
 	TerminalIDParams                 wire.TerminalIDParams                 `json:"terminalIDParams"`
 	TerminalAttachParams             wire.TerminalAttachParams             `json:"terminalAttachParams"`
-	TerminalRelaunchParams           wire.TerminalRelaunchParams           `json:"terminalRelaunchParams"`
 	TerminalDetachParams             wire.TerminalDetachParams             `json:"terminalDetachParams"`
 	TerminalWriteParams              wire.TerminalWriteParams              `json:"terminalWriteParams"`
 	TerminalResizeParams             wire.TerminalResizeParams             `json:"terminalResizeParams"`

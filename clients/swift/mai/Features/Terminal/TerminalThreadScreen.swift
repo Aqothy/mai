@@ -62,20 +62,17 @@ struct TerminalThreadScreen: View {
                         } else {
                             TerminalAttachmentOverlay(
                                 phase: attachment.phase,
-                                canRelaunch: attachment.terminalID != nil,
-                                relaunch: { store.relaunchActiveTerminal() }
+                                retry: { attachment.reattach() }
                             )
                         }
                     }
                 }
                 .toolbar {
                     TerminalActionsToolbar(
-                        canRelaunch: canRelaunch(attachment.phase),
                         rename: {
                             renameTitle = summary?.title ?? ""
                             isRenamePresented = true
                         },
-                        relaunch: { store.relaunchActiveTerminal() },
                         delete: { isDeleteConfirmationPresented = true }
                     )
                 }
@@ -138,30 +135,18 @@ struct TerminalThreadScreen: View {
             }
         }
     }
-
-    private func canRelaunch(_ phase: TerminalAttachment.Phase) -> Bool {
-        switch phase {
-        case .exited, .stopped, .failed: true
-        case .attaching, .running, .disconnected: false
-        }
-    }
 }
 
 /// Toolbar content with narrow inputs so phase changes do not rebuild the
 /// surface host.
 private struct TerminalActionsToolbar: ToolbarContent {
-    let canRelaunch: Bool
     let rename: () -> Void
-    let relaunch: () -> Void
     let delete: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu("Terminal Actions", systemImage: "ellipsis.circle") {
                 Button("Rename", systemImage: "pencil", action: rename)
-                if canRelaunch {
-                    Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-                }
                 TerminalTextSizeMenu()
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
@@ -197,8 +182,7 @@ private struct TerminalTextSizeMenu: View {
 /// rebuild the terminal surface.
 struct TerminalAttachmentOverlay: View {
     let phase: TerminalAttachment.Phase
-    var canRelaunch = true
-    var relaunch: () -> Void = {}
+    let retry: () -> Void
 
     var body: some View {
         switch phase {
@@ -209,9 +193,7 @@ struct TerminalAttachmentOverlay: View {
         case .failed(let message):
             VStack(spacing: 12) {
                 Label(message, systemImage: "exclamationmark.triangle")
-                if canRelaunch {
-                    Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-                }
+                Button("Try Again", systemImage: "arrow.clockwise", action: retry)
             }
             .padding()
             .background(.regularMaterial, in: .rect(cornerRadius: 12))
@@ -220,14 +202,7 @@ struct TerminalAttachmentOverlay: View {
                 .padding()
                 .background(.regularMaterial, in: .rect(cornerRadius: 12))
                 .accessibilityLabel("Reconnecting to maiD")
-        case .stopped:
-            VStack(spacing: 12) {
-                Label("Terminal stopped", systemImage: "stop.circle")
-                Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-            }
-            .padding()
-            .background(.regularMaterial, in: .rect(cornerRadius: 12))
-        case .running, .exited:
+        case .running:
             EmptyView()
         }
     }

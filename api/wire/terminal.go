@@ -8,12 +8,11 @@ import (
 
 // Terminal thread methods. terminal.write, terminal.resize, terminal.focus,
 // and terminal.detach are sent by clients as JSON-RPC notifications.
-// terminal.create, terminal.attach, and terminal.relaunch return a ticket for
-// the view's terminal stream.
+// terminal.create and terminal.attach return a ticket for the view's terminal
+// stream.
 const (
 	MethodTerminalCreate        = "terminal.create"
 	MethodTerminalAttach        = "terminal.attach"
-	MethodTerminalRelaunch      = "terminal.relaunch"
 	MethodTerminalDetach        = "terminal.detach"
 	MethodTerminalRename        = "terminal.rename"
 	MethodTerminalDelete        = "terminal.delete"
@@ -46,24 +45,22 @@ type TerminalListStreamItem struct {
 }
 
 // Client-visible terminal vocabularies.
-type TerminalStatus = terminal.Status
-
 type TerminalProgramState = terminal.ProgramState
 type TerminalProgramNeed = terminal.ProgramNeed
 type TerminalColorScheme = terminal.ColorScheme
 
-// TerminalSummary describes one terminal thread for lists and snapshots.
-// Fields other than identity/title/cwd reflect the current live run and are
-// not durable. The program fields are what the running program reports about
-// itself; their text comes from the program and is sanitized, not trusted.
+// TerminalSummary describes one terminal thread for lists and snapshots. Its
+// shell starts when a view first attaches, and a shell that exits removes its
+// terminal. After a daemon restart a saved terminal opens with a fresh shell
+// under the same id, with an empty screen. Fields other than identity/title/cwd
+// are not durable. The program fields are what the running program reports
+// about itself; their text comes from the program and is sanitized, not trusted.
 type TerminalSummary struct {
-	TerminalID string         `json:"terminalId"`
-	Title      string         `json:"title"`
-	Cwd        string         `json:"cwd"`
-	Status     TerminalStatus `json:"status"`
-	ExitCode   *int           `json:"exitCode,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	UpdatedAt  time.Time      `json:"updatedAt"`
+	TerminalID string    `json:"terminalId"`
+	Title      string    `json:"title"`
+	Cwd        string    `json:"cwd"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 
 	// ProgramTitle is the window title the program set (OSC 0/2), without
 	// control characters or spinner frames, capped at 128 scalars.
@@ -105,9 +102,9 @@ type TerminalAppearance struct {
 	Palette []string `json:"palette,omitempty"`
 }
 
-// TerminalAttachResult answers terminal.create, terminal.attach and
-// terminal.relaunch. StreamTicket opens the view's terminal stream (see
-// TerminalStreamPath); it works once, within TerminalStreamTicketLifetime,
+// TerminalAttachResult answers terminal.create and terminal.attach.
+// StreamTicket opens the view's terminal stream (see TerminalStreamPath); it
+// works once, within TerminalStreamTicketLifetime,
 // for a stream opened while this connection and view are still attached.
 // Issuing it closes the view's earlier stream.
 type TerminalAttachResult struct {
@@ -150,36 +147,22 @@ const (
 	TerminalRecordOutput TerminalStreamRecordKind = 0x03
 	// TerminalRecordResized's payload is a TerminalStreamResized (JSON).
 	TerminalRecordResized TerminalStreamRecordKind = 0x04
-	// TerminalRecordExited's payload is a TerminalStreamExited (JSON). The
-	// stream stays open unless the exit removes the terminal, which can also
-	// close it before this record is sent.
-	TerminalRecordExited TerminalStreamRecordKind = 0x05
 )
 
-// TerminalStreamSnapshot starts a terminal stream, or replaces its terminal:
-// after a relaunch, or when the client fell too far behind to be sent the
-// output it missed. The next Size bytes of snapshot data are a complete
-// native Ghostty terminal at the run's grid; clients validate SnapshotFormat
-// and install it, then apply the records that follow.
+// TerminalStreamSnapshot starts a terminal stream, or replaces its terminal
+// when the client fell too far behind to be sent the output it missed. The next
+// Size bytes of snapshot data are a complete native Ghostty terminal at its
+// current grid; clients validate SnapshotFormat and install it, then apply the
+// records that follow.
 type TerminalStreamSnapshot struct {
-	RunID          string         `json:"runId"`
-	Status         TerminalStatus `json:"status"`
-	ExitCode       *int           `json:"exitCode,omitempty"`
-	SnapshotFormat string         `json:"snapshotFormat"`
-	Size           int            `json:"size"`
+	SnapshotFormat string `json:"snapshotFormat"`
+	Size           int    `json:"size"`
 }
 
-// TerminalStreamResized is the run's new grid at its place in the output.
+// TerminalStreamResized is the terminal's new grid at its place in the output.
 type TerminalStreamResized struct {
 	Columns uint16 `json:"columns"`
 	Rows    uint16 `json:"rows"`
-}
-
-// TerminalStreamExited reports that the run ended: it exited, was stopped,
-// or failed. No output follows.
-type TerminalStreamExited struct {
-	Status   TerminalStatus `json:"status"`
-	ExitCode *int           `json:"exitCode,omitempty"`
 }
 
 type TerminalCreateParams struct {
@@ -197,9 +180,9 @@ type TerminalIDParams struct {
 
 // TerminalAttachParams attaches the calling client's view to a terminal with
 // the grid that fits it. A terminal has one size: the active view's. A view
-// becomes active when it creates or relaunches the terminal, attaches with
-// Focus or while no other view is attached, sends terminal.focus, or writes;
-// when it leaves, the view that was active before it takes over.
+// becomes active when it creates the terminal, attaches with Focus or while no
+// other view is attached, or sends terminal.focus; when it leaves, the view that
+// was active before it takes over.
 // AttachmentID is client-generated and names the view; a connection has one
 // view per terminal, and a newer one replaces the older in its place.
 type TerminalAttachParams struct {
@@ -209,21 +192,9 @@ type TerminalAttachParams struct {
 	AttachmentID string             `json:"attachmentId"`
 	Appearance   TerminalAppearance `json:"appearance"`
 	// Focus is set when the user opens the terminal, and not when a view
-	// attaches again (after a reconnect or another view's relaunch), so
-	// reattaching never takes the size from the device in use.
+	// attaches again (after a reconnect), so reattaching never takes the size
+	// from the device in use.
 	Focus bool `json:"focus,omitempty"`
-}
-
-// TerminalRelaunchParams starts a fresh run at the calling view's grid and
-// attaches the view to it as the active view. If the terminal already has a
-// live run, another client got there first and the view attaches to that one:
-// a relaunch never ends a running shell.
-type TerminalRelaunchParams struct {
-	TerminalID   string             `json:"terminalId"`
-	Columns      uint16             `json:"columns"`
-	Rows         uint16             `json:"rows"`
-	AttachmentID string             `json:"attachmentId"`
-	Appearance   TerminalAppearance `json:"appearance"`
 }
 
 // TerminalDetachParams releases control without terminating the shell. A
@@ -243,7 +214,6 @@ type TerminalRenameParams struct {
 // the JSON coders; terminal bytes are not necessarily valid UTF-8.
 type TerminalWriteParams struct {
 	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
 	Data       []byte `json:"data"`
 }
 
