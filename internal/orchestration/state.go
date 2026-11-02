@@ -9,6 +9,15 @@ import (
 
 // threadState is a thread as the engine holds it: its row and what the
 // reactors and the thread list need, never its conversation.
+// interruption is an interrupt on its way to ending a turn.
+type interruption struct {
+	// by decides the hold left on the queue.
+	by Actor
+	// released: someone who may release the stop sent a message since, which
+	// goes next when the turn ends, as if they had sent it a moment later.
+	released bool
+}
+
 type threadState struct {
 	Thread
 	participants []ParticipantID
@@ -25,9 +34,9 @@ type threadState struct {
 	// entries are the running turn's entries, in order, until its settle
 	// writes them; dirty ones are written by the next flush.
 	entries *liveEntries
-	// interrupting: an interrupt of the running turn was asked for, by a
-	// person or an agent (who decides the hold left on its queue).
-	interrupting *Actor
+	// interrupting: an interrupt of the running turn was asked for, and the turn
+	// hasn't ended yet.
+	interrupting *interruption
 	plan         []provider.PlanEntry
 	// caughtUp are opens waiting for its sessions' history reads to end.
 	caughtUp []chan struct{}

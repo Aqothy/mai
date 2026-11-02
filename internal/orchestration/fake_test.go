@@ -33,6 +33,8 @@ type fakeInstance struct {
 	openGate chan struct{}
 	// onSend runs a sent message; the default answers it and ends the turn.
 	onSend func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error)
+	// interruptGate, when set, holds an interrupted turn's end until closed.
+	interruptGate chan struct{}
 	// received is every message sent, in order.
 	received []fakeReceived
 	// interrupts are the turns interrupted.
@@ -195,7 +197,12 @@ func (f *fakeInstance) Interrupt(_ context.Context, session, turn string) error 
 	f.mu.Lock()
 	f.interrupts = append(f.interrupts, turn)
 	f.mu.Unlock()
-	go f.settle(session, turn, provider.TurnInterrupted)
+	go func() {
+		if f.interruptGate != nil {
+			<-f.interruptGate
+		}
+		f.settle(session, turn, provider.TurnInterrupted)
+	}()
 	return nil
 }
 

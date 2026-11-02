@@ -706,6 +706,9 @@ func (e *Engine) deliver(s *step, actor Actor, deliver Deliver) (CommandResult, 
 	if mode == ModeSteer && actor.Kind == ActorDevice {
 		e.makeWay(s, thread, delivery, actor)
 	}
+	if stop := thread.interrupting; stop != nil && (actor.Kind == ActorDevice || stop.by.Kind == ActorAgent && e.controls(actor, thread)) {
+		stop.released = true
+	}
 	thread.UpdatedAt = s.now
 	s.putThread(thread)
 	s.putDelivery(delivery)
@@ -902,9 +905,8 @@ func (e *Engine) interruptCommand(s *step, actor Actor, id ThreadID) error {
 // interruptTurn stops what a thread runs: its running turn, or a delivery
 // still on its way, which then waits again.
 func (e *Engine) interruptTurn(s *step, thread *threadState, actor Actor, hold bool) {
-	interrupter := actor
 	if running := thread.runningTurn(); running != nil {
-		thread.interrupting = &interrupter
+		thread.interrupting = &interruption{by: actor}
 		participant := e.participants[running.Participant]
 		session, ref := running.Session, running.Ref
 		s.providerCall(participant, func(ctx context.Context, instance provider.Instance, _ uint64) func(*step) {

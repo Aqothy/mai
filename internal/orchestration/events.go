@@ -191,14 +191,13 @@ func (e *Engine) settleTurn(s *step, thread *threadState, turn *Turn, settled pr
 	}
 	// A turn that didn't complete holds what waits behind it: whoever
 	// stopped it, or, when it failed or was cut off, a person or an agent
-	// above decides what goes next. A turn stopped for a person's steer
-	// lets it go.
+	// above decides what goes next. A message that released the stop goes next.
 	if queued := thread.queued(); len(queued) > 0 && thread.Hold == HoldNone && turn.State != provider.TurnCompleted {
 		switch {
 		case thread.interrupting == nil:
 			thread.Hold = HoldFailed
-		case queued[0].Mode == ModeSteer && queued[0].From.Kind == ActorDevice:
-		case thread.interrupting.Kind == ActorAgent:
+		case thread.interrupting.released:
+		case thread.interrupting.by.Kind == ActorAgent:
 			thread.Hold = HoldStoppedAgent
 		default:
 			thread.Hold = HoldStoppedPerson

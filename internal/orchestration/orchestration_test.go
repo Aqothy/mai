@@ -156,6 +156,82 @@ func TestHoldsAreReleasedOnlyByWhoMay(t *testing.T) {
 	}
 }
 
+// A turn doesn't end the moment it is stopped. A message sent in that gap by
+// someone who may release the stop goes next, as if sent a moment later; one from
+// someone who may not stays behind the stop.
+func TestAMessageSentWhileAStoppedTurnEnds(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		agentStops, stopOnly bool
+		agentSends           bool
+		wantHold             Hold
+	}{
+		{name: "an agent stops and sends", agentStops: true, agentSends: true},
+		{name: "an agent interrupts and sends", agentStops: true, stopOnly: true, agentSends: true},
+		{name: "an agent stops and a person sends", agentStops: true},
+		{name: "a person stops and sends"},
+		{name: "a person interrupts and sends", stopOnly: true},
+		{name: "a person stops and an agent sends", agentSends: true, wantHold: HoldStoppedPerson},
+		{name: "a person interrupts and an agent sends", stopOnly: true, agentSends: true, wantHold: HoldStoppedPerson},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+			codex.interruptGate = make(chan struct{})
+			codex.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+				f.startTurn(session, in.Delivery, in)
+				if len(f.messages()) > 1 {
+					go f.settle(session, in.Delivery, provider.TurnCompleted)
+				}
+				return provider.SendAck{Turn: in.Delivery}, nil
+			}
+			h := newHarness(t, claude, codex)
+			parent := h.createThread("claude", "Orchestrate")
+			h.settledTurns(parent.Thread, 1)
+			agent := Agent(parent.Thread, parent.Participant)
+			child, err := h.doAs(agent, Spawn{Parent: parent.Thread, Brief: "Long job", Agent: NewParticipant{Instance: "codex"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.eventually("the child to run", func() bool { return len(codex.messages()) == 1 })
+
+			act := func(byAgent bool, body CommandBody) {
+				t.Helper()
+				if !byAgent {
+					h.do(body)
+				} else if _, err := h.doAs(agent, body); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.stopOnly {
+				act(test.agentStops, Interrupt{Thread: child.Thread})
+			} else {
+				act(test.agentStops, Stop{Thread: child.Thread})
+			}
+			h.eventually("the interrupt to reach the agent", func() bool {
+				codex.mu.Lock()
+				defer codex.mu.Unlock()
+				return len(codex.interrupts) == 1
+			})
+
+			act(test.agentSends, Deliver{Thread: child.Thread, Body: MessageBody{Text: "carry on"}})
+			close(codex.interruptGate)
+
+			if test.wantHold != HoldNone {
+				h.eventually("the stop to hold", func() bool { return h.snapshot(child.Thread).Thread.Hold == test.wantHold })
+				if snapshot := h.snapshot(child.Thread); len(snapshot.Queue) != 1 || len(codex.messages()) != 1 {
+					t.Fatalf("snapshot = %#v, want the message waiting", snapshot)
+				}
+				return
+			}
+			h.eventually("the message to go next", func() bool { return len(codex.messages()) == 2 })
+			h.settledTurns(child.Thread, 2)
+			if hold := h.snapshot(child.Thread).Thread.Hold; hold != HoldNone {
+				t.Fatalf("hold = %q after the message went", hold)
+			}
+		})
+	}
+}
+
 // A native fork copies the conversation through a turn; deleting the source
 // keeps the fork, which only loses its link.
 func TestForkThroughATurnAndDeleteTheSource(t *testing.T) {
