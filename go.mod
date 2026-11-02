@@ -1,6 +1,6 @@
 module github.com/Aqothy/maiD
 
-go 1.26.5
+go 1.27.3
 
 require github.com/Aqothy/jsonrpc2 v0.0.0-20261027050031-e1508e8f7928
 
