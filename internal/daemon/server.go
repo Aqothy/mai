@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/adapters/claudecode"
 	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
@@ -107,6 +108,9 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		if err := s.providerService.RegisterManifestInstance(spec); err != nil {
 			logger.Warn("register provider", "provider", spec.InstanceID, "error", err)
 		}
+	}
+	if err := s.acpRegistry.pruneFiles(); err != nil {
+		logger.Warn("delete removed ACP agents' files", "error", err)
 	}
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
@@ -217,7 +221,10 @@ func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.I
 			s.logger.Info("terminal sign-in did not succeed", "provider", instanceID, "exitCode", exitCode)
 			return
 		}
-		s.restartProviderWhenIdle(instanceID)
+		s.restartProviderWhenIdle(instanceID, func(ctx context.Context) error {
+			_, err := s.providerService.RestartInstance(ctx, instanceID)
+			return err
+		})
 	})
 	if err != nil {
 		return provider.AuthenticationResult{}, err
@@ -230,9 +237,9 @@ func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.I
 // whether the provider's turns have finished.
 const providerIdlePollInterval = time.Second
 
-// restartProviderWhenIdle restarts a provider once no turn runs on it, so a
+// restartProviderWhenIdle runs restart once no turn runs on the provider, so a
 // restart never cuts off another thread's turn.
-func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID) {
+func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID, restart func(context.Context) error) {
 	ticker := time.NewTicker(providerIdlePollInterval)
 	defer ticker.Stop()
 	for s.engine.InstanceBusy(s.ctx, instanceID) {
@@ -242,11 +249,84 @@ func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID) {
 		case <-ticker.C:
 		}
 	}
+	// A canceled context also makes InstanceBusy report false, and a restart now
+	// would spawn an agent nothing waits for during shutdown.
+	if s.ctx.Err() != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
-	if _, err := s.providerService.RestartInstance(ctx, instanceID); err != nil {
-		s.logger.Warn("restart provider after terminal sign-in", "provider", instanceID, "error", err)
+	if err := restart(ctx); err != nil {
+		s.logger.Warn("restart provider", "provider", instanceID, "error", err)
 	}
+}
+
+// registerACPAgent makes an installed agent available to start.
+func (s *Server) registerACPAgent(id string) error {
+	spec, err := s.acpRegistry.instanceSpec(id)
+	if err != nil {
+		return err
+	}
+	if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+		return err
+	}
+	return s.requireACPAgentInstalled(id, spec.InstanceID)
+}
+
+// requireACPAgentInstalled undoes a registration or start that read the
+// manifest before a removal finished. The manifest decides: the agent goes
+// away again.
+func (s *Server) requireACPAgentInstalled(id string, instanceID provider.InstanceID) error {
+	_, installed, err := s.acpRegistry.installedAgent(id)
+	if err != nil || installed {
+		return err
+	}
+	if err := s.forgetACPAgent(instanceID); err != nil {
+		return err
+	}
+	return fmt.Errorf("ACP agent %q was removed", id)
+}
+
+// forgetACPAgent stops a removed agent, then deletes its files.
+func (s *Server) forgetACPAgent(instanceID provider.InstanceID) error {
+	if err := s.providerService.RemoveInstance(instanceID); err != nil {
+		return err
+	}
+	return s.acpRegistry.pruneFiles()
+}
+
+func (s *Server) removeACPAgent(id string) error {
+	agent, installed, err := s.acpRegistry.installedAgent(id)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return s.acpRegistry.pruneFiles()
+	}
+	if s.engine.InstanceBusy(s.ctx, agent.InstanceID) {
+		return &orchestration.CommandError{Code: orchestration.CodeInvalid, Message: fmt.Sprintf("%s is working on a turn. Stop it before removing the agent.", agent.Name)}
+	}
+	if err := s.acpRegistry.remove(agent.ID); err != nil {
+		return err
+	}
+	s.logger.Info("ACP agent removed", "provider", agent.InstanceID)
+	return s.forgetACPAgent(agent.InstanceID)
+}
+
+// updateCustomACPAgent saves a new definition, and moves a running agent onto
+// it once its turns finish.
+func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryInstalledAgent, error) {
+	updated, err := s.acpRegistry.updateCustom(params)
+	if err != nil {
+		return wire.ACPRegistryInstalledAgent{}, err
+	}
+	if err := s.registerACPAgent(updated.ID); err != nil {
+		return wire.ACPRegistryInstalledAgent{}, err
+	}
+	go s.restartProviderWhenIdle(updated.InstanceID, func(ctx context.Context) error {
+		return s.providerService.ApplyPending(ctx, updated.InstanceID)
+	})
+	return updated, nil
 }
 
 func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
@@ -260,6 +340,9 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string
 	started := time.Now()
 	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
 	s.logProviderStarted(spec, restart, started, err)
+	if removed := s.requireACPAgentInstalled(registryID, spec.InstanceID); removed != nil {
+		return provider.InstanceInfo{}, removed
+	}
 	return info, err
 }
 

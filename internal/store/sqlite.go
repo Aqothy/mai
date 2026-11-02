@@ -128,6 +128,13 @@ func (s *SQLite) SaveInstance(spec provider.InstanceSpec) error {
 	return nil
 }
 
+func (s *SQLite) DeleteInstance(id provider.InstanceID) error {
+	if _, err := s.db.Exec(`DELETE FROM instances WHERE instance_id = ?`, string(id)); err != nil {
+		return fmt.Errorf("store: delete instance %q: %w", id, err)
+	}
+	return nil
+}
+
 func (s *SQLite) LoadInstances() ([]provider.InstanceSpec, error) {
 	rows, err := s.db.Query(`SELECT instance_id, name, driver_kind, config FROM instances ORDER BY instance_id`)
 	if err != nil {

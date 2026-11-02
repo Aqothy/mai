@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -82,7 +83,7 @@ func TestACPRegistryInstallRecordsManifestAndBuildsBoundedNPMCommand(t *testing.
 		t.Fatalf("decode config: %v", err)
 	}
 	prefix := filepath.Join(registry.dataDir, "agents", "registry", "npx", "example")
-	cache := filepath.Join(registry.dataDir, "agents", "npm-cache")
+	cache := filepath.Join(prefix, "npm-cache")
 	wantCommand := []string{"npm", "--prefix", prefix, "exec", "--cache=" + cache, "--yes", "--", "@example/acp@0.0.0 - 1.2.3", "--acp"}
 	if !reflect.DeepEqual(config.Command, wantCommand) {
 		t.Fatalf("command = %#v, want %#v", config.Command, wantCommand)
@@ -125,7 +126,7 @@ func TestACPRegistryUpdateChangesVersionCeiling(t *testing.T) {
 	}
 }
 
-func TestACPCustomAgentUsesNameAsStableIdentityAndPersistsInPrivateJSON(t *testing.T) {
+func TestACPCustomAgentPersistsInPrivateJSON(t *testing.T) {
 	registry := &acpRegistry{dataDir: t.TempDir(), npm: "npm"}
 	installed, err := registry.addCustom(wire.ACPCustomAgentAddParams{
 		Name:    "  My Agent  ",
@@ -135,9 +136,6 @@ func TestACPCustomAgentUsesNameAsStableIdentityAndPersistsInPrivateJSON(t *testi
 	})
 	if err != nil {
 		t.Fatalf("addCustom: %v", err)
-	}
-	if installed.ID != "My Agent" || string(installed.InstanceID) != "custom-My Agent" {
-		t.Fatalf("installed identity = %#v, want name-derived custom id", installed)
 	}
 	if installed.Name != "My Agent" || installed.Source != acpAgentSourceCustom {
 		t.Fatalf("installed = %#v", installed)
@@ -175,42 +173,51 @@ func TestACPCustomAgentUsesNameAsStableIdentityAndPersistsInPrivateJSON(t *testi
 	}
 }
 
-func TestACPRegistryAndCustomAgentNamesDoNotReplaceEachOther(t *testing.T) {
+func TestACPRegistryAndCustomAgentsSharingANameStaySeparate(t *testing.T) {
 	body := `{
 		"version": "1",
 		"agents": [{
 			"id": "codex",
-			"name": "Codex",
+			"name": "codex",
 			"version": "1.0.0",
 			"distribution": {"npx": {"package": "codex-acp"}}
 		}]
 	}`
-	registry, _ := testRegistryServer(t, &body)
-	if _, err := registry.addCustom(wire.ACPCustomAgentAddParams{
-		Name: "codex", Command: "custom-agent",
-	}); err != nil {
-		t.Fatalf("addCustom: %v", err)
+	for _, customFirst := range []bool{true, false} {
+		registry, _ := testRegistryServer(t, &body)
+		addCustom := func() {
+			if _, err := registry.addCustom(wire.ACPCustomAgentAddParams{Name: "codex", Command: "custom-agent"}); err != nil {
+				t.Fatalf("addCustom: %v", err)
+			}
+		}
+		if customFirst {
+			addCustom()
+		}
+		if _, err := registry.install(context.Background(), "codex"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if !customFirst {
+			addCustom()
+		}
+		agents, err := registry.installedAgents()
+		if err != nil || len(agents) != 2 || agents[0].InstanceID == agents[1].InstanceID {
+			t.Fatalf("installedAgents = %#v, %v; want a registry and a custom agent", agents, err)
+		}
 	}
-	if _, err := registry.install(context.Background(), "codex"); err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("install collision error = %v, want already-exists error", err)
-	}
+}
 
-	agents, err := registry.installedAgents()
-	if err != nil || len(agents) != 1 || agents[0].Source != acpAgentSourceCustom {
-		t.Fatalf("installedAgents = %#v, %v; want original custom agent", agents, err)
+// Registry ids name directories that removing an agent deletes, and they come
+// from a remote index.
+func TestACPRegistrySkipsIDsThatEscapeTheAgentDirectory(t *testing.T) {
+	agent := func(id string) string {
+		return `{"id":` + strconv.Quote(id) + `,"name":"n","version":"1","distribution":{"npx":{"package":"p"}}}`
 	}
-
-	registryFirst, _ := testRegistryServer(t, &body)
-	if _, err := registryFirst.install(context.Background(), "codex"); err != nil {
-		t.Fatalf("install registry agent: %v", err)
+	raw := `{"agents":[` + strings.Join([]string{agent(".."), agent("."), agent("../../.."), agent(`a\\b`), agent("safe")}, ",") + `]}`
+	agents, err := parseACPRegistry([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
 	}
-	if _, err := registryFirst.addCustom(wire.ACPCustomAgentAddParams{
-		Name: "codex", Command: "custom-agent",
-	}); err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("custom collision error = %v, want already-exists error", err)
-	}
-	agents, err = registryFirst.installedAgents()
-	if err != nil || len(agents) != 1 || agents[0].Source != acpAgentSourceRegistry {
-		t.Fatalf("installedAgents = %#v, %v; want original registry agent", agents, err)
+	if len(agents) != 1 || agents[0].ID != "safe" {
+		t.Fatalf("agents = %#v, want only safe", agents)
 	}
 }

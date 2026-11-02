@@ -61,6 +61,74 @@ public extension ACPCustomAgentAddParams {
     }
 }
 
+// MARK: - ACPCustomAgentUpdateParams
+public struct ACPCustomAgentUpdateParams: Codable {
+    public var args: [String]?
+    public var command: String
+    public var env: [String: String]?
+    public var keepEnv: [String]?
+    public var name, registryID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case args, command, env, keepEnv, name
+        case registryID = "registryId"
+    }
+
+    public init(args: [String]?, command: String, env: [String: String]?, keepEnv: [String]?, name: String, registryID: String) {
+        self.args = args
+        self.command = command
+        self.env = env
+        self.keepEnv = keepEnv
+        self.name = name
+        self.registryID = registryID
+    }
+}
+
+// MARK: ACPCustomAgentUpdateParams convenience initializers and mutators
+
+public extension ACPCustomAgentUpdateParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ACPCustomAgentUpdateParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        args: [String]?? = nil,
+        command: String? = nil,
+        env: [String: String]?? = nil,
+        keepEnv: [String]?? = nil,
+        name: String? = nil,
+        registryID: String? = nil
+    ) -> ACPCustomAgentUpdateParams {
+        return ACPCustomAgentUpdateParams(
+            args: args ?? self.args,
+            command: command ?? self.command,
+            env: env ?? self.env,
+            keepEnv: keepEnv ?? self.keepEnv,
+            name: name ?? self.name,
+            registryID: registryID ?? self.registryID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ACPRegistryAgent
 public struct ACPRegistryAgent: Codable {
     public var args: [String]?
@@ -186,21 +254,25 @@ public extension ACPRegistryInstallParams {
 // MARK: - ACPRegistryInstalledAgent
 public struct ACPRegistryInstalledAgent: Codable {
     public var args: [String]?
-    public var description, icon: String?
+    public var command, description: String?
+    public var envNames: [String]?
+    public var icon: String?
     public var id: String
     public var installedAt: Date
     public var instanceID, name, package, source: String
     public var version: String
 
     public enum CodingKeys: String, CodingKey {
-        case args, description, icon, id, installedAt
+        case args, command, description, envNames, icon, id, installedAt
         case instanceID = "instanceId"
         case name, package, source, version
     }
 
-    public init(args: [String]?, description: String?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, source: String, version: String) {
+    public init(args: [String]?, command: String?, description: String?, envNames: [String]?, icon: String?, id: String, installedAt: Date, instanceID: String, name: String, package: String, source: String, version: String) {
         self.args = args
+        self.command = command
         self.description = description
+        self.envNames = envNames
         self.icon = icon
         self.id = id
         self.installedAt = installedAt
@@ -232,7 +304,9 @@ public extension ACPRegistryInstalledAgent {
 
     func with(
         args: [String]?? = nil,
+        command: String?? = nil,
         description: String?? = nil,
+        envNames: [String]?? = nil,
         icon: String?? = nil,
         id: String? = nil,
         installedAt: Date? = nil,
@@ -244,7 +318,9 @@ public extension ACPRegistryInstalledAgent {
     ) -> ACPRegistryInstalledAgent {
         return ACPRegistryInstalledAgent(
             args: args ?? self.args,
+            command: command ?? self.command,
             description: description ?? self.description,
+            envNames: envNames ?? self.envNames,
             icon: icon ?? self.icon,
             id: id ?? self.id,
             installedAt: installedAt ?? self.installedAt,
@@ -253,6 +329,54 @@ public extension ACPRegistryInstalledAgent {
             package: package ?? self.package,
             source: source ?? self.source,
             version: version ?? self.version
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ACPRegistryRemoveParams
+public struct ACPRegistryRemoveParams: Codable {
+    public var registryID: String
+
+    public enum CodingKeys: String, CodingKey {
+        case registryID = "registryId"
+    }
+
+    public init(registryID: String) {
+        self.registryID = registryID
+    }
+}
+
+// MARK: ACPRegistryRemoveParams convenience initializers and mutators
+
+public extension ACPRegistryRemoveParams {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ACPRegistryRemoveParams.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        registryID: String? = nil
+    ) -> ACPRegistryRemoveParams {
+        return ACPRegistryRemoveParams(
+            registryID: registryID ?? self.registryID
         )
     }
 

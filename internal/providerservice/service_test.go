@@ -205,6 +205,35 @@ func TestFailedRestartKeepsTheRunningProcess(t *testing.T) {
 
 // An instance whose process exited starts again when it's next needed, and
 // its exit says its generation is gone.
+// A caller can read a spec and then wait on the instance's start lock while a
+// removal finishes. Its spec must not bring the instance back.
+func TestARemovedInstanceStaysGone(t *testing.T) {
+	driver := &fakeDriver{}
+	s, _ := newService(t, driver)
+	definition := spec(`{}`)
+	if err := s.RegisterManifestInstance(definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartConfiguredInstance(context.Background(), definition.InstanceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveInstance(definition.InstanceID); err != nil {
+		t.Fatal(err)
+	}
+	if !driver.instances()[0].closed() {
+		t.Fatal("removal left the process running")
+	}
+	if _, err := s.start(context.Background(), definition, false, false); !errors.Is(err, errNotInstalled) {
+		t.Fatalf("start with the old spec = %v, want %v", err, errNotInstalled)
+	}
+	if opened := len(driver.instances()); opened != 1 {
+		t.Fatalf("opened %d processes, want 1", opened)
+	}
+	if _, ok := s.Info(definition.InstanceID); ok {
+		t.Fatal("the removed instance is still listed")
+	}
+}
+
 func TestExitedInstanceRestartsWhenNeeded(t *testing.T) {
 	driver := &fakeDriver{}
 	service, record := newService(t, driver)

@@ -12,6 +12,7 @@ import (
 // InstanceStore persists configured provider instances.
 type InstanceStore interface {
 	SaveInstance(spec provider.InstanceSpec) error
+	DeleteInstance(id provider.InstanceID) error
 	LoadInstances() ([]provider.InstanceSpec, error)
 }
 

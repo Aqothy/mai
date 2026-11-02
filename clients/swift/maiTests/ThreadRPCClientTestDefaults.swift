@@ -27,6 +27,10 @@ extension ThreadRPCClient {
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         throw unavailable
     }
+    func updateCustomACPAgent(_ input: ACPCustomAgentUpdateParams) async throws -> ACPRegistryInstalledAgent {
+        throw unavailable
+    }
+    func removeInstalledAgent(_ registryID: String) async throws { throw unavailable }
     func addCustomACPAgent(_ input: ACPCustomAgentAddParams) async throws -> ACPRegistryInstalledAgent {
         throw unavailable
     }

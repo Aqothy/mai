@@ -92,6 +92,8 @@ type contract struct {
 	PlanEntry                        wire.PlanEntry                        `json:"planEntry"`
 	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"aCPRegistryStartParams"`
+	ACPCustomAgentUpdateParams       wire.ACPCustomAgentUpdateParams       `json:"aCPCustomAgentUpdateParams"`
+	ACPRegistryRemoveParams          wire.ACPRegistryRemoveParams          `json:"aCPRegistryRemoveParams"`
 	ProviderAuthenticateParams       wire.ProviderAuthenticateParams       `json:"providerAuthenticateParams"`
 	ProviderInstanceParams           wire.ProviderInstanceParams           `json:"providerInstanceParams"`
 	ProviderListSessionsParams       wire.ProviderListSessionsParams       `json:"providerListSessionsParams"`

@@ -34,6 +34,8 @@ var Methods = []MethodDefinition{
 	{Name: MethodACPRegistryInstalled, Params: "EmptyParams", Result: "ACPRegistryInstalledAgent", ResultArray: true},
 	{Name: MethodACPRegistryInstall, Params: "ACPRegistryInstallParams", Result: "ACPRegistryInstalledAgent"},
 	{Name: MethodACPRegistryAddCustom, Params: "ACPCustomAgentAddParams", Result: "ACPRegistryInstalledAgent"},
+	{Name: MethodACPRegistryUpdateCustom, Params: "ACPCustomAgentUpdateParams", Result: "ACPRegistryInstalledAgent"},
+	{Name: MethodACPRegistryRemove, Params: "ACPRegistryRemoveParams", ResultNull: true},
 	{Name: MethodACPRegistryStart, Params: "ACPRegistryStartParams", Result: "InstanceInfo"},
 	{Name: MethodProviderAuthenticate, Params: "ProviderAuthenticateParams", Result: "AuthenticationResult"},
 	{Name: MethodProviderLogout, Params: "ProviderInstanceParams", Result: "InstanceInfo"},

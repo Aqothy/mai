@@ -13,7 +13,8 @@ final class ACPRegistryModel {
     }
 
     private(set) var phase: Phase = .loading
-    private(set) var installingIDs: Set<String> = []
+    /// Agents an install, update or removal is running on.
+    private(set) var busyIDs: Set<String> = []
     private(set) var errorMessage: String?
     /// Cached so body evaluations don't re-run the merge/sort/filter pipeline
     /// and don't depend on the store's whole installed-agents collection.
@@ -52,10 +53,7 @@ final class ACPRegistryModel {
         let installedByID = Dictionary(
             uniqueKeysWithValues: store.installedAgents.map { ($0.id, $0) }
         )
-        let customIDs = Set(store.installedAgents.lazy.compactMap { agent in
-            ACPRegistryEntry.Source(rawValue: agent.source) == .custom ? agent.id : nil
-        })
-        var entries = registryAgents.filter { !customIDs.contains($0.id) }.map { agent in
+        var entries = registryAgents.map { agent in
             ACPRegistryEntry(
                 id: agent.id,
                 name: agent.name,
@@ -66,11 +64,10 @@ final class ACPRegistryModel {
                 installedVersion: installedByID[agent.id]?.version
             )
         }
-        // Custom definitions take precedence over same-ID registry entries.
-        // Other installed agents stay visible if the registry no longer lists them.
+        // Installed agents stay visible if the registry no longer lists them.
         let registryIDs = Set(registryAgents.map(\.id))
         entries += store.installedAgents
-            .filter { customIDs.contains($0.id) || !registryIDs.contains($0.id) }
+            .filter { !registryIDs.contains($0.id) }
             .map { agent in
                 let source = ACPRegistryEntry.Source(rawValue: agent.source) ?? .registry
                 return ACPRegistryEntry(
@@ -135,17 +132,31 @@ final class ACPRegistryModel {
     }
 
     func install(_ entry: ACPRegistryEntry) async {
-        guard !installingIDs.contains(entry.id) else { return }
-        installingIDs.insert(entry.id)
+        guard busyIDs.insert(entry.id).inserted else { return }
         // Rebuilding in the defer covers every exit; the store mutates
         // installedAgents before a later await in installRegistryAgent can
         // throw or get cancelled.
         defer {
-            installingIDs.remove(entry.id)
+            busyIDs.remove(entry.id)
             rebuildEntries()
         }
         do {
             _ = try await store.installRegistryAgent(id: entry.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func remove(_ entry: ACPRegistryEntry) async {
+        guard busyIDs.insert(entry.id).inserted else { return }
+        defer {
+            busyIDs.remove(entry.id)
+            rebuildEntries()
+        }
+        do {
+            try await store.removeInstalledAgent(id: entry.id)
         } catch is CancellationError {
             return
         } catch {

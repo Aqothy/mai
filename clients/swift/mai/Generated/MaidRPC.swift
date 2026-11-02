@@ -17,6 +17,8 @@ nonisolated public enum MaidRPCMethod {
     public static let acpRegistryInstalled = "acp.registry.installed"
     public static let acpRegistryInstall = "acp.registry.install"
     public static let acpRegistryAddCustom = "acp.registry.addCustom"
+    public static let acpRegistryUpdateCustom = "acp.registry.updateCustom"
+    public static let acpRegistryRemove = "acp.registry.remove"
     public static let acpRegistryStart = "acp.registry.start"
     public static let providerAuthenticate = "provider.authenticate"
     public static let providerLogout = "provider.logout"

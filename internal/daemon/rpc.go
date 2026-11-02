@@ -514,11 +514,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err != nil {
 			return nil, err
 		}
-		spec, err := h.server.acpRegistry.instanceSpec(installed.ID)
-		if err != nil {
-			return nil, err
-		}
-		if err := h.server.providerService.RegisterManifestInstance(spec); err != nil {
+		if err := h.server.registerACPAgent(installed.ID); err != nil {
 			return nil, err
 		}
 		return installed, nil
@@ -531,6 +527,24 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, fmt.Errorf("%w: acp.registry.addCustom requires name and command", jsonrpc2.ErrInvalidParams)
 		}
 		return h.server.acpRegistry.addCustom(params)
+	case wire.MethodACPRegistryUpdateCustom:
+		var params wire.ACPCustomAgentUpdateParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.RegistryID == "" {
+			return nil, fmt.Errorf("%w: acp.registry.updateCustom requires registryId", jsonrpc2.ErrInvalidParams)
+		}
+		return h.server.updateCustomACPAgent(params)
+	case wire.MethodACPRegistryRemove:
+		var params wire.ACPRegistryRemoveParams
+		if err := decodeRPCParams(req, &params); err != nil {
+			return nil, err
+		}
+		if params.RegistryID == "" {
+			return nil, fmt.Errorf("%w: acp.registry.remove requires registryId", jsonrpc2.ErrInvalidParams)
+		}
+		return nil, h.server.removeACPAgent(params.RegistryID)
 	case wire.MethodACPRegistryStart:
 		var params wire.ACPRegistryStartParams
 		if err := decodeRPCParams(req, &params); err != nil {

@@ -79,28 +79,27 @@ struct ACPRegistryModelTests {
     }
 
     @Test
-    func customAgentOccupyingRegistryIDReplacesCatalogEntry() async throws {
+    func removingAnAgentDropsItEverywhereAndARefusalKeepsIt() async throws {
         let rpc = ACPRegistryMockRPCClient()
-        rpc.registryAgents = [
-            makeRegistryAgent(
-                id: "codex-acp",
-                name: "Codex",
-                description: "Registry description"
-            )
-        ]
-        rpc.installedAgents = [makeCustomAgent(id: "codex-acp", name: "codex-acp")]
+        rpc.installedAgents = [makeCustomAgent(id: "gemini-id", name: "Gemini")]
         let store = ThreadStore(rpc: rpc)
         await store.start()
         let model = ACPRegistryModel(store: store)
         await model.load()
-
-        #expect(model.entries.count == 1)
         let entry = try #require(model.entries.first)
-        #expect(entry.id == "codex-acp")
-        #expect(entry.name == "codex-acp")
-        #expect(entry.source == .custom)
-        #expect(entry.isInstalled)
-        #expect(!entry.hasUpdate)
+
+        rpc.removalRefusal = RPCError("Gemini is working on a turn. Stop it before removing the agent.")
+        await model.remove(entry)
+        #expect(model.errorMessage == "Gemini is working on a turn. Stop it before removing the agent.")
+        #expect(model.entries.map(\.id) == ["gemini-id"])
+        #expect(store.availableProviders.map(\.id) == ["custom-gemini-id"])
+        #expect(model.busyIDs.isEmpty)
+
+        rpc.removalRefusal = nil
+        await model.remove(entry)
+        #expect(rpc.removedIDs == ["gemini-id", "gemini-id"])
+        #expect(model.entries.isEmpty)
+        #expect(store.availableProviders.isEmpty)
     }
 
     @Test
@@ -134,10 +133,17 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
     var registryAgents: [ACPRegistryAgent] = []
     var installedAgents: [ACPRegistryInstalledAgent] = []
     var providers: [InstanceInfo] = []
+    var removedIDs: [String] = []
+    var removalRefusal: RPCError?
+
+    func removeInstalledAgent(_ registryID: String) async throws {
+        removedIDs.append(registryID)
+        if let removalRefusal { throw removalRefusal }
+    }
 
     func installRegistryAgent(_ registryID: String) async throws -> ACPRegistryInstalledAgent {
         let installed = ACPRegistryInstalledAgent(
-            args: nil, description: nil, icon: nil, id: registryID, installedAt: .now,
+            args: nil, command: nil, description: nil, envNames: nil, icon: nil, id: registryID, installedAt: .now,
             instanceID: "registry-\(registryID)", name: "Codex", package: "codex-acp@2.0.0",
             source: "registry", version: "2.0.0")
         installedAgents = [installed]
@@ -164,7 +170,9 @@ private final class ACPRegistryMockRPCClient: ThreadRPCClient {
 private func makeCustomAgent(id: String, name: String) -> ACPRegistryInstalledAgent {
     ACPRegistryInstalledAgent(
         args: nil,
+        command: nil,
         description: nil,
+        envNames: nil,
         icon: nil,
         id: id,
         installedAt: .now,

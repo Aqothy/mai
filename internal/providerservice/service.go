@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -56,6 +57,9 @@ type Service struct {
 	startLocks map[provider.InstanceID]*sync.Mutex
 	closing    bool
 }
+
+// errNotInstalled reaches the user when a chat's agent has been removed.
+var errNotInstalled = errors.New("not installed")
 
 // New makes the service. mirror gives each instance's adapter its native
 // mirror.
@@ -198,7 +202,7 @@ func (s *Service) StartConfiguredInstance(ctx context.Context, id provider.Insta
 	current := s.instances[id]
 	s.mu.Unlock()
 	if !configured {
-		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", id)
+		return provider.InstanceInfo{}, errNotInstalled
 	}
 	if current != nil && !exited(current.instance) {
 		return current.instance.Info(), nil
@@ -250,6 +254,44 @@ func (s *Service) RestartInstance(ctx context.Context, id provider.InstanceID) (
 	return s.start(ctx, spec, true, false)
 }
 
+// ApplyPending moves a running instance onto the definition registered while
+// it ran, if there is one.
+func (s *Service) ApplyPending(ctx context.Context, id provider.InstanceID) error {
+	s.mu.Lock()
+	spec, pending := s.pending[id]
+	s.mu.Unlock()
+	if !pending {
+		return nil
+	}
+	_, err := s.start(ctx, spec, true, false)
+	return err
+}
+
+// RemoveInstance ends the instance's process and forgets it, so it isn't
+// offered or started again and doesn't come back with the daemon.
+func (s *Service) RemoveInstance(id provider.InstanceID) error {
+	lock := s.startLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	current := s.instances[id]
+	delete(s.instances, id)
+	delete(s.specs, id)
+	delete(s.manifest, id)
+	delete(s.pending, id)
+	s.mu.Unlock()
+	if current != nil {
+		_ = current.instance.Close()
+		s.gone(id, current)
+	}
+	if s.store != nil {
+		if err := s.store.DeleteInstance(id); err != nil {
+			return fmt.Errorf("forget provider %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, restart, persist bool) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" || spec.Driver == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("a provider needs an instance id and a driver")
@@ -269,6 +311,12 @@ func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, restart
 	if s.closing {
 		s.mu.Unlock()
 		return provider.InstanceInfo{}, fmt.Errorf("the provider service is closed")
+	}
+	// A caller that read a configured spec before taking the lock may have
+	// raced its removal. Only persist brings a new instance into being.
+	if _, configured := s.specs[spec.InstanceID]; !configured && !persist {
+		s.mu.Unlock()
+		return provider.InstanceInfo{}, errNotInstalled
 	}
 	current := s.instances[spec.InstanceID]
 	if current != nil && !exited(current.instance) && !restart {

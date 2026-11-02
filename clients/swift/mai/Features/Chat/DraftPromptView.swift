@@ -204,7 +204,9 @@ struct DraftSessionControlsView: View {
                     installedAgents: [
                         ACPRegistryInstalledAgent(
                             args: nil,
+                            command: nil,
                             description: nil,
+                            envNames: nil,
                             icon: nil,
                             id: "claude-code",
                             installedAt: .now,
@@ -216,7 +218,9 @@ struct DraftSessionControlsView: View {
                         ),
                         ACPRegistryInstalledAgent(
                             args: nil,
+                            command: nil,
                             description: nil,
+                            envNames: nil,
                             icon: nil,
                             id: "codex",
                             installedAt: .now,

@@ -84,6 +84,16 @@
       "result": "ACPRegistryInstalledAgent"
     },
     {
+      "name": "acp.registry.updateCustom",
+      "params": "ACPCustomAgentUpdateParams",
+      "result": "ACPRegistryInstalledAgent"
+    },
+    {
+      "name": "acp.registry.remove",
+      "params": "ACPRegistryRemoveParams",
+      "resultNull": true
+    },
+    {
       "name": "acp.registry.start",
       "params": "ACPRegistryStartParams",
       "result": "InstanceInfo"

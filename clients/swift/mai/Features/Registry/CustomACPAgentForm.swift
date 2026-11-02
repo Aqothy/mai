@@ -7,8 +7,8 @@ struct CustomACPAgentForm: View {
     @State private var model: CustomACPAgentFormModel
     @FocusState private var isTextFieldFocused: Bool
 
-    init(store: ThreadStore) {
-        _model = State(initialValue: CustomACPAgentFormModel(store: store))
+    init(store: ThreadStore, editing agent: ACPRegistryInstalledAgent? = nil) {
+        _model = State(initialValue: CustomACPAgentFormModel(store: store, editing: agent))
     }
 
     var body: some View {
@@ -61,7 +61,7 @@ struct CustomACPAgentForm: View {
             }
         }
         .onSubmit { isTextFieldFocused = false }
-        .navigationTitle("Add Custom Agent")
+        .navigationTitle(model.isEditing ? "Edit Custom Agent" : "Add Custom Agent")
         .inlineNavigationBarTitle()
         .interactiveDismissDisabled(model.isSaving)
         .toolbar {
@@ -82,14 +82,14 @@ struct CustomACPAgentForm: View {
                     if model.isSaving {
                         ProgressView()
                     } else {
-                        Text("Add")
+                        Text(model.isEditing ? "Save" : "Add")
                     }
                 }
-                .accessibilityLabel("Add")
+                .accessibilityLabel(model.isEditing ? "Save" : "Add")
                 .disabled(!model.canSave)
             }
         }
-        .alert("Couldn’t Add Agent", isPresented: $model.isErrorPresented) {
+        .alert(model.isEditing ? "Couldn’t Save Agent" : "Couldn’t Add Agent", isPresented: $model.isErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "An unknown error occurred.")
@@ -110,9 +110,19 @@ private final class CustomACPAgentFormModel {
     private(set) var errorMessage: String?
 
     private let store: ThreadStore
+    /// The custom agent this form edits; nil when it adds one.
+    private let editedID: String?
 
-    init(store: ThreadStore) {
+    var isEditing: Bool { editedID != nil }
+
+    init(store: ThreadStore, editing agent: ACPRegistryInstalledAgent?) {
         self.store = store
+        editedID = agent?.id
+        guard let agent else { return }
+        name = agent.name
+        command = agent.command ?? ""
+        argumentText = (agent.args ?? []).joined(separator: " ")
+        environmentVariables = (agent.envNames ?? []).map(CustomACPEnvironmentVariable.init(existing:))
     }
 
     var isErrorPresented: Bool {
@@ -121,20 +131,22 @@ private final class CustomACPAgentFormModel {
     }
 
     var nameCollisionMessage: String? {
-        guard let collidingAgentID else { return nil }
-        return CustomACPAgentValidationError.duplicateAgentName(collidingAgentID).errorDescription
+        guard let collidingAgentName else { return nil }
+        return CustomACPAgentValidationError.duplicateAgentName(collidingAgentName).errorDescription
     }
 
-    private var collidingAgentID: String? {
+    private var collidingAgentName: String? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
-        return store.installedAgents.first { $0.id == name }?.id
+        return store.installedAgents.first {
+            $0.source == ACPRegistryEntry.Source.custom.rawValue && $0.name == name && $0.id != editedID
+        }?.name
     }
 
     var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && collidingAgentID == nil
+            && collidingAgentName == nil
             && !isSaving
     }
 
@@ -150,18 +162,23 @@ private final class CustomACPAgentFormModel {
         guard !isSaving else { return false }
 
         do {
-            if let collidingAgentID {
-                throw CustomACPAgentValidationError.duplicateAgentName(collidingAgentID)
+            if let collidingAgentName {
+                throw CustomACPAgentValidationError.duplicateAgentName(collidingAgentName)
             }
             let configuration = try CustomACPAgentConfiguration(
                 name: name,
                 command: command,
                 argumentText: argumentText,
-                environment: environmentVariables.map { ($0.key, $0.value) }
+                environment: environmentVariables.filter { !$0.keepsExistingValue }.map { ($0.key, $0.value) },
+                keeping: environmentVariables.filter(\.keepsExistingValue).map(\.key)
             )
             isSaving = true
             defer { isSaving = false }
-            _ = try await store.addCustomACPAgent(configuration)
+            if let editedID {
+                try await store.updateCustomACPAgent(id: editedID, configuration: configuration)
+            } else {
+                _ = try await store.addCustomACPAgent(configuration)
+            }
             return true
         } catch is CancellationError {
             return false
@@ -177,12 +194,16 @@ struct CustomACPAgentConfiguration: Equatable {
     let command: String
     let arguments: [String]
     let environment: [String: String]
+    /// Existing variables that stay as they are; the client never sees their
+    /// values.
+    let keptEnvironment: [String]
 
     init(
         name: String,
         command: String,
         argumentText: String,
-        environment: [(key: String, value: String)]
+        environment: [(key: String, value: String)],
+        keeping keptEnvironment: [String] = []
     ) throws {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
@@ -198,7 +219,7 @@ struct CustomACPAgentConfiguration: Equatable {
         for pair in environment {
             let key = pair.key.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { continue }
-            guard environmentValues[key] == nil else {
+            guard environmentValues[key] == nil, !keptEnvironment.contains(key) else {
                 throw CustomACPAgentValidationError.duplicateEnvironmentVariable(key)
             }
             environmentValues[key] = pair.value
@@ -208,6 +229,7 @@ struct CustomACPAgentConfiguration: Equatable {
         self.command = command
         self.arguments = argumentText.split(whereSeparator: \.isWhitespace).map(String.init)
         self.environment = environmentValues
+        self.keptEnvironment = keptEnvironment
     }
 }
 
@@ -227,7 +249,7 @@ enum CustomACPAgentValidationError: LocalizedError, Equatable {
             String(
                 localized: "An agent named \(name) already exists.",
                 comment:
-                    "Validation error shown when adding an ACP agent whose name is already used."
+                    "Validation error shown when naming an ACP agent with a name already used."
             )
         case .duplicateEnvironmentVariable(let key):
             String(
@@ -244,8 +266,23 @@ private final class CustomACPEnvironmentVariable: Identifiable {
     nonisolated deinit {}
 
     let id = UUID()
-    var key = ""
+    /// Set on a variable the agent already has: its name can't change and its
+    /// value is unknown here, so an empty value means leave it as it is.
+    let isExisting: Bool
+    var key: String
     var value = ""
+
+    var keepsExistingValue: Bool { isExisting && value.isEmpty }
+
+    init() {
+        isExisting = false
+        key = ""
+    }
+
+    init(existing name: String) {
+        isExisting = true
+        key = name
+    }
 }
 
 private struct CustomACPEnvironmentVariableRow: View {
@@ -260,7 +297,8 @@ private struct CustomACPEnvironmentVariableRow: View {
                 .autocorrectionDisabled()
                 .monospaced()
                 .focused(isTextFieldFocused)
-            TextField("Value", text: $variable.value)
+                .disabled(variable.isExisting)
+            TextField("Value", text: $variable.value, prompt: variable.isExisting ? Text("Unchanged") : nil)
                 .textContentType(.none)
                 .autocorrectionDisabled()
                 .monospaced()

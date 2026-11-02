@@ -4,8 +4,10 @@ import WebKit
 
 struct ACPRegistryRow: View {
     let entry: ACPRegistryEntry
-    let isInstalling: Bool
+    let isBusy: Bool
     let install: () -> Void
+    let edit: () -> Void
+    let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -35,8 +37,10 @@ struct ACPRegistryRow: View {
 
             ACPRegistryRowAction(
                 entry: entry,
-                isInstalling: isInstalling,
-                install: install
+                isBusy: isBusy,
+                install: install,
+                edit: edit,
+                remove: remove
             )
         }
         .contentShape(.rect)
@@ -161,14 +165,41 @@ extension ACPRegistrySVGIcon {
 
 struct ACPRegistryRowAction: View {
     let entry: ACPRegistryEntry
-    let isInstalling: Bool
+    let isBusy: Bool
     let install: () -> Void
+    let edit: () -> Void
+    let remove: () -> Void
 
     var body: some View {
-        if isInstalling {
+        if isBusy {
             ProgressView()
                 .controlSize(.small)
-        } else if !entry.isInstalled {
+        } else {
+            HStack(spacing: 8) {
+                status
+                if entry.isInstalled {
+                    manageMenu
+                }
+            }
+        }
+    }
+
+    private var manageMenu: some View {
+        Menu("Manage \(entry.name)", systemImage: "ellipsis.circle") {
+            if entry.source == .custom {
+                Button("Edit…", systemImage: "pencil", action: edit)
+            }
+            Button("Remove…", systemImage: "trash", role: .destructive, action: remove)
+        }
+        .labelStyle(.iconOnly)
+        .menuIndicator(.hidden)
+        .buttonStyle(.borderless)
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if !entry.isInstalled {
             Button("Install", action: install)
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)

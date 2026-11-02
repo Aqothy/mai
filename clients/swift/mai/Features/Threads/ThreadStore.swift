@@ -450,6 +450,35 @@ final class ThreadStore {
         return installed
     }
 
+    /// Replaces a custom agent's definition. The daemon moves a running agent
+    /// onto it once its turns finish.
+    func updateCustomACPAgent(
+        id: String,
+        configuration: CustomACPAgentConfiguration
+    ) async throws {
+        upsertInstalledAgent(
+            try await rpc.updateCustomACPAgent(
+                ACPCustomAgentUpdateParams(
+                    args: configuration.arguments.isEmpty ? nil : configuration.arguments,
+                    command: configuration.command,
+                    env: configuration.environment.isEmpty ? nil : configuration.environment,
+                    keepEnv: configuration.keptEnvironment.isEmpty ? nil : configuration.keptEnvironment,
+                    name: configuration.name,
+                    registryID: id
+                )
+            )
+        )
+    }
+
+    /// Removes an installed agent. The daemon refuses while a turn runs on it.
+    func removeInstalledAgent(id: String) async throws {
+        try await rpc.removeInstalledAgent(id)
+        let instanceID = installedAgents.first { $0.id == id }?.instanceID
+        installedAgents.removeAll { $0.id == id }
+        providers.removeAll { $0.instanceID == instanceID }
+        rebuildProviderCaches()
+    }
+
     /// Lists sessions reported by an agent, starting it first when needed.
     /// Import and delete remain independently capability-gated.
     func fetchProviderSessions(agentID: String) async throws -> [SessionSummary] {

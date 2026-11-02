@@ -5,6 +5,8 @@ struct ACPRegistryView: View {
 
     @State private var model: ACPRegistryModel
     @State private var isCustomAgentFormPresented = false
+    @State private var agentBeingEdited: ACPRegistryInstalledAgent?
+    @State private var agentToRemove: ACPRegistryEntry?
     @State private var areProviderAccountsPresented = false
 
     init(store: ThreadStore) {
@@ -26,10 +28,14 @@ struct ACPRegistryView: View {
                 ForEach(model.entries) { entry in
                     ACPRegistryRow(
                         entry: entry,
-                        isInstalling: model.installingIDs.contains(entry.id),
+                        isBusy: model.busyIDs.contains(entry.id),
                         install: {
                             Task { await model.install(entry) }
-                        }
+                        },
+                        edit: {
+                            agentBeingEdited = store.installedAgents.first { $0.id == entry.id }
+                        },
+                        remove: { agentToRemove = entry }
                     )
                 }
             } footer: {
@@ -67,6 +73,31 @@ struct ACPRegistryView: View {
                 CustomACPAgentForm(store: store)
             }
         }
+        .sheet(item: $agentBeingEdited) { agent in
+            NavigationStack {
+                CustomACPAgentForm(store: store, editing: agent)
+            }
+        }
+        .confirmationDialog(
+            "Remove \(agentToRemove?.name ?? "")?",
+            isPresented: Binding(
+                get: { agentToRemove != nil },
+                set: { if !$0 { agentToRemove = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: agentToRemove
+        ) { entry in
+            Button("Remove", role: .destructive) {
+                Task { await model.remove(entry) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { entry in
+            Text(
+                entry.source == .custom
+                    ? "Its chats stay in your list but can’t continue."
+                    : "Everything maiD downloaded for it is deleted. Its chats stay in your list but can’t continue until you install it again."
+            )
+        }
         .sheet(isPresented: $areProviderAccountsPresented) {
             NavigationStack {
                 ProviderAccountsView(store: store)
@@ -79,6 +110,8 @@ struct ACPRegistryView: View {
         }
     }
 }
+
+extension ACPRegistryInstalledAgent: Identifiable {}
 
 /// Rebuilds the cached entries when the store refreshes installed agents
 /// outside the registry model (e.g. on reconnect). Lives in its own modifier
@@ -182,7 +215,9 @@ struct ACPRegistryStatusView: View {
             installedAgents: [
                 ACPRegistryInstalledAgent(
                     args: nil,
+                    command: nil,
                     description: nil,
+                    envNames: nil,
                     icon: nil,
                     id: "claude-code",
                     installedAt: .now,
@@ -194,7 +229,9 @@ struct ACPRegistryStatusView: View {
                 ),
                 ACPRegistryInstalledAgent(
                     args: nil,
+                    command: nil,
                     description: nil,
+                    envNames: nil,
                     icon: nil,
                     id: "my-codex",
                     installedAt: .now,

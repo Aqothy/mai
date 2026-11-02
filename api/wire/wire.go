@@ -32,6 +32,8 @@ const (
 	MethodACPRegistryInstalled       = "acp.registry.installed"
 	MethodACPRegistryInstall         = "acp.registry.install"
 	MethodACPRegistryAddCustom       = "acp.registry.addCustom"
+	MethodACPRegistryUpdateCustom    = "acp.registry.updateCustom"
+	MethodACPRegistryRemove          = "acp.registry.remove"
 	MethodACPRegistryStart           = "acp.registry.start"
 	MethodProviderAuthenticate       = "provider.authenticate"
 	MethodProviderLogout             = "provider.logout"
@@ -244,13 +246,31 @@ type ACPRegistryInstallParams struct {
 	RegistryID string `json:"registryId"`
 }
 
-// ACPCustomAgentAddParams contains only user-facing launch configuration.
-// Name determines the stable definition identity; the daemon owns persistence.
+// ACPCustomAgentAddParams contains only user-facing launch configuration. The
+// daemon gives the agent its stable identity and owns persistence.
 type ACPCustomAgentAddParams struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+}
+
+// ACPCustomAgentUpdateParams replaces a custom agent's definition, which a
+// running agent takes up once it has no turn running. Env sets variables and
+// KeepEnv names existing ones to leave as they are, since clients never see
+// their values; any other existing variable is removed.
+type ACPCustomAgentUpdateParams struct {
+	RegistryID string `json:"registryId"`
+	ACPCustomAgentAddParams
+	KeepEnv []string `json:"keepEnv,omitempty"`
+}
+
+// ACPRegistryRemoveParams removes a registry or custom agent and deletes the
+// files maiD downloaded for it. It is refused while a turn runs on the agent;
+// removing an agent that isn't installed succeeds. Chats on the agent stay,
+// and can't continue unless a registry agent is installed again.
+type ACPRegistryRemoveParams struct {
+	RegistryID string `json:"registryId"`
 }
 
 // ProviderQuestion is a question an agent asks during provider.authenticate,
@@ -326,8 +346,8 @@ type ACPRegistryAgent struct {
 
 // ACPRegistryInstalledAgent describes a registry or custom ACP agent persisted
 // by the daemon. npm acquires registry packages lazily when they start, bounded
-// by Version. Custom launch configuration and all environment variables remain
-// server-only and are not represented.
+// by Version. Command and EnvNames are set for custom agents, for editing them;
+// environment variable values remain server-only and are not represented.
 type ACPRegistryInstalledAgent struct {
 	ID          string              `json:"id"`
 	InstanceID  provider.InstanceID `json:"instanceId"`
@@ -337,6 +357,8 @@ type ACPRegistryInstalledAgent struct {
 	Description string              `json:"description,omitempty"`
 	Icon        string              `json:"icon,omitempty"`
 	Package     string              `json:"package"`
+	Command     string              `json:"command,omitempty"`
 	Args        []string            `json:"args,omitempty"`
+	EnvNames    []string            `json:"envNames,omitempty"`
 	InstalledAt time.Time           `json:"installedAt"`
 }
