@@ -91,16 +91,6 @@ func (svc *Service) Relaunch(terminalID string, spec SpawnSpec, events Events) (
 	return session, nil
 }
 
-// Terminate kills the live run and keeps the session's final state available.
-func (svc *Service) Terminate(terminalID string) error {
-	session, err := svc.Get(terminalID)
-	if err != nil {
-		return err
-	}
-	session.Terminate(terminateGrace)
-	return nil
-}
-
 // Remove terminates the run if necessary and forgets the session.
 func (svc *Service) Remove(terminalID string) error {
 	svc.mu.Lock()

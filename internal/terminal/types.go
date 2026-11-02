@@ -19,11 +19,11 @@ const (
 	StatusStarting Status = "starting"
 	// StatusRunning means the PTY accepts input.
 	StatusRunning Status = "running"
-	// StatusExited means the process ended naturally; output remains
-	// available for this daemon run.
+	// StatusExited means the process ended by itself, which removes the
+	// terminal.
 	StatusExited Status = "exited"
-	// StatusStopped means no live run exists, normally after an explicit
-	// termination or a daemon restart.
+	// StatusStopped means no live run exists because the daemon ended it,
+	// normally by restarting; a relaunch starts a new one.
 	StatusStopped Status = "stopped"
 	// StatusError means spawn or a PTY operation failed.
 	StatusError Status = "error"

@@ -31,7 +31,6 @@ nonisolated public enum MaidRPCMethod {
     public static let terminalRelaunch = "terminal.relaunch"
     public static let terminalSubscribeList = "terminal.subscribeList"
     public static let terminalRename = "terminal.rename"
-    public static let terminalTerminate = "terminal.terminate"
     public static let terminalDelete = "terminal.delete"
     public static let terminalWrite = "terminal.write"
     public static let terminalResize = "terminal.resize"

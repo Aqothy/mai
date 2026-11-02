@@ -16,7 +16,6 @@ const (
 	MethodTerminalRelaunch      = "terminal.relaunch"
 	MethodTerminalDetach        = "terminal.detach"
 	MethodTerminalRename        = "terminal.rename"
-	MethodTerminalTerminate     = "terminal.terminate"
 	MethodTerminalDelete        = "terminal.delete"
 	MethodTerminalWrite         = "terminal.write"
 	MethodTerminalResize        = "terminal.resize"
@@ -124,10 +123,11 @@ type TerminalAttachResult struct {
 // message is one binary record from the daemon: a TerminalStreamRecordKind
 // byte, then its payload.
 //
-// Close codes: 1000 the view ended (detached, replaced by a new ticket, or
-// its terminal deleted), don't reconnect; 1001 the daemon is shutting down or
-// the view's connection closed, the connection's reconnect reattaches; 1002 or
-// 1008 a protocol or handshake error; 1011 an internal error.
+// Close codes: 1000 the view ended (detached, replaced by a new ticket, or its
+// terminal removed by a delete or its shell exiting), don't reconnect; 1001 the
+// daemon is shutting down or the view's connection closed, the connection's
+// reconnect reattaches; 1002 or 1008 a protocol or handshake error; 1011 an
+// internal error.
 const (
 	TerminalStreamPath           = "/terminal"
 	TerminalStreamSubprotocol    = "maid.terminal.v1"
@@ -151,7 +151,8 @@ const (
 	// TerminalRecordResized's payload is a TerminalStreamResized (JSON).
 	TerminalRecordResized TerminalStreamRecordKind = 0x04
 	// TerminalRecordExited's payload is a TerminalStreamExited (JSON). The
-	// stream stays open.
+	// stream stays open unless the exit removes the terminal, which can also
+	// close it before this record is sent.
 	TerminalRecordExited TerminalStreamRecordKind = 0x05
 )
 
@@ -214,7 +215,9 @@ type TerminalAttachParams struct {
 }
 
 // TerminalRelaunchParams starts a fresh run at the calling view's grid and
-// attaches the view to it as the active view.
+// attaches the view to it as the active view. If the terminal already has a
+// live run, another client got there first and the view attaches to that one:
+// a relaunch never ends a running shell.
 type TerminalRelaunchParams struct {
 	TerminalID   string             `json:"terminalId"`
 	Columns      uint16             `json:"columns"`

@@ -17,11 +17,11 @@ struct TerminalThreadScreen: View {
 
     @State private var isRenamePresented = false
     @State private var renameTitle = ""
-    @State private var isTerminateConfirmationPresented = false
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeleteErrorPresented = false
     @State private var deleteErrorMessage = ""
-    @State private var isDeletingExitedTerminal = false
+    /// The terminal on screen, kept after removal closes its attachment.
+    @State private var shownTerminalID: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -70,14 +70,12 @@ struct TerminalThreadScreen: View {
                 }
                 .toolbar {
                     TerminalActionsToolbar(
-                        isRunning: attachment.phase == .running,
                         canRelaunch: canRelaunch(attachment.phase),
                         rename: {
                             renameTitle = summary?.title ?? ""
                             isRenamePresented = true
                         },
                         relaunch: { store.relaunchActiveTerminal() },
-                        terminate: { isTerminateConfirmationPresented = true },
                         delete: { isDeleteConfirmationPresented = true }
                     )
                 }
@@ -89,18 +87,17 @@ struct TerminalThreadScreen: View {
         .task(id: request) {
             store.openTerminal(request)
         }
-        .onChange(of: attachment?.terminalID) { _, terminalID in
-            if case .new = request, let terminalID {
+        .onChange(of: attachment?.terminalID, initial: true) { _, terminalID in
+            guard let terminalID else { return }
+            shownTerminalID = terminalID
+            if case .new = request {
                 onCreated?(terminalID)
             }
         }
-        .onChange(of: attachment?.phase, initial: true) { _, phase in
-            guard case .exited = phase,
-                !isDeletingExitedTerminal,
-                let terminalID = attachment?.terminalID
-            else { return }
-            isDeletingExitedTerminal = true
-            deleteTerminal(terminalID)
+        .onChange(of: store.removedTerminalID) { _, removed in
+            guard let removed, removed == shownTerminalID else { return }
+            onDeleted?()
+            dismiss()
         }
         .alert("Rename Terminal", isPresented: $isRenamePresented) {
             TextField("Title", text: $renameTitle)
@@ -110,19 +107,6 @@ struct TerminalThreadScreen: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            "Terminate this shell?",
-            isPresented: $isTerminateConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Terminate Shell", role: .destructive) {
-                if let terminalID = attachment?.terminalID {
-                    store.terminateTerminal(terminalID: terminalID)
-                }
-            }
-        } message: {
-            Text("The running shell ends. The terminal stays in your Threads list and can be relaunched.")
         }
         .confirmationDialog(
             "Delete this terminal?",
@@ -148,10 +132,7 @@ struct TerminalThreadScreen: View {
         Task {
             do {
                 try await store.deleteTerminal(terminalID: terminalID)
-                onDeleted?()
-                dismiss()
             } catch {
-                isDeletingExitedTerminal = false
                 deleteErrorMessage = error.localizedDescription
                 isDeleteErrorPresented = true
             }
@@ -169,11 +150,9 @@ struct TerminalThreadScreen: View {
 /// Toolbar content with narrow inputs so phase changes do not rebuild the
 /// surface host.
 private struct TerminalActionsToolbar: ToolbarContent {
-    let isRunning: Bool
     let canRelaunch: Bool
     let rename: () -> Void
     let relaunch: () -> Void
-    let terminate: () -> Void
     let delete: () -> Void
 
     var body: some ToolbarContent {
@@ -184,9 +163,6 @@ private struct TerminalActionsToolbar: ToolbarContent {
                     Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
                 }
                 TerminalTextSizeMenu()
-                if isRunning {
-                    Button("Terminate", systemImage: "stop.circle", role: .destructive, action: terminate)
-                }
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
             .accessibilityLabel("Terminal actions")

@@ -24,10 +24,11 @@ final class TerminalAttachment: TerminalIO {
     enum Mode: Equatable {
         /// Create a new terminal in the given working directory.
         case create(cwd: String, title: String?)
-        /// Attach to an existing live (running or exited) terminal.
+        /// Attach to an existing terminal with a live run.
         case attach(terminalID: String)
         /// Start a fresh run for an existing terminal (stopped rows, or the
-        /// explicit Relaunch action).
+        /// explicit Relaunch action). If another client already did, this
+        /// joins its shell.
         case relaunch(terminalID: String)
     }
 

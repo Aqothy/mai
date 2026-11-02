@@ -128,13 +128,9 @@ func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 		info, _ := s.providerService.Info("agent")
 		return info.PID
 	}
-	waitUntil(t, "the sign-in program to exit", func() bool {
-		session, err := s.terminals.service.Get(result.Challenge.TerminalID)
-		if err != nil {
-			return false
-		}
-		_, exited := session.ExitCode()
-		return exited
+	waitUntil(t, "the sign-in program to exit, which removes its terminal", func() bool {
+		_, err := s.terminals.service.Get(result.Challenge.TerminalID)
+		return err != nil
 	})
 	// A restart that wrongly ran mid-turn would end it: give a pending one a
 	// few polls to do so.

@@ -1,7 +1,7 @@
 package daemon
 
 // Terminal list tests: the list stream, identity persistence, and the
-// rename/terminate/delete actions.
+// rename/delete actions.
 
 import (
 	"testing"
@@ -97,20 +97,6 @@ func TestTerminalListSnapshotAndLifecycleUpserts(t *testing.T) {
 	controller.waitForOutput(t, "NOISE-7")
 	if after := len(observer.listItemsSnapshot()); after != before {
 		t.Fatalf("raw output published %d list updates", after-before)
-	}
-
-	// Terminate publishes a stopped upsert without changing updatedAt.
-	observer.call(t, wire.MethodTerminalTerminate, wire.TerminalIDParams{TerminalID: terminalID}, nil)
-	stopped := waitForListUpsert(t, observer, func(s wire.TerminalSummary) bool {
-		return s.TerminalID == terminalID && s.Status == terminal.StatusStopped
-	})
-	if !stopped.UpdatedAt.Equal(renamed.UpdatedAt) {
-		t.Fatal("terminate changed updatedAt")
-	}
-	// The attached controller's stream reports the run stopped, and stays
-	// open.
-	if _, exit := created.stream.waitRecord(t, "the run's exit", 1, isExited); exit.exited.Status != terminal.StatusStopped {
-		t.Fatalf("controller exit = %s, want stopped", exit.exited.Status)
 	}
 
 	// Delete removes the row, publishes a removal, and ends the stream.

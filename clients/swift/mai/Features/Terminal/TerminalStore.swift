@@ -13,6 +13,9 @@ final class TerminalStore {
     /// same deterministic order the daemon persists.
     private(set) var terminals: [TerminalSummary] = []
     private(set) var hasLoadedTerminalList = false
+    /// The terminal most recently removed, by anyone: a screen showing it
+    /// leaves.
+    private(set) var removedTerminalID: String?
 
     /// The one attachment currently rendering a terminal, if any.
     private(set) var activeAttachment: TerminalAttachment?
@@ -100,6 +103,14 @@ final class TerminalStore {
         switch MaidTerminalListStreamItemKind(rawValue: item.kind) {
         case .snapshot:
             terminals = Self.sorted(item.terminals ?? [])
+            // It went away while this client was disconnected. Only a terminal
+            // this client was already showing can be told that way: a new one
+            // may be newer than the snapshot.
+            if let active = activeAttachment, active.hasInstalledInitialSnapshot, active.phase != .running,
+                let terminalID = active.terminalID, summary(for: terminalID) == nil
+            {
+                terminalWasRemoved(terminalID)
+            }
         case .terminalUpserted:
             guard let summary = item.terminal else { return }
             var next = terminals
@@ -112,14 +123,19 @@ final class TerminalStore {
             terminals = Self.sorted(next)
         case .terminalRemoved:
             guard let terminalID = item.terminalID else { return }
-            terminals.removeAll { $0.terminalID == terminalID }
-            if let active = activeAttachment, active.terminalID == terminalID {
-                closeActiveTerminal()
-            }
+            terminalWasRemoved(terminalID)
         case nil:
             // Unknown future kinds must not crash the client.
             break
         }
+    }
+
+    private func terminalWasRemoved(_ terminalID: String) {
+        terminals.removeAll { $0.terminalID == terminalID }
+        if let active = activeAttachment, active.terminalID == terminalID {
+            closeActiveTerminal()
+        }
+        removedTerminalID = terminalID
     }
 
     private static func sorted(_ summaries: [TerminalSummary]) -> [TerminalSummary] {
@@ -191,12 +207,6 @@ final class TerminalStore {
 
     // MARK: - Actions
 
-    func terminateTerminal(terminalID: String) {
-        Task {
-            try? await rpc.terminateTerminal(terminalID: terminalID)
-        }
-    }
-
     func renameTerminal(terminalID: String, title: String) {
         Task { [weak self] in
             guard let self else { return }
@@ -215,12 +225,10 @@ final class TerminalStore {
     }
 
     /// Deletes the terminal: the daemon terminates any live shell and removes
-    /// the persisted row. The list removal notification clears local state.
+    /// the persisted row. Other clients hear of it from the list.
     func deleteTerminal(terminalID: String) async throws {
         try await rpc.deleteTerminal(terminalID: terminalID)
-        if let active = activeAttachment, active.terminalID == terminalID {
-            closeActiveTerminal()
-        }
+        terminalWasRemoved(terminalID)
     }
 
     // MARK: - Transport events

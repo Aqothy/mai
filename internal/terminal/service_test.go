@@ -182,9 +182,7 @@ func TestTerminateKillsProcessGroup(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		if err := svc.Terminate("t1"); err != nil {
-			t.Errorf("terminate: %v", err)
-		}
+		session.Terminate(terminateGrace)
 		close(done)
 	}()
 	select {
@@ -274,9 +272,6 @@ func TestRemoveTerminatesAndForgets(t *testing.T) {
 	waitFor(t, "shell death", func() bool { return syscall.Kill(pid, 0) != nil })
 	if _, err := svc.Get("t1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get after remove err = %v, want ErrNotFound", err)
-	}
-	if err := svc.Terminate("t1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("terminate after remove err = %v, want ErrNotFound", err)
 	}
 }
 

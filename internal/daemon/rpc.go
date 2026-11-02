@@ -643,12 +643,6 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 			return nil, err
 		}
 		return nil, h.server.deleteTerminal(params.TerminalID)
-	case wire.MethodTerminalTerminate:
-		var params wire.TerminalIDParams
-		if err := decodeRPCParams(req, &params); err != nil {
-			return nil, err
-		}
-		return nil, h.server.terminateTerminal(params.TerminalID)
 	case wire.MethodTerminalWrite:
 		var params wire.TerminalWriteParams
 		if err := decodeRPCParams(req, &params); err != nil {

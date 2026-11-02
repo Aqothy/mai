@@ -7,7 +7,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -16,10 +15,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/Aqothy/maiD/api/wire"
-	"github.com/Aqothy/maiD/internal/terminal"
 )
-
-func isExited(record testRecord) bool { return record.kind == wire.TerminalRecordExited }
 
 func resizedTo(columns, rows uint16) func(testRecord) bool {
 	return func(record testRecord) bool {
@@ -283,6 +279,13 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	watching := other.mustAttachTerminal(t, terminalID, 80, 24)
 	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'OLDRUN-%d\\n' $((20+2))\n")
 	watched := watching.stream.waitOutput(t, 1, "OLDRUN-22")
+	// A run the daemon ended keeps its terminal and its views; a relaunch only
+	// replaces a run that is over.
+	running, err := s.terminals.service.Get(terminalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running.Terminate(time.Second)
 
 	var result wire.TerminalAttachResult
 	client.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: terminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &result)
@@ -313,34 +316,73 @@ func TestTerminalRelaunchFencesStaleRuns(t *testing.T) {
 	}
 }
 
-func TestTerminalAttachAfterNaturalExitShowsFinalState(t *testing.T) {
+// A relaunch never ends a running shell, whatever the caller last saw: it joins
+// the shell instead.
+func TestTerminalRelaunchJoinsARunningShell(t *testing.T) {
 	useQuietTestShell(t)
 	s := newTestServer(t)
 	defer s.Close()
 	url := newWSTestServer(t, s)
+	first := dialRecordingClient(t, url)
+	second := dialRecordingClient(t, url)
+
+	created := createTestTerminal(t, first)
+	terminalID := created.Terminal.TerminalID
+	// Only this shell knows the variable, so reading it back proves the shell
+	// survived and wasn't replaced by another.
+	first.writeTerminal(t, terminalID, created.RunID, "MARK=SURVIVOR-$((30+7))\n")
+
+	var joined wire.TerminalAttachResult
+	second.call(t, wire.MethodTerminalRelaunch, wire.TerminalRelaunchParams{TerminalID: terminalID, Columns: 80, Rows: 24, Appearance: testAppearance}, &joined)
+	view := second.view(t, joined)
+	if view.RunID != created.RunID {
+		t.Fatalf("relaunch put the view on run %s, want the running %s", view.RunID, created.RunID)
+	}
+	first.writeTerminal(t, terminalID, created.RunID, "printf 'STILL-%s\\n' \"$MARK\"\n")
+	view.stream.waitOutput(t, 1, "STILL-SURVIVOR-37")
+}
+
+// A shell that ends by itself, as with exit or Ctrl-D, takes its terminal with
+// it, for every client and across a restart, whether or not anyone has it open.
+func TestTerminalShellExitRemovesTheTerminal(t *testing.T) {
+	useQuietTestShell(t)
+	dir := t.TempDir()
+	s := newTestServerAt(t, dir)
+	url := newWSTestServer(t, s)
 	client := dialRecordingClient(t, url)
+	observer := dialRecordingClient(t, url)
+	subscribeTerminalListSnapshot(t, observer)
 
-	snapshot := createTestTerminal(t, client)
-	terminalID := snapshot.Terminal.TerminalID
-	client.writeTerminal(t, terminalID, snapshot.RunID, "printf 'FINAL-%d\\n' $((90+9)); exit 4\n")
-
-	// The attached client sees the exit streamed with its code.
-	_, exit := snapshot.stream.waitRecord(t, "the run's exit", 1, isExited)
-	if exit.exited.Status != terminal.StatusExited || exit.exited.ExitCode == nil || *exit.exited.ExitCode != 4 {
-		t.Fatalf("streamed exit = %s code %v, want exited 4", exit.exited.Status, exit.exited.ExitCode)
+	removed := func(terminalID string) {
+		t.Helper()
+		waitForListItem(t, observer, "removal", func(item wire.TerminalListStreamItem) bool {
+			return item.Kind == wire.TerminalListItemRemoved && item.TerminalID == terminalID
+		})
+		if _, err := client.attachTerminal(terminalID, 80, 24); err == nil {
+			t.Fatal("attached to a terminal whose shell exited")
+		}
 	}
 
-	// A later client attaching at a different grid gets the retained final
-	// screen at the run's last grid, which its view draws scaled.
-	attach := dialRecordingClient(t, url).mustAttachTerminal(t, terminalID, 100, 30)
-	if attach.Columns != 80 || attach.Rows != 24 {
-		t.Fatalf("attach grid = %dx%d, want the run's last 80x24", attach.Columns, attach.Rows)
+	opened := createTestTerminal(t, client)
+	client.writeTerminal(t, opened.Terminal.TerminalID, opened.RunID, "exit 4\n")
+	if code := opened.stream.waitClosed(t); code != websocket.StatusNormalClosure {
+		t.Fatalf("exit closed the stream with %v, want %v", code, websocket.StatusNormalClosure)
 	}
-	if attach.Terminal.Status != terminal.StatusExited || attach.Terminal.ExitCode == nil || *attach.Terminal.ExitCode != 4 {
-		t.Fatalf("attach status = %s exit %v, want exited 4", attach.Terminal.Status, attach.Terminal.ExitCode)
+	removed(opened.Terminal.TerminalID)
+
+	// Input needs an attached view, so this shell is told to exit before the
+	// view leaves.
+	background := createTestTerminal(t, client)
+	client.writeTerminal(t, background.Terminal.TerminalID, background.RunID, "sleep 1; exit\n")
+	client.notify(t, wire.MethodTerminalDetach, wire.TerminalDetachParams{TerminalID: background.Terminal.TerminalID})
+	removed(background.Terminal.TerminalID)
+
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if !containsBytes(attach.Snapshot, "FINAL-99") {
-		t.Fatal("attach after exit lost the final screen output")
+	restarted := dialRecordingClient(t, newWSTestServer(t, newTestServerAt(t, dir)))
+	if rows := subscribeTerminalListSnapshot(t, restarted).Terminals; len(rows) != 0 {
+		t.Fatalf("after restart the list has %d terminals, want none", len(rows))
 	}
 }
 
@@ -381,7 +423,7 @@ func TestTerminalExitDuringResizesFinishes(t *testing.T) {
 	defer s.Close()
 	url := newWSTestServer(t, s)
 	client := dialRecordingClient(t, url)
-	for round := range 20 {
+	for range 20 {
 		created := createTestTerminal(t, client)
 		terminalID, runID := created.Terminal.TerminalID, created.RunID
 		stop := make(chan struct{})
@@ -402,7 +444,7 @@ func TestTerminalExitDuringResizesFinishes(t *testing.T) {
 			}
 		}()
 		client.writeTerminal(t, terminalID, runID, "exit\n")
-		created.stream.waitRecord(t, fmt.Sprintf("round %d: the run's exit", round), 1, isExited)
+		created.stream.waitClosed(t)
 		close(stop)
 		<-resized
 	}

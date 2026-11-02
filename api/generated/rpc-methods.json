@@ -156,11 +156,6 @@
       "result": "TerminalSummary"
     },
     {
-      "name": "terminal.terminate",
-      "params": "TerminalIDParams",
-      "resultNull": true
-    },
-    {
       "name": "terminal.delete",
       "params": "TerminalIDParams",
       "resultNull": true

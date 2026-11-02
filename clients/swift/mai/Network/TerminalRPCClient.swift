@@ -15,7 +15,6 @@ protocol TerminalRPCClient: RPCTransportClient {
     func createTerminal(_ params: TerminalCreateParams) async throws -> TerminalAttachResult
     func attachTerminal(_ params: TerminalAttachParams) async throws -> TerminalAttachResult
     func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult
-    func terminateTerminal(terminalID: String) async throws
 
     /// Where views open their terminal streams, beside the RPC endpoint.
     var terminalStreamEndpoint: URL { get }
@@ -59,13 +58,6 @@ extension RPCClient: TerminalRPCClient {
 
     func relaunchTerminal(_ params: TerminalRelaunchParams) async throws -> TerminalAttachResult {
         try await call(MaidRPCMethod.terminalRelaunch, params: params)
-    }
-
-    func terminateTerminal(terminalID: String) async throws {
-        try await callVoid(
-            MaidRPCMethod.terminalTerminate,
-            params: TerminalIDParams(terminalID: terminalID)
-        )
     }
 
     func writeTerminal(_ params: TerminalWriteParams) {

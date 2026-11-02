@@ -48,7 +48,6 @@ var Methods = []MethodDefinition{
 	{Name: MethodTerminalRelaunch, Params: "TerminalRelaunchParams", Result: "TerminalAttachResult"},
 	{Name: MethodTerminalSubscribeList, Params: "EmptyParams", Result: "TerminalListStreamItem"},
 	{Name: MethodTerminalRename, Params: "TerminalRenameParams", Result: "TerminalSummary"},
-	{Name: MethodTerminalTerminate, Params: "TerminalIDParams", ResultNull: true},
 	{Name: MethodTerminalDelete, Params: "TerminalIDParams", ResultNull: true},
 	// Clients send terminal.write, terminal.resize, terminal.focus, and
 	// terminal.detach as notifications; they are registered here so generated

@@ -289,8 +289,14 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 		columns: params.Columns, rows: params.Rows, appearance: appearance,
 		ticket: newStreamTicket(),
 	}
-	if !entry.views.attach(view, params.Focus) {
-		entry.operations.Unlock()
+	result, err := s.attachView(entry, session, view, params.Focus)
+	entry.operations.Unlock()
+	return result, err
+}
+
+// attachView adds a view to the session's run. Callers hold entry.operations.
+func (s *Server) attachView(entry *terminalEntry, session *terminal.Session, view terminalView, focus bool) (wire.TerminalAttachResult, error) {
+	if !entry.views.attach(view, focus) {
 		return wire.TerminalAttachResult{}, errTerminalClientClosed
 	}
 	s.sizeToActiveView(entry)
@@ -298,17 +304,17 @@ func (s *Server) attachTerminal(client *rpcClient, params wire.TerminalAttachPar
 	seen := session.Seen()
 	result := s.terminalAttachResult(entry, view.ticket)
 	if seen {
-		s.publishTerminalList(params.TerminalID)
+		s.publishTerminalList(entry.terminalID)
 	}
-	entry.operations.Unlock()
-	s.logger.Info("terminal attached", "terminal", params.TerminalID, "run", session.RunID, "client", client.id,
-		"columns", params.Columns, "rows", params.Rows, "focus", params.Focus)
+	s.logger.Info("terminal attached", "terminal", entry.terminalID, "run", session.RunID, "client", view.client.id,
+		"columns", view.columns, "rows", view.rows, "focus", focus)
 	return result, nil
 }
 
 // relaunchTerminal replaces the terminal's run with a fresh shell in the
 // persisted cwd and attaches the calling client to the new run. Other views'
-// streams follow the new run from its snapshot.
+// streams follow the new run from its snapshot. A live run is another client's
+// shell, so the caller joins it instead.
 func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalRelaunchParams) (wire.TerminalAttachResult, error) {
 	rt := s.terminals
 	if err := terminal.ValidateSize(params.Columns, params.Rows); err != nil {
@@ -326,6 +332,13 @@ func (s *Server) relaunchTerminal(client *rpcClient, params wire.TerminalRelaunc
 		client: client, attachmentID: params.AttachmentID,
 		columns: params.Columns, rows: params.Rows, appearance: appearance,
 		ticket: newStreamTicket(),
+	}
+	if current, err := rt.service.Get(params.TerminalID); err == nil {
+		if status := current.Status(); status == terminal.StatusRunning || status == terminal.StatusStarting {
+			result, err := s.attachView(entry, current, view, true)
+			entry.operations.Unlock()
+			return result, err
+		}
 	}
 	if !entry.views.attach(view, true) {
 		entry.operations.Unlock()
@@ -455,23 +468,6 @@ func (s *Server) terminalMetaSummary(entry *terminalEntry) wire.TerminalSummary 
 	}
 }
 
-func (s *Server) terminateTerminal(terminalID string) error {
-	rt := s.terminals
-	entry, ok := rt.lockEntry(terminalID)
-	if !ok {
-		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
-	}
-	defer entry.operations.Unlock()
-	if err := rt.service.Terminate(terminalID); err != nil {
-		if errors.Is(err, terminal.ErrNotFound) {
-			return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
-		}
-		return err
-	}
-	s.logger.Info("terminal terminated", "terminal", terminalID)
-	return nil
-}
-
 // renameTerminal is an identity-level action: it changes the persisted title
 // and bumps updatedAt.
 func (s *Server) renameTerminal(params wire.TerminalRenameParams) (wire.TerminalSummary, error) {
@@ -499,6 +495,14 @@ func (s *Server) deleteTerminal(terminalID string) error {
 		return fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, terminal.ErrNotFound)
 	}
 	defer entry.operations.Unlock()
+	return s.dropTerminal(entry)
+}
+
+// dropTerminal ends any live run and removes the terminal's identity, for
+// every client. Callers hold entry.operations.
+func (s *Server) dropTerminal(entry *terminalEntry) error {
+	rt := s.terminals
+	terminalID := entry.terminalID
 	// Remove terminates the live process group when one exists.
 	if err := rt.service.Remove(terminalID); err != nil && !errors.Is(err, terminal.ErrNotFound) {
 		return err
@@ -513,7 +517,7 @@ func (s *Server) deleteTerminal(terminalID string) error {
 		}
 	}
 	s.publishTerminalList(terminalID)
-	s.logger.Info("terminal deleted", "terminal", terminalID)
+	s.logger.Info("terminal removed", "terminal", terminalID)
 	return nil
 }
 
@@ -713,9 +717,17 @@ func (s *Server) finishTerminalRun(terminalID, runID string, status terminal.Sta
 		entry.operations.Unlock()
 		return
 	}
-	s.publishTerminalList(terminalID)
 	onExit := entry.onExit
 	entry.onExit = nil
+	// A shell that ended by itself is finished with. One the daemon ended, by
+	// shutting down, stays for the user to relaunch.
+	if status == terminal.StatusExited {
+		if err := s.dropTerminal(entry); err != nil {
+			s.logger.Warn("remove exited terminal", "terminal", terminalID, "error", err)
+		}
+	} else {
+		s.publishTerminalList(terminalID)
+	}
 	entry.operations.Unlock()
 	if onExit != nil {
 		onExit(exitCode)
