@@ -124,27 +124,45 @@ func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	if result.Challenge == nil || result.Challenge.Kind != provider.AuthKindTerminal || result.Challenge.TerminalID == "" {
 		t.Fatalf("challenge = %#v, want a terminal to open", result.Challenge)
 	}
-	pid := func() int {
-		info, _ := s.providerService.Info("agent")
-		return info.PID
-	}
 	waitUntil(t, "the sign-in program to exit, which removes its terminal", func() bool {
 		_, err := s.terminals.service.Get(result.Challenge.TerminalID)
 		return err != nil
 	})
-	// A restart that wrongly ran mid-turn would end it: give a pending one a
-	// few polls to do so.
-	time.Sleep(3 * providerIdlePollInterval)
-	if now := pid(); now != before.PID {
-		t.Fatalf("provider restarted (pid %d -> %d) while a turn ran", before.PID, now)
-	}
 
-	client.command(t, wire.CommandParams{Interrupt: &orchestration.Interrupt{Thread: thread}})
-	client.waitSettled(t, thread, blocked)
+	if err := os.WriteFile(gate+"/release", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if turn := client.waitSettled(t, thread, blocked); turn.State != provider.TurnCompleted {
+		t.Fatalf("the turn the sign-in waited for = %s", turn.State)
+	}
 	waitUntil(t, "the provider restarted once idle", func() bool {
 		info, _ := s.providerService.Info("agent")
 		return info.PID != before.PID && info.Status == provider.InstanceStatusInitialized
 	})
+}
+
+// A message sent while a provider restarts waits for it: a turn started then
+// would be cut off.
+func TestAMessageSentDuringAProviderRestartWaitsForIt(t *testing.T) {
+	s := newTestServer(t)
+	client := newRecordingClient(t, s)
+	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, nil)
+	thread := client.createThread(t, "agent", t.TempDir()).Thread
+	client.subscribe(t, thread)
+
+	var sent orchestration.DeliveryID
+	s.restartProviderWhenIdle("agent", func(ctx context.Context) error {
+		sent = client.deliver(t, thread, "hello").Delivery
+		snapshot := client.subscribe(t, thread)
+		if len(snapshot.Queue) != 1 || snapshot.Queue[0].State != orchestration.DeliveryQueued {
+			t.Fatalf("during the restart the queue = %#v, want the message still queued", snapshot.Queue)
+		}
+		_, err := s.providerService.RestartInstance(ctx, "agent")
+		return err
+	})
+	if turn := client.waitSettled(t, thread, sent); turn.State != provider.TurnCompleted {
+		t.Fatalf("turn after the restart = %s", turn.State)
+	}
 }
 
 func TestProviderSessionManagement(t *testing.T) {

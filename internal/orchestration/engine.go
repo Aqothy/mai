@@ -71,6 +71,7 @@ type Engine struct {
 	// waits are agents' wait calls.
 	waits    map[uint64]*waiter
 	nextWait uint64
+	holds    []*instanceHold
 	// dispatched are deliveries whose Send is in flight.
 	dispatched map[DeliveryID]bool
 	// noticed are the requests a spawner was told about (WakeNeedsInput).
@@ -260,6 +261,7 @@ func (e *Engine) step(fn func(*step)) (ok bool) {
 		}
 		due = r.touched
 	}
+	e.grantHolds()
 	return true
 }
 

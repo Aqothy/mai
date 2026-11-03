@@ -156,6 +156,88 @@ func TestHoldsAreReleasedOnlyByWhoMay(t *testing.T) {
 	}
 }
 
+// turnsUntil makes every message's turn run until end closes.
+func turnsUntil(end <-chan struct{}) func(*fakeInstance, string, provider.SendInput) (provider.SendAck, error) {
+	return func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		f.startTurn(session, in.Delivery, in)
+		go func() {
+			<-end
+			f.settle(session, in.Delivery, provider.TurnCompleted)
+		}()
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+}
+
+// A hold takes effect once nothing needs its instance, and until it's released
+// no turn starts there. Other instances go on.
+func TestHoldingAnInstance(t *testing.T) {
+	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	claude.openGate = make(chan struct{})
+	endTurn := make(chan struct{})
+	claude.onSend = turnsUntil(endTurn)
+	h := newHarness(t, claude, codex)
+	first := h.createThread("claude", "first")
+
+	var release func()
+	held := make(chan error, 1)
+	go func() {
+		var err error
+		release, err = h.engine.HoldInstance(context.Background(), "claude")
+		held <- err
+	}()
+	waiting := func() bool {
+		waiting, err := call(context.Background(), h.engine, func(*step) (bool, error) {
+			return len(h.engine.holds) == 1 && !h.engine.holds[0].active, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return waiting
+	}
+	h.eventually("the hold to wait for the message on its way", waiting)
+
+	close(claude.openGate)
+	h.eventually("the turn to run", func() bool { return len(claude.messages()) == 1 })
+	if !waiting() {
+		t.Fatal("a hold took effect while a turn ran")
+	}
+
+	close(endTurn)
+	h.settledTurns(first.Thread, 1)
+	if err := <-held; err != nil {
+		t.Fatalf("HoldInstance: %v", err)
+	}
+	second := h.createThread("claude", "second")
+	other := h.createThread("codex", "other")
+	h.settledTurns(other.Thread, 1)
+	if queue := h.snapshot(second.Thread).Queue; len(queue) != 1 || queue[0].State != DeliveryQueued || len(claude.messages()) != 1 {
+		t.Fatalf("under the hold the queue = %#v and claude got %d messages; want the message queued", queue, len(claude.messages()))
+	}
+
+	release()
+	h.settledTurns(second.Thread, 1)
+}
+
+// Giving up on a hold leaves nothing behind that would take effect later.
+func TestACanceledHoldHoldsNothing(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	endTurn := make(chan struct{})
+	claude.onSend = turnsUntil(endTurn)
+	h := newHarness(t, claude)
+	first := h.createThread("claude", "first")
+	h.eventually("the turn to run", func() bool { return len(claude.messages()) == 1 })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.engine.HoldInstance(ctx, "claude"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("HoldInstance = %v, want it canceled", err)
+	}
+	close(endTurn)
+	h.settledTurns(first.Thread, 1)
+	second := h.createThread("claude", "second")
+	h.settledTurns(second.Thread, 1)
+}
+
 // A turn doesn't end the moment it is stopped. A message sent in that gap by
 // someone who may release the stop goes next, as if sent a moment later; one from
 // someone who may not stays behind the stop.

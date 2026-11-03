@@ -284,27 +284,14 @@ func (s *Server) stopIdleProviders() {
 	}
 }
 
-// providerIdlePollInterval is how often a pending provider restart checks
-// whether the provider's turns have finished.
-const providerIdlePollInterval = time.Second
-
-// restartProviderWhenIdle runs restart once no turn runs on the provider, so a
-// restart never cuts off another thread's turn.
+// restartProviderWhenIdle runs restart once no turn runs on the provider, and
+// starts none until it's done, so a restart never cuts off a thread's turn.
 func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID, restart func(context.Context) error) {
-	ticker := time.NewTicker(providerIdlePollInterval)
-	defer ticker.Stop()
-	for s.engine.InstanceBusy(s.ctx, instanceID) {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-	// A canceled context also makes InstanceBusy report false, and a restart now
-	// would spawn an agent nothing waits for during shutdown.
-	if s.ctx.Err() != nil {
+	release, err := s.engine.HoldInstance(s.ctx, instanceID)
+	if err != nil {
 		return
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 	if err := restart(ctx); err != nil {
