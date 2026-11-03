@@ -191,11 +191,14 @@ func TestCloseIsIdempotentAndRejectsLaterCalls(t *testing.T) {
 
 func TestConcurrentSearchAndClose(t *testing.T) {
 	finder, _ := newFixtureFinder(t)
+	searching := make(chan struct{})
+	signal := sync.OnceFunc(func() { close(searching) })
 	var wg sync.WaitGroup
 	for worker := 0; worker < 8; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer signal()
 			for i := 0; i < 200; i++ {
 				if _, err := finder.SearchFiles("main", 10); err != nil {
 					if errors.Is(err, ErrClosed) {
@@ -204,10 +207,11 @@ func TestConcurrentSearchAndClose(t *testing.T) {
 					t.Errorf("SearchFiles: %v", err)
 					return
 				}
+				signal()
 			}
 		}()
 	}
-	time.Sleep(10 * time.Millisecond)
+	<-searching
 	if err := finder.Close(); err != nil {
 		t.Fatalf("Close during searches: %v", err)
 	}

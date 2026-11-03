@@ -31,8 +31,8 @@ func newWorkspaceFixture(t *testing.T) string {
 	return root
 }
 
-// searchUntilWarm retries while the daemon reports Indexing, bounded by the
-// polling contract the client follows while a trigger stays active.
+// searchUntilWarm retries while the daemon reports Indexing, as pressing
+// "Check Again" does in the app.
 func searchUntilWarm(t *testing.T, client *recordingClient, params wire.WorkspaceSearchFilesParams) wire.WorkspaceSearchFilesResult {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

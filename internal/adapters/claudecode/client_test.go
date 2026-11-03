@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"testing"
@@ -12,7 +13,13 @@ import (
 func TestStreamClientFailsPendingControlOnStreamClose(t *testing.T) {
 	hostReader, cliWriter := io.Pipe()
 	cliReader, hostWriter := io.Pipe()
-	go func() { _, _ = io.Copy(io.Discard, cliReader) }()
+	requested := make(chan struct{})
+	go func() {
+		input := bufio.NewReader(cliReader)
+		_, _ = input.ReadString('\n')
+		close(requested)
+		_, _ = io.Copy(io.Discard, input)
+	}()
 	client := newStreamClient(hostReader, hostWriter)
 	client.start()
 
@@ -22,7 +29,13 @@ func TestStreamClientFailsPendingControlOnStreamClose(t *testing.T) {
 	go func() {
 		errs <- client.control(ctx, map[string]any{"subtype": "never-answered"}, nil)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	// A call registers as pending before it writes, so one the CLI has read is
+	// pending when the stream fails.
+	select {
+	case <-requested:
+	case err := <-errs:
+		t.Fatalf("control ended before the CLI read it: %v", err)
+	}
 	cliWriter.Close()
 	select {
 	case err := <-errs:

@@ -390,7 +390,9 @@ func TestUpdateReachesEveryFolder(t *testing.T) {
 	hosts.setIndex(fakeBinaryAgent("qa", "2.0.0", v2, ""))
 	refreshACP(t, client)
 	installACP(t, client, "qa")
-	client.waitACPState(t, "qa", wire.ACPAgentInstalled)
+	client.waitACPRow(t, "qa", "updated", func(row wire.ACPRegistryAgent) bool {
+		return row.State == wire.ACPAgentInstalled && row.InstalledVersion == "2.0.0"
+	})
 
 	late := client.createThread(t, info.InstanceID, t.TempDir()).Thread
 	client.subscribe(t, late)

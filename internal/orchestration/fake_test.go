@@ -429,6 +429,15 @@ func (h *harness) settledTurns(thread ThreadID, n int) ThreadSnapshot {
 	return snapshot
 }
 
+// rerunRules changes a thread so the engine's rules run for it. Steps run one
+// at a time and rules queue what they send within their step, so anything they
+// would still send is in a snapshot taken after this.
+func (h *harness) rerunRules(thread ThreadID) {
+	h.t.Helper()
+	read := true
+	h.do(UpdateThread{Thread: thread, Read: &read})
+}
+
 func (h *harness) createThread(instance provider.InstanceID, prompt string) CommandResult {
 	h.t.Helper()
 	create := CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance}}

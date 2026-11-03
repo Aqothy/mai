@@ -265,15 +265,18 @@ func TestSpawnedChildRepliesToItsParent(t *testing.T) {
 	if got := joined(texts(wake)); !strings.Contains(got, "envelope reply: answer to Fix the login bug") {
 		t.Fatalf("parent's wake = %s, want the child's answer as a reply", got)
 	}
-	time.Sleep(50 * time.Millisecond)
-	if turns := h.snapshot(parent.Thread).Turns; len(turns) != 2 {
-		t.Fatalf("parent has %d turns, want the reply once", len(turns))
+	h.rerunRules(spawned.Thread)
+	if again := h.snapshot(parent.Thread); len(again.Turns) != 2 || len(again.Queue) != 0 {
+		t.Fatalf("parent has %d turns and %d queued, want the reply once", len(again.Turns), len(again.Queue))
 	}
 }
 
 // A wait that returns the child's answer takes it: no wake follows.
 func TestWaitTakesTheReply(t *testing.T) {
 	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	// The child waits for the parent's wait: an answer that comes first goes to
+	// the running parent as a steer, leaving the wait nothing to take.
+	codex.openGate = make(chan struct{})
 	parentRelease := make(chan struct{})
 	claude.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
 		f.startTurn(session, in.Delivery, in)
@@ -291,15 +294,26 @@ func TestWaitTakesTheReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	result, err := h.engine.Wait(context.Background(), agent, []ThreadID{spawned.Thread}, false, 5*time.Second)
+	var result WaitResult
+	waited := make(chan struct{})
+	go func() {
+		defer close(waited)
+		result, err = h.engine.Wait(context.Background(), agent, []ThreadID{spawned.Thread}, false, 5*time.Second)
+	}()
+	h.eventually("the parent's wait", func() bool {
+		waiting, err := call(context.Background(), h.engine, func(*step) (bool, error) { return h.engine.waiting(parent.Thread), nil })
+		return err == nil && waiting
+	})
+	close(codex.openGate)
+	<-waited
 	if err != nil || result.TimedOut || len(result.Threads) != 1 || result.Threads[0].Reply == nil || result.Threads[0].Reply.Text != "answer to Count the files" {
 		t.Fatalf("wait = %#v, %v; want the child's answer", result, err)
 	}
 	close(parentRelease)
-	snapshot := h.settledTurns(parent.Thread, 1)
-	time.Sleep(50 * time.Millisecond)
-	if turns := h.snapshot(parent.Thread).Turns; len(turns) != 1 || len(claude.messages()) != 1 {
-		t.Fatalf("parent turns = %d, messages = %d; want no wake after the wait took the reply (%#v)", len(turns), len(claude.messages()), snapshot.Queue)
+	h.settledTurns(parent.Thread, 1)
+	h.rerunRules(spawned.Thread)
+	if again := h.snapshot(parent.Thread); len(again.Turns) != 1 || len(again.Queue) != 0 || len(claude.messages()) != 1 {
+		t.Fatalf("parent turns = %d, messages = %d; want no wake after the wait took the reply (%#v)", len(again.Turns), len(claude.messages()), again.Queue)
 	}
 }
 
