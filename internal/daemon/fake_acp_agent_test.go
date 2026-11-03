@@ -44,7 +44,7 @@ func fakeACPAgentCommand(flags ...string) []string {
 // startFakeACPAgent starts the fake ACP agent as provider instance id.
 func startFakeACPAgent(t *testing.T, s *Server, id provider.InstanceID, flags ...string) {
 	t.Helper()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec(id, string(id), fakeACPAgentCommand(flags...)), false); err != nil {
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec(id, string(id), fakeACPAgentCommand(flags...))); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
 }

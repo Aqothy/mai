@@ -307,9 +307,9 @@ func (s *Service) StartConfiguredInstance(ctx context.Context, id provider.Insta
 	return s.start(ctx, spec, folder, false, false)
 }
 
-// StartInstance starts (or with restart replaces) an instance of spec. A
-// user's spec persists; a manifest's config doesn't.
-func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
+// StartInstance starts an instance of spec. A user's spec persists; a
+// manifest's config doesn't.
+func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
 	s.mu.Lock()
 	manifest := s.manifest[spec.InstanceID]
 	s.mu.Unlock()
@@ -322,9 +322,6 @@ func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec,
 			}
 		}
 	}
-	if restart {
-		return s.replaceProcesses(ctx, spec, !manifest)
-	}
 	return s.start(ctx, spec, "", false, !manifest)
 }
 
@@ -335,16 +332,6 @@ func (s *Service) StartManifestInstance(ctx context.Context, spec provider.Insta
 		return provider.InstanceInfo{}, err
 	}
 	return s.StartConfiguredInstance(ctx, spec.InstanceID, folder)
-}
-
-// replaceProcesses replaces each of the instance's running processes with one
-// of spec, or starts one when none runs.
-func (s *Service) replaceProcesses(ctx context.Context, spec provider.InstanceSpec, persist bool) (provider.InstanceInfo, error) {
-	folders := s.folders(spec.InstanceID, func(*running) bool { return true })
-	if len(folders) == 0 {
-		folders = []string{""}
-	}
-	return s.replaceIn(ctx, spec, folders, persist)
 }
 
 // folders are where the instance's running processes that match serve.
@@ -360,11 +347,11 @@ func (s *Service) folders(id provider.InstanceID, match func(*running) bool) []s
 	return folders
 }
 
-func (s *Service) replaceIn(ctx context.Context, spec provider.InstanceSpec, folders []string, persist bool) (provider.InstanceInfo, error) {
+func (s *Service) replaceIn(ctx context.Context, spec provider.InstanceSpec, folders []string) (provider.InstanceInfo, error) {
 	var info provider.InstanceInfo
 	var failed error
 	for _, folder := range folders {
-		started, err := s.start(ctx, spec, folder, true, persist)
+		started, err := s.start(ctx, spec, folder, true, false)
 		if err != nil {
 			failed = errors.Join(failed, err)
 			continue
@@ -386,7 +373,11 @@ func (s *Service) RestartInstance(ctx context.Context, id provider.InstanceID) (
 	if !ok {
 		return provider.InstanceInfo{}, fmt.Errorf("provider instance %q is not configured", id)
 	}
-	return s.replaceProcesses(ctx, spec, false)
+	folders := s.folders(id, func(*running) bool { return true })
+	if len(folders) == 0 {
+		folders = []string{""}
+	}
+	return s.replaceIn(ctx, spec, folders)
 }
 
 // ApplyPending moves the instance's processes onto the definition registered
@@ -403,7 +394,7 @@ func (s *Service) ApplyPending(ctx context.Context, id provider.InstanceID) erro
 		return nil
 	}
 	folders := s.folders(id, func(process *running) bool { return !specsEqual(process.spec, spec) })
-	_, err := s.replaceIn(ctx, spec, folders, false)
+	_, err := s.replaceIn(ctx, spec, folders)
 	return err
 }
 
@@ -472,7 +463,7 @@ func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder 
 	if current != nil && !exited(current.instance) && !restart {
 		s.mu.Unlock()
 		if !specsEqual(current.spec, spec) {
-			return provider.InstanceInfo{}, fmt.Errorf("provider instance %q runs with another configuration; restart it to change it", spec.InstanceID)
+			return provider.InstanceInfo{}, fmt.Errorf("provider instance %q runs with another configuration", spec.InstanceID)
 		}
 		return current.instance.Info(), nil
 	}

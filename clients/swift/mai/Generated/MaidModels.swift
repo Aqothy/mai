@@ -5364,20 +5364,18 @@ public extension ProviderSessionParams {
 public struct ProviderStartParams: Codable {
     public var config: JSONAny?
     public var driver, instanceID, name: String?
-    public var restart: Bool?
 
     public enum CodingKeys: String, CodingKey {
         case config, driver
         case instanceID = "instanceId"
-        case name, restart
+        case name
     }
 
-    public init(config: JSONAny?, driver: String?, instanceID: String?, name: String?, restart: Bool?) {
+    public init(config: JSONAny?, driver: String?, instanceID: String?, name: String?) {
         self.config = config
         self.driver = driver
         self.instanceID = instanceID
         self.name = name
-        self.restart = restart
     }
 }
 
@@ -5403,15 +5401,13 @@ public extension ProviderStartParams {
         config: JSONAny?? = nil,
         driver: String?? = nil,
         instanceID: String?? = nil,
-        name: String?? = nil,
-        restart: Bool?? = nil
+        name: String?? = nil
     ) -> ProviderStartParams {
         return ProviderStartParams(
             config: config ?? self.config,
             driver: driver ?? self.driver,
             instanceID: instanceID ?? self.instanceID,
-            name: name ?? self.name,
-            restart: restart ?? self.restart
+            name: name ?? self.name
         )
     }
 

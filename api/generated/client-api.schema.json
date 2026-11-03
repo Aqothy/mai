@@ -1752,10 +1752,7 @@
         "driver": {
           "type": "string"
         },
-        "config": true,
-        "restart": {
-          "type": "boolean"
-        }
+        "config": true
       },
       "additionalProperties": false,
       "type": "object",

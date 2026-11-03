@@ -134,8 +134,7 @@ extension RPCClient: ThreadRPCClient {
                 config: nil,
                 driver: nil,
                 instanceID: instanceID,
-                name: nil,
-                restart: nil
+                name: nil
             )
         )
     }

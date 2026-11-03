@@ -32,7 +32,7 @@ func TestProviderStartValidation(t *testing.T) {
 		{name: "unsupported driver", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "unknown"}, want: `unsupported provider driver "unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := newTestServer(t).StartProvider(context.Background(), tc.spec, false)
+			_, err := newTestServer(t).StartProvider(context.Background(), tc.spec)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
@@ -59,7 +59,7 @@ func TestProviderRestartEndsTheOldProcessesTurnsAndRequests(t *testing.T) {
 		return event.Kind == orchestration.EventRequest
 	}).Request
 
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("agent", "agent", fakeACPAgentCommand()), true); err != nil {
+	if _, err := s.providerService.RestartInstance(context.Background(), "agent"); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	for _, turn := range []orchestration.TurnView{client.waitSettled(t, blockedThread, blocked), client.waitSettled(t, askingThread, asking)} {
@@ -87,7 +87,7 @@ func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
 	s := newTestServer(t)
 	pidPath := t.TempDir() + "/agent.pid"
 	inner := fmt.Sprintf("MAID_DAEMON_ACP_HELPER=1 '%s' -test.run=TestHelperProcess -- -linger -pidfile '%s'; exit $?", os.Args[0], pidPath)
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner}), false); err != nil {
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner})); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
 	pid := readPID(t, pidPath)

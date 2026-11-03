@@ -226,7 +226,6 @@ type ProviderCompleteCommandParams struct {
 // JSON and is intentionally unconstrained by the shared contract.
 type ProviderStartParams struct {
 	provider.InstanceSpec
-	Restart bool `json:"restart,omitempty"`
 }
 
 // ProviderQuestion is a question an agent asks during provider.authenticate,

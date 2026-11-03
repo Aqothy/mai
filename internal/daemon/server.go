@@ -423,15 +423,15 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID, cwd s
 	}
 	started := time.Now()
 	info, err := s.providerService.StartManifestInstance(ctx, spec, cwd)
-	s.logProviderStarted(spec, false, started, err)
+	s.logProviderStarted(spec, started, err)
 	if removed := s.requireACPAgentInstalled(registryID, spec.InstanceID); removed != nil {
 		return provider.InstanceInfo{}, removed
 	}
 	return info, err
 }
 
-func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
-	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
+func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
+	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 {
 		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID, "")
 	}
 	if spec.InstanceID == "" {
@@ -440,13 +440,13 @@ func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	started := time.Now()
-	info, err := s.providerService.StartInstance(ctx, spec, restart)
-	s.logProviderStarted(spec, restart, started, err)
+	info, err := s.providerService.StartInstance(ctx, spec)
+	s.logProviderStarted(spec, started, err)
 	return info, err
 }
 
-func (s *Server) logProviderStarted(spec provider.InstanceSpec, restart bool, started time.Time, err error) {
+func (s *Server) logProviderStarted(spec provider.InstanceSpec, started time.Time, err error) {
 	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
+		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "duration", time.Since(started).Round(time.Millisecond))
 	}
 }

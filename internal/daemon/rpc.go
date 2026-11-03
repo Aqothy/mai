@@ -509,7 +509,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.StartProvider(ctx, params.InstanceSpec, params.Restart)
+		return h.server.StartProvider(ctx, params.InstanceSpec)
 	case wire.MethodProviderList:
 		return h.server.providerService.ListInstances(), nil
 	case wire.MethodACPRegistrySubscribeList:

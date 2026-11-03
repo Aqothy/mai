@@ -431,7 +431,7 @@ func TestARelativeCommandIsFromWhereTheDaemonRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartProvider(s.ctx, provider.InstanceSpec{InstanceID: "agent", Name: "agent", Driver: "acp", Config: config}, false); err != nil {
+	if _, err := s.StartProvider(s.ctx, provider.InstanceSpec{InstanceID: "agent", Name: "agent", Driver: "acp", Config: config}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	client := newRecordingClient(t, s)

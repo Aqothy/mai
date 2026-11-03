@@ -301,7 +301,7 @@ func (i *testInstance) callback(handle string) provider.OptionsSessionCallbacks 
 func startTestInstances(t *testing.T, s *Server, set *testInstances) {
 	t.Helper()
 	for id := range set.instances {
-		if _, err := s.StartProvider(context.Background(), provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: testDriver}, false); err != nil {
+		if _, err := s.StartProvider(context.Background(), provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: testDriver}); err != nil {
 			t.Fatalf("start %s: %v", id, err)
 		}
 	}
