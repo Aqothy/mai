@@ -106,8 +106,8 @@ func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 }
 
 // A terminal sign-in runs the agent's own command in a maiD terminal; once
-// it succeeds the provider restarts to pick up the credentials, but only once
-// no turn runs on it.
+// it succeeds the provider restarts to pick up the credentials, after the turn
+// running on it.
 func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)

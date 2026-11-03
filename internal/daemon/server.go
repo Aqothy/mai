@@ -287,11 +287,11 @@ func (s *Server) stopIdleProviders() {
 // restartProviderWhenIdle runs restart once no turn runs on the provider, and
 // starts none until it's done, so a restart never cuts off a thread's turn.
 func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID, restart func(context.Context) error) {
-	release, err := s.engine.HoldInstance(s.ctx, instanceID)
+	resume, err := s.engine.PauseInstance(s.ctx, instanceID)
 	if err != nil {
 		return
 	}
-	defer release()
+	defer resume()
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 	if err := restart(ctx); err != nil {

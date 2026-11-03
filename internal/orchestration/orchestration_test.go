@@ -168,9 +168,9 @@ func turnsUntil(end <-chan struct{}) func(*fakeInstance, string, provider.SendIn
 	}
 }
 
-// A hold takes effect once nothing needs its instance, and until it's released
-// no turn starts there. Other instances go on.
-func TestHoldingAnInstance(t *testing.T) {
+// A pause takes effect once nothing needs its instance, and until it ends no
+// turn starts there. Other instances go on.
+func TestPausingAnInstance(t *testing.T) {
 	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
 	claude.openGate = make(chan struct{})
 	endTurn := make(chan struct{})
@@ -178,48 +178,94 @@ func TestHoldingAnInstance(t *testing.T) {
 	h := newHarness(t, claude, codex)
 	first := h.createThread("claude", "first")
 
-	var release func()
-	held := make(chan error, 1)
+	var resume func()
+	paused := make(chan error, 1)
 	go func() {
 		var err error
-		release, err = h.engine.HoldInstance(context.Background(), "claude")
-		held <- err
+		resume, err = h.engine.PauseInstance(context.Background(), "claude")
+		paused <- err
 	}()
-	waiting := func() bool {
-		waiting, err := call(context.Background(), h.engine, func(*step) (bool, error) {
-			return len(h.engine.holds) == 1 && !h.engine.holds[0].active, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return waiting
-	}
-	h.eventually("the hold to wait for the message on its way", waiting)
+	h.eventually("the pause to wait for the message on its way", h.pauseWaiting)
 
 	close(claude.openGate)
 	h.eventually("the turn to run", func() bool { return len(claude.messages()) == 1 })
-	if !waiting() {
-		t.Fatal("a hold took effect while a turn ran")
+	if !h.pauseWaiting() {
+		t.Fatal("a pause took effect while a turn ran")
 	}
 
 	close(endTurn)
 	h.settledTurns(first.Thread, 1)
-	if err := <-held; err != nil {
-		t.Fatalf("HoldInstance: %v", err)
+	h.eventually("the pause to start", func() bool { return len(paused) == 1 })
+	if err := <-paused; err != nil {
+		t.Fatalf("PauseInstance: %v", err)
 	}
 	second := h.createThread("claude", "second")
 	other := h.createThread("codex", "other")
 	h.settledTurns(other.Thread, 1)
 	if queue := h.snapshot(second.Thread).Queue; len(queue) != 1 || queue[0].State != DeliveryQueued || len(claude.messages()) != 1 {
-		t.Fatalf("under the hold the queue = %#v and claude got %d messages; want the message queued", queue, len(claude.messages()))
+		t.Fatalf("during the pause the queue = %#v and claude got %d messages; want the message queued", queue, len(claude.messages()))
 	}
 
-	release()
+	resume()
 	h.settledTurns(second.Thread, 1)
 }
 
-// Giving up on a hold leaves nothing behind that would take effect later.
-func TestACanceledHoldHoldsNothing(t *testing.T) {
+// A provider's own turn can start during a pause; a steer waits for the restart
+// rather than go to the process about to be replaced.
+func TestASteerWaitsOutAPause(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	created := h.createThread("claude", "first")
+	h.settledTurns(created.Thread, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resume, err := h.engine.PauseInstance(ctx, "claude")
+	if err != nil {
+		t.Fatalf("PauseInstance: %v", err)
+	}
+	const session = "claude-session-1"
+	claude.send(session, provider.TurnStarted{Turn: "its own", By: provider.TurnByProvider})
+	h.eventually("the provider's turn to run", func() bool { return h.snapshot(created.Thread).Thread.Status == StatusRunning })
+	h.do(Deliver{Thread: created.Thread, Mode: ModeSteer, Body: MessageBody{Text: "steer"}})
+	if queue := h.snapshot(created.Thread).Queue; len(queue) != 1 || queue[0].State != DeliveryQueued {
+		t.Fatalf("during the pause the queue = %#v, want the steer still queued", queue)
+	}
+	claude.settle(session, "its own", provider.TurnCompleted)
+	resume()
+	h.settledTurns(created.Thread, 3)
+}
+
+// A message the provider took and never answered stops counting in time, so it
+// can't keep a restart away from the agent that hung.
+func TestAnUnansweredMessageDoesntKeepOffAPauseForever(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.onSend = func(*fakeInstance, string, provider.SendInput) (provider.SendAck, error) {
+		return provider.SendAck{}, nil
+	}
+	h := newHarness(t, claude)
+	created := h.createThread("claude", "never answered")
+	h.eventually("the message to go", func() bool { return len(claude.messages()) == 1 })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	paused := make(chan error, 1)
+	go func() {
+		_, err := h.engine.PauseInstance(ctx, "claude")
+		paused <- err
+	}()
+	h.eventually("the pause to wait for the message", h.pauseWaiting)
+	if _, err := call(context.Background(), h.engine, func(*step) (struct{}, error) {
+		h.engine.threads[created.Thread].queue[0].Sent = time.Now().Add(-providerCallTimeout)
+		return struct{}{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-paused; err != nil {
+		t.Fatalf("PauseInstance: %v", err)
+	}
+}
+
+// Giving up on a pause leaves nothing behind that would take effect later.
+func TestACanceledPausePausesNothing(t *testing.T) {
 	claude := newFakeInstance("claude", "Claude")
 	endTurn := make(chan struct{})
 	claude.onSend = turnsUntil(endTurn)
@@ -229,8 +275,8 @@ func TestACanceledHoldHoldsNothing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := h.engine.HoldInstance(ctx, "claude"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("HoldInstance = %v, want it canceled", err)
+	if _, err := h.engine.PauseInstance(ctx, "claude"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("PauseInstance = %v, want it canceled", err)
 	}
 	close(endTurn)
 	h.settledTurns(first.Thread, 1)

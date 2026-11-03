@@ -52,7 +52,7 @@ func (e *Engine) reactThread(s *step, thread *threadState) {
 // holds it, the queued delivery with the lowest position goes, its
 // participant's session opened first. A delivery an agent or the daemon
 // sent waits while its tree already runs MaxRunning agent-started turns; a
-// person's never waits, except for a hold on its instance.
+// person's never waits, except while its instance is paused.
 func (e *Engine) floorReactor(s *step, thread *threadState) {
 	if thread.running() || thread.Hold != HoldNone {
 		return
@@ -62,7 +62,7 @@ func (e *Engine) floorReactor(s *step, thread *threadState) {
 		return
 	}
 	next := queued[0]
-	if participant := e.participants[next.To]; participant != nil && e.instanceHeld(participant.Instance) {
+	if participant := e.participants[next.To]; participant != nil && e.instancePaused(participant.Instance) {
 		return
 	}
 	if next.From.Kind != ActorDevice && e.agentTurnsRunning(thread) >= e.policy(thread).MaxRunning {
@@ -100,7 +100,7 @@ func (e *Engine) steerReactor(s *step, thread *threadState) {
 		return
 	}
 	participant := e.participants[running.Participant]
-	if participant == nil || participant.live == nil && thread.Origin.Kind != OriginNative || !e.instanceInfo(participant.Instance).Capabilities.Steer {
+	if participant == nil || participant.live == nil && thread.Origin.Kind != OriginNative || !e.instanceInfo(participant.Instance).Capabilities.Steer || e.instancePaused(participant.Instance) {
 		return
 	}
 	for _, delivery := range thread.queued() {
@@ -286,52 +286,52 @@ func (e *Engine) recover(s *step) {
 	}
 }
 
-// instanceHold keeps turns off an instance once nothing needs it.
-type instanceHold struct {
+// instancePause keeps turns off an instance once nothing needs it.
+type instancePause struct {
 	instance provider.InstanceID
-	// granted closes when the hold takes effect, which active records.
-	granted chan struct{}
+	// started closes when the pause takes effect, which active records.
+	started chan struct{}
 	active  bool
 }
 
-// HoldInstance waits until nothing needs the instance, then keeps new turns from
-// starting on it until release, so its processes can be replaced without cutting
+// PauseInstance waits until nothing needs the instance, then keeps turns from
+// starting on it until resume, so its processes can be replaced without cutting
 // a turn off. Turns can still start while it waits, and a provider can start one
 // of its own at any time.
-func (e *Engine) HoldInstance(ctx context.Context, instance provider.InstanceID) (release func(), err error) {
-	hold := &instanceHold{instance: instance, granted: make(chan struct{})}
-	if !e.post(func(*step) { e.holds = append(e.holds, hold) }) {
+func (e *Engine) PauseInstance(ctx context.Context, instance provider.InstanceID) (resume func(), err error) {
+	pause := &instancePause{instance: instance, started: make(chan struct{})}
+	if !e.post(func(*step) { e.pauses = append(e.pauses, pause) }) {
 		return nil, errClosed
 	}
-	release = func() { e.post(func(s *step) { e.endHold(s, hold) }) }
+	resume = func() { e.post(func(s *step) { e.endPause(s, pause) }) }
 	select {
-	case <-hold.granted:
-		return release, nil
+	case <-pause.started:
+		return resume, nil
 	case <-ctx.Done():
-		release()
+		resume()
 		return nil, ctx.Err()
 	case <-e.done:
 		return nil, errClosed
 	}
 }
 
-func (e *Engine) instanceHeld(instance provider.InstanceID) bool {
-	return slices.ContainsFunc(e.holds, func(hold *instanceHold) bool { return hold.active && hold.instance == instance })
+func (e *Engine) instancePaused(instance provider.InstanceID) bool {
+	return slices.ContainsFunc(e.pauses, func(pause *instancePause) bool { return pause.active && pause.instance == instance })
 }
 
-// grantHolds runs after every step, since any step can leave an instance idle.
-func (e *Engine) grantHolds() {
-	for _, hold := range e.holds {
-		if !hold.active && !e.instanceNeeded(hold.instance) {
-			hold.active = true
-			close(hold.granted)
+// startPauses runs after every step, since any step can leave an instance idle.
+func (e *Engine) startPauses() {
+	for _, pause := range e.pauses {
+		if !pause.active && !e.instanceNeeded(pause.instance) {
+			pause.active = true
+			close(pause.started)
 		}
 	}
 }
 
-// endHold lets what waited behind a hold start.
-func (e *Engine) endHold(s *step, hold *instanceHold) {
-	e.holds = slices.DeleteFunc(e.holds, func(other *instanceHold) bool { return other == hold })
+// endPause lets what waited behind a pause start.
+func (e *Engine) endPause(s *step, pause *instancePause) {
+	e.pauses = slices.DeleteFunc(e.pauses, func(other *instancePause) bool { return other == pause })
 	for id, thread := range e.threads {
 		if len(thread.queued()) > 0 {
 			s.touch(id)

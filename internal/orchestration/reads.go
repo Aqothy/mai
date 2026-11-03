@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
@@ -62,8 +63,9 @@ func (e *Engine) ProcessBusy(ctx context.Context, instance provider.InstanceID, 
 // InstanceBusy reports whether a turn or a message on its way to one needs the
 // instance.
 func (e *Engine) InstanceBusy(ctx context.Context, instance provider.InstanceID) bool {
-	busy, _ := call(ctx, e, func(s *step) (bool, error) { return e.instanceNeeded(instance), nil })
-	return busy
+	// Busy when the engine can't answer, so nothing ends on a guess.
+	busy, err := call(ctx, e, func(s *step) (bool, error) { return e.instanceNeeded(instance), nil })
+	return busy || err != nil
 }
 
 func (e *Engine) instanceNeeded(instance provider.InstanceID) bool {
@@ -71,7 +73,9 @@ func (e *Engine) instanceNeeded(instance provider.InstanceID) bool {
 }
 
 // needed reports whether a turn or a message on its way to one needs a
-// participant that matches.
+// participant that matches. A message nothing has answered within
+// providerCallTimeout no longer counts: a provider that took it and hung can't
+// keep off the restart that would recover it.
 func (e *Engine) needed(matches func(*participantState) bool) bool {
 	needs := func(id ParticipantID) bool {
 		participant := e.participants[id]
@@ -82,7 +86,7 @@ func (e *Engine) needed(matches func(*participantState) bool) bool {
 			return true
 		}
 		for _, delivery := range thread.queue {
-			if delivery.State == DeliverySending && needs(delivery.To) {
+			if delivery.State == DeliverySending && time.Since(delivery.Sent) < providerCallTimeout && needs(delivery.To) {
 				return true
 			}
 		}

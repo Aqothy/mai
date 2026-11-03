@@ -438,6 +438,18 @@ func (h *harness) rerunRules(thread ThreadID) {
 	h.do(UpdateThread{Thread: thread, Read: &read})
 }
 
+// pauseWaiting reports whether the engine has one pause, not yet in effect.
+func (h *harness) pauseWaiting() bool {
+	h.t.Helper()
+	waiting, err := call(context.Background(), h.engine, func(*step) (bool, error) {
+		return len(h.engine.pauses) == 1 && !h.engine.pauses[0].active, nil
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return waiting
+}
+
 func (h *harness) createThread(instance provider.InstanceID, prompt string) CommandResult {
 	h.t.Helper()
 	create := CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance}}
