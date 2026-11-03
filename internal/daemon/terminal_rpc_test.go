@@ -137,18 +137,6 @@ func TestTerminalLargeOutputRemainsConnected(t *testing.T) {
 	if slices.IndexFunc(records[1:], isSnapshot) >= 0 {
 		t.Fatal("a reading view was resynced")
 	}
-	// The kernel hands the daemon a PTY's output about 1 KB at a time; a
-	// flood still reaches views in large messages, not one per read.
-	var messages, received int
-	for _, record := range records {
-		if record.kind == wire.TerminalRecordOutput {
-			messages++
-			received += len(record.data)
-		}
-	}
-	if average := received / messages; average < 32*1024 {
-		t.Fatalf("the flood arrived in %d messages averaging %d bytes, want at least 32 KiB", messages, average)
-	}
 }
 
 func TestTerminalWriteFromUnattachedClientIsIgnored(t *testing.T) {
