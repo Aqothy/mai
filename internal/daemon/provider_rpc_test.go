@@ -106,8 +106,8 @@ func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 }
 
 // A terminal sign-in runs the agent's own command in a maiD terminal; once
-// it succeeds the provider restarts to pick up the credentials, after the turn
-// running on it.
+// it succeeds the provider restarts to pick up the credentials, but only once
+// no turn runs on it.
 func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
@@ -128,7 +128,9 @@ func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 		_, err := s.terminals.service.Get(result.Challenge.TerminalID)
 		return err != nil
 	})
-
+	// A restart that doesn't happen sends no event to wait for: give a wrong one
+	// time to cut the turn off. This can miss that bug, but can't fail correct code.
+	time.Sleep(500 * time.Millisecond)
 	if err := os.WriteFile(gate+"/release", nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
