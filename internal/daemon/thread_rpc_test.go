@@ -13,10 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
@@ -506,6 +508,14 @@ func TestSlowClientIsClosedAndRecoversFromASnapshot(t *testing.T) {
 	if drained >= tools {
 		t.Fatalf("slow client drained %d notifications, want it closed before the flood ended", drained)
 	}
+	// With its socket gone, nothing holds on to it: no subscription keeps
+	// the chat's events going its way.
+	cutOff := weak.Make(slowClient)
+	slowClient = nil
+	waitUntil(t, "the cut-off client released", func() bool {
+		runtime.GC()
+		return cutOff.Value() == nil
+	})
 
 	observer.waitSettled(t, thread, delivery)
 	seen := map[string]bool{}

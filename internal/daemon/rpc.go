@@ -274,11 +274,11 @@ func (s *Server) disconnectRPCClient(client *rpcClient) {
 	s.rpcMu.Unlock()
 	if client.closeOutbound() {
 		client.logger.Info("client disconnected")
-		client.subscription.Close()
 	}
 	// Cleanup is deliberately independent of who first closed the outbound
 	// channel. Queue overflow can close it before socket teardown reaches this
-	// path, and detaching the active sessions makes repeated cleanup harmless.
+	// path, and each step is harmless to repeat.
+	client.subscription.Close()
 	go s.closeClientOptionsSessions(client)
 	go s.detachClientTerminals(client)
 }
