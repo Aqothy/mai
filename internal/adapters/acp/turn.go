@@ -67,7 +67,9 @@ func (h *Instance) Interrupt(ctx context.Context, sessionID, turn string) error 
 	if err := h.agentPeer.Cancel(ctx, schema.CancelNotification{SessionID: schema.SessionId(sessionID)}); err != nil {
 		return acpRequestError(err)
 	}
-	h.cancelPendingPermissions(session)
+	// A cancel answers every pending request as cancelled (the ACP spec's
+	// cancellation rule).
+	h.cancelPermissions(session, func(*pendingPermission) bool { return true })
 	return nil
 }
 
@@ -77,11 +79,13 @@ func (h *Instance) settlePrompt(session *acpSession, resp schema.PromptResponse,
 	h.mu.Lock()
 	turn := session.prompt
 	session.prompt = ""
-	cancelled := session.mapper != nil && session.mapper.cancelled && session.mapper.turn == turn
 	h.mu.Unlock()
 	if turn == "" {
 		return
 	}
+	session.recordMu.Lock()
+	cancelled := session.mapper != nil && session.mapper.cancelled && session.mapper.turn == turn
+	session.recordMu.Unlock()
 	stop := &stopFrame{Turn: turn, State: provider.TurnCompleted}
 	switch {
 	case cancelled, err == nil && resp.StopReason == schema.StopReasonCancelled:
@@ -92,7 +96,9 @@ func (h *Instance) settlePrompt(session *acpSession, resp schema.PromptResponse,
 		stop.StopReason = stopReasonFromACP(resp.StopReason)
 	}
 	h.record(session, frame{At: time.Now(), Stop: stop})
-	h.cancelPendingPermissions(session)
+	// The prompt's requests end with it, as its turn's do in the daemon; the
+	// agent's own work after it keeps its.
+	h.cancelPermissions(session, func(pending *pendingPermission) bool { return pending.turn == turn })
 }
 
 // handleUpdate takes one session/update from the session's ordered stream.
@@ -161,25 +167,24 @@ func (h *Instance) record(session *acpSession, f frame) {
 	}
 	session.recordMu.Unlock()
 	if len(ended) > 0 {
-		h.cancelPendingPermissions(session, ended...)
+		h.cancelPermissions(session, func(pending *pendingPermission) bool {
+			return pending.toolCallID != "" && slices.Contains(ended, pending.toolCallID)
+		})
 	}
 }
 
-// runningTurn is the turn the session's prompt runs and the entry of a tool
-// call, for a request the agent makes; ended when nobody can answer it any
-// more: the turn was cancelled or the tool call already ended.
-func (h *Instance) runningTurn(session *acpSession, toolCallID string) (turn, entry string, ended bool) {
+// requestTurn is the turn and the tool call's entry a request the agent
+// makes is about: the tool call's turn, else the turn output goes to. ended
+// when nobody can answer it any more: a prompt was cancelled (which answers
+// every request, the ACP spec's cancellation rule) or the tool call already
+// ended.
+func (h *Instance) requestTurn(session *acpSession, toolCallID string) (turn, entry string, ended bool) {
 	session.recordMu.Lock()
 	defer session.recordMu.Unlock()
-	turn = session.mapper.turn
-	if session.mapper.cancelled {
-		return turn, "", true
-	}
-	if turn == "" || toolCallID == "" {
-		return turn, "", false
-	}
+	turn, ended = session.mapper.turn, session.mapper.cancelled
 	if tool := session.mapper.tools[toolCallID]; tool != nil {
-		return turn, tool.entry.Ref, tool.entry.Status != provider.ItemStatusInProgress
+		turn, entry = tool.entry.Turn, tool.entry.Ref
+		ended = ended || tool.entry.Status != provider.ItemStatusInProgress
 	}
-	return turn, "", false
+	return turn, entry, ended
 }

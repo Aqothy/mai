@@ -41,11 +41,30 @@ func (e *Engine) react(s *step, touched map[ThreadID]bool) {
 }
 
 func (e *Engine) reactThread(s *step, thread *threadState) {
+	// First: what an agent did while another's turn ran comes before what
+	// the chat does next.
+	e.heldReactor(s, thread)
 	e.replyReactor(s, thread)
 	e.needsInputReactor(s, thread)
 	e.steerReactor(s, thread)
 	e.hopReactor(s, thread)
 	e.floorReactor(s, thread)
+}
+
+// heldReactor takes an agent's held events (providerEvent) in order once the
+// chat runs no other agent's turn.
+func (e *Engine) heldReactor(s *step, thread *threadState) {
+	for _, id := range thread.participants {
+		participant := e.participants[id]
+		if len(participant.held) == 0 || thread.runsAnother(id) {
+			continue
+		}
+		held := participant.held
+		participant.held = nil
+		for _, event := range held {
+			e.applyEvent(s, thread, participant, event)
+		}
+	}
 }
 
 // floorReactor starts a thread's next turn: when it doesn't run and nothing
@@ -253,6 +272,8 @@ func (e *Engine) needsInputReactor(s *step, thread *threadState) {
 // recover settles what a crash left running and probes what it left
 // sending, then lets every reactor run.
 func (e *Engine) recover(s *step) {
+	// No session runs yet, so nothing one ran still does.
+	e.stopEntries(s, nil)
 	for _, thread := range e.threads {
 		if running := thread.runningTurn(); running != nil {
 			// Its entries stay as flushed; the session's history fills in the

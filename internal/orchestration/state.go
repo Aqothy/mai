@@ -103,6 +103,9 @@ type participantState struct {
 	// opening: an Open of its session is in flight.
 	opening bool
 	worker  *worker
+	// held are its session's events waiting for another agent's turn in the
+	// chat to end, as a chat runs one turn at a time (heldReactor).
+	held []provider.Event
 	// What the provider says of its session, kept while it lives.
 	options  []provider.ConfigOption
 	commands []provider.SlashCommand
@@ -226,18 +229,72 @@ func (s *step) putEntries(instance provider.InstanceID, session string, authored
 	}
 }
 
+// entry is a cached entry as this step leaves it, its own writes over the
+// cache's.
+func (s *step) entry(instance provider.InstanceID, session, ref string) (provider.Entry, bool, error) {
+	for index := len(s.tx.entries) - 1; index >= 0; index-- {
+		if pending := s.tx.entries[index]; pending.instance == instance && pending.session == session && pending.entry.Ref == ref {
+			return pending.entry, true, nil
+		}
+	}
+	return s.e.db.sessionEntry(s.e.ctx, instance, session, ref)
+}
+
+// entriesInProgress are the cached entries in progress as this step leaves
+// them, its own writes over the cache's: of the session key names, or of
+// every session without one.
+func (s *step) entriesInProgress(key *sessionKey) ([]cachedEntry, error) {
+	cached, err := s.e.db.entriesInProgress(s.e.ctx, key)
+	type entryKey struct {
+		session sessionKey
+		ref     string
+	}
+	latest := make(map[entryKey]cachedEntry)
+	var order []entryKey
+	for _, entry := range slices.Concat(cached, s.tx.entries) {
+		at := entryKey{sessionKey{entry.instance, entry.session}, entry.entry.Ref}
+		if key != nil && at.session != *key {
+			continue
+		}
+		if _, seen := latest[at]; !seen {
+			order = append(order, at)
+		}
+		latest[at] = entry
+	}
+	var running []cachedEntry
+	for _, at := range order {
+		if entry := latest[at]; entry.entry.Status == provider.ItemStatusInProgress {
+			running = append(running, entry)
+		}
+	}
+	return running, err
+}
+
 // running reports whether a thread runs: a turn runs or a delivery is on its
 // way to the provider.
 func (t *threadState) running() bool {
-	if t.latest != nil && t.latest.State == provider.TurnRunning {
-		return true
+	return t.floor() != ""
+}
+
+// runsAnother: the thread runs a turn for a participant other than id, its
+// events then wait (heldReactor).
+func (t *threadState) runsAnother(id ParticipantID) bool {
+	floor := t.floor()
+	return floor != "" && floor != id
+}
+
+// floor is the participant a thread runs a turn for: the running turn's, or
+// the one a message is on its way to.
+func (t *threadState) floor() ParticipantID {
+	if running := t.runningTurn(); running != nil {
+		return running.Participant
 	}
 	for _, delivery := range t.queue {
 		if delivery.State == DeliverySending {
-			return true
+			return delivery.To
 		}
 	}
-	return false
+	return ""
 }
 
 func (t *threadState) runningTurn() *Turn {

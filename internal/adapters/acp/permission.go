@@ -6,7 +6,6 @@ package acp
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/Aqothy/go-acp/schema"
@@ -84,7 +83,7 @@ func (h *Instance) ask(ctx context.Context, sessionID, toolCallID string, asked 
 	if session == nil || session.options != nil {
 		return approvalResponse{}, false
 	}
-	turn, entry, ended := h.runningTurn(session, toolCallID)
+	turn, entry, ended := h.requestTurn(session, toolCallID)
 	if ended {
 		return approvalResponse{}, false
 	}
@@ -117,14 +116,13 @@ func (h *Instance) emitRequest(sessionID string, body provider.EventBody) {
 	}
 }
 
-// cancelPendingPermissions ends the session's pending requests unanswered:
-// its turn ended or was cancelled, or, with toolCallIDs, those tool calls
-// ended.
-func (h *Instance) cancelPendingPermissions(session *acpSession, toolCallIDs ...string) {
+// cancelPermissions ends the session's pending requests that match
+// unanswered.
+func (h *Instance) cancelPermissions(session *acpSession, match func(*pendingPermission) bool) {
 	h.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(session.pendingPermissions))
 	for _, pending := range session.pendingPermissions {
-		if len(toolCallIDs) == 0 || pending.toolCallID != "" && slices.Contains(toolCallIDs, pending.toolCallID) {
+		if match(pending) {
 			cancels = append(cancels, pending.cancel)
 		}
 	}

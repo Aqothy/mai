@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS session_entries (
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS session_entries_ref ON session_entries(instance_id, native_session, ref);
 CREATE INDEX IF NOT EXISTS session_entries_turn ON session_entries(instance_id, native_session, turn_ref, seq);
+CREATE INDEX IF NOT EXISTS session_entries_in_progress ON session_entries(instance_id, native_session, seq) WHERE json_extract(entry, '$.status') = 'in_progress';
 CREATE TABLE IF NOT EXISTS session_markers (
 	instance_id TEXT NOT NULL,
 	native_session TEXT NOT NULL,
@@ -560,6 +561,37 @@ func (d *db) threadEntry(ctx context.Context, thread ThreadID, ref string) (prov
 		return provider.Entry{}, false, err
 	}
 	return entries[0], true, nil
+}
+
+// entriesInProgress are the cached entries still in progress: of the session
+// key names, or of every session without one.
+func (d *db) entriesInProgress(ctx context.Context, key *sessionKey) ([]cachedEntry, error) {
+	// The condition is session_entries_in_progress's, word for word, so the
+	// read touches only those rows.
+	query := `SELECT instance_id, native_session, entry FROM session_entries WHERE json_extract(entry, '$.status') = 'in_progress'`
+	var args []any
+	if key != nil {
+		query += ` AND instance_id = ? AND native_session = ?`
+		args = append(args, string(key.instance), key.session)
+	}
+	rows, err := d.sql.QueryContext(ctx, query+` ORDER BY instance_id, native_session, seq`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load entries in progress: %w", err)
+	}
+	defer rows.Close()
+	var entries []cachedEntry
+	for rows.Next() {
+		var instance, session, raw string
+		if err := rows.Scan(&instance, &session, &raw); err != nil {
+			return nil, fmt.Errorf("scan session entry: %w", err)
+		}
+		entry := cachedEntry{instance: provider.InstanceID(instance), session: session, authored: authoredByProvider}
+		if err := json.Unmarshal([]byte(raw), &entry.entry); err != nil {
+			return nil, fmt.Errorf("decode session entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 // tx is one engine step's writes, committed together.

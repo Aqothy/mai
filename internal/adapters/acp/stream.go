@@ -154,6 +154,8 @@ func (h *Instance) abandonSessionStream(stream *sessionStream, cause error) {
 		return
 	}
 	h.settlePrompt(session, schema.PromptResponse{}, cause)
+	// The requests of the agent's own work end with the session too.
+	h.cancelPermissions(session, func(*pendingPermission) bool { return true })
 	if !disposed && h.host.Emit != nil {
 		h.host.Emit(provider.Event{Session: stream.sessionID, Body: provider.SessionClosed{Error: acpRequestError(cause).Error()}})
 	}

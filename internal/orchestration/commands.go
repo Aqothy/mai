@@ -232,6 +232,11 @@ func (e *Engine) Do(ctx context.Context, command Command) (CommandResult, error)
 				_ = json.Unmarshal(raw, &result)
 				return pending{result: result}, nil
 			}
+			if job := e.forkInFlight(command); job != nil {
+				reply := make(chan asyncOutcome, 1)
+				job.replies = append(job.replies, reply)
+				return pending{async: reply}, nil
+			}
 		}
 		result, async, err := e.do(s, command)
 		if err == nil && async == nil && command.Key != "" {
@@ -556,6 +561,7 @@ func (e *Engine) deleteThread(s *step, actor Actor, id ThreadID) error {
 		delete(e.threads, victim.ID)
 		e.forgetWaits(victim.ID)
 	}
+	e.forksDeleted(s)
 	if parent := e.threads[thread.Origin.Parent]; parent != nil {
 		parent.children = slices.DeleteFunc(parent.children, func(child ThreadID) bool { return child == id })
 		s.touch(parent.ID)

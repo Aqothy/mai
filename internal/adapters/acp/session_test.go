@@ -119,6 +119,322 @@ func TestLiveEntriesEqualHistory(t *testing.T) {
 	}
 }
 
+// Output the agent sends outside a prompt (a session's first output, or
+// claude-agent-acp's follow-up when a background task ends) is a turn of its
+// own, settled as it starts since no frame would end it, its requests too.
+// Its messages stream as complete, since nothing would complete them.
+func TestOutputOutsideAPromptIsASettledTurnOfItsOwn(t *testing.T) {
+	answers := make(chan wireMsg, 1)
+	agent := &fakeWireAgent{responses: answers, onPrompt: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+		a.sendUpdate(params.SessionID, agentMessageUpdate("", "On it."))
+		a.respond(id, map[string]any{"stopReason": "end_turn"})
+	}}
+	h := newWireTestHandle(t, agent)
+	session := openSession(t, h, provider.OpenInput{}).Session
+	text := func(want string) func(provider.Event) bool {
+		return func(event provider.Event) bool {
+			upserted, ok := event.Body.(provider.EntryUpserted)
+			return ok && upserted.Entry.Text == want
+		}
+	}
+
+	agent.sendUpdate(session, agentMessageUpdate("", "Ready."))
+	h.events.WaitFor(t, "the first output's turn to settle", providertest.Settled("found-1"))
+	h.events.WaitFor(t, "the first output", text("Ready."))
+	send(t, h, session, "d1", "Build it")
+	h.events.WaitFor(t, "the prompt to settle", providertest.Settled("d1"))
+	settledAt := len(h.events.Snapshot())
+	agent.sendUpdate(session, toolUpdate("tool_call", "pending", map[string]any{"title": "build", "kind": "execute"}))
+	agent.write(map[string]any{"jsonrpc": "2.0", "id": "perm-1", "method": "session/request_permission", "params": map[string]any{
+		"sessionId": session,
+		"toolCall":  map[string]any{"toolCallId": "t1", "title": "build"},
+		"options":   []any{map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"}},
+	}})
+	request := h.events.WaitFor(t, "the follow-up's request", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestOpened)
+		return ok
+	}).Body.(provider.RequestOpened)
+	if request.Turn != "found-2" || request.Entry != "found-2/tool/t1" {
+		t.Fatalf("request = %#v, want it on turn found-2 about found-2/tool/t1", request)
+	}
+	if err := h.Respond(testContext(t), session, request.Request, provider.RequestAnswer{Action: request.Ask.Actions[0]}); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	waitFor(t, answers, "the agent never got the answer")
+	agent.sendUpdate(session, toolUpdate("tool_call_update", "completed", nil))
+	agent.sendUpdate(session, agentMessageUpdate("", "The build"))
+	agent.sendUpdate(session, agentMessageUpdate("", " finished."))
+	h.events.WaitFor(t, "the follow-up's text", func(event provider.Event) bool {
+		appended, ok := event.Body.(provider.TextAppended)
+		return ok && appended.Text == " finished."
+	})
+	for _, event := range h.events.Snapshot()[settledAt:] {
+		if upserted, ok := event.Body.(provider.EntryUpserted); ok && upserted.Entry.Kind == provider.ItemKindAssistantMessage && upserted.Entry.Status != provider.ItemStatusCompleted {
+			t.Fatalf("follow-up message %#v, want it complete as it streams", upserted.Entry)
+		}
+	}
+	send(t, h, session, "d2", "Thanks")
+	h.events.WaitFor(t, "the next prompt to settle", providertest.Settled("d2"))
+
+	live := h.events.LiveTurns(session)
+	page := readHistory(t, h, session, "")
+	if !reflect.DeepEqual(page.Turns, live) {
+		t.Fatalf("history turns = %#v\nlive turns = %#v", page.Turns, live)
+	}
+	want := [][]entrySummary{
+		{{Ref: "found-1/m1", Kind: "assistant_message", Status: "completed", Text: "Ready."}},
+		{
+			{Ref: "d1/user", Kind: "user_message", Status: "completed", Text: "Build it"},
+			{Ref: "d1/m1", Kind: "assistant_message", Status: "completed", Text: "On it."},
+		},
+		{
+			{Ref: "found-2/tool/t1", Kind: "command_execution", Status: "completed"},
+			{Ref: "found-2/m1", Kind: "assistant_message", Status: "completed", Text: "The build finished."},
+		},
+		{
+			{Ref: "d2/user", Kind: "user_message", Status: "completed", Text: "Thanks"},
+			{Ref: "d2/m1", Kind: "assistant_message", Status: "completed", Text: "On it."},
+		},
+	}
+	var got [][]entrySummary
+	for _, turn := range page.Turns {
+		if turn.State != provider.TurnCompleted {
+			t.Fatalf("turn %s is %s, want completed", turn.Ref, turn.State)
+		}
+		got = append(got, summarize(turn))
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("turns = %#v\nwant %#v", got, want)
+	}
+}
+
+// An Interrupt can record its cancel after the prompt's answer; the cancel
+// is moot then, and the agent's later output still counts.
+func TestCancelAfterTheAnswerDropsNoLaterOutput(t *testing.T) {
+	update, _ := json.Marshal(agentMessageUpdate("", "The build finished."))
+	_, turns := history([]json.RawMessage{
+		encodeFrame(frame{Prompt: &promptFrame{Turn: "d1", Text: "Build it"}}),
+		encodeFrame(frame{Stop: &stopFrame{Turn: "d1", State: provider.TurnCompleted}}),
+		encodeFrame(frame{Cancel: "d1"}),
+		encodeFrame(frame{Update: update}),
+	})
+	if len(turns) != 2 || turns[0].State != provider.TurnCompleted {
+		t.Fatalf("turns = %#v, want d1 completed and the agent's own turn", turns)
+	}
+	if entries := turns[1].Entries; len(entries) != 1 || entries[0].Text != "The build finished." {
+		t.Fatalf("entries = %#v, want the output after the cancel", entries)
+	}
+}
+
+// A tool call id is unique in an ACP session, so a tool call that ends
+// after the next prompt began ends its own card, not a new one, and leaves
+// that prompt's message whole.
+func TestToolCallEndingAfterTheNextPromptEndsItsCard(t *testing.T) {
+	update := func(u map[string]any) frame {
+		raw, _ := json.Marshal(u)
+		return frame{Update: raw}
+	}
+	var frames []json.RawMessage
+	for _, f := range []frame{
+		{Prompt: &promptFrame{Turn: "d1", Text: "Build it"}},
+		update(toolUpdate("tool_call", "in_progress", map[string]any{"title": "build", "kind": "execute"})),
+		{Stop: &stopFrame{Turn: "d1", State: provider.TurnCompleted}},
+		{Prompt: &promptFrame{Turn: "d2", Text: "Thanks"}},
+		update(agentMessageUpdate("", "You're")),
+		update(toolUpdate("tool_call_update", "completed", nil)),
+		update(agentMessageUpdate("", " welcome.")),
+		{Stop: &stopFrame{Turn: "d2", State: provider.TurnCompleted}},
+	} {
+		frames = append(frames, encodeFrame(f))
+	}
+	_, turns := history(frames)
+	var got [][]entrySummary
+	for _, turn := range turns {
+		got = append(got, summarize(turn))
+	}
+	want := [][]entrySummary{
+		{{Ref: "d1/user", Kind: "user_message", Status: "completed", Text: "Build it"}, {Ref: "d1/tool/t1", Kind: "command_execution", Status: "completed"}},
+		{{Ref: "d2/user", Kind: "user_message", Status: "completed", Text: "Thanks"}, {Ref: "d2/m1", Kind: "assistant_message", Status: "completed", Text: "You're welcome."}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("turns = %#v\nwant %#v", got, want)
+	}
+}
+
+// A tool call still running after its prompt's answer keeps its turn: a
+// request about it opens there, and outlives the next prompt, whose end only
+// ends its own requests.
+func TestRequestAboutAnEarlierTurnsToolOutlivesTheNextPrompt(t *testing.T) {
+	answers := make(chan wireMsg, 1)
+	agent := &fakeWireAgent{responses: answers, onPrompt: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+		if params.Prompt[0].Text == "Build it" {
+			a.sendUpdate(params.SessionID, toolUpdate("tool_call", "in_progress", map[string]any{"title": "build", "kind": "execute"}))
+		}
+		a.respond(id, map[string]any{"stopReason": "end_turn"})
+	}}
+	h := newWireTestHandle(t, agent)
+	session := openSession(t, h, provider.OpenInput{}).Session
+	send(t, h, session, "d1", "Build it")
+	h.events.WaitFor(t, "the prompt to settle", providertest.Settled("d1"))
+	agent.write(map[string]any{"jsonrpc": "2.0", "id": "perm-1", "method": "session/request_permission", "params": map[string]any{
+		"sessionId": session,
+		"toolCall":  map[string]any{"toolCallId": "t1", "title": "build"},
+		"options":   []any{map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"}},
+	}})
+	request := h.events.WaitFor(t, "the request", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestOpened)
+		return ok
+	}).Body.(provider.RequestOpened)
+	if request.Turn != "d1" || request.Entry != "d1/tool/t1" {
+		t.Fatalf("request = %#v, want it on turn d1 about d1/tool/t1", request)
+	}
+	send(t, h, session, "d2", "Thanks")
+	h.events.WaitFor(t, "the next prompt to settle", providertest.Settled("d2"))
+	if err := h.Respond(testContext(t), session, request.Request, provider.RequestAnswer{Action: request.Ask.Actions[0]}); err != nil {
+		t.Fatalf("Respond after the next prompt: %v", err)
+	}
+	var result struct {
+		Outcome struct {
+			Outcome string `json:"outcome"`
+		} `json:"outcome"`
+	}
+	if answer := waitFor(t, answers, "the agent never got the answer"); json.Unmarshal(answer.Result, &result) != nil || result.Outcome.Outcome != "selected" {
+		t.Fatalf("answer = %s, want the person's choice", answer.Result)
+	}
+}
+
+// A request about an earlier turn's tool ends with the session.
+func TestReleaseEndsARequestAboutAnEarlierTurnsTool(t *testing.T) {
+	answers := make(chan wireMsg, 1)
+	agent := &fakeWireAgent{responses: answers, onPrompt: func(a *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+		a.sendUpdate(params.SessionID, toolUpdate("tool_call", "in_progress", map[string]any{"title": "build", "kind": "execute"}))
+		a.respond(id, map[string]any{"stopReason": "end_turn"})
+	}}
+	h := newWireTestHandle(t, agent)
+	session := openSession(t, h, provider.OpenInput{}).Session
+	send(t, h, session, "d1", "Build it")
+	h.events.WaitFor(t, "the prompt to settle", providertest.Settled("d1"))
+	agent.write(map[string]any{"jsonrpc": "2.0", "id": "perm-1", "method": "session/request_permission", "params": map[string]any{
+		"sessionId": session,
+		"toolCall":  map[string]any{"toolCallId": "t1", "title": "build"},
+		"options":   []any{map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"}},
+	}})
+	h.events.WaitFor(t, "the request", func(event provider.Event) bool {
+		_, ok := event.Body.(provider.RequestOpened)
+		return ok
+	})
+	if err := h.Release(testContext(t), session); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	var result struct {
+		Outcome struct {
+			Outcome string `json:"outcome"`
+		} `json:"outcome"`
+	}
+	if answer := waitFor(t, answers, "the agent never got an answer"); json.Unmarshal(answer.Result, &result) != nil || result.Outcome.Outcome != "cancelled" {
+		t.Fatalf("answer = %s, want cancelled", answer.Result)
+	}
+}
+
+// A replay's end ends its last turn, so the agent's output after a load is
+// a turn of its own.
+func TestOutputAfterAReplayIsATurnOfItsOwn(t *testing.T) {
+	update := func(u map[string]any) frame {
+		raw, _ := json.Marshal(u)
+		return frame{Update: raw}
+	}
+	var frames []json.RawMessage
+	for _, f := range []frame{
+		update(map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "Build it"}}),
+		update(agentMessageUpdate("", "On it.")),
+		{Stop: &stopFrame{Turn: "found-1", State: provider.TurnCompleted}},
+		update(agentMessageUpdate("", "The build finished.")),
+	} {
+		frames = append(frames, encodeFrame(f))
+	}
+	_, turns := history(frames)
+	var got [][]entrySummary
+	for _, turn := range turns {
+		got = append(got, summarize(turn))
+	}
+	want := [][]entrySummary{
+		{{Ref: "found-1/user", Kind: "user_message", Status: "completed", Text: "Build it"}, {Ref: "found-1/m1", Kind: "assistant_message", Status: "completed", Text: "On it."}},
+		{{Ref: "found-2/m1", Kind: "assistant_message", Status: "completed", Text: "The build finished."}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("turns = %#v\nwant %#v", got, want)
+	}
+}
+
+// What the mirror leaves running (a prompt nothing answered, a tool call a
+// follow-up began) ran in a process that is gone: resuming ends it
+// interrupted, the agent's output after is a turn of its own, and the prompt
+// isn't taken as delivered.
+func TestResumeEndsAPromptLeftUnanswered(t *testing.T) {
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"resume": map[string]any{}}},
+		onResumeSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			a.respond(id, map[string]any{})
+		},
+	}
+	h := newWireTestHandle(t, agent)
+	tool, _ := json.Marshal(toolUpdate("tool_call", "in_progress", map[string]any{"title": "build", "kind": "execute"}))
+	background, _ := json.Marshal(toolUpdate("tool_call", "in_progress", map[string]any{"toolCallId": "t0", "title": "watch", "kind": "execute"}))
+	h.mirror.Append("cut", []json.RawMessage{
+		encodeFrame(frame{Update: background}),
+		encodeFrame(frame{Prompt: &promptFrame{Turn: "d1", Text: "Build it"}}),
+		encodeFrame(frame{Update: tool}),
+	})
+	h.mirror.Append("unsent", []json.RawMessage{encodeFrame(frame{Prompt: &promptFrame{Turn: "d2", Text: "Lost?"}})})
+	openSession(t, h, provider.OpenInput{Session: "cut"})
+	openSession(t, h, provider.OpenInput{Session: "unsent"})
+	// The end resuming gives a prompt is maiD's, no sign the agent had it.
+	if delivered, err := h.Delivered(testContext(t), "unsent", provider.DeliveryProbe{Delivery: "d2"}); err != nil || delivered != provider.TriUnknown {
+		t.Fatalf("Delivered = %v, %v; want unknown", delivered, err)
+	}
+	agent.sendUpdate("cut", agentMessageUpdate("", "Back."))
+	h.events.WaitFor(t, "the output after the resume", func(event provider.Event) bool {
+		upserted, ok := event.Body.(provider.EntryUpserted)
+		return ok && upserted.Entry.Ref == "found-2/m1"
+	})
+	turns := readHistory(t, h, "cut", "").Turns
+	if len(turns) != 3 || turns[0].Entries[0].Status != provider.ItemStatusInterrupted || turns[1].State != provider.TurnInterrupted || turns[1].Entries[1].Status != provider.ItemStatusInterrupted || turns[2].Ref != "found-2" {
+		t.Fatalf("turns = %#v, want found-1's tool, d1 and d1's tool interrupted, then the agent's own turn", turns)
+	}
+}
+
+// Only a session/load replay's thoughts lack the live stream's separators:
+// a live thought outside a prompt keeps its text as sent.
+func TestOnlyReplayedThoughtsGetSeparators(t *testing.T) {
+	update := func(u map[string]any, replay bool) frame {
+		raw, _ := json.Marshal(u)
+		return frame{Update: raw, Replay: replay}
+	}
+	userChunk := map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "Build it"}}
+	var frames []json.RawMessage
+	for _, f := range []frame{
+		update(userChunk, true),
+		update(thought("replayed"), true),
+		{Stop: &stopFrame{Turn: "found-1", State: provider.TurnCompleted}},
+		update(userChunk, false),
+		update(thought("live"), false),
+	} {
+		frames = append(frames, encodeFrame(f))
+	}
+	_, turns := history(frames)
+	var got []string
+	for _, turn := range turns {
+		for _, entry := range turn.Entries {
+			if entry.Kind == provider.ItemKindReasoning {
+				got = append(got, entry.Text)
+			}
+		}
+	}
+	if !reflect.DeepEqual(got, []string{"replayed\n\n", "live"}) {
+		t.Fatalf("thoughts = %q, want the replayed one separated and the live one as sent", got)
+	}
+}
+
 // A resumed session continues its frames: its history has the turns from
 // before and after, and a marker returns only the newer ones.
 func TestResumedSessionKeepsHistoryAcrossReopen(t *testing.T) {
@@ -161,8 +477,8 @@ func TestResumedSessionKeepsHistoryAcrossReopen(t *testing.T) {
 }
 
 // A session maiD never ran is loaded once for its history, which becomes its
-// first frames; opening it later drops the agent's second replay, so nothing
-// shows twice.
+// first frames, what it left running ended; opening it later drops the
+// agent's second replay, so nothing shows twice.
 func TestUnseenSessionLoadsItsHistoryOnce(t *testing.T) {
 	var loads, closes atomic.Int32
 	agent := &fakeWireAgent{
@@ -172,6 +488,7 @@ func TestUnseenSessionLoadsItsHistoryOnce(t *testing.T) {
 			a.sendUpdate(params.SessionID, map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "old prompt"}})
 			a.sendUpdate(params.SessionID, thought("old thought"))
 			a.sendUpdate(params.SessionID, agentMessageUpdate("", "old answer"))
+			a.sendUpdate(params.SessionID, toolUpdate("tool_call", "in_progress", map[string]any{"title": "build", "kind": "execute"}))
 			a.respond(id, map[string]any{})
 		},
 		onCloseSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
@@ -189,6 +506,7 @@ func TestUnseenSessionLoadsItsHistoryOnce(t *testing.T) {
 		{Ref: "found-1/user", Kind: "user_message", Status: "completed", Text: "old prompt"},
 		{Ref: "found-1/m1", Kind: "reasoning", Status: "completed", Text: "old thought\n\n"},
 		{Ref: "found-1/m2", Kind: "assistant_message", Status: "completed", Text: "old answer"},
+		{Ref: "found-1/tool/t1", Kind: "command_execution", Status: "interrupted"},
 	}
 	if len(page.Turns) != 1 || page.Turns[0].State != provider.TurnCompleted || !reflect.DeepEqual(summarize(page.Turns[0]), want) {
 		t.Fatalf("history = %#v, want the replayed turn %#v", page.Turns, want)
@@ -202,11 +520,17 @@ func TestUnseenSessionLoadsItsHistoryOnce(t *testing.T) {
 	}
 
 	openSession(t, h, provider.OpenInput{Session: "ext"})
+	// The agent's output after the replay continues the mirror's turns.
+	agent.sendUpdate("ext", agentMessageUpdate("", "unprompted"))
+	h.events.WaitFor(t, "the output after the load", func(event provider.Event) bool {
+		upserted, ok := event.Body.(provider.EntryUpserted)
+		return ok && upserted.Entry.Ref == "found-2/m1"
+	})
 	send(t, h, "ext", "d1", "next")
 	h.events.WaitFor(t, "the new turn to settle", providertest.Settled("d1"))
 	page = readHistory(t, h, "ext", "")
-	if len(page.Turns) != 2 || page.Turns[0].Ref != "found-1" || page.Turns[1].Ref != "d1" || len(page.Turns[0].Entries) != 3 {
-		t.Fatalf("history = %#v, want the replayed turn once, then d1", page.Turns)
+	if len(page.Turns) != 3 || page.Turns[0].Ref != "found-1" || page.Turns[1].Ref != "found-2" || page.Turns[2].Ref != "d1" || len(page.Turns[0].Entries) != 4 {
+		t.Fatalf("history = %#v, want the replayed turn once, the agent's own, then d1", page.Turns)
 	}
 }
 
@@ -239,12 +563,26 @@ func TestInterruptEndsTurnAndDropsLaterText(t *testing.T) {
 	if settled.State != provider.TurnInterrupted {
 		t.Fatalf("turn state = %q, want interrupted", settled.State)
 	}
-	turn := readHistory(t, h, opened.Session, "").Turns[0]
-	for _, entry := range turn.Entries {
-		if entry.Text == "late text" || entry.Kind == provider.ItemKindAssistantMessage && entry.Text != "working" {
-			t.Fatalf("entry %#v kept text sent after the cancel", entry)
+	// Output after the agent answered the cancel is the agent's own again.
+	agent.sendUpdate(opened.Session, agentMessageUpdate("", "Stopped."))
+	h.events.WaitFor(t, "the output after the answer", func(event provider.Event) bool {
+		upserted, ok := event.Body.(provider.EntryUpserted)
+		return ok && upserted.Entry.Text == "Stopped."
+	})
+	var texts [][]string
+	for _, turn := range readHistory(t, h, opened.Session, "").Turns {
+		var messages []string
+		for _, entry := range turn.Entries {
+			if entry.Kind == provider.ItemKindAssistantMessage {
+				messages = append(messages, entry.Text)
+			}
 		}
+		texts = append(texts, messages)
 	}
+	if !reflect.DeepEqual(texts, [][]string{{"working"}, {"Stopped."}}) {
+		t.Fatalf("messages = %q, want the text before the cancel, and after its answer in a turn of its own, not between", texts)
+	}
+	turn := readHistory(t, h, opened.Session, "").Turns[0]
 	if tool := turn.Entries[len(turn.Entries)-1]; tool.Ref != "d1/tool/t1" || tool.Status != provider.ItemStatusCompleted {
 		t.Fatalf("tool = %#v, want its completion after the cancel kept", tool)
 	}
@@ -284,10 +622,14 @@ func TestAgentExitFailsTurnAndClosesSession(t *testing.T) {
 		_, ok := event.Body.(provider.SessionClosed)
 		return ok && event.Session == opened.Session
 	})
+	// The agent died before it read the prompt, as far as maiD knows.
+	if delivered, err := h.Delivered(testContext(t), opened.Session, provider.DeliveryProbe{Delivery: "d1"}); err != nil || delivered != provider.TriUnknown {
+		t.Fatalf("Delivered = %v, %v; want unknown", delivered, err)
+	}
 }
 
-// A delivery is proved once the agent answered after its prompt; a prompt
-// that is the session's last frame may not have reached the agent.
+// A delivery is proved once the agent answered its prompt; until then it may
+// not have reached the agent.
 func TestDeliveredFromMirror(t *testing.T) {
 	agent := &fakeWireAgent{}
 	h := newWireTestHandle(t, agent)
@@ -295,6 +637,11 @@ func TestDeliveredFromMirror(t *testing.T) {
 	send(t, h, opened.Session, "d1", "go")
 	h.events.WaitFor(t, "the turn to settle", providertest.Settled("d1"))
 	h.mirror.Append("other", []json.RawMessage{encodeFrame(frame{Prompt: &promptFrame{Turn: "d2", Text: "lost?"}})})
+	// The agent's own output can race a prompt it hasn't read.
+	output, _ := json.Marshal(agentMessageUpdate("", "The build finished."))
+	h.mirror.Append("raced", []json.RawMessage{encodeFrame(frame{Prompt: &promptFrame{Turn: "d3", Text: "read?"}}), encodeFrame(frame{Update: output})})
+	// Only the prompt's own answer proves it.
+	h.mirror.Append("another", []json.RawMessage{encodeFrame(frame{Prompt: &promptFrame{Turn: "d4", Text: "read?"}}), encodeFrame(frame{Stop: &stopFrame{Turn: "found-1", State: provider.TurnCompleted}})})
 	for _, tc := range []struct {
 		session, delivery string
 		want              provider.Tri
@@ -302,6 +649,8 @@ func TestDeliveredFromMirror(t *testing.T) {
 		{opened.Session, "d1", provider.TriYes},
 		{opened.Session, "never-sent", provider.TriNo},
 		{"other", "d2", provider.TriUnknown},
+		{"raced", "d3", provider.TriUnknown},
+		{"another", "d4", provider.TriUnknown},
 	} {
 		got, err := h.Delivered(testContext(t), tc.session, provider.DeliveryProbe{Delivery: tc.delivery})
 		if err != nil || got != tc.want {

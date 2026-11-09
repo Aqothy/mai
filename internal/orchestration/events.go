@@ -51,6 +51,29 @@ func (e *Engine) providerEvent(s *step, instance provider.InstanceID, generation
 		}
 	}
 	thread := e.threads[participant.Thread]
+	if waits(thread, participant, event.Body) {
+		participant.held = append(participant.held, event)
+		return
+	}
+	e.applyEvent(s, thread, participant, event)
+}
+
+// waits: the event waits for another agent's turn in the thread to end, as
+// the agent's turns do (heldReactor). What is of the agent itself, or ends a
+// request already shown, doesn't.
+func waits(thread *threadState, participant *participantState, body provider.EventBody) bool {
+	switch body := body.(type) {
+	case provider.ConfigChanged, provider.GoalChanged, provider.UsageChanged, provider.TitleChanged, provider.SessionReplaced, provider.SessionClosed:
+		return false
+	case provider.RequestResolved:
+		if thread.requests[body.Request] != nil {
+			return false
+		}
+	}
+	return participant.held != nil || thread.runsAnother(participant.ID)
+}
+
+func (e *Engine) applyEvent(s *step, thread *threadState, participant *participantState, event provider.Event) {
 	at := event.At
 	if at.IsZero() {
 		at = s.now
@@ -64,8 +87,12 @@ func (e *Engine) providerEvent(s *step, instance provider.InstanceID, generation
 	case provider.EntryUpserted:
 		e.entryUpserted(s, thread, participant, body.Entry)
 	case provider.TextAppended:
-		if thread.entries != nil && thread.latest != nil && thread.latest.Ref == body.Turn && thread.latest.Session == participant.Session && thread.entries.append(body.Entry, body.Text) {
-			e.notifyText(s, thread, body)
+		if thread.entries != nil && thread.latest.Ref == body.Turn && thread.latest.Session == participant.Session {
+			if thread.entries.append(body.Entry, body.Text) {
+				e.notifyText(s, thread, thread.latest.ID, body)
+			}
+		} else {
+			e.appendSettled(s, thread, participant, body)
 		}
 	case provider.RequestOpened:
 		e.requestOpened(s, thread, participant, body, at)
@@ -235,6 +262,26 @@ func (e *Engine) entryUpserted(s *step, thread *threadState, participant *partic
 	e.notifyEntry(s, thread, turn, entry)
 }
 
+// appendSettled writes at once text streamed onto a settled turn: one an
+// agent started on its own (ACP's, which nothing ends), which only a running
+// turn's buffer would otherwise hold.
+func (e *Engine) appendSettled(s *step, thread *threadState, participant *participantState, appended provider.TextAppended) {
+	turn := e.turnFor(thread, participant, appended.Turn)
+	if turn == nil {
+		return
+	}
+	entry, ok, err := s.entry(participant.Instance, turn.Session, appended.Entry)
+	if err != nil {
+		e.logger.Warn("read a settled turn's entry", "thread", thread.ID, "error", err)
+	}
+	if !ok {
+		return
+	}
+	entry.Text += appended.Text
+	s.putEntries(participant.Instance, turn.Session, authoredByProvider, entry)
+	e.notifyText(s, thread, turn.ID, appended)
+}
+
 // flushRunning writes the running turns' changed entries.
 func (e *Engine) flushRunning(s *step) {
 	for _, thread := range e.threads {
@@ -284,7 +331,7 @@ func (e *Engine) requestResolved(s *step, thread *threadState, id, action string
 	record := &provider.RequestRecord{Request: id, Ask: request.Ask, Action: action, Answers: answers}
 	if participant := e.participants[request.Participant]; participant != nil {
 		if turn := e.requestTurn(thread, request); turn != nil {
-			entry := provider.Entry{Ref: "request:" + id, Turn: turn.Ref, Kind: provider.ItemKindRequest, Status: provider.ItemStatusCompleted, Request: record, At: s.now}
+			entry := provider.Entry{Ref: "request:" + id, Turn: turn.Ref, Kind: provider.ItemKindRequest, Status: provider.ItemStatusCompleted, Request: record, Local: true, At: s.now}
 			if thread.entries != nil && thread.entries.turn == turn.ID {
 				thread.entries.upsert(entry)
 			} else {
@@ -319,7 +366,7 @@ func (e *Engine) warning(s *step, thread *threadState, participant *participantS
 		e.logger.Info("provider warning outside a turn", "thread", thread.ID, "message", warning.Message)
 		return
 	}
-	entry := provider.Entry{Ref: "warning:" + newID(), Turn: turn.Ref, Kind: provider.ItemKindWarning, Status: provider.ItemStatusCompleted, Text: warning.Message, At: at}
+	entry := provider.Entry{Ref: "warning:" + newID(), Turn: turn.Ref, Kind: provider.ItemKindWarning, Status: provider.ItemStatusCompleted, Text: warning.Message, Local: true, At: at}
 	if thread.entries != nil && thread.entries.turn == turn.ID {
 		thread.entries.upsert(entry)
 	} else {
@@ -349,8 +396,22 @@ func (e *Engine) sessionReplaced(s *step, thread *threadState, participant *part
 func (e *Engine) sessionClosed(s *step, participant *participantState, reason string) {
 	participant.live = nil
 	thread := e.threads[participant.Thread]
+	// What it held reaches the turns the chat has; a turn it would have
+	// started shows from its history once the chat is next caught up.
+	held := participant.held
+	participant.held = nil
+	for _, event := range held {
+		if _, starts := event.Body.(provider.TurnStarted); !starts {
+			e.applyEvent(s, thread, participant, event)
+		}
+	}
 	if running := thread.runningTurn(); running != nil && running.Participant == participant.ID {
 		e.settleTurn(s, thread, running, provider.TurnSettled{Turn: running.Ref, State: provider.TurnFailed, Error: reason})
+	}
+	for _, entry := range e.stopEntries(s, &sessionKey{participant.Instance, participant.Session}) {
+		if turn := e.turnFor(thread, participant, entry.Turn); turn != nil {
+			e.notifyEntry(s, thread, turn, entry)
+		}
 	}
 	for _, request := range thread.requests {
 		if request.Participant == participant.ID {
@@ -364,6 +425,26 @@ func (e *Engine) sessionClosed(s *step, participant *participantState, reason st
 		}
 	}
 	e.notifyParticipant(s, thread, participant)
+}
+
+// stopEntries interrupts the entries still in progress of the session key
+// names, or of every session without one, and returns them. It reaches every
+// turn, settled ones too, since a provider's own work (a follow-up, a
+// background task) can outlive the turn it began in. Nothing a session ran
+// still runs once its process is gone, and a provider leaves an entry in
+// progress only when its process died before ending it.
+func (e *Engine) stopEntries(s *step, key *sessionKey) []provider.Entry {
+	running, err := s.entriesInProgress(key)
+	if err != nil {
+		e.logger.Warn("read entries in progress", "error", err)
+	}
+	stopped := make([]provider.Entry, 0, len(running))
+	for _, entry := range running {
+		entry.entry.Status = provider.ItemStatusInterrupted
+		s.putEntries(entry.instance, entry.session, entry.authored, entry.entry)
+		stopped = append(stopped, entry.entry)
+	}
+	return stopped
 }
 
 func (e *Engine) replayOrphans(s *step, participant *participantState) {

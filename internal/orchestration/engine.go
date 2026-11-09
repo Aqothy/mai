@@ -74,6 +74,9 @@ type Engine struct {
 	pauses   []*instancePause
 	// dispatched are deliveries whose Send is in flight.
 	dispatched map[DeliveryID]bool
+	// forks are the forks whose provider call is in flight. A retry of a
+	// keyed one waits for its outcome, as its receipt isn't written yet.
+	forks []*forkJob
 	// noticed are the requests a spawner was told about (WakeNeedsInput).
 	noticed map[string]bool
 	// projects are the projects' canonical paths, with when each was added.

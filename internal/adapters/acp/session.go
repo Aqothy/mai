@@ -21,8 +21,8 @@ import (
 
 // acpSession is one live ACP session: its ordered update stream, its
 // mapper, the prompt in flight, cached configuration, pending requests. Fields
-// are guarded by Instance.mu, except that record holds recordMu around the
-// mapper so a session's events go out in frame order.
+// are guarded by Instance.mu, except the mapper, guarded by recordMu, which
+// record holds so a session's events go out in frame order.
 type acpSession struct {
 	id     string
 	stream *sessionStream
@@ -106,6 +106,16 @@ func (h *Instance) resume(ctx context.Context, in provider.OpenInput) error {
 		return err
 	}
 	restored, _ := history(frames)
+	// What the frames leave open (a prompt nothing answered, a turn the
+	// agent began, a tool call nothing ended) ended unheard, and the agent's
+	// output from here starts new turns.
+	if restored.leftOpen() {
+		lost := frame{At: time.Now().Round(0), Lost: true}
+		restored.apply(lost)
+		if h.host.Mirror != nil {
+			h.host.Mirror.Append(in.Session, []json.RawMessage{encodeFrame(lost)})
+		}
+	}
 	request := struct {
 		cwd         string
 		directories []string
@@ -128,34 +138,32 @@ func (h *Instance) resume(ctx context.Context, in provider.OpenInput) error {
 	if !h.supportsLoadSession() {
 		return provider.ErrSessionNotFound
 	}
-	baseline := len(frames) == 0
-	if err := h.load(ctx, in.Session, request.cwd, request.directories, request.mcp, baseline); err != nil {
-		return err
+	if len(frames) == 0 {
+		restored = nil
 	}
-	if !baseline {
-		h.mu.Lock()
-		if session := h.sessions[in.Session]; session != nil {
-			session.mapper = restored
-		}
-		h.mu.Unlock()
-	}
-	return nil
+	return h.load(ctx, in.Session, request.cwd, request.directories, request.mcp, restored)
 }
 
-// load runs session/load. With baseline its replay becomes the session's
-// first frames; otherwise the mirror already holds them and the replay is
-// dropped.
-func (h *Instance) load(ctx context.Context, sessionID, cwd string, directories []string, servers []schema.McpServer, baseline bool) error {
+// load runs session/load. Without restored, its replay becomes the
+// session's first frames; with it, the mirror holds them already, so the
+// replay is dropped and restored maps what follows.
+func (h *Instance) load(ctx context.Context, sessionID, cwd string, directories []string, servers []schema.McpServer, restored *mapper) error {
 	stream := h.attach(sessionID, nil, &mapper{}, []json.RawMessage{})
 	resp, err := h.agentPeer.LoadSession(ctx, schema.LoadSessionRequest{SessionID: schema.SessionId(sessionID), CWD: cwd, AdditionalDirectories: directories, MCPServers: servers})
-	var replay []json.RawMessage
 	if err == nil {
+		// At the replay's end in the stream, so the agent's output after it
+		// maps after it.
 		err = h.awaitSessionBarrier(ctx, stream, func() {
 			h.mu.Lock()
-			if session := h.sessions[sessionID]; session != nil {
+			session := h.sessions[sessionID]
+			var replay []json.RawMessage
+			if session != nil {
 				replay, session.capture = session.capture, nil
 			}
 			h.mu.Unlock()
+			if session != nil {
+				h.endReplay(session, replay, restored)
+			}
 		})
 	}
 	if err != nil {
@@ -163,39 +171,33 @@ func (h *Instance) load(ctx context.Context, sessionID, cwd string, directories 
 		return sessionError(err)
 	}
 	h.cacheSessionState(sessionID, resp.ConfigOptions, resp.Modes)
-	if !baseline {
-		return nil
-	}
-	at := time.Now()
-	frames := make([]json.RawMessage, 0, len(replay)+1)
-	for _, update := range replay {
-		frames = append(frames, encodeFrame(frame{At: at, Update: update}))
-	}
-	h.mu.Lock()
-	session := h.sessions[sessionID]
-	h.mu.Unlock()
-	if session == nil {
-		return provider.ErrSessionNotFound
-	}
+	return nil
+}
+
+func (h *Instance) endReplay(session *acpSession, replay []json.RawMessage, restored *mapper) {
 	session.recordMu.Lock()
 	defer session.recordMu.Unlock()
-	for _, raw := range frames {
-		var f frame
-		_ = json.Unmarshal(raw, &f)
-		session.mapper.apply(f)
+	if restored != nil {
+		session.mapper = restored
+		return
 	}
-	// The replay's last turn ends with it.
-	if turn := session.mapper.turn; turn != "" {
-		stop := encodeFrame(frame{At: at, Stop: &stopFrame{Turn: turn, State: provider.TurnCompleted}})
-		var f frame
-		_ = json.Unmarshal(stop, &f)
+	at := time.Now().Round(0)
+	frames := make([]json.RawMessage, 0, len(replay)+1)
+	for _, update := range replay {
+		f := frame{At: at, Update: update, Replay: true}
 		session.mapper.apply(f)
-		frames = append(frames, stop)
+		frames = append(frames, encodeFrame(f))
+	}
+	// What the replay leaves open (its last turn, a tool call nothing ended)
+	// ended where maiD didn't hear it, as in resume.
+	if session.mapper.leftOpen() {
+		f := frame{At: at, Lost: true}
+		session.mapper.apply(f)
+		frames = append(frames, encodeFrame(f))
 	}
 	if h.host.Mirror != nil {
-		h.host.Mirror.Append(sessionID, frames)
+		h.host.Mirror.Append(session.id, frames)
 	}
-	return nil
 }
 
 // History maps the session's frames to turns. A session maiD never ran has
@@ -207,7 +209,7 @@ func (h *Instance) History(ctx context.Context, sessionID string, workspace prov
 		return provider.HistoryPage{}, err
 	}
 	if len(frames) == 0 && !h.live(sessionID) && h.supportsLoadSession() && h.host.Mirror != nil {
-		if err := h.load(ctx, sessionID, workspace.Cwd, h.supportedAdditionalDirectories(workspace.AdditionalDirectories), []schema.McpServer{}, true); err != nil {
+		if err := h.load(ctx, sessionID, workspace.Cwd, h.supportedAdditionalDirectories(workspace.AdditionalDirectories), []schema.McpServer{}, nil); err != nil {
 			return provider.HistoryPage{}, err
 		}
 		h.closeAgentSession(ctx, sessionID)
@@ -220,7 +222,9 @@ func (h *Instance) History(ctx context.Context, sessionID string, workspace prov
 }
 
 // Delivered finds the prompt frame of the delivery: taken once the agent
-// answered after it, not known while the prompt is the session's last frame.
+// answered it, not known while it runs or when it failed or was lost with its
+// process. An update can't tell: ACP v1 doesn't say which prompt, if any, it
+// is for.
 func (h *Instance) Delivered(ctx context.Context, sessionID string, probe provider.DeliveryProbe) (provider.Tri, error) {
 	if h.host.Mirror == nil {
 		return provider.TriUnknown, nil
@@ -234,10 +238,20 @@ func (h *Instance) Delivered(ctx context.Context, sessionID string, probe provid
 		if json.Unmarshal(raw, &f) != nil || f.Prompt == nil || f.Prompt.Turn != probe.Delivery {
 			continue
 		}
-		if index == len(frames)-1 {
-			return provider.TriUnknown, nil
+		for _, later := range frames[index+1:] {
+			var next frame
+			if json.Unmarshal(later, &next) != nil {
+				continue
+			}
+			switch {
+			case next.Stop != nil && next.Stop.Turn == probe.Delivery && next.Stop.State != provider.TurnFailed:
+				return provider.TriYes, nil
+			case next.Prompt != nil, next.Lost, next.Stop != nil && next.Stop.Turn == probe.Delivery:
+				// A failed prompt may have failed before the agent read it.
+				return provider.TriUnknown, nil
+			}
 		}
-		return provider.TriYes, nil
+		return provider.TriUnknown, nil
 	}
 	return provider.TriNo, nil
 }
@@ -268,6 +282,8 @@ func (h *Instance) Release(ctx context.Context, sessionID string) error {
 	h.detach(sessionID)
 	// The prompt's own end can't arrive once the stream is gone.
 	h.settlePrompt(session, schema.PromptResponse{StopReason: schema.StopReasonCancelled}, nil)
+	// The requests of the agent's own work end with the session too.
+	h.cancelPermissions(session, func(*pendingPermission) bool { return true })
 	return nil
 }
 

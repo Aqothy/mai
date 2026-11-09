@@ -425,3 +425,106 @@ func TestTheLastNameGivenWins(t *testing.T) {
 	claude.send("claude-session-1", provider.TitleChanged{Title: "Renamed in the CLI"})
 	h.eventually("the CLI's later name", func() bool { return title() == "Renamed in the CLI" })
 }
+
+// Nothing runs once its session's process is gone. A tool still running ends
+// interrupted when its session closes or maiD restarts: one a settled turn
+// left running (a background task) as one of a turn cut off, though the
+// session's own record still has both running.
+func TestEntriesInProgressEndWithTheirSession(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(map[bool]string{false: "closed", true: "restart"}[restart], func(t *testing.T) {
+			claude := newFakeInstance("claude", "Claude")
+			h := newHarness(t, claude)
+			chat := h.createThread("claude", "one")
+			h.settledTurns(chat.Thread, 1)
+			first := claude.messages()[0]
+			tool := func(turn string) provider.Entry {
+				return provider.Entry{Ref: turn + "/tool/t1", Turn: turn, Kind: provider.ItemKindToolCall, Status: provider.ItemStatusInProgress}
+			}
+			claude.entry(first.session, tool(first.in.Delivery))
+			claude.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+				f.startTurn(session, in.Delivery, in)
+				go f.entry(session, tool(in.Delivery))
+				return provider.SendAck{Turn: in.Delivery}, nil
+			}
+			h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "two"}})
+			statuses := func() []provider.ItemStatus {
+				var out []provider.ItemStatus
+				for _, turn := range h.snapshot(chat.Thread).Turns {
+					for _, entry := range turn.Entries {
+						if entry.Kind == provider.ItemKindToolCall {
+							out = append(out, entry.Status)
+						}
+					}
+				}
+				return out
+			}
+			running := []provider.ItemStatus{provider.ItemStatusInProgress, provider.ItemStatusInProgress}
+			h.eventually("both tools to run", func() bool { return slices.Equal(statuses(), running) })
+			if restart {
+				h.restart()
+			} else {
+				claude.send(first.session, provider.SessionClosed{})
+			}
+			stopped := []provider.ItemStatus{provider.ItemStatusInterrupted, provider.ItemStatusInterrupted}
+			h.eventually("both tools to end interrupted", func() bool { return slices.Equal(statuses(), stopped) })
+		})
+	}
+}
+
+// A turn a provider starts on its own and settles at once (an ACP agent's
+// follow-up) still takes streamed text: it shows as it streams, and is
+// written to the cache.
+func TestTextStreamsOntoASettledTurn(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+	claude.send(session, provider.TurnStarted{Turn: "found-1", By: provider.TurnByProvider})
+	claude.send(session, provider.TurnSettled{Turn: "found-1", State: provider.TurnCompleted})
+	// The message and its first text in one step, as replayed orphans are:
+	// the text reaches the message not yet written.
+	h.providers.mu.Lock()
+	generation := h.providers.generation
+	h.providers.mu.Unlock()
+	h.engine.post(func(s *step) {
+		h.engine.providerEvent(s, "claude", generation, provider.Event{Session: session, Body: provider.EntryUpserted{Entry: provider.Entry{Ref: "found-1/m1", Turn: "found-1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "The build"}}})
+		h.engine.providerEvent(s, "claude", generation, provider.Event{Session: session, Body: provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: " finished"}})
+	})
+	claude.send(session, provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: "."})
+	// What streamed is its turn's session's, though the chat moved on.
+	claude.send(session, provider.SessionReplaced{New: "claude-session-2"})
+	text := func() string {
+		turns := h.snapshot(chat.Thread).Turns
+		return joined(texts(turns[len(turns)-1]))
+	}
+	h.eventually("the streamed text to show", func() bool { return text() == "assistant_message: The build finished." })
+	h.eventually("the text to be written", func() bool {
+		entries, err := h.engine.db.turnEntries(context.Background(), "claude", session, "found-1")
+		return err == nil && len(entries) == 1 && entries[0].Text == "The build finished."
+	})
+}
+
+// Text keeps reaching a turn an agent started on its own after a later turn
+// overtook it.
+func TestTextStreamsOntoAnOvertakenTurn(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+	claude.send(session, provider.TurnStarted{Turn: "found-1", By: provider.TurnByProvider})
+	claude.send(session, provider.TurnSettled{Turn: "found-1", State: provider.TurnCompleted})
+	claude.send(session, provider.EntryUpserted{Entry: provider.Entry{Ref: "found-1/m1", Turn: "found-1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "The build"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "two"}})
+	h.settledTurns(chat.Thread, 3)
+	claude.send(session, provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: " finished."})
+	h.eventually("the text to be written", func() bool {
+		entries, err := h.engine.db.turnEntries(context.Background(), "claude", session, "found-1")
+		return err == nil && len(entries) == 1 && entries[0].Text == "The build finished."
+	})
+	if got := joined(texts(h.snapshot(chat.Thread).Turns[1])); got != "assistant_message: The build finished." {
+		t.Fatalf("overtaken turn = %s", got)
+	}
+}

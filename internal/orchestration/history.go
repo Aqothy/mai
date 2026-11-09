@@ -44,7 +44,9 @@ func (e *Engine) reconcile(s *step, thread *threadState, participant *participan
 		return
 	}
 	participant.reconciling = true
-	id, session, workspace := participant.ID, participant.Session, thread.Workspace
+	// An Open in flight runs first on the worker, so the read sees the
+	// session it opens, if it does.
+	id, session, workspace, live := participant.ID, participant.Session, thread.Workspace, participant.opening
 	s.providerCall(participant, func(ctx context.Context, instance provider.Instance, _ uint64) func(*step) {
 		version := instance.Info().Capabilities.HistoryVersion
 		rebuild := stored.marker != "" && stored.version != version
@@ -60,12 +62,16 @@ func (e *Engine) reconcile(s *step, thread *threadState, participant *participan
 			page.Turns, page.Subagents, page.Next, page.More = append(page.Turns, next.Turns...), append(page.Subagents, next.Subagents...), next.Next, next.More
 		}
 		e.attachments.stripTurns(page.Turns)
-		return func(s *step) { e.applyHistory(s, id, session, page, err, rebuild || page.Reset, version) }
-	}, func(s *step, err error) { e.applyHistory(s, id, session, provider.HistoryPage{}, err, false, 0) })
+		return func(s *step) { e.applyHistory(s, id, session, live, page, err, rebuild || page.Reset, version) }
+	}, func(s *step, err error) { e.applyHistory(s, id, session, live, provider.HistoryPage{}, err, false, 0) })
 }
 
-func (e *Engine) applyHistory(s *step, id ParticipantID, session string, page provider.HistoryPage, err error, rebuild bool, version int) {
+// applyHistory records a session's history; live: the session ran in maiD
+// as it was read.
+func (e *Engine) applyHistory(s *step, id ParticipantID, session string, live bool, page provider.HistoryPage, err error, rebuild bool, version int) {
 	participant := e.participants[id]
+	// One that closed since stopped what ran (stopEntries).
+	live = live && participant.live != nil
 	participant.reconciling = false
 	thread := e.threads[participant.Thread]
 	if !e.readingHistory(thread) {
@@ -96,14 +102,12 @@ func (e *Engine) applyHistory(s *step, id ParticipantID, session string, page pr
 			// The live stream is the turn's record while it runs.
 			continue
 		}
-		for index := range native.Entries {
-			e.withQuoteCards(&native.Entries[index])
-		}
+		e.historyEntries(native.Entries, live)
 		all = append(all, native.Entries...)
 		if !rebuild {
 			s.putEntries(participant.Instance, session, authoredByProvider, native.Entries...)
 		}
-		changed = e.recordNativeTurn(s, thread, participant, native) || changed
+		changed = e.recordNativeTurn(s, thread, participant, live, native) || changed
 	}
 	if rebuild {
 		s.tx.rebuilds = append(s.tx.rebuilds, sessionRebuild{key: key, entries: all})
@@ -116,6 +120,17 @@ func (e *Engine) applyHistory(s *step, id ParticipantID, session string, page pr
 	}
 	if changed {
 		e.notifyRefresh(s, thread)
+	}
+}
+
+// historyEntries readies entries read from a session's history. Unless it
+// ran as they were read, nothing in them still runs (stopEntries).
+func (e *Engine) historyEntries(entries []provider.Entry, live bool) {
+	for index := range entries {
+		e.withQuoteCards(&entries[index])
+		if !live && entries[index].Status == provider.ItemStatusInProgress {
+			entries[index].Status = provider.ItemStatusInterrupted
+		}
 	}
 }
 
@@ -169,11 +184,11 @@ func (e *Engine) dropVanishedTurns(s *step, thread *threadState, session string,
 // ledger knows settles as the provider says; one it doesn't is found (run
 // in the CLI, or inherited by a fork) and placed by its start time. A turn
 // whose message is a delivery the ledger has under a placeholder takes its
-// real ref.
-func (e *Engine) recordNativeTurn(s *step, thread *threadState, participant *participantState, native provider.HistoryTurn) bool {
+// real ref. live: the session ran in maiD as its history was read.
+func (e *Engine) recordNativeTurn(s *step, thread *threadState, participant *participantState, live bool, native provider.HistoryTurn) bool {
 	state := native.State
-	if state == provider.TurnRunning && participant.live == nil {
-		// Its session isn't running, so neither is the turn.
+	if state == provider.TurnRunning && !live {
+		// Its session wasn't running, so neither is the turn.
 		state = provider.TurnInterrupted
 	}
 	if turn := e.turnFor(thread, participant, native.Ref); turn != nil {

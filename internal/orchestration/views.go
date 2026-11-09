@@ -723,8 +723,8 @@ func (e *Engine) notifyEntry(s *step, thread *threadState, turn *Turn, entry pro
 	e.emit(s, thread.ID, ThreadEvent{Kind: EventEntry, Turn: &turnView, Entry: &view})
 }
 
-func (e *Engine) notifyText(s *step, thread *threadState, appended provider.TextAppended) {
-	e.emit(s, thread.ID, ThreadEvent{Kind: EventText, Text: &TextAppend{Turn: thread.latest.ID, Entry: appended.Entry, Stream: appended.Stream, Text: appended.Text}})
+func (e *Engine) notifyText(s *step, thread *threadState, turn TurnID, appended provider.TextAppended) {
+	e.emit(s, thread.ID, ThreadEvent{Kind: EventText, Text: &TextAppend{Turn: turn, Entry: appended.Entry, Stream: appended.Stream, Text: appended.Text}})
 }
 
 func (e *Engine) notifyTurn(s *step, thread *threadState, turn *Turn) {

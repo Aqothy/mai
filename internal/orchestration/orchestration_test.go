@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +65,130 @@ func TestSwitchingAgentsHandsOverOnlyWhatWasMissed(t *testing.T) {
 			t.Fatalf("after restart turn %d is %s's, want %s's", index, turn.Participant, participants[index])
 		}
 	}
+}
+
+// A chat runs one turn at a time: a turn an agent starts on its own while
+// another agent's runs (a background task's reply) waits for it to end,
+// rather than cutting it off.
+func TestAnAgentsOwnTurnWaitsForAnothersTurn(t *testing.T) {
+	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	release := make(chan struct{})
+	codex.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		f.startTurn(session, in.Delivery, in)
+		go func() {
+			<-release
+			f.settle(session, in.Delivery, provider.TurnCompleted)
+		}()
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+	h := newHarness(t, claude, codex)
+	chat := h.createThread("claude", "Start the build")
+	h.settledTurns(chat.Thread, 1)
+	first := claude.messages()[0]
+	// A background tool of claude's asks before codex's turn.
+	claude.send(first.session, provider.RequestOpened{Request: "r1", Turn: first.in.Delivery})
+	h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "codex"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "Review it"}})
+	h.eventually("codex's turn to run", func() bool {
+		turns := h.snapshot(chat.Thread).Turns
+		return len(turns) == 2 && turns[1].State == provider.TurnRunning
+	})
+	// Ending a request it shows, or moving to a new session, doesn't wait.
+	claude.send(first.session, provider.RequestResolved{Request: "r1"})
+	if requests := h.snapshot(chat.Thread).Requests; len(requests) != 0 {
+		t.Fatalf("requests = %#v while codex runs, want claude's withdrawn one gone", requests)
+	}
+	session := "claude-session-9"
+	claude.send(first.session, provider.SessionReplaced{New: session})
+	claude.send(session, provider.TurnStarted{Turn: "wake:1", By: provider.TurnByProvider})
+	claude.send(session, provider.EntryUpserted{Entry: provider.Entry{Ref: "wake:1/m1", Turn: "wake:1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "The build passed."}})
+	claude.send(session, provider.TurnSettled{Turn: "wake:1", State: provider.TurnCompleted})
+	if turns := h.snapshot(chat.Thread).Turns; len(turns) != 2 || turns[1].State != provider.TurnRunning {
+		t.Fatalf("turns = %#v, want codex's still running alone", turns)
+	}
+	// What the agent says of itself, unlike its turns, doesn't wait.
+	claude.send(session, provider.UsageChanged{Usage: provider.TokenUsage{UsedTokens: 7}})
+	for _, participant := range h.snapshot(chat.Thread).Participants {
+		if participant.ID == chat.Participant && (participant.Usage == nil || participant.Usage.UsedTokens != 7) {
+			t.Fatalf("claude's usage = %#v while codex runs, want it at once", participant.Usage)
+		}
+	}
+	close(release)
+	turns := h.settledTurns(chat.Thread, 3).Turns
+	if turns[1].State != provider.TurnCompleted || turns[2].Participant != chat.Participant || joined(texts(turns[2])) != "assistant_message: The build passed." {
+		t.Fatalf("turns = %#v, want codex's completed, then claude's own", turns)
+	}
+}
+
+// An agent's own turn also waits for a message still on its way to another
+// agent: the chat runs one turn at a time.
+func TestAnAgentsOwnTurnWaitsForAMessageToAnother(t *testing.T) {
+	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	sending, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	codex.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		close(sending)
+		<-release
+		f.startTurn(session, in.Delivery, in)
+		go func() {
+			<-done
+			f.settle(session, in.Delivery, provider.TurnCompleted)
+		}()
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+	h := newHarness(t, claude, codex)
+	chat := h.createThread("claude", "Start the build")
+	h.settledTurns(chat.Thread, 1)
+	added := h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "codex"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "Review it"}})
+	<-sending
+	session := claude.messages()[0].session
+	claude.send(session, provider.TurnStarted{Turn: "wake:1", By: provider.TurnByProvider})
+	close(release)
+	running := func() (out []ParticipantID) {
+		for _, turn := range h.snapshot(chat.Thread).Turns {
+			if turn.State == provider.TurnRunning {
+				out = append(out, turn.Participant)
+			}
+		}
+		return out
+	}
+	h.eventually("codex's turn to run", func() bool { return slices.Contains(running(), added.Participant) })
+	if got := running(); len(got) != 1 {
+		t.Fatalf("running turns of %v, want codex's alone", got)
+	}
+	close(done)
+	h.eventually("claude's own turn to run", func() bool { return slices.Equal(running(), []ParticipantID{chat.Participant}) })
+	claude.send(session, provider.TurnSettled{Turn: "wake:1", State: provider.TurnCompleted})
+	h.settledTurns(chat.Thread, 3)
+}
+
+// What an agent's session sent while held still reaches the turns the chat
+// has when the session ends.
+func TestHeldOutputReachesItsTurnWhenTheSessionEnds(t *testing.T) {
+	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	codex.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		f.startTurn(session, in.Delivery, in)
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+	h := newHarness(t, claude, codex)
+	chat := h.createThread("claude", "Start the build")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+	claude.send(session, provider.TurnStarted{Turn: "found-1", By: provider.TurnByProvider})
+	claude.send(session, provider.TurnSettled{Turn: "found-1", State: provider.TurnCompleted})
+	claude.send(session, provider.EntryUpserted{Entry: provider.Entry{Ref: "found-1/m1", Turn: "found-1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "The build"}})
+	h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "codex"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "Review it"}})
+	h.eventually("codex's turn to run", func() bool {
+		turns := h.snapshot(chat.Thread).Turns
+		return len(turns) == 3 && turns[2].State == provider.TurnRunning
+	})
+	claude.send(session, provider.TextAppended{Entry: "found-1/m1", Turn: "found-1", Stream: provider.StreamAssistant, Text: " passed."})
+	claude.send(session, provider.SessionClosed{})
+	h.eventually("the held text to be written", func() bool {
+		entries, err := h.engine.db.turnEntries(context.Background(), "claude", session, "found-1")
+		return err == nil && len(entries) == 1 && entries[0].Text == "The build passed."
+	})
 }
 
 // Two agents messaging each other are held at the hop limit; Continue sends
@@ -395,6 +521,159 @@ func TestForkThroughATurnAndDeleteTheSource(t *testing.T) {
 	}
 }
 
+// A fork's session never ran its source's background work, so a tool still
+// running in the source is not running in the fork.
+func TestForkStopsWhatItsSourceStillRuns(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	source := h.createThread("claude", "one")
+	turns := h.settledTurns(source.Thread, 1).Turns
+	first := claude.messages()[0]
+	claude.entry(first.session, provider.Entry{Ref: first.in.Delivery + "/tool/t1", Turn: first.in.Delivery, Kind: provider.ItemKindToolCall, Status: provider.ItemStatusInProgress})
+	fork := h.do(ForkThread{Thread: source.Thread, Through: turns[0].ID, Prompt: MessageBody{Text: "two"}})
+	forked := h.settledTurns(fork.Thread, 2)
+	tools := 0
+	for _, entry := range forked.Turns[0].Entries {
+		if entry.Kind == provider.ItemKindToolCall {
+			tools++
+			if entry.Status != provider.ItemStatusInterrupted {
+				t.Fatalf("forked tool = %s, want interrupted", entry.Status)
+			}
+		}
+	}
+	if tools != 1 {
+		t.Fatalf("fork turn has %d tools, want 1", tools)
+	}
+}
+
+// A fork retried while the first try still forks waits for that fork: a
+// client that resends after losing its connection gets the one chat.
+func TestRetriedForkWaitsForTheForkInFlight(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	source := h.createThread("claude", "one")
+	turns := h.settledTurns(source.Thread, 1).Turns
+	forking, release := make(chan struct{}), make(chan struct{})
+	var forks atomic.Int32
+	claude.onFork = func() {
+		if forks.Add(1) == 1 {
+			close(forking)
+			<-release
+		}
+	}
+	fork := Command{Key: "fork-1", Actor: h.device, Body: ForkThread{Thread: source.Thread, Through: turns[0].ID, Prompt: MessageBody{Text: "two"}}}
+	first := make(chan CommandResult, 1)
+	go func() {
+		result, err := h.engine.Do(context.Background(), fork)
+		if err != nil {
+			t.Errorf("fork: %v", err)
+		}
+		first <- result
+	}()
+	<-forking
+	// A call whose client went away still runs, which queues this retry
+	// before the fork in flight can end.
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.engine.Do(gone, fork); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retry = %v, want its caller's cancellation", err)
+	}
+	close(release)
+	forked := <-first
+	// A second fork would run on the source agent before this turn does.
+	h.do(Deliver{Thread: source.Thread, Body: MessageBody{Text: "three"}})
+	h.settledTurns(source.Thread, 2)
+
+	list, err := h.sub.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if n := forks.Load(); n != 1 || len(list.Threads) != 2 {
+		t.Fatalf("%d forks and %d chats, want one fork and the source with its fork", n, len(list.Threads))
+	}
+	retried, err := h.engine.Do(context.Background(), fork)
+	if err != nil || retried.Thread != forked.Thread {
+		t.Fatalf("retry after the fork = %v, %v; want its chat %s", retried.Thread, err, forked.Thread)
+	}
+}
+
+// Deleting a chat while it forks ends the fork, and a retry of it is refused
+// rather than waiting for a fork whose outcome nobody takes.
+func TestDeletingTheSourceEndsItsForkInFlight(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	source := h.createThread("claude", "one")
+	turns := h.settledTurns(source.Thread, 1).Turns
+	forking, release := make(chan struct{}), make(chan struct{})
+	claude.onFork = func() {
+		close(forking)
+		<-release
+	}
+	fork := Command{Key: "fork-1", Actor: h.device, Body: ForkThread{Thread: source.Thread, Through: turns[0].ID, Prompt: MessageBody{Text: "two"}}}
+	first := make(chan error, 1)
+	go func() {
+		_, err := h.engine.Do(context.Background(), fork)
+		first <- err
+	}()
+	<-forking
+	h.do(DeleteThread{Thread: source.Thread})
+	var refusal *CommandError
+	if err := <-first; !errors.As(err, &refusal) || refusal.Code != CodeNotFound {
+		t.Fatalf("fork = %v, want it refused as deleted", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := h.engine.Do(ctx, fork); !errors.As(err, &refusal) || refusal.Code != CodeNotFound {
+		t.Fatalf("retry = %v, want it refused as deleted", err)
+	}
+	// The fork comes back after: the session it made goes too, after the
+	// deleted source's.
+	close(release)
+	h.eventually("the fork's session to be released", func() bool {
+		claude.mu.Lock()
+		defer claude.mu.Unlock()
+		return len(claude.released) == 2
+	})
+}
+
+// Deleting the chat a spawn goes under while its fork runs ends the spawn:
+// no chat is made under one that is gone.
+func TestDeletingASpawnsParentEndsItsForkInFlight(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	parent := h.createThread("claude", "plan")
+	source := h.createThread("claude", "one")
+	h.settledTurns(parent.Thread, 1)
+	h.settledTurns(source.Thread, 1)
+	forking, release := make(chan struct{}), make(chan struct{})
+	claude.onFork = func() {
+		close(forking)
+		<-release
+	}
+	spawned := make(chan error, 1)
+	go func() {
+		_, err := h.doAs(h.device, Spawn{Parent: parent.Thread, Brief: "look", Context: &ForkPoint{Thread: source.Thread}})
+		spawned <- err
+	}()
+	<-forking
+	h.do(DeleteThread{Thread: parent.Thread})
+	var refusal *CommandError
+	if err := <-spawned; !errors.As(err, &refusal) || refusal.Code != CodeNotFound {
+		t.Fatalf("spawn = %v, want it refused as deleted", err)
+	}
+	// The fork comes back after: the session it made goes, after the deleted
+	// parent's, and it makes no chat.
+	close(release)
+	h.eventually("the fork's session to be released", func() bool {
+		claude.mu.Lock()
+		defer claude.mu.Unlock()
+		return len(claude.released) == 2
+	})
+	if list, err := h.sub.List(context.Background()); err != nil || len(list.Threads) != 1 || list.Threads[0].ID != source.Thread {
+		t.Fatalf("chats = %#v, %v; want only the source", list.Threads, err)
+	}
+}
+
 // A chat is unread once a turn settles after a person last read it, on any
 // device; reading it, or marking it unread, is one command every device
 // sees, and it survives a restart.
@@ -632,6 +911,86 @@ func TestQuotesReachTheAgentAsTextAndShowAsCards(t *testing.T) {
 	})
 	if got := card(h.snapshot(chat.Thread)); got != "Explain [use a map: why?]" {
 		t.Fatalf("rebuilt message = %q", got)
+	}
+}
+
+// maiD is the only keeper of what was asked and answered: the record
+// outlives a rebuild from the provider's session.
+func TestRequestRecordOutlivesARebuild(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		f.startTurn(session, in.Delivery, in)
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "Deploy")
+	h.eventually("the turn to run", func() bool { return len(claude.messages()) == 1 })
+	sent := claude.messages()[0]
+	claude.send(sent.session, provider.RequestOpened{Request: "r1", Turn: sent.in.Delivery})
+	claude.send(sent.session, provider.RequestResolved{Request: "r1", Action: "allow"})
+	claude.settle(sent.session, sent.in.Delivery, provider.TurnCompleted)
+	recorded := func() bool {
+		return slices.ContainsFunc(h.snapshot(chat.Thread).Turns[0].Entries, func(entry EntryView) bool { return entry.Kind == provider.ItemKindRequest })
+	}
+	h.settledTurns(chat.Thread, 1)
+	if !recorded() {
+		t.Fatal("no request record after the turn")
+	}
+	claude.mu.Lock()
+	claude.info.Capabilities.HistoryVersion = 2
+	claude.mu.Unlock()
+	h.restart()
+	h.snapshot(chat.Thread)
+	h.eventually("the rebuild", func() bool {
+		stored, err := h.engine.db.marker(context.Background(), "claude", sent.session)
+		return err == nil && stored.version == 2
+	})
+	if !recorded() {
+		t.Fatal("the rebuild dropped the request record")
+	}
+}
+
+// A history read queued behind an Open reads the session it opened: what
+// runs there still runs.
+func TestHistoryReadAfterAnOpenSeesTheSessionLive(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+	h.restart()
+	h.snapshot(chat.Thread)
+	gate := make(chan struct{})
+	claude.mu.Lock()
+	claude.openGate = gate
+	claude.mu.Unlock()
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "two"}})
+	h.eventually("the open", func() bool {
+		opening := make(chan bool, 1)
+		h.engine.post(func(*step) { opening <- h.engine.participants[chat.Participant].opening })
+		return <-opening
+	})
+	claude.mu.Lock()
+	claude.sessions[session].turns = append(claude.sessions[session].turns, provider.HistoryTurn{Ref: "woke", State: provider.TurnRunning})
+	claude.mu.Unlock()
+	queued := make(chan struct{})
+	h.engine.post(func(s *step) {
+		h.engine.catchUp(s, h.engine.threads[chat.Thread])
+		close(queued)
+	})
+	<-queued
+	close(gate)
+	found := func() *TurnView {
+		for _, turn := range h.snapshot(chat.Thread).Turns {
+			if turn.StartedBy == StartedByFound {
+				return &turn
+			}
+		}
+		return nil
+	}
+	h.eventually("the session's own turn", func() bool { return found() != nil })
+	if turn := found(); turn.State != provider.TurnRunning {
+		t.Fatalf("the live session's turn = %s, want running", turn.State)
 	}
 }
 

@@ -33,6 +33,8 @@ type fakeInstance struct {
 	openGate chan struct{}
 	// onSend runs a sent message; the default answers it and ends the turn.
 	onSend func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error)
+	// onFork, when set, runs as a fork starts.
+	onFork func()
 	// interruptGate, when set, holds an interrupted turn's end until closed.
 	interruptGate chan struct{}
 	// received is every message sent, in order.
@@ -40,6 +42,8 @@ type fakeInstance struct {
 	// interrupts are the turns interrupted.
 	interrupts []string
 	responses  []provider.RequestAnswer
+	// released are the sessions released, in order.
+	released []string
 }
 
 type fakeReceived struct {
@@ -101,6 +105,7 @@ func (f *fakeInstance) Release(_ context.Context, session string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.live, session)
+	f.released = append(f.released, session)
 	return nil
 }
 
@@ -238,6 +243,9 @@ func (f *fakeInstance) Delivered(_ context.Context, session string, probe provid
 }
 
 func (f *fakeInstance) Fork(_ context.Context, in provider.ForkInput) (string, error) {
+	if f.onFork != nil {
+		f.onFork()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	source := f.sessions[in.Session]

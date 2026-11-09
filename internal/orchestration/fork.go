@@ -34,13 +34,17 @@ type forkSource struct {
 type forkJob struct {
 	source  forkSource
 	carryOn *participantState
+	// under is the chat the new one goes under, if any: a spawn's parent.
+	under   ThreadID
 	session string
 	history []provider.HistoryTurn
 	// finish makes the new thread once the call came back.
 	finish func(s *step, job *forkJob) (CommandResult, error)
-	reply  chan asyncOutcome
-	key    string
-	actor  Actor
+	// replies are the command's callers: the first, then its retries.
+	replies []chan asyncOutcome
+	// key and actor are the command's, for its receipt and retries.
+	key   string
+	actor Actor
 }
 
 func (e *Engine) forkSourceOf(thread *threadState, through TurnID) (forkSource, error) {
@@ -118,14 +122,17 @@ func (e *Engine) ForkPreview(ctx context.Context, id ThreadID, through TurnID, a
 	})
 }
 
-// startFork forks carryOn's session natively, then finishes; without
-// carryOn it finishes at once.
-func (e *Engine) startFork(s *step, command Command, source forkSource, carryOn *participantState, finish func(*step, *forkJob) (CommandResult, error)) (CommandResult, chan asyncOutcome, error) {
-	job := &forkJob{source: source, carryOn: carryOn, finish: finish, reply: make(chan asyncOutcome, 1), key: command.Key, actor: command.Actor}
+// startFork forks carryOn's session natively, then finishes, making a chat
+// under the chat under names, if any; without carryOn it finishes at once.
+func (e *Engine) startFork(s *step, command Command, source forkSource, carryOn *participantState, under ThreadID, finish func(*step, *forkJob) (CommandResult, error)) (CommandResult, chan asyncOutcome, error) {
+	job := &forkJob{source: source, carryOn: carryOn, under: under, finish: finish, key: command.Key, actor: command.Actor}
 	if carryOn == nil {
 		result, err := finish(s, job)
 		return result, nil, err
 	}
+	reply := make(chan asyncOutcome, 1)
+	job.replies = []chan asyncOutcome{reply}
+	e.forks = append(e.forks, job)
 	in := provider.ForkInput{Session: carryOn.Session, Through: source.kept[len(source.kept)-1].Ref, Workspace: source.thread.Workspace, Settings: carryOn.Settings}
 	s.providerCall(carryOn, func(ctx context.Context, instance provider.Instance, _ uint64) func(*step) {
 		session, err := instance.Fork(ctx, in)
@@ -137,28 +144,80 @@ func (e *Engine) startFork(s *step, command Command, source forkSource, carryOn 
 				e.attachments.stripTurns(history)
 			}
 		}
-		return func(s *step) { e.forkCallDone(s, job, session, history, err) }
+		// Posted here rather than returned, as providerCall drops what it is
+		// given once carryOn is gone (its chat deleted): the session the fork
+		// made goes unless a chat took it.
+		taken := make(chan bool, 1)
+		if !e.post(func(s *step) { taken <- e.forkCallDone(s, job, session, history, err) }) {
+			return nil
+		}
+		select {
+		case kept := <-taken:
+			if session != "" && !kept {
+				_ = instance.Release(ctx, session)
+			}
+		case <-e.done:
+		}
+		return nil
 	}, func(s *step, err error) { e.forkCallDone(s, job, "", nil, err) })
-	return CommandResult{}, job.reply, nil
+	return CommandResult{}, reply, nil
 }
 
-func (e *Engine) forkCallDone(s *step, job *forkJob, session string, history []provider.HistoryTurn, err error) {
+// forkCallDone ends a fork with its provider call's outcome, unless it ended
+// already (forksDeleted), and reports whether a chat took its session.
+func (e *Engine) forkCallDone(s *step, job *forkJob, session string, history []provider.HistoryTurn, err error) bool {
+	if !slices.Contains(e.forks, job) {
+		return false
+	}
+	outcome := e.finishFork(s, job, session, history, err)
+	e.endFork(s, job, outcome)
+	return outcome.err == nil
+}
+
+func (e *Engine) finishFork(s *step, job *forkJob, session string, history []provider.HistoryTurn, err error) asyncOutcome {
 	if err != nil {
 		// Nothing was made; the person tries again, or continues in
 		// another agent.
-		job.reply <- asyncOutcome{err: refused(CodeAgentUnavailable, "the agent couldn't fork its session: %v", err)}
-		return
-	}
-	if e.threads[job.source.thread.ID] == nil {
-		job.reply <- asyncOutcome{err: refused(CodeNotFound, "the chat was deleted while it forked")}
-		return
+		return asyncOutcome{err: refused(CodeAgentUnavailable, "the agent couldn't fork its session: %v", err)}
 	}
 	job.session, job.history = session, history
 	result, err := job.finish(s, job)
 	if err == nil && job.key != "" {
 		s.tx.receipts = append(s.tx.receipts, receiptRow{actor: job.actor, key: job.key, result: mustJSON(result)})
 	}
-	s.after(func() { job.reply <- asyncOutcome{result: result, err: err} })
+	return asyncOutcome{result: result, err: err}
+}
+
+// forkInFlight is the keyed fork whose provider call is in flight for
+// command, a retry of it.
+func (e *Engine) forkInFlight(command Command) *forkJob {
+	for _, job := range e.forks {
+		if job.key == command.Key && job.actor.key() == command.Actor.key() {
+			return job
+		}
+	}
+	return nil
+}
+
+// endFork answers a fork's callers once the step commits.
+func (e *Engine) endFork(s *step, job *forkJob, outcome asyncOutcome) {
+	e.forks = slices.DeleteFunc(e.forks, func(other *forkJob) bool { return other == job })
+	s.after(func() {
+		for _, reply := range job.replies {
+			reply <- outcome
+		}
+	})
+}
+
+// forksDeleted ends the forks whose source or destination chat was deleted:
+// the fork's outcome is dropped with its participant, or would make a chat
+// under one that is gone, and its callers still wait.
+func (e *Engine) forksDeleted(s *step) {
+	for _, job := range slices.Clone(e.forks) {
+		if e.participants[job.carryOn.ID] == nil || job.under != "" && e.threads[job.under] == nil {
+			e.endFork(s, job, asyncOutcome{err: refused(CodeNotFound, "the chat was deleted while it forked")})
+		}
+	}
 }
 
 // forkedParticipant adds the native fork's participant to thread, with its
@@ -183,9 +242,8 @@ func (e *Engine) forkedParticipant(s *step, thread *threadState, job *forkJob) *
 		if startedAt.IsZero() {
 			startedAt = s.now
 		}
-		for entry := range native.Entries {
-			e.withQuoteCards(&native.Entries[entry])
-		}
+		// The fork's session never ran them.
+		e.historyEntries(native.Entries, false)
 		turn := &Turn{
 			ID: TurnID(newID()), Thread: thread.ID, Participant: participant.ID, Session: participant.Session, Ref: native.Ref,
 			StartedBy: StartedByFound, State: native.State, StopReason: native.StopReason, Error: native.Error, StartedAt: startedAt, SettledAt: s.now,
@@ -233,7 +291,7 @@ func (e *Engine) forkThread(s *step, command Command, fork ForkThread) (CommandR
 	if err := e.checkPrompt(fork.Prompt); err != nil {
 		return CommandResult{}, nil, err
 	}
-	return e.startFork(s, command, plan, carryOn, func(s *step, job *forkJob) (CommandResult, error) {
+	return e.startFork(s, command, plan, carryOn, "", func(s *step, job *forkJob) (CommandResult, error) {
 		thread := e.newThread(s, source.Title+" (fork)", source.Workspace, Origin{Kind: OriginUser, ForkedFrom: &ForkPoint{Thread: source.ID, Turn: plan.through}})
 		var agent *participantState
 		if carryOn != nil {
@@ -405,7 +463,7 @@ func (e *Engine) spawn(s *step, command Command, spawn Spawn) (CommandResult, ch
 		result, err := makeChild(s, nil)
 		return result, nil, err
 	}
-	return e.startFork(s, command, *plan, carryOn, makeChild)
+	return e.startFork(s, command, *plan, carryOn, parent.ID, makeChild)
 }
 
 // runningToolEntry is the tool entry of the spawner's running turn that a
