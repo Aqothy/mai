@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 // the daemon tests' fake ACP agent. Flags configure the agent process itself:
 //
 //	-list-only       advertise session/list without load/resume/close
+//	-delete          advertise session/delete; a deleted session can't be resumed
 //	-linger          ignore stdin EOF, like real agents that only die with their process group
 //	-ignore-term     ignore SIGTERM too, so only SIGKILL ends it
 //	-pidfile <path>  write the agent's pid at startup
@@ -70,6 +72,7 @@ func TestHelperProcess(t *testing.T) {
 	}
 	flags := flag.NewFlagSet("fake-acp-agent", flag.ExitOnError)
 	listOnly := flags.Bool("list-only", false, "")
+	deletes := flags.Bool("delete", false, "")
 	linger := flags.Bool("linger", false, "")
 	ignoreTerm := flags.Bool("ignore-term", false, "")
 	pidPath := flags.String("pidfile", "", "")
@@ -93,11 +96,13 @@ func TestHelperProcess(t *testing.T) {
 
 	agent := &fakeACPAgent{
 		listOnly:    *listOnly,
+		deletes:     *deletes,
 		askToSignIn: *askToSignIn,
 		history:     *history,
 		sessions:    *sessions,
 		out:         json.NewEncoder(os.Stdout),
 		cwds:        map[string]string{},
+		deleted:     map[string]bool{},
 		parked:      map[string]string{},
 		permissions: map[string]fakePermission{},
 		mode:        "ask",
@@ -131,6 +136,7 @@ func TestHelperProcess(t *testing.T) {
 // sessions keep being served while one waits on an approval or a cancel.
 type fakeACPAgent struct {
 	listOnly    bool
+	deletes     bool
 	askToSignIn bool
 	history     string
 	sessions    string
@@ -141,6 +147,7 @@ type fakeACPAgent struct {
 	out         *json.Encoder
 	order       []string                  // session ids in creation/load order
 	cwds        map[string]string         // session id -> cwd
+	deleted     map[string]bool           // session ids session/delete removed
 	parked      map[string]string         // session id -> blocked session/prompt request id
 	permissions map[string]fakePermission // permission request id -> prompt to settle
 
@@ -282,6 +289,9 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			sessionCapabilities["resume"] = map[string]any{}
 			sessionCapabilities["close"] = map[string]any{}
 		}
+		if a.deletes {
+			sessionCapabilities["delete"] = map[string]any{}
+		}
 		authMethods := []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
 		// Terminal methods may only be offered to clients that run them.
 		if a.askToSignIn {
@@ -324,14 +334,27 @@ func (a *fakeACPAgent) handle(msg fakeACPMessage, line []byte) {
 			sessions = append(sessions, map[string]any{"sessionId": id, "cwd": a.cwds[id], "title": "Test session"})
 		}
 		result = map[string]any{"sessions": sessions}
-	case "session/load":
+	case "session/delete":
+		if !a.deletes {
+			fakeAgentFail("unexpected request: %s", line)
+		}
+		a.deleted[sessionID] = true
+		a.order = slices.DeleteFunc(a.order, func(id string) bool { return id == sessionID })
+		delete(a.cwds, sessionID)
+	case "session/load", "session/resume":
+		if a.deleted[sessionID] {
+			// ACP Resource not found.
+			a.write(map[string]any{"id": msg.ID, "error": map[string]any{"code": -32002, "message": "session not found"}})
+			return
+		}
 		a.trackSession(sessionID, msg.Params.Cwd)
+		if msg.Method == "session/resume" {
+			break
+		}
 		for _, prompt := range a.prompts(sessionID) {
 			a.update(sessionID, map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": prompt}})
 		}
 		a.chunk(sessionID, "replayed")
-	case "session/resume":
-		a.trackSession(sessionID, msg.Params.Cwd)
 	case "session/set_config_option":
 		switch msg.Params.ConfigID {
 		case "mode":

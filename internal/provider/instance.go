@@ -64,7 +64,8 @@ type Instance interface {
 	// instead.
 	Open(ctx context.Context, in OpenInput) (Opened, error)
 	// Release frees a live session's process or load; the native session
-	// stays. A running turn ends as interrupted.
+	// stays. A running turn ends as interrupted. No SessionClosed follows:
+	// whoever calls it knows the session is no longer live.
 	Release(ctx context.Context, session string) error
 	// Send delivers a message: a new turn, or with Steer the running one.
 	Send(ctx context.Context, session string, in SendInput) (SendAck, error)
@@ -88,6 +89,10 @@ type Instance interface {
 	// returns the new session's key.
 	Fork(ctx context.Context, in ForkInput) (string, error)
 	Sessions(ctx context.Context, cwd string) ([]SessionSummary, error)
+	// Delete removes the native session for good, releasing it first when it
+	// is live. As after Release, the caller knows; it treats the session as
+	// released when Delete fails too, since the release may have happened,
+	// unless the failure is ErrUnsupported.
 	Delete(ctx context.Context, session string) error
 	Rename(ctx context.Context, session, title string) error
 

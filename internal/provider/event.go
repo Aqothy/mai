@@ -102,8 +102,10 @@ type TitleChanged struct{ Title string }
 // SessionReplaced: the conversation moved to a new session (Claude /clear).
 type SessionReplaced struct{ New string }
 
-// SessionClosed: the live session ended (its process exited, its connection
-// closed) without Release. Error says why, when it failed.
+// SessionClosed: the live session ended without the host ending it (its
+// process exited, its connection closed, the provider unloaded it). Error
+// says why, when it failed. An end the host asked for (Release, Delete, Close)
+// needs none: the host doesn't wait for one.
 type SessionClosed struct{ Error string }
 
 // SubagentSeen names one of the provider's own subagents: a session of its own

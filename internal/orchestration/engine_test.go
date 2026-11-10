@@ -472,6 +472,26 @@ func TestEntriesInProgressEndWithTheirSession(t *testing.T) {
 	}
 }
 
+// A provider that can't delete sessions says so before it touches one, so the
+// chat on the session keeps it live, with the turn it runs.
+func TestASessionDeleteTheProviderCantDoLeavesItsChatRunning(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
+		f.startTurn(session, in.Delivery, in)
+		return provider.SendAck{Turn: in.Delivery}, nil
+	}
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "Work")
+	h.eventually("the turn to start", func() bool { return len(claude.messages()) == 1 })
+	if err := h.engine.DeleteSession(context.Background(), "claude", claude.messages()[0].session); !errors.Is(err, provider.ErrUnsupported) {
+		t.Fatalf("delete = %v, want unsupported", err)
+	}
+	snapshot := h.snapshot(chat.Thread)
+	if len(snapshot.Turns) != 1 || snapshot.Turns[0].State != provider.TurnRunning || !snapshot.Participants[0].Live {
+		t.Fatalf("after the refused delete: turns = %#v, live = %v; want the turn running on a live session", snapshot.Turns, snapshot.Participants[0].Live)
+	}
+}
+
 // A turn a provider starts on its own and settles at once (an ACP agent's
 // follow-up) still takes streamed text: it shows as it streams, and is
 // written to the cache.

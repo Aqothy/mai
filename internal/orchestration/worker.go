@@ -55,29 +55,33 @@ func (w *worker) drain() {
 // outcome.
 func (s *step) providerCall(participant *participantState, call func(ctx context.Context, instance provider.Instance, generation uint64) func(*step), unavailable func(*step, error)) {
 	e := s.e
+	id, instanceID, folder := participant.ID, participant.Instance, e.threads[participant.Thread].Workspace.Cwd
+	s.onWorker(participant, func() {
+		ctx, cancel := context.WithTimeout(e.ctx, providerCallTimeout)
+		defer cancel()
+		var apply func(*step)
+		if instance, generation, err := e.cfg.Providers.Instance(ctx, instanceID, folder); err != nil {
+			apply = func(s *step) { unavailable(s, err) }
+		} else {
+			apply = call(ctx, instance, generation)
+		}
+		if apply == nil {
+			return
+		}
+		e.post(func(s *step) {
+			if e.participants[id] == nil {
+				return
+			}
+			apply(s)
+		})
+	})
+}
+
+// onWorker runs job on the participant's worker once the step commits.
+func (s *step) onWorker(participant *participantState, job func()) {
 	if participant.worker == nil {
 		participant.worker = &worker{}
 	}
-	w, id, instanceID, folder := participant.worker, participant.ID, participant.Instance, e.threads[participant.Thread].Workspace.Cwd
-	s.after(func() {
-		w.enqueue(func() {
-			ctx, cancel := context.WithTimeout(e.ctx, providerCallTimeout)
-			defer cancel()
-			var apply func(*step)
-			if instance, generation, err := e.cfg.Providers.Instance(ctx, instanceID, folder); err != nil {
-				apply = func(s *step) { unavailable(s, err) }
-			} else {
-				apply = call(ctx, instance, generation)
-			}
-			if apply == nil {
-				return
-			}
-			e.post(func(s *step) {
-				if e.participants[id] == nil {
-					return
-				}
-				apply(s)
-			})
-		})
-	})
+	w := participant.worker
+	s.after(func() { w.enqueue(job) })
 }

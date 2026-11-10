@@ -187,6 +187,52 @@ func TestProviderSessionManagement(t *testing.T) {
 	}
 }
 
+// Deleting the session a chat has open ends it for the chat too: the next
+// message opens a new session instead of going to the one that is gone.
+func TestChatGoesOnAfterItsLiveSessionIsDeleted(t *testing.T) {
+	s := newTestServer(t)
+	startFakeACPAgent(t, s, "agent", "-delete")
+	client := newRecordingClient(t, s)
+	thread := client.createThread(t, "agent", t.TempDir()).Thread
+	client.subscribe(t, thread)
+	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
+
+	client.call(t, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
+	next := client.deliver(t, thread, "again").Delivery
+	event := client.waitEvent(t, "the message after the delete to be taken or refused", func(event orchestration.ThreadEvent) bool {
+		return event.Kind == orchestration.EventDelivery && event.Delivery.ID == next &&
+			(event.Delivery.State == orchestration.DeliveryDelivered || event.Delivery.State == orchestration.DeliveryRefused)
+	})
+	if event.Delivery.State != orchestration.DeliveryDelivered {
+		t.Fatalf("the message after the delete was refused: %s", event.Delivery.Reason)
+	}
+	if turn := client.waitSettled(t, thread, next); turn.State != provider.TurnCompleted {
+		t.Fatalf("turn after the delete = %s", turn.State)
+	}
+	var sessions []provider.SessionSummary
+	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &sessions)
+	if len(sessions) != 1 || sessions[0].SessionID != "sess-2" {
+		t.Fatalf("sessions after the delete = %#v, want only the chat's new one", sessions)
+	}
+}
+
+func TestDeletingASessionNoChatIsOn(t *testing.T) {
+	s := newTestServer(t)
+	startFakeACPAgent(t, s, "agent", "-delete")
+	client := newRecordingClient(t, s)
+	thread := client.createThread(t, "agent", t.TempDir()).Thread
+	client.subscribe(t, thread)
+	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
+	client.command(t, wire.CommandParams{DeleteThread: &orchestration.DeleteThread{Thread: thread}})
+
+	client.call(t, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
+	var sessions []provider.SessionSummary
+	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &sessions)
+	if len(sessions) != 0 {
+		t.Fatalf("sessions after the delete = %#v, want none", sessions)
+	}
+}
+
 func TestRPCErrorPreservesAgentRequestError(t *testing.T) {
 	err := rpcError(&provider.RequestError{Code: -32000, Message: "Authentication required", Data: json.RawMessage(`{"method":"login"}`)})
 	var wireErr *jsonrpc2.WireError

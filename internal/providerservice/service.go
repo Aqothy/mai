@@ -623,28 +623,6 @@ func (s *Service) Sessions(ctx context.Context, id provider.InstanceID, cwd stri
 	return sessions, nil
 }
 
-// DeleteSession deletes a native session from its provider.
-func (s *Service) DeleteSession(ctx context.Context, id provider.InstanceID, session string) error {
-	instance, _, err := s.Instance(ctx, id, "")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, sessionCallTimeout)
-	defer cancel()
-	// The session may be live on the process of its folder.
-	s.mu.Lock()
-	alive := s.aliveLocked(id)
-	s.mu.Unlock()
-	for _, process := range alive {
-		if process.instance != instance {
-			if err := process.instance.Release(ctx, session); err != nil {
-				return err
-			}
-		}
-	}
-	return instance.Delete(ctx, session)
-}
-
 func (s *Service) CompleteCommand(ctx context.Context, id provider.InstanceID, input provider.CompleteCommandInput) ([]provider.CommandCompletion, error) {
 	s.mu.Lock()
 	current := s.processes[s.keyLocked(id, input.Cwd)]

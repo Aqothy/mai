@@ -1,6 +1,8 @@
 package orchestration
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +30,61 @@ func (e *Engine) InstanceGone(instance provider.InstanceID, generation uint64) {
 			}
 		}
 	})
+}
+
+// DeleteSession deletes a native session from its provider. A chat on the
+// session keeps the conversation, which the cache has, and loses the live
+// session: its next message opens a new one and hands the conversation over.
+func (e *Engine) DeleteSession(ctx context.Context, instance provider.InstanceID, session string) error {
+	key := sessionKey{instance, session}
+	remove := func(ctx context.Context, folder string) error {
+		ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
+		defer cancel()
+		running, _, err := e.cfg.Providers.Instance(ctx, instance, folder)
+		if err != nil {
+			return err
+		}
+		return running.Delete(ctx, session)
+	}
+	outcome := make(chan error, 1)
+	bound, err := call(ctx, e, func(s *step) (bool, error) {
+		participant := e.participants[e.bySession[key]]
+		if participant == nil {
+			return false, nil
+		}
+		folder := e.threads[participant.Thread].Workspace.Cwd
+		// On the chat's worker, so the delete follows an Open or a Send already
+		// on its way to the session, and the engine hears of those first. Not a
+		// providerCall: the caller is answered even when the chat is gone by then.
+		s.onWorker(participant, func() {
+			err := remove(e.ctx, folder)
+			e.post(func(s *step) {
+				// Unsupported is the one answer that says nothing was done. After
+				// any other the session may be released (Instance.Delete), and
+				// nothing else will say so.
+				holder := e.participants[e.bySession[key]]
+				if holder != nil && holder.live != nil && !errors.Is(err, provider.ErrUnsupported) {
+					e.sessionClosed(s, holder, "The agent's session was deleted.")
+				}
+				s.after(func() { outcome <- err })
+			})
+		})
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return remove(ctx, "")
+	}
+	select {
+	case err := <-outcome:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.done:
+		return errClosed
+	}
 }
 
 func placeholderRef(delivery DeliveryID) string { return "delivery:" + string(delivery) }
