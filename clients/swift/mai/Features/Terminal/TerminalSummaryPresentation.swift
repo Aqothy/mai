@@ -7,29 +7,34 @@ extension TerminalSummary: Equatable {
         lhs.terminalID == rhs.terminalID
             && lhs.title == rhs.title
             && lhs.cwd == rhs.cwd
-            && lhs.status == rhs.status
-            && lhs.exitCode == rhs.exitCode
             && lhs.createdAt == rhs.createdAt
             && lhs.updatedAt == rhs.updatedAt
-            && lhs.observedTitle == rhs.observedTitle
-            && lhs.agentKind == rhs.agentKind
-            && lhs.agentActivity == rhs.agentActivity
-            && lhs.agentActivityUpdatedAt == rhs.agentActivityUpdatedAt
+            && lhs.programTitle == rhs.programTitle
+            && lhs.pwd == rhs.pwd
+            && lhs.programStatus == rhs.programStatus
+    }
+}
+
+extension TerminalProgramStatus: Equatable {
+    public static func == (lhs: TerminalProgramStatus, rhs: TerminalProgramStatus) -> Bool {
+        lhs.state == rhs.state
+            && lhs.need == rhs.need
+            && lhs.progress == rhs.progress
+            && lhs.app == rhs.app
+            && lhs.title == rhs.title
+            && lhs.message == rhs.message
+            && lhs.updatedAt == rhs.updatedAt
     }
 }
 
 /// Presentation values for terminal rows and detail chrome. Rows receive only
-/// these derived values, never live output or store objects.
+/// these derived values, never live output or store objects. Program text
+/// comes from the program, sanitized by the daemon.
 extension TerminalSummary {
-    var terminalStatus: MaidTerminalStatus? {
-        MaidTerminalStatus(rawValue: status)
-    }
-
-    /// The detected agent activity; nil when absent or a future unknown
-    /// value, which must render neutrally.
-    var terminalAgentActivity: MaidTerminalAgentActivity? {
-        guard let agentActivity, !agentActivity.isEmpty else { return nil }
-        return MaidTerminalAgentActivity(rawValue: agentActivity)
+    /// What the program reports doing; nil when it reports nothing, or a
+    /// future state, which renders neutrally.
+    var programState: MaidTerminalProgramState? {
+        programStatus.flatMap { MaidTerminalProgramState(rawValue: $0.state) }
     }
 
     /// The persisted title, falling back to the working directory name.
@@ -38,82 +43,58 @@ extension TerminalSummary {
         return workingDirectoryName ?? String(localized: "Terminal")
     }
 
+    /// The directory the shell last reported (OSC 7), else the one it
+    /// started in.
     var workingDirectoryName: String? {
+        if let pwd, !pwd.isEmpty {
+            let path = URL(string: pwd).flatMap { $0.scheme == "file" ? $0.path() : nil } ?? pwd
+            return URL(filePath: path).lastPathComponent
+        }
         guard !cwd.isEmpty else { return nil }
         return URL(filePath: cwd).lastPathComponent
     }
 
-    /// Row subtitle: the normalized observed terminal title when the daemon
-    /// has one, otherwise the working directory name.
+    /// Row subtitle: the title the program set, when it adds something,
+    /// otherwise the working directory name.
     var displaySubtitle: String? {
-        if let observedTitle, !observedTitle.isEmpty, observedTitle != displayTitle {
-            return observedTitle
+        if let programTitle, !programTitle.isEmpty, programTitle != displayTitle {
+            return programTitle
         }
         return workingDirectoryName
     }
 
-    /// Compact status for list rows: the highest-value signal wins. Lifecycle
-    /// state wins when the terminal is not running; for a running terminal,
-    /// agent activity takes priority in the order blocked, done, working,
-    /// idle. Unknown activity and unknown future values render as the plain
-    /// lifecycle label.
-    var statusLabel: String? {
-        if isRunning, let activityLabel = agentActivityLabel {
-            return activityLabel
-        }
-        return lifecycleLabel
-    }
-
-    /// Shared thread-list indicator. Running and idle shells stay quiet;
-    /// actionable and active agent states use the same visuals as agent rows.
+    /// Shared thread-list indicator. A terminal without a report stays quiet;
+    /// reports use the same visuals as agent rows.
     var rowIndicatorStatus: ThreadRowIndicatorStatus? {
-        guard isRunning else {
-            return switch terminalStatus {
-            case .error: .failed
-            case .stopped: .interrupted
-            case .starting, .running, .exited, nil: nil
-            }
-        }
-        guard let terminalAgentActivity else { return nil }
-        return switch terminalAgentActivity {
+        switch programState {
         case .blocked: .needsInput
         case .working: .working
         case .done: .done
-        case MaidTerminalAgentActivity.none, .idle, .unknown: nil
+        case .error: .failed
+        case .idle, nil: nil
         }
     }
 
-    private var agentActivityLabel: String? {
-        guard let terminalAgentActivity else { return nil }
-        return switch terminalAgentActivity {
-        case .blocked: String(localized: "Needs input")
+    /// Compact status for list rows: what the program reports, if anything.
+    var statusLabel: String? {
+        switch programState {
+        case .blocked:
+            switch programStatus?.need.flatMap(MaidTerminalProgramNeed.init(rawValue:)) {
+            case .permission: String(localized: "Needs permission")
+            case .answer: String(localized: "Needs an answer")
+            case .auth: String(localized: "Needs sign-in")
+            case nil: String(localized: "Needs input")
+            }
+        case .working:
+            if let progress = programStatus?.progress {
+                String(localized: "Working \(progress)%")
+            } else {
+                String(localized: "Working")
+            }
         case .done: String(localized: "Done")
-        case .working: String(localized: "Working")
-        case .idle: String(localized: "Agent ready")
-        case MaidTerminalAgentActivity.none, .unknown: nil
-        }
-    }
-
-    private var lifecycleLabel: String? {
-        switch terminalStatus {
-        case .starting, .running: String(localized: "Running")
-        case .exited: String(localized: "Exited")
-        case .stopped: String(localized: "Stopped")
-        case .error: String(localized: "Error")
+        case .error: String(localized: "Failed")
+        case .idle: String(localized: "Ready")
         case nil: nil
-        }
-    }
-
-    /// Whether a live shell can accept input right now.
-    var isRunning: Bool {
-        terminalStatus == .running || terminalStatus == .starting
-    }
-
-    /// Stopped and error rows need a fresh run rather than an attach.
-    var needsRelaunchToOpen: Bool {
-        switch terminalStatus {
-        case .stopped, .error: true
-        case .starting, .running, .exited, nil: false
         }
     }
 }

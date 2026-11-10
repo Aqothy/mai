@@ -17,11 +17,11 @@ struct TerminalThreadScreen: View {
 
     @State private var isRenamePresented = false
     @State private var renameTitle = ""
-    @State private var isTerminateConfirmationPresented = false
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeleteErrorPresented = false
     @State private var deleteErrorMessage = ""
-    @State private var isDeletingExitedTerminal = false
+    /// The terminal on screen, kept after removal closes its attachment.
+    @State private var shownTerminalID: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -41,12 +41,12 @@ struct TerminalThreadScreen: View {
         Group {
             if let attachment {
                 TerminalThreadView(
-                    controller: attachment.controller,
+                    attachment: attachment,
                     title: summary?.displayTitle ?? String(localized: "Terminal")
                 )
-                // Each attachment renders through its own Ghostty session;
-                // switching terminals must rebuild the surface rather than
-                // feed a new byte stream into an old grid.
+                // Each attachment renders its own terminal; switching
+                // terminals must rebuild the view rather than draw another
+                // terminal in the old one.
                 .id(ObjectIdentifier(attachment))
                 .overlay(alignment: .center) {
                     ZStack {
@@ -62,23 +62,17 @@ struct TerminalThreadScreen: View {
                         } else {
                             TerminalAttachmentOverlay(
                                 phase: attachment.phase,
-                                canRelaunch: attachment.terminalID != nil,
-                                relaunch: { store.relaunchActiveTerminal() }
+                                retry: { attachment.reattach() }
                             )
                         }
                     }
                 }
                 .toolbar {
                     TerminalActionsToolbar(
-                        isRunning: attachment.phase == .running,
-                        canRelaunch: canRelaunch(attachment.phase),
-                        controller: attachment.controller,
                         rename: {
                             renameTitle = summary?.title ?? ""
                             isRenamePresented = true
                         },
-                        relaunch: { store.relaunchActiveTerminal() },
-                        terminate: { isTerminateConfirmationPresented = true },
                         delete: { isDeleteConfirmationPresented = true }
                     )
                 }
@@ -90,18 +84,17 @@ struct TerminalThreadScreen: View {
         .task(id: request) {
             store.openTerminal(request)
         }
-        .onChange(of: attachment?.terminalID) { _, terminalID in
-            if case .new = request, let terminalID {
+        .onChange(of: attachment?.terminalID, initial: true) { _, terminalID in
+            guard let terminalID else { return }
+            shownTerminalID = terminalID
+            if case .new = request {
                 onCreated?(terminalID)
             }
         }
-        .onChange(of: attachment?.phase, initial: true) { _, phase in
-            guard case .exited = phase,
-                !isDeletingExitedTerminal,
-                let terminalID = attachment?.terminalID
-            else { return }
-            isDeletingExitedTerminal = true
-            deleteTerminal(terminalID)
+        .onChange(of: store.removedTerminalID) { _, removed in
+            guard let removed, removed == shownTerminalID else { return }
+            onDeleted?()
+            dismiss()
         }
         .alert("Rename Terminal", isPresented: $isRenamePresented) {
             TextField("Title", text: $renameTitle)
@@ -111,19 +104,6 @@ struct TerminalThreadScreen: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            "Terminate this shell?",
-            isPresented: $isTerminateConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Terminate Shell", role: .destructive) {
-                if let terminalID = attachment?.terminalID {
-                    store.terminateTerminal(terminalID: terminalID)
-                }
-            }
-        } message: {
-            Text("The running shell ends. The terminal stays in your Threads list and can be relaunched.")
         }
         .confirmationDialog(
             "Delete this terminal?",
@@ -149,20 +129,10 @@ struct TerminalThreadScreen: View {
         Task {
             do {
                 try await store.deleteTerminal(terminalID: terminalID)
-                onDeleted?()
-                dismiss()
             } catch {
-                isDeletingExitedTerminal = false
                 deleteErrorMessage = error.localizedDescription
                 isDeleteErrorPresented = true
             }
-        }
-    }
-
-    private func canRelaunch(_ phase: TerminalAttachment.Phase) -> Bool {
-        switch phase {
-        case .exited, .stopped, .failed: true
-        case .attaching, .running, .disconnected: false
         }
     }
 }
@@ -170,25 +140,14 @@ struct TerminalThreadScreen: View {
 /// Toolbar content with narrow inputs so phase changes do not rebuild the
 /// surface host.
 private struct TerminalActionsToolbar: ToolbarContent {
-    let isRunning: Bool
-    let canRelaunch: Bool
-    let controller: TerminalSessionController
     let rename: () -> Void
-    let relaunch: () -> Void
-    let terminate: () -> Void
     let delete: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu("Terminal Actions", systemImage: "ellipsis.circle") {
                 Button("Rename", systemImage: "pencil", action: rename)
-                if canRelaunch {
-                    Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-                }
-                TerminalTextSizeMenu(controller: controller)
-                if isRunning {
-                    Button("Terminate", systemImage: "stop.circle", role: .destructive, action: terminate)
-                }
+                TerminalTextSizeMenu()
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
             .accessibilityLabel("Terminal actions")
@@ -196,27 +155,23 @@ private struct TerminalActionsToolbar: ToolbarContent {
     }
 }
 
-/// Text-size controls: the persisted preference applies to future terminals
-/// and to the current surface through its configuration.
+/// Text-size controls: the persisted preference, which every terminal view
+/// configures its font from.
 private struct TerminalTextSizeMenu: View {
-    let controller: TerminalSessionController
     @State private var settings = TerminalSettings.shared
 
     var body: some View {
         Menu("Text Size", systemImage: "textformat.size") {
             Button("Larger", systemImage: "plus.magnifyingglass") {
                 settings.increaseFontSize()
-                controller.setFontSize(settings.fontSize)
             }
             .disabled(!settings.canIncrease)
             Button("Smaller", systemImage: "minus.magnifyingglass") {
                 settings.decreaseFontSize()
-                controller.setFontSize(settings.fontSize)
             }
             .disabled(!settings.canDecrease)
             Button("Reset", systemImage: "arrow.counterclockwise") {
                 settings.resetFontSize()
-                controller.setFontSize(settings.fontSize)
             }
         }
         .accessibilityLabel("Terminal text size")
@@ -227,8 +182,7 @@ private struct TerminalTextSizeMenu: View {
 /// rebuild the terminal surface.
 struct TerminalAttachmentOverlay: View {
     let phase: TerminalAttachment.Phase
-    var canRelaunch = true
-    var relaunch: () -> Void = {}
+    let retry: () -> Void
 
     var body: some View {
         switch phase {
@@ -239,9 +193,7 @@ struct TerminalAttachmentOverlay: View {
         case .failed(let message):
             VStack(spacing: 12) {
                 Label(message, systemImage: "exclamationmark.triangle")
-                if canRelaunch {
-                    Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-                }
+                Button("Try Again", systemImage: "arrow.clockwise", action: retry)
             }
             .padding()
             .background(.regularMaterial, in: .rect(cornerRadius: 12))
@@ -250,14 +202,7 @@ struct TerminalAttachmentOverlay: View {
                 .padding()
                 .background(.regularMaterial, in: .rect(cornerRadius: 12))
                 .accessibilityLabel("Reconnecting to maiD")
-        case .stopped:
-            VStack(spacing: 12) {
-                Label("Terminal stopped", systemImage: "stop.circle")
-                Button("Relaunch", systemImage: "arrow.clockwise", action: relaunch)
-            }
-            .padding()
-            .background(.regularMaterial, in: .rect(cornerRadius: 12))
-        case .running, .exited:
+        case .running:
             EmptyView()
         }
     }

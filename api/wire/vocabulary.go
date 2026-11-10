@@ -15,138 +15,257 @@ import (
 // Server-internal vocabularies do not belong here.
 var Vocabularies = []VocabularyDefinition{
 	{
-		Name:        "EventType",
-		Description: "Type discriminator of a thread event delivered on orchestration.subscribeThread.",
-		Values: values(
-			string(orchestration.EventThreadCreated),
-			string(orchestration.EventThreadImported),
-			string(orchestration.EventThreadMetaUpdated),
-			string(orchestration.EventThreadMessageSent),
-			string(orchestration.EventThreadTurnStartRequested),
-			string(orchestration.EventThreadTurnInterruptRequested),
-			string(orchestration.EventThreadTurnInterruptConfirmed),
-			string(orchestration.EventThreadTurnInterruptFailed),
-			string(orchestration.EventThreadApprovalResponseRequested),
-			string(orchestration.EventThreadSessionPrepareRequested),
-			string(orchestration.EventThreadSessionStopRequested),
-			string(orchestration.EventThreadSessionStopFailed),
-			string(orchestration.EventThreadConfigOptionSetRequested),
-			string(orchestration.EventThreadSessionStatusSet),
-			string(orchestration.EventThreadItemUpserted),
-			string(orchestration.EventThreadPlanUpdated),
-			string(orchestration.EventThreadApprovalOpened),
-			string(orchestration.EventThreadApprovalResolved),
-			string(orchestration.EventThreadConfigOptionsUpdated),
-			string(orchestration.EventThreadSlashCommandsUpdated),
-			string(orchestration.EventThreadTokenUsageUpdated),
-			string(orchestration.EventThreadHistoryReplayCompleted),
-		),
+		Name:        "CommandErrorCode",
+		Description: "Why thread.command refused a command: the data.code of its JSON-RPC error.",
+		Values: []string{
+			string(orchestration.CodeOutOfScope),
+			string(orchestration.CodeCeilingExceeded),
+			string(orchestration.CodeDepthExceeded),
+			string(orchestration.CodeAgentUnavailable),
+			string(orchestration.CodeNotFound),
+			string(orchestration.CodeNotRunning),
+			string(orchestration.CodePermissionRequest),
+			string(orchestration.CodeInvalid),
+		},
 	},
 	{
-		Name:        "CommandType",
-		Description: "Type discriminator of a client command sent to orchestration.dispatchCommand.",
-		Values: values(
-			orchestration.CommandThreadCreate,
-			orchestration.CommandThreadStart,
-			orchestration.CommandThreadMetaUpdate,
-			orchestration.CommandThreadTurnStart,
-			orchestration.CommandThreadTurnRetry,
-			orchestration.CommandThreadTurnInterrupt,
-			orchestration.CommandThreadApprovalRespond,
-			orchestration.CommandThreadSessionPrepare,
-			orchestration.CommandThreadSessionStop,
-			orchestration.CommandThreadConfigOptionSet,
-		),
+		Name:        "ACPAgentSource",
+		Description: "Where an ACP agent's definition comes from.",
+		Values:      []string{string(ACPAgentSourceRegistry), string(ACPAgentSourceCustom)},
 	},
 	{
-		Name:        "StreamItemKind",
-		Description: "Payload discriminator of a subscription snapshot or update.",
-		Values: values(
-			orchestration.StreamItemSnapshot,
-			orchestration.StreamItemEvent,
-			orchestration.StreamItemThreadUpserted,
-		),
+		Name:        "ACPAgentState",
+		Description: "What the daemon is doing with an ACP agent's files. Failed says the last install or update failed; an installed version keeps working.",
+		Values: []string{
+			string(ACPAgentNotInstalled),
+			string(ACPAgentInstalling),
+			string(ACPAgentInstalled),
+			string(ACPAgentUpdating),
+			string(ACPAgentFailed),
+		},
+	},
+	{
+		Name:        "ACPAgentBlocker",
+		Description: "Why an ACP agent can't be installed on the daemon's machine.",
+		Values:      []string{string(ACPAgentNeedsPlatform), string(ACPAgentNeedsNode), string(ACPAgentNeedsUV)},
+	},
+	{
+		Name:        "ThreadStatus",
+		Description: "What a thread is doing, derived from its turns, requests and queue.",
+		Values: []string{
+			string(orchestration.StatusRunning),
+			string(orchestration.StatusWaiting),
+			string(orchestration.StatusHeld),
+			string(orchestration.StatusIdle),
+		},
+	},
+	{
+		Name:        "OriginKind",
+		Description: "How a thread began: a person's chat, a spawned child, or a provider's own subagent.",
+		Values: []string{
+			string(orchestration.OriginUser),
+			string(orchestration.OriginSpawn),
+			string(orchestration.OriginNative),
+		},
+	},
+	{
+		Name:        "Hold",
+		Description: "Why a thread's queue waits, and so who may release it; absent when nothing holds it.",
+		Values: []string{
+			string(orchestration.HoldStoppedPerson),
+			string(orchestration.HoldStoppedAgent),
+			string(orchestration.HoldFailed),
+			string(orchestration.HoldHops),
+		},
+	},
+	{
+		Name:        "StartedBy",
+		Description: "What started a turn.",
+		Values: []string{
+			string(orchestration.StartedByDelivery),
+			string(orchestration.StartedByProvider),
+			string(orchestration.StartedByFound),
+		},
+	},
+	{
+		Name:        "DeliveryKind",
+		Description: "Who a delivery is from: a person's prompt, an agent's message, a reply, a daemon notice.",
+		Values: []string{
+			string(orchestration.KindPrompt),
+			string(orchestration.KindMessage),
+			string(orchestration.KindReply),
+			string(orchestration.KindNotice),
+		},
+	},
+	{
+		Name:        "DeliveryMode",
+		Description: "How a delivery goes: as the next turn, or into the running one.",
+		Values: []string{
+			string(orchestration.ModeQueue),
+			string(orchestration.ModeSteer),
+		},
+	},
+	{
+		Name:        "DeliveryState",
+		Description: "Where a delivery is on its way to the agent.",
+		Values: []string{
+			string(orchestration.DeliveryQueued),
+			string(orchestration.DeliverySending),
+			string(orchestration.DeliveryDelivered),
+			string(orchestration.DeliveryRefused),
+			string(orchestration.DeliveryCancelled),
+		},
 	},
 	{
 		Name:        "ActorKind",
-		Description: "Origin of a thread event.",
-		Values: values(
-			string(orchestration.ActorKindClient),
-			string(orchestration.ActorKindServer),
-			string(orchestration.ActorKindProvider),
-		),
+		Description: "Who sent a delivery or issued a command.",
+		Values: []string{
+			string(orchestration.ActorDevice),
+			string(orchestration.ActorAgent),
+			string(orchestration.ActorDaemon),
+		},
 	},
 	{
-		Name:        "TimelineEntryKind",
-		Description: "Which payload of a timeline entry's tagged union is populated.",
-		Values: values(
-			string(orchestration.TimelineEntryMessage),
-			string(orchestration.TimelineEntryItem),
-			string(orchestration.TimelineEntryApproval),
-		),
+		Name:        "WakeMode",
+		Description: "When a spawned thread's parent hears from it.",
+		Values: []string{
+			string(orchestration.WakeSettled),
+			string(orchestration.WakeNeedsInput),
+		},
 	},
 	{
-		Name:        "MessageRole",
-		Description: "Author of a timeline message.",
-		Values: values(
-			string(orchestration.MessageRoleUser),
-			string(orchestration.MessageRoleAssistant),
-		),
+		Name:        "ThreadEventKind",
+		Description: "Which change a thread.event notification carries.",
+		Values: []string{
+			string(orchestration.EventEntry),
+			string(orchestration.EventText),
+			string(orchestration.EventTurn),
+			string(orchestration.EventDelivery),
+			string(orchestration.EventRequest),
+			string(orchestration.EventResolved),
+			string(orchestration.EventParticipant),
+			string(orchestration.EventThread),
+			string(orchestration.EventChild),
+			string(orchestration.EventPlan),
+			string(orchestration.EventRefresh),
+			string(orchestration.EventRemoved),
+		},
+	},
+	{
+		Name:        "ThreadListKind",
+		Description: "Whether a thread.list item is the snapshot, an upsert or a removal.",
+		Values: []string{
+			string(orchestration.ListSnapshot),
+			string(orchestration.ListUpsert),
+			string(orchestration.ListRemove),
+		},
 	},
 	{
 		Name:        "TurnState",
-		Description: "Lifecycle state of a thread's latest turn.",
-		Values: values(
-			string(orchestration.TurnStateRunning),
-			string(orchestration.TurnStateInterrupted),
-			string(orchestration.TurnStateCompleted),
-			string(orchestration.TurnStateError),
-		),
+		Description: "Lifecycle state of a turn.",
+		Values: []string{
+			string(provider.TurnRunning),
+			string(provider.TurnCompleted),
+			string(provider.TurnFailed),
+			string(provider.TurnInterrupted),
+		},
 	},
 	{
-		Name:        "SessionStatus",
-		Description: "Status of a thread's provider session binding.",
-		Values: values(
-			string(orchestration.SessionStatusStarting),
-			string(orchestration.SessionStatusRunning),
-			string(orchestration.SessionStatusReady),
-			string(orchestration.SessionStatusInterrupted),
-			string(orchestration.SessionStatusStopped),
-			string(orchestration.SessionStatusError),
-		),
+		Name:        "StreamKind",
+		Description: "What streamed text adds to.",
+		Values: []string{
+			string(provider.StreamAssistant),
+			string(provider.StreamReasoning),
+		},
 	},
 	{
-		Name:        "ApprovalStatus",
-		Description: "Whether an approval request is still awaiting a decision.",
-		Values: values(
-			string(orchestration.ApprovalStatusPending),
-			string(orchestration.ApprovalStatusResolved),
-		),
+		Name:        "EnvelopeKind",
+		Description: "What a block maiD wrapped around text it sent an agent carries.",
+		Values: []string{
+			string(provider.EnvelopeHandoff),
+			string(provider.EnvelopeMessage),
+			string(provider.EnvelopeReply),
+			string(provider.EnvelopeNotice),
+			string(provider.EnvelopeInstructions),
+		},
+	},
+	{
+		Name:        "HistoryQuality",
+		Description: "How well a provider rebuilds a session run outside maiD from its own record.",
+		Values: []string{
+			string(provider.HistoryNone),
+			string(provider.HistoryLossy),
+			string(provider.HistoryExact),
+		},
 	},
 	{
 		Name:        "ApprovalDecision",
 		Description: "Client decision on an approval request.",
-		Values: values(
+		Values: []string{
 			string(provider.ApprovalDecisionAccept),
 			string(provider.ApprovalDecisionAcceptForSession),
 			string(provider.ApprovalDecisionDecline),
 			string(provider.ApprovalDecisionCancel),
-		),
+		},
 	},
 	{
-		Name:        "RequestType",
-		Description: "What an approval request is asking permission for.",
-		Values: values(
-			string(provider.RuntimeRequestCommandExecution),
-			string(provider.RuntimeRequestFileRead),
-			string(provider.RuntimeRequestFileChange),
-			string(provider.RuntimeRequestDynamicToolCall),
-		),
+		Name:        "AuthKind",
+		Description: "How a sign-in method or challenge proceeds.",
+		Values: []string{
+			string(provider.AuthKindBrowser),
+			string(provider.AuthKindDeviceCode),
+			string(provider.AuthKindSecret),
+			string(provider.AuthKindTerminal),
+		},
+	},
+	{
+		Name:        "AttachmentKind",
+		Description: "What a message or tool attachment carries.",
+		Values: []string{
+			string(provider.AttachmentImage),
+			string(provider.AttachmentAudio),
+			string(provider.AttachmentResource),
+			string(provider.AttachmentResourceLink),
+		},
+	},
+	{
+		Name:        "StopReason",
+		Description: "Why a completed turn ended early; absent when it finished normally.",
+		Values: []string{
+			string(provider.StopReasonMaxTokens),
+			string(provider.StopReasonMaxTurnRequests),
+			string(provider.StopReasonRefusal),
+		},
+	},
+	{
+		Name:        "OutputFormat",
+		Description: "How to render tool output; absent means plain text.",
+		Values:      []string{string(provider.OutputFormatMarkdown)},
+	},
+	{
+		Name:        "QuestionKind",
+		Description: "Input a user-input question takes.",
+		Values: []string{
+			string(provider.QuestionKindText),
+			string(provider.QuestionKindNumber),
+			string(provider.QuestionKindInteger),
+			string(provider.QuestionKindChoice),
+		},
+	},
+	{
+		Name:        "AccessLevel",
+		Description: "How much a session may do without asking, from read_only to full; absent when its mode isn't mapped.",
+		Values: []string{
+			string(provider.AccessReadOnly),
+			string(provider.AccessAsk),
+			string(provider.AccessEdit),
+			string(provider.AccessFull),
+		},
 	},
 	{
 		Name:        "ItemKind",
-		Description: "Kind of a non-message timeline item.",
-		Values: values(
+		Description: "Kind of an entry of a session's conversation.",
+		Values: []string{
 			string(provider.ItemKindUserMessage),
 			string(provider.ItemKindAssistantMessage),
 			string(provider.ItemKindReasoning),
@@ -156,149 +275,146 @@ var Vocabularies = []VocabularyDefinition{
 			string(provider.ItemKindToolCall),
 			string(provider.ItemKindWarning),
 			string(provider.ItemKindError),
-		),
+			string(provider.ItemKindWebSearch),
+			string(provider.ItemKindImageView),
+			string(provider.ItemKindImageGeneration),
+			string(provider.ItemKindContextCompaction),
+			string(provider.ItemKindEnvelope),
+			string(provider.ItemKindRequest),
+		},
 	},
 	{
 		Name:        "ItemStatus",
-		Description: "Lifecycle status of a timeline item.",
-		Values: values(
+		Description: "Lifecycle status of an entry.",
+		Values: []string{
 			string(provider.ItemStatusInProgress),
 			string(provider.ItemStatusCompleted),
 			string(provider.ItemStatusFailed),
 			string(provider.ItemStatusInterrupted),
 			string(provider.ItemStatusDeclined),
-		),
+		},
+	},
+	{
+		Name:        "GoalStatus",
+		Description: "Status of the goal a provider pursues over its turns.",
+		Values: []string{
+			string(provider.GoalActive),
+			string(provider.GoalPaused),
+			string(provider.GoalBlocked),
+			string(provider.GoalUsageLimited),
+			string(provider.GoalBudgetLimited),
+			string(provider.GoalComplete),
+		},
 	},
 	{
 		Name:        "ToolAction",
-		Description: "Provider-neutral semantic action performed by a tool call.",
-		Values: values(
+		Description: "Action a provider explicitly stated for a tool call; absent when it stated none.",
+		Values: []string{
 			string(provider.ToolActionRead),
-			string(provider.ToolActionEdit),
-			string(provider.ToolActionDelete),
-			string(provider.ToolActionMove),
 			string(provider.ToolActionSearch),
-			string(provider.ToolActionExecute),
-			string(provider.ToolActionThink),
-			string(provider.ToolActionFetch),
-			string(provider.ToolActionSwitchMode),
-			string(provider.ToolActionDelegate),
-			string(provider.ToolActionView),
-			string(provider.ToolActionOther),
-		),
+		},
 	},
 	{
 		Name:        "FileChangeKind",
 		Description: "Kind of a normalized file mutation produced by a tool.",
-		Values: values(
+		Values: []string{
 			string(provider.FileChangeAdd),
 			string(provider.FileChangeUpdate),
 			string(provider.FileChangeDelete),
 			string(provider.FileChangeMove),
-		),
+		},
 	},
 	{
 		Name:        "ConfigOptionType",
 		Description: "Control a session config option renders as.",
-		Values: values(
+		Values: []string{
 			string(provider.ConfigOptionTypeSelect),
 			string(provider.ConfigOptionTypeBoolean),
-		),
+		},
 	},
 	{
 		Name:        "ConfigOptionCategory",
 		Description: "Advisory grouping hint for a session config option; unknown values must be tolerated.",
-		Values: values(
+		Values: []string{
 			string(provider.ConfigOptionCategoryModel),
 			string(provider.ConfigOptionCategoryMode),
 			string(provider.ConfigOptionCategoryModelConfig),
 			string(provider.ConfigOptionCategoryThoughtLevel),
 			string(provider.ConfigOptionCategoryOther),
-		),
+		},
 	},
 	{
 		Name:        "PlanEntryStatus",
 		Description: "Status of an execution-plan checklist entry.",
-		Values: values(
+		Values: []string{
 			string(provider.PlanEntryStatusPending),
 			string(provider.PlanEntryStatusInProgress),
 			string(provider.PlanEntryStatusCompleted),
-		),
+		},
 	},
 	{
 		Name:        "PlanEntryPriority",
 		Description: "Priority of an execution-plan checklist entry.",
-		Values: values(
+		Values: []string{
 			string(provider.PlanEntryPriorityHigh),
 			string(provider.PlanEntryPriorityMedium),
 			string(provider.PlanEntryPriorityLow),
-		),
+		},
 	},
 	{
 		Name:        "InstanceStatus",
 		Description: "Lifecycle of a provider instance: configured but never started this run, alive, or exited.",
-		Values: values(
+		Values: []string{
 			string(provider.InstanceStatusConfigured),
 			string(provider.InstanceStatusInitialized),
 			string(provider.InstanceStatusExited),
-		),
+		},
 	},
 	{
 		Name:        "AuthStatus",
 		Description: "Provider authentication state. Unknown means the agent advertises auth methods but exposes no probe.",
-		Values: values(
+		Values: []string{
 			string(provider.AuthStatusUnknown),
 			string(provider.AuthStatusAuthenticated),
 			string(provider.AuthStatusUnauthenticated),
-		),
-	},
-	{
-		Name:        "ModelSwitchSupport",
-		Description: "Whether a provider can change the active model for a thread.",
-		Values: values(
-			string(provider.ModelSwitchUnsupported),
-			string(provider.ModelSwitchInSession),
-		),
-	},
-	{
-		Name:        "TerminalStatus",
-		Description: "Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.",
-		Values: values(
-			string(terminal.StatusStarting),
-			string(terminal.StatusRunning),
-			string(terminal.StatusExited),
-			string(terminal.StatusStopped),
-			string(terminal.StatusError),
-		),
-	},
-	{
-		Name:        "TerminalStreamItemKind",
-		Description: "Payload discriminator of a terminal.subscribe notification.",
-		Values: values(
-			string(terminal.StreamItemOutput),
-			string(terminal.StreamItemStatus),
-		),
+		},
 	},
 	{
 		Name:        "TerminalListStreamItemKind",
 		Description: "Payload discriminator of a terminal.subscribeList snapshot or update.",
-		Values: values(
+		Values: []string{
 			string(TerminalListItemSnapshot),
 			string(TerminalListItemUpserted),
 			string(TerminalListItemRemoved),
-		),
+		},
 	},
 	{
-		Name:        "TerminalAgentActivity",
-		Description: "Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.",
-		Values: values(
-			string(terminal.AgentActivityNone),
-			string(terminal.AgentActivityIdle),
-			string(terminal.AgentActivityWorking),
-			string(terminal.AgentActivityBlocked),
-			string(terminal.AgentActivityDone),
-			string(terminal.AgentActivityUnknown),
-		),
+		Name:        "TerminalProgramState",
+		Description: "What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.",
+		Values: []string{
+			string(terminal.ProgramIdle),
+			string(terminal.ProgramWorking),
+			string(terminal.ProgramDone),
+			string(terminal.ProgramBlocked),
+			string(terminal.ProgramError),
+		},
+	},
+	{
+		Name:        "TerminalProgramNeed",
+		Description: "What a blocked terminal program needs from the user. Unknown future values render like no need given.",
+		Values: []string{
+			string(terminal.ProgramNeedsPermission),
+			string(terminal.ProgramNeedsAnswer),
+			string(terminal.ProgramNeedsAuth),
+		},
+	},
+	{
+		Name:        "TerminalColorScheme",
+		Description: "Whether a terminal view's theme is light or dark.",
+		Values: []string{
+			string(terminal.ColorSchemeLight),
+			string(terminal.ColorSchemeDark),
+		},
 	},
 }
 
@@ -308,5 +424,3 @@ type VocabularyDefinition struct {
 	Description string   `json:"description,omitempty"`
 	Values      []string `json:"values"`
 }
-
-func values(v ...string) []string { return v }

@@ -1,14 +1,6 @@
 nonisolated struct ChatMarkdownPresentation: Equatable, Sendable {
     var isStreaming: Bool
-    var showsDiagnostics: Bool
-
-    init(
-        isStreaming: Bool,
-        showsDiagnostics: Bool = false
-    ) {
-        self.isStreaming = isStreaming
-        self.showsDiagnostics = showsDiagnostics
-    }
+    var showsDiagnostics = false
 
     static func timelineMessage(
         role: String,
@@ -16,7 +8,7 @@ nonisolated struct ChatMarkdownPresentation: Equatable, Sendable {
         streamingTurnID: String?
     ) -> Self {
         Self(
-            isStreaming: role == MaidMessageRole.assistant.rawValue
+            isStreaming: role == ChatRole.assistant.rawValue
                 && streamingTurnID.map { $0 == turnID } == true
         )
     }

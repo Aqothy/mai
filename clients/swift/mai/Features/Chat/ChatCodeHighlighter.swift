@@ -1,6 +1,11 @@
 import Foundation
 @preconcurrency import Highlighter
-import UIKit
+
+#if os(macOS)
+    import AppKit
+#else
+    import UIKit
+#endif
 
 nonisolated enum ChatCodeHighlightTheme: String, Hashable, Sendable {
     case light
@@ -81,21 +86,26 @@ actor ChatCodeHighlighter {
         mutable.removeAttribute(.backgroundColor, range: range)
         mutable.removeAttribute(.paragraphStyle, range: range)
         let value = AttributedString(mutable)
-        insert(value, code: code, for: key)
+        insert(value, for: key)
         return value
+    }
+
+    /// Loads the JavaScript highlighter ahead of the first code block, so a
+    /// chat's first fenced block is not the request that pays the
+    /// context-creation cost. Safe to call more than once.
+    func warmUp() {
+        _ = configuredHighlighter(for: .light)
     }
 
     private func insert(
         _ value: AttributedString,
-        code: String,
         for key: Key
     ) {
         let entry = Entry(
             value: value,
-            retainedBytes: Self.estimatedRetainedBytes(
-                code: code,
-                value: value
-            )
+            retainedBytes: key.code.utf8.count * 2
+                + value.characters.count * 2
+                + value.runs.count * 96
         )
         guard entry.retainedBytes <= Self.maximumRetainedBytes else { return }
 
@@ -112,15 +122,6 @@ actor ChatCodeHighlighter {
             }
             retainedBytes -= removed.retainedBytes
         }
-    }
-
-    private static func estimatedRetainedBytes(
-        code: String,
-        value: AttributedString
-    ) -> Int {
-        code.utf8.count * 2
-            + value.characters.count * 2
-            + value.runs.count * 96
     }
 
     private func configuredHighlighter(

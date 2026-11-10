@@ -1,27 +1,35 @@
 import Foundation
 import Observation
 
+/// Browses the daemon's folders. Pinned locations are this device's
+/// shortcuts into the daemon's filesystem, so they stay on the device.
 @Observable
 final class FolderPickerModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private struct DirectorySnapshot {
         let path: String
         let parentPath: String?
         let entries: [WorkspaceDirectoryEntry]
     }
 
+    private static let pinnedStorageKey = "project-parent-folders"
+
     var searchText = ""
 
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    /// Pinned locations, most recently used first.
+    private(set) var parentFolders: [String]
 
     private let store: ThreadStore
-    private let projectFolders: ProjectFolderStore
     private var snapshot: DirectorySnapshot?
     private var browseGeneration = 0
 
-    init(store: ThreadStore, projectFolders: ProjectFolderStore) {
+    init(store: ThreadStore) {
         self.store = store
-        self.projectFolders = projectFolders
+        parentFolders = UserDefaults.standard.stringArray(forKey: Self.pinnedStorageKey) ?? []
     }
 
     var currentPath: String? { snapshot?.path }
@@ -31,7 +39,6 @@ final class FolderPickerModel {
         return name.isEmpty ? currentPath : name
     }
     var parentPath: String? { snapshot?.parentPath }
-    var parentFolders: [String] { projectFolders.parentFolders }
     var isInitialLoading: Bool { isLoading && snapshot == nil }
 
     var canSelectCurrentFolder: Bool {
@@ -39,7 +46,7 @@ final class FolderPickerModel {
     }
 
     var currentFolderIsRemembered: Bool {
-        currentPath.map(projectFolders.containsParentFolder) == true
+        currentPath.map(parentFolders.contains) == true
     }
 
     var visibleEntries: [WorkspaceDirectoryEntry] {
@@ -85,11 +92,32 @@ final class FolderPickerModel {
 
     func rememberCurrentFolder() {
         guard let currentPath else { return }
-        projectFolders.rememberParentFolder(currentPath)
+        pin(currentPath)
     }
 
     func forgetCurrentFolder() {
         guard let currentPath else { return }
-        projectFolders.removeParentFolder(currentPath)
+        parentFolders.removeAll { $0 == currentPath }
+        save()
+    }
+
+    /// The chosen folder. Its parent is pinned first, so the next browse
+    /// starts beside it.
+    func selectCurrentFolder() -> String? {
+        guard let currentPath else { return nil }
+        if let parentPath {
+            pin(parentPath)
+        }
+        return currentPath
+    }
+
+    private func pin(_ path: String) {
+        parentFolders.removeAll { $0 == path }
+        parentFolders.insert(path, at: 0)
+        save()
+    }
+
+    private func save() {
+        UserDefaults.standard.set(parentFolders, forKey: Self.pinnedStorageKey)
     }
 }

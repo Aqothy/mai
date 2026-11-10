@@ -4,18 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-func TestSetConfigOptionSendsBooleanWireValue(t *testing.T) {
-	wireBooleanOptions := func(current bool) []any {
-		return []any{map[string]any{"type": "boolean", "id": "fast", "name": "Fast mode", "category": "model_config", "currentValue": current}}
-	}
+// maiD advertises exactly what it implements: no fs or terminal client methods.
+func TestInitializeAdvertisesSupportedClientCapabilities(t *testing.T) {
 	initializeRequests := make(chan schema.InitializeRequest, 1)
-	requests := make(chan wireSessionParams, 1)
 	agent := &fakeWireAgent{
 		onInitialize: func(params json.RawMessage) {
 			var request schema.InitializeRequest
@@ -25,83 +21,86 @@ func TestSetConfigOptionSendsBooleanWireValue(t *testing.T) {
 			}
 			initializeRequests <- request
 		},
-		onNewSession: func(agent *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
-			agent.respond(id, map[string]any{"sessionId": "sess", "configOptions": wireBooleanOptions(false)})
-		},
-		onSetConfigOption: func(agent *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
-			requests <- params
-			agent.respond(id, map[string]any{"configOptions": wireBooleanOptions(true)})
-		},
 	}
-	instance := newWireTestHandle(t, agent)
-	select {
-	case request := <-initializeRequests:
-		if request.ClientCapabilities == nil ||
-			request.ClientCapabilities.Session == nil ||
-			request.ClientCapabilities.Session.ConfigOptions == nil ||
-			request.ClientCapabilities.Session.ConfigOptions.Boolean == nil {
-			t.Fatalf("client capabilities = %#v, want session.configOptions.boolean", request.ClientCapabilities)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("initialize request was not observed")
+	_ = newWireTestHandle(t, agent)
+	caps := waitFor(t, initializeRequests, "initialize request was not observed").ClientCapabilities
+	if caps == nil || caps.Session == nil || caps.Session.ConfigOptions == nil || caps.Session.ConfigOptions.Boolean == nil {
+		t.Fatalf("client capabilities = %#v, want boolean config options advertised", caps)
 	}
-
-	result, err := instance.StartSession(context.Background(), provider.StartSessionInput{ThreadID: "thread-1"})
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
+	if caps.Elicitation == nil || caps.Elicitation.Form == nil || caps.Elicitation.URL == nil {
+		t.Fatalf("elicitation capabilities = %#v, want form and url", caps.Elicitation)
 	}
-	if len(result.Session.ConfigOptions) != 1 {
-		t.Fatalf("initial config options = %#v, want one boolean option", result.Session.ConfigOptions)
+	if caps.Auth == nil || caps.Auth.Terminal == nil || !*caps.Auth.Terminal {
+		t.Fatalf("auth capabilities = %#v, want terminal sign-in", caps.Auth)
 	}
-	initial := result.Session.ConfigOptions[0]
-	if initial.ID != "fast" || initial.Type != provider.ConfigOptionTypeBoolean || initial.Category != provider.ConfigOptionCategoryModelConfig || initial.CurrentValue != false || len(initial.Choices) != 0 {
-		t.Fatalf("initial boolean option = %#v, want false model-config option without choices", initial)
-	}
-	if err := instance.SetConfigOption(context.Background(), provider.SetConfigOptionInput{ThreadID: "thread-1", OptionID: "fast", Value: true}); err != nil {
-		t.Fatalf("SetConfigOption: %v", err)
-	}
-	select {
-	case request := <-requests:
-		if request.Type != schema.SetSessionConfigOptionRequestTypeBoolean || request.Value != true {
-			t.Fatalf("wire request = %#v, want boolean type and value", request)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("session/set_config_option was not called")
-	}
-	options := instance.combinedConfigOptions("sess")
-	if len(options) != 1 || options[0].CurrentValue != true {
-		t.Fatalf("cached options = %#v, want fast=true", options)
+	if caps.FS != nil || caps.Terminal != nil {
+		t.Fatalf("client capabilities = %#v, want fs and terminal unadvertised", caps)
 	}
 }
 
-func TestConfigOptionsFromACPKeepsSelectWithoutCurrentValue(t *testing.T) {
-	options := configOptionsFromACP([]schema.SessionConfigOption{{
-		ID:      "model",
-		Type:    schema.SessionConfigOptionTypeSelect,
-		Name:    "Model",
-		Options: []schema.SessionConfigSelectOption{{Value: schema.SessionConfigValueId("fast"), Name: "Fast"}},
-	}})
-	if len(options) != 1 || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
-		t.Fatalf("options = %#v, want select kept with empty current value", options)
-	}
-}
-
-func TestConfigOptionsFromACPSkipsMalformedValues(t *testing.T) {
+func TestConfigOptionsFromACPKeepsValidDescriptorsOnly(t *testing.T) {
 	options := configOptionsFromACP([]schema.SessionConfigOption{
+		{
+			ID:      "model",
+			Type:    schema.SessionConfigOptionTypeSelect,
+			Name:    "Model",
+			Options: []schema.SessionConfigSelectOption{{Value: schema.SessionConfigValueId("fast"), Name: "Fast"}},
+		},
 		{ID: "bad-boolean", Type: schema.SessionConfigOptionTypeBoolean, CurrentValue: "true"},
+		{ID: "auto-approve", Type: schema.SessionConfigOptionTypeBoolean, Name: "Auto approve", CurrentValue: false},
 		{ID: "bad-select", Type: schema.SessionConfigOptionTypeSelect, CurrentValue: false},
 		{ID: "unknown", Type: "future", CurrentValue: "value"},
 	})
-	if len(options) != 0 {
-		t.Fatalf("options = %#v, want malformed descriptors skipped", options)
+	// A select without a current value is kept; malformed descriptors are skipped.
+	if len(options) != 2 || options[0].ID != "model" || options[0].CurrentValue != "" || len(options[0].Choices) != 1 {
+		t.Fatalf("options = %#v, want the select kept with empty current value", options)
+	}
+	if options[1].ID != "auto-approve" || options[1].Type != provider.ConfigOptionTypeBoolean || options[1].CurrentValue != false {
+		t.Fatalf("options = %#v, want the well-formed boolean kept", options)
 	}
 }
 
 func TestSetSessionConfigOptionRejectsNonACPValue(t *testing.T) {
-	instance := newInstance(nil)
+	instance := newInstance(provider.Host{})
 	err := instance.setSessionConfigOptionValue(context.Background(), "session", "option", []string{"value"})
 	if err == nil {
 		t.Fatal("non-ACP config value was accepted")
+	}
+}
+
+func TestSetBooleanConfigOptionSendsBooleanType(t *testing.T) {
+	booleanOption := func(current bool) []any {
+		return []any{map[string]any{"type": "boolean", "id": "auto-approve", "name": "Auto approve", "currentValue": current}}
+	}
+	sets := make(chan wireSessionParams, 1)
+	agent := &fakeWireAgent{
+		capabilities: map[string]any{"sessionCapabilities": map[string]any{"close": map[string]any{}}},
+		onNewSession: func(agent *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+			agent.respond(id, map[string]any{"sessionId": "options-session", "configOptions": booleanOption(false)})
+		},
+		onSetConfigOption: func(agent *fakeWireAgent, id json.RawMessage, params wireSessionParams) {
+			sets <- params
+			agent.respond(id, map[string]any{"configOptions": booleanOption(true)})
+		},
+	}
+	instance := newWireTestHandle(t, agent)
+	opened, err := instance.OpenOptions(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{})
+	if err != nil {
+		t.Fatalf("OpenOptionsSession: %v", err)
+	}
+	if len(opened.ConfigOptions) != 1 || opened.ConfigOptions[0].CurrentValue != false {
+		t.Fatalf("opened options = %#v, want auto-approve=false", opened.ConfigOptions)
+	}
+
+	options, err := instance.SetOption(context.Background(), opened.Handle, "auto-approve", true)
+	if err != nil {
+		t.Fatalf("SetOptionsSessionValue: %v", err)
+	}
+	if params := waitFor(t, sets, "set_config_option was not sent"); params.Type != "boolean" || params.Value != true {
+		t.Fatalf("set params = %#v, want type boolean value true", params)
+	}
+	if len(options) != 1 || options[0].CurrentValue != true {
+		t.Fatalf("options = %#v, want auto-approve=true", options)
 	}
 }
 
@@ -125,7 +124,7 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 	instance := newWireTestHandle(t, agent)
 	updates := make(chan []provider.ConfigOption, 1)
 
-	opened, err := instance.OpenOptionsSession(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{
+	opened, err := instance.OpenOptions(context.Background(), "/tmp/project", provider.OptionsSessionCallbacks{
 		Updated: func(options []provider.ConfigOption) { updates <- options },
 	})
 	if err != nil {
@@ -134,11 +133,8 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 	if opened.Handle != "options-session" || len(opened.ConfigOptions) != 1 {
 		t.Fatalf("opened = %#v, want one live option", opened)
 	}
-	if threadID := instance.threadIDForSession(opened.Handle); threadID != "" {
-		t.Fatalf("options session bound to thread %q", threadID)
-	}
 
-	options, err := instance.SetOptionsSessionValue(context.Background(), opened.Handle, "model", "slow")
+	options, err := instance.SetOption(context.Background(), opened.Handle, "model", "slow")
 	if err != nil {
 		t.Fatalf("SetOptionsSessionValue: %v", err)
 	}
@@ -155,16 +151,12 @@ func TestDisposableOptionsSessionStaysUnboundAndPublishesSpontaneousUpdates(t *t
 		"sessionUpdate": "config_option_update",
 		"configOptions": wireOptions("fast"),
 	})
-	select {
-	case update := <-updates:
-		if len(update) != 1 || update[0].CurrentValue != "fast" {
-			t.Fatalf("update = %#v, want model=fast", update)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("spontaneous options update was not published")
+	update := waitFor(t, updates, "spontaneous options update was not published")
+	if len(update) != 1 || update[0].CurrentValue != "fast" {
+		t.Fatalf("update = %#v, want model=fast", update)
 	}
 
-	if err := instance.CloseOptionsSession(context.Background(), opened.Handle); err != nil {
+	if err := instance.CloseOptions(context.Background(), opened.Handle); err != nil {
 		t.Fatalf("CloseOptionsSession: %v", err)
 	}
 	if instance.sessionLockedForTest(opened.Handle) {
@@ -181,11 +173,11 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 	}
 	instance := newWireTestHandle(t, agent)
 
-	first, err := instance.OpenOptionsSession(context.Background(), "/first", provider.OptionsSessionCallbacks{})
+	first, err := instance.OpenOptions(context.Background(), "/first", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open first options session: %v", err)
 	}
-	second, err := instance.OpenOptionsSession(context.Background(), "/second", provider.OptionsSessionCallbacks{})
+	second, err := instance.OpenOptions(context.Background(), "/second", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open second options session: %v", err)
 	}
@@ -193,10 +185,10 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 		t.Fatalf("options sessions were not independently registered: first=%q second=%q", first.Handle, second.Handle)
 	}
 
-	if err := instance.CloseOptionsSession(context.Background(), first.Handle); err != nil {
+	if err := instance.CloseOptions(context.Background(), first.Handle); err != nil {
 		t.Fatalf("close first options session: %v", err)
 	}
-	third, err := instance.OpenOptionsSession(context.Background(), "/third", provider.OptionsSessionCallbacks{})
+	third, err := instance.OpenOptions(context.Background(), "/third", provider.OptionsSessionCallbacks{})
 	if err != nil {
 		t.Fatalf("open replacement options session: %v", err)
 	}
@@ -208,5 +200,27 @@ func TestDisposableOptionsSessionsDoNotShareEmptyThreadBinding(t *testing.T) {
 func (h *Instance) sessionLockedForTest(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.sessionLocked(sessionID) != nil
+	return h.sessions[sessionID] != nil
+}
+
+// claude-acp can switch modes with only current_mode_update while exposing the
+// mode as a config option; the option must follow, or the picker goes stale.
+func TestCurrentModeUpdateMovesModeConfigOption(t *testing.T) {
+	mode := "mode"
+	agent := &fakeWireAgent{onNewSession: func(a *fakeWireAgent, id json.RawMessage, _ wireSessionParams) {
+		a.respond(id, map[string]any{"sessionId": "sess", "configOptions": []any{map[string]any{
+			"type": "select", "id": "mode", "name": "Mode", "category": mode, "currentValue": "auto",
+			"options": []any{map[string]any{"value": "auto", "name": "Auto"}, map[string]any{"value": "acceptEdits", "name": "Accept edits"}},
+		}}})
+	}}
+	h := newWireTestHandle(t, agent)
+	openSession(t, h, provider.OpenInput{})
+	agent.sendUpdate("sess", map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "acceptEdits"})
+	changed := h.events.WaitFor(t, "the options", func(event provider.Event) bool {
+		changed, ok := event.Body.(provider.ConfigChanged)
+		return ok && changed.Options != nil
+	}).Body.(provider.ConfigChanged)
+	if current, _ := provider.CurrentConfigString(changed.Options, "mode"); current != "acceptEdits" {
+		t.Fatalf("mode option = %q, want acceptEdits", current)
+	}
 }

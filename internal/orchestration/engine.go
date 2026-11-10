@@ -2,1041 +2,294 @@ package orchestration
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"database/sql"
 	"errors"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
+	"log/slog"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
-const (
-	engineQueueSize = 256
-)
+// Providers gives the engine provider instances.
+type Providers interface {
+	// Instance returns the running process that serves folder, starting one
+	// when there is none, and its generation.
+	Instance(ctx context.Context, id provider.InstanceID, folder string) (provider.Instance, uint64, error)
+	// Info describes a configured instance, running or not.
+	Info(id provider.InstanceID) (provider.InstanceInfo, bool)
+}
 
-// Engine locking: the worker goroutine is the ONLY writer to the projection,
-// the sequence, and receipts (except boot-time RestoreThreads, which seeds
-// stubs under mu before any dispatch), so writes need no coordination with each
-// other. mu exists for cross-goroutine readers (snapshots, SessionView) racing
-// the worker's projection writes. Snapshot creation holds mu while reading the
-// projection.
+type Config struct {
+	DB        *sql.DB
+	Providers Providers
+	// DataDir holds the attachment store.
+	DataDir string
+	Logger  *slog.Logger
+	// MCP is maiD's MCP server for a participant's session; nil while maiD
+	// has none.
+	MCP func(ThreadID, ParticipantID) *provider.MCPServer
+	// Instructions tell agents with an MCP server how to work in maiD.
+	Instructions string
+}
+
+// Engine owns the ledger, the session cache and all live orchestration state.
+// One goroutine runs it: commands, provider events, provider call results and
+// reads are steps on its queue, totally ordered. It never waits on a
+// provider: calls run on per-participant workers and come back as steps.
 type Engine struct {
-	mu             sync.Mutex
-	nextSequence   uint64
-	projection     *Projection
-	listeners      map[uint64]func(Event)
-	nextListenerID uint64
-	receipts       map[CommandID]commandReceipt
+	cfg         Config
+	db          *db
+	attachments *attachmentStore
+	mirrors     *mirrorWriter
+	logger      *slog.Logger
 
-	requestQueue chan engineRequest
-	closed       chan struct{}
-	closeOnce    sync.Once
-	stopped      chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
+	inbox  chan func(*step)
+	done   chan struct{}
+	// fatal is the error that stopped the engine.
+	fatalMu sync.Mutex
+	fatal   error
 
-	// defaultCwd is the daemon's working directory, captured at construction.
-	// It is the fallback when thread.create carries no cwd.
-	defaultCwd string
-
-	// onInvariant, when set, is notified of an InvariantViolationError — a
-	// panic that fired AFTER live state began mutating, when the sequence and
-	// read model may disagree and there is no complete process state to rebuild.
-	// The engine logs the violation and closes itself BEFORE notifying, so
-	// the handler observes a terminal engine; the daemon's handler shuts the
-	// whole server down and surfaces the error from RunWebSocket, leaving
-	// process exit to main. Set it before the first dispatch.
-	onInvariant func(*InvariantViolationError)
+	// Everything below belongs to the engine goroutine.
+	threads      map[ThreadID]*threadState
+	participants map[ParticipantID]*participantState
+	bySession    map[sessionKey]ParticipantID
+	seq          uint64
+	subscribers  map[uint64]*subscriber
+	nextSub      uint64
+	// orphans are events for sessions not known yet, kept while an Open on
+	// their instance is in flight (Opened arrives after the session's first
+	// events can).
+	orphans []orphanEvent
+	opening map[provider.InstanceID]int
+	// published is each thread's summary as clients last got it.
+	published map[ThreadID]ThreadSummary
+	// waits are agents' wait calls.
+	waits    map[uint64]*waiter
+	nextWait uint64
+	pauses   []*instancePause
+	// dispatched are deliveries whose Send is in flight.
+	dispatched map[DeliveryID]bool
+	// noticed are the requests a spawner was told about (WakeNeedsInput).
+	noticed map[string]bool
+	// projects are the projects' canonical paths, with when each was added.
+	projects map[string]time.Time
 }
 
-type commandReceipt struct {
-	sequence uint64
-	err      string
+type orphanEvent struct {
+	instance   provider.InstanceID
+	generation uint64
+	event      provider.Event
 }
 
-type engineRequest struct {
-	command        Command
-	eventInput     *EventInput
-	sessionUpdate  *sessionUpdate
-	importedThread *RestoredThread
-	done           chan dispatchOutcome
-}
-
-// EventInput is the parameter of AppendEvent: the caller-supplied fields of an
-// event, appended nearly verbatim (the engine mints Sequence). It carries
-// provider/server observations, which — unlike commands — are not client
-// intents: they cannot be refused or retried (no receipt) and carry no client
-// CommandID, so those fields deliberately do not exist here. Appends share the
-// engine queue with commands so live events stay totally ordered.
-type EventInput struct {
-	Type     EventType
-	ThreadID ThreadID
-	// Actor defaults to ActorKindProvider; server-derived events (session
-	// status, assistant messages, confirmed interaction modes) set ActorKindServer.
-	Actor      ActorKind
-	OccurredAt time.Time
-	Metadata   EventMetadata
-	Payload    EventPayload
-}
-
-type dispatchOutcome struct {
-	result DispatchResult
-	err    error
-}
-
-func NewEngine() *Engine {
-	defaultCwd, _ := os.Getwd()
-	e := &Engine{
-		projection:   NewProjection(),
-		listeners:    make(map[uint64]func(Event)),
-		receipts:     make(map[CommandID]commandReceipt),
-		requestQueue: make(chan engineRequest, engineQueueSize),
-		closed:       make(chan struct{}),
-		stopped:      make(chan struct{}),
-		defaultCwd:   defaultCwd,
+// Open loads the ledger, recovers from a crash and starts the engine.
+func Open(cfg Config) (*Engine, error) {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
-	go e.worker()
-	return e
+	database, err := openDB(cfg.DB)
+	if err != nil {
+		return nil, err
+	}
+	attachments, err := openAttachmentStore(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	e := &Engine{
+		cfg: cfg, db: database, attachments: attachments, logger: cfg.Logger.With("component", "orchestration"),
+		ctx: ctx, cancel: cancel, inbox: make(chan func(*step), 1024), done: make(chan struct{}),
+		threads: make(map[ThreadID]*threadState), participants: make(map[ParticipantID]*participantState), projects: make(map[string]time.Time),
+		bySession: make(map[sessionKey]ParticipantID), subscribers: make(map[uint64]*subscriber),
+		opening: make(map[provider.InstanceID]int), published: make(map[ThreadID]ThreadSummary),
+		waits: make(map[uint64]*waiter), dispatched: make(map[DeliveryID]bool), noticed: make(map[string]bool),
+	}
+	e.mirrors = newMirrorWriter(database, e.logger)
+	loaded, err := database.load(ctx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	e.install(loaded)
+	go e.mirrors.run(ctx)
+	go e.run()
+	// Recovery and every reactor run once at startup, so state left by a
+	// crash converges.
+	e.post(func(s *step) { e.recover(s) })
+	return e, nil
 }
 
-// Close stops the command worker. Queued/in-flight dispatches unblock with an error.
+// Mirror is the native mirror the engine keeps for an instance's adapter.
+func (e *Engine) Mirror(instance provider.InstanceID) provider.Mirror {
+	return &instanceMirror{writer: e.mirrors, instance: instance}
+}
+
+// Close stops the engine. Queued steps are dropped; queued mirror frames are
+// written.
 func (e *Engine) Close() {
-	e.closeOnce.Do(func() { close(e.closed) })
+	e.cancel()
+	<-e.done
+	<-e.mirrors.stopped
 }
 
-// Stopped closes after the worker exits.
-func (e *Engine) Stopped() <-chan struct{} {
-	return e.stopped
+// Done closes once the engine stopped, on Close or a fatal error.
+func (e *Engine) Done() <-chan struct{} { return e.done }
+
+// Err is the fatal error that stopped the engine, if any.
+func (e *Engine) Err() error {
+	e.fatalMu.Lock()
+	defer e.fatalMu.Unlock()
+	return e.fatal
 }
 
-// worker is the single serial command processor. Event listeners also run on
-// this goroutine and must hand off any engine work rather than awaiting it here.
-func (e *Engine) worker() {
-	var violation *InvariantViolationError
-	defer func() {
-		close(e.stopped)
-		if violation == nil {
-			return
-		}
-		e.mu.Lock()
-		handler := e.onInvariant
-		e.mu.Unlock()
-		if handler != nil {
-			handler(violation)
-		}
-	}()
+var errClosed = errors.New("orchestration engine is closed")
 
+// post queues a step. It never blocks the engine goroutine itself: steps
+// posted from it run after the current one.
+func (e *Engine) post(fn func(*step)) bool {
+	select {
+	case e.inbox <- fn:
+		return true
+	case <-e.ctx.Done():
+		return false
+	}
+}
+
+// call runs fn as a step and waits for the value it produces.
+func call[T any](ctx context.Context, e *Engine, fn func(*step) (T, error)) (T, error) {
+	type outcome struct {
+		value T
+		err   error
+	}
+	result := make(chan outcome, 1)
+	queued := e.post(func(s *step) {
+		value, err := fn(s)
+		// The caller hears only once the step's writes committed.
+		s.after(func() { result <- outcome{value, err} })
+	})
+	var zero T
+	if !queued {
+		return zero, errClosed
+	}
+	select {
+	case out := <-result:
+		return out.value, out.err
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case <-e.done:
+		select {
+		case out := <-result:
+			return out.value, out.err
+		default:
+			return zero, errClosed
+		}
+	}
+}
+
+// flushInterval is how often running turns' entries are written to the
+// session cache. A crash loses at most this much of a running turn, which
+// reconciliation reads again where the provider keeps it.
+const flushInterval = 250 * time.Millisecond
+
+func (e *Engine) run() {
+	defer close(e.done)
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-e.closed:
+		case <-e.ctx.Done():
 			return
-		case env := <-e.requestQueue:
-			// Close is the worker's stop boundary. If shutdown raced with a queued
-			// request, reject it rather than mutating state after Close returned to
-			// another goroutine.
-			select {
-			case <-e.closed:
-				env.done <- dispatchOutcome{err: fmt.Errorf("orchestration engine is closed")}
+		case fn := <-e.inbox:
+			if !e.step(fn) {
 				return
-			default:
 			}
-			var result DispatchResult
-			var err error
-			if env.sessionUpdate != nil {
-				result, err = e.sessionUpdateRecovered(*env.sessionUpdate)
-			} else if env.eventInput != nil {
-				result, err = e.appendRecovered(*env.eventInput)
-			} else if env.importedThread != nil {
-				result, err = e.importThreadRecovered(*env.importedThread)
-			} else {
-				result, err = e.process(env.command)
-			}
-			env.done <- dispatchOutcome{result: result, err: err}
-			// Escalate an invariant violation AFTER replying, so the in-flight
-			// caller deterministically receives the typed error before the
-			// engine closes and the handler (the daemon's shutdown) runs.
-			if fatal, ok := errors.AsType[*InvariantViolationError](err); ok {
-				e.Close()
-				violation = fatal
+		case <-ticker.C:
+			if !e.step(func(s *step) { e.flushRunning(s) }) {
 				return
 			}
 		}
 	}
 }
 
-func (e *Engine) OnEvent(listener func(Event)) func() {
-	e.mu.Lock()
-	e.nextListenerID++
-	id := e.nextListenerID
-	e.listeners[id] = listener
-	e.mu.Unlock()
-	return func() {
-		e.mu.Lock()
-		delete(e.listeners, id)
-		e.mu.Unlock()
-	}
+// step is one engine step: its writes commit together, then its effects run.
+type step struct {
+	e  *Engine
+	tx *tx
+	// touched are the threads the reactors still have to look at; changed
+	// all the threads the step changed, for the thread list.
+	touched map[ThreadID]bool
+	changed map[ThreadID]bool
+	effects []func()
+	now     time.Time
 }
 
-// Dispatch enqueues a command for the serial worker and waits for its result.
-// Concurrent callers are safe; an event listener on the worker must not call it
-// synchronously because the queued request cannot run until the listener returns.
-func (e *Engine) Dispatch(ctx context.Context, command Command) (DispatchResult, error) {
-	if command.CommandID == "" {
-		command.CommandID = CommandID(newID("cmd"))
-	}
-	if command.CreatedAt.IsZero() {
-		command.CreatedAt = time.Now()
-	}
-	return e.await(ctx, engineRequest{command: command, done: make(chan dispatchOutcome, 1)})
+func (s *step) touch(id ThreadID) {
+	s.touched[id] = true
+	s.changed[id] = true
 }
 
-// AppendEvent appends a provider/server-observed event through the worker
-// queue. The event's thread must exist; beyond that the input is recorded,
-// not decided — nothing retries it, so there is no receipt.
-func (e *Engine) AppendEvent(ctx context.Context, input EventInput) (DispatchResult, error) {
-	if input.OccurredAt.IsZero() {
-		input.OccurredAt = time.Now()
-	}
-	return e.await(ctx, engineRequest{eventInput: &input, done: make(chan dispatchOutcome, 1)})
-}
+// after runs fn once the step committed.
+func (s *step) after(fn func()) { s.effects = append(s.effects, fn) }
 
-// updateSession serializes one internal session lifecycle update with commands
-// and provider events. The worker derives the complete client-facing session
-// binding from current thread state before appending the ordinary domain event.
-func (e *Engine) updateSession(ctx context.Context, update sessionUpdate) (DispatchResult, error) {
-	if update.occurredAt.IsZero() {
-		update.occurredAt = time.Now()
-	}
-	return e.await(ctx, engineRequest{sessionUpdate: &update, done: make(chan dispatchOutcome, 1)})
-}
-
-func (e *Engine) await(ctx context.Context, env engineRequest) (DispatchResult, error) {
-	select {
-	case e.requestQueue <- env:
-	case <-e.closed:
-		return DispatchResult{}, fmt.Errorf("orchestration engine is closed")
-	case <-ctx.Done():
-		return DispatchResult{}, ctx.Err()
-	}
-	select {
-	case outcome := <-env.done:
-		return outcome.result, outcome.err
-	case <-e.closed:
-		// The worker publishes an invariant-violation outcome before closing
-		// the engine. If both channels are ready, preserve that specific error
-		// instead of nondeterministically returning the generic closed error.
-		select {
-		case outcome := <-env.done:
-			return outcome.result, outcome.err
-		default:
-			return DispatchResult{}, fmt.Errorf("orchestration engine is closed")
-		}
-	case <-ctx.Done():
-		return DispatchResult{}, ctx.Err()
-	}
-}
-
-// process runs only on the worker goroutine, so the receipts map needs no extra
-// locking. Receipts exist for client retry idempotency: every command is a
-// client intent (provider/server events go through AppendEvent, receipt-free,
-// so per-delta streaming traffic cannot grow this map).
-// TODO: bound receipts (grows one entry per client command).
-func (e *Engine) process(command Command) (DispatchResult, error) {
-	if receipt, ok := e.receipts[command.CommandID]; ok {
-		if receipt.err != "" {
-			return DispatchResult{}, fmt.Errorf("command %q was previously rejected: %s", command.CommandID, receipt.err)
-		}
-		return DispatchResult{Sequence: receipt.sequence}, nil
-	}
-	result, err := e.dispatchRecovered(command)
-	if err != nil {
-		e.receipts[command.CommandID] = commandReceipt{err: err.Error()}
-		return DispatchResult{}, err
-	}
-	e.receipts[command.CommandID] = commandReceipt{sequence: result.Sequence}
-	return result, nil
-}
-
-// dispatchRecovered converts a pre-mutation (decider/validation) panic into a
-// command error so one bad command cannot wedge the worker. Panics that fire
-// after live state began mutating arrive as InvariantViolationError because
-// the sequence and read model may now disagree.
-func (e *Engine) dispatchRecovered(command Command) (DispatchResult, error) {
-	return recoverEngineOperation(fmt.Sprintf("command %q", command.Type), func() (DispatchResult, error) {
-		return e.dispatch(command)
-	})
-}
-
-func (e *Engine) dispatch(command Command) (DispatchResult, error) {
-	switch command.Type {
-	case CommandThreadCreate:
-		return e.dispatchThreadCreate(command)
-	case CommandThreadStart:
-		return e.dispatchThreadStart(command)
-	case CommandThreadMetaUpdate:
-		return e.dispatchThreadMetaUpdate(command)
-	case CommandThreadTurnStart:
-		return e.dispatchThreadTurnStart(command)
-	case CommandThreadTurnRetry:
-		return e.dispatchThreadTurnRetry(command)
-	case CommandThreadTurnInterrupt:
-		return e.dispatchThreadTurnInterrupt(command)
-	case CommandThreadApprovalRespond:
-		return e.dispatchApprovalRespond(command)
-	case CommandThreadSessionPrepare:
-		return e.dispatchSessionPrepare(command)
-	case CommandThreadSessionStop:
-		return e.dispatchSessionStop(command)
-	case CommandThreadConfigOptionSet:
-		return e.dispatchConfigOptionSet(command)
-	default:
-		return DispatchResult{}, fmt.Errorf("unsupported orchestration command %q", command.Type)
-	}
-}
-
-// appendRecovered converts a pre-mutation (validation/derivation) panic into
-// an error so one bad event cannot wedge the worker, mirroring
-// dispatchRecovered. Post-mutation panics surface as InvariantViolationError
-// and the worker escalates them instead.
-func (e *Engine) appendRecovered(input EventInput) (DispatchResult, error) {
-	return recoverEngineOperation(fmt.Sprintf("appending event %q", input.Type), func() (DispatchResult, error) {
-		return e.appendInput(input)
-	})
-}
-
-// recoverEngineOperation is the common panic boundary for work executed by the
-// engine worker. withLockNotify has already classified post-mutation panics as
-// invariant violations; all other panics are safe to report as operation
-// errors because no event was appended.
-func recoverEngineOperation(operation string, run func() (DispatchResult, error)) (result DispatchResult, err error) {
+// step runs fn and commits it, then runs the reactors for the threads it
+// touched, each round its own commit, so reactors read what the step wrote.
+// A crash between rounds reruns them at startup. A failed commit or a panic
+// stops the engine: memory and storage may disagree, so going on could do
+// anything twice.
+func (e *Engine) step(fn func(*step)) (ok bool) {
 	defer func() {
-		if rec := recover(); rec != nil {
-			if violation, ok := rec.(*InvariantViolationError); ok {
-				err = violation
-				return
-			}
-			log.Printf("orchestration: %s panicked: %v\n%s", operation, rec, debug.Stack())
-			err = fmt.Errorf("%s panicked: %v", operation, rec)
+		if recovered := recover(); recovered != nil {
+			e.stop(fmt.Errorf("orchestration step panicked: %v\n%s", recovered, debug.Stack()))
+			ok = false
 		}
 	}()
-	return run()
+	s := e.newStep()
+	fn(s)
+	if !e.finish(s) {
+		return false
+	}
+	due := s.touched
+	for round := 0; round < maxReactorRounds && len(due) > 0; round++ {
+		r := e.newStep()
+		e.react(r, due)
+		if !e.finish(r) {
+			return false
+		}
+		due = r.touched
+	}
+	e.startPauses()
+	return true
 }
 
-// appendInput appends a provider/server event against an existing thread. The
-// only per-type logic is payload normalization/derivation that needs the live
-// thread (config-option model selection); everything else is recorded verbatim.
-func (e *Engine) appendInput(input EventInput) (DispatchResult, error) {
-	if input.ThreadID == "" {
-		return DispatchResult{}, fmt.Errorf("event %q requires threadId", input.Type)
-	}
-	if err := validateEventInput(input); err != nil {
-		return DispatchResult{}, err
-	}
-	var sequence uint64
-	err := e.withLockNotify(func(appendEvent func(Event) Event) error {
-		thread := e.projection.liveThread(input.ThreadID)
-		if thread == nil {
-			return fmt.Errorf("thread %q not found", input.ThreadID)
-		}
-		payload := input.Payload
-		payload.ThreadID = input.ThreadID
-		switch input.Type {
-		case EventThreadConfigOptionsUpdated:
-			// An explicit empty update (non-nil []) must reach clients so they clear
-			// state; a model config option also refreshes the thread's model selection.
-			if payload.ConfigOptions == nil {
-				payload.ConfigOptions = []provider.ConfigOption{}
-			}
-			payload.ModelSelection = modelSelectionFromConfigOptions(*thread, payload.ConfigOptions)
-		case EventThreadSlashCommandsUpdated:
-			if payload.SlashCommands == nil {
-				payload.SlashCommands = []provider.SlashCommand{}
-			}
-		}
-		actor := input.Actor
-		if actor == "" {
-			actor = ActorKindProvider
-		}
-		appended := appendEvent(Event{Type: input.Type, OccurredAt: input.OccurredAt, Actor: actor, Metadata: input.Metadata, Payload: payload})
-		sequence = appended.Sequence
-		return nil
-	})
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	return DispatchResult{Sequence: sequence}, nil
+func (e *Engine) newStep() *step {
+	return &step{e: e, tx: newTx(), touched: make(map[ThreadID]bool), changed: make(map[ThreadID]bool), now: time.Now()}
 }
 
-// validateEventInput guards provider-supplied payload sections that may arrive
-// empty; payloads constructed entirely by internal callers are not rechecked.
-func validateEventInput(input EventInput) error {
-	switch input.Type {
-	case EventThreadSessionStatusSet:
-		if input.Payload.Session == nil || input.Payload.Session.Status == "" {
-			return fmt.Errorf("%s requires session.status", input.Type)
+// finish publishes a step's summaries, commits it and runs its effects.
+func (e *Engine) finish(s *step) bool {
+	e.publishSummaries(s)
+	if err := e.db.commit(e.ctx, s.tx); err != nil {
+		if e.ctx.Err() == nil {
+			e.stop(err)
 		}
-	case EventThreadItemUpserted:
-		if input.Payload.Item == nil || input.Payload.Item.ID == "" {
-			return fmt.Errorf("%s requires item with id", input.Type)
-		}
-	case EventThreadApprovalOpened, EventThreadApprovalResolved:
-		if input.Payload.Approval == nil || input.Payload.Approval.RequestID == "" {
-			return fmt.Errorf("%s requires approval with requestId", input.Type)
-		}
+		return false
 	}
-	return nil
+	for _, effect := range s.effects {
+		effect()
+	}
+	return true
 }
 
-// SubscribeThread returns an authoritative snapshot. The RPC layer installs
-// the live subscription before calling this, so events at the captured
-// boundary can be duplicated but can never be lost.
-func (e *Engine) SubscribeThread(input SubscribeThreadInput) (ThreadStreamItem, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.projection.liveThread(input.ThreadID) == nil {
-		return ThreadStreamItem{}, fmt.Errorf("thread %q not found", input.ThreadID)
+func (e *Engine) stop(err error) {
+	e.logger.Error("orchestration engine stopped", "error", err)
+	e.fatalMu.Lock()
+	if e.fatal == nil {
+		e.fatal = err
 	}
-	snapshot, err := e.projection.ThreadSnapshot(input.ThreadID)
-	if err != nil {
-		return ThreadStreamItem{}, err
-	}
-	return ThreadStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}, nil
-}
-
-// GetItemDetail returns one complete canonical item without exposing or
-// replaying the event history that produced it.
-func (e *Engine) GetItemDetail(input GetItemDetailInput) (Item, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	thread := e.projection.liveThread(input.ThreadID)
-	if thread == nil {
-		return Item{}, fmt.Errorf("thread %q not found", input.ThreadID)
-	}
-	item := thread.Timeline.Item(input.ItemID)
-	if item == nil {
-		return Item{}, fmt.Errorf("item %q not found in thread %q", input.ItemID, input.ThreadID)
-	}
-	return cloneItem(*item), nil
-}
-
-func (e *Engine) ThreadListSnapshot() ThreadListStreamItem {
-	e.mu.Lock()
-	snapshot := e.projection.ThreadListSnapshot()
-	e.mu.Unlock()
-	return ThreadListStreamItem{Kind: StreamItemSnapshot, Snapshot: &snapshot}
-}
-
-func (e *Engine) ThreadListEntry(threadID ThreadID) (ThreadListEntry, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.projection.ThreadListEntry(threadID)
-}
-
-// ThreadHistoryRestorePending reports whether the thread is still the
-// metadata-only stub (or is currently rebuilding that stub from provider
-// history). It is intentionally a clone-free query for notification fan-out.
-func (e *Engine) ThreadHistoryRestorePending(threadID ThreadID) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	thread := e.projection.liveThread(threadID)
-	return thread != nil && thread.ReplayHistoryPending
-}
-
-// Thread returns a detached complete thread snapshot for diagnostics and tests.
-// Client and runtime paths should use bounded projections/views instead.
-func (e *Engine) Thread(threadID ThreadID) (Thread, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.projection.Thread(threadID)
-}
-
-// ThreadSessionView is the cheap read for per-runtime-event consumers
-// (ingestion): session binding, latest turn, and resolved provider routing —
-// WITHOUT cloning the thread's messages/items/approvals. Thread() clones all of
-// those, which is O(thread size) per call and must stay off the per-delta path.
-type ThreadSessionView struct {
-	// ProviderInstanceID is the thread's resolved routing identity
-	// (model-selection instance wins over the thread-level field).
-	ProviderInstanceID provider.InstanceID
-	Session            *SessionBinding
-	LatestTurn         *Turn
-}
-
-// ThreadProviderView is the bounded state needed to start or resume provider
-// work. It deliberately excludes the timeline except for the addressed prompt,
-// avoiding an O(thread size) clone on every session/turn start.
-type ThreadProviderView struct {
-	ID                   ThreadID
-	ReplayHistoryPending bool
-	ProviderInstanceID   provider.InstanceID
-	Cwd                  string
-	ModelSelection       *provider.ModelSelection
-	ConfigSelections     []provider.ConfigOptionSelection
-	Session              *SessionBinding
-	LatestTurn           *Turn
-	Message              *Message
-}
-
-// ThreadApprovalView is SessionView plus one approval, read under a single lock
-// acquisition: composing two reads could answer a request against a session
-// that has since been replaced.
-type ThreadApprovalView struct {
-	Session *SessionBinding
-	// Approval is nil when the thread has no such request.
-	Approval *Approval
-}
-
-func (e *Engine) ApprovalView(threadID ThreadID, requestID ApprovalID) (ThreadApprovalView, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	thread := e.projection.liveThread(threadID)
-	if thread == nil {
-		return ThreadApprovalView{}, false
-	}
-	view := ThreadApprovalView{Session: cloneSessionPtr(thread.Session)}
-	if approval := thread.Timeline.Approval(string(requestID)); approval != nil {
-		clone := *approval
-		clone.Args = cloneRawMessage(approval.Args)
-		clone.Options = append([]provider.ApprovalOption(nil), approval.Options...)
-		view.Approval = &clone
-	}
-	return view, true
-}
-
-func (e *Engine) SessionView(threadID ThreadID) (ThreadSessionView, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	thread := e.projection.liveThread(threadID)
-	if thread == nil {
-		return ThreadSessionView{}, false
-	}
-	return ThreadSessionView{
-		ProviderInstanceID: thread.ProviderInstanceID,
-		Session:            cloneSessionPtr(thread.Session),
-		LatestTurn:         cloneTurnPtr(thread.LatestTurn),
-	}, true
-}
-
-// ThreadCwd returns the thread's workspace directory. It is a bounded read
-// for per-keystroke consumers (workspace file search): no timeline clone.
-func (e *Engine) ThreadCwd(threadID ThreadID) (string, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	thread := e.projection.liveThread(threadID)
-	if thread == nil {
-		return "", false
-	}
-	return thread.Cwd, true
-}
-
-func (e *Engine) ProviderView(threadID ThreadID, messageID MessageID) (ThreadProviderView, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	thread := e.projection.liveThread(threadID)
-	if thread == nil {
-		return ThreadProviderView{}, false
-	}
-	view := ThreadProviderView{
-		ID:                   thread.ID,
-		ReplayHistoryPending: thread.ReplayHistoryPending,
-		ProviderInstanceID:   thread.ProviderInstanceID,
-		Cwd:                  thread.Cwd,
-		ModelSelection:       cloneModelSelection(thread.ModelSelection),
-		ConfigSelections:     append([]provider.ConfigOptionSelection(nil), thread.ConfigSelections...),
-		Session:              cloneSessionPtr(thread.Session),
-		LatestTurn:           cloneTurnPtr(thread.LatestTurn),
-	}
-	if messageID != "" {
-		if message := thread.Timeline.Message(messageID); message != nil {
-			clone := *message
-			clone.Attachments = cloneAttachments(message.Attachments)
-			view.Message = &clone
-		}
-	}
-	return view, true
-}
-
-func (e *Engine) existingThreadSequence(threadID ThreadID) (uint64, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.projection.liveThread(threadID) == nil {
-		return 0, false
-	}
-	if sequence := e.projection.createSequence(threadID); sequence != 0 {
-		return sequence, true
-	}
-	return e.projection.appliedSequence(), true
-}
-
-// ResolveThreadCwd applies the engine's cwd default and validation policy to
-// thread state installed outside the command path, such as imported sessions.
-func (e *Engine) ResolveThreadCwd(cwd string) (string, error) {
-	return e.resolveThreadCwd("thread import", cwd)
-}
-
-// resolveThreadCwd enforces the daemon-wide cwd rule in one place: a thread's
-// cwd is client-supplied, defaults to the daemon's working directory when
-// empty, and must name an existing directory as an absolute path. Validating
-// here makes a bad cwd fail at thread.create/thread.update with an actionable
-// error instead of surfacing deep inside a provider adapter on the first turn.
-func (e *Engine) resolveThreadCwd(commandType string, cwd string) (string, error) {
-	if cwd == "" {
-		cwd = e.defaultCwd
-		if cwd == "" {
-			return "", fmt.Errorf("%s requires cwd (the daemon has no working directory to default to)", commandType)
-		}
-	}
-	if !filepath.IsAbs(cwd) {
-		return "", fmt.Errorf("%s cwd %q must be an absolute path", commandType, cwd)
-	}
-	info, err := os.Stat(cwd)
-	if err != nil {
-		return "", fmt.Errorf("%s cwd %q is not usable: %v", commandType, cwd, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("%s cwd %q is not a directory", commandType, cwd)
-	}
-	return cwd, nil
-}
-
-func (e *Engine) dispatchThreadCreate(command Command) (DispatchResult, error) {
-	if command.ThreadID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.create requires threadId")
-	}
-	if sequence, exists := e.existingThreadSequence(command.ThreadID); exists {
-		return DispatchResult{Sequence: sequence}, nil
-	}
-	title := command.Title
-	if title == "" {
-		title = "Untitled thread"
-	}
-	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	appended := e.append(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID, ModelSelection: cloneModelSelection(command.ModelSelection), Cwd: cwd}})
-	return DispatchResult{Sequence: appended.Sequence}, nil
-}
-
-// dispatchThreadStart creates a real thread and records its first user message
-// and turn request in one locked operation. The provider work remains
-// asynchronous in ProviderEventReactor, exactly like every later turn.
-func (e *Engine) dispatchThreadStart(command Command) (DispatchResult, error) {
-	if command.ThreadID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.start requires threadId")
-	}
-	if sequence, exists := e.existingThreadSequence(command.ThreadID); exists {
-		return DispatchResult{Sequence: sequence}, nil
-	}
-	if command.ProviderInstanceID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.start requires providerInstanceId")
-	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
-		return DispatchResult{}, fmt.Errorf("thread.start requires prompt")
-	}
-	cwd, err := e.resolveThreadCwd(command.Type, command.Cwd)
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	messageID := MessageID(command.Message.MessageID)
-	if messageID == "" {
-		messageID = MessageID(newID("msg"))
-	}
-	turnID := TurnID(newID("turn"))
-	title := command.Title
-	if title == "" {
-		title = strings.Join(strings.Fields(command.Message.Text), " ")
-		titleRunes := []rune(title)
-		if len(titleRunes) > 80 {
-			title = string(titleRunes[:80])
-		}
-		if title == "" {
-			title = "Untitled thread"
-		}
-	}
-	modelSelection := cloneModelSelection(command.ModelSelection)
-	for _, selection := range command.ConfigSelections {
-		if selection.Category == provider.ConfigOptionCategoryModel {
-			if model, ok := selection.Value.(string); ok && model != "" {
-				if modelSelection == nil {
-					modelSelection = &provider.ModelSelection{}
-				}
-				modelSelection.Model = model
-			}
-		}
-	}
-
-	var sequence uint64
-	err = e.withLockNotify(func(appendEvent func(Event) Event) error {
-		appendEvent(Event{Type: EventThreadCreated, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
-			ThreadID: command.ThreadID, Title: title, ProviderInstanceID: command.ProviderInstanceID,
-			ModelSelection: modelSelection, Cwd: cwd, ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
-		}})
-		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
-			ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text,
-			Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt,
-		}})
-		started := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{
-			ThreadID: command.ThreadID, Title: title, MessageID: messageID, TurnID: turnID,
-			ProviderInstanceID: command.ProviderInstanceID, ModelSelection: modelSelection,
-			ConfigSelections: append([]provider.ConfigOptionSelection(nil), command.ConfigSelections...),
-		}})
-		sequence = started.Sequence
-		return nil
-	})
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	return DispatchResult{Sequence: sequence}, nil
-}
-
-func (e *Engine) dispatchThreadMetaUpdate(command Command) (DispatchResult, error) {
-	if command.Cwd != "" {
-		if _, err := e.resolveThreadCwd(command.Type, command.Cwd); err != nil {
-			return DispatchResult{}, err
-		}
-	}
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateMetaCwdChange(*thread, command.Cwd); err != nil {
-			return Event{}, err
-		}
-		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
-		if err := selectionChange.validateMetaUpdate(*thread); err != nil {
-			return Event{}, err
-		}
-		return threadEvent(command, EventThreadMetaUpdated, ActorKindClient, EventPayload{Title: command.Title, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, Cwd: command.Cwd, SessionCleared: selectionChange.ClearsSession}), nil
-	})
-}
-
-func (e *Engine) dispatchThreadTurnStart(command Command) (DispatchResult, error) {
-	if command.ThreadID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.turn.start requires threadId")
-	}
-	if err := validateTurnStartBoundary(command); err != nil {
-		return DispatchResult{}, err
-	}
-	if command.Message == nil || (command.Message.Text == "" && len(command.Message.Attachments) == 0) {
-		return DispatchResult{}, fmt.Errorf("thread.turn.start requires message.text or message.attachments")
-	}
-	messageID := MessageID(command.Message.MessageID)
-	if messageID == "" {
-		messageID = MessageID(newID("msg"))
-	}
-
-	var sequence uint64
-	err := e.withLockNotify(func(appendEvent func(Event) Event) error {
-		thread := e.projection.liveThread(command.ThreadID)
-		if thread == nil {
-			return fmt.Errorf("thread %q not found", command.ThreadID)
-		}
-		if sessionPreparing(*thread) {
-			return fmt.Errorf("cannot start a turn while thread %q is preparing its provider session", command.ThreadID)
-		}
-		if thread.ReplayHistoryPending {
-			return fmt.Errorf("cannot start a turn on restored thread %q before preparing its provider session", command.ThreadID)
-		}
-		active := activeTurnID(*thread)
-		steering := active != ""
-		turnID := active
-		if turnID == "" {
-			turnID = TurnID(newID("turn"))
-		}
-		selectionChange := resolveProviderSelectionChange(*thread, command.ProviderInstanceID, command.ModelSelection)
-		if steering {
-			if err := selectionChange.validateSteering(*thread); err != nil {
-				return err
-			}
-			selectionChange = providerSelectionChange{}
-		}
-		appendEvent(Event{Type: EventThreadMessageSent, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, MessageID: messageID, Role: MessageRoleUser, Text: command.Message.Text, Attachments: command.Message.Attachments, TurnID: turnID, CreatedAt: command.CreatedAt, UpdatedAt: command.CreatedAt}})
-		turnEvent := appendEvent(Event{Type: EventThreadTurnStartRequested, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: ActorKindClient, Payload: EventPayload{ThreadID: command.ThreadID, Title: command.Title, MessageID: messageID, TurnID: turnID, Steering: steering, ProviderInstanceID: selectionChange.ProviderInstanceID, ModelSelection: selectionChange.ModelSelection, SessionCleared: selectionChange.ClearsSession}})
-		sequence = turnEvent.Sequence
-		return nil
-	})
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	return DispatchResult{Sequence: sequence}, nil
-}
-
-// dispatchThreadTurnRetry starts a fresh turn with the existing user message
-// from the failed turn. It avoids appending the same prompt to the timeline a
-// second time.
-func (e *Engine) dispatchThreadTurnRetry(command Command) (DispatchResult, error) {
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if sessionPreparing(*thread) {
-			return Event{}, fmt.Errorf("cannot retry a turn while thread %q is preparing its provider session", command.ThreadID)
-		}
-		if thread.LatestTurn == nil || thread.LatestTurn.State != TurnStateError {
-			return Event{}, fmt.Errorf("thread %q has no failed turn to retry", command.ThreadID)
-		}
-		var messageID MessageID
-		for _, message := range thread.Timeline.Messages() {
-			if message.Role == MessageRoleUser && message.TurnID == thread.LatestTurn.ID {
-				messageID = message.ID
-			}
-		}
-		if messageID == "" {
-			return Event{}, fmt.Errorf("failed turn %q has no user message to retry", thread.LatestTurn.ID)
-		}
-		return threadEvent(command, EventThreadTurnStartRequested, ActorKindClient, EventPayload{
-			MessageID: messageID,
-			TurnID:    TurnID(newID("turn")),
-		}), nil
-	})
-}
-
-func (e *Engine) dispatchApprovalRespond(command Command) (DispatchResult, error) {
-	if command.ThreadID == "" || command.RequestID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.approval.respond requires threadId and requestId")
-	}
-	decision := command.Decision
-	if decision == "" {
-		decision = provider.ApprovalDecisionCancel
-	}
-	if err := validateApprovalDecision(command.Type, decision); err != nil {
-		return DispatchResult{}, err
-	}
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if err := validateApprovalResponse(command.Type, *thread, command.RequestID, command.OptionID); err != nil {
-			return Event{}, err
-		}
-		event := threadEvent(command, EventThreadApprovalResponseRequested, ActorKindClient, EventPayload{RequestID: command.RequestID, Decision: decision, OptionID: command.OptionID})
-		event.Metadata = EventMetadata{RequestID: string(command.RequestID)}
-		return event, nil
-	})
-}
-
-func (e *Engine) dispatchThreadTurnInterrupt(command Command) (DispatchResult, error) {
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		turnID := command.TurnID
-		active := activeTurnID(*thread)
-		if active == "" {
-			return Event{}, fmt.Errorf("thread %q has no active turn to interrupt", command.ThreadID)
-		}
-		if turnID != "" && turnID != active {
-			return Event{}, fmt.Errorf("turn %q is not the active turn for thread %q", turnID, command.ThreadID)
-		}
-		if turnID == "" {
-			turnID = active
-		}
-		return threadEvent(command, EventThreadTurnInterruptRequested, ActorKindClient, EventPayload{TurnID: turnID}), nil
-	})
-}
-
-func (e *Engine) dispatchSessionPrepare(command Command) (DispatchResult, error) {
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if thread.ProviderInstanceID == "" {
-			return Event{}, fmt.Errorf("thread %q has no provider instance", command.ThreadID)
-		}
-		if activeTurnID(*thread) != "" {
-			return Event{}, fmt.Errorf("cannot prepare session while thread %q has an active turn", command.ThreadID)
-		}
-		if sessionPreparing(*thread) {
-			return Event{}, fmt.Errorf("thread %q is already preparing its provider session", command.ThreadID)
-		}
-		return threadEvent(command, EventThreadSessionPrepareRequested, ActorKindClient, EventPayload{}), nil
-	})
-}
-
-func (e *Engine) dispatchSessionStop(command Command) (DispatchResult, error) {
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if sessionPreparing(*thread) {
-			return Event{}, fmt.Errorf("cannot stop thread %q while its provider session is preparing", command.ThreadID)
-		}
-		return threadEvent(command, EventThreadSessionStopRequested, ActorKindClient, EventPayload{TurnID: command.TurnID}), nil
-	})
-}
-
-// dispatchWithThread is the shared decider shape for commands that validate
-// against (or derive event payload from) the current state of an existing
-// thread: build runs under the projection lock against the live thread and
-// returns the single event to append; the appended event is published to
-// listeners before returning. build must only read the thread.
-func (e *Engine) dispatchWithThread(command Command, build func(thread *Thread) (Event, error)) (DispatchResult, error) {
-	if command.ThreadID == "" {
-		return DispatchResult{}, fmt.Errorf("%s requires threadId", command.Type)
-	}
-	var sequence uint64
-	err := e.withLockNotify(func(appendEvent func(Event) Event) error {
-		thread := e.projection.liveThread(command.ThreadID)
-		if thread == nil {
-			return fmt.Errorf("thread %q not found", command.ThreadID)
-		}
-		event, err := build(thread)
-		if err != nil {
-			return err
-		}
-		sequence = appendEvent(event).Sequence
-		return nil
-	})
-	if err != nil {
-		return DispatchResult{}, err
-	}
-	return DispatchResult{Sequence: sequence}, nil
-}
-
-func threadEvent(command Command, eventType EventType, actor ActorKind, payload EventPayload) Event {
-	payload.ThreadID = command.ThreadID
-	return Event{Type: eventType, OccurredAt: command.CreatedAt, CommandID: command.CommandID, Actor: actor, Payload: payload}
-}
-
-func (e *Engine) dispatchConfigOptionSet(command Command) (DispatchResult, error) {
-	if command.OptionID == "" {
-		return DispatchResult{}, fmt.Errorf("thread.config-option.set requires optionId")
-	}
-	return e.dispatchWithThread(command, func(thread *Thread) (Event, error) {
-		if !providerSessionActive(thread.Session) {
-			return Event{}, fmt.Errorf("thread.config-option.set requires an active provider session")
-		}
-		return threadEvent(command, EventThreadConfigOptionSetRequested, ActorKindClient, EventPayload{OptionID: command.OptionID, Value: command.Value}), nil
-	})
-}
-
-func (e *Engine) append(event Event) Event {
-	var appended Event
-	_ = e.withLockNotify(func(appendEvent func(Event) Event) error {
-		appended = appendEvent(event)
-		return nil
-	})
-	return appended
-}
-
-// testApplyHook, when non-nil (tests only), runs inside the locked apply path
-// after an event is stored and applied. It exists so tests can inject a panic
-// into a region that holds e.mu; it is nil in production.
-var testApplyHook func(Event)
-
-// InvariantViolationError is the terminal error the engine reports when a
-// panic fires after live state began mutating: the sequence and read model may
-// disagree, and with no complete process state to rebuild the engine cannot
-// continue — it closes itself. The process owner (main) decides how to exit;
-// the engine and server never call os.Exit themselves.
-type InvariantViolationError struct {
-	Cause any
-	Stack []byte
-}
-
-func (e *InvariantViolationError) Error() string {
-	return fmt.Sprintf("orchestration invariant violation: panic after live state began mutating (in-memory state is unrecoverable): %v", e.Cause)
-}
-
-// OnInvariantViolation installs the handler notified after the engine has
-// logged an invariant violation and closed itself (see Engine.onInvariant).
-func (e *Engine) OnInvariantViolation(fn func(*InvariantViolationError)) {
-	e.mu.Lock()
-	e.onInvariant = fn
-	e.mu.Unlock()
-}
-
-// withLockNotify runs fn while holding e.mu and hands it the only way to
-// append: appendEvent stores the event, applies it to the projection, and
-// records it for notification. The deferred handlers split panics into two
-// classes:
-//   - BEFORE the first append (decider/validation code): the mutex is
-//     released, nothing was written, and the panic propagates to
-//     dispatchRecovered/appendRecovered, which convert it into a command
-//     error — one bad command cannot wedge the daemon.
-//   - AFTER mutation began (stamp/projection.Apply): the mutex is
-//     released, every completed event is still published, and a typed
-//     invariant violation tells the worker to close the engine.
-//
-// Listeners run outside the lock but synchronously on the worker. A listener
-// that needs engine work must hand it to another goroutine; awaiting a queued
-// request here would deadlock the worker.
-func (e *Engine) withLockNotify(fn func(appendEvent func(Event) Event) error) error {
-	var appended []Event
-	mutated := false
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			return
-		}
-		if mutated {
-			// Re-panic as the TYPED violation: dispatchRecovered/appendRecovered
-			// return it as the in-flight command's error, and the worker — after
-			// replying to that caller — closes the engine and notifies the
-			// invariant handler (deterministic ordering; see worker()).
-			violation := &InvariantViolationError{Cause: rec, Stack: debug.Stack()}
-			log.Printf("%v\n%s", violation, violation.Stack)
-			panic(violation)
-		}
-		panic(rec) // pre-mutation: nothing was written; upstream converts this into a command error
-	}()
-	defer func() {
-		if len(appended) == 0 {
-			return
-		}
-		e.mu.Lock()
-		listeners := e.listenersLocked()
-		e.mu.Unlock()
-		for _, event := range appended {
-			e.notify(listeners, event)
-		}
-	}()
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return fn(func(event Event) Event {
-		mutated = true
-		sequenced := normalizeEvent(e.stamp(event))
-		appended = append(appended, sequenced)
-		e.projection.Apply(sequenced)
-		if hook := testApplyHook; hook != nil {
-			hook(sequenced)
-		}
-		return sequenced
-	})
-}
-
-func (e *Engine) listenersLocked() []func(Event) {
-	listeners := make([]func(Event), 0, len(e.listeners))
-	for _, listener := range e.listeners {
-		listeners = append(listeners, listener)
-	}
-	return listeners
-}
-
-// notify runs listeners on the worker goroutine; a panicking listener must not
-// take the worker (and all future dispatches) down with it.
-func (e *Engine) notify(listeners []func(Event), event Event) {
-	for _, listener := range listeners {
-		e.notifyOne(listener, event)
-	}
-}
-
-func (e *Engine) notifyOne(listener func(Event), event Event) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("orchestration: event listener panicked on %q: %v\n%s", event.Type, rec, debug.Stack())
-		}
-	}()
-	listener(event)
-}
-
-func newID(prefix string) string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	buf := make([]byte, len(prefix)+1+36)
-	copy(buf, prefix)
-	buf[len(prefix)] = '_'
-	offset := len(prefix) + 1
-	hex.Encode(buf[offset:offset+8], b[0:4])
-	buf[offset+8] = '-'
-	hex.Encode(buf[offset+9:offset+13], b[4:6])
-	buf[offset+13] = '-'
-	hex.Encode(buf[offset+14:offset+18], b[6:8])
-	buf[offset+18] = '-'
-	hex.Encode(buf[offset+19:offset+23], b[8:10])
-	buf[offset+23] = '-'
-	hex.Encode(buf[offset+24:offset+36], b[10:16])
-	return string(buf)
+	e.fatalMu.Unlock()
+	e.cancel()
 }

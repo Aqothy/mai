@@ -1,17 +1,16 @@
 module github.com/Aqothy/maiD
 
-go 1.26.5
+go 1.27.3
 
-require github.com/Aqothy/jsonrpc2 v0.0.0-20260702183250-4711ed453505
+require github.com/Aqothy/jsonrpc2 v0.0.0-20261027050031-e1508e8f7928
 
 require github.com/coder/websocket v1.8.14
 
 require (
-	github.com/Aqothy/go-acp v0.0.0-20260710233715-77db8d3d58be
-	github.com/BurntSushi/toml v1.6.0
+	github.com/Aqothy/go-acp v0.0.0-20261027050104-d4180fbb362b
 	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0
-	go.mitchellh.com/libghostty v0.0.0-20260803215605-774494360861
+	go.mitchellh.com/libghostty v0.0.0-20261021212106-df1957cbff56
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
 )

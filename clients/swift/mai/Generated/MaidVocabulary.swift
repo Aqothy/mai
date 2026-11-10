@@ -5,95 +5,157 @@
 // still decodes; use `Maid<Name>(rawValue:)` to branch and treat nil as
 // "unrecognized" rather than as an error.
 
-/// Type discriminator of a thread event delivered on orchestration.subscribeThread.
-public enum MaidEventType: String, Codable, Sendable, CaseIterable {
-    case threadCreated = "thread.created"
-    case threadImported = "thread.imported"
-    case threadMetaUpdated = "thread.meta-updated"
-    case threadMessageSent = "thread.message-sent"
-    case threadTurnStartRequested = "thread.turn-start-requested"
-    case threadTurnInterruptRequested = "thread.turn-interrupt-requested"
-    case threadTurnInterruptConfirmed = "thread.turn-interrupt-confirmed"
-    case threadTurnInterruptFailed = "thread.turn-interrupt-failed"
-    case threadApprovalResponseRequested = "thread.approval-response-requested"
-    case threadSessionPrepareRequested = "thread.session-prepare-requested"
-    case threadSessionStopRequested = "thread.session-stop-requested"
-    case threadSessionStopFailed = "thread.session-stop-failed"
-    case threadConfigOptionSetRequested = "thread.config-option-set-requested"
-    case threadSessionStatusSet = "thread.session-status-set"
-    case threadItemUpserted = "thread.item-upserted"
-    case threadPlanUpdated = "thread.plan-updated"
-    case threadApprovalOpened = "thread.approval-opened"
-    case threadApprovalResolved = "thread.approval-resolved"
-    case threadConfigOptionsUpdated = "thread.config-options-updated"
-    case threadSlashCommandsUpdated = "thread.slash-commands-updated"
-    case threadTokenUsageUpdated = "thread.token-usage-updated"
-    case threadHistoryReplayCompleted = "thread.history-replay-completed"
+/// Why thread.command refused a command: the data.code of its JSON-RPC error.
+public enum MaidCommandErrorCode: String, Codable, Sendable, CaseIterable {
+    case outOfScope = "out_of_scope"
+    case ceilingExceeded = "ceiling_exceeded"
+    case depthExceeded = "depth_exceeded"
+    case agentUnavailable = "agent_unavailable"
+    case notFound = "not_found"
+    case notRunning = "not_running"
+    case permissionRequest = "permission_request"
+    case invalid = "invalid"
 }
 
-/// Type discriminator of a client command sent to orchestration.dispatchCommand.
-public enum MaidCommandType: String, Codable, Sendable, CaseIterable {
-    case threadCreate = "thread.create"
-    case threadStart = "thread.start"
-    case threadMetaUpdate = "thread.meta.update"
-    case threadTurnStart = "thread.turn.start"
-    case threadTurnRetry = "thread.turn.retry"
-    case threadTurnInterrupt = "thread.turn.interrupt"
-    case threadApprovalRespond = "thread.approval.respond"
-    case threadSessionPrepare = "thread.session.prepare"
-    case threadSessionStop = "thread.session.stop"
-    case threadConfigOptionSet = "thread.config-option.set"
+/// Where an ACP agent's definition comes from.
+public enum MaidACPAgentSource: String, Codable, Sendable, CaseIterable {
+    case registry = "registry"
+    case custom = "custom"
 }
 
-/// Payload discriminator of a subscription snapshot or update.
-public enum MaidStreamItemKind: String, Codable, Sendable, CaseIterable {
-    case snapshot = "snapshot"
-    case event = "event"
-    case threadUpserted = "thread-upserted"
+/// What the daemon is doing with an ACP agent's files. Failed says the last install or update failed; an installed version keeps working.
+public enum MaidACPAgentState: String, Codable, Sendable, CaseIterable {
+    case notInstalled = "notInstalled"
+    case installing = "installing"
+    case installed = "installed"
+    case updating = "updating"
+    case failed = "failed"
 }
 
-/// Origin of a thread event.
-public enum MaidActorKind: String, Codable, Sendable, CaseIterable {
-    case client = "client"
-    case server = "server"
-    case provider = "provider"
+/// Why an ACP agent can't be installed on the daemon's machine.
+public enum MaidACPAgentBlocker: String, Codable, Sendable, CaseIterable {
+    case platform = "platform"
+    case node = "node"
+    case uv = "uv"
 }
 
-/// Which payload of a timeline entry's tagged union is populated.
-public enum MaidTimelineEntryKind: String, Codable, Sendable, CaseIterable {
-    case message = "message"
-    case item = "item"
-    case approval = "approval"
+/// What a thread is doing, derived from its turns, requests and queue.
+public enum MaidThreadStatus: String, Codable, Sendable, CaseIterable {
+    case running = "running"
+    case waiting = "waiting"
+    case held = "held"
+    case idle = "idle"
 }
 
-/// Author of a timeline message.
-public enum MaidMessageRole: String, Codable, Sendable, CaseIterable {
+/// How a thread began: a person's chat, a spawned child, or a provider's own subagent.
+public enum MaidOriginKind: String, Codable, Sendable, CaseIterable {
     case user = "user"
-    case assistant = "assistant"
+    case spawn = "spawn"
+    case native = "native"
 }
 
-/// Lifecycle state of a thread's latest turn.
+/// Why a thread's queue waits, and so who may release it; absent when nothing holds it.
+public enum MaidHold: String, Codable, Sendable, CaseIterable {
+    case stoppedPerson = "stoppedPerson"
+    case stoppedAgent = "stoppedAgent"
+    case failed = "failed"
+    case hops = "hops"
+}
+
+/// What started a turn.
+public enum MaidStartedBy: String, Codable, Sendable, CaseIterable {
+    case delivery = "delivery"
+    case provider = "provider"
+    case found = "found"
+}
+
+/// Who a delivery is from: a person's prompt, an agent's message, a reply, a daemon notice.
+public enum MaidDeliveryKind: String, Codable, Sendable, CaseIterable {
+    case prompt = "prompt"
+    case message = "message"
+    case reply = "reply"
+    case notice = "notice"
+}
+
+/// How a delivery goes: as the next turn, or into the running one.
+public enum MaidDeliveryMode: String, Codable, Sendable, CaseIterable {
+    case queue = "queue"
+    case steer = "steer"
+}
+
+/// Where a delivery is on its way to the agent.
+public enum MaidDeliveryState: String, Codable, Sendable, CaseIterable {
+    case queued = "queued"
+    case sending = "sending"
+    case delivered = "delivered"
+    case refused = "refused"
+    case cancelled = "cancelled"
+}
+
+/// Who sent a delivery or issued a command.
+public enum MaidActorKind: String, Codable, Sendable, CaseIterable {
+    case device = "device"
+    case agent = "agent"
+    case daemon = "daemon"
+}
+
+/// When a spawned thread's parent hears from it.
+public enum MaidWakeMode: String, Codable, Sendable, CaseIterable {
+    case settled = "settled"
+    case needsInput = "needsInput"
+}
+
+/// Which change a thread.event notification carries.
+public enum MaidThreadEventKind: String, Codable, Sendable, CaseIterable {
+    case entry = "entry"
+    case text = "text"
+    case turn = "turn"
+    case delivery = "delivery"
+    case request = "request"
+    case resolved = "resolved"
+    case participant = "participant"
+    case thread = "thread"
+    case child = "child"
+    case plan = "plan"
+    case refresh = "refresh"
+    case removed = "removed"
+}
+
+/// Whether a thread.list item is the snapshot, an upsert or a removal.
+public enum MaidThreadListKind: String, Codable, Sendable, CaseIterable {
+    case snapshot = "snapshot"
+    case upsert = "upsert"
+    case remove = "remove"
+}
+
+/// Lifecycle state of a turn.
 public enum MaidTurnState: String, Codable, Sendable, CaseIterable {
     case running = "running"
-    case interrupted = "interrupted"
     case completed = "completed"
-    case error = "error"
-}
-
-/// Status of a thread's provider session binding.
-public enum MaidSessionStatus: String, Codable, Sendable, CaseIterable {
-    case starting = "starting"
-    case running = "running"
-    case ready = "ready"
+    case failed = "failed"
     case interrupted = "interrupted"
-    case stopped = "stopped"
-    case error = "error"
 }
 
-/// Whether an approval request is still awaiting a decision.
-public enum MaidApprovalStatus: String, Codable, Sendable, CaseIterable {
-    case pending = "pending"
-    case resolved = "resolved"
+/// What streamed text adds to.
+public enum MaidStreamKind: String, Codable, Sendable, CaseIterable {
+    case assistant = "assistant"
+    case reasoning = "reasoning"
+}
+
+/// What a block maiD wrapped around text it sent an agent carries.
+public enum MaidEnvelopeKind: String, Codable, Sendable, CaseIterable {
+    case handoff = "handoff"
+    case message = "message"
+    case reply = "reply"
+    case notice = "notice"
+    case instructions = "instructions"
+}
+
+/// How well a provider rebuilds a session run outside maiD from its own record.
+public enum MaidHistoryQuality: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case lossy = "lossy"
+    case exact = "exact"
 }
 
 /// Client decision on an approval request.
@@ -104,15 +166,51 @@ public enum MaidApprovalDecision: String, Codable, Sendable, CaseIterable {
     case cancel = "cancel"
 }
 
-/// What an approval request is asking permission for.
-public enum MaidRequestType: String, Codable, Sendable, CaseIterable {
-    case commandExecutionApproval = "command_execution_approval"
-    case fileReadApproval = "file_read_approval"
-    case fileChangeApproval = "file_change_approval"
-    case dynamicToolCall = "dynamic_tool_call"
+/// How a sign-in method or challenge proceeds.
+public enum MaidAuthKind: String, Codable, Sendable, CaseIterable {
+    case browser = "browser"
+    case deviceCode = "device-code"
+    case secret = "secret"
+    case terminal = "terminal"
 }
 
-/// Kind of a non-message timeline item.
+/// What a message or tool attachment carries.
+public enum MaidAttachmentKind: String, Codable, Sendable, CaseIterable {
+    case image = "image"
+    case audio = "audio"
+    case resource = "resource"
+    case resourceLink = "resource_link"
+}
+
+/// Why a completed turn ended early; absent when it finished normally.
+public enum MaidStopReason: String, Codable, Sendable, CaseIterable {
+    case maxTokens = "max_tokens"
+    case maxTurnRequests = "max_turn_requests"
+    case refusal = "refusal"
+}
+
+/// How to render tool output; absent means plain text.
+public enum MaidOutputFormat: String, Codable, Sendable, CaseIterable {
+    case markdown = "markdown"
+}
+
+/// Input a user-input question takes.
+public enum MaidQuestionKind: String, Codable, Sendable, CaseIterable {
+    case text = "text"
+    case number = "number"
+    case integer = "integer"
+    case choice = "choice"
+}
+
+/// How much a session may do without asking, from read_only to full; absent when its mode isn't mapped.
+public enum MaidAccessLevel: String, Codable, Sendable, CaseIterable {
+    case readOnly = "read_only"
+    case ask = "ask"
+    case edit = "edit"
+    case full = "full"
+}
+
+/// Kind of an entry of a session's conversation.
 public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case userMessage = "user_message"
     case assistantMessage = "assistant_message"
@@ -123,9 +221,15 @@ public enum MaidItemKind: String, Codable, Sendable, CaseIterable {
     case toolCall = "tool_call"
     case warning = "warning"
     case error = "error"
+    case webSearch = "web_search"
+    case imageView = "image_view"
+    case imageGeneration = "image_generation"
+    case contextCompaction = "context_compaction"
+    case envelope = "envelope"
+    case request = "request"
 }
 
-/// Lifecycle status of a timeline item.
+/// Lifecycle status of an entry.
 public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case inProgress = "in_progress"
     case completed = "completed"
@@ -134,20 +238,20 @@ public enum MaidItemStatus: String, Codable, Sendable, CaseIterable {
     case declined = "declined"
 }
 
-/// Provider-neutral semantic action performed by a tool call.
+/// Status of the goal a provider pursues over its turns.
+public enum MaidGoalStatus: String, Codable, Sendable, CaseIterable {
+    case active = "active"
+    case paused = "paused"
+    case blocked = "blocked"
+    case usageLimited = "usage_limited"
+    case budgetLimited = "budget_limited"
+    case complete = "complete"
+}
+
+/// Action a provider explicitly stated for a tool call; absent when it stated none.
 public enum MaidToolAction: String, Codable, Sendable, CaseIterable {
     case read = "read"
-    case edit = "edit"
-    case delete = "delete"
-    case move = "move"
     case search = "search"
-    case execute = "execute"
-    case think = "think"
-    case fetch = "fetch"
-    case switchMode = "switch_mode"
-    case delegate = "delegate"
-    case view = "view"
-    case other = "other"
 }
 
 /// Kind of a normalized file mutation produced by a tool.
@@ -201,27 +305,6 @@ public enum MaidAuthStatus: String, Codable, Sendable, CaseIterable {
     case unauthenticated = "unauthenticated"
 }
 
-/// Whether a provider can change the active model for a thread.
-public enum MaidModelSwitchSupport: String, Codable, Sendable, CaseIterable {
-    case unsupported = "unsupported"
-    case inSession = "in-session"
-}
-
-/// Lifecycle of a terminal thread's shell run. Unknown future values must render as a neutral unavailable state.
-public enum MaidTerminalStatus: String, Codable, Sendable, CaseIterable {
-    case starting = "starting"
-    case running = "running"
-    case exited = "exited"
-    case stopped = "stopped"
-    case error = "error"
-}
-
-/// Payload discriminator of a terminal.subscribe notification.
-public enum MaidTerminalStreamItemKind: String, Codable, Sendable, CaseIterable {
-    case output = "output"
-    case status = "status"
-}
-
 /// Payload discriminator of a terminal.subscribeList snapshot or update.
 public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseIterable {
     case snapshot = "snapshot"
@@ -229,12 +312,24 @@ public enum MaidTerminalListStreamItemKind: String, Codable, Sendable, CaseItera
     case terminalRemoved = "terminal-removed"
 }
 
-/// Semantic activity of a terminal's detected coding agent. Blocked renders as “Needs input”; unknown renders neutrally, never as an error.
-public enum MaidTerminalAgentActivity: String, Codable, Sendable, CaseIterable {
-    case none = "none"
+/// What a terminal's program reported doing (OSC 7501). Blocked renders as needing the user; unknown future values render neutrally.
+public enum MaidTerminalProgramState: String, Codable, Sendable, CaseIterable {
     case idle = "idle"
     case working = "working"
-    case blocked = "blocked"
     case done = "done"
-    case unknown = "unknown"
+    case blocked = "blocked"
+    case error = "error"
+}
+
+/// What a blocked terminal program needs from the user. Unknown future values render like no need given.
+public enum MaidTerminalProgramNeed: String, Codable, Sendable, CaseIterable {
+    case permission = "permission"
+    case answer = "answer"
+    case auth = "auth"
+}
+
+/// Whether a terminal view's theme is light or dark.
+public enum MaidTerminalColorScheme: String, Codable, Sendable, CaseIterable {
+    case light = "light"
+    case dark = "dark"
 }

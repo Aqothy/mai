@@ -10,7 +10,10 @@ import (
 )
 
 func main() {
-	server := daemon.NewServer()
+	server, err := daemon.NewServer()
+	if err != nil {
+		log.Fatal(err)
+	}
 	// Agent processes run in their own process groups, so they do not die with
 	// the daemon; a signal must shut the server down cleanly (Close stops every
 	// provider instance) instead of leaking running agents.

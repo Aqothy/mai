@@ -25,9 +25,6 @@ type Result struct {
 var (
 	// ErrClosed is returned once the service has shut down.
 	ErrClosed = errors.New("workspacesearch: service is closed")
-	// ErrInvalidRoot rejects workspace roots that are not absolute paths to
-	// existing directories.
-	ErrInvalidRoot = errors.New("workspacesearch: invalid workspace root")
 	// ErrQueryTooLong rejects queries above MaxQueryBytes.
 	ErrQueryTooLong = errors.New("workspacesearch: query exceeds 256 bytes")
 )

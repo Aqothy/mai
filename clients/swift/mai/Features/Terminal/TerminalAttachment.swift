@@ -1,95 +1,100 @@
 import Foundation
+import GhosttyTerminal
+import GhosttyVT
+import SwiftUI
 
-/// One client attachment to one terminal thread run.
+/// One client attachment to one terminal thread, and the I/O of the terminal
+/// view that renders it.
 ///
-/// The attachment owns the stable Ghostty controller for the terminal view's
-/// lifetime and implements the attach contract: transactionally install the
-/// authoritative native Ghostty snapshot, then apply only live items whose
-/// run matches and whose sequence is greater than the snapshot sequence.
-/// Items that arrive while the attach call is in flight are buffered and
-/// applied in sequence order afterward.
+/// Attaching returns a ticket for the view's terminal stream, which begins
+/// with a native Ghostty snapshot and carries everything after it; its
+/// `TerminalFeed` applies it off the main actor. The view draws the daemon's grid, scaled
+/// to fit, and reports the grid that fits it. The daemon sizes the terminal
+/// to the view the user is using: opening, focusing, pressing or typing
+/// into a view takes the size, and closing it gives the size back.
 ///
-/// Observable properties change only on lifecycle events; raw output bytes go
-/// straight to the controller and never enter observation.
+/// Observable properties change only on lifecycle events; output bytes go
+/// straight to the feed and never enter observation.
 @Observable
-final class TerminalAttachment {
+final class TerminalAttachment: TerminalIO {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// How the attachment obtains its run.
     enum Mode: Equatable {
         /// Create a new terminal in the given working directory.
         case create(cwd: String, title: String?)
-        /// Attach to an existing live (running or exited) terminal.
+        /// Attach to an existing terminal.
         case attach(terminalID: String)
-        /// Start a fresh run for an existing terminal (stopped rows, or the
-        /// explicit Relaunch action).
-        case relaunch(terminalID: String)
     }
 
     enum Phase: Equatable {
         case attaching
         case running
-        case exited(Int?)
-        case stopped
         case failed(String)
         case disconnected
     }
 
     private(set) var phase: Phase = .attaching
 
-    /// True once this surface has installed its first authoritative snapshot and
-    /// all live items buffered behind it. Reconnects keep the rendered screen
-    /// visible while a replacement snapshot is in flight.
+    /// True once the first snapshot is installed. Reconnects keep the
+    /// rendered screen visible while a replacement snapshot is in flight.
     private(set) var hasInstalledInitialSnapshot = false
 
-    /// Stable for the attachment's lifetime so SwiftUI updates never recreate
-    /// the Ghostty surface.
-    @ObservationIgnored let controller: TerminalSessionController
-
-    /// Known immediately for attach/relaunch; assigned by the create snapshot.
+    /// Known immediately for attach; assigned by the create result.
     private(set) var terminalID: String?
 
-    /// The navigation request this attachment serves. Preserved across
-    /// relaunch replacement so a screen opened via `.new` keeps matching.
+    /// The title the program set, frame by frame: the open terminal shows
+    /// it as it is, while the list shows the daemon's steadier one.
+    private(set) var programTitle = ""
+
+    /// The terminal the view draws. Stable for the attachment's lifetime so
+    /// SwiftUI updates never recreate the surface.
+    @ObservationIgnored let terminal: Terminal
+
+    /// The navigation request this attachment serves.
     @ObservationIgnored let origin: TerminalOpenRequest
 
-    @ObservationIgnored private(set) var runID: String?
+    /// The view's light or dark appearance, which the daemon answers the
+    /// program's color queries with while this view has the size.
+    @ObservationIgnored var colorScheme: ColorScheme = .dark {
+        didSet {
+            if colorScheme != oldValue { reportView() }
+        }
+    }
+
+    /// Applies the stream to the terminal, off the main actor.
+    @ObservationIgnored nonisolated let feed: TerminalFeed
+    /// Names this view's subscription on the connection, so a detach sent
+    /// after the terminal was reopened elsewhere cannot drop the new view's.
+    @ObservationIgnored private let attachmentID = UUID().uuidString
     @ObservationIgnored private var mode: Mode
     @ObservationIgnored private weak var store: TerminalStore?
-    @ObservationIgnored private let backend: TerminalAttachmentBackend
-    @ObservationIgnored private let snapshotRestorer: TerminalStore.SnapshotRestorer
-
-    @ObservationIgnored private var lastAppliedSequence = 0
     @ObservationIgnored private var awaitingSnapshot = true
-    @ObservationIgnored private var bufferedItems: [TerminalStreamMessage] = []
     @ObservationIgnored private var isClosed = false
-
-    @ObservationIgnored private var pendingGrid: TerminalOutputPipeline.Grid?
-    @ObservationIgnored private var lastSentGrid: TerminalOutputPipeline.Grid?
+    /// The grid that fits the view, which attach asks for.
+    @ObservationIgnored private var preferredGrid: GridSize?
     @ObservationIgnored private var startTask: Task<Void, Never>?
-    @ObservationIgnored private var startInFlight = false
+    /// The view's open stream, once attach returned its ticket.
+    @ObservationIgnored private var stream: TerminalStreamConnection?
 
-    init(
-        store: TerminalStore,
-        origin: TerminalOpenRequest,
-        mode: Mode,
-        snapshotRestorer: @escaping TerminalStore.SnapshotRestorer
-    ) {
+    init(store: TerminalStore, origin: TerminalOpenRequest, mode: Mode) {
         self.store = store
         self.origin = origin
         self.mode = mode
-        self.snapshotRestorer = snapshotRestorer
-        let backend = TerminalAttachmentBackend()
-        self.backend = backend
-        controller = TerminalSessionController(
-            backend: backend,
-            fontSize: TerminalSettings.shared.fontSize
-        )
-        backend.bind(to: self)
+        // A placeholder until the snapshot replaces it.
+        // swiftlint:disable:next force_try
+        let terminal = try! Terminal(grid: GridSize(columns: 80, rows: 24))
+        self.terminal = terminal
+        let relay = FeedEventRelay()
+        feed = TerminalFeed(terminal: terminal) { event in relay.attachment?.handle(event) }
         switch mode {
         case .create:
             terminalID = nil
-        case .attach(let terminalID), .relaunch(let terminalID):
+        case .attach(let terminalID):
             self.terminalID = terminalID
         }
+        relay.attachment = self
     }
 
     /// Whether this attachment already serves the requested navigation
@@ -102,351 +107,211 @@ final class TerminalAttachment {
         return false
     }
 
-    // MARK: - Surface callbacks (via backend, MainActor)
+    // MARK: - TerminalIO
 
-    /// Terminal input from the surface. Dropped unless this attachment is on
-    /// a running shell; every attached client may write to the shared PTY.
-    func sendInput(_ data: Data) {
-        guard !isClosed, phase == .running, !awaitingSnapshot,
-            let terminalID, let runID
-        else { return }
+    /// The user's input. Every attached view may write to the shared PTY;
+    /// input is dropped until this attachment shows the shell.
+    func send(_ bytes: [UInt8]) {
+        guard !isClosed, phase == .running, !awaitingSnapshot, let terminalID else { return }
         store?.rpc.writeTerminal(
-            TerminalWriteParams(
-                data: data.base64EncodedString(),
-                runID: runID,
-                terminalID: terminalID
-            ))
+            TerminalWriteParams(data: Data(bytes).base64EncodedString(), terminalID: terminalID))
     }
 
-    /// The first measured grid starts attach. Synchronous layout bursts use
-    /// their latest value; a later change is handled by the snapshot-grid
-    /// validation in `apply(snapshot:)`.
-    func gridChanged(columns: UInt16, rows: UInt16) {
-        pendingGrid = .init(columns: columns, rows: rows)
-        if runID != nil {
-            scheduleResize()
-        } else if !startInFlight {
-            startTask?.cancel()
-            startTask = nil
-            scheduleStart()
+    /// The grid that fits the view: the first one starts the attach.
+    func requestResize(_ grid: GridSize) {
+        preferredGrid = grid
+        scheduleStart()
+        reportView()
+    }
+
+    func activate() {
+        guard !isClosed, !awaitingSnapshot, let terminalID else { return }
+        store?.rpc.focusTerminal(terminalID: terminalID)
+    }
+
+    func handle(_ event: TerminalEvent) {
+        if case .titleChanged(let title) = event {
+            programTitle = title
         }
     }
 
     // MARK: - Lifecycle
 
-    /// Re-runs the attach flow over a fresh connection. The last rendered
-    /// screen stays visible until the new snapshot replaces it.
-    func reattachAfterReconnect() {
+    /// Re-runs the attach flow, after a reconnect or when the user retries a
+    /// failed attach. The last rendered screen stays visible until the new
+    /// snapshot replaces it.
+    func reattach() {
         guard !isClosed else { return }
         if let terminalID {
             mode = .attach(terminalID: terminalID)
         }
         // Without an identity the original create never completed; retry it
-        // unchanged on the fresh connection.
-        prepareForNewRunRequest()
-    }
-
-    /// Starts a fresh shell for this terminal after exit/stop/failure.
-    func relaunch() {
-        guard !isClosed, let terminalID else { return }
-        switch phase {
-        case .exited, .stopped, .failed:
-            mode = .relaunch(terminalID: terminalID)
-            prepareForNewRunRequest()
-        case .attaching, .running, .disconnected:
-            return
-        }
+        // unchanged.
+        requestSnapshot(phase: .attaching)
     }
 
     /// Best-effort detach; the shell keeps running on the daemon.
     func close() {
         guard !isClosed else { return }
         isClosed = true
-        // Once an attach RPC has been sent, let it finish so we can detach the
-        // server-side subscription using the identity returned in its snapshot.
-        // Canceling only the local await would discard that identity while the
-        // daemon keeps this connection subscribed.
-        if !startInFlight {
-            startTask?.cancel()
-            startTask = nil
+        closeStream()
+        // Once an attach RPC has been sent, let it finish so its returned
+        // identity can detach the server-side subscription.
+        if let terminalID {
+            store?.rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: terminalID))
         }
-        if let terminalID, let runID {
-            store?.rpc.detachTerminal(
-                TerminalDetachParams(runID: runID, terminalID: terminalID))
-        }
-        controller.setInputEnabled(false)
     }
 
-    /// Transport loss: keep the last rendered screen, disable input.
+    /// Transport loss: keep the last rendered screen, stop input.
     func connectionLost() {
         guard !isClosed else { return }
         startTask?.cancel()
         startTask = nil
-        startInFlight = false
+        closeStream()
         phase = .disconnected
-        controller.setInputEnabled(false)
     }
 
-    private func prepareForNewRunRequest() {
-        phase = .attaching
+    /// Attaches again for a fresh stream, keeping the screen until its
+    /// snapshot arrives.
+    private func requestSnapshot(phase: Phase) {
+        self.phase = phase
         awaitingSnapshot = true
-        startInFlight = false
         startTask?.cancel()
         startTask = nil
-        bufferedItems.removeAll()
+        closeStream()
         scheduleStart()
     }
 
     private func scheduleStart() {
-        guard !isClosed, awaitingSnapshot, !startInFlight,
-            startTask == nil, pendingGrid != nil
-        else { return }
+        guard !isClosed, awaitingSnapshot, startTask == nil, stream == nil, let grid = preferredGrid else { return }
         startTask = Task { [weak self] in
-            guard let self, !Task.isCancelled, !isClosed,
-                awaitingSnapshot, !startInFlight,
-                let grid = pendingGrid
-            else { return }
-            startInFlight = true
-            await start(grid: grid)
+            await self?.start(grid: grid)
         }
     }
 
-    private func start(grid: TerminalOutputPipeline.Grid) async {
-        guard let rpc = store?.rpc else { return }
-        do {
-            let snapshot: TerminalAttachSnapshot
-            switch mode {
-            case .create(let cwd, let title):
-                snapshot = try await rpc.createTerminal(
-                    TerminalCreateParams(
-                        columns: Int(grid.columns),
-                        cwd: cwd,
-                        rows: Int(grid.rows),
-                        title: title
-                    ))
-            case .attach(let terminalID):
-                snapshot = try await rpc.attachTerminal(
-                    TerminalAttachParams(
-                        columns: Int(grid.columns),
-                        rows: Int(grid.rows),
-                        terminalID: terminalID
-                    ))
-            case .relaunch(let terminalID):
-                snapshot = try await rpc.relaunchTerminal(
-                    TerminalAttachParams(
-                        columns: Int(grid.columns),
-                        rows: Int(grid.rows),
-                        terminalID: terminalID
-                    ))
-            }
-            // A reconnect or replacement request may have canceled this task
-            // while an RPC implementation was still completing it. Such a
-            // stale response must not clear or overwrite the newer request.
-            guard !Task.isCancelled else { return }
-            startInFlight = false
-            startTask = nil
-            if isClosed {
-                rpc.detachTerminal(
-                    TerminalDetachParams(
-                        runID: snapshot.runID,
-                        terminalID: snapshot.terminal.terminalID
-                    ))
-                return
-            }
-            await apply(snapshot: snapshot)
-        } catch {
-            guard !Task.isCancelled else { return }
-            startInFlight = false
-            startTask = nil
-            guard !isClosed, phase == .attaching else { return }
-            phase = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Installs the authoritative native model, then applies buffered items
-    /// above the snapshot sequence in order. Awaiting Ghostty's completion is
-    /// the visibility barrier that prevents the old/empty buffer from flashing.
-    private func apply(snapshot: TerminalAttachSnapshot) async {
-        let snapshotGrid = TerminalOutputPipeline.Grid(
-            columns: UInt16(clamping: snapshot.columns),
-            rows: UInt16(clamping: snapshot.rows)
-        )
-        // A native model can only be installed at its captured grid. If the
-        // surface's grid moved while the request was in flight (iOS reports a
-        // provisional layout before settling), discard this snapshot and
-        // fetch a fresh one at the settled grid; the run it started
-        // (create/relaunch) is joined with a plain attach. The daemon can also
-        // reflow a naturally exited run's retained model without a live PTY.
-        let canReflowSnapshot: Bool =
-            switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
-            case .running, .starting, .exited: true
-            default: false
-            }
-        if canReflowSnapshot, let pendingGrid, pendingGrid != snapshotGrid {
-            terminalID = snapshot.terminal.terminalID
-            mode = .attach(terminalID: snapshot.terminal.terminalID)
-            scheduleStart()
-            return
-        }
-
-        terminalID = snapshot.terminal.terminalID
-        runID = snapshot.runID
-        lastAppliedSequence = snapshot.sequence
-        lastSentGrid = snapshotGrid
-
-        guard snapshot.snapshotFormat == TerminalSnapshotContract.format else {
-            failSnapshot(
-                String(localized: "The app and daemon use incompatible terminal snapshot versions."))
-            return
-        }
-        guard let data = Data(base64Encoded: snapshot.snapshot), !data.isEmpty else {
-            failSnapshot(String(localized: "The daemon returned an invalid terminal snapshot."))
-            return
-        }
-
-        do {
-            try await snapshotRestorer(controller, data)
-        } catch {
-            guard !isClosed else { return }
-            // A layout change can race the native install after the earlier
-            // check. Fetch again only when the measured grid actually moved;
-            // malformed or incompatible snapshots must not retry forever.
-            if canReflowSnapshot, let pendingGrid, pendingGrid != snapshotGrid {
-                mode = .attach(terminalID: snapshot.terminal.terminalID)
-                scheduleStart()
-                return
-            }
-            failSnapshot(error.localizedDescription)
-            return
-        }
-        guard !isClosed else { return }
-
-        switch MaidTerminalStatus(rawValue: snapshot.terminal.status) {
-        case .starting, .running, nil:
-            phase = .running
-            controller.setInputEnabled(true)
-        case .exited:
-            phase = .exited(snapshot.terminal.exitCode)
-            controller.processDidEnd(exitCode: snapshot.terminal.exitCode)
-        case .stopped:
-            phase = .stopped
-            controller.setInputEnabled(false)
-        case .error:
-            phase = .failed(String(localized: "The terminal failed"))
-            controller.setInputEnabled(false)
-        }
-
-        awaitingSnapshot = false
-        let buffered = bufferedItems.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }
-        bufferedItems.removeAll()
-        for item in buffered {
-            applyStreamItem(item)
-        }
-        hasInstalledInitialSnapshot = true
-        scheduleResize()
-    }
-
-    // MARK: - Stream items
-
-    func receive(_ item: TerminalStreamMessage) {
-        guard !isClosed else { return }
-        if case .failed = phase { return }
-        if awaitingSnapshot {
-            bufferedItems.append(item)
-            return
-        }
-        if shouldReattachForReplacementRun(item) {
-            guard let terminalID else { return }
-            mode = .attach(terminalID: terminalID)
-            prepareForNewRunRequest()
-            bufferedItems.append(item)
-            return
-        }
-        applyStreamItem(item)
-    }
-
-    /// A relaunch is shared lifecycle state. The daemon announces the fresh
-    /// running run so every listener can obtain its authoritative snapshot.
-    /// Old-run exit items intentionally do not trigger another attach.
-    private func shouldReattachForReplacementRun(_ item: TerminalStreamMessage) -> Bool {
-        guard item.terminalID == terminalID,
-            item.runID != nil, item.runID != runID,
-            MaidTerminalStreamItemKind(rawValue: item.kind) == .status
-        else { return false }
-        return switch MaidTerminalStatus(rawValue: item.status ?? "") {
-        case .starting, .running: true
-        case .exited, .stopped, .error, nil: false
-        }
-    }
-
-    private func applyStreamItem(_ item: TerminalStreamMessage) {
-        guard item.terminalID == terminalID else { return }
-        guard item.runID == runID else { return }
-        let sequence = item.sequence ?? 0
-        guard sequence > lastAppliedSequence else { return }
-        lastAppliedSequence = sequence
-
-        switch MaidTerminalStreamItemKind(rawValue: item.kind) {
-        case .output:
-            if let data = item.data {
-                controller.receive(data)
-            }
-        case .status:
-            applyStatus(item)
-        case nil:
-            // Unknown future kinds must not crash the client.
-            break
-        }
-    }
-
-    private func applyStatus(_ item: TerminalStreamMessage) {
-        switch MaidTerminalStatus(rawValue: item.status ?? "") {
-        case .exited:
-            phase = .exited(item.exitCode)
-            controller.processDidEnd(exitCode: item.exitCode)
-        case .stopped:
-            phase = .stopped
-            controller.processDidEnd(exitCode: item.exitCode)
-        case .error:
-            phase = .failed(item.message ?? String(localized: "The terminal failed"))
-            controller.setInputEnabled(false)
-        case .starting, .running, nil:
-            break
-        }
-    }
-
-    private func failSnapshot(_ message: String) {
-        phase = .failed(message)
-        awaitingSnapshot = false
-        bufferedItems.removeAll()
-        controller.setInputEnabled(false)
-        if let terminalID, let runID {
-            store?.rpc.detachTerminal(
-                TerminalDetachParams(runID: runID, terminalID: terminalID))
-        }
-    }
-
-    // MARK: - Resize
-
-    private func scheduleResize() {
-        guard !isClosed, phase == .running, runID != nil,
-            pendingGrid != lastSentGrid
-        else { return }
-        sendPendingResize()
-    }
-
-    private func sendPendingResize() {
-        guard !isClosed, phase == .running,
-            let terminalID, let runID,
-            let grid = pendingGrid, grid != lastSentGrid
-        else { return }
-        lastSentGrid = grid
+    /// Tells the daemon the view's grid and appearance, once it has the view.
+    private func reportView() {
+        guard !isClosed, !awaitingSnapshot, let terminalID, let preferredGrid else { return }
         store?.rpc.resizeTerminal(
             TerminalResizeParams(
-                columns: Int(grid.columns),
-                rows: Int(grid.rows),
-                runID: runID,
-                terminalID: terminalID
-            ))
+                appearance: MaidTerminalAppearance.wireAppearance(for: colorScheme),
+                columns: Int(preferredGrid.columns),
+                rows: Int(preferredGrid.rows),
+                terminalID: terminalID))
+    }
+
+    private func start(grid: GridSize) async {
+        guard let rpc = store?.rpc else { return }
+        let appearance = MaidTerminalAppearance.wireAppearance(for: colorScheme)
+        do {
+            let result: TerminalAttachResult
+            switch mode {
+            case .create(let cwd, let title):
+                result = try await rpc.createTerminal(
+                    TerminalCreateParams(
+                        appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
+                        cwd: cwd, rows: Int(grid.rows), title: title))
+            case .attach(let terminalID):
+                // Opening the terminal takes the size; attaching again after a
+                // reconnect or a dropped stream doesn't.
+                result = try await rpc.attachTerminal(
+                    TerminalAttachParams(
+                        appearance: appearance, attachmentID: attachmentID, columns: Int(grid.columns),
+                        focus: !hasInstalledInitialSnapshot, rows: Int(grid.rows), terminalID: terminalID))
+            }
+            // A reconnect or replacement may have canceled this request while
+            // the RPC completed; its response must not overwrite the newer one.
+            guard !Task.isCancelled else { return }
+            terminalID = result.terminal.terminalID
+            mode = .attach(terminalID: result.terminal.terminalID)
+            if isClosed {
+                rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: result.terminal.terminalID))
+                return
+            }
+            guard let ticket = TerminalStreamConnection.ticketBytes(result.streamTicket) else {
+                throw TerminalStreamError(String(localized: "maiD returned an invalid terminal stream ticket."))
+            }
+            startTask = nil
+            await openStream(ticket: ticket, endpoint: rpc.terminalStreamEndpoint)
+        } catch {
+            guard !Task.isCancelled, !isClosed else { return }
+            startTask = nil
+            fail(error.localizedDescription)
+        }
+    }
+
+    private func openStream(ticket: Data, endpoint: URL) async {
+        let stream = TerminalStreamConnection(endpoint: endpoint)
+        self.stream = stream
+        let feed = feed
+        await feed.expectSnapshot()
+        Task { [weak self] in
+            let (end, sawSnapshot) = await stream.run(ticket: ticket) { record in
+                try await feed.apply(record)
+            }
+            self?.streamEnded(stream, end: end, sawSnapshot: sawSnapshot)
+        }
+    }
+
+    /// The view's stream ended. A stream that never delivered a snapshot
+    /// failed the attach, with no retry; one that dropped later attaches
+    /// again, which converges.
+    private func streamEnded(_ ended: TerminalStreamConnection, end: TerminalStreamConnection.End, sawSnapshot: Bool) {
+        guard ended === stream, !isClosed else { return }
+        stream = nil
+        switch end {
+        case .closed(.normalClosure, _):
+            // The view ended on purpose: detached, replaced or deleted.
+            break
+        case .closed(.goingAway, _):
+            // The daemon is going away or dropped this connection; the
+            // connection's reconnect attaches again.
+            break
+        case .failed(let message):
+            fail(message)
+        case .closed(_, let reason) where !sawSnapshot:
+            fail(reason.isEmpty ? String(localized: "maiD refused the terminal stream.") : reason)
+        case .dropped where !sawSnapshot:
+            fail(String(localized: "The terminal stream closed before it showed the terminal."))
+        case .closed, .dropped:
+            guard phase != .disconnected else { return }
+            requestSnapshot(phase: phase)
+        }
+    }
+
+    private func closeStream() {
+        stream?.close()
+        stream = nil
+    }
+
+    fileprivate func handle(_ event: TerminalFeed.Event) {
+        guard !isClosed else { return }
+        switch event {
+        case .snapshot(let title):
+            awaitingSnapshot = false
+            hasInstalledInitialSnapshot = true
+            // The snapshot carries the title without announcing it.
+            programTitle = title
+            phase = .running
+            // The view may have changed while it attached.
+            reportView()
+        case .needsSnapshot:
+            requestSnapshot(phase: phase == .running ? .running : .attaching)
+        }
+    }
+
+    private func fail(_ message: String) {
+        phase = .failed(message)
+        awaitingSnapshot = false
+        closeStream()
+        if let terminalID {
+            store?.rpc.detachTerminal(TerminalDetachParams(attachmentID: attachmentID, terminalID: terminalID))
+        }
     }
 }
+
+/// Hands the feed's events to the attachment, which owns the feed.
+private final class FeedEventRelay {
+    weak var attachment: TerminalAttachment?
+}
+

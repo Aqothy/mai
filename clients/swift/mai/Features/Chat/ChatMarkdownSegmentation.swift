@@ -19,10 +19,10 @@ nonisolated enum ChatTextOptimizationPolicy {
         streamingTurnID: String?,
         source: String
     ) -> Bool {
-        if role == MaidMessageRole.user.rawValue {
+        if role == ChatRole.user.rawValue {
             return ChatMarkdownSegmenter.shouldOptimize(source)
         }
-        guard role == MaidMessageRole.assistant.rawValue else { return false }
+        guard role == ChatRole.assistant.rawValue else { return false }
         // Every settled assistant message uses one selectable native text host
         // per consecutive prose run. Streaming stays in one stable live row.
         return streamingTurnID == nil || messageTurnID != streamingTurnID
@@ -101,7 +101,8 @@ nonisolated enum ChatMarkdownSegmenter {
         return parsedSegments(of: source)
     }
 
-    /// Full-parser equivalent retained as a benchmark seam. Keeping the
+#if DEBUG
+    /// Full-parser equivalent, the test oracle for the prefilter. Keeping the
     /// semantic result directly comparable prevents the prefilter from
     /// becoming an unverified collection of syntax assumptions.
     static func segmentsUsingFullParser(
@@ -110,6 +111,8 @@ nonisolated enum ChatMarkdownSegmenter {
         guard canSegment(source) else { return nil }
         return parsedSegments(of: source)
     }
+
+#endif
 
     private static func canSegment(_ source: String) -> Bool {
         !containsReferenceDefinition(source)
@@ -127,7 +130,7 @@ nonisolated enum ChatMarkdownSegmenter {
             lineStarts.append(offset + 1)
         }
 
-        let document = Markdown.Document(parsing: source)
+        let document = Markdown.Document(chatSource: source)
         var blocks: [(offset: Int, kind: ChatMarkdownSegment.Kind)] = []
         for block in document.children {
             guard let location = block.range?.lowerBound,
@@ -236,6 +239,9 @@ nonisolated struct ChatMarkdownPrimeRequest: Equatable, Sendable {
 
 /// Avoids reparsing unchanged settled messages when the timeline updates.
 final class ChatMarkdownSegmentCache {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     /// Retained message entries; a test seam for retention behavior.
     var entryCount: Int { entries.count }
 

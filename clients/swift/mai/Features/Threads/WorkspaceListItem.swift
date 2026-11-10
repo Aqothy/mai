@@ -11,7 +11,7 @@ enum WorkspaceItemID: Hashable {
 /// the presentation layer; terminal summaries are never converted into fake
 /// thread entries.
 enum WorkspaceListItem: Identifiable {
-    case agentThread(ThreadListEntry)
+    case agentThread(ThreadSummary)
     case terminal(TerminalSummary)
 
     var id: WorkspaceItemID {
@@ -32,7 +32,7 @@ enum WorkspaceListItem: Identifiable {
     /// descending, with a stable id tiebreak so equal timestamps cannot
     /// reorder between updates.
     static func merged(
-        threads: [ThreadListEntry],
+        threads: [ThreadSummary],
         terminals: [TerminalSummary]
     ) -> [WorkspaceListItem] {
         var items = threads.map(WorkspaceListItem.agentThread)
@@ -57,8 +57,8 @@ enum WorkspaceListItem: Identifiable {
     var projectDirectory: String? {
         switch self {
         case .agentThread(let thread):
-            guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
-            return cwd
+            let cwd = thread.workspace.cwd
+            return cwd.isEmpty ? nil : cwd
         case .terminal(let summary):
             return summary.cwd.isEmpty ? nil : summary.cwd
         }

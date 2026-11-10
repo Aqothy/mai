@@ -1,6 +1,15 @@
 {
-  "originHash" : "100b4fa37523fc768e1cf9656b10adeb12f1fe1eeaa20ed0ad9b44d83b1e542f",
+  "originHash" : "5c6d7ff6a0e1d8ac8a631adbb5906e39fe221d002cb2f3511c6154ef1a2435fe",
   "pins" : [
+    {
+      "identity" : "ghost-swiftly",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Aqothy/ghost-swiftly",
+      "state" : {
+        "revision" : "6c75154905831302520db6a4242781a859abc2df",
+        "version" : "0.3.3"
+      }
+    },
     {
       "identity" : "highlighterswift",
       "kind" : "remoteSourceControl",
@@ -8,24 +17,6 @@
       "state" : {
         "revision" : "fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0",
         "version" : "3.1.0"
-      }
-    },
-    {
-      "identity" : "libghostty-spm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Aqothy/libghostty-spm",
-      "state" : {
-        "revision" : "fe46cb1a7d7cf14e9de517984127afbfdacc2917",
-        "version" : "1.5.2"
-      }
-    },
-    {
-      "identity" : "msdisplaylink",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Lakr233/MSDisplayLink.git",
-      "state" : {
-        "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
-        "version" : "2.1.0"
       }
     },
     {

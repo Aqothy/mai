@@ -1,21 +1,22 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/coder/websocket"
 )
 
 func TestProviderStartValidation(t *testing.T) {
@@ -31,633 +32,209 @@ func TestProviderStartValidation(t *testing.T) {
 		{name: "unsupported driver", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "unknown"}, want: `unsupported provider driver "unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer()
-			defer server.Close()
-			_, err := server.StartProvider(context.Background(), tc.spec, false)
+			_, err := newTestServer(t).StartProvider(context.Background(), tc.spec)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want error containing %q", err, tc.want)
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestProviderRestartSettlesActiveTurnFromReplacedProcess(t *testing.T) {
+// Restarting a provider ends the turns its old process ran, and cancels
+// their open requests: the old process can no longer settle or answer them.
+func TestProviderRestartEndsTheOldProcessesTurnsAndRequests(t *testing.T) {
 	s := newTestServer(t)
-	defer s.Close()
+	startFakeACPAgent(t, s, "agent")
+	client := newRecordingClient(t, s)
+	folder := t.TempDir()
+	blockedThread := client.createThread(t, "agent", folder).Thread
+	askingThread := client.createThread(t, "agent", folder).Thread
+	client.subscribe(t, blockedThread)
+	client.subscribe(t, askingThread)
+	gate := t.TempDir()
+	blocked := client.deliver(t, blockedThread, "block "+gate).Delivery
+	asking := client.deliver(t, askingThread, "permission").Delivery
+	waitForFile(t, gate+"/ready")
+	request := client.waitEvent(t, "the permission request", func(event orchestration.ThreadEvent) bool {
+		return event.Kind == orchestration.EventRequest
+	}).Request
 
-	dir := t.TempDir()
-	readyPath := dir + "/ready"
-	releasePath := dir + "/release"
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("blocked-sessions", readyPath, releasePath)), false); err != nil {
-		t.Fatalf("provider start: %v", err)
+	if _, err := s.providerService.RestartInstance(context.Background(), "agent"); err != nil {
+		t.Fatalf("restart: %v", err)
 	}
-
-	threadID := orchestration.ThreadID("thread-restart-settles-turn")
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadCreate, CommandID: "cmd-create-restart-settle", ThreadID: threadID, Title: "Restart settle", ProviderInstanceID: "codex", Cwd: dir}); err != nil {
-		t.Fatalf("thread.create: %v", err)
-	}
-	if _, err := s.orchestration.Dispatch(context.Background(), orchestration.Command{Type: orchestration.CommandThreadTurnStart, CommandID: "cmd-turn-restart-settle", ThreadID: threadID, Message: &orchestration.CommandMessage{MessageID: "msg-restart", Text: "hello"}}); err != nil {
-		t.Fatalf("thread.turn.start: %v", err)
-	}
-	waitForFile(t, readyPath)
-
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("codex", "codex", helperCommand("sessions")), true); err != nil {
-		t.Fatalf("provider restart: %v", err)
-	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		thread, ok := s.orchestration.Thread(threadID)
-		if ok && thread.LatestTurn != nil && thread.LatestTurn.State == orchestration.TurnStateError && thread.Session != nil && thread.Session.ActiveTurnID == "" {
-			return
+	for _, turn := range []orchestration.TurnView{client.waitSettled(t, blockedThread, blocked), client.waitSettled(t, askingThread, asking)} {
+		if turn.State == provider.TurnCompleted || turn.State == provider.TurnRunning {
+			t.Fatalf("turn of the replaced process = %s, want it ended", turn.State)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	thread, _ := s.orchestration.Thread(threadID)
-	t.Fatalf("thread after restart = %#v, want replaced provider turn settled as error", thread)
+	client.waitEvent(t, "the request cancelled", func(event orchestration.ThreadEvent) bool {
+		return event.Kind == orchestration.EventResolved && event.Resolved.Request == request.ID
+	})
+	_, err := client.commandErr(wire.CommandParams{Respond: &orchestration.Respond{Thread: askingThread, Request: request.ID, Action: request.Ask.Actions[0].ID}})
+	if code, reason := commandCode(err); code != commandRefusedCode || reason != orchestration.CodeNotFound {
+		t.Fatalf("answering the cancelled request = %v, want refused not found", err)
+	}
+	// The new process takes the chats' next messages.
+	if turn := client.waitSettled(t, blockedThread, client.deliver(t, blockedThread, "hello").Delivery); turn.State != provider.TurnCompleted {
+		t.Fatalf("turn on the new process = %s, want completed", turn.State)
+	}
 }
 
-// TestProviderCloseKillsWrappedAgentProcessTree guards against orphaning the
-// real agent when the configured command is a wrapper (npx/npm exec): killing
-// only the direct child would leak the agent process it spawned. The fake agent
-// runs behind a non-exec'ing shell so it is a grandchild of the daemon.
+// Closing the daemon kills an agent behind a wrapper (npx, npm exec) too:
+// killing only the direct child would leak the agent it spawned. The fake
+// agent runs behind a shell that doesn't exec it, as a grandchild.
 func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process-group kill is unix-only")
-	}
-	s := NewServer()
-	dir := t.TempDir()
-	pidPath := dir + "/agent.pid"
-	// The trailing "exit $?" keeps the shell from exec-replacing itself with the
-	// helper, so the helper stays a grandchild like npx's spawned agent.
-	inner := fmt.Sprintf("MAID_DAEMON_ACP_HELPER=1 MAID_HELPER_PIDFILE='%s' '%s' -test.run=TestHelperProcess -- lingering-sessions; exit $?", pidPath, os.Args[0])
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner}), false); err != nil {
+	s := newTestServer(t)
+	pidPath := t.TempDir() + "/agent.pid"
+	inner := fmt.Sprintf("MAID_DAEMON_ACP_HELPER=1 '%s' -test.run=TestHelperProcess -- -linger -pidfile '%s'; exit $?", os.Args[0], pidPath)
+	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner})); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
-	waitForFile(t, pidPath)
-	raw, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("read helper pidfile: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatalf("parse helper pid %q: %v", raw, err)
-	}
+	pid := readPID(t, pidPath)
 	if err := syscall.Kill(pid, 0); err != nil {
-		t.Fatalf("wrapped agent process %d not alive before close: %v", pid, err)
+		t.Fatalf("wrapped agent %d not alive before close: %v", pid, err)
 	}
-
 	if err := s.Close(); err != nil {
-		t.Fatalf("server close: %v", err)
+		t.Fatalf("close: %v", err)
 	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return // grandchild died with the process group
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	_ = syscall.Kill(pid, 9)
-	t.Fatalf("wrapped agent process %d survived server close (leaked agent)", pid)
+	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
+	waitUntil(t, "the wrapped agent to die with its process group", func() bool { return syscall.Kill(pid, 0) != nil })
 }
 
-func acpInstanceSpec(id provider.InstanceID, name string, command []string) provider.InstanceSpec {
-	config, err := json.Marshal(map[string]any{"command": command})
-	if err != nil {
-		panic(err)
-	}
-	return provider.InstanceSpec{InstanceID: id, Name: name, Driver: "acp", Config: config}
-}
-
-func helperCommand(args ...string) []string {
-	cmd := []string{"env", "MAID_DAEMON_ACP_HELPER=1", os.Args[0], "-test.run=TestHelperProcess", "--"}
-	return append(cmd, args...)
-}
-
-func waitForFile(t *testing.T, path string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", path)
-}
-
-func waitForHelperFile(path string) {
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func assertPermissionResponse(reader *bufio.Reader, expectedOption string) {
-	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "perm_1",
-		"method":  "session/request_permission",
-		"params": map[string]any{
-			"sessionId": "sess_new",
-			"toolCall":  map[string]any{"toolCallId": "tool_1", "title": "Edit file"},
-			"options": []any{
-				map[string]any{"kind": "allow_once", "name": "Allow", "optionId": "allow"},
-				map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
-			},
-		},
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(request); err != nil {
-		fmt.Fprintf(os.Stderr, "write permission request: %v", err)
-		os.Exit(1)
-	}
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read permission response: %v", err)
-		os.Exit(1)
-	}
-	var resp struct {
-		ID     string          `json:"id"`
-		Error  json.RawMessage `json:"error"`
-		Result struct {
-			Outcome struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
-			} `json:"outcome"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(line, &resp); err != nil {
-		fmt.Fprintf(os.Stderr, "decode permission response: %v", err)
-		os.Exit(1)
-	}
-	if len(resp.Error) > 0 {
-		fmt.Fprintf(os.Stderr, "permission response error: %s", resp.Error)
-		os.Exit(1)
-	}
-	if resp.ID != "perm_1" || resp.Result.Outcome.Outcome != "selected" || resp.Result.Outcome.OptionID != expectedOption {
-		fmt.Fprintf(os.Stderr, "permission response = %s, want selected %s", line, expectedOption)
-		os.Exit(1)
-	}
-}
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("MAID_DAEMON_ACP_HELPER") != "1" {
-		return
-	}
-	if pidPath := os.Getenv("MAID_HELPER_PIDFILE"); pidPath != "" {
-		if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write helper pidfile: %v", err)
-			os.Exit(1)
-		}
-	}
-
-	helperArgs := []string{}
-	for i, arg := range os.Args {
-		if arg == "--" && i+1 < len(os.Args) {
-			helperArgs = os.Args[i+1:]
-			break
-		}
-	}
-	mode := ""
-	if len(helperArgs) > 0 {
-		mode = helperArgs[0]
-	}
-
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read request: %v", err)
-		os.Exit(1)
-	}
-
-	var req struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
-	}
-	if err := json.Unmarshal(line, &req); err != nil {
-		fmt.Fprintf(os.Stderr, "decode request: %v", err)
-		os.Exit(1)
-	}
-	if req.Method != "initialize" {
-		fmt.Fprintf(os.Stderr, "unexpected method: %s", req.Method)
-		os.Exit(1)
-	}
-
-	authMethods := []any{}
-	if mode == "rich-sessions" {
-		authMethods = []any{map[string]any{"id": "agent-login", "name": "Agent login"}}
-	}
-	sessionCapabilities := map[string]any{}
-	loadSession := false
-	if mode == "list-only-sessions" {
-		sessionCapabilities = map[string]any{"list": map[string]any{}}
-	} else if isSessionMode(mode) {
-		loadSession = true
-		sessionCapabilities = map[string]any{"list": map[string]any{}, "resume": map[string]any{}, "close": map[string]any{}}
-	}
-	resp := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      json.RawMessage(req.ID),
-		"result": map[string]any{
-			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{"auth": map[string]any{"logout": map[string]any{}}, "loadSession": loadSession, "sessionCapabilities": sessionCapabilities},
-			"agentInfo":         map[string]any{"name": "fake-acp-agent"},
-			"authMethods":       authMethods,
-		},
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-		fmt.Fprintf(os.Stderr, "write response: %v", err)
-		os.Exit(1)
-	}
-
-	if mode == "scripted-sessions" {
-		serveScriptedSessionRequests(reader)
-		return
-	}
-	if isSessionMode(mode) {
-		var readyPath, releasePath string
-		if mode == "blocked-sessions" {
-			if len(helperArgs) < 3 {
-				fmt.Fprintln(os.Stderr, "blocked-sessions requires ready and release paths")
-				os.Exit(1)
-			}
-			readyPath = helperArgs[1]
-			releasePath = helperArgs[2]
-		}
-		serveDaemonSessionRequests(reader, mode, readyPath, releasePath)
-		return
-	}
-}
-
-func isSessionMode(mode string) bool {
-	switch mode {
-	case "sessions", "blocked-sessions", "permission-deny-sessions", "permission-allow-sessions", "lingering-sessions",
-		"rich-sessions", "scripted-sessions", "list-only-sessions":
-		return true
-	}
-	return false
-}
-
-// fakeSessionConfigOptions is the ACP configOptions payload the rich-sessions
-// fake agent advertises: a mode selector and a model selector (the two
-// categories maiD projects onto SessionBinding.ConfigOptions).
-func fakeSessionConfigOptions(modeValue string, modelValue string) []any {
-	return []any{
-		map[string]any{"type": "select", "id": "mode", "name": "Mode", "category": "mode", "currentValue": modeValue, "options": []any{
-			map[string]any{"name": "Ask", "value": "ask"},
-			map[string]any{"name": "Plan", "value": "plan"},
-		}},
-		map[string]any{"type": "select", "id": "model", "name": "Model", "category": "model", "currentValue": modelValue, "options": []any{
-			map[string]any{"name": "Test Model 1", "value": "test-model-1"},
-			map[string]any{"name": "Test Model 2", "value": "test-model-2"},
-		}},
-	}
-}
-
-func serveDaemonSessionRequests(reader *bufio.Reader, mode string, readyPath string, releasePath string) {
-	linger := mode == "lingering-sessions"
-	rich := mode == "rich-sessions"
-	expectedPermissionOption := ""
-	switch mode {
-	case "permission-deny-sessions":
-		expectedPermissionOption = "reject"
-	case "permission-allow-sessions":
-		expectedPermissionOption = "allow"
-	}
-
-	cwdBySession := map[string]string{}
-	modeValue := "ask"
-	modelValue := "test-model-1"
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			if linger {
-				// Mimic real agents (e.g. claude-code-acp) that do not exit on
-				// stdin EOF: only a kill of the process group reaps them.
-				// (A sleep loop, not select{}, so the Go runtime's deadlock
-				// detector does not terminate the helper.)
-				for {
-					time.Sleep(time.Hour)
-				}
-			}
-			return
-		}
-		var req struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params struct {
-				Cwd       string `json:"cwd"`
-				SessionID string `json:"sessionId"`
-				MethodID  string `json:"methodId"`
-				ConfigID  string `json:"configId"`
-				Value     string `json:"value"`
-			} `json:"params"`
-		}
-		if err := json.Unmarshal(line, &req); err != nil {
-			fmt.Fprintf(os.Stderr, "decode session request: %v", err)
-			os.Exit(1)
-		}
-
-		var result any = map[string]any{}
-		switch req.Method {
-		case "$/cancel_request":
-			// Protocol-level request cancellation is a notification; a real
-			// agent treats a cancel for an already-completed request as a no-op.
-			continue
-		case "session/cancel":
-			// Cancellation is a notification; there is no response to write.
-			continue
-		case "authenticate":
-			if req.Params.MethodID != "agent-login" {
-				fmt.Fprintf(os.Stderr, "unexpected authenticate request: %s", line)
-				os.Exit(1)
-			}
-		case "logout":
-		case "session/close":
-		case "session/set_config_option":
-			switch req.Params.ConfigID {
-			case "mode":
-				modeValue = req.Params.Value
-			case "model":
-				modelValue = req.Params.Value
-			default:
-				fmt.Fprintf(os.Stderr, "unexpected set_config_option request: %s", line)
-				os.Exit(1)
-			}
-			result = map[string]any{"configOptions": fakeSessionConfigOptions(modeValue, modelValue)}
-		case "session/new":
-			cwdBySession["sess_new"] = req.Params.Cwd
-			newSession := map[string]any{"sessionId": "sess_new"}
-			if rich {
-				newSession["configOptions"] = fakeSessionConfigOptions(modeValue, modelValue)
-			}
-			result = newSession
-		case "session/list":
-			result = map[string]any{"sessions": []any{map[string]any{"sessionId": "sess_new", "cwd": cwdBySession["sess_new"], "title": "Test session"}}}
-		case "session/load":
-			sessionID := req.Params.SessionID
-			if sessionID == "" {
-				sessionID = "sess_new"
-			}
-			notification := map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": sessionID, "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "replayed"}}}}
-			if err := json.NewEncoder(os.Stdout).Encode(notification); err != nil {
-				fmt.Fprintf(os.Stderr, "write session load update: %v", err)
-				os.Exit(1)
-			}
-		case "session/prompt":
-			if expectedPermissionOption != "" {
-				assertPermissionResponse(reader, expectedPermissionOption)
-			}
-			if readyPath != "" {
-				if err := os.WriteFile(readyPath, []byte("ready"), 0o644); err != nil {
-					fmt.Fprintf(os.Stderr, "write prompt ready marker: %v", err)
-					os.Exit(1)
-				}
-			}
-			if releasePath != "" {
-				waitForHelperFile(releasePath)
-			}
-			if rich {
-				for _, update := range []map[string]any{
-					{"sessionUpdate": "available_commands_update", "availableCommands": []any{map[string]any{"name": "compact", "description": "Compact the conversation"}}},
-					{"sessionUpdate": "session_info_update", "title": "Agent set title"},
-					{"sessionUpdate": "usage_update", "used": 1200, "size": 200000, "cost": map[string]any{"amount": 0.42, "currency": "USD"}},
-				} {
-					richNotification := map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "sess_new", "update": update}}
-					if err := json.NewEncoder(os.Stdout).Encode(richNotification); err != nil {
-						fmt.Fprintf(os.Stderr, "write rich session update: %v", err)
-						os.Exit(1)
-					}
-				}
-			}
-			notification := map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "sess_new", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "hi"}}}}
-			if err := json.NewEncoder(os.Stdout).Encode(notification); err != nil {
-				fmt.Fprintf(os.Stderr, "write session update: %v", err)
-				os.Exit(1)
-			}
-			result = map[string]any{"stopReason": "end_turn"}
-		default:
-			fmt.Fprintf(os.Stderr, "unexpected session request: %s", line)
-			os.Exit(1)
-		}
-		resp := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": result}
-		if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-			fmt.Fprintf(os.Stderr, "write session response: %v", err)
-			os.Exit(1)
-		}
-	}
-}
-
-// serveScriptedSessionRequests is the multi-client-test fake agent: it mints a
-// distinct session id per session/new (so concurrent threads on one instance
-// do not collide) and interprets the prompt text as a behavior script:
-//
-//	"stream <n> [width] [delayMs]"  emit n agent_message_chunk updates
-//	                      (width-padded, optionally paced like a real agent)
-//	"tools <n>"           emit n distinct tool_call updates (per-event client
-//	                      traffic — agent text is buffered server-side)
-//	"permission"          request permission, answer follows the chosen option
-//	"block"               park the prompt until session/cancel resolves it
-//	anything else         a single "hi" chunk
-//
-// The loop is fully event-driven (parked prompts and pending permission
-// requests are keyed state, not blocking reads), so prompts on other sessions
-// keep being served while one session waits on an approval or a cancel.
-func serveScriptedSessionRequests(reader *bufio.Reader) {
-	writeMessage := func(msg map[string]any) {
-		if err := json.NewEncoder(os.Stdout).Encode(msg); err != nil {
-			fmt.Fprintf(os.Stderr, "scripted agent write: %v", err)
-			os.Exit(1)
-		}
-	}
-	writeResult := func(id json.RawMessage, result any) {
-		writeMessage(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
-	}
-	writeChunk := func(sessionID string, text string) {
-		writeMessage(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
-			"sessionId": sessionID,
-			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}},
-		}})
-	}
-
-	type pendingPermission struct {
-		promptID  json.RawMessage
-		sessionID string
-	}
-	sessionCounter := 0
-	permissionCounter := 0
-	parkedPrompts := map[string]json.RawMessage{}        // sessionID -> blocked session/prompt id
-	pendingPermissions := map[string]pendingPermission{} // permission request id -> prompt to settle
-
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			return
-		}
-		var msg struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params struct {
-				Cwd       string `json:"cwd"`
-				SessionID string `json:"sessionId"`
-				Prompt    []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"prompt"`
-			} `json:"params"`
-			Result struct {
-				Outcome struct {
-					Outcome  string `json:"outcome"`
-					OptionID string `json:"optionId"`
-				} `json:"outcome"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintf(os.Stderr, "scripted agent decode: %v", err)
-			os.Exit(1)
-		}
-
-		if msg.Method == "" && len(msg.ID) > 0 {
-			// A response to one of our permission requests.
-			pending, ok := pendingPermissions[strings.Trim(string(msg.ID), `"`)]
-			if !ok {
-				continue
-			}
-			delete(pendingPermissions, strings.Trim(string(msg.ID), `"`))
-			if msg.Result.Outcome.Outcome == "cancelled" {
-				writeResult(pending.promptID, map[string]any{"stopReason": "cancelled"})
-				continue
-			}
-			writeChunk(pending.sessionID, "perm:"+msg.Result.Outcome.OptionID)
-			writeResult(pending.promptID, map[string]any{"stopReason": "end_turn"})
-			continue
-		}
-
-		switch msg.Method {
-		case "$/cancel_request":
-			// Protocol-level cancellation notification; nothing to settle here.
-		case "session/new":
-			sessionCounter++
-			writeResult(msg.ID, map[string]any{"sessionId": fmt.Sprintf("sess-%d", sessionCounter)})
-		case "session/load", "session/resume":
-			// Resume support without history replay: enough for a provider
-			// restart to rebind a thread's session.
-			writeResult(msg.ID, map[string]any{})
-		case "session/cancel":
-			if promptID, ok := parkedPrompts[msg.Params.SessionID]; ok {
-				delete(parkedPrompts, msg.Params.SessionID)
-				writeResult(promptID, map[string]any{"stopReason": "cancelled"})
-			}
-			// Cancellation is a notification; nothing else to write.
-		case "session/prompt":
-			text := ""
-			for _, block := range msg.Params.Prompt {
-				if block.Type == "text" {
-					text = block.Text
-					break
-				}
-			}
-			fields := strings.Fields(text)
-			switch {
-			case len(fields) >= 2 && fields[0] == "stream":
-				count, err := strconv.Atoi(fields[1])
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "scripted agent stream count %q: %v", fields[1], err)
-					os.Exit(1)
-				}
-				width := 0
-				if len(fields) >= 3 {
-					if width, err = strconv.Atoi(fields[2]); err != nil {
-						fmt.Fprintf(os.Stderr, "scripted agent stream width %q: %v", fields[2], err)
-						os.Exit(1)
-					}
-				}
-				delay := time.Duration(0)
-				if len(fields) >= 4 {
-					delayMs, err := strconv.Atoi(fields[3])
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "scripted agent stream delay %q: %v", fields[3], err)
-						os.Exit(1)
-					}
-					delay = time.Duration(delayMs) * time.Millisecond
-				}
-				for i := 0; i < count; i++ {
-					chunk := fmt.Sprintf("w%d ", i)
-					if pad := width - len(chunk); pad > 0 {
-						chunk += strings.Repeat("x", pad)
-					}
-					writeChunk(msg.Params.SessionID, chunk)
-					if delay > 0 {
-						time.Sleep(delay)
-					}
-				}
-				writeResult(msg.ID, map[string]any{"stopReason": "end_turn"})
-			case len(fields) >= 2 && fields[0] == "tools":
-				count, err := strconv.Atoi(fields[1])
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "scripted agent tools count %q: %v", fields[1], err)
-					os.Exit(1)
-				}
-				for i := 0; i < count; i++ {
-					writeMessage(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
-						"sessionId": msg.Params.SessionID,
-						"update":    map[string]any{"sessionUpdate": "tool_call", "toolCallId": fmt.Sprintf("tool-%d", i), "title": fmt.Sprintf("tool %d", i), "status": "completed"},
-					}})
-				}
-				writeResult(msg.ID, map[string]any{"stopReason": "end_turn"})
-			case len(fields) >= 1 && fields[0] == "permission":
-				permissionCounter++
-				permID := fmt.Sprintf("perm-%d", permissionCounter)
-				pendingPermissions[permID] = pendingPermission{promptID: append(json.RawMessage(nil), msg.ID...), sessionID: msg.Params.SessionID}
-				writeMessage(map[string]any{"jsonrpc": "2.0", "id": permID, "method": "session/request_permission", "params": map[string]any{
-					"sessionId": msg.Params.SessionID,
-					"toolCall":  map[string]any{"toolCallId": "tool-" + permID, "title": "Edit file"},
-					"options": []any{
-						map[string]any{"kind": "allow_once", "name": "Allow", "optionId": "allow"},
-						map[string]any{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
-					},
-				}})
-			case len(fields) >= 1 && fields[0] == "block":
-				parkedPrompts[msg.Params.SessionID] = append(json.RawMessage(nil), msg.ID...)
-			default:
-				writeChunk(msg.Params.SessionID, "hi")
-				writeResult(msg.ID, map[string]any{"stopReason": "end_turn"})
-			}
-		default:
-			fmt.Fprintf(os.Stderr, "scripted agent unexpected request: %s", line)
-			os.Exit(1)
-		}
-	}
-}
-
-// TestInvariantViolationClosesServerAndSurfacesFromRunWebSocket pins fatal-path
-// ownership: the server records the typed error, shuts down its listener, and
-// returns the error to main, which remains the sole owner of process exit.
-func TestInvariantViolationClosesServerAndSurfacesFromRunWebSocket(t *testing.T) {
-	s := NewServer()
-
+// An engine that can't commit stops, and the daemon shuts down and returns
+// the error from RunWebSocket, so main owns the exit.
+func TestEngineFailureClosesServerAndSurfacesFromRunWebSocket(t *testing.T) {
+	s := newTestServer(t)
+	startFakeACPAgent(t, s, "agent")
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.RunWebSocket("127.0.0.1:0") }()
-	// Give the listener a beat to install itself so Close tears it down.
-	time.Sleep(50 * time.Millisecond)
+	waitUntil(t, "the listener", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.httpServer != nil
+	})
 
-	violation := &orchestration.InvariantViolationError{Cause: "test boom"}
-	s.handleInvariantViolation(violation)
-
+	project, err := s.engine.AddProject(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The database going away under the engine, as a full or failed disk.
+	_ = s.metadataStore.Close()
+	_, _ = s.engine.Do(context.Background(), orchestration.Command{Actor: orchestration.Person("test"), Body: orchestration.CreateThread{
+		Workspace: provider.Workspace{Cwd: project.Path}, Participant: orchestration.NewParticipant{Instance: "agent"},
+	}})
 	select {
 	case err := <-runErr:
-		var got *orchestration.InvariantViolationError
-		if !errors.As(err, &got) || got != violation {
-			t.Fatalf("RunWebSocket returned %v, want the reported InvariantViolationError", err)
+		if err == nil || err != s.engine.Err() {
+			t.Fatalf("RunWebSocket = %v, want the engine's error %v", err, s.engine.Err())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("RunWebSocket did not return after the engine stopped")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("a second Close = %v, want nil", err)
+	}
+}
+
+// Closing the daemon doesn't wait for a client that stopped reading, such as
+// a suspended phone: the daemon's writes to it block, and only the pings
+// would have given up on it.
+func TestCloseDoesNotWaitForAClientThatStoppedReading(t *testing.T) {
+	s := newTestServer(t)
+	s.pingInterval = time.Hour
+	attachment, err := s.engine.StoreAttachment(strings.Repeat("a", 4<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _, err := websocket.Dial(context.Background(), newWSTestServer(t, s), nil)
+	if err != nil {
+		t.Fatalf("websocket dial: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	for id := range 16 {
+		request := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{"id":%q}}`, id+1, wire.MethodAttachmentGet, attachment)
+		if err := ws.Write(context.Background(), websocket.MessageText, []byte(request)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitUntil(t, "the daemon's writes to the client to block", func() bool {
+		s.rpcMu.Lock()
+		defer s.rpcMu.Unlock()
+		for _, client := range s.rpcClients {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			err := client.conn.Notify(ctx, wire.MethodThreadList, nil)
+			cancel()
+			return errors.Is(err, context.DeadlineExceeded)
+		}
+		return false
+	})
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("RunWebSocket did not return after an invariant violation")
+		t.Fatal("Close is still waiting for the client that stopped reading")
 	}
-	// The shutdown ran: a second Close is idempotent.
-	if err := s.Close(); err != nil {
-		t.Fatalf("second Close err = %v, want idempotent nil", err)
+}
+
+// Closing the daemon stops agents and terminals at the same time, each
+// within its grace: the terminal's program hears its hangup while an agent
+// is still stopping, not after, and Close is done once the slowest is.
+func TestCloseStopsAgentsAndTerminalsTogether(t *testing.T) {
+	dir := t.TempDir()
+	shell := filepath.Join(dir, "shell")
+	script := fmt.Sprintf("#!/bin/sh\necho $$ > '%[1]s/shell.pid'\ntrap 'echo hup >> %[1]s/hup' HUP\ntrap '' TERM\nwhile :; do sleep 0.05; done\n", dir)
+	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("SHELL", shell)
+	s := newTestServer(t)
+	// An agent that ignores stdin closing and SIGTERM takes both of its
+	// one-second graces before it is killed.
+	startFakeACPAgent(t, s, "agent", "-linger", "-ignore-term", "-pidfile", filepath.Join(dir, "agent.pid"))
+	createTestTerminal(t, newRecordingClient(t, s))
+	agent, shellPID := readPID(t, filepath.Join(dir, "agent.pid")), readPID(t, filepath.Join(dir, "shell.pid"))
+
+	started := time.Now()
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	waitForFile(t, filepath.Join(dir, "hup"))
+	if syscall.Kill(agent, 0) != nil {
+		t.Fatal("the terminal heard its hangup only after the agent was gone")
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	if elapsed := time.Since(started); elapsed < 2*time.Second || elapsed > 3*time.Second {
+		t.Fatalf("Close took %v, want the agent's two 1 s graces (2 s), with the terminal's 1 s alongside", elapsed)
+	}
+	for name, pid := range map[string]int{"agent": agent, "terminal program": shellPID} {
+		if syscall.Kill(pid, 0) == nil {
+			t.Fatalf("the %s (pid %d) outlived Close", name, pid)
+		}
+	}
+}
+
+func readPID(t *testing.T, path string) int {
+	t.Helper()
+	waitForFile(t, path)
+	var pid int
+	waitUntil(t, path+" to hold a pid", func() bool {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(strings.TrimSpace(string(raw)))
+		return err == nil
+	})
+	return pid
 }

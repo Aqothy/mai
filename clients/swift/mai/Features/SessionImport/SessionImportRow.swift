@@ -2,8 +2,13 @@ import SwiftUI
 
 struct SessionImportRow: View {
     let entry: SessionImportEntry
+    let capabilities: SessionImportCapabilities
     let isImporting: Bool
+    let isDeleting: Bool
     let importSession: () -> Void
+    let deleteSession: () -> Void
+
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -27,15 +32,38 @@ struct SessionImportRow: View {
 
             Spacer(minLength: 0)
 
-            if isImporting {
+            if isImporting || isDeleting {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Button("Import", action: importSession)
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
+                if capabilities.canImport {
+                    Button("Import", action: importSession)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                }
+
+                if capabilities.canDelete {
+                    Menu("Session Actions", systemImage: "ellipsis") {
+                        Button("Delete Session", systemImage: "trash", role: .destructive) {
+                            isConfirmingDelete = true
+                        }
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("Session Actions")
+                } else if !capabilities.canImport {
+                    Label("No available actions", systemImage: "nosign")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("No available actions")
+                }
             }
         }
         .contentShape(.rect)
+        .confirmationDialog("Delete Session?", isPresented: $isConfirmingDelete) {
+            Button("Delete Session", role: .destructive, action: deleteSession)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes the provider session. This action cannot be undone.")
+        }
     }
 }

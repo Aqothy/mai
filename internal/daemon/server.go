@@ -6,29 +6,20 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"slices"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/adapters/acp"
+	"github.com/Aqothy/maiD/api/wire"
+	"github.com/Aqothy/maiD/internal/adapters/claudecode"
+	"github.com/Aqothy/maiD/internal/adapters/codexapp"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
 	"github.com/Aqothy/maiD/internal/providerservice"
 	"github.com/Aqothy/maiD/internal/store"
 	"github.com/Aqothy/maiD/internal/workspacesearch"
 )
-
-// openProviderInstance maps a configured provider driver to its adapter.
-// New drivers get a case here; providerservice supplies the runtime event sink.
-func openProviderInstance(ctx context.Context, spec provider.InstanceSpec, emit provider.RuntimeEventListener) (providerservice.ProviderInstance, error) {
-	switch spec.Driver {
-	case acp.DriverKind:
-		return acp.OpenInstance(ctx, spec, emit)
-	default:
-		return nil, fmt.Errorf("unsupported provider driver %q", spec.Driver)
-	}
-}
 
 type Server struct {
 	logger *slog.Logger
@@ -41,13 +32,8 @@ type Server struct {
 
 	providerService *providerservice.Service
 	acpRegistry     *acpRegistry
-	orchestration   *orchestration.Engine
-	ingestion       *orchestration.ProviderRuntimeIngestion
-	reactor         *orchestration.ProviderEventReactor
-
-	metadataStore    *store.SQLite
-	threadMetaWriter *threadMetaWriter
-	importMu         sync.Mutex
+	engine          *orchestration.Engine
+	metadataStore   *store.SQLite
 
 	terminals *terminalRuntime
 
@@ -55,56 +41,78 @@ type Server struct {
 	// workspace.searchFiles.
 	workspaceSearch *workspacesearch.Service
 
-	rpcMu                  sync.Mutex
-	rpcClients             map[string]*rpcClient
-	historyReplayCoalescing map[orchestration.ThreadID]struct{}
+	pingInterval time.Duration
+
+	rpcMu      sync.Mutex
+	rpcClients map[string]*rpcClient
 
 	closeOnce sync.Once
 	closeErr  error
-	// fatalErr, guarded by mu, records an orchestration invariant violation;
-	// RunWebSocket returns it so main owns the process exit.
+	// fatalErr, guarded by mu, records the error that stopped the
+	// orchestration engine; RunWebSocket returns it so main owns the exit.
 	fatalErr error
 }
 
-func NewServer() *Server {
+// NewServer opens the data directory and starts the daemon's services.
+func NewServer() (*Server, error) {
 	logger := newLoggerFromEnv()
-	return newServer(logger, openMetadataStore(logger))
+	dir, err := maidDataDir()
+	if err != nil {
+		return nil, err
+	}
+	return newServer(logger, dir, drivers)
 }
 
-func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
+// newServer starts the daemon on a data directory with drivers.
+func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverKind]provider.Driver) (*Server, error) {
+	metadata, err := store.Open(filepath.Join(dataDir, "maid.db"))
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("data directory opened", "path", dataDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		logger:                  logger,
-		rpcClients:              make(map[string]*rpcClient),
-		historyReplayCoalescing: make(map[orchestration.ThreadID]struct{}),
-		ctx:                     ctx,
-		ctxCancel:               cancel,
-		metadataStore:           metadata,
-		acpRegistry:             newACPRegistry(),
+		logger:        logger,
+		pingInterval:  rpcPingInterval,
+		rpcClients:    make(map[string]*rpcClient),
+		ctx:           ctx,
+		ctxCancel:     cancel,
+		metadataStore: metadata,
 	}
-	var terminalMeta store.TerminalStore
-	if metadata != nil {
-		terminalMeta = metadata
-	}
-	s.terminals = newTerminalRuntime(terminalMeta, logger)
+	s.acpRegistry = newACPRegistry(ctx, dataDir, logger, s.publishACPRegistryList)
+	s.terminals = newTerminalRuntime(metadata, logger)
 	s.workspaceSearch = workspacesearch.NewService()
-	s.orchestration = orchestration.NewEngine()
-	s.orchestration.OnInvariantViolation(s.handleInvariantViolation)
-	if metadata != nil {
-		count, err := restorePersistedThreads(s.orchestration, metadata, metadata, logger)
-		if err != nil {
-			logger.Warn("restore persisted threads", "error", err)
-		} else {
-			logger.Info("restored persisted threads", "count", count)
+	// The engine and the providers need each other: the providers report to
+	// the engine, which they don't call until it has started.
+	var engine *orchestration.Engine
+	s.providerService = providerservice.New(drivers, metadata, func(id provider.InstanceID) provider.Mirror { return engine.Mirror(id) }, providerservice.Sink{
+		Event: func(instance provider.InstanceID, generation uint64, event provider.Event) {
+			engine.ProviderEvent(instance, generation, event)
+		},
+		Gone: func(instance provider.InstanceID, generation uint64) { engine.InstanceGone(instance, generation) },
+	}, logger)
+	engine, err = orchestration.Open(orchestration.Config{
+		DB: metadata.DB(), Providers: s.providerService, DataDir: dataDir, Logger: logger,
+	})
+	if err != nil {
+		cancel()
+		_ = metadata.Close()
+		return nil, err
+	}
+	s.engine = engine
+	go s.watchEngine()
+	go s.stopIdleProviders()
+	for _, spec := range []provider.InstanceSpec{
+		{InstanceID: "codex-app-server", Name: "Codex", Driver: codexapp.DriverKind},
+		{InstanceID: "claude-code", Name: "Claude Code", Driver: claudecode.DriverKind},
+	} {
+		if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+			logger.Warn("register provider", "provider", spec.InstanceID, "error", err)
 		}
 	}
-	s.ingestion = orchestration.NewProviderRuntimeIngestion(s.orchestration)
-	var providerOptions []providerservice.Option
-	if metadata != nil {
-		providerOptions = append(providerOptions, providerservice.WithRouteStore(metadata))
-		s.threadMetaWriter = newThreadMetaWriter(s.orchestration, metadata, logger)
+	if err := s.acpRegistry.pruneFiles(); err != nil {
+		logger.Warn("delete removed ACP agents' files", "error", err)
 	}
-	s.providerService = providerservice.New(openProviderInstance, providerOptions...)
 	if specs, err := s.acpRegistry.instanceSpecs(); err != nil {
 		logger.Warn("load installed ACP agent definitions", "error", err)
 	} else {
@@ -114,16 +122,21 @@ func newServer(logger *slog.Logger, metadata *store.SQLite) *Server {
 			}
 		}
 	}
-	s.reactor = orchestration.NewProviderEventReactor(ctx, s.orchestration, s.providerService, s.ingestion)
-	go s.ingestion.Run(ctx, s.providerService.Events())
-	s.orchestration.OnEvent(func(event orchestration.Event) {
-		s.logEvent(event)
-		if s.threadMetaWriter != nil && orchestration.ThreadMetadataMayChange(event) {
-			s.threadMetaWriter.markDirty(event.ThreadID())
+	return s, nil
+}
+
+// watchEngine shuts the daemon down when the engine stops on its own: its
+// state can no longer be trusted, and main owns the process exit.
+func (s *Server) watchEngine() {
+	<-s.engine.Done()
+	if err := s.engine.Err(); err != nil {
+		s.mu.Lock()
+		if s.fatalErr == nil {
+			s.fatalErr = err
 		}
-		s.publishOrchestrationEvent(event)
-	})
-	return s
+		s.mu.Unlock()
+		go s.Close()
+	}
 }
 
 func newLoggerFromEnv() *slog.Logger {
@@ -139,78 +152,6 @@ func newLoggerFromEnv() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 }
 
-// logEvent deliberately records only correlation metadata. Event payloads can
-// contain prompts, tool output, attachments, and secrets and do not belong in
-// routine daemon logs. The daemon intentionally retains no historical event
-// payloads; clients recover from authoritative snapshots.
-func (s *Server) logEvent(event orchestration.Event) {
-	// Runs on the engine worker for every event, including each streamed
-	// flush, so do not build the attribute slice unless it will be used.
-	if !s.logger.Enabled(context.Background(), slog.LevelDebug) {
-		return
-	}
-	attrs := []any{
-		"sequence", event.Sequence,
-		"event", event.Type,
-		"actor", event.Actor,
-		"thread", event.ThreadID(),
-	}
-	if event.CommandID != "" {
-		attrs = append(attrs, "command", event.CommandID)
-	}
-
-	// Streamed text and reasoning chunks are intentionally absent. They are
-	// high-volume, may contain private content, and their lifecycle boundaries
-	// are already represented by turn/session events.
-	switch event.Type {
-	case orchestration.EventThreadMessageSent:
-		return
-	case orchestration.EventThreadItemUpserted:
-		item := event.Payload.Item
-		if item == nil || item.TextDelta != "" {
-			return
-		}
-		attrs = append(attrs, "item", item.ID, "kind", item.Kind, "status", item.Status, "turn", item.TurnID)
-	case orchestration.EventThreadSessionStatusSet:
-		if session := event.Payload.Session; session != nil {
-			attrs = append(attrs, "provider", session.ProviderInstanceID, "status", session.Status, "turn", session.ActiveTurnID, "generation", session.ProviderGeneration)
-		}
-	case orchestration.EventThreadTurnStartRequested,
-		orchestration.EventThreadTurnInterruptRequested,
-		orchestration.EventThreadTurnInterruptConfirmed,
-		orchestration.EventThreadTurnInterruptFailed:
-		attrs = append(attrs, "turn", event.Payload.TurnID)
-	case orchestration.EventThreadApprovalOpened, orchestration.EventThreadApprovalResolved:
-		if approval := event.Payload.Approval; approval != nil {
-			attrs = append(attrs, "request", approval.RequestID, "turn", approval.TurnID, "kind", approval.RequestType, "decision", approval.Decision)
-		}
-	case orchestration.EventThreadPlanUpdated:
-		if plan := event.Payload.Plan; plan != nil {
-			attrs = append(attrs, "entries", len(plan.Entries))
-		}
-	case orchestration.EventThreadConfigOptionsUpdated:
-		attrs = append(attrs, "options", len(event.Payload.ConfigOptions))
-	case orchestration.EventThreadSlashCommandsUpdated:
-		attrs = append(attrs, "commands", len(event.Payload.SlashCommands))
-	case orchestration.EventThreadTokenUsageUpdated:
-		if usage := event.Payload.TokenUsage; usage != nil {
-			attrs = append(attrs, "usedTokens", usage.UsedTokens)
-		}
-	}
-	s.logger.Debug("orchestration event", attrs...)
-}
-
-// handleInvariantViolation preserves main's ownership of process exit while
-// using normal shutdown to kill every group-isolated provider process.
-func (s *Server) handleInvariantViolation(err *orchestration.InvariantViolationError) {
-	s.mu.Lock()
-	if s.fatalErr == nil {
-		s.fatalErr = err
-	}
-	s.mu.Unlock()
-	_ = s.Close()
-}
-
 // Close shuts the daemon down exactly once; concurrent callers block until the
 // full shutdown has completed. The blocking matters: closing the HTTP listener
 // makes RunWebSocket return and the process exit, so a second Close that
@@ -222,9 +163,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) doClose() error {
-	if s.ctxCancel != nil {
-		s.ctxCancel()
-	}
+	s.ctxCancel()
 
 	s.mu.Lock()
 	httpServer := s.httpServer
@@ -234,20 +173,20 @@ func (s *Server) doClose() error {
 	if httpServer != nil {
 		err = httpServer.Close()
 	}
-	if s.orchestration != nil {
-		s.orchestration.Close()
+	// Agents and terminal shells never survive daemon shutdown. Stop them at
+	// once, so shutdown takes one grace, and wait for every process group to be
+	// cleaned up before releasing clients and the store.
+	var stopped sync.WaitGroup
+	stopped.Go(s.terminals.service.Close)
+	stopped.Go(s.acpRegistry.waitForJobs)
+	s.providerService.Close()
+	s.engine.Close()
+	stopped.Wait()
+	// Close streams before the process exits, so their clients hear why.
+	for _, stream := range s.terminals.closeStreams() {
+		<-stream.finished
 	}
-	if s.providerService != nil {
-		s.providerService.Close()
-	}
-	// Terminal shells never survive daemon shutdown; wait for every process
-	// group to be cleaned up before releasing clients and the store.
-	if s.terminals != nil {
-		s.terminals.close()
-	}
-	if s.workspaceSearch != nil {
-		s.workspaceSearch.Close()
-	}
+	s.workspaceSearch.Close()
 
 	s.rpcMu.Lock()
 	clients := make([]*rpcClient, 0, len(s.rpcClients))
@@ -257,160 +196,257 @@ func (s *Server) doClose() error {
 	s.rpcClients = make(map[string]*rpcClient)
 	s.rpcMu.Unlock()
 
+	// Close the sockets first: a client that stopped reading blocks the
+	// connection's writes, and the connection's own Close waits for them.
+	for _, client := range clients {
+		_ = client.socket.CloseNow()
+	}
 	for _, client := range clients {
 		_ = client.conn.Close()
 		client.closeOutbound()
 	}
-
-	if s.threadMetaWriter != nil {
-		<-s.orchestration.Stopped()
-		s.threadMetaWriter.Close()
-	}
-	if s.metadataStore != nil {
-		_ = s.metadataStore.Close()
-	}
+	_ = s.metadataStore.Close()
 	return err
 }
 
-// ImportProviderSession persists an explicitly selected provider session and
-// installs its empty, replay-pending thread stub in the live engine. Import is
-// serialized so duplicate requests always observe the first completed stub.
-func (s *Server) ImportProviderSession(ctx context.Context, instanceID provider.InstanceID, summary provider.SessionSummary) (orchestration.ThreadID, bool, error) {
-	if s.metadataStore == nil {
-		return "", false, fmt.Errorf("provider session import requires metadata persistence")
-	}
-	if instanceID == "" || summary.SessionID == "" {
-		return "", false, fmt.Errorf("provider session import requires instanceId and session.sessionId")
-	}
-	info, err := s.providerService.Info(instanceID)
+// authenticateProvider signs in to a provider. A provider whose sign-in is an
+// interactive program gets it run in a maiD terminal the client then opens;
+// once it exits successfully the provider restarts, as soon as no turn is
+// running on it, so it picks up the new credentials.
+func (s *Server) authenticateProvider(ctx context.Context, instanceID provider.InstanceID, input provider.AuthenticateInput) (provider.AuthenticationResult, error) {
+	result, err := s.providerService.Authenticate(ctx, instanceID, input)
 	if err != nil {
-		return "", false, err
+		return result, err
 	}
-	if !info.Capabilities.LoadReplay && !info.Capabilities.Resume {
-		return "", false, fmt.Errorf("provider does not support restoring imported sessions")
+	if result.Terminal == nil {
+		s.spreadAccountChange(instanceID)
+		return result, nil
 	}
-
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
-
-	cwd, err := s.orchestration.ResolveThreadCwd(summary.Cwd)
+	terminalID, err := s.startCommandTerminal("Sign in to "+result.Instance.Name, *result.Terminal, func(exitCode *int) {
+		if exitCode == nil || *exitCode != 0 {
+			s.logger.Info("terminal sign-in did not succeed", "provider", instanceID, "exitCode", exitCode)
+			return
+		}
+		s.restartProviderWhenIdle(instanceID, func(ctx context.Context) error {
+			_, err := s.providerService.RestartInstance(ctx, instanceID)
+			return err
+		})
+	})
 	if err != nil {
-		return "", false, err
+		return provider.AuthenticationResult{}, err
 	}
-	summary.Cwd = cwd
-
-	now := time.Now()
-	updatedAt := now
-	if summary.UpdatedAt != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, summary.UpdatedAt); err == nil {
-			updatedAt = parsed
-		}
-	}
-	threadID := orchestration.NewThreadID()
-	startInput := provider.StartSessionInput{
-		ThreadID:           string(threadID),
-		ProviderInstanceID: instanceID,
-		Cwd:                summary.Cwd,
-	}
-	meta := store.ThreadMeta{
-		ThreadID:           string(threadID),
-		Title:              summary.Title,
-		Cwd:                summary.Cwd,
-		ProviderInstanceID: instanceID,
-		CreatedAt:          updatedAt,
-		UpdatedAt:          updatedAt,
-	}
-	route := store.RouteRecord{
-		InstanceID:        instanceID,
-		ProviderSessionID: summary.SessionID,
-		StartInput:        startInput,
-	}
-	persistedThreadID, imported, err := s.metadataStore.ImportThread(meta, route)
-	if err != nil {
-		return "", false, err
-	}
-	threadID = orchestration.ThreadID(persistedThreadID)
-	if !imported {
-		// Use the committed row rather than caller-supplied duplicate metadata.
-		// This also repairs live state after a prior import committed just as the
-		// daemon shut down.
-		metas, err := s.metadataStore.ListThreads()
-		if err != nil {
-			return "", false, err
-		}
-		metaIndex := slices.IndexFunc(metas, func(stored store.ThreadMeta) bool { return stored.ThreadID == persistedThreadID })
-		if metaIndex >= 0 {
-			meta = metas[metaIndex]
-		}
-		routes, err := s.metadataStore.LoadRoutes()
-		if err != nil {
-			return "", false, err
-		}
-		var foundRoute bool
-		route, foundRoute = routes[persistedThreadID]
-		if metaIndex < 0 || !foundRoute {
-			return "", false, fmt.Errorf("imported thread %q has incomplete persisted metadata", persistedThreadID)
-		}
-	}
-	startInput = route.StartInput
-	startInput.ThreadID = persistedThreadID
-	startInput.ProviderInstanceID = route.InstanceID
-	if err := s.providerService.RegisterImportedSession(persistedThreadID, route.InstanceID, route.ProviderSessionID, startInput); err != nil {
-		return "", false, err
-	}
-	// Once SQLite commits, finish live reconciliation even if the requesting
-	// client disconnects. A canceled RPC must not leave the durable import
-	// invisible until the next daemon restart.
-	if _, err := s.orchestration.ImportThread(context.WithoutCancel(ctx), orchestration.RestoredThread{
-		ThreadID:           threadID,
-		Title:              meta.Title,
-		Cwd:                meta.Cwd,
-		ProviderInstanceID: meta.ProviderInstanceID,
-		ModelSelection:     meta.ModelSelection,
-		CreatedAt:          meta.CreatedAt,
-		UpdatedAt:          meta.UpdatedAt,
-	}); err != nil {
-		return "", false, err
-	}
-	return threadID, imported, nil
+	result.Challenge = &provider.AuthChallenge{Kind: provider.AuthKindTerminal, TerminalID: terminalID}
+	return result, nil
 }
 
-func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID string, restart bool) (provider.InstanceInfo, error) {
-	if s.acpRegistry == nil {
-		return provider.InstanceInfo{}, fmt.Errorf("ACP registry is unavailable")
+// logoutProvider signs out of a provider.
+func (s *Server) logoutProvider(ctx context.Context, instanceID provider.InstanceID) (provider.InstanceInfo, error) {
+	info, err := s.providerService.Logout(ctx, instanceID)
+	if err == nil {
+		s.spreadAccountChange(instanceID)
 	}
+	return info, err
+}
+
+// spreadAccountChange restarts the instance's processes once idle when it has
+// several: a sign-in or sign-out reaches only the process it ran on, and another
+// folder's may keep the old account until it starts again.
+func (s *Server) spreadAccountChange(instanceID provider.InstanceID) {
+	if s.providerService.ProcessCount(instanceID) < 2 {
+		return
+	}
+	go s.restartProviderWhenIdle(instanceID, func(ctx context.Context) error {
+		_, err := s.providerService.RestartInstance(ctx, instanceID)
+		return err
+	})
+}
+
+// A process serving a folder stops after this long without work. Long enough
+// for a conversation's pauses, since the next message then waits for a new
+// process and session/resume.
+const (
+	providerIdleTimeout       = 10 * time.Minute
+	providerIdleCheckInterval = time.Minute
+)
+
+func (s *Server) stopIdleProviders() {
+	ticker := time.NewTicker(providerIdleCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case now := <-ticker.C:
+			s.providerService.StopIdle(now.Add(-providerIdleTimeout), func(id provider.InstanceID, generation uint64) bool {
+				return s.engine.ProcessBusy(s.ctx, id, generation)
+			})
+		}
+	}
+}
+
+// restartProviderWhenIdle runs restart once no turn runs on the provider, and
+// starts none until it's done, so a restart never cuts off a thread's turn.
+func (s *Server) restartProviderWhenIdle(instanceID provider.InstanceID, restart func(context.Context) error) {
+	resume, err := s.engine.PauseInstance(s.ctx, instanceID)
+	if err != nil {
+		return
+	}
+	defer resume()
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
+	defer cancel()
+	if err := restart(ctx); err != nil {
+		s.logger.Warn("restart provider", "provider", instanceID, "error", err)
+	}
+}
+
+// publishACPRegistryList tells every subscribed client. It never blocks: a
+// client that can't keep up is closed and recovers from a fresh snapshot.
+func (s *Server) publishACPRegistryList(list wire.ACPRegistryList) {
+	s.rpcMu.Lock()
+	defer s.rpcMu.Unlock()
+	for _, client := range s.rpcClients {
+		if client.subscribedACPRegistryList() {
+			client.notify(wire.MethodACPRegistryList, list)
+		}
+	}
+}
+
+// installACPAgent starts or joins the job bringing an agent to the version the
+// registry lists. The job outlives the call.
+func (s *Server) installACPAgent(ctx context.Context, id string) error {
+	job, err := s.acpRegistry.startInstall(ctx, id)
+	if err != nil || job == nil {
+		return err
+	}
+	go s.runACPInstall(job)
+	return nil
+}
+
+// runACPInstall builds the new version and makes it the agent's definition
+// before saying it is installed, so a client that sees that can start it.
+func (s *Server) runACPInstall(job *acpInstallJob) {
+	record, err := s.acpRegistry.build(job)
+	if err == nil {
+		err = s.providerService.RegisterManifestInstance(s.acpRegistry.instanceSpecForAgent(record))
+	}
+	s.acpRegistry.finish(job, err)
+	if err != nil {
+		s.logger.Warn("install ACP agent", "agent", job.agent.ID, "error", err)
+		return
+	}
+	s.logger.Info("ACP agent installed", "agent", record.ID, "version", record.Version)
+	// A running agent moves over once it has no turn. Only then is nothing
+	// running from the old version, which can go.
+	s.restartProviderWhenIdle(record.InstanceID, func(ctx context.Context) error {
+		if err := s.providerService.ApplyPending(ctx, record.InstanceID); err != nil {
+			return err
+		}
+		return s.acpRegistry.pruneAgent(record.ID)
+	})
+}
+
+// requireACPAgentInstalled undoes a start that read the manifest before a
+// removal finished. The manifest decides: the agent goes away again, and the
+// removal deletes its files.
+func (s *Server) requireACPAgentInstalled(id string, instanceID provider.InstanceID) error {
+	_, installed, err := s.acpRegistry.installedAgent(id)
+	if err != nil || installed {
+		return err
+	}
+	if err := s.providerService.RemoveInstance(instanceID); err != nil {
+		return err
+	}
+	return fmt.Errorf("ACP agent %q was removed", id)
+}
+
+// removeACPAgent stops a removed agent, then deletes its files. The id comes
+// from a client, so only the manifest's id for it may name a directory; an
+// agent that isn't installed has at most a failure or a first install to end.
+func (s *Server) removeACPAgent(id string) error {
+	agent, installed, err := s.acpRegistry.installedAgent(id)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return s.acpRegistry.remove(id)
+	}
+	if s.engine.InstanceBusy(s.ctx, agent.InstanceID) {
+		return &orchestration.CommandError{Code: orchestration.CodeInvalid, Message: fmt.Sprintf("%s is working on a turn. Stop it before removing the agent.", agent.Name)}
+	}
+	if err := s.acpRegistry.remove(agent.ID); err != nil {
+		return err
+	}
+	s.logger.Info("ACP agent removed", "provider", agent.InstanceID)
+	if err := s.providerService.RemoveInstance(agent.InstanceID); err != nil {
+		return err
+	}
+	return s.acpRegistry.pruneAgent(agent.ID)
+}
+
+// updateCustomACPAgent saves a new definition, and moves a running agent onto
+// it once its turns finish.
+func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (wire.ACPRegistryAgent, error) {
+	updated, err := s.acpRegistry.updateCustom(params)
+	if err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	spec, err := s.acpRegistry.instanceSpec(updated.ID)
+	if err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	if err := s.requireACPAgentInstalled(updated.ID, updated.InstanceID); err != nil {
+		return wire.ACPRegistryAgent{}, err
+	}
+	go s.restartProviderWhenIdle(updated.InstanceID, func(ctx context.Context) error {
+		return s.providerService.ApplyPending(ctx, updated.InstanceID)
+	})
+	return updated, nil
+}
+
+// StartACPRegistryProvider starts an installed agent's process for cwd, or for
+// no folder when cwd is empty. Installing is a job of its own, so this only ever
+// launches what is on disk.
+func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID, cwd string) (provider.InstanceInfo, error) {
 	spec, err := s.acpRegistry.instanceSpec(registryID)
 	if err != nil {
 		return provider.InstanceInfo{}, err
 	}
-	// npm may need to acquire the package before the agent can initialize.
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+	// The agent runs in cwd, so it is held to the same rule as a chat's working
+	// directory.
+	if cwd != "" {
+		if cwd, err = s.engine.WorkspaceRoot(ctx, cwd); err != nil {
+			return provider.InstanceInfo{}, err
+		}
+	}
 	started := time.Now()
-	info, err := s.providerService.StartManifestInstance(ctx, spec, restart)
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
+	info, err := s.providerService.StartManifestInstance(ctx, spec, cwd)
+	s.logProviderStarted(spec, started, err)
+	if removed := s.requireACPAgentInstalled(registryID, spec.InstanceID); removed != nil {
+		return provider.InstanceInfo{}, removed
 	}
 	return info, err
 }
 
-func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec, restart bool) (provider.InstanceInfo, error) {
-	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 && !restart {
-		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID)
+func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
+	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 {
+		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID, "")
 	}
-	return s.startProvider(ctx, spec, restart, 30*time.Second)
-}
-
-func (s *Server) startProvider(ctx context.Context, spec provider.InstanceSpec, restart bool, timeout time.Duration) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	started := time.Now()
-	info, err := s.providerService.StartInstance(ctx, spec, restart)
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "restart", restart, "duration", time.Since(started).Round(time.Millisecond))
-	}
+	info, err := s.providerService.StartInstance(ctx, spec)
+	s.logProviderStarted(spec, started, err)
 	return info, err
+}
+
+func (s *Server) logProviderStarted(spec provider.InstanceSpec, started time.Time, err error) {
+	if err == nil {
+		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "duration", time.Since(started).Round(time.Millisecond))
+	}
 }

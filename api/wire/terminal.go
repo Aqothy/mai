@@ -6,21 +6,19 @@ import (
 	"github.com/Aqothy/maiD/internal/terminal"
 )
 
-// Terminal thread methods. terminal.write, terminal.resize, and
-// terminal.detach are sent by clients as JSON-RPC notifications;
-// terminal.subscribe is the server-to-client stream method registered by
-// terminal.create, terminal.attach, and terminal.relaunch.
+// Terminal thread methods. terminal.write, terminal.resize, terminal.focus,
+// and terminal.detach are sent by clients as JSON-RPC notifications.
+// terminal.create and terminal.attach return a ticket for the view's terminal
+// stream.
 const (
 	MethodTerminalCreate        = "terminal.create"
 	MethodTerminalAttach        = "terminal.attach"
-	MethodTerminalRelaunch      = "terminal.relaunch"
 	MethodTerminalDetach        = "terminal.detach"
 	MethodTerminalRename        = "terminal.rename"
-	MethodTerminalTerminate     = "terminal.terminate"
 	MethodTerminalDelete        = "terminal.delete"
 	MethodTerminalWrite         = "terminal.write"
 	MethodTerminalResize        = "terminal.resize"
-	MethodTerminalSubscribe     = "terminal.subscribe"
+	MethodTerminalFocus         = "terminal.focus"
 	MethodTerminalSubscribeList = "terminal.subscribeList"
 )
 
@@ -47,93 +45,163 @@ type TerminalListStreamItem struct {
 }
 
 // Client-visible terminal vocabularies.
-type TerminalStatus = terminal.Status
-type TerminalStreamItemKind = terminal.StreamItemKind
+type TerminalProgramState = terminal.ProgramState
+type TerminalProgramNeed = terminal.ProgramNeed
+type TerminalColorScheme = terminal.ColorScheme
 
-// TerminalAgentKind is an open label naming the detected foreground agent
-// ("codex", "claude", ...). Clients must tolerate values they do not know
-// and treat them as display labels, not behavior switches.
-type TerminalAgentKind = terminal.AgentKind
-
-// TerminalAgentActivity is the closed semantic activity vocabulary; see the
-// TerminalAgentActivity vocabulary definition.
-type TerminalAgentActivity = terminal.AgentActivityState
-
-// TerminalSummary describes one terminal thread for lists and snapshots.
-// Fields other than identity/title/cwd reflect the current live run and are
-// not durable. The agent fields are the detector's semantic result only;
-// screen evidence and raw titles never cross the wire.
+// TerminalSummary describes one terminal thread for lists and snapshots. Its
+// shell starts when a view first attaches, and a shell that exits removes its
+// terminal. After a daemon restart a saved terminal opens with a fresh shell
+// under the same id, with an empty screen. Fields other than identity/title/cwd
+// are not durable. The program fields are what the running program reports
+// about itself; their text comes from the program and is sanitized, not trusted.
 type TerminalSummary struct {
-	TerminalID string         `json:"terminalId"`
-	Title      string         `json:"title"`
-	Cwd        string         `json:"cwd"`
-	Status     TerminalStatus `json:"status"`
-	ExitCode   *int           `json:"exitCode,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	UpdatedAt  time.Time      `json:"updatedAt"`
+	TerminalID string    `json:"terminalId"`
+	Title      string    `json:"title"`
+	Cwd        string    `json:"cwd"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 
-	// ObservedTitle is the normalized terminal title (control characters
-	// and spinner frames removed, capped at 128 scalars).
-	ObservedTitle string `json:"observedTitle,omitempty"`
-	// AgentKind names the detected foreground agent; empty when none.
-	AgentKind TerminalAgentKind `json:"agentKind,omitempty"`
-	// AgentActivity is the semantic agent state for the current run.
-	AgentActivity TerminalAgentActivity `json:"agentActivity,omitempty"`
-	// AgentActivityUpdatedAt is when the semantic activity last changed.
-	AgentActivityUpdatedAt *time.Time `json:"agentActivityUpdatedAt,omitempty"`
+	// ProgramTitle is the window title the program set (OSC 0/2), without
+	// control characters or spinner frames, capped at 128 scalars.
+	ProgramTitle string `json:"programTitle,omitempty"`
+	// Pwd is the working directory the shell reported (OSC 7).
+	Pwd string `json:"pwd,omitempty"`
+	// ProgramStatus is the program's most pressing status report (OSC
+	// 7501), if it sends any.
+	ProgramStatus *TerminalProgramStatus `json:"programStatus,omitempty"`
 }
 
-// TerminalAttachSnapshot is the authoritative attach point for one run.
-// Snapshot is a complete native Ghostty terminal model captured at Sequence
-// and Columns by Rows. Clients must validate SnapshotFormat, install Snapshot
-// transactionally, then consume only live output whose run ID matches and
-// whose sequence is greater than Sequence.
-type TerminalAttachSnapshot struct {
-	Terminal       TerminalSummary `json:"terminal"`
-	RunID          string          `json:"runId"`
-	Sequence       uint64          `json:"sequence"`
-	Columns        uint16          `json:"columns"`
-	Rows           uint16          `json:"rows"`
-	SnapshotFormat string          `json:"snapshotFormat"`
-	Snapshot       []byte          `json:"snapshot"`
+// TerminalProgramStatus is a program's report about what it is doing
+// (the program status protocol, OSC 7501).
+type TerminalProgramStatus struct {
+	State TerminalProgramState `json:"state"`
+	// Need is what a blocked program needs, when it said.
+	Need TerminalProgramNeed `json:"need,omitempty"`
+	// Progress is 0-100; absent when the program gave no percentage.
+	Progress *int `json:"progress,omitempty"`
+	// App names the program for grouping or an icon, not for display.
+	App string `json:"app,omitempty"`
+	// Title labels the report.
+	Title string `json:"title,omitempty"`
+	// Message is one line about what the program is doing.
+	Message   string    `json:"message,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// TerminalStreamItem is one terminal.subscribe notification payload.
-type TerminalStreamItem struct {
-	Kind       TerminalStreamItemKind `json:"kind"`
-	TerminalID string                 `json:"terminalId"`
-	RunID      string                 `json:"runId,omitempty"`
-	Sequence   uint64                 `json:"sequence,omitempty"`
-	Data       []byte                 `json:"data,omitempty"`
-	Status     TerminalStatus         `json:"status,omitempty"`
-	ExitCode   *int                   `json:"exitCode,omitempty"`
-	Message    string                 `json:"message,omitempty"`
+// TerminalAppearance is a view's theme. The daemon answers the program's
+// color and light/dark queries (OSC 10/11/4, CSI ? 996 n) with the
+// appearance of the active view (see TerminalAttachParams).
+type TerminalAppearance struct {
+	ColorScheme TerminalColorScheme `json:"colorScheme"`
+	// Foreground and Background are "#rrggbb".
+	Foreground string `json:"foreground"`
+	Background string `json:"background"`
+	// Palette overrides the first entries of the 256-color palette, as
+	// "#rrggbb".
+	Palette []string `json:"palette,omitempty"`
+}
+
+// TerminalAttachResult answers terminal.create and terminal.attach.
+// StreamTicket opens the view's terminal stream (see TerminalStreamPath); it
+// works once, within TerminalStreamTicketLifetime,
+// for a stream opened while this connection and view are still attached.
+// Issuing it closes the view's earlier stream.
+type TerminalAttachResult struct {
+	Terminal     TerminalSummary `json:"terminal"`
+	StreamTicket string          `json:"streamTicket"`
+}
+
+// The terminal stream carries one view's terminal from the daemon, separate
+// from the JSON-RPC connection so output never delays it. The client opens a
+// WebSocket at TerminalStreamPath with subprotocol TerminalStreamSubprotocol
+// and, within 5 seconds, sends one binary message: the 16 bytes of the ticket,
+// decoded from unpadded base64url. It never sends anything else. Every later
+// message is one binary record from the daemon: a TerminalStreamRecordKind
+// byte, then its payload.
+//
+// Close codes: 1000 the view ended (detached, replaced by a new ticket, or its
+// terminal removed by a delete or its shell exiting), don't reconnect; 1001 the
+// daemon is shutting down or the view's connection closed, the connection's
+// reconnect reattaches; 1002 or 1008 a protocol or handshake error; 1011 an
+// internal error.
+const (
+	TerminalStreamPath           = "/terminal"
+	TerminalStreamSubprotocol    = "maid.terminal.v1"
+	TerminalStreamTicketLifetime = 30 * time.Second
+)
+
+// TerminalStreamRecordKind is the first byte of a terminal stream record.
+type TerminalStreamRecordKind byte
+
+const (
+	// TerminalRecordSnapshot's payload is a TerminalStreamSnapshot (JSON). A
+	// stream begins with one, and another can arrive at any time; it abandons
+	// a partial snapshot and replaces the terminal.
+	TerminalRecordSnapshot TerminalStreamRecordKind = 0x01
+	// TerminalRecordSnapshotData's payload is the next part of the
+	// snapshot, at most 64 KiB; the snapshot is complete once the parts add
+	// up to its Size.
+	TerminalRecordSnapshotData TerminalStreamRecordKind = 0x02
+	// TerminalRecordOutput's payload is program output, at most 64 KiB.
+	TerminalRecordOutput TerminalStreamRecordKind = 0x03
+	// TerminalRecordResized's payload is a TerminalStreamResized (JSON).
+	TerminalRecordResized TerminalStreamRecordKind = 0x04
+)
+
+// TerminalStreamSnapshot starts a terminal stream, or replaces its terminal
+// when the client fell too far behind to be sent the output it missed. The next
+// Size bytes of snapshot data are a complete native Ghostty terminal at its
+// current grid; clients validate SnapshotFormat and install it, then apply the
+// records that follow.
+type TerminalStreamSnapshot struct {
+	SnapshotFormat string `json:"snapshotFormat"`
+	Size           int    `json:"size"`
+}
+
+// TerminalStreamResized is the terminal's new grid at its place in the output.
+type TerminalStreamResized struct {
+	Columns uint16 `json:"columns"`
+	Rows    uint16 `json:"rows"`
 }
 
 type TerminalCreateParams struct {
-	Title   string `json:"title,omitempty"`
-	Cwd     string `json:"cwd"`
-	Columns uint16 `json:"columns"`
-	Rows    uint16 `json:"rows"`
+	Title        string             `json:"title,omitempty"`
+	Cwd          string             `json:"cwd"`
+	Columns      uint16             `json:"columns"`
+	Rows         uint16             `json:"rows"`
+	AttachmentID string             `json:"attachmentId"`
+	Appearance   TerminalAppearance `json:"appearance"`
 }
 
 type TerminalIDParams struct {
 	TerminalID string `json:"terminalId"`
 }
 
-// TerminalAttachParams attaches the calling client to a terminal (or, for
-// terminal.relaunch, to a fresh run) with the client's measured grid.
+// TerminalAttachParams attaches the calling client's view to a terminal with
+// the grid that fits it. A terminal has one size: the active view's. A view
+// becomes active when it creates the terminal, attaches with Focus or while no
+// other view is attached, or sends terminal.focus; when it leaves, the view that
+// was active before it takes over.
+// AttachmentID is client-generated and names the view; a connection has one
+// view per terminal, and a newer one replaces the older in its place.
 type TerminalAttachParams struct {
-	TerminalID string `json:"terminalId"`
-	Columns    uint16 `json:"columns"`
-	Rows       uint16 `json:"rows"`
+	TerminalID   string             `json:"terminalId"`
+	Columns      uint16             `json:"columns"`
+	Rows         uint16             `json:"rows"`
+	AttachmentID string             `json:"attachmentId"`
+	Appearance   TerminalAppearance `json:"appearance"`
+	// Focus is set when the user opens the terminal, and not when a view
+	// attaches again (after a reconnect), so reattaching never takes the size
+	// from the device in use.
+	Focus bool `json:"focus,omitempty"`
 }
 
-// TerminalDetachParams releases control without terminating the shell. RunID
-// fences the detach so it cannot release a newer attachment or run.
+// TerminalDetachParams releases control without terminating the shell. A
+// detach for an attachment that a newer one already replaced is ignored.
 type TerminalDetachParams struct {
-	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
+	TerminalID   string `json:"terminalId"`
+	AttachmentID string `json:"attachmentId"`
 }
 
 // TerminalRenameParams gives a terminal a user-chosen title.
@@ -146,13 +214,15 @@ type TerminalRenameParams struct {
 // the JSON coders; terminal bytes are not necessarily valid UTF-8.
 type TerminalWriteParams struct {
 	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
 	Data       []byte `json:"data"`
 }
 
+// TerminalResizeParams reports the grid that now fits the calling view, and
+// its appearance. The terminal takes them only while the view is active;
+// otherwise the daemon keeps them for when the view becomes active.
 type TerminalResizeParams struct {
-	TerminalID string `json:"terminalId"`
-	RunID      string `json:"runId"`
-	Columns    uint16 `json:"columns"`
-	Rows       uint16 `json:"rows"`
+	TerminalID string             `json:"terminalId"`
+	Columns    uint16             `json:"columns"`
+	Rows       uint16             `json:"rows"`
+	Appearance TerminalAppearance `json:"appearance"`
 }

@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/Aqothy/go-acp/schema"
 	"github.com/Aqothy/jsonrpc2"
@@ -19,8 +18,8 @@ func authStateFromACP(initResp schema.InitializeResponse) provider.Auth {
 	// methods say auth is AVAILABLE, not that it is required: ACP has no
 	// auth-status probe, and agents (e.g. claude-code-acp) advertise their login
 	// method even while already authenticated. So report unknown; clients render
-	// the methods as actions and open the auth flow only when an
-	// operation fails with auth_required, never off this status.
+	// the methods as actions, and the status turns unauthenticated once a
+	// request fails with auth_required (noteAuthRequired).
 	status := provider.AuthStatusAuthenticated
 	if len(initResp.AuthMethods) > 0 {
 		status = provider.AuthStatusUnknown
@@ -28,7 +27,10 @@ func authStateFromACP(initResp schema.InitializeResponse) provider.Auth {
 	return provider.Auth{Status: status, Methods: methods}
 }
 
-func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
+// capabilitySet is what the agent offers. Sessions maiD ran rebuild from the
+// mirror, so they keep their delivery IDs (MessageIDs) only with one; the
+// agent's own replay rates only sessions run elsewhere.
+func capabilitySet(initResp schema.InitializeResponse, mirrored bool) provider.Capabilities {
 	capabilities := agentCapabilitiesValue(initResp.AgentCapabilities)
 	prompt := schema.PromptCapabilities{}
 	if capabilities.PromptCapabilities != nil {
@@ -38,24 +40,29 @@ func capabilitySet(initResp schema.InitializeResponse) provider.Capabilities {
 	if capabilities.MCPCapabilities != nil {
 		mcp = *capabilities.MCPCapabilities
 	}
+	sessions := schema.SessionCapabilities{}
+	if capabilities.SessionCapabilities != nil {
+		sessions = *capabilities.SessionCapabilities
+	}
+	history := provider.HistoryNone
+	if boolValue(capabilities.LoadSession) {
+		history = provider.HistoryLossy
+	}
 	return provider.Capabilities{
-		SessionList: capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.List != nil,
-		LoadReplay:  boolValue(capabilities.LoadSession),
-		Resume:      sessionResumeSupported(capabilities),
-		Auth:        hasStableAuthMethod(initResp.AuthMethods),
-		Logout:      capabilities.Auth != nil && capabilities.Auth.Logout != nil,
+		History:               history,
+		HistoryVersion:        historyVersion,
+		Resume:                sessions.Resume != nil || boolValue(capabilities.LoadSession),
+		MessageIDs:            mirrored,
+		MCP:                   provider.MCPCapabilities{HTTP: boolValue(mcp.HTTP), Stdio: true},
+		AdditionalDirectories: sessions.AdditionalDirectories != nil,
+		Sessions:              sessions.List != nil,
+		Delete:                sessions.Delete != nil,
+		Auth:                  hasSupportedAuthMethod(initResp.AuthMethods),
+		Logout:                capabilities.Auth != nil && capabilities.Auth.Logout != nil,
 		PromptContent: provider.PromptContentCapabilities{
 			Image:           boolValue(prompt.Image),
 			Audio:           boolValue(prompt.Audio),
 			EmbeddedContext: boolValue(prompt.EmbeddedContext),
-		},
-		// ACP exposes in-session model/config switching via session/set_config_option
-		// (the actual model/mode lists, if any, arrive per session as ConfigOptions).
-		ModelSwitch:   provider.ModelSwitchInSession,
-		ConfigOptions: true,
-		MCP: provider.MCPCapabilities{
-			HTTP: boolValue(mcp.HTTP),
-			SSE:  boolValue(mcp.SSE),
 		},
 	}
 }
@@ -67,10 +74,6 @@ func agentCapabilitiesValue(capabilities *schema.AgentCapabilities) schema.Agent
 	return *capabilities
 }
 
-func sessionResumeSupported(capabilities schema.AgentCapabilities) bool {
-	return capabilities.SessionCapabilities != nil && capabilities.SessionCapabilities.Resume != nil
-}
-
 func boolValue(value *bool) bool {
 	return value != nil && *value
 }
@@ -78,50 +81,58 @@ func boolValue(value *bool) bool {
 // contentBlocks builds the ACP prompt content. Text and resource_link are
 // always allowed (baseline ACP); image/audio/embedded blocks are gated on the
 // agent's advertised prompt-content capabilities.
-func contentBlocks(input provider.SendTurnInput, caps provider.PromptContentCapabilities) ([]schema.ContentBlock, error) {
+func contentBlocks(input provider.SendInput, caps provider.PromptContentCapabilities) ([]schema.ContentBlock, error) {
 	blocks := make([]schema.ContentBlock, 0, len(input.Attachments)+1)
-	if strings.TrimSpace(input.Input) != "" {
-		blocks = append(blocks, schema.TextBlock(input.Input))
+	if strings.TrimSpace(input.Text) != "" {
+		blocks = append(blocks, schema.TextBlock(input.Text))
 	}
 	for _, attachment := range input.Attachments {
+		var block schema.ContentBlock
 		switch attachment.Kind {
-		case "", "text":
-			blocks = append(blocks, schema.TextBlock(attachment.Data))
-		case "image":
+		case provider.AttachmentImage:
 			if !caps.Image {
 				return nil, fmt.Errorf("ACP agent does not accept image content")
 			}
-			blocks = append(blocks, schema.ImageBlock(attachment.Data, attachment.MimeType))
-		case "audio":
+			block = schema.ImageBlock(attachment.Data, attachment.MimeType)
+			block.URI = stringPtr(attachment.URI)
+		case provider.AttachmentAudio:
 			if !caps.Audio {
 				return nil, fmt.Errorf("ACP agent does not accept audio content")
 			}
-			blocks = append(blocks, schema.AudioBlock(attachment.Data, attachment.MimeType))
-		case "resource", "embedded_context", "embeddedContext":
+			block = schema.AudioBlock(attachment.Data, attachment.MimeType)
+		case provider.AttachmentResource:
 			if !caps.EmbeddedContext {
 				return nil, fmt.Errorf("ACP agent does not accept embedded resource content")
 			}
 			if attachment.URI == "" {
 				return nil, fmt.Errorf("ACP embedded resource requires a URI")
 			}
-			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType)}
+			resource := &schema.EmbeddedResourceResource{URI: attachment.URI, MimeType: stringPtr(attachment.MimeType), Meta: cloneMetadata(attachment.ResourceMetadata)}
 			if strings.HasPrefix(attachment.MimeType, "text/") || attachment.MimeType == "application/json" || attachment.MimeType == "" {
 				resource.Text = stringPtr(attachment.Data)
 			} else {
 				resource.Blob = stringPtr(attachment.Data)
 			}
-			blocks = append(blocks, schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource})
-		case "resource_link", "resourceLink":
+			block = schema.ContentBlock{Type: schema.ContentBlockTypeResource, Resource: resource}
+		case provider.AttachmentResourceLink:
 			name := attachment.Name
 			if name == "" {
 				name = attachment.URI
 			}
-			block := schema.ResourceLinkBlock(name, attachment.URI)
+			block = schema.ResourceLinkBlock(name, attachment.URI)
 			block.MimeType = stringPtr(attachment.MimeType)
-			blocks = append(blocks, block)
+			block.Title = stringPtr(attachment.Title)
+			block.Description = stringPtr(attachment.Description)
+			if attachment.Size != 0 {
+				size := attachment.Size
+				block.Size = &size
+			}
 		default:
-			return nil, fmt.Errorf("unsupported generic attachment kind %q for ACP", attachment.Kind)
+			return nil, fmt.Errorf("unsupported attachment kind %q for ACP", attachment.Kind)
 		}
+		block.Annotations = annotationsToACP(attachment.Annotations)
+		block.Meta = cloneMetadata(attachment.Metadata)
+		blocks = append(blocks, block)
 	}
 	if len(blocks) == 0 {
 		return []schema.ContentBlock{schema.TextBlock("")}, nil
@@ -136,53 +147,13 @@ func stringPtr(value string) *string {
 	return &value
 }
 
-func permissionResponseForDecision(options []schema.PermissionOption, decision provider.ApprovalDecision) schema.RequestPermissionResponse {
-	var preferred []schema.PermissionOptionKind
-	switch decision {
-	case provider.ApprovalDecisionAccept:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindAllowOnce, schema.PermissionOptionKindAllowAlways}
-	case provider.ApprovalDecisionAcceptForSession:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindAllowAlways, schema.PermissionOptionKindAllowOnce}
-	case provider.ApprovalDecisionDecline:
-		preferred = []schema.PermissionOptionKind{schema.PermissionOptionKindRejectOnce, schema.PermissionOptionKindRejectAlways}
-	default:
+// permissionResponseFor answers with the option the user chose, or as
+// cancelled when the request ended without one.
+func permissionResponseFor(response approvalResponse) schema.RequestPermissionResponse {
+	if response.action.ID == "" {
 		return cancelledPermissionResponse()
 	}
-	if option, ok := choosePermissionOption(options, preferred); ok {
-		return selectedPermissionResponse(option.OptionID)
-	}
-	return cancelledPermissionResponse()
-}
-
-// permissionResponseForApproval answers with the client's exact option
-// selection when one was made (RespondToRequest already validated it against
-// the offered options); otherwise it maps the coarse decision onto the
-// agent's options by kind.
-func permissionResponseForApproval(options []schema.PermissionOption, response approvalResponse) schema.RequestPermissionResponse {
-	if response.optionID != "" {
-		return selectedPermissionResponse(schema.PermissionOptionId(response.optionID))
-	}
-	return permissionResponseForDecision(options, response.decision)
-}
-
-func hasPermissionOption(options []schema.PermissionOption, optionID string) bool {
-	for _, option := range options {
-		if string(option.OptionID) == optionID {
-			return true
-		}
-	}
-	return false
-}
-
-func choosePermissionOption(options []schema.PermissionOption, preferred []schema.PermissionOptionKind) (schema.PermissionOption, bool) {
-	for _, kind := range preferred {
-		for _, option := range options {
-			if option.Kind == kind {
-				return option, true
-			}
-		}
-	}
-	return schema.PermissionOption{}, false
+	return selectedPermissionResponse(schema.PermissionOptionId(response.action.ID))
 }
 
 func selectedPermissionResponse(optionID schema.PermissionOptionId) schema.RequestPermissionResponse {
@@ -193,101 +164,38 @@ func cancelledPermissionResponse() schema.RequestPermissionResponse {
 	return schema.RequestPermissionResponse{Outcome: schema.RequestPermissionOutcome{Outcome: schema.RequestPermissionOutcomeOutcomeCancelled}}
 }
 
-func selectedPermissionOptionID(resp schema.RequestPermissionResponse) (schema.PermissionOptionId, bool) {
-	if resp.Outcome.Outcome != schema.RequestPermissionOutcomeOutcomeSelected || resp.Outcome.OptionID == nil {
-		return "", false
-	}
-	return *resp.Outcome.OptionID, true
-}
-
-func permissionOptionsFromACP(options []schema.PermissionOption) []provider.ApprovalOption {
-	converted := make([]provider.ApprovalOption, 0, len(options))
+func permissionRequestFromACP(message string, options []schema.PermissionOption) provider.Request {
+	request := provider.Request{Message: message, Actions: make([]provider.RequestAction, 0, len(options))}
 	for _, option := range options {
-		converted = append(converted, provider.ApprovalOption{ID: string(option.OptionID), Name: option.Name, Kind: string(option.Kind)})
+		request.Actions = append(request.Actions, provider.RequestAction{ID: string(option.OptionID), Label: option.Name, Decision: permissionDecision(option.Kind)})
 	}
-	return converted
+	return request
 }
 
-func permissionRequestID(threadID string, toolCallID string) string {
-	base := threadID
-	if base == "" {
-		base = "unknown"
-	}
-	if toolCallID == "" {
-		return "permission:" + base
-	}
-	return "permission:" + base + ":" + toolCallID
-}
-
-func permissionDecisionFromResponse(options []schema.PermissionOption, resp schema.RequestPermissionResponse) (provider.ApprovalDecision, string) {
-	optionID, ok := selectedPermissionOptionID(resp)
-	if !ok {
-		return provider.ApprovalDecisionCancel, ""
-	}
-	for _, option := range options {
-		if option.OptionID != optionID {
-			continue
-		}
-		switch option.Kind {
-		case schema.PermissionOptionKindAllowAlways:
-			return provider.ApprovalDecisionAcceptForSession, string(optionID)
-		case schema.PermissionOptionKindAllowOnce:
-			return provider.ApprovalDecisionAccept, string(optionID)
-		case schema.PermissionOptionKindRejectAlways, schema.PermissionOptionKindRejectOnce:
-			return provider.ApprovalDecisionDecline, string(optionID)
-		}
-	}
-	return provider.ApprovalDecisionCancel, ""
-}
-
-func sessionRuntimeEvent(notification schema.SessionNotification) provider.RuntimeEvent {
-	update := provider.RuntimeEvent{
-		EventID:   provider.RuntimeEventID(newID()),
-		Provider:  DriverKind,
-		CreatedAt: time.Now(),
-	}
-	u := notification.Update
-	switch u.SessionUpdate {
-	case schema.SessionUpdateUserMessageChunk:
-		update.Type = provider.RuntimeEventItemCompleted
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{ItemType: provider.ItemKindUserMessage, ItemStatus: provider.ItemStatusCompleted, Detail: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateAgentMessageChunk:
-		update.Type = provider.RuntimeEventContentDelta
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentAssistantText, Delta: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateAgentThoughtChunk:
-		update.Type = provider.RuntimeEventContentDelta
-		update.ItemID = messageID(u.MessageID)
-		text, _ := u.TextChunk()
-		update.Payload = provider.RuntimeEventPayload{StreamKind: provider.RuntimeContentReasoningText, Delta: text, Attachments: attachmentsFromACPContent(u)}
-	case schema.SessionUpdateToolCall:
-		update.Type = provider.RuntimeEventItemStarted
-		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
-	case schema.SessionUpdateToolCallUpdate:
-		update.Type = provider.RuntimeEventItemUpdated
-		update.ItemID = toolCallIDValue(u.ToolCallID)
-		update.Payload = provider.RuntimeEventPayload{ItemType: itemKindFromToolKind(toolKindString(u.Kind)), ItemStatus: itemStatusFromACP(toolStatusString(u.Status)), Title: stringValue(u.Title)}
-	case schema.SessionUpdatePlan:
-		update.Type = provider.RuntimeEventTurnPlanUpdated
-		update.Payload = provider.RuntimeEventPayload{PlanEntries: planEntriesFromACP(u.Entries), Data: marshalRaw(schema.Plan{Entries: u.Entries})}
-	case schema.SessionUpdateAvailableCommandsUpdate:
-		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{SlashCommands: slashCommandsFromACP(u.AvailableCommands), Data: marshalRaw(schema.AvailableCommandsUpdate{AvailableCommands: u.AvailableCommands})}
-	case schema.SessionUpdateSessionInfoUpdate:
-		update.Type = provider.RuntimeEventThreadMetadataUpdate
-		update.Payload = provider.RuntimeEventPayload{Title: stringValue(u.Title), Data: marshalRaw(schema.SessionInfoUpdate{Title: u.Title, UpdatedAt: u.UpdatedAt})}
-	case schema.SessionUpdateUsageUpdate:
-		update.Type = provider.RuntimeEventThreadTokenUsage
-		update.Payload = provider.RuntimeEventPayload{TokenUsage: tokenUsageFromACP(u), Data: marshalRaw(usageUpdateFromACP(u))}
+func permissionDecision(kind schema.PermissionOptionKind) provider.ApprovalDecision {
+	switch kind {
+	case schema.PermissionOptionKindAllowAlways:
+		return provider.ApprovalDecisionAcceptForSession
+	case schema.PermissionOptionKindAllowOnce:
+		return provider.ApprovalDecisionAccept
+	case schema.PermissionOptionKindRejectAlways, schema.PermissionOptionKindRejectOnce:
+		return provider.ApprovalDecisionDecline
 	default:
-		update.Type = provider.RuntimeEventRuntimeWarning
-		update.Payload = provider.RuntimeEventPayload{Message: "Unknown ACP session update", Data: marshalRaw(notification.Update)}
+		return provider.ApprovalDecisionCancel
 	}
-	return update
+}
+
+func stopReasonFromACP(reason schema.StopReason) provider.StopReason {
+	switch reason {
+	case schema.StopReasonMaxTokens:
+		return provider.StopReasonMaxTokens
+	case schema.StopReasonMaxTurnRequests:
+		return provider.StopReasonMaxTurnRequests
+	case schema.StopReasonRefusal:
+		return provider.StopReasonRefusal
+	default:
+		return ""
+	}
 }
 
 func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachment {
@@ -303,10 +211,28 @@ func attachmentsFromACPContent(update schema.SessionUpdate) []provider.Attachmen
 }
 
 func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, bool) {
-	attachment := provider.Attachment{}
+	attachment := provider.Attachment{
+		Annotations: annotationsFromACP(block.Annotations),
+		Metadata:    cloneMetadata(block.Meta),
+	}
+	if block.Title != nil {
+		attachment.Title = *block.Title
+	}
+	if block.Description != nil {
+		attachment.Description = *block.Description
+	}
+	if block.Size != nil {
+		attachment.Size = *block.Size
+	}
+	if block.URI != nil {
+		attachment.URI = *block.URI
+	}
 	switch block.Type {
 	case schema.ContentBlockTypeImage, schema.ContentBlockTypeAudio:
-		attachment.Kind = block.Type
+		attachment.Kind = provider.AttachmentImage
+		if block.Type == schema.ContentBlockTypeAudio {
+			attachment.Kind = provider.AttachmentAudio
+		}
 		if block.Data != nil {
 			attachment.Data = *block.Data
 		}
@@ -314,12 +240,9 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 			attachment.MimeType = *block.MimeType
 		}
 	case schema.ContentBlockTypeResourceLink:
-		attachment.Kind = "resource_link"
+		attachment.Kind = provider.AttachmentResourceLink
 		if block.Name != nil {
 			attachment.Name = *block.Name
-		}
-		if block.URI != nil {
-			attachment.URI = *block.URI
 		}
 		if block.MimeType != nil {
 			attachment.MimeType = *block.MimeType
@@ -328,8 +251,9 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		if block.Resource == nil {
 			return provider.Attachment{}, false
 		}
-		attachment.Kind = "resource"
+		attachment.Kind = provider.AttachmentResource
 		attachment.URI = block.Resource.URI
+		attachment.ResourceMetadata = cloneMetadata(block.Resource.Meta)
 		if block.Resource.MimeType != nil {
 			attachment.MimeType = *block.Resource.MimeType
 		}
@@ -342,6 +266,52 @@ func attachmentFromACPBlock(block schema.ContentBlock) (provider.Attachment, boo
 		return provider.Attachment{}, false
 	}
 	return attachment, true
+}
+
+func annotationsFromACP(value *schema.Annotations) *provider.ContentAnnotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]string, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, string(role))
+	}
+	annotations := &provider.ContentAnnotations{
+		Audience: audience,
+		Priority: value.Priority,
+		Metadata: cloneMetadata(value.Meta),
+	}
+	if value.LastModified != nil {
+		annotations.LastModified = *value.LastModified
+	}
+	return annotations
+}
+
+func annotationsToACP(value *provider.ContentAnnotations) *schema.Annotations {
+	if value == nil {
+		return nil
+	}
+	audience := make([]schema.Role, 0, len(value.Audience))
+	for _, role := range value.Audience {
+		audience = append(audience, schema.Role(role))
+	}
+	return &schema.Annotations{
+		Audience:     audience,
+		Priority:     value.Priority,
+		LastModified: stringPtr(value.LastModified),
+		Meta:         cloneMetadata(value.Metadata),
+	}
+}
+
+func cloneMetadata(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, entry := range value {
+		cloned[key] = entry
+	}
+	return cloned
 }
 
 func itemKindFromToolKind(kind string) provider.ItemKind {
@@ -386,6 +356,7 @@ func itemStatusFromACP(status string) provider.ItemStatus {
 // old/new text — on every sparse update.
 type toolCallPatch struct {
 	title     *string
+	name      *string
 	kind      *schema.ToolKind
 	status    *schema.ToolCallStatus
 	content   []schema.ToolCallContent
@@ -398,6 +369,12 @@ type toolCallPatch struct {
 	// content blocks — without client terminal support, command output often
 	// arrives only here. Only bounded text is ever extracted from it.
 	rawOutput any
+	// terminalOutput accumulates codex-acp's `_meta.terminal_output_delta`
+	// chunks (its output channel for clients without terminal support); a
+	// patch carries just the new chunk, which overlay appends.
+	terminalOutput string
+	// exitCode comes from codex-acp's `_meta.terminal_exit`.
+	exitCode *int
 }
 
 // toolCallPatchFromUpdate extracts the sparse patch a tool_call or
@@ -408,14 +385,18 @@ func toolCallPatchFromUpdate(u schema.SessionUpdate) *toolCallPatch {
 	default:
 		return nil
 	}
+	output, exitCode := terminalMeta(u.Meta)
 	return &toolCallPatch{
-		title:     u.Title,
-		kind:      u.Kind,
-		status:    u.Status,
-		content:   toolCallContentFromAny(u.Content),
-		locations: u.Locations,
-		rawInput:  u.RawInput,
-		rawOutput: u.RawOutput,
+		title:          u.Title,
+		name:           u.Name,
+		terminalOutput: output,
+		exitCode:       exitCode,
+		kind:           u.Kind,
+		status:         toolCallStatus(u.Status),
+		content:        toolCallContentFromAny(u.Content),
+		locations:      u.Locations,
+		rawInput:       u.RawInput,
+		rawOutput:      u.RawOutput,
 	}
 }
 
@@ -472,7 +453,36 @@ func (s *toolCallPatch) overlay(patch *toolCallPatch) *toolCallPatch {
 	if patch.rawOutput != nil {
 		s.rawOutput = patch.rawOutput
 	}
+	if patch.name != nil {
+		s.name = patch.name
+	}
+	if patch.exitCode != nil {
+		s.exitCode = patch.exitCode
+	}
+	if room := toolOutputCharacterLimit - len(s.terminalOutput); room > 0 && patch.terminalOutput != "" {
+		s.terminalOutput += provider.TruncateUTF8(patch.terminalOutput, room)
+	}
 	return s
+}
+
+// terminalMeta reads codex-acp's command output conventions from a tool
+// update's `_meta`: `terminal_output_delta: {data}` chunks and
+// `terminal_exit: {exit_code}`. They are not part of the ACP spec, but they
+// are the only place codex-acp reports output to a client that, like maiD,
+// does not advertise terminals.
+func terminalMeta(meta map[string]any) (string, *int) {
+	var output string
+	if delta, ok := meta["terminal_output_delta"].(map[string]any); ok {
+		output, _ = delta["data"].(string)
+	}
+	var exitCode *int
+	if exit, ok := meta["terminal_exit"].(map[string]any); ok {
+		if code, ok := exit["exit_code"].(float64); ok {
+			value := int(code)
+			exitCode = &value
+		}
+	}
+	return output, exitCode
 }
 
 // toolCall converts the accumulated adapter-private snapshot into the public
@@ -483,19 +493,27 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 		return nil
 	}
 	providerKind := strings.ToLower(strings.TrimSpace(toolKindString(s.kind)))
-	action := toolActionFromACP(providerKind)
 	call := &provider.ToolCall{
-		Action:       action,
+		Action:       toolActionFromACP(providerKind),
+		Name:         stringValue(s.name),
 		ProviderKind: providerKind,
+		ExitCode:     s.exitCode,
 		Locations:    toolLocationsFromACP(s.locations),
-		Changes:      toolChangesFromACP(s.content, action),
+		Changes:      toolChangesFromACP(s.content, providerKind),
 		Attachments:  toolAttachmentsFromACP(s.content),
 		Output:       toolTextFromACP(s.content),
+	}
+	if call.Output != "" {
+		// ACP text content is Markdown; terminal and raw output are not.
+		call.OutputFormat = provider.OutputFormatMarkdown
+	}
+	if call.Output == "" {
+		call.Output = s.terminalOutput
 	}
 	if call.Output == "" {
 		call.Output = rawOutputText(s.rawOutput)
 	}
-	call.Output = boundedOutputText(call.Output)
+	call.Output = provider.TruncateUTF8(call.Output, toolOutputCharacterLimit)
 	call.Command, call.Query, call.Cwd = toolInputDetails(s.rawInput)
 	return call
 }
@@ -505,18 +523,6 @@ func (s *toolCallPatch) toolCall() *provider.ToolCall {
 // real command output, small enough that per-item snapshots stay cheap to
 // re-emit on every sparse update.
 const toolOutputCharacterLimit = 16_384
-
-// boundedOutputText truncates output on a rune boundary.
-func boundedOutputText(text string) string {
-	if len(text) <= toolOutputCharacterLimit {
-		return text
-	}
-	cut := toolOutputCharacterLimit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut]
-}
 
 func rawOutputText(raw any) string {
 	switch value := raw.(type) {
@@ -549,30 +555,16 @@ func rawOutputText(raw any) string {
 	return ""
 }
 
+// toolActionFromACP keeps only the actions ACP's tool kind states; every
+// other kind leaves the action empty.
 func toolActionFromACP(kind string) provider.ToolAction {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
+	switch kind {
 	case "read":
 		return provider.ToolActionRead
-	case "edit", "patch", "file_change", "write", "create":
-		return provider.ToolActionEdit
-	case "delete":
-		return provider.ToolActionDelete
-	case "move":
-		return provider.ToolActionMove
 	case "search":
 		return provider.ToolActionSearch
-	case "execute", "terminal", "command", "shell":
-		return provider.ToolActionExecute
-	case "think":
-		return provider.ToolActionThink
-	case "fetch":
-		return provider.ToolActionFetch
-	case "switch_mode":
-		return provider.ToolActionSwitchMode
-	case "":
-		return provider.ToolActionOther
 	default:
-		return provider.ToolActionOther
+		return ""
 	}
 }
 
@@ -617,7 +609,7 @@ func toolTextFromACP(content []schema.ToolCallContent) string {
 	return strings.Join(parts, "\n")
 }
 
-func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAction) []provider.FileChange {
+func toolChangesFromACP(content []schema.ToolCallContent, kind string) []provider.FileChange {
 	if content == nil {
 		return nil
 	}
@@ -626,7 +618,7 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 		if entry.Type != schema.ToolCallContentTypeDiff {
 			continue
 		}
-		change := provider.FileChange{Kind: fileChangeKindFromAction(action)}
+		change := provider.FileChange{Kind: fileChangeKindFromACP(kind)}
 		if entry.Path != nil {
 			change.Path = *entry.Path
 		}
@@ -641,11 +633,11 @@ func toolChangesFromACP(content []schema.ToolCallContent, action provider.ToolAc
 	return changes
 }
 
-func fileChangeKindFromAction(action provider.ToolAction) provider.FileChangeKind {
-	switch action {
-	case provider.ToolActionDelete:
+func fileChangeKindFromACP(kind string) provider.FileChangeKind {
+	switch kind {
+	case "delete":
 		return provider.FileChangeDelete
-	case provider.ToolActionMove:
+	case "move":
 		return provider.FileChangeMove
 	default:
 		return provider.FileChangeUpdate
@@ -699,25 +691,21 @@ func toolCallTitle(tool schema.ToolCallUpdate) string {
 	return string(tool.ToolCallID)
 }
 
-func permissionRequestType(tool schema.ToolCallUpdate) provider.RuntimeRequestType {
-	kind := toolKindString(tool.Kind)
-	if hasTerminalContent(tool.Content) || kind == "execute" || kind == "terminal" || kind == "command" || kind == "shell" {
-		return provider.RuntimeRequestCommandExecution
-	}
-	if kind == "read" {
-		return provider.RuntimeRequestFileRead
-	}
-	if hasDiffContent(tool.Content) || kind == "edit" || kind == "patch" || kind == "file_change" || kind == "delete" || kind == "move" {
-		return provider.RuntimeRequestFileChange
-	}
-	return provider.RuntimeRequestDynamicToolCall
-}
-
 func toolKindString(kind *schema.ToolKind) string {
 	if kind == nil {
 		return ""
 	}
 	return strings.ToLower(string(*kind))
+}
+
+// toolCallStatus types a session update's status, which the schema shares
+// between tool calls and compactions.
+func toolCallStatus(status *string) *schema.ToolCallStatus {
+	if status == nil {
+		return nil
+	}
+	typed := schema.ToolCallStatus(*status)
+	return &typed
 }
 
 func toolStatusString(status *schema.ToolCallStatus) string {
@@ -734,36 +722,11 @@ func toolCallIDValue(id *schema.ToolCallId) string {
 	return string(*id)
 }
 
-func hasDiffContent(content []schema.ToolCallContent) bool {
-	for _, block := range content {
-		if block.Type == schema.ToolCallContentTypeDiff {
-			return true
-		}
-	}
-	return false
-}
-
-func hasTerminalContent(content []schema.ToolCallContent) bool {
-	for _, block := range content {
-		if block.Type == schema.ToolCallContentTypeTerminal {
-			return true
-		}
-	}
-	return false
-}
-
 func stringValue(value *string) string {
 	if value == nil {
 		return ""
 	}
 	return *value
-}
-
-func messageID(id *schema.MessageId) string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
 }
 
 func acpRequestError(err error) error {
@@ -819,13 +782,13 @@ func configOptionsFromACP(options []schema.SessionConfigOption) []provider.Confi
 func slashCommandsFromACP(commands []schema.AvailableCommand) []provider.SlashCommand {
 	converted := make([]provider.SlashCommand, 0, len(commands))
 	for _, command := range commands {
-		converted = append(converted, provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil})
+		convertedCommand := provider.SlashCommand{Name: command.Name, Description: command.Description, HasInput: command.Input != nil}
+		if command.Input != nil {
+			convertedCommand.InputHint = command.Input.Hint
+		}
+		converted = append(converted, convertedCommand)
 	}
 	return converted
-}
-
-func usageUpdateFromACP(u schema.SessionUpdate) schema.UsageUpdate {
-	return schema.UsageUpdate{Used: uint64Value(u.Used), Size: uint64Value(u.Size), Cost: u.Cost}
 }
 
 func tokenUsageFromACP(u schema.SessionUpdate) *provider.TokenUsage {
@@ -844,36 +807,32 @@ func uint64Value(value *uint64) uint64 {
 	return *value
 }
 
-// isStableAuthMethod reports whether the advertised method is the stable
-// agent-handled variant. The type field discriminates: absent (or empty) means
-// agent; env_var/terminal are unstable client-driven methods maiD skips.
-func isStableAuthMethod(method schema.AuthMethod) bool {
+// isAgentAuthMethod reports whether the method is the agent-handled variant
+// (type absent or empty), which runs through `authenticate`.
+func isAgentAuthMethod(method schema.AuthMethod) bool {
 	return method.Type == nil || *method.Type == ""
 }
 
-func hasStableAuthMethod(methods []schema.AuthMethod) bool {
-	for _, method := range methods {
-		if isStableAuthMethod(method) && method.ID != "" {
-			return true
-		}
-	}
-	return false
+// isSupportedAuthMethod reports whether maiD can run the method: agent-handled
+// ones, or terminal ones run in a maiD terminal.
+func isSupportedAuthMethod(method schema.AuthMethod) bool {
+	return method.ID != "" && (isAgentAuthMethod(method) || stringValue(method.Type) == schema.AuthMethodTypeTerminal)
 }
 
-func authMethodID(method schema.AuthMethod) string {
-	if !isStableAuthMethod(method) {
-		return ""
-	}
-	return string(method.ID)
+func hasSupportedAuthMethod(methods []schema.AuthMethod) bool {
+	return slices.ContainsFunc(methods, isSupportedAuthMethod)
 }
 
 func authMethodsFromACP(methods []schema.AuthMethod) []provider.AuthMethod {
 	converted := make([]provider.AuthMethod, 0, len(methods))
 	for _, method := range methods {
-		if !isStableAuthMethod(method) {
-			continue // skip unstable env/terminal auth methods
+		if !isSupportedAuthMethod(method) {
+			continue
 		}
 		am := provider.AuthMethod{ID: string(method.ID), Name: method.Name}
+		if !isAgentAuthMethod(method) {
+			am.Kind = provider.AuthKindTerminal
+		}
 		if method.Description != nil {
 			am.Description = *method.Description
 		}
@@ -889,10 +848,11 @@ func sessionSummariesFromACP(sessions []schema.SessionInfo) []provider.SessionSu
 	converted := make([]provider.SessionSummary, 0, len(sessions))
 	for _, session := range sessions {
 		converted = append(converted, provider.SessionSummary{
-			SessionID: string(session.SessionID),
-			Title:     stringValue(session.Title),
-			Cwd:       session.CWD,
-			UpdatedAt: stringValue(session.UpdatedAt),
+			SessionID:             string(session.SessionID),
+			Title:                 stringValue(session.Title),
+			Cwd:                   session.CWD,
+			AdditionalDirectories: append([]string(nil), session.AdditionalDirectories...),
+			UpdatedAt:             stringValue(session.UpdatedAt),
 		})
 	}
 	return converted
@@ -936,17 +896,17 @@ func configChoices(options schema.SessionConfigSelectOptions) []provider.ConfigC
 	}
 	var grouped []schema.SessionConfigSelectGroup
 	if err := json.Unmarshal(raw, &grouped); err == nil && hasGroupedOptions(grouped) {
-		var flattened []schema.SessionConfigSelectOption
+		var choices []provider.ConfigChoice
 		for _, group := range grouped {
-			flattened = append(flattened, group.Options...)
+			choices = append(choices, configChoicesFromOptions(group.Options, string(group.Group), group.Name)...)
 		}
-		return configChoicesFromOptions(flattened)
+		return choices
 	}
 	var ungrouped []schema.SessionConfigSelectOption
 	if err := json.Unmarshal(raw, &ungrouped); err != nil {
 		return nil
 	}
-	return configChoicesFromOptions(ungrouped)
+	return configChoicesFromOptions(ungrouped, "", "")
 }
 
 func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
@@ -958,13 +918,17 @@ func hasGroupedOptions(groups []schema.SessionConfigSelectGroup) bool {
 	return false
 }
 
-func configChoicesFromOptions(options []schema.SessionConfigSelectOption) []provider.ConfigChoice {
+func configChoicesFromOptions(options []schema.SessionConfigSelectOption, group, groupLabel string) []provider.ConfigChoice {
 	if len(options) == 0 {
 		return nil
 	}
 	choices := make([]provider.ConfigChoice, 0, len(options))
 	for _, option := range options {
-		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name})
+		description := ""
+		if option.Description != nil {
+			description = *option.Description
+		}
+		choices = append(choices, provider.ConfigChoice{Value: string(option.Value), Label: option.Name, Description: description, Group: group, GroupLabel: groupLabel})
 	}
 	return choices
 }
@@ -982,17 +946,6 @@ func configStringValue(value any) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func resumeSessionID(cursor json.RawMessage) string {
-	if len(cursor) == 0 {
-		return ""
-	}
-	var payload struct {
-		SessionId string `json:"sessionId"`
-	}
-	_ = json.Unmarshal(cursor, &payload)
-	return payload.SessionId
 }
 
 func marshalRaw(value any) json.RawMessage {

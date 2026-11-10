@@ -4,8 +4,6 @@
 *.dll
 *.so
 *.dylib
-# Vendored, checksum-pinned native search library (see third_party/fff/MANIFEST.json)
-!third_party/fff/lib/**/*.dylib
 bin/
 tmp/
 
@@ -36,5 +34,5 @@ xcuserdata/
 buildServer.json
 Local.xcconfig
 
-# Native libghostty-vt build tree (make ghostty-vt)
+# Downloaded libghostty-vt and FFF (make ghostty-vt fff)
 build/

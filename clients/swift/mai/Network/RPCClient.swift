@@ -1,29 +1,37 @@
 import Foundation
 
 final class RPCClient {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private static let notificationQueueLimit = 1_024
+    /// How often the socket is pinged and how long a pong may take. A link
+    /// that went half-open (a network change, a suspension, a stalled proxy)
+    /// otherwise looks connected while every call hangs; the daemon pings on
+    /// the same cadence and drops the connection from its side too.
+    private static let pingInterval: Duration = .seconds(15)
+    /// A probe answers whether the socket survived a suspension, so it can't
+    /// wait as long as the periodic ping: the user is looking at the screen.
+    private static let probeTimeout: Duration = .seconds(5)
 
     var onNotification: ((String, Data) -> Void)?
-    var onTerminalStreamItem: ((TerminalStreamMessage) -> Void)?
     var onTerminalListItem: ((TerminalListStreamItem) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
-    private let endpoint: URL
-    private let session: URLSession
+    private let endpoint = RPCClient.configuredEndpoint
+
+    /// The terminal stream path (the daemon's `wire.TerminalStreamPath`) is
+    /// the RPC path's sibling.
+    var terminalStreamEndpoint: URL {
+        endpoint.deletingLastPathComponent().appending(path: "terminal")
+    }
     private var webSocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var nextRequestID = 1
     private var pendingRequests: [Int: CheckedContinuation<Data, any Error>] = [:]
     private var notifyContinuation: AsyncStream<String>.Continuation?
     private var notifyTask: Task<Void, Never>?
-
-    init(
-        endpoint: URL? = nil,
-        session: URLSession = .shared
-    ) {
-        self.endpoint = endpoint ?? RPCClient.configuredEndpoint
-        self.session = session
-    }
+    private var pingTask: Task<Void, Never>?
 
     private static var configuredEndpoint: URL {
         if let value = Bundle.main.object(forInfoDictionaryKey: "MAI_RPC_URL") as? String,
@@ -39,13 +47,29 @@ final class RPCClient {
     func connect() {
         guard webSocket == nil else { return }
 
-        let socket = session.webSocketTask(with: endpoint)
+        let socket = URLSession.shared.webSocketTask(with: endpoint)
         socket.maximumMessageSize = 64 * 1_024 * 1_024
         webSocket = socket
         socket.resume()
 
         receiveTask = Task { [weak self] in
-            await self?.receiveMessages(from: socket)
+            await Self.receiveMessages(
+                from: socket,
+                route: { [weak self] envelope, data in self?.route(envelope, data: data) },
+                finish: { [weak self] failure in
+                    self?.finishConnection(socket, error: failure.map { RPCError($0.message) })
+                })
+        }
+        pingTask = Task { [weak self] in
+            while true {
+                do {
+                    try await Task.sleep(for: Self.pingInterval)
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                await ping(socket, timeout: Self.pingInterval)
+            }
         }
 
         // One consumer drains notifications sequentially so fire-and-forget
@@ -72,10 +96,40 @@ final class RPCClient {
         finishConnection(socket, error: nil)
     }
 
+    /// Pings the socket now and closes it, through `onDisconnect`, when the
+    /// pong doesn't come back soon.
+    func checkConnection() {
+        guard let socket = webSocket else { return }
+        Task { [weak self] in
+            await self?.ping(socket, timeout: Self.probeTimeout)
+        }
+    }
+
+    private func ping(_ socket: URLSessionWebSocketTask, timeout: Duration) async {
+        // A half-open link never calls the pong handler, so the deadline
+        // closes the socket, which then fails the ping.
+        let deadline = Task { [weak self] in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch {
+                return
+            }
+            self?.finishConnection(socket, error: RPCError("maiD stopped responding"))
+        }
+        let answered = await withCheckedContinuation { continuation in
+            socket.sendPing { error in
+                continuation.resume(returning: error == nil)
+            }
+        }
+        deadline.cancel()
+        if !answered {
+            finishConnection(socket, error: RPCError("maiD stopped responding"))
+        }
+    }
+
     func call<Params: Encodable, Result: Decodable>(
         _ method: String,
-        params: sending Params,
-        as resultType: Result.Type = Result.self
+        params: sending Params
     ) async throws -> Result {
         let data = try await sendRequestAndWaitForResponse(method, params: params)
         let response = try await Self.decode(Response<Result>.self, from: data)
@@ -84,11 +138,7 @@ final class RPCClient {
             throw RPCError(code: error.code, message: error.message, data: error.data)
         }
         guard let result = response.result else {
-            throw RPCError(
-                code: nil,
-                message: "maiD returned no result for \(method)",
-                data: nil
-            )
+            throw RPCError("maiD returned no result for \(method)")
         }
         return result
     }
@@ -109,11 +159,7 @@ final class RPCClient {
             guard let socket = webSocket else { return }
             finishConnection(
                 socket,
-                error: RPCError(
-                    code: nil,
-                    message: "Client notification queue is full",
-                    data: nil
-                )
+                error: RPCError("Client notification queue is full")
             )
         @unknown default:
             break
@@ -136,9 +182,7 @@ final class RPCClient {
         _ type: Value.Type,
         from data: Data
     ) async throws -> sending Value {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(type, from: data)
+        try WireJSON.makeDecoder().decode(type, from: data)
     }
 
     // Encoding runs off the main actor for the same reason decoding does: a
@@ -148,17 +192,7 @@ final class RPCClient {
     private static func encode<Value: Encodable & SendableMetatype>(
         _ value: sending Value
     ) async throws -> String {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(value)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw RPCError(
-                code: nil,
-                message: "Could not encode the JSON-RPC request",
-                data: nil
-            )
-        }
-        return text
+        try encodeInline(value)
     }
 
     private func sendRequestAndWaitForResponse<Params: Encodable>(
@@ -166,7 +200,7 @@ final class RPCClient {
         params: sending Params
     ) async throws -> Data {
         guard webSocket != nil else {
-            throw RPCError(code: nil, message: "Not connected to maiD", data: nil)
+            throw RPCError("Not connected to maiD")
         }
 
         let requestID = nextRequestID
@@ -175,7 +209,7 @@ final class RPCClient {
             Request(id: requestID, method: method, params: params)
         )
         guard let socket = webSocket else {
-            throw RPCError(code: nil, message: "Not connected to maiD", data: nil)
+            throw RPCError("Not connected to maiD")
         }
 
         return try await withTaskCancellationHandler {
@@ -211,7 +245,14 @@ final class RPCClient {
         }
     }
 
-    private func receiveMessages(from socket: URLSessionWebSocketTask) async {
+    /// Receives off the main actor and routes each message to the main
+    /// actor in arrival order.
+    @concurrent
+    private nonisolated static func receiveMessages(
+        from socket: URLSessionWebSocketTask,
+        route: @escaping @MainActor (Envelope, Data) -> Void,
+        finish: @escaping @MainActor (ReceiveFailure?) -> Void
+    ) async {
         do {
             while !Task.isCancelled {
                 let message = try await socket.receive()
@@ -219,57 +260,33 @@ final class RPCClient {
 
                 switch message {
                 case .string(let text):
-                    guard let textData = text.data(using: .utf8) else {
-                        throw RPCError(
-                            code: nil,
-                            message: "maiD sent invalid UTF-8",
-                            data: nil
-                        )
-                    }
-                    data = textData
+                    data = Data(text.utf8)
                 case .data:
-                    throw RPCError(
-                        code: nil,
-                        message: "maiD sent a binary WebSocket frame",
-                        data: nil
-                    )
+                    throw ReceiveFailure(message: "maiD sent a binary WebSocket frame")
                 @unknown default:
-                    throw RPCError(
-                        code: nil,
-                        message: "maiD sent an unknown WebSocket frame",
-                        data: nil
-                    )
+                    throw ReceiveFailure(message: "maiD sent an unknown WebSocket frame")
                 }
 
-                if onTerminalStreamItem != nil {
-                    let envelope = try await Self.decode(TerminalEnvelope.self, from: data)
-                    routeTerminalEnvelope(envelope, data: data)
-                } else {
-                    let route = try await Self.decode(Route.self, from: data)
-                    routeMessage(route, data: data)
-                }
+                let envelope = try WireJSON.makeDecoder().decode(Envelope.self, from: data)
+                await route(envelope, data)
             }
+            await finish(nil)
         } catch is CancellationError {
-            finishConnection(socket, error: nil)
+            await finish(nil)
+        } catch let failure as ReceiveFailure {
+            await finish(failure)
         } catch {
-            finishConnection(socket, error: error)
+            await finish(ReceiveFailure(message: error.localizedDescription))
         }
     }
 
-    private func routeMessage(_ route: Route, data: Data) {
-        if let id = route.id {
-            pendingRequests.removeValue(forKey: id)?.resume(returning: data)
-        } else if let method = route.method {
-            onNotification?(method, data)
-        }
+    nonisolated private struct ReceiveFailure: Error {
+        let message: String
     }
 
-    private func routeTerminalEnvelope(_ envelope: TerminalEnvelope, data: Data) {
+    private func route(_ envelope: Envelope, data: Data) {
         if let id = envelope.id {
             pendingRequests.removeValue(forKey: id)?.resume(returning: data)
-        } else if envelope.method == MaidRPCMethod.terminalSubscribe,
-                  let item = envelope.params {
-            onTerminalStreamItem?(item)
         } else if envelope.method == MaidRPCMethod.terminalSubscribeList {
             // List updates are low-frequency lifecycle changes; decoding
             // inline keeps them ordered with the surrounding stream.
@@ -283,11 +300,7 @@ final class RPCClient {
         }
     }
 
-    private static let listNotificationDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+    private static let listNotificationDecoder = WireJSON.makeDecoder()
 
     nonisolated private struct TerminalListNotification: Decodable {
         let params: TerminalListStreamItem
@@ -301,14 +314,7 @@ final class RPCClient {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(value)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw RPCError(
-                code: nil,
-                message: "Could not encode the JSON-RPC notification",
-                data: nil
-            )
-        }
-        return text
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func finishConnection(_ socket: URLSessionWebSocketTask, error: Error?) {
@@ -318,17 +324,15 @@ final class RPCClient {
         notifyContinuation?.finish()
         notifyTask = nil
         notifyContinuation = nil
+        pingTask?.cancel()
+        pingTask = nil
         receiveTask?.cancel()
         socket.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         receiveTask = nil
         let failure =
             error
-            ?? RPCError(
-                code: nil,
-                message: "Connection closed",
-                data: nil
-            )
+            ?? RPCError("Connection closed")
         let requests = pendingRequests.values
         pendingRequests.removeAll()
         for request in requests {
@@ -350,35 +354,9 @@ final class RPCClient {
         let params: Params
     }
 
-    nonisolated private struct Route: Decodable {
+    nonisolated private struct Envelope: Decodable, Sendable {
         let id: Int?
         let method: String?
-    }
-
-    /// Terminal connections decode their notification payload in the same
-    /// pass as the JSON-RPC route, avoiding a second parse of every output
-    /// frame. Malformed terminal output fails the connection instead of being
-    /// silently dropped, because one missing escape sequence can corrupt the
-    /// rendered screen.
-    nonisolated private struct TerminalEnvelope: Decodable, Sendable {
-        let id: Int?
-        let method: String?
-        let params: TerminalStreamMessage?
-
-        private enum CodingKeys: String, CodingKey {
-            case id, method, params
-        }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            id = try container.decodeIfPresent(Int.self, forKey: .id)
-            method = try container.decodeIfPresent(String.self, forKey: .method)
-            if method == MaidRPCMethod.terminalSubscribe {
-                params = try container.decode(TerminalStreamMessage.self, forKey: .params)
-            } else {
-                params = nil
-            }
-        }
     }
 
     nonisolated private struct Response<Result: Decodable>: Decodable {

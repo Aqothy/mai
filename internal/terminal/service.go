@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// terminateGrace bounds how long a process group gets to exit after SIGTERM
-// before it is killed.
-const terminateGrace = 3 * time.Second
+// terminateGrace bounds how long a process group gets to exit after SIGHUP
+// and SIGTERM before it is killed. Shells exit on SIGHUP at once; the grace
+// is for a program that saves its state on hangup.
+const terminateGrace = time.Second
 
 // Service owns every live terminal session for one daemon run. It knows
 // nothing about RPC clients, rendering, or persistence.
@@ -22,9 +23,8 @@ func NewService() *Service {
 	return &Service{sessions: make(map[string]*Session)}
 }
 
-// Start spawns the first login shell for terminalID. An existing session is
-// never replaced implicitly; callers must use Relaunch for that lifecycle
-// transition.
+// Start spawns the login shell for terminalID. A shell that ends removes its
+// terminal, so an existing session is never replaced.
 func (svc *Service) Start(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
@@ -51,53 +51,6 @@ func (svc *Service) Get(terminalID string) (*Session, error) {
 		return nil, ErrNotFound
 	}
 	return session, nil
-}
-
-// Relaunch replaces a terminal's run with a fresh shell: any live process
-// group is killed first, then a new session starts with a new run ID, a reset
-// sequence, and an empty attach model. Events from the old run keep their old
-// run ID and cannot affect the new shell.
-func (svc *Service) Relaunch(terminalID string, spec SpawnSpec, events Events) (*Session, error) {
-	svc.mu.Lock()
-	if svc.closed {
-		svc.mu.Unlock()
-		return nil, ErrServiceClosed
-	}
-	existing := svc.sessions[terminalID]
-	svc.mu.Unlock()
-
-	// Terminate can block for the grace interval, so it must not hold the
-	// service lock.
-	if existing != nil {
-		existing.Terminate(terminateGrace)
-		existing.Release()
-	}
-
-	svc.mu.Lock()
-	defer svc.mu.Unlock()
-	if svc.closed {
-		return nil, ErrServiceClosed
-	}
-	if svc.sessions[terminalID] != existing {
-		// A concurrent relaunch already installed a newer run.
-		return nil, ErrAlreadyRunning
-	}
-	session, err := startSession(terminalID, spec, events)
-	if err != nil {
-		return nil, err
-	}
-	svc.sessions[terminalID] = session
-	return session, nil
-}
-
-// Terminate kills the live run and keeps the session's final state available.
-func (svc *Service) Terminate(terminalID string) error {
-	session, err := svc.Get(terminalID)
-	if err != nil {
-		return err
-	}
-	session.Terminate(terminateGrace)
-	return nil
 }
 
 // Remove terminates the run if necessary and forgets the session.

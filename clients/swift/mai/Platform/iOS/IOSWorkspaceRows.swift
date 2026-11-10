@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 /// Rows for the unified Threads list: agent chats and terminals merged in
@@ -25,8 +26,9 @@ struct IOSWorkspaceRows: View {
     }
 }
 
-/// A concrete row root lets List keep one stable identity path for both
-/// agent-thread and terminal rows.
+/// A single-root container keeps the row unary regardless of which workspace
+/// domain the item belongs to, so List can template row identities from the
+/// ForEach without evaluating every row's body.
 private struct IOSWorkspaceRow: View {
     let store: ThreadStore
     let item: WorkspaceListItem
@@ -36,51 +38,26 @@ private struct IOSWorkspaceRow: View {
     let openTerminalHere: (String) -> Void
 
     var body: some View {
-        switch item {
-        case .agentThread(let thread):
-            IOSThreadRowButton(
-                thread: thread,
-                isUnread: store.isThreadUnread(thread.id),
-                isCompact: isCompact,
-                providerName: store.providerDisplayName(for: thread),
-                select: { selectThread(thread.id) },
-                markRead: { store.markThreadRead(thread.id) },
-                markUnread: { store.markThreadUnread(thread.id) },
-                openTerminalHere: openTerminalHereAction(for: thread)
-            )
-        case .terminal(let summary):
-            IOSTerminalRowButton(
-                summary: summary,
-                isCompact: isCompact,
-                select: { selectTerminal(summary.terminalID) }
-            )
-        }
-    }
-
-    private func openTerminalHereAction(for thread: ThreadListEntry) -> (() -> Void)? {
-        guard let cwd = thread.cwd, !cwd.isEmpty else { return nil }
-        return { openTerminalHere(cwd) }
-    }
-}
-
-/// One row's chrome, kept unary (a single top-level Button) to preserve the
-/// List fast path and give each row its own invalidation boundary.
-private struct IOSThreadRowButton: View {
-    let thread: ThreadListEntry
-    let isUnread: Bool
-    let isCompact: Bool
-    let providerName: String?
-    let select: () -> Void
-    let markRead: () -> Void
-    let markUnread: () -> Void
-    let openTerminalHere: (() -> Void)?
-
-    var body: some View {
-        Button(action: select) {
-            if isCompact {
-                CompactThreadRow(thread: thread, isUnread: isUnread)
-            } else {
-                ThreadRow(thread: thread, isUnread: isUnread, providerName: providerName)
+        VStack(spacing: 0) {
+            switch item {
+            case .agentThread(let thread):
+                IOSThreadRowButton(
+                    thread: thread,
+                    isUnread: store.isThreadUnread(thread.id),
+                    isCompact: isCompact,
+                    providerName: store.providerDisplayName(for: thread),
+                    select: { selectThread(thread.id) },
+                    markRead: { store.markThreadRead(thread.id) },
+                    markUnread: { store.markThreadUnread(thread.id) },
+                    openTerminalHere: openTerminalHereAction(for: thread),
+                    rename: { try await store.renameThread(threadID: thread.id, title: $0) }
+                )
+            case .terminal(let summary):
+                IOSTerminalRowButton(
+                    summary: summary,
+                    isCompact: isCompact,
+                    select: { selectTerminal(summary.terminalID) }
+                )
             }
         }
         // The two-line row's title line box carries more headroom than the
@@ -91,7 +68,41 @@ private struct IOSThreadRowButton: View {
                 ? EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
                 : EdgeInsets(top: 9, leading: 16, bottom: 11, trailing: 16)
         )
+    }
+
+    private func openTerminalHereAction(for thread: ThreadSummary) -> (() -> Void)? {
+        let cwd = thread.workspace.cwd
+        guard !cwd.isEmpty else { return nil }
+        return { openTerminalHere(cwd) }
+    }
+}
+
+/// One agent-thread row's chrome, its own invalidation boundary with the
+/// context menu attached; the enclosing row supplies the List insets.
+private struct IOSThreadRowButton: View {
+    let thread: ThreadSummary
+    let isUnread: Bool
+    let isCompact: Bool
+    let providerName: String?
+    let select: () -> Void
+    let markRead: () -> Void
+    let markUnread: () -> Void
+    let openTerminalHere: (() -> Void)?
+    let rename: (String) async throws -> Void
+
+    @State private var isRenaming = false
+
+    var body: some View {
+        Button(action: select) {
+            if isCompact {
+                CompactThreadRow(thread: thread, isUnread: isUnread)
+            } else {
+                ThreadRow(thread: thread, isUnread: isUnread, providerName: providerName)
+            }
+        }
+        .threadRenameAlert(isPresented: $isRenaming, currentTitle: thread.title, rename: rename)
         .contextMenu {
+            Button("Rename…", systemImage: "pencil") { isRenaming = true }
             if isUnread {
                 Button("Mark as Read", systemImage: "envelope.open", action: markRead)
             } else {
@@ -104,7 +115,7 @@ private struct IOSThreadRowButton: View {
     }
 }
 
-/// One terminal row, mirroring the agent-row structure and insets.
+/// One terminal row, mirroring the agent-row structure.
 private struct IOSTerminalRowButton: View {
     let summary: TerminalSummary
     let isCompact: Bool
@@ -118,10 +129,7 @@ private struct IOSTerminalRowButton: View {
                 TerminalThreadRow(summary: summary)
             }
         }
-        .listRowInsets(
-            isCompact
-                ? EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
-                : EdgeInsets(top: 9, leading: 16, bottom: 11, trailing: 16)
-        )
     }
 }
+
+#endif

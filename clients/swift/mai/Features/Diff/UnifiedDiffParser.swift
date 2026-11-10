@@ -65,7 +65,7 @@ nonisolated enum UnifiedDiffParser {
                     ensureFile()
                     hunk = HunkBuilder(parsedHeader: UnifiedDiffParser.hunkHeader(line))
                 } else if hunk != nil {
-                    appendHunkLine(line)
+                    hunk?.append(line)
                 } else {
                     parseOutsideHunk(line)
                 }
@@ -77,7 +77,7 @@ nonisolated enum UnifiedDiffParser {
             return files
         }
 
-        private mutating func isPathHeaderPair(_ line: String, _ nextLine: String?) -> Bool {
+        private func isPathHeaderPair(_ line: String, _ nextLine: String?) -> Bool {
             line.hasPrefix("--- ") && nextLine?.hasPrefix("+++ ") == true
         }
 
@@ -157,16 +157,12 @@ nonisolated enum UnifiedDiffParser {
                         newCount: nil
                     )
                 )
-                appendHunkLine(line)
+                hunk?.append(line)
                 return
             }
 
             ensureFile()
             file?.metadataLines.append(line)
-        }
-
-        private mutating func appendHunkLine(_ rawLine: String) {
-            hunk?.append(rawLine)
         }
 
         private mutating func startFile(oldPath: String?, newPath: String?) {
@@ -378,7 +374,6 @@ nonisolated enum UnifiedDiffParser {
     }
 
     private static func headerPath(_ line: String, prefix: String) -> String? {
-        guard line.hasPrefix(prefix) else { return nil }
         let raw = line.dropFirst(prefix.count)
         if raw.first == "\"" {
             return gitTokens(raw).first.flatMap(stripGitPrefix)
@@ -388,7 +383,6 @@ nonisolated enum UnifiedDiffParser {
     }
 
     private static func renamePath(_ line: String, prefix: String) -> String? {
-        guard line.hasPrefix(prefix) else { return nil }
         let raw = line.dropFirst(prefix.count)
         if raw.first == "\"" {
             return gitTokens(raw).first

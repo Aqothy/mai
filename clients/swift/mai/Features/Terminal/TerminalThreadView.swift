@@ -1,10 +1,11 @@
+import GhosttyTerminal
 import SwiftUI
 
-/// Detail view for one terminal thread: primarily the Ghostty surface with
-/// minimal chrome. Surface, status overlay, and toolbar stay separate view
-/// structs so status changes do not reconstruct the terminal host.
+/// Detail view for one terminal thread: primarily the terminal view with
+/// minimal chrome. The terminal view and toolbar stay separate view structs so
+/// status changes do not reconstruct the terminal.
 struct TerminalThreadView: View {
-    let controller: TerminalSessionController
+    let attachment: TerminalAttachment
     var title = "Terminal"
     @Environment(\.colorScheme) private var colorScheme
 
@@ -16,35 +17,30 @@ struct TerminalThreadView: View {
                 .fill(backgroundColor)
                 .ignoresSafeArea()
 
-            TerminalSurfaceHost(
-                controller: controller,
-                backgroundColor: backgroundColor
-            )
-            .ignoresSafeArea(.container, edges: .bottom)
-        }
-        .overlay(alignment: .bottom) {
-            TerminalStatusView(hasEnded: controller.hasEnded)
-                .padding(.bottom)
+            AttachedTerminalView(attachment: attachment, colorScheme: colorScheme)
+                .ignoresSafeArea(.container, edges: .bottom)
         }
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationSubtitleIfAvailable(attachment.programTitle == title ? "" : attachment.programTitle)
+        .inlineNavigationBarTitle()
     }
 }
 
-#if DEBUG
-    /// Development-only harness: renders the adapter against the fake echo
-    /// backend so the Ghostty integration can be exercised without a daemon.
-    private struct TerminalPreviewHarness: View {
-        @State private var context = TerminalPreviewBackend.makeContext()
+/// The package's terminal view over one attachment. Its own struct so
+/// lifecycle changes elsewhere never rebuild it; it re-renders only for the
+/// color scheme and text size.
+private struct AttachedTerminalView: View {
+    let attachment: TerminalAttachment
+    let colorScheme: ColorScheme
+    @State private var settings = TerminalSettings.shared
 
-        var body: some View {
-            NavigationStack {
-                TerminalThreadView(controller: context.controller, title: "Preview Terminal")
+    var body: some View {
+        TerminalView(
+            terminal: attachment.terminal,
+            io: attachment,
+            configuration: MaidTerminalAppearance.configuration(for: colorScheme, fontSize: settings.fontSize))
+            .onChange(of: colorScheme, initial: true) { _, colorScheme in
+                attachment.colorScheme = colorScheme
             }
-        }
     }
-
-    #Preview("Terminal") {
-        TerminalPreviewHarness()
-    }
-#endif
+}

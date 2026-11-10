@@ -4,26 +4,36 @@ import SwiftUI
 struct ChatView: View {
     let store: ThreadStore
     let draftStore: ThreadDraftStore
+    let openThread: ((String) -> Void)?
+    /// Shows the new-chat draft.
+    let openDraft: (() -> Void)?
 
     @State private var draftModel: DraftPromptModel
     @State private var chatModel: ChatPromptModel?
     @State private var scrollState = ChatScrollState()
+    /// Thread whose initial page has been Markdown-primed off the main actor.
+    /// The timeline mounts only after this, so a cold open never parses
+    /// synchronously inside view construction.
+    @State private var warmedThreadID: String?
+    @State private var annotationModel = ChatAnnotationModel()
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         store: ThreadStore,
         draftStore: ThreadDraftStore,
-        projectFolders: ProjectFolderStore = ProjectFolderStore(defaults: nil),
-        initialWorkingDirectory: String? = nil
+        initialWorkingDirectory: String? = nil,
+        openThread: ((String) -> Void)? = nil,
+        openDraft: (() -> Void)? = nil
     ) {
         self.store = store
         self.draftStore = draftStore
+        self.openThread = openThread
+        self.openDraft = openDraft
         _draftModel = State(
             initialValue: DraftPromptModel(
                 store: store,
                 draftStore: draftStore,
-                projectFolders: projectFolders,
                 initialWorkingDirectory: initialWorkingDirectory
             )
         )
@@ -40,25 +50,47 @@ struct ChatView: View {
 
     var body: some View {
         let promptText = currentPromptText
-        let workspaceFilePicker = currentWorkspaceFilePicker
+        let promptCompletion = currentPromptCompletion
 
         Group {
-            if let errorMessage = store.selectedThreadLoadErrorMessage {
+            if let errorMessage = store.selectedThreadLoadErrorMessage, store.selectedThread == nil {
                 ThreadLoadErrorView(store: store, errorMessage: errorMessage)
-            } else if let errorMessage = store.selectedThreadHistoryRestoreErrorMessage {
-                ThreadLoadErrorView(store: store, errorMessage: errorMessage)
-            } else if store.isSelectedThreadRestoringHistory {
-                ProgressView("Restoring Chat…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let thread = store.selectedThread,
                 let segmentCache = store.selectedThreadMarkdownSegmentCache
             {
                 if let textLayoutStore = store.selectedThreadTextLayoutStore {
-                    chatTimeline(
-                        thread: thread,
-                        segmentCache: segmentCache,
-                        textLayoutStore: textLayoutStore
-                    )
+                    // A thread whose initial page is already parsed (a recent
+                    // back-navigation, or a small thread the store primed)
+                    // mounts immediately instead of flashing a spinner.
+                    if warmedThreadID == thread.id
+                        || Self.isInitialPagePrimed(
+                            thread: thread,
+                            segmentCache: segmentCache
+                        )
+                    {
+                        chatTimeline(
+                            thread: thread,
+                            segmentCache: segmentCache,
+                            textLayoutStore: textLayoutStore
+                        )
+                        .environment(
+                            \.attachmentLoader,
+                            ChatTranscriptAttachmentLoader(threadID: thread.id) { [store] attachmentID in
+                                try await store.attachmentData(attachmentID: attachmentID)
+                            }
+                        )
+                    } else {
+                        ProgressView("Loading Chat…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .task(id: thread.id) {
+                                await warmInitialPage(
+                                    thread: thread,
+                                    segmentCache: segmentCache
+                                )
+                                guard !Task.isCancelled else { return }
+                                warmedThreadID = thread.id
+                            }
+                    }
                 }
             } else if store.selectedThreadID != nil {
                 ProgressView("Loading Chat…")
@@ -69,19 +101,27 @@ struct ChatView: View {
         }
         .overlay(alignment: .bottom) {
             if store.selectedThread != nil {
-                ChatScrollToBottomButton(scrollState: scrollState) {
-                    scrollState.requestScrollToBottom(animated: true)
+                ViewThatFits(in: .vertical) {
+                    ChatScrollToBottomButton(scrollState: scrollState) {
+                        scrollState.requestScrollToBottom(animated: true)
+                    }
+                    .safeAreaPadding(.vertical)
+
+                    // A landscape keyboard can leave no transcript space
+                    // between the navigation bar and composer.
+                    Color.clear
+                        .frame(height: 0)
+                        .allowsHitTesting(false)
                 }
-                .safeAreaPadding(.bottom)
             }
         }
         .overlay(alignment: .bottom) {
             // This overlay belongs to the full chat surface. Rendering it
             // outside the safe-area bar's bounds would make its visible rows
             // miss taps and scrolling gestures.
-            ChatWorkspaceFilePickerOverlay(
+            ChatPromptCompletionOverlay(
                 text: promptText,
-                model: workspaceFilePicker
+                model: promptCompletion
             )
             .safeAreaPadding(.bottom)
         }
@@ -91,19 +131,40 @@ struct ChatView: View {
                     store: store,
                     draftModel: draftModel,
                     chatModel: chatModel,
+                    annotationModel: annotationModel,
+                    scrollState: scrollState,
                     promptText: promptText,
-                    workspaceFilePicker: workspaceFilePicker
+                    promptCompletion: promptCompletion,
+                    openThread: openThread
                 )
             )
         )
         .navigationTitle(selectedThreadTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
+        .toolbar {
+            if let chatModel, let forkAction {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Fork Chat", systemImage: "arrow.triangle.branch") {
+                        ForEach(forkAction.otherAgents) { agent in
+                            Button("Continue in \(agent.title)") {
+                                forkAction(.latest, into: agent.id)
+                            }
+                        }
+                    } primaryAction: {
+                        forkAction(.latest)
+                    }
+                    .disabled(!chatModel.canFork)
+                    .accessibilityHint("Creates a new chat from this conversation’s finished turns")
+                }
+            }
+        }
         .onChange(of: store.selectedThreadID, initial: true) {
             previousThreadID,
             threadID in
             if previousThreadID != threadID {
-                currentWorkspaceFilePicker.dismiss()
+                currentPromptCompletion.dismiss()
             }
+            annotationModel.show(threadID: threadID, draftStore: draftStore)
             if previousThreadID != threadID, previousThreadID != nil {
                 scrollState.reset()
             }
@@ -124,6 +185,18 @@ struct ChatView: View {
             // the previous Dynamic Type size.
             store.resetSelectedThreadTextLayoutStore()
         }
+        .sheet(
+            isPresented: Binding(
+                get: { annotationModel.editorDraft != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        annotationModel.cancelEditor()
+                    }
+                }
+            )
+        ) {
+            ChatAnnotationEditor(model: annotationModel)
+        }
         .alert(
             "Something Went Wrong",
             isPresented: Binding(
@@ -137,27 +210,123 @@ struct ChatView: View {
         }
     }
 
+    /// Projects the timeline incrementally: the session invalidates the
+    /// projection per event, so steady-state streaming reprojects only the
+    /// changed suffix instead of re-walking the whole transcript.
+    private func projectedSections(for thread: ThreadDetail)
+        -> [ChatTimelineLayout.Section]
+    {
+        guard let projection = store.selectedThreadTimelineProjection else {
+            return ChatTimelineLayout.sections(turns: thread.turns)
+        }
+        return projection.project(thread.turns)
+    }
+
+    /// The rows of the first mounted page, from a full walk of `thread`.
+    /// Pre-mount work deliberately bypasses the shared projection: it runs
+    /// on a captured thread value that live events may have outdated, and
+    /// consuming the projection's watermark against a stale timeline would
+    /// leave the mounted timeline showing stale sections.
+    private static func initialPageRows(
+        of thread: ThreadDetail
+    ) -> [ChatTimelineRowModel] {
+        ChatTimelineLayout.rows(
+            sections: ChatTimeline.initialSections(
+                in: ChatTimelineLayout.sections(turns: thread.turns)
+            ),
+            requests: thread.requests.map(ChatRequest.init(open:)),
+            expandedSectionIDs: []
+        )
+    }
+
+    /// Whether every Markdown parse the initial page's first body would
+    /// perform is already cached, so the timeline can mount without a warm
+    /// pass. Only cache lookups run here; nothing parses.
+    private static func isInitialPagePrimed(
+        thread: ThreadDetail,
+        segmentCache: ChatMarkdownSegmentCache
+    ) -> Bool {
+        let pageRows = initialPageRows(of: thread)
+        let streamingTurnID = streamingTurnID(of: thread)
+        let segmentRequests = ChatMarkdownSegmentCache.primeRequests(
+            rows: pageRows,
+            streamingTurnID: streamingTurnID
+        )
+        guard segmentRequests.allSatisfy({
+            segmentCache.contains(messageID: $0.messageID, source: $0.source)
+        }) else { return false }
+
+        // Segmentation is cached, so planning and row rendering below only
+        // read the cache.
+        let wholeDocumentRequests = ChatTimeline.wholeDocumentMarkdownRenderRequests(
+            in: pageRows,
+            streamingTurnID: streamingTurnID,
+            segmentCache: segmentCache
+        )
+        guard wholeDocumentRequests.allSatisfy({
+            ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: $0.messageID,
+                source: $0.source
+            ) != nil
+        }) else { return false }
+
+        let renderRequests = ChatTimeline.markdownRenderRequests(
+            in: ChatTimeline.renderRows(
+                pageRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
+            ),
+            streamingTurnID: streamingTurnID
+        )
+        return renderRequests.allSatisfy {
+            ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: $0.messageID,
+                source: $0.source
+            ) != nil
+        }
+    }
+
+    /// Parses the initial page's Markdown off the main actor before the
+    /// timeline's first body runs. Without this, every settled message on a
+    /// cold open would parse synchronously during view construction.
+    private func warmInitialPage(
+        thread: ThreadDetail,
+        segmentCache: ChatMarkdownSegmentCache
+    ) async {
+        // The rendered rows are only needed by `prepare`'s layout pass; the
+        // pre-mount warm stops at Markdown parsing.
+        _ = await ChatTimeline.primeMarkdownCaches(
+            timelineRows: Self.initialPageRows(of: thread),
+            streamingTurnID: Self.streamingTurnID(of: thread),
+            segmentCache: segmentCache
+        )
+    }
+
     private func chatTimeline(
-        thread: Thread,
+        thread: ThreadDetail,
         segmentCache: ChatMarkdownSegmentCache,
         textLayoutStore: ChatTextLayoutStore
     ) -> some View {
         ChatTimeline(
             threadID: thread.id,
-            sections: ChatTimelineLayout.sections(
-                timeline: thread.timeline
-            ),
-            timelineEntryCount: thread.timeline.count,
+            sections: projectedSections(for: thread),
+            requests: thread.requests.map(ChatRequest.init(open:)),
+            timelineEntryCount: thread.turns.reduce(thread.turns.count) { $0 + $1.entries.count },
+            hasOlderTurns: thread.older != nil,
             plan: thread.plan,
-            latestTurn: thread.latestTurn,
             streamingTurnID: Self.streamingTurnID(of: thread),
             segmentCache: segmentCache,
             store: store,
             scrollState: scrollState,
+            annotationModel: annotationModel,
             textLayoutStore: textLayoutStore
         )
+        .environment(\.chatFork, forkAction)
         .id(thread.id)
         .onAppear {
+            // Whether mounted through the warm pass or the primed fast
+            // path, later bodies skip the cache probe.
+            warmedThreadID = thread.id
             textLayoutStore.activateTextViewReuse()
         }
         .onDisappear {
@@ -165,14 +334,25 @@ struct ChatView: View {
         }
     }
 
-    private static func streamingTurnID(of thread: Thread) -> String? {
-        thread.latestTurn?.turnState == .running
-            ? thread.latestTurn?.turnID
-            : nil
+    private static func streamingTurnID(of thread: ThreadDetail) -> String? {
+        thread.runningTurn?.id
+    }
+
+    /// Opens a new-chat draft that forks the open chat.
+    private var forkAction: ChatForkAction? {
+        guard let chatModel, let openDraft else { return nil }
+        let agentID = store.selectedThread?.addressee?.instance
+        return ChatForkAction(otherAgents: store.availableProviders.filter { $0.id != agentID }) { point, agent, prompt in
+            Task {
+                if await chatModel.fork(at: point, into: agent, editing: prompt) {
+                    openDraft()
+                }
+            }
+        }
     }
 
     private var selectedThreadTitle: String {
-        if let title = store.selectedThread?.title {
+        if let title = store.selectedThread?.summary.title {
             return title
         }
         return store.selectedThreadTitle ?? ""
@@ -187,8 +367,8 @@ struct ChatView: View {
         return $draftModel.prompt
     }
 
-    private var currentWorkspaceFilePicker: WorkspaceFilePickerModel {
-        chatModel?.workspaceFilePicker ?? draftModel.workspaceFilePicker
+    private var currentPromptCompletion: PromptCompletionModel {
+        chatModel?.promptCompletion ?? draftModel.promptCompletion
     }
 }
 
@@ -196,7 +376,13 @@ private struct ChatTimelinePreparationKey: Equatable {
     let timelineEntryCount: Int
     let streamingTurnID: String?
     let rowWidth: CGFloat
+    /// Highlighted code is prepared per appearance.
+    let codeTheme: ChatCodeHighlightTheme
     let expandedSectionIDs: Set<String>
+    /// Loading earlier history changes which rows exist without changing the
+    /// counts above; preparation must re-run over the widened window or a
+    /// later width change only prepares the rows captured at the old window.
+    let oldestLoadedSectionID: String?
 }
 
 /// Keeps one composer identity across draft-to-thread transitions.
@@ -204,13 +390,49 @@ private struct ChatComposerStack: View {
     let store: ThreadStore
     let draftModel: DraftPromptModel
     let chatModel: ChatPromptModel?
+    let annotationModel: ChatAnnotationModel
+    let scrollState: ChatScrollState
     let promptText: Binding<String>
-    let workspaceFilePicker: WorkspaceFilePickerModel
+    let promptCompletion: PromptCompletionModel
+    let openThread: ((String) -> Void)?
 
     var body: some View {
         let state = ChatComposerThreadState(thread: store.selectedThread)
 
         VStack(alignment: .leading) {
+            if chatModel != nil, let openThread, let thread = store.selectedThread {
+                let origin = thread.summary.origin
+                let parent = origin.parent.flatMap { id in store.threads.first { $0.id == id } }
+                let forkedFrom = origin.forkedFrom.flatMap { fork in store.threads.first { $0.id == fork.thread } }
+                if parent != nil || forkedFrom != nil || !thread.children.isEmpty {
+                    ChatThreadTreeBar(parent: parent, forkedFrom: forkedFrom, children: thread.children, openThread: openThread)
+                }
+            }
+
+            if let chatModel, chatModel.failedTurnID != nil {
+                ChatFailedTurnView(model: chatModel)
+            } else if let reason = chatModel?.stopReason {
+                ChatTurnStopNoticeView(reason: reason)
+            }
+
+            if let chatModel, let hold = state.hold {
+                ChatHoldView(model: chatModel, hold: hold)
+            }
+
+            if chatModel != nil, state.exists, !state.acceptsInput {
+                Label("The agent that started this subagent directs it.", systemImage: "person.2")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: ChatContentMetrics.maximumWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
+
+            if chatModel != nil, let goal = state.participant?.goal {
+                ChatGoalStatusView(goal: goal)
+            }
+
             if chatModel == nil {
                 HStack(spacing: 16) {
                     DraftSessionControlsView(model: draftModel)
@@ -224,7 +446,7 @@ private struct ChatComposerStack: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal)
                 .padding(.bottom, 10)
-            } else if let chatModel, !chatModel.queuedPrompts.isEmpty {
+            } else if let chatModel, state.hasQueue {
                 ChatPromptQueueView(model: chatModel)
             }
 
@@ -232,32 +454,44 @@ private struct ChatComposerStack: View {
                 text: promptText,
                 isEnabled: chatModel == nil
                     ? draftModel.isPromptEnabled
-                    : state.exists && chatModel?.isPromptEnabled == true,
+                    : state.acceptsInput && chatModel?.isPromptEnabled == true,
                 focusID: chatModel == nil ? draftModel.promptFocusID : nil,
                 canSend: chatModel == nil
                     ? draftModel.canSend
-                    : state.exists && chatModel?.canSend == true,
+                    : state.acceptsInput && chatModel?.canSend == true,
                 isSending: isSendingNow,
                 isRunning: state.isRunning,
                 isStopping: chatModel?.isInterrupting == true,
                 attachments: currentAttachments,
-                workspaceFilePicker: workspaceFilePicker,
+                annotations: chatModel?.annotations ?? draftModel.annotations,
+                promptCompletion: promptCompletion,
+                commands: state.slashCommands,
+                skills: state.skills,
                 submitLabel: chatModel == nil ? "Start chat" : "Send"
-            ) {
+            ) { mode in
                 if let chatModel {
-                    Task { await chatModel.send() }
+                    // Sending is explicit intent to see the new turn, even
+                    // after the reader scrolled away or expanded content.
+                    scrollState.requestScrollToBottom(animated: true)
+                    Task { await chatModel.send(mode) }
                 } else {
                     Task { await draftModel.send() }
                 }
             } stop: {
-                if let chatModel, let turnID = state.turnID {
-                    Task { await chatModel.interrupt(turnID: turnID) }
+                if let chatModel, state.isRunning {
+                    Task { await chatModel.interrupt() }
                 }
             } removeAttachment: { id in
                 if let chatModel {
                     chatModel.removeAttachment(id: id)
                 } else {
                     draftModel.removeAttachment(id: id)
+                }
+            } removeAnnotation: { id in
+                if chatModel == nil {
+                    draftModel.removeAnnotation(id: id)
+                } else {
+                    annotationModel.remove(id: id)
                 }
             } leadingControls: {
                 ComposerAddMenu(
@@ -270,9 +504,9 @@ private struct ChatComposerStack: View {
                         ChatAttachmentLoader.maximumAttachmentCount - currentAttachments.count
                     ),
                     commands: state.slashCommands,
-                    addWorkspaceFile: workspaceFilePicker.isAvailable && !isSendingNow
+                    addWorkspaceFile: promptCompletion.isFileCompletionAvailable && !isSendingNow
                         ? {
-                            presentWorkspaceFilePickerAtPromptEnd()
+                            presentWorkspaceFileCompletionAtPromptEnd()
                         }
                         : nil,
                     addImages: chatModel?.addImages ?? draftModel.addImages,
@@ -284,7 +518,7 @@ private struct ChatComposerStack: View {
             } trailingControls: {
                 if let chatModel, state.exists {
                     ChatComposerControlsView(
-                        session: state.session,
+                        participant: state.participant,
                         model: chatModel
                     )
                 } else if chatModel == nil {
@@ -305,54 +539,160 @@ private struct ChatComposerStack: View {
     private var supportsImageAttachments: Bool {
         if chatModel != nil {
             return store.promptContentCapabilities(
-                for: store.selectedThread?.providerInstanceID
+                for: store.selectedThread?.addressee?.instance
             )?.image == true
         }
         return draftModel.supportsImageAttachments
     }
 
-    private func presentWorkspaceFilePickerAtPromptEnd() {
-        // Appending `@` reuses the same trigger path as typing it, keeping one
-        // insertion behavior for keyboard and menu-driven use.
-        var prompt = promptText.wrappedValue
-        if !prompt.isEmpty, prompt.last?.isWhitespace != true {
-            prompt += " "
-        }
-        prompt += "@"
-        promptText.wrappedValue = prompt
+    private func presentWorkspaceFileCompletionAtPromptEnd() {
+        promptText.wrappedValue = promptCompletion.textByPresentingFileCompletion(
+            in: promptText.wrappedValue
+        )
     }
 }
 
-/// The composer needs a handful of session fields, not the thread's entire
-/// value-typed timeline. Capturing this projection in its view-builder
-/// closures keeps the store's timeline buffer uniquely owned while text
-/// streams into its final entry.
+/// A failed turn's error. The agent's session keeps the message and what it
+/// did before failing, so what comes next is the person's to write.
+private struct ChatFailedTurnView: View {
+    let model: ChatPromptModel
+
+    @State private var signIn: ChatSignInTarget?
+
+    var body: some View {
+        HStack {
+            Label(
+                model.failedTurnError ?? "The response failed.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+
+            Spacer()
+
+            if let providerID = model.signInProviderID {
+                Button("Sign In", systemImage: "person.crop.circle.badge.exclamationmark") {
+                    signIn = ChatSignInTarget(id: providerID)
+                }
+            }
+        }
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom)
+        .accessibilityElement(children: .contain)
+        .task(id: model.failedTurnID) { await model.refreshProviderAfterFailedTurn() }
+        .sheet(item: $signIn) { ChatProviderSignInSheet(providerID: $0.id, store: model.store) }
+    }
+}
+
+/// Stops a background task, such as a command run in the background. Sending
+/// the stop does not end the task; the item's own update does, which removes
+/// the button, so a stop that did not take can be sent again.
+private struct ChatStopBackgroundItemButton: View {
+    let ref: String
+    let threadID: String
+    let store: ThreadStore
+
+    @State private var isStopping = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(isStopping ? "Stopping…" : "Stop", systemImage: "stop.circle") {
+                Task { await stop() }
+            }
+            .disabled(isStopping || store.connectionState != .connected)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            }
+        }
+        .font(.caption)
+        .buttonStyle(.borderless)
+    }
+
+    private func stop() async {
+        isStopping = true
+        defer { isStopping = false }
+        do {
+            try await store.stopItem(threadID: threadID, ref: ref)
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// The provider a sign-in sheet opened for. Capturing it keeps the sheet up
+/// once sign-in succeeds and the provider no longer reports signed out.
+private struct ChatSignInTarget: Identifiable {
+    let id: String
+}
+
+private struct ChatProviderSignInSheet: View {
+    let providerID: String
+    let store: ThreadStore
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ProviderAccountDetailView(providerID: providerID, store: store)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        #if os(macOS)
+            .frame(minWidth: 500, minHeight: 440)
+        #endif
+    }
+}
+
+/// The composer needs a handful of thread fields, not the thread's turns.
+/// Capturing this projection in its view-builder closures keeps the store's
+/// turns uniquely owned while text streams into the running one.
 private struct ChatComposerThreadState {
     let exists: Bool
-    let turnID: String?
+    /// A native subagent its provider gives no input to only shows what its
+    /// parent agent has it do.
+    let acceptsInput: Bool
     let isRunning: Bool
-    let session: SessionBinding?
+    let hold: MaidHold?
+    let participant: ParticipantView?
     let slashCommands: [SlashCommand]
+    let skills: [Skill]
+    let hasQueue: Bool
 
-    init(thread: Thread?) {
+    init(thread: ThreadDetail?) {
         exists = thread != nil
-        turnID = thread?.latestTurn?.turnID
-        isRunning = thread?.latestTurn?.turnState == .running
-        session = thread?.session
-        slashCommands = thread?.session?.slashCommands ?? []
+        acceptsInput = thread?.summary.origin.acceptsInput == true
+        isRunning = thread?.status == .running
+        hold = thread?.summary.holdReason
+        participant = thread?.addressee
+        slashCommands = participant?.commands ?? []
+        skills = participant?.skills ?? []
+        hasQueue = thread?.queue.isEmpty == false
     }
 }
 
-private struct ChatWorkspaceFilePickerOverlay: View {
+private struct ChatPromptCompletionOverlay: View {
     private static let composerSpacing: CGFloat = 8
 
     @Binding var text: String
-    let model: WorkspaceFilePickerModel
+    let model: PromptCompletionModel
 
     var body: some View {
-        if model.isPresented, model.isAvailable {
-            WorkspaceFilePickerView(model: model) { match in
-                insertWorkspaceFile(match.relativePath)
+        if model.isPresented {
+            PromptCompletionView(model: model) { match in
+                insertCompletion(match)
             }
             .frame(maxWidth: ChatContentMetrics.maximumWidth)
             .frame(maxWidth: .infinity)
@@ -361,23 +701,18 @@ private struct ChatWorkspaceFilePickerOverlay: View {
         }
     }
 
-    private func insertWorkspaceFile(_ relativePath: String) {
-        guard
-            let updatedText = model.textBySelecting(
-                relativePath: relativePath,
-                in: text
-            )
-        else { return }
-        text = updatedText
+    private func insertCompletion(_ match: PromptCompletionMatch) {
+        guard let edit = model.edit(selecting: match, in: text) else { return }
+        text = edit.text
     }
 }
 
-private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
+struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
     let composer: Composer
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content
                 .safeAreaBar(edge: .bottom, spacing: 0) {
                     composer
@@ -395,13 +730,38 @@ private struct ChatComposerSafeAreaBar<Composer: View>: ViewModifier {
 /// fold without closure or binding inputs defeating row-level invalidation.
 @Observable
 final class ChatTimelineFoldModel {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
     private(set) var expandedSectionIDs: Set<String> = []
+    /// The reader's explicit choices for disclosures inside sections, keyed by
+    /// stable item identity. Rows are recreated when they leave the viewport,
+    /// so a choice must outlive them for the rest of this chat's timeline.
+    private(set) var disclosureChoices: [ChatDisclosure: Bool] = [:]
+    @ObservationIgnored var prepareForToggle: () -> Void = {}
 
     func toggle(_ sectionID: String) {
+        prepareForToggle()
         withChatContentExpansionTransaction {
             expandedSectionIDs.formSymmetricDifference([sectionID])
         }
     }
+
+    func isExpanded(_ disclosure: ChatDisclosure, default defaultValue: Bool = false) -> Bool {
+        disclosureChoices[disclosure] ?? defaultValue
+    }
+
+    func setExpanded(_ disclosure: ChatDisclosure, _ isExpanded: Bool) {
+        withChatContentExpansionTransaction {
+            disclosureChoices[disclosure] = isExpanded
+        }
+    }
+}
+
+nonisolated enum ChatDisclosure: Hashable {
+    case thought(itemID: String)
+    case activityGroup(id: String)
+    case activityItem(itemID: String)
 }
 
 /// A disclosure should grow in place without an animated layout transition.
@@ -420,6 +780,10 @@ nonisolated enum ChatContentMetrics {
 }
 
 nonisolated enum ChatTimelineMetrics {
+    /// Hysteresis for follow state and the jump-to-bottom control. Native
+    /// bottom alignment itself still pins to the exact content end.
+    static let nearBottomDistance: CGFloat = 24
+    static let rowVerticalInset: CGFloat = 10
     static let rowHorizontalInset: CGFloat = 16
     static let userBubbleHorizontalPadding: CGFloat = 14
     static let userBubbleVerticalPadding: CGFloat = 10
@@ -433,37 +797,74 @@ nonisolated enum ChatTimelineMetrics {
         )
     }
 
-    static func textWidth(
-        for style: ChatTextLayoutStyle,
-        in rowWidth: CGFloat
-    ) -> CGFloat {
-        switch style {
-        case .markdownProse:
-            rowWidth
-        case .plain:
-            max(0, rowWidth - 2 * userBubbleHorizontalPadding)
-        }
-    }
-
     static func proseTextWidth(role: String, in rowWidth: CGFloat) -> CGFloat {
-        guard role == MaidMessageRole.user.rawValue else { return rowWidth }
+        guard role == ChatRole.user.rawValue else { return rowWidth }
         return max(0, rowWidth - 2 * userBubbleHorizontalPadding)
     }
 }
 
-private struct ChatTimeline: View {
-    static let nearBottomDistance: CGFloat = 24
-    private static let historyLoadDistance: CGFloat = 1
+/// Bridges the gap between a turn finishing and its settled presentation
+/// being ready. Switching a just-finished message to the settled path with
+/// cold caches parses and lays out its entire text synchronously on the main
+/// thread in one frame; instead the message keeps its streaming presentation
+/// until the preparation task has primed everything off the main actor.
+///
+/// Plain non-observable storage: `body` records the live turn here without
+/// triggering another invalidation.
+private final class ChatStreamingContinuity {
+    // Back-deployment: avoid the isolated-deinit runtime bug (swiftlang/swift#88036).
+    nonisolated deinit {}
+
+    private var lastStreamingTurnID: String?
+    private var preparedSettledTurnID: String?
+
+    /// Records the live turn and answers which finished turn should keep its
+    /// streaming presentation. Lingers only for the latest turn, and only
+    /// until its settled preparation completes; any other transition (thread
+    /// restored idle, a newer turn already running) uses the settled path.
+    func settlingTurnID(
+        streamingTurnID: String?,
+        latestTurnID: String?
+    ) -> String? {
+        if let streamingTurnID {
+            lastStreamingTurnID = streamingTurnID
+            return nil
+        }
+        guard let lastStreamingTurnID,
+            lastStreamingTurnID == latestTurnID,
+            lastStreamingTurnID != preparedSettledTurnID
+        else { return nil }
+        return lastStreamingTurnID
+    }
+
+    func noteSettledPreparation(turnID: String) {
+        preparedSettledTurnID = turnID
+    }
+}
+
+struct ChatTimeline: View {
+    #if os(macOS)
+        // The native transcript arms pagination well before the top edge so
+        // the next page is prepared before the reader reaches it.
+        private static let historyLoadDistance: CGFloat = 240
+    #else
+        private static let historyLoadDistance: CGFloat = 1
+        private static let scrollMovementTolerance: CGFloat = 0.5
+    #endif
 
     let threadID: String
     let sections: [ChatTimelineLayout.Section]
+    /// Requests still open, shown with their turns.
+    let requests: [ChatRequest]
     let timelineEntryCount: Int
-    let plan: Plan?
-    let latestTurn: Turn?
+    /// Whether the daemon has turns before the loaded ones.
+    let hasOlderTurns: Bool
+    let plan: [PlanEntry]
     let streamingTurnID: String?
     let segmentCache: ChatMarkdownSegmentCache
     let store: ThreadStore
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
 
     @State private var foldModel = ChatTimelineFoldModel()
     @State private var isAwaitingInitialBottom = true
@@ -475,6 +876,24 @@ private struct ChatTimeline: View {
     @State private var isViewportNearBottom = true
     @State private var pendingPrependAnchorID: String?
     @State private var rowWidth: CGFloat = 0
+    #if os(macOS)
+        @State private var nativePreparedKey: ChatTimelinePreparationKey?
+    #endif
+
+    #if os(macOS)
+        @State private var macScrollPositionPreserver =
+            ChatMacScrollPositionPreserver()
+    #else
+        @State private var bottomFollower = ChatListBottomFollower()
+    #endif
+
+    @State private var streamingContinuity = ChatStreamingContinuity()
+    /// Bumped when a finished turn's settled preparation lands, so `body`
+    /// re-evaluates and swaps the lingering message to its settled rows.
+    @State private var settledPreparationGeneration = 0
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.chatFork) private var chatFork
 
     /// Retained by the thread session across short navigation round trips.
     let textLayoutStore: ChatTextLayoutStore
@@ -484,37 +903,122 @@ private struct ChatTimeline: View {
             in: sections,
             oldestSectionID: oldestLoadedSectionID
         )
+        // Read so the settled-preparation bump re-evaluates this body; the
+        // continuity object itself is deliberately not observable.
+        let _ = settledPreparationGeneration
+        let settlingTurnID = streamingContinuity.settlingTurnID(
+            streamingTurnID: streamingTurnID,
+            latestTurnID: sections.last?.id
+        )
+        let effectiveStreamingTurnID = streamingTurnID ?? settlingTurnID
         let timelineRows = ChatTimelineLayout.rows(
             sections: loadedSections,
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
+            requests: requests,
+            liveTurnID: effectiveStreamingTurnID,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         let rows = Self.renderRows(
             timelineRows,
-            streamingTurnID: streamingTurnID,
+            streamingTurnID: effectiveStreamingTurnID,
             segmentCache: segmentCache
         )
-        let hasEarlierSections = loadedSections.first?.id != sections.first?.id
+        let hasEarlierSections = loadedSections.first?.id != sections.first?.id || hasOlderTurns
+        let preparationKey = ChatTimelinePreparationKey(
+            timelineEntryCount: timelineEntryCount,
+            streamingTurnID: streamingTurnID,
+            rowWidth: rowWidth,
+            codeTheme: codeTheme,
+            expandedSectionIDs: foldModel.expandedSectionIDs,
+            oldestLoadedSectionID: loadedSections.first?.id
+        )
 
+        #if os(macOS)
+            let nativeItems = ChatNativeTimelineItem.items(
+                rows: rows, plan: plan,
+                hasEarlierSections: hasEarlierSections, isStreaming: effectiveStreamingTurnID != nil)
+        #endif
         ScrollViewReader { proxy in
-            List {
-                timelineContent(
-                    rows: rows,
-                    hasEarlierSections: hasEarlierSections,
-                    showsHistoryMarker: true,
-                    showsPlan: !hasEarlierSections
-                )
+            Group {
+                #if os(macOS)
+                    // The transcript reports its own geometry; a SwiftUI scroll
+                    // observer here would see nested code/table scrollers instead.
+                    ChatNativeTranscript(
+                        ids: nativeItems.map(\.id), width: rowWidth,
+                        isPrepared: nativePreparedKey == preparationKey,
+                        measurementKeys: nativeItems.map(\.measurementKey),
+                        presentationTheme: codeTheme,
+                        historyLoadDistance: Self.historyLoadDistance,
+                        onGeometryChange: { old, new in
+                            handleMacScrollGeometryChange(
+                                from: old, to: new, hasEarlierSections: hasEarlierSections)
+                        }, onAttach: configureMacScrollDocument,
+                        nativeRowHeight: { index, width in
+                            guard case .row(let row) = nativeItems[index],
+                                let descriptor = ChatNativePreparedRow.descriptor(for: row)
+                            else { return nil }
+                            return ChatNativePreparedRow.preparedHeight(
+                                for: descriptor, width: width, store: textLayoutStore)
+                        },
+                        nativeRowFactory: { index, reused in
+                            guard case .row(let row) = nativeItems[index],
+                                let descriptor = ChatNativePreparedRow.descriptor(for: row)
+                            else { return nil }
+                            let native =
+                                reused as? ChatNativePreparedRow
+                                ?? ChatNativePreparedRow(frame: .zero)
+                            native.update(
+                                descriptor, width: rowWidth, store: textLayoutStore,
+                                theme: codeTheme,
+                                annotationContext: row.annotationContext(model: annotationModel))
+                            return native
+                        }
+                    ) { index in
+                        ChatNativeTimelineItemView(
+                            item: nativeItems[index], streamingTurnID: effectiveStreamingTurnID,
+                            threadID: threadID, store: store, foldModel: foldModel,
+                            scrollState: scrollState, annotationModel: annotationModel, textLayoutStore: textLayoutStore
+                        )
+                        // Natively hosted rows don't inherit this view's environment.
+                        .environment(\.chatFork, chatFork)
+                        .id(nativeItems[index].id)
+                        .frame(width: rowWidth)
+                        .frame(maxWidth: .infinity)
+                    }
+                #else
+                    List {
+                        timelineContent(
+                            rows: rows, effectiveStreamingTurnID: effectiveStreamingTurnID,
+                            hasEarlierSections: hasEarlierSections)
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .environment(\.defaultMinListRowHeight, 0)
+                    .dismissesKeyboardInteractively()
+                #endif
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 0)
-            .scrollDismissesKeyboard(.interactively)
+            #if os(macOS)
+                .opacity(isAwaitingInitialBottom ? 0 : 1)
+            #else
+                .background {
+                    ChatListCollectionViewIntrospector { collectionView in
+                        bottomFollower.attach(to: collectionView)
+                    }
+                    .allowsHitTesting(false)
+                }
+            #endif
             .modifier(
                 ChatBottomScrollRequestModifier(
                     scrollState: scrollState,
                     proxy: proxy,
-                    bottomID: Self.bottomID
+                    bottomID: Self.bottomID,
+                    pinToBottom: { animated in
+                        #if os(macOS)
+                            return macScrollPositionPreserver.pinToBottom()
+                        #else
+                            guard !animated else { return false }
+                            return bottomFollower.pinToBottom()
+                        #endif
+                    }
                 )
             )
             .overlay(alignment: .top) {
@@ -535,210 +1039,378 @@ private struct ChatTimeline: View {
                 guard historyLoadRequest > 0, isTimelineNearTop,
                     !isAwaitingInitialBottom
                 else { return }
-                await loadEarlier(
-                    loadedSections: loadedSections,
-                    renderedRows: rows,
-                    preservesPosition: !isViewportNearBottom
-                        || !scrollState.shouldFollowBottom
-                )
+                #if os(macOS)
+                    await loadEarlier(
+                        loadedSections: loadedSections,
+                        hasEarlierSections: hasEarlierSections
+                    )
+                #else
+                    await loadEarlier(
+                        loadedSections: loadedSections,
+                        renderedRows: rows,
+                        preservesPosition: !isViewportNearBottom
+                            || !scrollState.shouldFollowBottom
+                    )
+                #endif
             }
             .task(
-                id: ChatTimelinePreparationKey(
-                    timelineEntryCount: timelineEntryCount,
-                    streamingTurnID: streamingTurnID,
-                    rowWidth: rowWidth,
-                    expandedSectionIDs: foldModel.expandedSectionIDs
-                )
+                id: preparationKey
             ) {
                 guard rowWidth > 0 else { return }
+                #if DEBUG
+                    // A real-thread benchmark waits for this preparation pass so
+                    // sweeps measure the production steady state.
+                    let signalsBenchmarkWarm =
+                        ChatBenchmarkAutoRun.plan != nil
+                        && ChatBenchmarkAutoRun.threadTitleQuery != nil
+                    if signalsBenchmarkWarm {
+                        ChatBenchmarkAutoRun.noteTranscriptWarmStarted()
+                    }
+                #endif
+                // While a finished turn lingers in its streaming presentation,
+                // prepare the settled rows it is about to swap to.
+                let preparationRows = settlingTurnID == nil
+                    ? timelineRows
+                    : ChatTimelineLayout.rows(
+                        sections: loadedSections,
+                        requests: requests,
+                        liveTurnID: streamingTurnID,
+                        expandedSectionIDs: foldModel.expandedSectionIDs
+                    )
                 await Self.prepare(
-                    timelineRows: timelineRows,
+                    timelineRows: preparationRows,
                     streamingTurnID: streamingTurnID,
                     segmentCache: segmentCache,
                     textLayoutStore: textLayoutStore,
-                    rowWidth: rowWidth
+                    rowWidth: rowWidth,
+                    codeTheme: codeTheme
                 )
-            }
-            .onAppear {
-                if oldestLoadedSectionID == nil {
-                    oldestLoadedSectionID = loadedSections.first?.id
-                }
-                isAwaitingInitialBottom = true
-                proxy.scrollTo(Self.bottomID, anchor: .bottom)
-            }
-            .onScrollGeometryChange(for: ChatScrollGeometry.self) {
-                geometry in
-                Self.scrollGeometry(from: geometry)
-            } action: { oldGeometry, newGeometry in
-                handleScrollGeometryChange(
-                    from: oldGeometry,
-                    to: newGeometry,
-                    hasEarlierSections: hasEarlierSections,
-                    proxy: proxy
+                #if DEBUG
+                    if signalsBenchmarkWarm, !Task.isCancelled {
+                        ChatBenchmarkAutoRun.noteTranscriptWarm()
+                    }
+                #endif
+                #if os(macOS)
+                    if !Task.isCancelled {
+                        nativePreparedKey = preparationKey
+                    }
+                #endif
+                guard !Task.isCancelled, let settlingTurnID else { return }
+                streamingContinuity.noteSettledPreparation(
+                    turnID: settlingTurnID
                 )
-            }
-            .onScrollPhaseChange { oldPhase, newPhase in
-                handleScrollPhaseChange(from: oldPhase, to: newPhase)
-            }
-        }
-    }
-
-    private static func scrollGeometry(
-        from geometry: ScrollGeometry
-    ) -> ChatScrollGeometry {
-        let hasContentMetrics =
-            geometry.containerSize.height > 0
-            && geometry.contentSize.height > 0
-        return ChatScrollGeometry(
-            isNearTop: hasContentMetrics
-                && geometry.visibleRect.minY + geometry.contentInsets.top
-                    <= Self.historyLoadDistance,
-            isNearBottom: hasContentMetrics
-                && geometry.contentSize.height + geometry.contentInsets.bottom
-                    - geometry.visibleRect.maxY <= Self.nearBottomDistance,
-            containerHeight: geometry.containerSize.height,
-            bottomInset: geometry.contentInsets.bottom,
-            contentHeight: geometry.contentSize.height
-        )
-    }
-
-    private func handleScrollGeometryChange(
-        from oldGeometry: ChatScrollGeometry,
-        to newGeometry: ChatScrollGeometry,
-        hasEarlierSections: Bool,
-        proxy: ScrollViewProxy
-    ) {
-        // Content growing confirms the prepended rows have landed; pinning
-        // earlier would run against the old layout.
-        if let anchorID = pendingPrependAnchorID {
-            if newGeometry.contentHeight > oldGeometry.contentHeight {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
-                    proxy.scrollTo(anchorID, anchor: .top)
+                    settledPreparationGeneration &+= 1
                 }
-                pendingPrependAnchorID = nil
             }
-            return
-        }
-
-        let isNearTop = hasEarlierSections && newGeometry.isNearTop
-        if isTimelineNearTop != isNearTop {
-            isTimelineNearTop = isNearTop
-        }
-        if isViewportNearBottom != newGeometry.isNearBottom {
-            isViewportNearBottom = newGeometry.isNearBottom
-        }
-        scrollState.noteEndVisibility(newGeometry.isNearBottom)
-        if isAwaitingInitialBottom {
-            if newGeometry.isNearBottom {
-                isAwaitingInitialBottom = false
+            .onAppear {
+                #if os(macOS)
+                    foldModel.prepareForToggle = {
+                        macScrollPositionPreserver
+                            .captureBeforeContentExpansion()
+                    }
+                #endif
+                if oldestLoadedSectionID == nil {
+                    oldestLoadedSectionID = loadedSections.first?.id
+                    #if DEBUG
+                        // A real-thread benchmark sweeps the whole transcript;
+                        // mounting it fully up front keeps history pagination
+                        // from re-anchoring the viewport mid-measurement.
+                        if ChatBenchmarkAutoRun.threadTitleQuery != nil,
+                            !UserDefaults.standard.bool(forKey: "ChatBenchmarkPaginatedHistory")
+                        {
+                            oldestLoadedSectionID = sections.first?.id
+                        }
+                    #endif
+                }
+                isAwaitingInitialBottom = true
+                #if os(macOS)
+                    macScrollPositionPreserver.beginInitialBottomAlignment {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            isAwaitingInitialBottom = false
+                            #if DEBUG
+                                ChatBenchmarkAutoRun.isInitialAlignmentComplete = true
+                            #endif
+                        }
+                    }
+                #else
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                #endif
             }
-            return
-        }
-        if hasEarlierSections, !oldGeometry.isNearTop,
-            newGeometry.isNearTop, !isLoadingEarlier
-        {
-            historyLoadRequest &+= 1
-        }
-
-        let viewportShrank =
-            newGeometry.bottomInset > oldGeometry.bottomInset
-            || newGeometry.containerHeight < oldGeometry.containerHeight
-        let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
-        if viewportShrank || contentGrew, scrollState.shouldFollowBottom {
-            proxy.scrollTo(Self.bottomID, anchor: .bottom)
-        }
-    }
-
-    private func handleScrollPhaseChange(
-        from oldPhase: ScrollPhase,
-        to newPhase: ScrollPhase
-    ) {
-        if newPhase.isUserDriven, !oldPhase.isUserDriven,
-            isTimelineNearTop,
-            !isAwaitingInitialBottom, !isLoadingEarlier
-        {
-            // A drag beginning at the top changes no geometry, so explicitly
-            // restart the structured pagination task.
-            historyLoadRequest &+= 1
-        }
-        scrollState.noteUserScrollActivity(isActive: newPhase.isUserDriven)
-    }
-
-    @ViewBuilder
-    private func timelineContent(
-        rows: [ChatTimelineRenderRow],
-        hasEarlierSections: Bool,
-        showsHistoryMarker: Bool,
-        showsPlan: Bool
-    ) -> some View {
-        if showsHistoryMarker, hasEarlierSections {
-            Color.clear
-                .frame(height: ChatTimelineMetrics.historyMarkerHeight)
-                .id(Self.historyMarkerID)
-                .listRowInsets(.init())
-                .listRowSeparator(.hidden)
-        }
-
-        if showsPlan, let plan, !plan.entries.isEmpty {
-            ChatPlanRow(plan: plan)
-                .padding(.vertical, 10)
-                .frame(
-                    maxWidth: ChatContentMetrics.maximumWidth,
-                    alignment: .leading
-                )
-                .frame(maxWidth: .infinity)
-                .listRowInsets(
-                    .init(
-                        top: 0,
-                        leading: ChatTimelineMetrics.rowHorizontalInset,
-                        bottom: 0,
-                        trailing: ChatTimelineMetrics.rowHorizontalInset
+            #if !os(macOS)
+                .onScrollGeometryChange(for: ChatScrollGeometry.self) {
+                    geometry in
+                    Self.scrollGeometry(from: geometry)
+                } action: { oldGeometry, newGeometry in
+                    handleScrollGeometryChange(
+                        from: oldGeometry,
+                        to: newGeometry,
+                        hasEarlierSections: hasEarlierSections,
+                        proxy: proxy
                     )
-                )
-                .listRowSeparator(.hidden)
+                }
+                .onScrollPhaseChange { oldPhase, newPhase in
+                    handleScrollPhaseChange(from: oldPhase, to: newPhase)
+                }
+            #endif
         }
+    }
 
-        ForEach(rows) { row in
-            ChatTimelineRenderRowView(
-                row: row,
-                streamingTurnID: streamingTurnID,
-                threadID: threadID,
-                store: store,
-                foldModel: foldModel,
-                scrollState: scrollState,
-                textLayoutStore: textLayoutStore
+    #if os(macOS)
+        private func configureMacScrollDocument(_ document: any ChatMacScrollDocument) {
+            macScrollPositionPreserver.configure(
+                isBottomFollowingEnabled: {
+                    scrollState.shouldFollowBottom
+                },
+                noteUserScrollActivity: { isActive in
+                    scrollState.noteUserScrollActivity(
+                        isActive: isActive
+                    )
+                },
+                noteUserReachedEnd: {
+                    scrollState.noteScrollReturnedToEnd()
+                },
+                noteKeyboardScrollIntent: { towardEnd in
+                    if towardEnd {
+                        scrollState.noteScrollTowardEnd()
+                    } else {
+                        scrollState.noteScrollAwayFromEnd()
+                    }
+                }
+            )
+            macScrollPositionPreserver.attach(to: document)
+        }
+    #endif
+
+    private var codeTheme: ChatCodeHighlightTheme {
+        colorScheme == .dark ? .dark : .light
+    }
+
+    #if os(macOS)
+        private func handleMacScrollGeometryChange(
+            from oldGeometry: ChatMacScrollGeometry,
+            to newGeometry: ChatMacScrollGeometry,
+            hasEarlierSections: Bool
+        ) {
+            let isNearTop = hasEarlierSections && newGeometry.isNearTop
+            if isTimelineNearTop != isNearTop {
+                isTimelineNearTop = isNearTop
+            }
+            if isViewportNearBottom != newGeometry.isNearBottom {
+                isViewportNearBottom = newGeometry.isNearBottom
+            }
+            scrollState.noteEndVisibility(newGeometry.isNearBottom)
+
+            if isAwaitingInitialBottom {
+                if newGeometry.isNearBottom {
+                    isAwaitingInitialBottom = false
+                } else {
+                    _ = macScrollPositionPreserver.pinToBottom()
+                }
+                return
+            }
+
+            // The 24-point end zone is only UI/intent hysteresis. While
+            // following, every projected layout change (resize, reflow, or
+            // content growth) aligns to the exact native document end.
+            if scrollState.shouldFollowBottom {
+                _ = macScrollPositionPreserver.pinToBottom()
+            }
+
+            if hasEarlierSections, !oldGeometry.isNearTop,
+                newGeometry.isNearTop, !isLoadingEarlier
+            {
+                historyLoadRequest &+= 1
+            }
+
+        }
+    #else
+        private static func scrollGeometry(
+            from geometry: ScrollGeometry
+        ) -> ChatScrollGeometry {
+            let hasContentMetrics =
+                geometry.containerSize.height > 0
+                && geometry.contentSize.height > 0
+            return ChatScrollGeometry(
+                isNearTop: hasContentMetrics
+                    && geometry.visibleRect.minY + geometry.contentInsets.top
+                        <= Self.historyLoadDistance,
+                isNearBottom: hasContentMetrics
+                    && geometry.contentSize.height + geometry.contentInsets.bottom
+                        - geometry.visibleRect.maxY
+                        <= ChatTimelineMetrics.nearBottomDistance,
+                containerHeight: geometry.containerSize.height,
+                bottomInset: geometry.contentInsets.bottom,
+                contentHeight: geometry.contentSize.height,
+                contentOffsetY: geometry.contentOffset.y
             )
         }
 
-        if streamingTurnID != nil {
-            ChatWorkingIndicator(activityKey: rows.last?.id)
-                .padding(.vertical, 10)
-                .frame(
-                    maxWidth: ChatContentMetrics.maximumWidth,
-                    alignment: .leading
-                )
-                .frame(maxWidth: .infinity)
-                .listRowInsets(
-                    .init(
-                        top: 0,
-                        leading: ChatTimelineMetrics.rowHorizontalInset,
-                        bottom: 0,
-                        trailing: ChatTimelineMetrics.rowHorizontalInset
-                    )
-                )
-                .listRowSeparator(.hidden)
+        private func handleScrollGeometryChange(
+            from oldGeometry: ChatScrollGeometry,
+            to newGeometry: ChatScrollGeometry,
+            hasEarlierSections: Bool,
+            proxy: ScrollViewProxy
+        ) {
+            // Content growing confirms the prepended rows have landed; pinning
+            // earlier would run against the old layout.
+            if let anchorID = pendingPrependAnchorID {
+                if newGeometry.contentHeight > oldGeometry.contentHeight {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo(anchorID, anchor: .top)
+                    }
+                    pendingPrependAnchorID = nil
+                }
+                return
+            }
+
+            let isNearTop = hasEarlierSections && newGeometry.isNearTop
+            if isTimelineNearTop != isNearTop {
+                isTimelineNearTop = isNearTop
+            }
+            if isViewportNearBottom != newGeometry.isNearBottom {
+                isViewportNearBottom = newGeometry.isNearBottom
+            }
+            scrollState.noteEndVisibility(newGeometry.isNearBottom)
+            if isAwaitingInitialBottom {
+                if newGeometry.isNearBottom {
+                    isAwaitingInitialBottom = false
+                }
+                return
+            }
+            if hasEarlierSections, !oldGeometry.isNearTop,
+                newGeometry.isNearTop, !isLoadingEarlier
+            {
+                historyLoadRequest &+= 1
+            }
+
+            let viewportShrank =
+                newGeometry.bottomInset > oldGeometry.bottomInset
+                || newGeometry.containerHeight < oldGeometry.containerHeight
+            let contentGrew = newGeometry.contentHeight > oldGeometry.contentHeight
+
+            // Keyboard and accessibility scrolling do not always enter a
+            // user-driven `ScrollPhase`. Offset movement toward older content is
+            // still proof the viewport left the end, so following must stop —
+            // otherwise every content-height correction below yanks the viewport
+            // back down. Same-frame keyboard shifts and streaming growth are
+            // excluded; they move the offset without expressing that intent.
+            if !viewportShrank, !contentGrew,
+                newGeometry.contentOffsetY
+                    < oldGeometry.contentOffsetY - Self.scrollMovementTolerance
+            {
+                scrollState.noteScrollAwayFromEnd()
+            }
+
+            if viewportShrank || contentGrew, scrollState.shouldFollowBottom {
+                // Pinning through the proxy resolves the row identifier by
+                // walking the entire ForEach identity list per call; the direct
+                // offset write is constant time. The proxy remains the fallback
+                // until the collection view resolves.
+                if !bottomFollower.pinToBottom() {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
+            }
         }
 
-        ChatEndMarker()
-            .id(Self.bottomID)
-            .listRowInsets(.init())
-            .listRowSeparator(.hidden)
-    }
+        private func handleScrollPhaseChange(
+            from oldPhase: ScrollPhase,
+            to newPhase: ScrollPhase
+        ) {
+            if newPhase.isUserDriven, !oldPhase.isUserDriven,
+                isTimelineNearTop,
+                !isAwaitingInitialBottom, !isLoadingEarlier
+            {
+                // A drag beginning at the top changes no geometry, so explicitly
+                // restart the structured pagination task.
+                historyLoadRequest &+= 1
+            }
+            scrollState.noteUserScrollActivity(isActive: newPhase.isUserDriven)
+        }
 
-    private static let bottomID = "chat-bottom"
-    private static let historyMarkerID = "chat-history-marker"
+        @ViewBuilder
+        private func timelineContent(
+            rows: [ChatTimelineRenderRow],
+            effectiveStreamingTurnID: String?,
+            hasEarlierSections: Bool
+        ) -> some View {
+            if hasEarlierSections {
+                Color.clear
+                    .frame(height: ChatTimelineMetrics.historyMarkerHeight)
+                    .id(Self.historyMarkerID)
+                    .listRowInsets(.init())
+                    .listRowSeparator(.hidden)
+            }
+
+            if !hasEarlierSections, !plan.isEmpty {
+                ChatPlanRow(plan: plan)
+                    .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
+                    .frame(
+                        maxWidth: ChatContentMetrics.maximumWidth,
+                        alignment: .leading
+                    )
+                    .frame(maxWidth: .infinity)
+                    .listRowInsets(
+                        .init(
+                            top: 0,
+                            leading: ChatTimelineMetrics.rowHorizontalInset,
+                            bottom: 0,
+                            trailing: ChatTimelineMetrics.rowHorizontalInset
+                        )
+                    )
+                    .listRowSeparator(.hidden)
+            }
+
+            ForEach(rows) { row in
+                ChatTimelineRenderRowView(
+                    row: row,
+                    streamingTurnID: effectiveStreamingTurnID,
+                    threadID: threadID,
+                    store: store,
+                    foldModel: foldModel,
+                    scrollState: scrollState,
+                    annotationModel: annotationModel,
+                    textLayoutStore: textLayoutStore
+                )
+            }
+
+            // Keep the activity header, message and footer in the same presentation
+            // until settled preparation is ready. Removing just the footer early
+            // changes List's bottom offset and briefly displaces the live header.
+            if effectiveStreamingTurnID != nil {
+                ChatWorkingIndicator(activityKey: rows.last?.id)
+                    .padding(.vertical, ChatTimelineMetrics.rowVerticalInset)
+                    .frame(
+                        maxWidth: ChatContentMetrics.maximumWidth,
+                        alignment: .leading
+                    )
+                    .frame(maxWidth: .infinity)
+                    .listRowInsets(
+                        .init(
+                            top: 0,
+                            leading: ChatTimelineMetrics.rowHorizontalInset,
+                            bottom: 0,
+                            trailing: ChatTimelineMetrics.rowHorizontalInset
+                        )
+                    )
+                    .listRowSeparator(.hidden)
+            }
+
+            ChatEndMarker()
+                .id(Self.bottomID)
+                .listRowInsets(.init())
+                .listRowSeparator(.hidden)
+        }
+    #endif
+
+    private static let bottomID = ChatTimelineBoundaryID.bottom
+    private static let historyMarkerID = ChatTimelineBoundaryID.history
     private static let initialTurnCount = 5
     private static let earlierTurnCount = 10
 
@@ -767,33 +1439,95 @@ private struct ChatTimeline: View {
         return Array(sections[startIndex...])
     }
 
-    private func loadEarlier(
-        loadedSections: [ChatTimelineLayout.Section],
-        renderedRows: [ChatTimelineRenderRow],
-        preservesPosition: Bool
-    ) async {
-        guard !isLoadingEarlier else { return }
+    #if os(macOS)
+        private func loadEarlier(
+            loadedSections: [ChatTimelineLayout.Section],
+            hasEarlierSections: Bool
+        ) async {
+            guard !isLoadingEarlier else { return }
 
-        isLoadingEarlier = true
-        defer { isLoadingEarlier = false }
+            isLoadingEarlier = true
+            defer { isLoadingEarlier = false }
 
-        guard
-            let page = await prepareEarlierPage(
-                loadedSections: loadedSections,
-                rowWidth: rowWidth
+            guard
+                let page = await prepareEarlierPage(
+                    loadedSections: loadedSections,
+                    rowWidth: rowWidth
+                )
+            else {
+                await loadOlderTurns(loadedSections: loadedSections)
+                return
+            }
+
+            // The preserver needs the exact number of rows entering above the
+            // current anchor: the page's rows plus the change in leading
+            // fixed rows (history marker or plan).
+            let pageRows = Self.renderRows(
+                page.timelineRows,
+                streamingTurnID: streamingTurnID,
+                segmentCache: segmentCache
             )
-        else { return }
+            let oldLeadingRowCount = hasEarlierSections
+                ? 1
+                : (plan.isEmpty ? 0 : 1)
+            let hasEarlierSectionsAfterLoad =
+                page.newOldestSectionID != sections.first?.id || hasOlderTurns
+            let newLeadingRowCount = hasEarlierSectionsAfterLoad
+                ? 1
+                : (plan.isEmpty ? 0 : 1)
+            let leadingRowCount = pageRows.count
+                + newLeadingRowCount - oldLeadingRowCount
 
-        if preservesPosition {
-            // Loading only arms at the top edge, so pinning the former first
-            // row to the top preserves the viewport as older rows prepend.
-            pendingPrependAnchorID = renderedRows.first?.id
+            macScrollPositionPreserver.captureBeforePrepend(
+                leadingRowCount: leadingRowCount
+            )
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                oldestLoadedSectionID = page.newOldestSectionID
+            }
         }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            oldestLoadedSectionID = page.newOldestSectionID
+    #else
+        private func loadEarlier(
+            loadedSections: [ChatTimelineLayout.Section],
+            renderedRows: [ChatTimelineRenderRow],
+            preservesPosition: Bool
+        ) async {
+            guard !isLoadingEarlier else { return }
+
+            isLoadingEarlier = true
+            defer { isLoadingEarlier = false }
+
+            guard
+                let page = await prepareEarlierPage(
+                    loadedSections: loadedSections,
+                    rowWidth: rowWidth
+                )
+            else {
+                await loadOlderTurns(loadedSections: loadedSections)
+                return
+            }
+
+            if preservesPosition {
+                // Loading only arms at the top edge, so pinning the former first
+                // row to the top preserves the viewport as older rows prepend.
+                pendingPrependAnchorID = renderedRows.first?.id
+            }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                oldestLoadedSectionID = page.newOldestSectionID
+            }
         }
+    #endif
+
+    /// With every loaded turn shown, reads the daemon's next older page;
+    /// once it lands, the load runs again over the widened sections.
+    private func loadOlderTurns(loadedSections: [ChatTimelineLayout.Section]) async {
+        guard hasOlderTurns, loadedSections.first?.id == sections.first?.id else { return }
+        await store.loadOlderTurns()
+        guard !Task.isCancelled else { return }
+        historyLoadRequest &+= 1
     }
 
     private func prepareEarlierPage(
@@ -817,8 +1551,7 @@ private struct ChatTimeline: View {
         )
         let pageTimelineRows = ChatTimelineLayout.rows(
             sections: pageSections,
-            streamingTurnID: streamingTurnID,
-            latestTurn: latestTurn,
+            liveTurnID: streamingTurnID,
             expandedSectionIDs: foldModel.expandedSectionIDs
         )
         await Self.prepare(
@@ -826,7 +1559,8 @@ private struct ChatTimeline: View {
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache,
             textLayoutStore: textLayoutStore,
-            rowWidth: rowWidth
+            rowWidth: rowWidth,
+            codeTheme: codeTheme
         )
 
         guard !Task.isCancelled, isTimelineNearTop,
@@ -845,20 +1579,128 @@ private struct ChatTimeline: View {
         timelineRows: [ChatTimelineRowModel],
         streamingTurnID: String?,
         segmentCache: ChatMarkdownSegmentCache,
-        textLayoutStore: any ChatNativeTextLayoutStore,
-        rowWidth: CGFloat
+        textLayoutStore: ChatTextLayoutStore,
+        rowWidth: CGFloat,
+        codeTheme: ChatCodeHighlightTheme
     ) async {
+        let renderedRows = await primeMarkdownCaches(
+            timelineRows: timelineRows,
+            streamingTurnID: streamingTurnID,
+            segmentCache: segmentCache
+        )
+        guard !Task.isCancelled else { return }
+
+        let layoutRequests = Self.textLayoutRequests(
+            in: renderedRows,
+            streamingTurnID: streamingTurnID,
+            rowWidth: rowWidth
+        )
+        let richBlocks = Self.richBlockLayoutRequests(
+            in: renderedRows,
+            streamingTurnID: streamingTurnID,
+            codeTheme: codeTheme
+        )
+        #if DEBUG
+            ChatBenchmarkAutoRun.trace(
+                "prepare rows=\(renderedRows.count) requests=\(layoutRequests.count) code=\(richBlocks.code.count) tables=\(richBlocks.tables.count)"
+            )
+        #endif
+        await textLayoutStore.prepare(requests: layoutRequests)
+        // Prose first: it is most of every page. Code highlighting is
+        // JavaScript-backed and tables are rarer, so they follow.
+        await textLayoutStore.prepareTables(requests: richBlocks.tables)
+        await textLayoutStore.prepareCodeBlocks(requests: richBlocks.code)
+    }
+
+    /// Settled code blocks and tables the rows will host natively on macOS,
+    /// keyed exactly as `ChatMarkdownRichContentView` and
+    /// `ChatResolvedMarkdownBlockRow` key them. Streaming messages are
+    /// excluded: their tail changes per chunk.
+    static func richBlockLayoutRequests(
+        in rows: [ChatTimelineRenderRow],
+        streamingTurnID: String?,
+        codeTheme: ChatCodeHighlightTheme
+    ) -> (code: [ChatCodeLayoutRequest], tables: [ChatTableLayoutRequest]) {
+        var code: [ChatCodeLayoutRequest] = []
+        var tables: [ChatTableLayoutRequest] = []
+
+        func appendBlocks(messageID: String, source: String) {
+            guard let plan = ChatMarkdownRenderCache.shared.cachedPlan(
+                messageID: messageID,
+                source: source
+            ) else { return }
+            for (index, block) in plan.blocks.enumerated() {
+                let id = "\(messageID)-block-\(index)"
+                switch block {
+                case .code(let codeBlock):
+                    code.append(
+                        ChatCodeLayoutRequest(id: id, block: codeBlock, theme: codeTheme)
+                    )
+                case .table(let table):
+                    tables.append(ChatTableLayoutRequest(id: id, table: table))
+                case .prose:
+                    break
+                }
+            }
+        }
+
+        for row in rows {
+            switch row {
+            case .richMarkdown(let segment):
+                appendBlocks(messageID: segment.rowID, source: segment.source)
+            case .standard(.message(let message)):
+                guard
+                    message.role != ChatRole.assistant.rawValue
+                        || streamingTurnID == nil
+                        || message.turnID != streamingTurnID
+                else { continue }
+                appendBlocks(messageID: message.id, source: message.text)
+            case .resolvedMarkdown(let block):
+                switch block.content {
+                case .code(let codeBlock):
+                    code.append(
+                        ChatCodeLayoutRequest(
+                            id: block.rowID,
+                            block: codeBlock,
+                            theme: codeTheme
+                        )
+                    )
+                case .table(let table):
+                    tables.append(
+                        ChatTableLayoutRequest(id: block.rowID, table: table)
+                    )
+                case .proseRun:
+                    break
+                }
+            case .standard, .prose:
+                break
+            }
+        }
+        return (code, tables)
+    }
+
+    /// Parses every Markdown representation the rows will request — source
+    /// segmentation, whole-document plans, and per-segment plans — off the
+    /// main actor. Called before the timeline's first body so a cold open
+    /// never parses synchronously inside view construction. Returns the
+    /// rendered rows so callers can derive layout requests without building
+    /// them twice.
+    static func primeMarkdownCaches(
+        timelineRows: [ChatTimelineRowModel],
+        streamingTurnID: String?,
+        segmentCache: ChatMarkdownSegmentCache
+    ) async -> [ChatTimelineRenderRow] {
         await segmentCache.prime(
             requests: ChatMarkdownSegmentCache.primeRequests(
                 rows: timelineRows,
                 streamingTurnID: streamingTurnID
             )
         )
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return [] }
 
         // Reference definitions and other document-wide Markdown cannot be
         // source-segmented safely. Resolve those documents once before
-        // splitting their already-parsed blocks into lazy List rows.
+        // splitting their already-parsed blocks into lazy transcript rows.
         await ChatMarkdownRenderCache.shared.prime(
             requests: Self.wholeDocumentMarkdownRenderRequests(
                 in: timelineRows,
@@ -866,35 +1708,26 @@ private struct ChatTimeline: View {
                 segmentCache: segmentCache
             )
         )
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return [] }
 
         let renderedRows = Self.renderRows(
             timelineRows,
             streamingTurnID: streamingTurnID,
             segmentCache: segmentCache
         )
-        let markdownRequests = Self.markdownRenderRequests(
-            in: renderedRows,
-            streamingTurnID: streamingTurnID
-        )
         await ChatMarkdownRenderCache.shared.prime(
-            requests: markdownRequests
-        )
-        guard !Task.isCancelled else { return }
-
-        await textLayoutStore.prepare(
-            requests: Self.textLayoutRequests(
+            requests: Self.markdownRenderRequests(
                 in: renderedRows,
-                streamingTurnID: streamingTurnID,
-                rowWidth: rowWidth
+                streamingTurnID: streamingTurnID
             )
         )
+        return renderedRows
     }
 
     /// Expands oversized user messages and every settled assistant message.
     /// Streaming keeps one stable live row. Documents that cannot be
-    /// source-segmented are parsed once as a whole, then their resolved blocks
-    /// become lazy timeline rows without changing reference-link semantics.
+    /// source-segmented are parsed as whole documents before splitting into
+    /// resolved rows, retaining reference links and message annotation context.
     static func renderRows(
         _ rows: [ChatTimelineRowModel],
         streamingTurnID: String?,
@@ -924,39 +1757,42 @@ private struct ChatTimeline: View {
             )
             switch plan {
             case .existingRenderer:
-                guard message.role == MaidMessageRole.assistant.rawValue,
-                    message.turnID != streamingTurnID
-                else { return [.standard(row)] }
+                #if os(macOS)
+                    // A restored message can carry no turn ID; `nil != nil` must
+                    // not classify it as the streaming message when nothing is
+                    // streaming.
+                    guard message.annotations?.isEmpty != false,
+                        message.role == ChatRole.assistant.rawValue,
+                        streamingTurnID == nil || message.turnID != streamingTurnID
+                    else { return [.standard(row)] }
 
-                let renderPlan = ChatMarkdownRenderCache.shared.plan(
-                    messageID: message.id,
-                    source: message.text
-                )
-                let contents = renderPlan.blocks.flatMap { block in
-                    switch block {
-                    case .prose(let prose):
-                        prose.pieces.map(ChatResolvedMarkdownRowContent.prose)
-                    case .code(let code):
-                        [ChatResolvedMarkdownRowContent.code(code)]
-                    case .table(let table):
-                        [ChatResolvedMarkdownRowContent.table(table)]
-                    }
-                }
-                guard !contents.isEmpty else { return [.standard(row)] }
-                return contents.indices.map { index in
-                    .resolvedMarkdown(
-                        ChatResolvedMarkdownBlockRowModel(
-                            messageID: message.id,
-                            index: index,
-                            content: contents[index],
-                            attachments: index == contents.count - 1
-                                ? message.attachments
-                                : nil,
-                            isFirst: index == 0,
-                            isLast: index == contents.count - 1
-                        )
+                    let renderPlan = ChatMarkdownRenderCache.shared.plan(
+                        messageID: message.id,
+                        source: message.text
                     )
-                }
+                    let contents = ChatResolvedMarkdownRowPlanner.contents(
+                        in: renderPlan
+                    )
+                    guard !contents.isEmpty else { return [.standard(row)] }
+                    return contents.indices.map { index in
+                        .resolvedMarkdown(
+                            ChatResolvedMarkdownBlockRowModel(
+                                messageID: message.id,
+                                index: index,
+                                content: contents[index],
+                                attachments: index == contents.count - 1
+                                    ? message.attachments
+                                    : nil,
+                                isFirst: index == 0,
+                                isLast: index == contents.count - 1
+                            )
+                        )
+                    }
+                #else
+                    // Keep the selection action on the complete attributed
+                    // document, including references resolved outside a block.
+                    return [.standard(row)]
+                #endif
 
             case .segmented(let segments):
                 return segments.indices.map { index in
@@ -966,6 +1802,9 @@ private struct ChatTimeline: View {
                         index: index,
                         source: segment.source,
                         role: message.role,
+                        annotations: index == segments.count - 1
+                            ? message.annotations
+                            : nil,
                         attachments: index == segments.count - 1
                             ? message.attachments
                             : nil,
@@ -987,8 +1826,8 @@ private struct ChatTimeline: View {
     ) -> [ChatMarkdownRenderRequest] {
         rows.compactMap { row in
             guard case .message(let message) = row,
-                message.role == MaidMessageRole.assistant.rawValue,
-                message.turnID != streamingTurnID,
+                message.role == ChatRole.assistant.rawValue,
+                streamingTurnID == nil || message.turnID != streamingTurnID,
                 case .existingRenderer = ChatMessageTextPlanner.plan(
                     messageID: message.id,
                     role: message.role,
@@ -1013,7 +1852,8 @@ private struct ChatTimeline: View {
             switch row {
             case .standard(.message(let message)):
                 guard
-                    message.role != MaidMessageRole.assistant.rawValue
+                    message.role != ChatRole.assistant.rawValue
+                        || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { return nil }
                 return ChatMarkdownRenderRequest(
@@ -1060,8 +1900,7 @@ private struct ChatTimeline: View {
                     requests.append(
                         ChatTextLayoutRequest(
                             id: id,
-                            source: prose.source,
-                            style: .markdownProse,
+                            content: .rendered(prose.text),
                             width: ChatTimelineMetrics.proseTextWidth(
                                 role: role,
                                 in: rowWidth
@@ -1080,8 +1919,7 @@ private struct ChatTimeline: View {
                 requests.append(
                     ChatTextLayoutRequest(
                         id: segment.rowID,
-                        source: segment.source,
-                        style: .markdownProse,
+                        content: .source(segment.source),
                         width: ChatTimelineMetrics.proseTextWidth(
                             role: segment.role,
                             in: rowWidth
@@ -1096,7 +1934,8 @@ private struct ChatTimeline: View {
                 )
             case .standard(.message(let message)):
                 guard
-                    message.role != MaidMessageRole.assistant.rawValue
+                    message.role != ChatRole.assistant.rawValue
+                        || streamingTurnID == nil
                         || message.turnID != streamingTurnID
                 else { continue }
                 appendRichRequests(
@@ -1104,13 +1943,24 @@ private struct ChatTimeline: View {
                     source: message.text,
                     role: message.role
                 )
-            case .standard, .resolvedMarkdown:
+            case .resolvedMarkdown(let block):
+                guard case .proseRun(let prose) = block.content else { continue }
+                requests.append(
+                    ChatTextLayoutRequest(
+                        id: block.rowID,
+                        content: .rendered(prose.text),
+                        width: ChatTimelineMetrics.proseTextWidth(
+                            role: ChatRole.assistant.rawValue,
+                            in: rowWidth
+                        )
+                    )
+                )
+            case .standard:
                 break
             }
         }
         return requests
     }
-
 }
 
 enum ChatTimelineRenderRow: Identifiable {
@@ -1118,6 +1968,38 @@ enum ChatTimelineRenderRow: Identifiable {
     case richMarkdown(ChatMessageSegmentRowModel)
     case prose(ChatMessageSegmentRowModel)
     case resolvedMarkdown(ChatResolvedMarkdownBlockRowModel)
+
+    func annotationContext(model: ChatAnnotationModel) -> ChatAnnotationContext? {
+        switch self {
+        case .prose(let segment), .richMarkdown(let segment):
+            ChatAnnotationContext(messageID: segment.messageID, role: segment.role, model: model)
+        case .resolvedMarkdown(let block):
+            ChatAnnotationContext(messageID: block.messageID, role: ChatRole.assistant.rawValue, model: model)
+        case .standard:
+            nil
+        }
+    }
+
+    /// Vertical spacing around one piece of a split message. Native rows
+    /// reproduce it exactly, so both hosts share this definition.
+    var verticalInsets: (top: CGFloat, bottom: CGFloat) {
+        switch self {
+        case .standard:
+            (0, 0)
+        case .prose(let segment), .richMarkdown(let segment):
+            (
+                segment.isFirst ? ChatTimelineMetrics.rowVerticalInset : 0,
+                segment.isLast
+                    ? ChatTimelineMetrics.rowVerticalInset : ChatTimelineMetrics.interSegmentSpacing
+            )
+        case .resolvedMarkdown(let block):
+            (
+                block.isFirst
+                    ? ChatTimelineMetrics.rowVerticalInset : ChatMarkdownProseStyle.blockSpacing,
+                block.isLast ? ChatTimelineMetrics.rowVerticalInset : 0
+            )
+        }
+    }
 
     var id: String {
         switch self {
@@ -1129,7 +2011,7 @@ enum ChatTimelineRenderRow: Identifiable {
     }
 }
 
-/// One stable shape lets List obtain identities without evaluating expensive
+/// One stable shape lets the transcript obtain identities without evaluating expensive
 /// row bodies for the entire transcript.
 struct ChatTimelineRenderRowView: View {
     let row: ChatTimelineRenderRow
@@ -1138,6 +2020,7 @@ struct ChatTimelineRenderRowView: View {
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
@@ -1151,6 +2034,7 @@ struct ChatTimelineRenderRowView: View {
                     store: store,
                     foldModel: foldModel,
                     scrollState: scrollState,
+                    annotationModel: annotationModel,
                     textLayoutStore: textLayoutStore
                 )
 
@@ -1159,41 +2043,36 @@ struct ChatTimelineRenderRowView: View {
                     messageID: segment.rowID,
                     text: segment.source,
                     role: segment.role,
+                    annotations: segment.annotations,
                     attachments: segment.attachments,
                     streamingText: nil,
                     presentation: ChatMarkdownPresentation(isStreaming: false),
                     textLayoutStore: textLayoutStore
                 )
-                .padding(.top, segment.isFirst ? 10 : 0)
-                .padding(
-                    .bottom,
-                    segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
-                )
 
             case .prose(let segment):
-                ChatNativeTextMessageRow(segment: segment) {
+                ChatMessageBubble(
+                    role: segment.role,
+                    annotations: segment.annotations,
+                    attachments: segment.attachments
+                ) {
                     ChatSelectableText(
                         layoutID: segment.rowID,
-                        source: segment.source,
-                        style: .markdownProse,
+                        content: .source(segment.source),
                         layoutStore: textLayoutStore
                     )
                 }
-                .padding(.top, segment.isFirst ? 10 : 0)
-                .padding(
-                    .bottom,
-                    segment.isLast ? 10 : ChatTimelineMetrics.interSegmentSpacing
-                )
 
             case .resolvedMarkdown(let block):
-                ChatResolvedMarkdownBlockRow(model: block)
-                    .padding(
-                        .top,
-                        block.isFirst ? 10 : ChatMarkdownProseStyle.blockSpacing
-                    )
-                    .padding(.bottom, block.isLast ? 10 : 0)
+                ChatResolvedMarkdownBlockRow(
+                    model: block,
+                    textLayoutStore: textLayoutStore
+                )
             }
         }
+        .environment(\.chatAnnotationContext, row.annotationContext(model: annotationModel))
+        .padding(.top, row.verticalInsets.top)
+        .padding(.bottom, row.verticalInsets.bottom)
         .frame(
             maxWidth: ChatContentMetrics.maximumWidth,
             alignment: .leading
@@ -1216,6 +2095,7 @@ struct ChatMessageSegmentRowModel {
     let index: Int
     let source: String
     let role: String
+    let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
     let isFirst: Bool
     let isLast: Bool
@@ -1223,43 +2103,34 @@ struct ChatMessageSegmentRowModel {
     var rowID: String { "\(messageID)#segment-\(index)" }
 }
 
-private struct ChatNativeTextMessageRow<NativeText: View>: View {
-    let segment: ChatMessageSegmentRowModel
-    @ViewBuilder let nativeText: () -> NativeText
+/// The shared message layout: a trailing user bubble or a full-width
+/// assistant column, followed by annotation cards and attachments.
+struct ChatMessageBubble<Content: View>: View {
+    let role: String
+    var annotations: [PromptAnnotation]? = nil
+    var attachments: [Attachment]? = nil
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
+        let isUser = role == ChatRole.user.rawValue
         VStack(alignment: .leading) {
-            nativeText()
+            content()
 
-            if let attachments = segment.attachments, !attachments.isEmpty {
-                Text(
-                    attachments.map { $0.name ?? $0.kind }
-                        .joined(separator: " · ")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let annotations, !annotations.isEmpty {
+                ChatMessageAnnotationsView(annotations: annotations)
+            }
+
+            if let attachments, !attachments.isEmpty {
+                ChatMessageAttachmentsView(attachments: attachments)
             }
         }
-        .padding(
-            .horizontal,
-            isUserMessage ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
-        )
-        .padding(
-            .vertical,
-            isUserMessage ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
-        )
+        .padding(.horizontal, isUser ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0)
+        .padding(.vertical, isUser ? ChatTimelineMetrics.userBubbleVerticalPadding : 0)
         .background(
-            isUserMessage ? Color.accentColor.opacity(0.15) : Color.clear,
+            isUser ? Color.accentColor.opacity(0.15) : Color.clear,
             in: .rect(cornerRadius: 18)
         )
-        .frame(
-            maxWidth: .infinity,
-            alignment: isUserMessage ? .trailing : .leading
-        )
-    }
-
-    private var isUserMessage: Bool {
-        segment.role == MaidMessageRole.user.rawValue
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
 
@@ -1269,17 +2140,23 @@ private struct ChatScrollGeometry: Equatable {
     let containerHeight: CGFloat
     let bottomInset: CGFloat
     let contentHeight: CGFloat
+    let contentOffsetY: CGFloat
 }
 
 /// Handles explicit jump-to-bottom requests without storing a scroll proxy in
 /// shared state. Automatic following is driven by post-layout geometry below.
-private struct ChatBottomScrollRequestModifier: ViewModifier {
+struct ChatBottomScrollRequestModifier: ViewModifier {
     let scrollState: ChatScrollState
     let proxy: ScrollViewProxy
     let bottomID: String
+    let pinToBottom: (_ animated: Bool) -> Bool
 
     func body(content: Content) -> some View {
         content.onChange(of: scrollState.bottomScrollRequest) { _, request in
+            if pinToBottom(request.animated) {
+                scrollState.noteEndVisibility(true)
+                return
+            }
             if request.animated {
                 withAnimation(.smooth) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
@@ -1309,6 +2186,7 @@ private struct ChatTimelineRow: View {
     let store: ThreadStore
     let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
+    let annotationModel: ChatAnnotationModel
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
@@ -1319,11 +2197,9 @@ private struct ChatTimelineRow: View {
                     messageID: message.id,
                     text: message.text,
                     role: message.role,
+                    annotations: message.annotations,
                     attachments: message.attachments,
-                    streamingText: store.streamingMessageText(
-                        threadID: threadID,
-                        messageID: message.id
-                    ),
+                    streamingText: store.streamingText(threadID: threadID, rowID: message.id),
                     presentation: ChatMarkdownPresentation.timelineMessage(
                         role: message.role,
                         turnID: message.turnID,
@@ -1331,14 +2207,20 @@ private struct ChatTimelineRow: View {
                     ),
                     textLayoutStore: textLayoutStore
                 )
+                .environment(
+                    \.chatAnnotationContext,
+                    ChatAnnotationContext(
+                        messageID: message.id,
+                        role: message.role,
+                        model: annotationModel
+                    )
+                )
                 .padding(.vertical, 10)
             case .thought(let item):
                 ChatThoughtRow(
                     item: item,
-                    streamingText: store.streamingReasoningText(
-                        threadID: threadID,
-                        itemID: item.id
-                    ),
+                    streamingText: store.streamingText(threadID: threadID, rowID: item.id),
+                    foldModel: foldModel,
                     scrollState: scrollState
                 )
             case .turnActivity(let activity):
@@ -1354,6 +2236,7 @@ private struct ChatTimelineRow: View {
                         item: item,
                         threadID: threadID,
                         store: store,
+                        foldModel: foldModel,
                         scrollState: scrollState
                     )
                     .padding(.vertical, 4)
@@ -1362,13 +2245,28 @@ private struct ChatTimelineRow: View {
                         group: group,
                         threadID: threadID,
                         store: store,
+                        foldModel: foldModel,
                         scrollState: scrollState
                     )
                 }
             case .notice(let item):
                 ChatNoticeRow(item: item)
-            case .approval(let approval):
-                ChatApprovalRow(approval: approval, threadID: threadID, store: store)
+            case .handoff(let item):
+                ChatHandoffRow(item: item, threadID: threadID, store: store)
+            case .envelope(let item):
+                ChatEnvelopeRow(item: item)
+            case .stopNote(let note):
+                Label(note.text, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            case .turnFork(let fork):
+                ChatTurnForkRow(fork: fork)
+            case .request(let request):
+                ChatRequestRow(request: request, threadID: threadID, store: store)
+                    // An answered request shows its record: fresh state.
+                    .id(request.isOpen)
                     .padding(.vertical, 10)
             }
         }
@@ -1381,20 +2279,17 @@ private struct ChatTimelineRow: View {
 /// compact font and secondary color rather than the document-level styling of
 /// assistant messages.
 private struct ChatThoughtRow: View {
-    let item: Item
+    let item: ChatItem
     let streamingText: ThreadStreamingText?
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
-
-    @State private var isExpandedOverride: Bool?
 
     var body: some View {
         if let text = ChatTimelineLayout.reasoningText(item) {
             VStack(alignment: .leading, spacing: 8) {
                 Button {
                     scrollState.noteContentExpansion()
-                    withChatContentExpansionTransaction {
-                        isExpandedOverride = !isExpanded
-                    }
+                    foldModel.setExpanded(.thought(itemID: item.id), !isExpanded)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "brain")
@@ -1430,26 +2325,40 @@ private struct ChatThoughtRow: View {
         }
     }
 
+    /// Untouched thoughts are open only while streaming; an explicit choice
+    /// survives completion and offscreen reuse.
     private var isExpanded: Bool {
-        isExpandedOverride ?? (item.itemStatus == .inProgress)
+        foldModel.isExpanded(
+            .thought(itemID: item.id),
+            default: item.itemStatus == .inProgress
+        )
     }
 }
 
 /// Owns the only observation read for a live thought. The disclosure row and
-/// surrounding List retain stable inputs while this leaf updates.
+/// surrounding transcript retain stable inputs while this leaf updates.
 private struct ChatThoughtText: View {
     let fallbackText: String
     let streamingText: ThreadStreamingText?
 
     var body: some View {
-        Text(Self.attributed(streamingText?.text ?? fallbackText))
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if let streamingText {
+                ChatLiveThoughtText(
+                    streamingText: streamingText,
+                    seedText: fallbackText
+                )
+            } else {
+                Text(Self.attributed(fallbackText))
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func attributed(_ text: String) -> AttributedString {
+    nonisolated static func attributed(_ text: String) -> AttributedString {
         guard
             let parsed = try? AttributedString(
                 markdown: text,
@@ -1459,6 +2368,46 @@ private struct ChatThoughtText: View {
             return AttributedString(text)
         }
         return parsed
+    }
+}
+
+/// Displays one live reasoning buffer, mirroring how the assistant message
+/// text streams: this leaf is the only view observing the buffer, and each
+/// flushed update parses off the main actor.
+///
+/// The daemon coalesces reasoning chunks on a 50 ms ticker, so the leaf
+/// re-evaluates at most 20 times per second; the body itself only swaps in a
+/// finished attributed string. A newer revision cancels an in-flight parse,
+/// so superseded text is never rendered. The initial display seeds from
+/// `seedText`, the settled-payload snapshot the parent already carries, so
+/// the row shows text on its first frame. When the item settles the store
+/// clears the buffer and the parent swaps to the settled payload text.
+private struct ChatLiveThoughtText: View {
+    let streamingText: ThreadStreamingText
+
+    @State private var rendered: AttributedString
+
+    init(streamingText: ThreadStreamingText, seedText: String) {
+        self.streamingText = streamingText
+        _rendered = State(initialValue: ChatThoughtText.attributed(seedText))
+    }
+
+    var body: some View {
+        Text(rendered)
+            .task(id: streamingText.revision) {
+                let parsed = await Self.parse(streamingText.text)
+                guard !Task.isCancelled else { return }
+                rendered = parsed
+            }
+    }
+
+    /// Streamed reasoning carries leading/trailing newlines that the settled
+    /// row trims; trim the live text the same way before parsing.
+    @concurrent
+    private static func parse(_ text: String) async -> AttributedString {
+        ChatThoughtText.attributed(
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 
@@ -1525,15 +2474,18 @@ private struct ChatActivityGroupRow: View {
     let group: ChatActivityGroup
     let threadID: String
     let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
 
-    @State private var isExpanded = false
+    private var isExpanded: Bool {
+        foldModel.isExpanded(.activityGroup(id: group.id))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 scrollState.noteContentExpansion()
-                withChatContentExpansionTransaction { isExpanded.toggle() }
+                foldModel.setExpanded(.activityGroup(id: group.id), !isExpanded)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: Self.iconName(for: group.items.first))
@@ -1545,7 +2497,7 @@ private struct ChatActivityGroupRow: View {
                                 : AnyShapeStyle(.secondary)
                         )
 
-                    summaryText
+                    Text(group.summary)
                         .lineLimit(1)
 
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -1564,6 +2516,7 @@ private struct ChatActivityGroupRow: View {
                             item: item,
                             threadID: threadID,
                             store: store,
+                            foldModel: foldModel,
                             scrollState: scrollState
                         )
                     }
@@ -1574,56 +2527,38 @@ private struct ChatActivityGroupRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var summaryText: Text {
-        Text(group.summary)
-    }
-
     /// A single-step group shows its specific work instead of an aggregate.
-    static func singleItemText(_ item: Item, fallback: String) -> Text {
-        let summary = item.toolCallSummary
-        switch ChatActivityVerb(item: item) {
+    static func itemLineText(_ item: ChatItem) -> Text {
+        let summary = item.tool
+        let verb = ChatActivityVerb(item: item)
+        switch verb {
         case .ranCommand:
             if let command = summary?.commandPreview, !command.isEmpty {
-                return Text("Ran ") + monospaced(command)
+                return Text("Ran \(monospaced(command))")
             }
         case .thought:
-            let seconds = item.updatedAt.timeIntervalSince(item.createdAt)
-            if seconds >= 1 {
-                return Text("Thought for \(ChatTurnActivity.formatted(.seconds(seconds)))")
-            }
             return Text("Thought")
         case .read:
             if let path = summary?.locations?.first?.path, !path.isEmpty {
-                return Text("Read ") + monospaced(lastPathComponent(path))
+                return Text("Read \(monospaced(lastPathComponent(path)))")
             }
         case .edited:
             if let path = summary?.changes?.first?.path, !path.isEmpty {
                 let extra = max(0, (summary?.changeCount ?? 1) - 1)
                 let suffix = extra > 0 ? " +\(extra)" : ""
-                return Text("Edited ") + monospaced(lastPathComponent(path)) + Text(suffix)
+                return Text("Edited \(monospaced(lastPathComponent(path)))\(suffix)")
             }
         case .searched:
             if let query = summary?.queryPreview, !query.isEmpty {
-                return Text("Searched ") + monospaced(query)
+                return Text("Searched \(monospaced(query))")
             }
-        case .fetched, .tool:
+        case .tool:
             break
         }
         if let title = item.title, !title.isEmpty {
             return Text(title)
         }
-        return Text(fallback)
-    }
-
-    /// The one-line label for a step, shared by the group summary and the
-    /// expanded per-step rows so both read identically.
-    static func itemLineText(_ item: Item) -> Text {
-        singleItemText(
-            item,
-            fallback: ChatActivityVerb(item: item)
-                .phrase(count: 1, toolName: item.toolCallSummary?.name)
-                .capitalizedFirst
-        )
+        return Text(verb.phrase(count: 1, leading: true))
     }
 
     private static func monospaced(_ value: String) -> Text {
@@ -1634,7 +2569,7 @@ private struct ChatActivityGroupRow: View {
         path.split(separator: "/").last.map(String.init) ?? path
     }
 
-    static func iconName(for item: Item?) -> String {
+    static func iconName(for item: ChatItem?) -> String {
         guard let item else { return "circle.dashed" }
         return switch ChatActivityVerb(item: item) {
         case .thought: "brain"
@@ -1642,7 +2577,6 @@ private struct ChatActivityGroupRow: View {
         case .searched: "magnifyingglass"
         case .edited: "pencil"
         case .ranCommand: "terminal"
-        case .fetched: "globe"
         case .tool: "wrench.and.screwdriver"
         }
     }
@@ -1653,39 +2587,42 @@ private struct ChatActivityGroupRow: View {
 /// box; file edits open the diff viewer directly; steps with nothing more to
 /// show are plain text, not buttons.
 private struct ChatActivityItemRow: View {
-    let item: Item
+    let item: ChatItem
     let threadID: String
     let store: ThreadStore
+    let foldModel: ChatTimelineFoldModel
     let scrollState: ChatScrollState
 
-    @State private var isExpanded = false
     // Captured at presentation: `detail` is cleared whenever the item
     // updates, and an open sheet must not lose its content to that.
     @State private var presentedChanges: [FileChange]?
-    @State private var detail: Item?
+    @State private var detail: Entry?
     @State private var isLoadingDetail = false
     @State private var detailErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isFileChangeStep || hasExpandableContent {
-                Button {
-                    if isFileChangeStep {
-                        Task { await openDiff() }
-                    } else {
-                        scrollState.noteContentExpansion()
-                        withChatContentExpansionTransaction { isExpanded.toggle() }
-                        if isExpanded, detail == nil, item.detailAvailable == true {
-                            Task { await loadDetail() }
+            HStack(spacing: 8) {
+                if isFileChangeStep || hasExpandableContent {
+                    Button {
+                        if opensDiffDirectly {
+                            Task { await openDiff() }
+                        } else {
+                            scrollState.noteContentExpansion()
+                            isExpanded.toggle()
                         }
+                    } label: {
+                        lineLabel
+                            .contentShape(.rect)
                     }
-                } label: {
+                    .buttonStyle(.plain)
+                } else {
                     lineLabel
-                        .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-            } else {
-                lineLabel
+
+                if item.isRunningInBackground {
+                    ChatStopBackgroundItemButton(ref: item.ref, threadID: threadID, store: store)
+                }
             }
 
             if isExpanded, hasExpandableContent || detailErrorMessage != nil {
@@ -1699,14 +2636,16 @@ private struct ChatActivityItemRow: View {
                 set: { if !$0 { presentedChanges = nil } }
             )
         ) {
-            ChatStepDiffSheet(changes: presentedChanges ?? [])
+            UnifiedDiffView(changes: presentedChanges ?? [])
                 .presentationDragIndicator(.visible)
         }
-        .onChange(of: item.sequence) { _, _ in
-            itemDidUpdate()
+        .task(id: isExpanded) {
+            // Also runs when a reused row reappears already expanded.
+            if isExpanded, detail == nil, item.detailAvailable {
+                await loadDetail()
+            }
         }
-        .onChange(of: item.updatedAt) { _, _ in
-            guard item.sequence == nil else { return }
+        .onChange(of: updateKey) { _, _ in
             itemDidUpdate()
         }
     }
@@ -1755,23 +2694,103 @@ private struct ChatActivityItemRow: View {
                 .foregroundStyle(.secondary)
             }
         } else {
-            // Summary previews render instantly; the fetched detail replaces
-            // them in place, so expansion never flashes a loading state.
-            ChatStepOutputBox(
-                command: toolCall?.command ?? summary?.commandPreview,
-                query: toolCall?.query ?? summary?.queryPreview,
-                output: toolCall?.output ?? summary?.outputPreview,
-                error: toolCall?.error ?? summary?.errorPreview,
-                metadata: metadata
-            )
+            if hasOutputContent {
+                // Summary previews render instantly; fetched detail replaces
+                // them in place without hiding already available output.
+                ChatStepOutputBox(
+                    itemID: item.id,
+                    command: toolCall?.command ?? summary?.commandPreview,
+                    query: toolCall?.query ?? summary?.queryPreview,
+                    output: toolCall?.output ?? summary?.outputPreview,
+                    outputIsMarkdown: (toolCall?.outputFormat ?? summary?.outputFormat)
+                        == MaidOutputFormat.markdown.rawValue,
+                    error: toolCall?.error ?? summary?.errorPreview,
+                    metadata: metadata,
+                    textLayoutStore: store.selectedThreadTextLayoutStore
+                )
+            }
+
+            if let attachments = toolCall?.attachments, !attachments.isEmpty {
+                ChatMessageAttachmentsView(attachments: attachments)
+            } else if hasAttachmentSummary, detail == nil,
+                item.detailAvailable
+            {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading attachments…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            } else if hasAttachmentSummary {
+                Label(
+                    "Attachments unavailable",
+                    systemImage: "photo.badge.exclamationmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if isFileChangeStep,
+                let changes = toolCall?.changes,
+                !changes.isEmpty
+            {
+                Button(
+                    "View Changes",
+                    systemImage: "doc.text.magnifyingglass"
+                ) {
+                    presentedChanges = changes
+                }
+                .font(.caption)
+                .buttonStyle(.plain)
+            }
         }
     }
 
-    private var summary: ToolCallSummary? { item.toolCallSummary }
-    private var toolCall: ToolCall? { detail?.toolCall }
+    /// Fetched detail stays transient row state; the open choice is the
+    /// reader's and outlives this row.
+    private var isExpanded: Bool {
+        get { foldModel.isExpanded(.activityItem(itemID: item.id)) }
+        nonmutating set { foldModel.setExpanded(.activityItem(itemID: item.id), newValue) }
+    }
+
+    private var summary: ToolCallSummary? { item.tool }
+    private var toolCall: ToolCall? { detail?.tool }
+
+    /// Changes whenever the entry does, so a read whole entry isn't kept
+    /// past its update.
+    private var updateKey: String {
+        let tool = item.tool
+        return [
+            item.entry.status ?? "", String(item.text?.count ?? 0), tool?.outputPreview ?? "",
+            tool?.errorPreview ?? "", tool?.exitCode.map(String.init) ?? "", String(tool?.changeCount ?? 0),
+        ].joined(separator: "|")
+    }
 
     private var isFileChangeStep: Bool {
         ChatActivityVerb(item: item) == .edited
+    }
+
+    private var opensDiffDirectly: Bool {
+        isFileChangeStep && !hasAttachmentSummary
+    }
+
+    private var hasAttachmentSummary: Bool {
+        (summary?.attachmentCount ?? 0) > 0
+            || summary?.attachments?.isEmpty == false
+    }
+
+    private var hasOutputContent: Bool {
+        toolCall?.command != nil
+            || summary?.commandPreview != nil
+            || toolCall?.query != nil
+            || summary?.queryPreview != nil
+            || toolCall?.output != nil
+            || summary?.outputPreview != nil
+            || toolCall?.error != nil
+            || summary?.errorPreview != nil
+            || metadata != nil
     }
 
     /// Expandable only when there is genuinely more to show; a bare read
@@ -1781,13 +2800,14 @@ private struct ChatActivityItemRow: View {
             || summary?.queryPreview != nil
             || summary?.outputPreview != nil
             || summary?.errorPreview != nil
+            || hasAttachmentSummary
     }
 
     private func openDiff() async {
         if detail == nil {
             await loadDetail()
         }
-        if let changes = detail?.toolCall?.changes, !changes.isEmpty {
+        if let changes = detail?.tool?.changes, !changes.isEmpty {
             presentedChanges = changes
         } else if hasExpandableContent || detailErrorMessage != nil {
             // No structured diff came back; fall back to whatever the step
@@ -1800,7 +2820,9 @@ private struct ChatActivityItemRow: View {
         switch item.itemStatus {
         case .failed, .interrupted, .declined:
             item.itemStatus.map { ChatTimelineText.humanized($0.rawValue) }
-        case .completed, .inProgress, nil:
+        case .inProgress:
+            item.isRunningInBackground ? "Running in background" : nil
+        case .completed, nil:
             nil
         }
     }
@@ -1833,7 +2855,7 @@ private struct ChatActivityItemRow: View {
         detailErrorMessage = nil
         defer { isLoadingDetail = false }
         do {
-            detail = try await store.itemDetail(threadID: threadID, item: item)
+            detail = try await store.entryDetail(threadID: threadID, item: item)
         } catch {
             detailErrorMessage = error.localizedDescription
         }
@@ -1845,11 +2867,15 @@ private struct ChatActivityItemRow: View {
 private struct ChatStepOutputBox: View {
     private static let maximumCharacters = 4_000
 
+    let itemID: String
     let command: String?
     let query: String?
     let output: String?
+    /// Agent text (ACP tool content) is Markdown; command output is not.
+    let outputIsMarkdown: Bool
     let error: String?
     let metadata: String?
+    let textLayoutStore: ChatTextLayoutStore?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1862,7 +2888,16 @@ private struct ChatStepOutputBox: View {
                     .textSelection(.enabled)
             }
             if let output, !output.isEmpty {
-                monospacedText(output, style: .secondary)
+                if outputIsMarkdown, let textLayoutStore {
+                    ChatMarkdownMessageView(
+                        messageID: "\(itemID):output",
+                        source: output,
+                        presentation: ChatMarkdownPresentation(isStreaming: false),
+                        textLayoutStore: textLayoutStore
+                    )
+                } else {
+                    monospacedText(output, style: .secondary)
+                }
             }
             if let error, !error.isEmpty {
                 monospacedText(error, style: .red)
@@ -1906,18 +2941,9 @@ private struct ChatStepOutputBox: View {
     }
 }
 
-/// Presents a tool step's captured file changes in the shared diff viewer.
-private struct ChatStepDiffSheet: View {
-    let changes: [FileChange]
-
-    var body: some View {
-        UnifiedDiffView(changes: changes)
-    }
-}
-
 /// Warnings and errors stay visible outside the fold.
 private struct ChatNoticeRow: View {
-    let item: Item
+    let item: ChatItem
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1949,15 +2975,21 @@ private struct ChatMessageRow: View {
     let messageID: String
     let text: String
     let role: String
+    let annotations: [PromptAnnotation]?
     let attachments: [Attachment]?
     let streamingText: ThreadStreamingText?
     let presentation: ChatMarkdownPresentation
     let textLayoutStore: ChatTextLayoutStore
 
     var body: some View {
-        VStack(alignment: .leading) {
+        ChatMessageBubble(role: role, annotations: annotations, attachments: attachments) {
             if !text.isEmpty {
-                if let streamingText {
+                // A restored thread can retain a replayed streaming buffer
+                // for its final messages. Once the message presents as
+                // settled, the settled renderer must win: its layouts are the
+                // ones preparation primes, and the buffer may lag the
+                // reduced timeline text.
+                if let streamingText, presentation.isStreaming {
                     ChatStreamingMarkdownMessageView(
                         messageID: messageID,
                         streamingText: streamingText,
@@ -1973,125 +3005,12 @@ private struct ChatMessageRow: View {
                     )
                 }
             }
-
-            if let attachments, !attachments.isEmpty {
-                Text(attachments.map { $0.name ?? $0.kind }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(
-            .horizontal,
-            role == MaidMessageRole.user.rawValue
-                ? ChatTimelineMetrics.userBubbleHorizontalPadding : 0
-        )
-        .padding(
-            .vertical,
-            role == MaidMessageRole.user.rawValue
-                ? ChatTimelineMetrics.userBubbleVerticalPadding : 0
-        )
-        .background(
-            role == MaidMessageRole.user.rawValue
-                ? Color.accentColor.opacity(0.15) : Color.clear,
-            in: .rect(cornerRadius: 18)
-        )
-        .frame(
-            maxWidth: .infinity,
-            alignment: role == MaidMessageRole.user.rawValue ? .trailing : .leading
-        )
-    }
-}
-
-private struct ChatApprovalRow: View {
-    let approval: Approval
-    let threadID: String
-    let store: ThreadStore
-
-    @State private var isResponding = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            Label("Permission needed", systemImage: "hand.raised")
-                .bold()
-
-            if let args = approval.args {
-                Text(ChatTimelineText.encoded(args.value))
-                    .font(.callout.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            if approval.approvalStatus == .pending {
-                HStack {
-                    if let options = approval.options, !options.isEmpty {
-                        ForEach(options, id: \.optionID) { option in
-                            Button(option.name) {
-                                respond(
-                                    decision: decision(for: option),
-                                    optionID: option.optionID
-                                )
-                            }
-                            .disabled(isResponding)
-                        }
-                    } else {
-                        Button("Decline", role: .destructive) {
-                            respond(decision: .decline, optionID: nil)
-                        }
-                        .disabled(isResponding)
-
-                        Button("Allow") {
-                            respond(decision: .accept, optionID: nil)
-                        }
-                        .disabled(isResponding)
-                    }
-                }
-            } else {
-                Text(approval.decision.map(ChatTimelineText.humanized) ?? "Resolved")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-        .padding()
-        .background(.orange.opacity(0.12), in: .rect(cornerRadius: 14))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func decision(for option: ApprovalOption) -> MaidApprovalDecision {
-        switch option.kind {
-        case "allow_always": .acceptForSession
-        case "reject_once", "reject_always": .decline
-        default: .accept
-        }
-    }
-
-    private func respond(decision: MaidApprovalDecision, optionID: String?) {
-        guard !isResponding else { return }
-        isResponding = true
-        errorMessage = nil
-        Task {
-            defer { isResponding = false }
-            do {
-                try await store.respondToApproval(
-                    threadID: threadID,
-                    requestID: approval.requestID,
-                    decision: decision,
-                    optionID: optionID
-                )
-            } catch {
-                errorMessage = error.localizedDescription
-            }
         }
     }
 }
 
-private struct ChatPlanRow: View {
-    let plan: Plan
+struct ChatPlanRow: View {
+    let plan: [PlanEntry]
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -2099,8 +3018,8 @@ private struct ChatPlanRow: View {
                 .bold()
 
             // PlanEntry has no stable key and plans are replaced wholesale.
-            ForEach(plan.entries.indices, id: \.self) { index in
-                let entry = plan.entries[index]
+            ForEach(plan.indices, id: \.self) { index in
+                let entry = plan[index]
                 HStack(alignment: .firstTextBaseline) {
                     Image(
                         systemName: entry.status == "completed" ? "checkmark.circle.fill" : "circle"
@@ -2122,14 +3041,9 @@ private struct ChatPlanRow: View {
     }
 }
 
-private enum ChatTimelineText {
+enum ChatTimelineText {
     static func humanized(_ value: String) -> String {
         value.replacing("_", with: " ").replacing("-", with: " ").capitalized
-    }
-
-    static func encoded<T: Encodable>(_ value: T) -> String? {
-        guard let data = try? newJSONEncoder().encode(value) else { return nil }
-        return String(decoding: data, as: UTF8.self)
     }
 
     static func encoded(_ value: Any) -> String {
@@ -2146,7 +3060,7 @@ private enum ChatTimelineText {
     }
 }
 
-private struct ChatEndMarker: View {
+struct ChatEndMarker: View {
     var body: some View {
         Color.clear
             .frame(height: 24)
@@ -2154,7 +3068,7 @@ private struct ChatEndMarker: View {
     }
 }
 
-private struct ChatScrollToBottomButton: View {
+struct ChatScrollToBottomButton: View {
     let scrollState: ChatScrollState
     let scrollToBottom: () -> Void
 
@@ -2170,25 +3084,11 @@ private struct ChatScrollToBottomButton: View {
                         .frame(width: 24, height: 24)
                         .contentShape(.circle)
                 }
-                .buttonBorderShape(.circle)
-                .modifier(ChatScrollButtonStyle())
+                .glassCircleButton()
                 .transition(.scale.combined(with: .opacity))
             }
         }
         .animation(.snappy, value: scrollState.isNearBottom)
-    }
-}
-
-private struct ChatScrollButtonStyle: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.buttonStyle(.glass)
-        } else {
-            content
-                .background(.regularMaterial, in: .circle)
-                .buttonStyle(.plain)
-        }
     }
 }
 
@@ -2198,13 +3098,13 @@ private struct ChatPromptQueueView: View {
     private let composerOverlap: CGFloat = 24
 
     var body: some View {
+        let queue = model.queue
         VStack(spacing: 0) {
-            ForEach(model.queuedPrompts) { prompt in
+            ForEach(Array(queue.enumerated()), id: \.element.id) { index, delivery in
                 QueuedPromptRow(
                     model: model,
-                    promptID: prompt.id,
-                    text: prompt.text,
-                    attachmentCount: prompt.attachments.count
+                    delivery: delivery,
+                    previous: index > 0 ? queue[index - 1] : nil
                 )
             }
         }
@@ -2220,42 +3120,133 @@ private struct ChatPromptQueueView: View {
     }
 }
 
+/// A message waiting for the running turn, on its way, or one that didn't
+/// get through.
 private struct QueuedPromptRow: View {
     let model: ChatPromptModel
-    let promptID: String
-    let text: String
-    let attachmentCount: Int
+    let delivery: DeliveryView
+    /// The message before it in the queue, to move it up past.
+    let previous: DeliveryView?
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "arrow.turn.down.right")
-                .foregroundStyle(.secondary)
+            Image(systemName: isRefused ? "exclamationmark.circle.fill" : "arrow.turn.down.right")
+                .foregroundStyle(isRefused ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
 
-            Text(
-                text.isEmpty
-                    ? "\(attachmentCount) attachment(s)"
-                    : text
-            )
-            .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                if delivery.from.kind != MaidActorKind.device.rawValue {
+                    Text("From \(delivery.from.name)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(
+                    Self.summary(
+                        text: delivery.text ?? "",
+                        attachmentCount: delivery.attachments?.count ?? 0,
+                        annotationCount: delivery.annotations?.count ?? 0
+                    )
+                )
+                .lineLimit(1)
+                if isRefused {
+                    Text("Not delivered: \(delivery.reason ?? String(localized: "unknown error"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
 
             Spacer()
 
-            Button("Steer", systemImage: "arrow.triangle.branch") {
-                Task { await model.steerQueuedPrompt(promptID) }
+            Group {
+                switch delivery.deliveryState {
+                case .sending:
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Sending")
+                case .refused:
+                    Button("Retry", systemImage: "arrow.clockwise") {
+                        Task { await model.retry(delivery) }
+                    }
+                default:
+                    Button(model.isTurnRunning ? "Steer" : "Send", systemImage: model.isTurnRunning ? "arrow.triangle.branch" : "arrow.up") {
+                        Task { await model.sendNow(delivery) }
+                    }
+                }
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .disabled(model.store.connectionState != .connected)
 
-            Button("Remove queued prompt", systemImage: "trash") {
-                model.removeQueuedPrompt(promptID)
+            if delivery.deliveryState != .sending {
+                Button("Remove queued message", systemImage: "trash") {
+                    Task { await model.cancel(delivery) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contextMenu {
+            if let previous, delivery.deliveryState == .queued, previous.deliveryState == .queued {
+                Button("Move Up", systemImage: "arrow.up") {
+                    Task { await model.move(delivery, before: previous) }
+                }
+            }
+        }
+    }
+
+    private var isRefused: Bool { delivery.deliveryState == .refused }
+
+    private static func summary(
+        text: String,
+        attachmentCount: Int,
+        annotationCount: Int
+    ) -> String {
+        if !text.isEmpty { return text }
+        if annotationCount > 0, attachmentCount > 0 {
+            return "\(annotationCount) annotation(s) · \(attachmentCount) attachment(s)"
+        }
+        if annotationCount > 0 {
+            return "\(annotationCount) annotation(s)"
+        }
+        return "\(attachmentCount) attachment(s)"
+    }
+}
+
+/// Why a chat's queue waits — stopped, failed, or agents going back and
+/// forth too long — and the way to let it go on.
+private struct ChatHoldView: View {
+    let model: ChatPromptModel
+    let hold: MaidHold
+
+    var body: some View {
+        HStack {
+            Label(message, systemImage: "pause.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button("Continue", systemImage: "play.fill") {
+                Task { await model.continueThread() }
+            }
+            .disabled(model.store.connectionState != .connected)
+        }
+        .frame(maxWidth: ChatContentMetrics.maximumWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
+    private var message: String {
+        switch hold {
+        case .stoppedPerson: String(localized: "Stopped. Messages wait until you continue.")
+        case .stoppedAgent: String(localized: "An agent stopped this chat. Messages wait until it continues.")
+        case .failed: String(localized: "A turn failed. Messages wait until you continue.")
+        case .hops: String(localized: "Agents went back and forth too long. Messages wait until you continue.")
+        }
     }
 }
 

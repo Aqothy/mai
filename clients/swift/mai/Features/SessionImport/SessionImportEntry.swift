@@ -23,14 +23,14 @@ struct SessionImportEntry: Identifiable, Equatable {
     /// optional, so parsing tries both forms.
     private static func parseTimestamp(_ raw: String?) -> Date? {
         guard let raw else { return nil }
-        return (try? Date(raw, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
-            ?? (try? Date(raw, strategy: .iso8601))
+        return WireJSON.parseDate(raw)
     }
 }
 
 extension SessionSummary: Equatable {
     public static func == (lhs: SessionSummary, rhs: SessionSummary) -> Bool {
         lhs.sessionID == rhs.sessionID
+            && lhs.additionalDirectories == rhs.additionalDirectories
             && lhs.title == rhs.title
             && lhs.cwd == rhs.cwd
             && lhs.updatedAt == rhs.updatedAt
