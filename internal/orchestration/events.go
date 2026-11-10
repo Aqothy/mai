@@ -37,6 +37,13 @@ func (e *Engine) InstanceGone(instance provider.InstanceID, generation uint64) {
 // touched. When the provider's delete then fails, the chat is gone and the
 // session is still the provider's, to delete again or import.
 func (e *Engine) DeleteSession(ctx context.Context, actor Actor, instance provider.InstanceID, session string) error {
+	// A running process says what it can do; before one ran, its driver may
+	// not know.
+	if running, _, err := e.cfg.Providers.Instance(ctx, instance, ""); err != nil {
+		return err
+	} else if !running.Info().Capabilities.Delete {
+		return provider.ErrUnsupported
+	}
 	remove := func(ctx context.Context, folder string) error {
 		ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 		defer cancel()
@@ -51,9 +58,6 @@ func (e *Engine) DeleteSession(ctx context.Context, actor Actor, instance provid
 		participant := e.participants[e.bySession[sessionKey{instance, session}]]
 		if participant == nil {
 			return false, nil
-		}
-		if info, _ := e.cfg.Providers.Info(instance); !info.Capabilities.Delete {
-			return false, provider.ErrUnsupported
 		}
 		folder := e.threads[participant.Thread].Workspace.Cwd
 		if err := e.deleteThread(s, actor, participant.Thread); err != nil {

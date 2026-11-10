@@ -213,6 +213,28 @@ func TestDeletingASessionDeletesTheChatOnIt(t *testing.T) {
 	}
 }
 
+// What an agent can do is known once it runs: a delete that is the first
+// call to it after a restart starts it and asks, as for a session no chat is
+// on.
+func TestDeletingAChatsSessionBeforeItsAgentRanSinceTheRestart(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServerAt(t, dir)
+	startFakeACPAgent(t, s, "agent", "-delete")
+	client := newRecordingClient(t, s)
+	thread := client.createThread(t, "agent", t.TempDir()).Thread
+	client.subscribe(t, thread)
+	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	restarted := newRecordingClient(t, newTestServerAt(t, dir))
+	restarted.call(t, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
+	if _, err := restarted.commandErr(wire.CommandParams{Deliver: &orchestration.Deliver{Thread: thread, Body: orchestration.MessageBody{Text: "again"}}}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("a message to the deleted chat = %v, want not found", err)
+	}
+}
+
 func TestDeletingASessionNoChatIsOn(t *testing.T) {
 	s := newTestServer(t)
 	startFakeACPAgent(t, s, "agent", "-delete")
