@@ -353,12 +353,16 @@ func (h *Instance) Close() error {
 func (h *Instance) wait() {
 	h.process.Drain(h.conn.Done(), drainTimeout)
 	h.mu.Lock()
-	h.info.Status = provider.InstanceStatusExited
 	consuming := slices.Collect(maps.Keys(h.consuming))
 	h.mu.Unlock()
 	for _, stream := range consuming {
 		<-stream.consumed
 	}
+	// Exited only once every session said it closed: the host replaces an
+	// exited process, and says this one's sessions are gone as it does.
+	h.mu.Lock()
+	h.info.Status = provider.InstanceStatusExited
+	h.mu.Unlock()
 	if h.host.Exited != nil {
 		h.host.Exited()
 	}

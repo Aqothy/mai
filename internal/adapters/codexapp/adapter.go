@@ -346,8 +346,6 @@ func firstError(err, fallback error) error {
 func (h *Instance) handleTransportClosed(err error) {
 	h.mu.Lock()
 	h.transportClosed = true
-	h.info.Status = provider.InstanceStatusExited
-	h.info.PID = 0
 	settled := provider.TurnSettled{State: provider.TurnFailed, Error: "Codex app-server disconnected unexpectedly"}
 	if err != nil {
 		settled.Error += ": " + err.Error()
@@ -380,12 +378,18 @@ func (h *Instance) handleTransportClosed(err error) {
 	for _, session := range closed {
 		h.emit(session, provider.SessionClosed{Error: settled.Error})
 	}
+	// Exited only once every session said it closed: the host replaces an
+	// exited process, and says this one's sessions are gone as it does.
+	h.mu.Lock()
+	h.info.Status = provider.InstanceStatusExited
+	h.info.PID = 0
+	h.mu.Unlock()
 }
 
 func (h *Instance) Close() error {
 	h.closeOnce.Do(func() {
 		h.mu.Lock()
-		intentional := h.info.Status != provider.InstanceStatusExited
+		intentional := !h.transportClosed && h.info.Status != provider.InstanceStatusExited
 		h.closing = intentional
 		h.mu.Unlock()
 		h.cancelPendingApprovals("")
