@@ -63,7 +63,7 @@ struct SessionImportRow: View {
             Button("Delete Session", role: .destructive, action: deleteSession)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes the provider session. This action cannot be undone.")
+            Text("This permanently deletes the provider session, and the chat on it if there is one. This action cannot be undone.")
         }
     }
 }

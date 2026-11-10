@@ -44,6 +44,10 @@ type fakeInstance struct {
 	responses  []provider.RequestAnswer
 	// released are the sessions released, in order.
 	released []string
+	// deleted are the sessions deleted; deletedLive, those of them still live
+	// as they were. deleteErr, when set, is Delete's answer.
+	deleted, deletedLive []string
+	deleteErr            error
 }
 
 type fakeReceived struct {
@@ -106,6 +110,24 @@ func (f *fakeInstance) Release(_ context.Context, session string) error {
 	defer f.mu.Unlock()
 	delete(f.live, session)
 	f.released = append(f.released, session)
+	return nil
+}
+
+func (f *fakeInstance) Delete(_ context.Context, session string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.info.Capabilities.Delete {
+		return provider.ErrUnsupported
+	}
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	if f.live[session] {
+		f.deletedLive = append(f.deletedLive, session)
+	}
+	delete(f.live, session)
+	delete(f.sessions, session)
+	f.deleted = append(f.deleted, session)
 	return nil
 }
 

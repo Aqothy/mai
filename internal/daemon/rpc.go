@@ -613,7 +613,10 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return nil, h.server.engine.DeleteSession(ctx, params.InstanceID, params.SessionID)
+		if params.InstanceID == "" || params.SessionID == "" {
+			return nil, fmt.Errorf("%w: provider.deleteSession requires instanceId and sessionId", jsonrpc2.ErrInvalidParams)
+		}
+		return nil, h.server.engine.DeleteSession(ctx, orchestration.Person(orchestration.DeviceID(h.client.id)), params.InstanceID, params.SessionID)
 	case wire.MethodProviderOptionsGet:
 		var params wire.ProviderOptionsGetParams
 		if err := decodeRPCParams(req, &params); err != nil {

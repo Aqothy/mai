@@ -472,8 +472,8 @@ func TestEntriesInProgressEndWithTheirSession(t *testing.T) {
 	}
 }
 
-// A provider that can't delete sessions says so before it touches one, so the
-// chat on the session keeps it live, with the turn it runs.
+// A session delete its provider can't do is refused before the chat on the
+// session is touched: it keeps its live session, with the turn it runs.
 func TestASessionDeleteTheProviderCantDoLeavesItsChatRunning(t *testing.T) {
 	claude := newFakeInstance("claude", "Claude")
 	claude.onSend = func(f *fakeInstance, session string, in provider.SendInput) (provider.SendAck, error) {
@@ -483,12 +483,75 @@ func TestASessionDeleteTheProviderCantDoLeavesItsChatRunning(t *testing.T) {
 	h := newHarness(t, claude)
 	chat := h.createThread("claude", "Work")
 	h.eventually("the turn to start", func() bool { return len(claude.messages()) == 1 })
-	if err := h.engine.DeleteSession(context.Background(), "claude", claude.messages()[0].session); !errors.Is(err, provider.ErrUnsupported) {
+	if err := h.engine.DeleteSession(context.Background(), h.device, "claude", claude.messages()[0].session); !errors.Is(err, provider.ErrUnsupported) {
 		t.Fatalf("delete = %v, want unsupported", err)
 	}
 	snapshot := h.snapshot(chat.Thread)
 	if len(snapshot.Turns) != 1 || snapshot.Turns[0].State != provider.TurnRunning || !snapshot.Participants[0].Live {
 		t.Fatalf("after the refused delete: turns = %#v, live = %v; want the turn running on a live session", snapshot.Turns, snapshot.Participants[0].Live)
+	}
+}
+
+// Deleting the session of one agent of a chat deletes the chat, every agent's
+// part of it: the session is released before it is deleted, and the other
+// agents' sessions are released and stay with their providers.
+func TestDeletingASessionDeletesTheWholeChatOnIt(t *testing.T) {
+	claude, codex := newFakeInstance("claude", "Claude"), newFakeInstance("codex", "Codex")
+	claude.info.Capabilities.Delete = true
+	h := newHarness(t, claude, codex)
+	chat := h.createThread("claude", "Plan the cache")
+	h.settledTurns(chat.Thread, 1)
+	h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "codex"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "Implement it"}})
+	h.settledTurns(chat.Thread, 2)
+	session, other := claude.messages()[0].session, codex.messages()[0].session
+
+	if err := h.engine.DeleteSession(context.Background(), h.device, "claude", session); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := h.sub.List(context.Background()); err != nil || len(list.Threads) != 0 {
+		t.Fatalf("chats after the delete = %#v, %v; want none", list.Threads, err)
+	}
+	claude.mu.Lock()
+	released, deleted, deletedLive := slices.Clone(claude.released), slices.Clone(claude.deleted), slices.Clone(claude.deletedLive)
+	claude.mu.Unlock()
+	if !slices.Equal(released, []string{session}) || !slices.Equal(deleted, []string{session}) || len(deletedLive) != 0 {
+		t.Fatalf("claude: released %v, deleted %v (live as deleted: %v); want %s released, then deleted", released, deleted, deletedLive, session)
+	}
+	h.eventually("the other agent's session to be released", func() bool {
+		codex.mu.Lock()
+		defer codex.mu.Unlock()
+		return slices.Equal(codex.released, []string{other})
+	})
+	codex.mu.Lock()
+	kept := codex.sessions[other] != nil && len(codex.deleted) == 0
+	codex.mu.Unlock()
+	if !kept {
+		t.Fatal("the other agent's session was deleted too")
+	}
+}
+
+// A provider's delete that fails is the caller's answer. The chat is gone by
+// then; the session is still the provider's.
+func TestAFailedSessionDeleteIsReportedAfterItsChatIsDeleted(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.info.Capabilities.Delete = true
+	claude.deleteErr = errors.New("disk is read-only")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "Work")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+
+	if err := h.engine.DeleteSession(context.Background(), h.device, "claude", session); !errors.Is(err, claude.deleteErr) {
+		t.Fatalf("delete = %v, want the provider's error", err)
+	}
+	if list, err := h.sub.List(context.Background()); err != nil || len(list.Threads) != 0 {
+		t.Fatalf("chats after the delete = %#v, %v; want none", list.Threads, err)
+	}
+	claude.mu.Lock()
+	defer claude.mu.Unlock()
+	if claude.sessions[session] == nil {
+		t.Fatal("the session is gone though its delete failed")
 	}
 }
 

@@ -2,7 +2,6 @@ package orchestration
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -32,11 +31,12 @@ func (e *Engine) InstanceGone(instance provider.InstanceID, generation uint64) {
 	})
 }
 
-// DeleteSession deletes a native session from its provider. A chat on the
-// session keeps the conversation, which the cache has, and loses the live
-// session: its next message opens a new one and hands the conversation over.
-func (e *Engine) DeleteSession(ctx context.Context, instance provider.InstanceID, session string) error {
-	key := sessionKey{instance, session}
+// DeleteSession deletes a native session from its provider, and first the
+// chat on it, as DeleteThread does: no chat is left on a session maiD
+// deleted. A provider that can't delete is refused before the chat is
+// touched. When the provider's delete then fails, the chat is gone and the
+// session is still the provider's, to delete again or import.
+func (e *Engine) DeleteSession(ctx context.Context, actor Actor, instance provider.InstanceID, session string) error {
 	remove := func(ctx context.Context, folder string) error {
 		ctx, cancel := context.WithTimeout(ctx, providerCallTimeout)
 		defer cancel()
@@ -48,27 +48,20 @@ func (e *Engine) DeleteSession(ctx context.Context, instance provider.InstanceID
 	}
 	outcome := make(chan error, 1)
 	bound, err := call(ctx, e, func(s *step) (bool, error) {
-		participant := e.participants[e.bySession[key]]
+		participant := e.participants[e.bySession[sessionKey{instance, session}]]
 		if participant == nil {
 			return false, nil
 		}
+		if info, _ := e.cfg.Providers.Info(instance); !info.Capabilities.Delete {
+			return false, provider.ErrUnsupported
+		}
 		folder := e.threads[participant.Thread].Workspace.Cwd
-		// On the chat's worker, so the delete follows an Open or a Send already
-		// on its way to the session, and the engine hears of those first. Not a
-		// providerCall: the caller is answered even when the chat is gone by then.
-		s.onWorker(participant, func() {
-			err := remove(e.ctx, folder)
-			e.post(func(s *step) {
-				// Unsupported is the one answer that says nothing was done. After
-				// any other the session may be released (Instance.Delete), and
-				// nothing else will say so.
-				holder := e.participants[e.bySession[key]]
-				if holder != nil && holder.live != nil && !errors.Is(err, provider.ErrUnsupported) {
-					e.sessionClosed(s, holder, "The agent's session was deleted.")
-				}
-				s.after(func() { outcome <- err })
-			})
-		})
+		if err := e.deleteThread(s, actor, participant.Thread); err != nil {
+			return false, err
+		}
+		// On the chat's worker, so the delete follows what is already on its way
+		// to the session, the release deleteThread asked for last.
+		s.onWorker(participant, func() { outcome <- remove(e.ctx, folder) })
 		return true, nil
 	})
 	if err != nil {

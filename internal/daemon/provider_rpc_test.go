@@ -189,9 +189,9 @@ func TestProviderSessionManagement(t *testing.T) {
 	}
 }
 
-// Deleting the session a chat has open ends it for the chat too: the next
-// message opens a new session instead of going to the one that is gone.
-func TestChatGoesOnAfterItsLiveSessionIsDeleted(t *testing.T) {
+// Deleting the session a chat has open deletes the chat with it, so nothing
+// is left on a session that is gone.
+func TestDeletingASessionDeletesTheChatOnIt(t *testing.T) {
 	s := newTestServer(t)
 	startFakeACPAgent(t, s, "agent", "-delete")
 	client := newRecordingClient(t, s)
@@ -200,21 +200,16 @@ func TestChatGoesOnAfterItsLiveSessionIsDeleted(t *testing.T) {
 	client.waitSettled(t, thread, client.deliver(t, thread, "hello").Delivery)
 
 	client.call(t, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
-	next := client.deliver(t, thread, "again").Delivery
-	event := client.waitEvent(t, "the message after the delete to be taken or refused", func(event orchestration.ThreadEvent) bool {
-		return event.Kind == orchestration.EventDelivery && event.Delivery.ID == next &&
-			(event.Delivery.State == orchestration.DeliveryDelivered || event.Delivery.State == orchestration.DeliveryRefused)
+	client.waitEvent(t, "the chat to be removed", func(event orchestration.ThreadEvent) bool {
+		return event.Kind == orchestration.EventRemoved && event.Thread == thread
 	})
-	if event.Delivery.State != orchestration.DeliveryDelivered {
-		t.Fatalf("the message after the delete was refused: %s", event.Delivery.Reason)
-	}
-	if turn := client.waitSettled(t, thread, next); turn.State != provider.TurnCompleted {
-		t.Fatalf("turn after the delete = %s", turn.State)
+	if _, err := client.commandErr(wire.CommandParams{Deliver: &orchestration.Deliver{Thread: thread, Body: orchestration.MessageBody{Text: "again"}}}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("a message to the deleted chat = %v, want not found", err)
 	}
 	var sessions []provider.SessionSummary
 	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &sessions)
-	if len(sessions) != 1 || sessions[0].SessionID != "sess-2" {
-		t.Fatalf("sessions after the delete = %#v, want only the chat's new one", sessions)
+	if len(sessions) != 0 {
+		t.Fatalf("sessions after the delete = %#v, want none", sessions)
 	}
 }
 
