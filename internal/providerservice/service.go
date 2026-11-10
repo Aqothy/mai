@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
-	"github.com/Aqothy/maiD/internal/store"
 )
 
 // Sink receives instances' events and the end of their processes.
@@ -58,7 +57,6 @@ type optionsKey struct {
 // per folder in use.
 type Service struct {
 	drivers map[provider.DriverKind]provider.Driver
-	store   store.InstanceStore
 	mirror  func(provider.InstanceID) provider.Mirror
 	sink    Sink
 	logger  *slog.Logger
@@ -71,12 +69,9 @@ type Service struct {
 	// options are the processes holding options sessions, which a draft needs
 	// for as long as it stays open.
 	options map[optionsKey]*running
-	// specs are every configured instance's, persisted or from a manifest.
-	specs map[provider.InstanceID]provider.InstanceSpec
-	// manifest instances are the daemon's own definitions, never persisted
-	// with their config; pending holds a manifest update for a running one
-	// until a process launches on it.
-	manifest   map[provider.InstanceID]bool
+	// specs are every registered instance's definition. pending holds a new
+	// definition for a running one until a process launches on it.
+	specs      map[provider.InstanceID]provider.InstanceSpec
 	pending    map[provider.InstanceID]provider.InstanceSpec
 	generation uint64
 	// startLocks serialize an instance's launches.
@@ -87,36 +82,27 @@ type Service struct {
 // errNotInstalled reaches the user when a chat's agent has been removed.
 var errNotInstalled = errors.New("not installed")
 
-// New makes the service. mirror gives each instance's adapter its native
-// mirror.
-func New(drivers map[provider.DriverKind]provider.Driver, instances store.InstanceStore, mirror func(provider.InstanceID) provider.Mirror, sink Sink, logger *slog.Logger) *Service {
+// New makes the service, with no instance: the daemon registers each one it
+// defines. mirror gives each instance's adapter its native mirror.
+func New(drivers map[provider.DriverKind]provider.Driver, mirror func(provider.InstanceID) provider.Mirror, sink Sink, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Service{
-		drivers: drivers, store: instances, mirror: mirror, sink: sink, logger: logger.With("component", "providerservice"),
+	return &Service{
+		drivers: drivers, mirror: mirror, sink: sink, logger: logger.With("component", "providerservice"),
 		processes: make(map[processKey]*running), known: make(map[provider.InstanceID]provider.InstanceInfo),
 		options: make(map[optionsKey]*running), specs: make(map[provider.InstanceID]provider.InstanceSpec),
-		manifest: make(map[provider.InstanceID]bool), pending: make(map[provider.InstanceID]provider.InstanceSpec),
+		pending:    make(map[provider.InstanceID]provider.InstanceSpec),
 		startLocks: make(map[provider.InstanceID]*sync.Mutex),
 	}
-	if instances != nil {
-		specs, err := instances.LoadInstances()
-		if err != nil {
-			s.logger.Warn("load persisted instance specs", "error", err)
-		}
-		for _, spec := range specs {
-			s.specs[spec.InstanceID] = cloneSpec(spec)
-		}
-	}
-	return s
 }
 
-// RegisterManifestInstance makes a daemon-owned definition available to
-// start. Its config stays in memory.
-func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
+// RegisterInstance makes a definition available to start, which is the only
+// way an instance comes into being. A running instance moves onto a new
+// definition when a process next launches (ApplyPending).
+func (s *Service) RegisterInstance(spec provider.InstanceSpec) error {
 	if spec.InstanceID == "" || spec.Driver == "" {
-		return fmt.Errorf("a manifest provider needs an instance id and a driver")
+		return fmt.Errorf("a provider needs an instance id and a driver")
 	}
 	if spec.Name == "" {
 		spec.Name = string(spec.InstanceID)
@@ -126,7 +112,6 @@ func (s *Service) RegisterManifestInstance(spec provider.InstanceSpec) error {
 	defer lock.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.manifest[spec.InstanceID] = true
 	if len(s.aliveLocked(spec.InstanceID)) == 0 {
 		s.specs[spec.InstanceID] = cloneSpec(spec)
 		delete(s.pending, spec.InstanceID)
@@ -304,34 +289,7 @@ func (s *Service) StartConfiguredInstance(ctx context.Context, id provider.Insta
 	if current != nil {
 		return current.instance.Info(), nil
 	}
-	return s.start(ctx, spec, folder, false, false)
-}
-
-// StartInstance starts an instance of spec. A user's spec persists; a
-// manifest's config doesn't.
-func (s *Service) StartInstance(ctx context.Context, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
-	s.mu.Lock()
-	manifest := s.manifest[spec.InstanceID]
-	s.mu.Unlock()
-	if manifest {
-		reference := cloneSpec(spec)
-		reference.Config = nil
-		if s.store != nil {
-			if err := s.store.SaveInstance(reference); err != nil {
-				return provider.InstanceInfo{}, fmt.Errorf("persist manifest provider %q: %w", spec.InstanceID, err)
-			}
-		}
-	}
-	return s.start(ctx, spec, "", false, !manifest)
-}
-
-// StartManifestInstance registers a manifest definition and starts its process
-// for folder.
-func (s *Service) StartManifestInstance(ctx context.Context, spec provider.InstanceSpec, folder string) (provider.InstanceInfo, error) {
-	if err := s.RegisterManifestInstance(spec); err != nil {
-		return provider.InstanceInfo{}, err
-	}
-	return s.StartConfiguredInstance(ctx, spec.InstanceID, folder)
+	return s.start(ctx, spec, folder, false)
 }
 
 // folders are where the instance's running processes that match serve.
@@ -351,7 +309,7 @@ func (s *Service) replaceIn(ctx context.Context, spec provider.InstanceSpec, fol
 	var info provider.InstanceInfo
 	var failed error
 	for _, folder := range folders {
-		started, err := s.start(ctx, spec, folder, true, false)
+		started, err := s.start(ctx, spec, folder, true)
 		if err != nil {
 			failed = errors.Join(failed, err)
 			continue
@@ -399,8 +357,8 @@ func (s *Service) ApplyPending(ctx context.Context, id provider.InstanceID) erro
 }
 
 // RemoveInstance ends the instance's processes and forgets it, so it isn't
-// offered or started again and doesn't come back with the daemon.
-func (s *Service) RemoveInstance(id provider.InstanceID) error {
+// offered or started again.
+func (s *Service) RemoveInstance(id provider.InstanceID) {
 	lock := s.startLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -413,7 +371,6 @@ func (s *Service) RemoveInstance(id provider.InstanceID) error {
 		}
 	}
 	delete(s.specs, id)
-	delete(s.manifest, id)
 	delete(s.pending, id)
 	delete(s.known, id)
 	s.mu.Unlock()
@@ -421,15 +378,9 @@ func (s *Service) RemoveInstance(id provider.InstanceID) error {
 		_ = process.instance.Close()
 		s.gone(id, process)
 	}
-	if s.store != nil {
-		if err := s.store.DeleteInstance(id); err != nil {
-			return fmt.Errorf("forget provider %q: %w", id, err)
-		}
-	}
-	return nil
 }
 
-func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder string, restart, persist bool) (provider.InstanceInfo, error) {
+func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder string, restart bool) (provider.InstanceInfo, error) {
 	if spec.InstanceID == "" || spec.Driver == "" {
 		return provider.InstanceInfo{}, fmt.Errorf("a provider needs an instance id and a driver")
 	}
@@ -454,8 +405,8 @@ func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder 
 		return provider.InstanceInfo{}, fmt.Errorf("the provider service is closed")
 	}
 	// A caller that read a configured spec before taking the lock may have
-	// raced its removal. Only persist brings a new instance into being.
-	if _, configured := s.specs[spec.InstanceID]; !configured && !persist {
+	// raced its removal, and a start doesn't bring an instance back.
+	if _, configured := s.specs[spec.InstanceID]; !configured {
 		s.mu.Unlock()
 		return provider.InstanceInfo{}, errNotInstalled
 	}
@@ -513,11 +464,6 @@ func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder 
 	if replaced != nil {
 		_ = replaced.instance.Close()
 		s.gone(id, replaced)
-	}
-	if persist && s.store != nil {
-		if err := s.store.SaveInstance(spec); err != nil {
-			s.logger.Warn("persist provider instance", "instance", id, "error", err)
-		}
 	}
 	return instance.Info(), nil
 }

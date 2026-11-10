@@ -2,12 +2,10 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/Aqothy/maiD/internal/provider"
 )
 
 func openTestStore(t *testing.T) *SQLite {
@@ -18,25 +16,6 @@ func openTestStore(t *testing.T) *SQLite {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
-}
-
-func TestInstanceStoreRoundTrip(t *testing.T) {
-	s := openTestStore(t)
-	spec := provider.InstanceSpec{InstanceID: "gemini", Name: "Gemini", Driver: "acp", Config: json.RawMessage(`{"command":"gemini"}`)}
-	if err := s.SaveInstance(spec); err != nil {
-		t.Fatalf("SaveInstance: %v", err)
-	}
-	spec.Name = "Gemini CLI"
-	if err := s.SaveInstance(spec); err != nil {
-		t.Fatalf("SaveInstance update: %v", err)
-	}
-	specs, err := s.LoadInstances()
-	if err != nil {
-		t.Fatalf("LoadInstances: %v", err)
-	}
-	if len(specs) != 1 || specs[0].Name != "Gemini CLI" || specs[0].Driver != "acp" || string(specs[0].Config) != `{"command":"gemini"}` {
-		t.Fatalf("instances = %+v", specs)
-	}
 }
 
 // A database of another layout is set aside, not changed, and a new one
@@ -81,10 +60,10 @@ func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if err := again.SaveInstance(provider.InstanceSpec{InstanceID: "x", Driver: "acp"}); err != nil {
+	if err := again.UpsertTerminal(TerminalMeta{TerminalID: "x", Cwd: "/"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path + ".2.old"); !os.IsNotExist(err) {
+	if _, err := os.Stat(fmt.Sprintf("%s.%d.old", path, schemaVersion)); !os.IsNotExist(err) {
 		t.Fatalf("the current layout was set aside: %v", err)
 	}
 }

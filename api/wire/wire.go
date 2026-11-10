@@ -222,12 +222,6 @@ type ProviderCompleteCommandParams struct {
 	Input       string                      `json:"input"`
 }
 
-// ProviderStartParams starts a configured provider. Config is adapter-owned
-// JSON and is intentionally unconstrained by the shared contract.
-type ProviderStartParams struct {
-	provider.InstanceSpec
-}
-
 // ProviderQuestion is a question an agent asks during provider.authenticate,
 // outside any thread. It goes to the client whose sign-in is running, which
 // answers it with provider.question.answer before the sign-in can finish.

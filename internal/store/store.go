@@ -1,20 +1,9 @@
-// Package store opens the daemon's database and persists provider instance
-// specs and terminal threads. The orchestration ledger and session cache
-// share the database and own their tables.
+// Package store opens the daemon's database and persists terminal threads.
+// The orchestration ledger and session cache share the database and own
+// their tables.
 package store
 
-import (
-	"time"
-
-	"github.com/Aqothy/maiD/internal/provider"
-)
-
-// InstanceStore persists configured provider instances.
-type InstanceStore interface {
-	SaveInstance(spec provider.InstanceSpec) error
-	DeleteInstance(id provider.InstanceID) error
-	LoadInstances() ([]provider.InstanceSpec, error)
-}
+import "time"
 
 // TerminalMeta contains the only durable terminal-thread values. Process
 // state, dimensions, output, and run identity are deliberately absent: a

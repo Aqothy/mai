@@ -20,15 +20,15 @@ type InstanceID string
 
 type DriverKind string
 
-// InstanceSpec describes a configured provider instance to materialize. Config
-// is an opaque, driver-owned JSON envelope: providerservice routes and stores it
-// without knowing whether the adapter runs a process, an SDK, or an in-process
-// agent. Runtime event wiring is passed separately to the adapter factory.
+// InstanceSpec is the daemon's definition of a provider instance. Config is
+// the driver's own JSON: providerservice keeps and routes it without knowing
+// whether the adapter runs a process, an SDK, or an in-process agent. It
+// never comes from a client or reaches one.
 type InstanceSpec struct {
-	InstanceID InstanceID      `json:"instanceId,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Driver     DriverKind      `json:"driver,omitempty"`
-	Config     json.RawMessage `json:"config,omitempty"`
+	InstanceID InstanceID
+	Name       string
+	Driver     DriverKind
+	Config     json.RawMessage
 }
 
 // RequestError carries structured request errors returned by a provider through

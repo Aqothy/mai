@@ -90,7 +90,6 @@ type contract struct {
 	RequestRecord                    wire.RequestRecord                    `json:"requestRecord"`
 	Workspace                        wire.Workspace                        `json:"workspace"`
 	PlanEntry                        wire.PlanEntry                        `json:"planEntry"`
-	ProviderStartParams              wire.ProviderStartParams              `json:"providerStartParams"`
 	ACPRegistryStartParams           wire.ACPRegistryStartParams           `json:"aCPRegistryStartParams"`
 	ACPCustomAgentUpdateParams       wire.ACPCustomAgentUpdateParams       `json:"aCPCustomAgentUpdateParams"`
 	ACPRegistryRemoveParams          wire.ACPRegistryRemoveParams          `json:"aCPRegistryRemoveParams"`

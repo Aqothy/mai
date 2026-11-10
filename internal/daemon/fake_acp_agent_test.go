@@ -46,9 +46,18 @@ func fakeACPAgentCommand(flags ...string) []string {
 // startFakeACPAgent starts the fake ACP agent as provider instance id.
 func startFakeACPAgent(t *testing.T, s *Server, id provider.InstanceID, flags ...string) {
 	t.Helper()
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec(id, string(id), fakeACPAgentCommand(flags...))); err != nil {
+	if _, err := startInstance(s, acpInstanceSpec(id, string(id), fakeACPAgentCommand(flags...))); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
+}
+
+// startInstance defines an instance as the daemon does for a built-in or an
+// installed agent, and starts its no-folder process.
+func startInstance(s *Server, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
+	if err := s.providerService.RegisterInstance(spec); err != nil {
+		return provider.InstanceInfo{}, err
+	}
+	return s.providerService.StartConfiguredInstance(context.Background(), spec.InstanceID, "")
 }
 
 func acpInstanceSpec(id provider.InstanceID, name string, command []string) provider.InstanceSpec {

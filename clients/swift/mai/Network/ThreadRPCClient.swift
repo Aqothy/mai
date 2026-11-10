@@ -128,15 +128,7 @@ extension RPCClient: ThreadRPCClient {
     }
 
     func startProvider(_ instanceID: String) async throws -> InstanceInfo {
-        try await call(
-            MaidRPCMethod.providerStart,
-            params: ProviderStartParams(
-                config: nil,
-                driver: nil,
-                instanceID: instanceID,
-                name: nil
-            )
-        )
+        try await call(MaidRPCMethod.providerStart, params: ProviderInstanceParams(instanceID: instanceID))
     }
 
     func startRegistryAgent(_ registryID: String, cwd: String?) async throws -> InstanceInfo {

@@ -19,20 +19,20 @@ import (
 	"github.com/coder/websocket"
 )
 
-func TestProviderStartValidation(t *testing.T) {
+// An instance whose definition can't run says why when it is started.
+func TestStartingABrokenInstanceDefinitionSaysWhy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		spec provider.InstanceSpec
 		want string
 	}{
-		{name: "instance id", spec: provider.InstanceSpec{}, want: "provider start requires instanceId"},
 		{name: "config", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "acp"}, want: "missing ACP config"},
 		{name: "command", spec: acpInstanceSpec("codex", "codex", nil), want: "ACP config requires command"},
 		{name: "malformed config", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "acp", Config: json.RawMessage(`{"command":`)}, want: "decode ACP config"},
 		{name: "unsupported driver", spec: provider.InstanceSpec{InstanceID: "codex", Name: "codex", Driver: "unknown"}, want: `unsupported provider driver "unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := newTestServer(t).StartProvider(context.Background(), tc.spec)
+			_, err := startInstance(newTestServer(t), tc.spec)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
@@ -87,7 +87,7 @@ func TestProviderCloseKillsWrappedAgentProcessTree(t *testing.T) {
 	s := newTestServer(t)
 	pidPath := t.TempDir() + "/agent.pid"
 	inner := fmt.Sprintf("MAID_DAEMON_ACP_HELPER=1 '%s' -test.run=TestHelperProcess -- -linger -pidfile '%s'; exit $?", os.Args[0], pidPath)
-	if _, err := s.StartProvider(context.Background(), acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner})); err != nil {
+	if _, err := startInstance(s, acpInstanceSpec("wrapped", "wrapped", []string{"/bin/sh", "-c", inner})); err != nil {
 		t.Fatalf("provider start: %v", err)
 	}
 	pid := readPID(t, pidPath)

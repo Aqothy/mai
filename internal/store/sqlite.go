@@ -2,40 +2,29 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/Aqothy/maiD/internal/provider"
-
 	_ "modernc.org/sqlite"
 )
 
-// SQLite implements the store interfaces in one database file, which the
+// SQLite implements TerminalStore in one database file, which the
 // orchestration ledger shares (DB).
 type SQLite struct {
 	db *sql.DB
 }
 
-var _ InstanceStore = (*SQLite)(nil)
 var _ TerminalStore = (*SQLite)(nil)
 
 // schemaVersion is the layout of every table in the file, the ledger's
 // included. maiD is unreleased and keeps no migrations: a file of another
 // layout is set aside and a new one started.
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `
-CREATE TABLE IF NOT EXISTS instances (
-	instance_id TEXT PRIMARY KEY,
-	name        TEXT NOT NULL DEFAULT '',
-	driver_kind TEXT NOT NULL,
-	config      TEXT
-) STRICT;
-
 CREATE TABLE IF NOT EXISTS terminal_threads (
 	terminal_id TEXT PRIMARY KEY,
 	title       TEXT NOT NULL DEFAULT '',
@@ -108,58 +97,6 @@ func (s *SQLite) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLite) SaveInstance(spec provider.InstanceSpec) error {
-	if spec.InstanceID == "" {
-		return fmt.Errorf("store: save instance requires an instance id")
-	}
-	if spec.Driver == "" {
-		return fmt.Errorf("store: save instance %q requires a driver", spec.InstanceID)
-	}
-	_, err := s.db.Exec(`INSERT INTO instances (instance_id, name, driver_kind, config)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT (instance_id) DO UPDATE SET
-			name = excluded.name,
-			driver_kind = excluded.driver_kind,
-			config = excluded.config`,
-		string(spec.InstanceID), spec.Name, string(spec.Driver), nullableText(string(spec.Config)))
-	if err != nil {
-		return fmt.Errorf("store: save instance %q: %w", spec.InstanceID, err)
-	}
-	return nil
-}
-
-func (s *SQLite) DeleteInstance(id provider.InstanceID) error {
-	if _, err := s.db.Exec(`DELETE FROM instances WHERE instance_id = ?`, string(id)); err != nil {
-		return fmt.Errorf("store: delete instance %q: %w", id, err)
-	}
-	return nil
-}
-
-func (s *SQLite) LoadInstances() ([]provider.InstanceSpec, error) {
-	rows, err := s.db.Query(`SELECT instance_id, name, driver_kind, config FROM instances ORDER BY instance_id`)
-	if err != nil {
-		return nil, fmt.Errorf("store: load instances: %w", err)
-	}
-	defer rows.Close()
-	var specs []provider.InstanceSpec
-	for rows.Next() {
-		var instanceID, name, driver string
-		var config sql.NullString
-		if err := rows.Scan(&instanceID, &name, &driver, &config); err != nil {
-			return nil, fmt.Errorf("store: scan instance: %w", err)
-		}
-		spec := provider.InstanceSpec{InstanceID: provider.InstanceID(instanceID), Name: name, Driver: provider.DriverKind(driver)}
-		if config.Valid && config.String != "" {
-			spec.Config = json.RawMessage(config.String)
-		}
-		specs = append(specs, spec)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: load instances: %w", err)
-	}
-	return specs, nil
-}
-
 func (s *SQLite) UpsertTerminal(meta TerminalMeta) error {
 	if meta.TerminalID == "" {
 		return fmt.Errorf("store: upsert terminal requires a terminal id")
@@ -222,11 +159,4 @@ func parseTimestamp(value string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-func nullableText(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
 }

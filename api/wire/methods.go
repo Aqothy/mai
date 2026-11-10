@@ -28,7 +28,7 @@ var Methods = []MethodDefinition{
 	{Name: MethodThreadForkPreview, Params: "ThreadForkPreviewParams", Result: "ForkPreview"},
 	{Name: MethodAttachmentUpload, Params: "AttachmentUploadParams", Result: "AttachmentUploadResult"},
 	{Name: MethodAttachmentGet, Params: "AttachmentParams", Result: "Attachment"},
-	{Name: MethodProviderStart, Params: "ProviderStartParams", Result: "InstanceInfo"},
+	{Name: MethodProviderStart, Params: "ProviderInstanceParams", Result: "InstanceInfo"},
 	{Name: MethodProviderList, Params: "EmptyParams", Result: "InstanceInfo", ResultArray: true},
 	{Name: MethodACPRegistrySubscribeList, Params: "EmptyParams", Result: "ACPRegistryList"},
 	{Name: MethodACPRegistryRefresh, Params: "EmptyParams", Result: "ACPRegistryList"},

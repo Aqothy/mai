@@ -1741,23 +1741,6 @@
       ],
       "title": "ProviderSessionParams"
     },
-    "ProviderStartParams": {
-      "properties": {
-        "instanceId": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "driver": {
-          "type": "string"
-        },
-        "config": true
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "title": "ProviderStartParams"
-    },
     "Question": {
       "properties": {
         "id": {
@@ -3463,9 +3446,6 @@
         "planEntry": {
           "$ref": "#/$defs/PlanEntry"
         },
-        "providerStartParams": {
-          "$ref": "#/$defs/ProviderStartParams"
-        },
         "aCPRegistryStartParams": {
           "$ref": "#/$defs/ACPRegistryStartParams"
         },
@@ -3649,7 +3629,6 @@
         "requestRecord",
         "workspace",
         "planEntry",
-        "providerStartParams",
         "aCPRegistryStartParams",
         "aCPCustomAgentUpdateParams",
         "aCPRegistryRemoveParams",

@@ -91,7 +91,7 @@ type sinkRecord struct {
 func newService(t *testing.T, driver *fakeDriver) (*Service, *sinkRecord) {
 	t.Helper()
 	record := &sinkRecord{}
-	service := New(map[provider.DriverKind]provider.Driver{"fake": driver.driver()}, nil, nil, Sink{
+	service := New(map[provider.DriverKind]provider.Driver{"fake": driver.driver()}, nil, Sink{
 		Event: func(_ provider.InstanceID, generation uint64, _ provider.Event) {
 			record.mu.Lock()
 			record.events = append(record.events, generation)
@@ -111,15 +111,29 @@ func spec(config string) provider.InstanceSpec {
 	return provider.InstanceSpec{InstanceID: "agent", Name: "Agent", Driver: "fake", Config: json.RawMessage(config)}
 }
 
+// startRegistered registers a definition and starts its process.
+func startRegistered(t *testing.T, service *Service, definition provider.InstanceSpec) {
+	t.Helper()
+	if err := service.RegisterInstance(definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartConfiguredInstance(context.Background(), definition.InstanceID, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Concurrent starts of one instance launch one process.
 func TestConcurrentStartsLaunchOneProcess(t *testing.T) {
 	driver := &fakeDriver{gate: make(chan struct{})}
 	service, _ := newService(t, driver)
+	if err := service.RegisterInstance(spec(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
 	var started sync.WaitGroup
 	errs := make(chan error, 4)
 	for range 4 {
 		started.Go(func() {
-			_, err := service.StartInstance(context.Background(), spec(`{"a":1}`))
+			_, err := service.StartConfiguredInstance(context.Background(), "agent", "")
 			errs <- err
 		})
 	}
@@ -136,22 +150,31 @@ func TestConcurrentStartsLaunchOneProcess(t *testing.T) {
 	}
 }
 
-// A running instance is the same configuration however its JSON is written;
-// another configuration is refused.
-func TestStartComparesConfigurationsByMeaning(t *testing.T) {
+// A running instance is on a definition however its JSON is written, and
+// moves only onto another one.
+func TestARunningInstanceMovesOnlyOntoAnotherDefinition(t *testing.T) {
 	driver := &fakeDriver{}
 	service, _ := newService(t, driver)
-	if _, err := service.StartInstance(context.Background(), spec(`{"a":1,"b":[1,2]}`)); err != nil {
-		t.Fatal(err)
+	startRegistered(t, service, spec(`{"a":1,"b":[1,2]}`))
+	for _, step := range []struct {
+		definition string
+		opened     int
+	}{
+		{`{ "b": [1, 2], "a": 1 }`, 1},
+		{`{"a":2}`, 2},
+	} {
+		if err := service.RegisterInstance(spec(step.definition)); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.ApplyPending(context.Background(), "agent"); err != nil {
+			t.Fatal(err)
+		}
+		if opened := len(driver.instances()); opened != step.opened {
+			t.Fatalf("after registering %s: opened %d processes, want %d", step.definition, opened, step.opened)
+		}
 	}
-	if _, err := service.StartInstance(context.Background(), spec(`{ "b": [1, 2], "a": 1 }`)); err != nil {
-		t.Fatalf("the same configuration written differently: %v", err)
-	}
-	if _, err := service.StartInstance(context.Background(), spec(`{"a":2}`)); err == nil {
-		t.Fatal("another configuration started")
-	}
-	if opened := len(driver.instances()); opened != 1 {
-		t.Fatalf("opened %d processes, want 1", opened)
+	if running := driver.instances()[1]; string(running.spec.Config) != `{"a":2}` || !driver.instances()[0].closed() {
+		t.Fatalf("running on %s, old process closed %v; want the new definition and the old process closed", running.spec.Config, driver.instances()[0].closed())
 	}
 }
 
@@ -160,9 +183,7 @@ func TestStartComparesConfigurationsByMeaning(t *testing.T) {
 func TestRestartStampsGenerationsAndEndsTheOldProcess(t *testing.T) {
 	driver := &fakeDriver{}
 	service, record := newService(t, driver)
-	if _, err := service.StartInstance(context.Background(), spec(`{}`)); err != nil {
-		t.Fatal(err)
-	}
+	startRegistered(t, service, spec(`{}`))
 	if _, err := service.RestartInstance(context.Background(), "agent"); err != nil {
 		t.Fatal(err)
 	}
@@ -183,9 +204,7 @@ func TestRestartStampsGenerationsAndEndsTheOldProcess(t *testing.T) {
 func TestFailedRestartKeepsTheRunningProcess(t *testing.T) {
 	driver := &fakeDriver{}
 	service, record := newService(t, driver)
-	if _, err := service.StartInstance(context.Background(), spec(`{}`)); err != nil {
-		t.Fatal(err)
-	}
+	startRegistered(t, service, spec(`{}`))
 	driver.mu.Lock()
 	driver.fail = errors.New("no binary")
 	driver.mu.Unlock()
@@ -203,27 +222,18 @@ func TestFailedRestartKeepsTheRunningProcess(t *testing.T) {
 	}
 }
 
-// An instance whose process exited starts again when it's next needed, and
-// its exit says its generation is gone.
 // A caller can read a spec and then wait on the instance's start lock while a
 // removal finishes. Its spec must not bring the instance back.
 func TestARemovedInstanceStaysGone(t *testing.T) {
 	driver := &fakeDriver{}
 	s, _ := newService(t, driver)
 	definition := spec(`{}`)
-	if err := s.RegisterManifestInstance(definition); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.StartConfiguredInstance(context.Background(), definition.InstanceID, ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RemoveInstance(definition.InstanceID); err != nil {
-		t.Fatal(err)
-	}
+	startRegistered(t, s, definition)
+	s.RemoveInstance(definition.InstanceID)
 	if !driver.instances()[0].closed() {
 		t.Fatal("removal left the process running")
 	}
-	if _, err := s.start(context.Background(), definition, "", false, false); !errors.Is(err, errNotInstalled) {
+	if _, err := s.start(context.Background(), definition, "", false); !errors.Is(err, errNotInstalled) {
 		t.Fatalf("start with the old spec = %v, want %v", err, errNotInstalled)
 	}
 	if opened := len(driver.instances()); opened != 1 {
@@ -234,12 +244,12 @@ func TestARemovedInstanceStaysGone(t *testing.T) {
 	}
 }
 
+// An instance whose process exited starts again when it's next needed, and
+// its exit says its generation is gone.
 func TestExitedInstanceRestartsWhenNeeded(t *testing.T) {
 	driver := &fakeDriver{}
 	service, record := newService(t, driver)
-	if _, err := service.StartInstance(context.Background(), spec(`{}`)); err != nil {
-		t.Fatal(err)
-	}
+	startRegistered(t, service, spec(`{}`))
 	exited := driver.instances()[0]
 	_, generation, _ := service.Instance(context.Background(), "agent", "")
 	_ = exited.Close()
@@ -260,9 +270,12 @@ func TestExitedInstanceRestartsWhenNeeded(t *testing.T) {
 func TestStartFinishingDuringCloseIsClosed(t *testing.T) {
 	driver := &fakeDriver{gate: make(chan struct{})}
 	service, _ := newService(t, driver)
+	if err := service.RegisterInstance(spec(`{}`)); err != nil {
+		t.Fatal(err)
+	}
 	started := make(chan error, 1)
 	go func() {
-		_, err := service.StartInstance(context.Background(), spec(`{}`))
+		_, err := service.StartConfiguredInstance(context.Background(), "agent", "")
 		started <- err
 	}()
 	// Close once the start is inside Open.

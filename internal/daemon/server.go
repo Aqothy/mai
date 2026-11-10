@@ -85,7 +85,7 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 	// The engine and the providers need each other: the providers report to
 	// the engine, which they don't call until it has started.
 	var engine *orchestration.Engine
-	s.providerService = providerservice.New(drivers, metadata, func(id provider.InstanceID) provider.Mirror { return engine.Mirror(id) }, providerservice.Sink{
+	s.providerService = providerservice.New(drivers, func(id provider.InstanceID) provider.Mirror { return engine.Mirror(id) }, providerservice.Sink{
 		Event: func(instance provider.InstanceID, generation uint64, event provider.Event) {
 			engine.ProviderEvent(instance, generation, event)
 		},
@@ -106,7 +106,7 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		{InstanceID: "codex-app-server", Name: "Codex", Driver: codexapp.DriverKind},
 		{InstanceID: "claude-code", Name: "Claude Code", Driver: claudecode.DriverKind},
 	} {
-		if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+		if err := s.providerService.RegisterInstance(spec); err != nil {
 			logger.Warn("register provider", "provider", spec.InstanceID, "error", err)
 		}
 	}
@@ -117,7 +117,7 @@ func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverK
 		logger.Warn("load installed ACP agent definitions", "error", err)
 	} else {
 		for _, spec := range specs {
-			if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+			if err := s.providerService.RegisterInstance(spec); err != nil {
 				logger.Warn("register installed ACP agent", "provider", spec.InstanceID, "error", err)
 			}
 		}
@@ -327,7 +327,7 @@ func (s *Server) installACPAgent(ctx context.Context, id string) error {
 func (s *Server) runACPInstall(job *acpInstallJob) {
 	record, err := s.acpRegistry.build(job)
 	if err == nil {
-		err = s.providerService.RegisterManifestInstance(s.acpRegistry.instanceSpecForAgent(record))
+		err = s.providerService.RegisterInstance(s.acpRegistry.instanceSpecForAgent(record))
 	}
 	s.acpRegistry.finish(job, err)
 	if err != nil {
@@ -353,9 +353,7 @@ func (s *Server) requireACPAgentInstalled(id string, instanceID provider.Instanc
 	if err != nil || installed {
 		return err
 	}
-	if err := s.providerService.RemoveInstance(instanceID); err != nil {
-		return err
-	}
+	s.providerService.RemoveInstance(instanceID)
 	return fmt.Errorf("ACP agent %q was removed", id)
 }
 
@@ -377,9 +375,7 @@ func (s *Server) removeACPAgent(id string) error {
 		return err
 	}
 	s.logger.Info("ACP agent removed", "provider", agent.InstanceID)
-	if err := s.providerService.RemoveInstance(agent.InstanceID); err != nil {
-		return err
-	}
+	s.providerService.RemoveInstance(agent.InstanceID)
 	return s.acpRegistry.pruneAgent(agent.ID)
 }
 
@@ -394,7 +390,7 @@ func (s *Server) updateCustomACPAgent(params wire.ACPCustomAgentUpdateParams) (w
 	if err != nil {
 		return wire.ACPRegistryAgent{}, err
 	}
-	if err := s.providerService.RegisterManifestInstance(spec); err != nil {
+	if err := s.providerService.RegisterInstance(spec); err != nil {
 		return wire.ACPRegistryAgent{}, err
 	}
 	if err := s.requireACPAgentInstalled(updated.ID, updated.InstanceID); err != nil {
@@ -421,32 +417,16 @@ func (s *Server) StartACPRegistryProvider(ctx context.Context, registryID, cwd s
 			return provider.InstanceInfo{}, err
 		}
 	}
+	if err := s.providerService.RegisterInstance(spec); err != nil {
+		return provider.InstanceInfo{}, err
+	}
 	started := time.Now()
-	info, err := s.providerService.StartManifestInstance(ctx, spec, cwd)
-	s.logProviderStarted(spec, started, err)
+	info, err := s.providerService.StartConfiguredInstance(ctx, spec.InstanceID, cwd)
+	if err == nil {
+		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "duration", time.Since(started).Round(time.Millisecond))
+	}
 	if removed := s.requireACPAgentInstalled(registryID, spec.InstanceID); removed != nil {
 		return provider.InstanceInfo{}, removed
 	}
 	return info, err
-}
-
-func (s *Server) StartProvider(ctx context.Context, spec provider.InstanceSpec) (provider.InstanceInfo, error) {
-	if spec.InstanceID != "" && spec.Name == "" && spec.Driver == "" && len(spec.Config) == 0 {
-		return s.providerService.StartConfiguredInstance(ctx, spec.InstanceID, "")
-	}
-	if spec.InstanceID == "" {
-		return provider.InstanceInfo{}, fmt.Errorf("provider start requires instanceId")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	started := time.Now()
-	info, err := s.providerService.StartInstance(ctx, spec)
-	s.logProviderStarted(spec, started, err)
-	return info, err
-}
-
-func (s *Server) logProviderStarted(spec provider.InstanceSpec, started time.Time, err error) {
-	if err == nil {
-		s.logger.Info("provider started", "provider", spec.InstanceID, "driver", spec.Driver, "duration", time.Since(started).Round(time.Millisecond))
-	}
 }

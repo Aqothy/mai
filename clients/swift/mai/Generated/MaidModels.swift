@@ -5360,66 +5360,6 @@ public extension ProviderSessionParams {
     }
 }
 
-// MARK: - ProviderStartParams
-public struct ProviderStartParams: Codable {
-    public var config: JSONAny?
-    public var driver, instanceID, name: String?
-
-    public enum CodingKeys: String, CodingKey {
-        case config, driver
-        case instanceID = "instanceId"
-        case name
-    }
-
-    public init(config: JSONAny?, driver: String?, instanceID: String?, name: String?) {
-        self.config = config
-        self.driver = driver
-        self.instanceID = instanceID
-        self.name = name
-    }
-}
-
-// MARK: ProviderStartParams convenience initializers and mutators
-
-public extension ProviderStartParams {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(ProviderStartParams.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        config: JSONAny?? = nil,
-        driver: String?? = nil,
-        instanceID: String?? = nil,
-        name: String?? = nil
-    ) -> ProviderStartParams {
-        return ProviderStartParams(
-            config: config ?? self.config,
-            driver: driver ?? self.driver,
-            instanceID: instanceID ?? self.instanceID,
-            name: name ?? self.name
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - RequestResolution
 public struct RequestResolution: Codable {
     public var record: RequestRecord

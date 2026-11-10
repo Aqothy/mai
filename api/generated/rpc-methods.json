@@ -52,7 +52,7 @@
     },
     {
       "name": "provider.start",
-      "params": "ProviderStartParams",
+      "params": "ProviderInstanceParams",
       "result": "InstanceInfo"
     },
     {

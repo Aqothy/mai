@@ -26,11 +26,11 @@ import (
 func TestProviderStartAndList(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
+	if err := s.providerService.RegisterInstance(acpInstanceSpec("codex", "codex", fakeACPAgentCommand())); err != nil {
+		t.Fatal(err)
+	}
 	var started provider.InstanceInfo
-	client.call(t, wire.MethodProviderStart, map[string]any{
-		"instanceId": "codex", "name": "codex", "driver": "acp",
-		"config": map[string]any{"command": fakeACPAgentCommand()},
-	}, &started)
+	client.call(t, wire.MethodProviderStart, wire.ProviderInstanceParams{InstanceID: "codex"}, &started)
 	if started.InstanceID != "codex" || started.Driver != "acp" {
 		t.Fatalf("started = %#v, want codex/acp", started)
 	}
@@ -50,11 +50,38 @@ func TestProviderStartAndList(t *testing.T) {
 	}
 }
 
+// A client names an instance the daemon defines and can't define one: a
+// spec sent along is not read, so nothing runs and nothing is listed.
+func TestProviderStartRunsOnlyWhatTheDaemonDefines(t *testing.T) {
+	s := newTestServer(t)
+	client := newRecordingClient(t, s)
+	pidPath := filepath.Join(t.TempDir(), "agent.pid")
+	if err := client.callErr(wire.MethodProviderStart, map[string]any{
+		"instanceId": "mine", "name": "mine", "driver": "acp",
+		"config": map[string]any{"command": fakeACPAgentCommand("-pidfile", pidPath)},
+	}, nil); err == nil {
+		t.Fatal("provider.start with a client's spec succeeded")
+	}
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatalf("the client's command ran: %v", err)
+	}
+	var list []provider.InstanceInfo
+	client.call(t, wire.MethodProviderList, nil, &list)
+	if slices.ContainsFunc(list, func(info provider.InstanceInfo) bool { return info.InstanceID == "mine" }) {
+		t.Fatalf("provider.list = %#v, want no instance a client defined", list)
+	}
+	if err := client.callErr(wire.MethodProviderStart, wire.ProviderInstanceParams{}, nil); err == nil {
+		t.Fatal("provider.start without instanceId succeeded")
+	}
+}
+
 func TestProviderAuthenticateAndLogout(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
-	var started provider.InstanceInfo
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", fakeACPAgentCommand())}, &started)
+	started, err := startInstance(s, acpInstanceSpec("codex", "codex", fakeACPAgentCommand()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if started.Auth.Status != provider.AuthStatusUnknown || len(started.Auth.Methods) != 2 || started.Auth.Methods[0].ID != "agent-login" {
 		t.Fatalf("auth = %#v, want unknown with the advertised agent-login", started.Auth)
 	}
@@ -79,7 +106,7 @@ func TestProviderAuthenticateAndLogout(t *testing.T) {
 func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("codex", "codex", fakeACPAgentCommand("-ask-to-sign-in"))}, nil)
+	startFakeACPAgent(t, s, "codex", "-ask-to-sign-in")
 	signedIn := make(chan error, 1)
 	var result provider.AuthenticationResult
 	go func() {
@@ -113,7 +140,7 @@ func TestProviderSignInQuestionReachesSigningInClient(t *testing.T) {
 func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, nil)
+	startFakeACPAgent(t, s, "agent")
 	thread := client.createThread(t, "agent", t.TempDir()).Thread
 	client.subscribe(t, thread)
 	gate := t.TempDir()
@@ -150,7 +177,7 @@ func TestProviderTerminalSignInRestartsProviderWhenIdle(t *testing.T) {
 func TestAMessageSentDuringAProviderRestartWaitsForIt(t *testing.T) {
 	s := newTestServer(t)
 	client := newRecordingClient(t, s)
-	client.call(t, wire.MethodProviderStart, wire.ProviderStartParams{InstanceSpec: acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())}, nil)
+	startFakeACPAgent(t, s, "agent")
 	thread := client.createThread(t, "agent", t.TempDir()).Thread
 	client.subscribe(t, thread)
 
@@ -228,7 +255,11 @@ func TestDeletingAChatsSessionBeforeItsAgentRanSinceTheRestart(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	restarted := newRecordingClient(t, newTestServerAt(t, dir))
+	again := newTestServerAt(t, dir)
+	if err := again.providerService.RegisterInstance(acpInstanceSpec("agent", "agent", fakeACPAgentCommand("-delete"))); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newRecordingClient(t, again)
 	restarted.call(t, wire.MethodProviderDeleteSession, wire.ProviderSessionParams{InstanceID: "agent", SessionID: "sess-1"}, nil)
 	if _, err := restarted.commandErr(wire.CommandParams{Deliver: &orchestration.Deliver{Thread: thread, Body: orchestration.MessageBody{Text: "again"}}}); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("a message to the deleted chat = %v, want not found", err)
@@ -397,7 +428,7 @@ func (i *testInstance) callback(handle string) provider.OptionsSessionCallbacks 
 func startTestInstances(t *testing.T, s *Server, set *testInstances) {
 	t.Helper()
 	for id := range set.instances {
-		if _, err := s.StartProvider(context.Background(), provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: testDriver}); err != nil {
+		if _, err := startInstance(s, provider.InstanceSpec{InstanceID: id, Name: string(id), Driver: testDriver}); err != nil {
 			t.Fatalf("start %s: %v", id, err)
 		}
 	}

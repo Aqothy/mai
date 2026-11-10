@@ -390,7 +390,7 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 	started := time.Now()
 	// jsonrpc2 treats a non-nil result alongside a non-nil error as a handler
 	// contract violation (logged via OnInternalError), so drop zero-value
-	// results from pass-through calls like Dispatch/StartProvider on failure.
+	// results from pass-through calls on failure.
 	defer func() {
 		err = rpcError(err)
 		attrs := []any{"method", req.Method, "duration", time.Since(started).Round(time.Millisecond), "client", h.client.id}
@@ -505,11 +505,16 @@ func (h *rpcHandler) Handle(ctx context.Context, req *jsonrpc2.Request) (result 
 		}
 		return h.server.engine.Entry(ctx, params.Thread, params.Ref)
 	case wire.MethodProviderStart:
-		var params wire.ProviderStartParams
+		var params wire.ProviderInstanceParams
 		if err := decodeRPCParams(req, &params); err != nil {
 			return nil, err
 		}
-		return h.server.StartProvider(ctx, params.InstanceSpec)
+		if params.InstanceID == "" {
+			return nil, fmt.Errorf("%w: provider.start requires instanceId", jsonrpc2.ErrInvalidParams)
+		}
+		// A client names an instance the daemon defines, a built-in or an
+		// installed agent, and never says what runs.
+		return h.server.providerService.StartConfiguredInstance(ctx, params.InstanceID, "")
 	case wire.MethodProviderList:
 		return h.server.providerService.ListInstances(), nil
 	case wire.MethodACPRegistrySubscribeList:
