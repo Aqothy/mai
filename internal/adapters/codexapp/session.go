@@ -309,7 +309,8 @@ func (h *Instance) Sessions(ctx context.Context, cwd string) ([]provider.Session
 }
 
 func (h *Instance) Delete(ctx context.Context, thread string) error {
-	if err := h.rpc.call(ctx, "thread/delete", map[string]any{"threadId": thread}, nil); err != nil {
+	// A thread app-server no longer has is deleted already.
+	if err := h.rpc.call(ctx, "thread/delete", map[string]any{"threadId": thread}, nil); err != nil && !threadMissing(err) {
 		return err
 	}
 	h.mu.Lock()

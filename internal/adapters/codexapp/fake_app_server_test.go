@@ -67,6 +67,7 @@ func runFakeAppServer(scenario string) error {
 
 	loggedIn := false
 	interrupted := false
+	deleted := make(map[string]bool)
 	turnStarted := false
 	var goal map[string]any
 	if scenario == "goal-resume" {
@@ -662,6 +663,24 @@ func runFakeAppServer(scenario string) error {
 				if err := writeFakeNotification(encoder, method, map[string]any{"threadId": "native-thread", "turn": fakeTurn("compact-turn", "completed")}); err != nil {
 					return err
 				}
+			}
+		case "thread/delete":
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			if err := decodeFakeParams(message, &params); err != nil {
+				return err
+			}
+			// app-server/src/request_processors/thread_delete.rs.
+			if deleted[params.ThreadID] {
+				if err := writeFakeError(encoder, message["id"], -32600, "thread not found: "+params.ThreadID); err != nil {
+					return err
+				}
+				continue
+			}
+			deleted[params.ThreadID] = true
+			if err := writeFakeResult(encoder, message["id"], map[string]any{}); err != nil {
+				return err
 			}
 		case "thread/unsubscribe":
 			if scenario == "stop-active" && !interrupted {

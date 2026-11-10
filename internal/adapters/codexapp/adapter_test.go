@@ -263,6 +263,17 @@ func TestRenameSetsThreadName(t *testing.T) {
 	}
 }
 
+// Deleting a thread that is already deleted succeeds, so a delete run twice
+// ends the same.
+func TestDeletingADeletedThreadSucceeds(t *testing.T) {
+	h := openFakeInstance(t, "lifecycle")
+	for range 2 {
+		if err := h.Delete(testContext(t), nativeThread); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+	}
+}
+
 func TestOpenReusesTheLoadedThread(t *testing.T) {
 	h := openFakeInstance(t, "lifecycle")
 	h.open(t, provider.OpenInput{})
