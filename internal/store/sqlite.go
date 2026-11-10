@@ -19,12 +19,9 @@ type SQLite struct {
 
 var _ TerminalStore = (*SQLite)(nil)
 
-// schemaVersion is the layout of every table in the file, the ledger's
-// included. maiD is unreleased and keeps no migrations: a file of another
-// layout is set aside and a new one started.
-const schemaVersion = 3
-
-const schema = `
+// terminalSchema is the one table this package keeps. It is part of the
+// file's layout, which the caller of Open versions.
+const terminalSchema = `
 CREATE TABLE IF NOT EXISTS terminal_threads (
 	terminal_id TEXT PRIMARY KEY,
 	title       TEXT NOT NULL DEFAULT '',
@@ -34,9 +31,11 @@ CREATE TABLE IF NOT EXISTS terminal_threads (
 ) STRICT;
 `
 
-// Open opens or creates the database at path. A file of an older layout is
-// renamed beside it (path.<version>.old) rather than changed.
-func Open(path string) (*SQLite, error) {
+// Open opens or creates the database at path, with this package's table and
+// those of schemas. version names that layout as a whole. maiD is unreleased
+// and keeps no migrations: a file of another version is renamed beside it
+// (path.<its version>.old) rather than changed, and a new one started.
+func Open(path string, version int, schemas ...string) (*SQLite, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store: create data directory: %w", err)
 	}
@@ -45,29 +44,31 @@ func Open(path string) (*SQLite, error) {
 		if err != nil {
 			return nil, err
 		}
-		var version int
-		if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		var found int
+		if err := db.QueryRow(`PRAGMA user_version`).Scan(&found); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("store: read schema version: %w", err)
 		}
 		var tables int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables)
-		if version == schemaVersion || tables == 0 {
-			if _, err := db.Exec(schema); err != nil {
-				_ = db.Close()
-				return nil, fmt.Errorf("store: ensure schema: %w", err)
+		if found == version || tables == 0 {
+			for _, schema := range append([]string{terminalSchema}, schemas...) {
+				if _, err := db.Exec(schema); err != nil {
+					_ = db.Close()
+					return nil, fmt.Errorf("store: ensure schema: %w", err)
+				}
 			}
-			if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+			if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, version)); err != nil {
 				_ = db.Close()
 				return nil, fmt.Errorf("store: set schema version: %w", err)
 			}
 			return &SQLite{db: db}, nil
 		}
 		_ = db.Close()
-		aside := fmt.Sprintf("%s.%d.old", path, version)
+		aside := fmt.Sprintf("%s.%d.old", path, found)
 		for _, suffix := range []string{"", "-wal", "-shm"} {
 			if err := os.Rename(path+suffix, aside+suffix); err != nil && !os.IsNotExist(err) {
-				return nil, fmt.Errorf("store: set aside database of layout %d: %w", version, err)
+				return nil, fmt.Errorf("store: set aside database of layout %d: %w", found, err)
 			}
 		}
 	}

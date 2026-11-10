@@ -15,6 +15,17 @@ import (
 	"github.com/Aqothy/maiD/internal/provider"
 )
 
+// LayoutVersion names what maid.db holds: its tables (Schema here, and the
+// terminals' in internal/store), the JSON its columns keep, which is the
+// encoding of the Go types stored there, and the values stored as text. A
+// file of another version is set aside at startup (store.Open), so a change
+// that would misread rows written before it changes this number.
+// testdata/layout.golden records the layout, and TestLayoutGuard fails until
+// a change to it is recorded.
+const LayoutVersion = 3
+
+// Schema is the engine's tables, for store.Open.
+//
 // The ledger is plain tables, mutated only by the engine, one transaction per
 // step. The session cache keeps what providers said, rebuildable from native
 // data; the native mirror keeps native frames for adapters (provider.Mirror).
@@ -26,7 +37,7 @@ import (
 // another session, since the thread's earlier turns still show from it. A row
 // without a thread is a session a provider just made, whose frames can arrive
 // before the engine hears of it (dropUnowned).
-const schema = `
+const Schema = `
 CREATE TABLE IF NOT EXISTS threads (
 	thread_id TEXT PRIMARY KEY,
 	title TEXT NOT NULL,
@@ -170,13 +181,6 @@ const (
 // any goroutine.
 type db struct {
 	sql *sql.DB
-}
-
-func openDB(handle *sql.DB) (*db, error) {
-	if _, err := handle.Exec(schema); err != nil {
-		return nil, fmt.Errorf("orchestration: ensure schema: %w", err)
-	}
-	return &db{sql: handle}, nil
 }
 
 // state is what the engine holds in memory from the ledger at startup.

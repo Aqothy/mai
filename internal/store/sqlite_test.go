@@ -8,9 +8,12 @@ import (
 	"testing"
 )
 
+// testLayout is a layout version for the tests' files.
+const testLayout = 7
+
 func openTestStore(t *testing.T) *SQLite {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "maid.db"))
+	s, err := Open(filepath.Join(t.TempDir(), "maid.db"), testLayout)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -31,14 +34,17 @@ func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
 	}
 	_ = old.Close()
 
-	s, err := Open(path)
+	const ledger = `CREATE TABLE IF NOT EXISTS threads (thread_id TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT`
+	s, err := Open(path, testLayout, ledger)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer s.Close()
-	var tables int
-	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'threads'`).Scan(&tables); err != nil || tables != 0 {
-		t.Fatalf("old table in the new file: %d, %v", tables, err)
+	// The new file has the caller's tables as it declares them, and the old
+	// file's row isn't in them.
+	var threads int
+	if err := s.DB().QueryRow(`SELECT COUNT(title) FROM threads`).Scan(&threads); err != nil || threads != 0 {
+		t.Fatalf("threads in the new file: %d, %v; want the new table, empty", threads, err)
 	}
 	if _, err := os.Stat(path + ".0.old"); err != nil {
 		t.Fatalf("the old file wasn't kept: %v", err)
@@ -55,7 +61,7 @@ func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
 
 	// Reopening the new file keeps it.
 	_ = s.Close()
-	again, err := Open(path)
+	again, err := Open(path, testLayout, ledger)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -63,7 +69,7 @@ func TestOpenSetsAsideADatabaseOfAnotherLayout(t *testing.T) {
 	if err := again.UpsertTerminal(TerminalMeta{TerminalID: "x", Cwd: "/"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(fmt.Sprintf("%s.%d.old", path, schemaVersion)); !os.IsNotExist(err) {
+	if _, err := os.Stat(fmt.Sprintf("%s.%d.old", path, testLayout)); !os.IsNotExist(err) {
 		t.Fatalf("the current layout was set aside: %v", err)
 	}
 }

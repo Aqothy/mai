@@ -2,10 +2,8 @@ package orchestration
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,8 +12,7 @@ import (
 	"time"
 
 	"github.com/Aqothy/maiD/internal/provider"
-
-	_ "modernc.org/sqlite"
+	"github.com/Aqothy/maiD/internal/store"
 )
 
 // fakeInstance is an in-process provider. Its native sessions outlive the
@@ -368,12 +365,11 @@ func newHarness(t *testing.T, instances ...*fakeInstance) *harness {
 
 func (h *harness) start() {
 	h.t.Helper()
-	path := filepath.Join(h.dir, "maid.db")
-	handle, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate")
+	file, err := store.Open(filepath.Join(h.dir, "maid.db"), LayoutVersion, Schema)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	engine, err := Open(Config{DB: handle, Providers: h.providers, DataDir: h.dir})
+	engine, err := Open(Config{DB: file.DB(), Providers: h.providers, DataDir: h.dir})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -386,7 +382,7 @@ func (h *harness) start() {
 	h.sub = engine.Subscribe(h.sink)
 	h.t.Cleanup(func() {
 		engine.Close()
-		_ = handle.Close()
+		_ = file.Close()
 	})
 }
 

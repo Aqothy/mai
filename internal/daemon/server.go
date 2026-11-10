@@ -65,7 +65,7 @@ func NewServer() (*Server, error) {
 
 // newServer starts the daemon on a data directory with drivers.
 func newServer(logger *slog.Logger, dataDir string, drivers map[provider.DriverKind]provider.Driver) (*Server, error) {
-	metadata, err := store.Open(filepath.Join(dataDir, "maid.db"))
+	metadata, err := store.Open(filepath.Join(dataDir, "maid.db"), orchestration.LayoutVersion, orchestration.Schema)
 	if err != nil {
 		return nil, err
 	}

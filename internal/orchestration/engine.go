@@ -23,6 +23,7 @@ type Providers interface {
 }
 
 type Config struct {
+	// DB is maid.db, opened with Schema at LayoutVersion (store.Open).
 	DB        *sql.DB
 	Providers Providers
 	// DataDir holds the attachment store.
@@ -94,10 +95,7 @@ func Open(cfg Config) (*Engine, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	database, err := openDB(cfg.DB)
-	if err != nil {
-		return nil, err
-	}
+	database := &db{sql: cfg.DB}
 	attachments, err := openAttachmentStore(cfg.DataDir)
 	if err != nil {
 		return nil, err
