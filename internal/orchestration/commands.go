@@ -551,6 +551,11 @@ func (e *Engine) deleteThread(s *step, actor Actor, id ThreadID) error {
 					return nil
 				}, func(*step, error) {})
 			}
+			if participant.opening {
+				// The Open releases what it opens once it finds the chat gone.
+				e.openingEnded(participant)
+				e.dropOrphans(participant.Instance)
+			}
 			if participant.Session != "" {
 				key := sessionKey{participant.Instance, participant.Session}
 				delete(e.bySession, key)

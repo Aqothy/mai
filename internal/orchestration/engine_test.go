@@ -492,6 +492,22 @@ func TestASessionDeleteTheProviderCantDoLeavesItsChatRunning(t *testing.T) {
 	}
 }
 
+// A chat deleted while its session opens leaves nothing live at the provider:
+// the session is released as its Open returns.
+func TestAChatDeletedWhileItsSessionOpensReleasesIt(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.openGate = make(chan struct{})
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "Work")
+	h.do(DeleteThread{Thread: chat.Thread})
+	close(claude.openGate)
+	h.eventually("the opened session to be released", func() bool {
+		claude.mu.Lock()
+		defer claude.mu.Unlock()
+		return claude.opened == 1 && len(claude.released) == 1 && len(claude.live) == 0
+	})
+}
+
 // Deleting the session of one agent of a chat deletes the chat, every agent's
 // part of it: the session is released before it is deleted, and the other
 // agents' sessions are released and stay with their providers.

@@ -63,17 +63,33 @@ func (e *Engine) openParticipant(s *step, thread *threadState, participant *part
 	id := participant.ID
 	s.providerCall(participant, func(ctx context.Context, instance provider.Instance, generation uint64) func(*step) {
 		opened, err := instance.Open(ctx, in)
-		return func(s *step) { e.opened(s, id, generation, opened, err) }
+		// Posted here rather than returned, as providerCall drops what it is
+		// given once the participant is gone (its chat deleted): the session
+		// Open made live is released then, as nothing else knows of it.
+		taken := make(chan bool, 1)
+		if !e.post(func(s *step) { taken <- e.opened(s, id, generation, opened, err) }) {
+			return nil
+		}
+		select {
+		case kept := <-taken:
+			if err == nil && !kept {
+				_ = instance.Release(ctx, opened.Session)
+			}
+		case <-e.done:
+		}
+		return nil
 	}, func(s *step, err error) { e.opened(s, id, 0, provider.Opened{}, err) })
 }
 
-func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened provider.Opened, err error) {
+// opened takes an Open's outcome and reports whether its participant is still
+// there to take it.
+func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened provider.Opened, err error) bool {
 	participant := e.participants[id]
-	thread := e.threads[participant.Thread]
-	participant.opening = false
-	if e.opening[participant.Instance]--; e.opening[participant.Instance] <= 0 {
-		delete(e.opening, participant.Instance)
+	if participant == nil {
+		return false
 	}
+	thread := e.threads[participant.Thread]
+	e.openingEnded(participant)
 	// A session key names one chat, and the ledger enforces it. An agent breaking
 	// ACP's unique session IDs costs this message, not the daemon.
 	if owner, taken := e.bySession[sessionKey{participant.Instance, opened.Session}]; err == nil && taken && owner != id {
@@ -87,7 +103,7 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 			}
 		}
 		e.dropOrphans(participant.Instance)
-		return
+		return true
 	}
 	participant.live = &liveSession{generation: generation}
 	if opened.Session != participant.Session {
@@ -108,6 +124,16 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 		if delivery.To == id && delivery.State == DeliverySending && !e.dispatched[delivery.ID] {
 			e.dispatch(s, thread, participant, delivery)
 		}
+	}
+	return true
+}
+
+// openingEnded: the participant's Open is over, or its chat is gone and
+// nothing waits for it.
+func (e *Engine) openingEnded(participant *participantState) {
+	participant.opening = false
+	if e.opening[participant.Instance]--; e.opening[participant.Instance] <= 0 {
+		delete(e.opening, participant.Instance)
 	}
 }
 
