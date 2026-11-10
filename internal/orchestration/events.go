@@ -510,14 +510,16 @@ func (e *Engine) replayOrphans(s *step, participant *participantState) {
 		kept = append(kept, orphan)
 	}
 	e.orphans = kept
-	e.dropOrphans(participant.Instance)
+	e.dropOrphans(s, participant.Instance)
 }
 
-// dropOrphans forgets an instance's orphans once none of its Opens is in
-// flight: no session they could belong to is coming.
-func (e *Engine) dropOrphans(instance provider.InstanceID) {
+// dropOrphans forgets what waits for a session of an instance to be a chat's
+// once none of its Opens is in flight, as no such session is coming: its
+// orphans, and what its mirror kept of sessions no thread has.
+func (e *Engine) dropOrphans(s *step, instance provider.InstanceID) {
 	if e.opening[instance] > 0 {
 		return
 	}
 	e.orphans = slices.DeleteFunc(e.orphans, func(orphan orphanEvent) bool { return orphan.instance == instance })
+	s.tx.unowned = append(s.tx.unowned, instance)
 }

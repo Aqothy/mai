@@ -89,7 +89,7 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 				e.refuse(s, thread, delivery, "The agent couldn't start: "+err.Error())
 			}
 		}
-		e.dropOrphans(participant.Instance)
+		e.dropOrphans(s, participant.Instance)
 		// Nothing to release: Open failed, or the session's key is another
 		// chat's, which a release would end.
 		return true

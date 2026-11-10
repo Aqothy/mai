@@ -22,7 +22,7 @@ var _ TerminalStore = (*SQLite)(nil)
 // schemaVersion is the layout of every table in the file, the ledger's
 // included. maiD is unreleased and keeps no migrations: a file of another
 // layout is set aside and a new one started.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `
 CREATE TABLE IF NOT EXISTS terminal_threads (

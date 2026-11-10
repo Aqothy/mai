@@ -357,9 +357,26 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 		}
 	}
 	if create.Participant.Session != "" {
-		if id, ok := e.bySession[sessionKey{create.Participant.Instance, create.Participant.Session}]; ok {
+		key := sessionKey{create.Participant.Instance, create.Participant.Session}
+		if id, ok := e.bySession[key]; ok {
 			participant := e.participants[id]
 			return CommandResult{Thread: participant.Thread, Participant: id}, nil
+		}
+		// A session a chat's agent left (/clear) is still that chat's: its
+		// earlier turns are the session's. Importing it opens that chat.
+		owner, owned, err := e.db.sessionThread(e.ctx, key)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if thread := e.threads[owner]; owned && thread != nil {
+			result := CommandResult{Thread: thread.ID, Participant: thread.Address}
+			for _, id := range thread.participants {
+				if e.participants[id].Instance == key.instance {
+					result.Participant = id
+					break
+				}
+			}
+			return result, nil
 		}
 	}
 	title := strings.TrimSpace(create.Title)
@@ -554,12 +571,10 @@ func (e *Engine) deleteThread(s *step, actor Actor, id ThreadID) error {
 			if participant.opening {
 				// The Open releases what it opens once it finds the chat gone.
 				e.openingEnded(participant)
-				e.dropOrphans(participant.Instance)
+				e.dropOrphans(s, participant.Instance)
 			}
 			if participant.Session != "" {
-				key := sessionKey{participant.Instance, participant.Session}
-				delete(e.bySession, key)
-				s.tx.sessions = append(s.tx.sessions, key)
+				delete(e.bySession, sessionKey{participant.Instance, participant.Session})
 			}
 			delete(e.participants, pid)
 		}

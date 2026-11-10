@@ -18,6 +18,14 @@ import (
 // The ledger is plain tables, mutated only by the engine, one transaction per
 // step. The session cache keeps what providers said, rebuildable from native
 // data; the native mirror keeps native frames for adapters (provider.Mirror).
+//
+// A sessions row owns everything kept of a native session: its entries, its
+// frames, and how far the cache has it (marker, at the adapter's history
+// version). It is its thread's from the moment a participant is on the
+// session and for as long as the thread lives, also after its agent moved to
+// another session, since the thread's earlier turns still show from it. A row
+// without a thread is a session a provider just made, whose frames can arrive
+// before the engine hears of it (dropUnowned).
 const schema = `
 CREATE TABLE IF NOT EXISTS threads (
 	thread_id TEXT PRIMARY KEY,
@@ -98,6 +106,17 @@ CREATE TABLE IF NOT EXISTS receipts (
 	created_at TEXT NOT NULL,
 	PRIMARY KEY (actor, key)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS sessions (
+	instance_id TEXT NOT NULL,
+	native_session TEXT NOT NULL,
+	thread_id TEXT REFERENCES threads(thread_id) ON DELETE CASCADE,
+	marker TEXT NOT NULL DEFAULT '',
+	version INTEGER NOT NULL DEFAULT 0,
+	touched_at TEXT NOT NULL,
+	PRIMARY KEY (instance_id, native_session)
+) STRICT;
+CREATE INDEX IF NOT EXISTS sessions_thread ON sessions(thread_id);
+CREATE INDEX IF NOT EXISTS sessions_unowned ON sessions(instance_id) WHERE thread_id IS NULL;
 CREATE TABLE IF NOT EXISTS session_entries (
 	instance_id TEXT NOT NULL,
 	native_session TEXT NOT NULL,
@@ -106,25 +125,19 @@ CREATE TABLE IF NOT EXISTS session_entries (
 	turn_ref TEXT NOT NULL,
 	entry TEXT NOT NULL,
 	authored TEXT NOT NULL,
-	PRIMARY KEY (instance_id, native_session, seq)
+	PRIMARY KEY (instance_id, native_session, seq),
+	FOREIGN KEY (instance_id, native_session) REFERENCES sessions(instance_id, native_session) ON DELETE CASCADE
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS session_entries_ref ON session_entries(instance_id, native_session, ref);
 CREATE INDEX IF NOT EXISTS session_entries_turn ON session_entries(instance_id, native_session, turn_ref, seq);
 CREATE INDEX IF NOT EXISTS session_entries_in_progress ON session_entries(instance_id, native_session, seq) WHERE json_extract(entry, '$.status') = 'in_progress';
-CREATE TABLE IF NOT EXISTS session_markers (
-	instance_id TEXT NOT NULL,
-	native_session TEXT NOT NULL,
-	marker TEXT NOT NULL,
-	version INTEGER NOT NULL,
-	touched_at TEXT NOT NULL,
-	PRIMARY KEY (instance_id, native_session)
-) STRICT;
 CREATE TABLE IF NOT EXISTS native_mirror (
 	instance_id TEXT NOT NULL,
 	native_session TEXT NOT NULL,
 	seq INTEGER NOT NULL,
 	frames BLOB NOT NULL,
-	PRIMARY KEY (instance_id, native_session, seq)
+	PRIMARY KEY (instance_id, native_session, seq),
+	FOREIGN KEY (instance_id, native_session) REFERENCES sessions(instance_id, native_session) ON DELETE CASCADE
 ) STRICT;
 `
 
@@ -235,6 +248,11 @@ func (d *db) loadProjects(ctx context.Context) ([]Project, error) {
 }
 
 type scanner interface{ Scan(...any) error }
+
+// execer is a database or a transaction on it.
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
 
 func scanThread(row scanner) (Thread, error) {
 	var thread Thread
@@ -528,7 +546,7 @@ type marker struct {
 // marker is how far the cache has a session; zero when it has none of it.
 func (d *db) marker(ctx context.Context, instance provider.InstanceID, session string) (marker, error) {
 	var found marker
-	err := d.sql.QueryRowContext(ctx, `SELECT marker, version FROM session_markers WHERE instance_id = ? AND native_session = ?`, string(instance), session).Scan(&found.marker, &found.version)
+	err := d.sql.QueryRowContext(ctx, `SELECT marker, version FROM sessions WHERE instance_id = ? AND native_session = ?`, string(instance), session).Scan(&found.marker, &found.version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return marker{}, nil
 	}
@@ -536,6 +554,34 @@ func (d *db) marker(ctx context.Context, instance provider.InstanceID, session s
 		return marker{}, fmt.Errorf("load session marker: %w", err)
 	}
 	return found, nil
+}
+
+// sessionThread is the thread a session is kept for, if any.
+func (d *db) sessionThread(ctx context.Context, key sessionKey) (ThreadID, bool, error) {
+	var thread sql.NullString
+	err := d.sql.QueryRowContext(ctx, `SELECT thread_id FROM sessions WHERE instance_id = ? AND native_session = ?`, string(key.instance), key.session).Scan(&thread)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !thread.Valid {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("load session owner: %w", err)
+	}
+	return ThreadID(thread.String), true, nil
+}
+
+// dropUnowned deletes what is kept of sessions no thread has, of one instance
+// or, without one, of all. Nothing of them is a chat's: a provider made the
+// session for an Open whose chat never took it, or went on writing frames of
+// a session whose chat was deleted.
+func dropUnowned(ctx context.Context, sqlDB execer, instance provider.InstanceID) error {
+	query, args := `DELETE FROM sessions WHERE thread_id IS NULL`, []any(nil)
+	if instance != "" {
+		query, args = query+` AND instance_id = ?`, []any{string(instance)}
+	}
+	if _, err := sqlDB.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete sessions no chat took: %w", err)
+	}
+	return nil
 }
 
 // participantInstances maps a thread's participants to their instances.
@@ -596,10 +642,14 @@ func (d *db) entriesInProgress(ctx context.Context, key *sessionKey) ([]cachedEn
 
 // tx is one engine step's writes, committed together.
 type tx struct {
-	threads         map[ThreadID]Thread
-	deleted         []ThreadID
-	sessions        []sessionKey
-	participants    map[ParticipantID]Participant
+	threads      map[ThreadID]Thread
+	deleted      []ThreadID
+	participants map[ParticipantID]Participant
+	// sessions are the sessions its participants were on, each its thread's
+	// from here on.
+	sessions map[sessionKey]ThreadID
+	// unowned are the instances to drop the sessions no thread has of.
+	unowned         []provider.InstanceID
 	turns           map[TurnID]Turn
 	droppedTurns    []TurnID
 	deliveries      map[DeliveryID]Delivery
@@ -634,6 +684,7 @@ func newTx() *tx {
 	return &tx{
 		threads:      make(map[ThreadID]Thread),
 		participants: make(map[ParticipantID]Participant),
+		sessions:     make(map[sessionKey]ThreadID),
 		turns:        make(map[TurnID]Turn),
 		deliveries:   make(map[DeliveryID]Delivery),
 		markers:      make(map[sessionKey]marker),
@@ -641,8 +692,8 @@ func newTx() *tx {
 }
 
 func (t *tx) empty() bool {
-	return len(t.threads) == 0 && len(t.deleted) == 0 && len(t.participants) == 0 && len(t.turns) == 0 && len(t.droppedTurns) == 0 && len(t.deliveries) == 0 &&
-		len(t.receipts) == 0 && len(t.entries) == 0 && len(t.rebuilds) == 0 && len(t.markers) == 0 &&
+	return len(t.threads) == 0 && len(t.deleted) == 0 && len(t.participants) == 0 && len(t.sessions) == 0 && len(t.unowned) == 0 && len(t.turns) == 0 &&
+		len(t.droppedTurns) == 0 && len(t.deliveries) == 0 && len(t.receipts) == 0 && len(t.entries) == 0 && len(t.rebuilds) == 0 && len(t.markers) == 0 &&
 		len(t.addedProjects) == 0 && len(t.removedProjects) == 0
 }
 
@@ -667,16 +718,11 @@ func (d *db) commit(ctx context.Context, t *tx) error {
 }
 
 func writeTx(ctx context.Context, sqlTx *sql.Tx, t *tx) error {
+	// A thread's rows go with it, and so does what is kept of every session
+	// it was on (ON DELETE CASCADE).
 	for _, id := range t.deleted {
 		if _, err := sqlTx.ExecContext(ctx, `DELETE FROM threads WHERE thread_id = ?`, string(id)); err != nil {
 			return fmt.Errorf("delete thread: %w", err)
-		}
-	}
-	for _, key := range t.sessions {
-		for _, table := range []string{"session_entries", "session_markers", "native_mirror"} {
-			if _, err := sqlTx.ExecContext(ctx, `DELETE FROM `+table+` WHERE instance_id = ? AND native_session = ?`, string(key.instance), key.session); err != nil {
-				return fmt.Errorf("delete session %s: %w", table, err)
-			}
 		}
 	}
 	// Parents before children, so the foreign key holds within the write.
@@ -713,6 +759,16 @@ func writeTx(ctx context.Context, sqlTx *sql.Tx, t *tx) error {
 			string(participant.ID), string(participant.Thread), string(participant.Instance), encodeJSON(nilIfEmpty(participant.Settings)), participant.Session,
 			string(participant.SeenThrough)); err != nil {
 			return fmt.Errorf("write participant: %w", err)
+		}
+	}
+	// Before the entries and markers below, which need their session's row.
+	// One that the mirror made for a new session's first frames becomes the
+	// thread's here.
+	for key, thread := range t.sessions {
+		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO sessions (instance_id, native_session, thread_id, touched_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT (instance_id, native_session) DO UPDATE SET thread_id = excluded.thread_id`,
+			string(key.instance), key.session, string(thread), encodeTime(time.Now())); err != nil {
+			return fmt.Errorf("write session: %w", err)
 		}
 	}
 	for _, turn := range t.turns {
@@ -762,10 +818,15 @@ func writeTx(ctx context.Context, sqlTx *sql.Tx, t *tx) error {
 		}
 	}
 	for key, marker := range t.markers {
-		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO session_markers (instance_id, native_session, marker, version, touched_at) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (instance_id, native_session) DO UPDATE SET marker = excluded.marker, version = excluded.version, touched_at = excluded.touched_at`,
-			string(key.instance), key.session, string(marker.marker), marker.version, encodeTime(time.Now())); err != nil {
+		if _, err := sqlTx.ExecContext(ctx, `UPDATE sessions SET marker = ?, version = ?, touched_at = ? WHERE instance_id = ? AND native_session = ?`,
+			string(marker.marker), marker.version, encodeTime(time.Now()), string(key.instance), key.session); err != nil {
 			return fmt.Errorf("write session marker: %w", err)
+		}
+	}
+	// After the sessions above: one a participant just took stays.
+	for _, instance := range t.unowned {
+		if err := dropUnowned(ctx, sqlTx, instance); err != nil {
+			return err
 		}
 	}
 	for _, path := range t.removedProjects {
@@ -1026,9 +1087,7 @@ func (w *mirrorWriter) write(batch []mirrorWrite) {
 	for _, key := range order {
 		blob, err := encodeFrames(bySession[key])
 		if err == nil {
-			_, err = w.db.sql.Exec(`INSERT INTO native_mirror (instance_id, native_session, seq, frames)
-				VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM native_mirror WHERE instance_id = ? AND native_session = ?), ?)`,
-				string(key.instance), key.session, string(key.instance), key.session, blob)
+			err = w.db.appendMirror(key, blob)
 		}
 		if err != nil {
 			// The session goes on without these frames: its rebuilds lack
@@ -1039,6 +1098,28 @@ func (w *mirrorWriter) write(batch []mirrorWrite) {
 	for _, done := range waiters {
 		close(done)
 	}
+}
+
+// appendMirror adds a row of frames to a session. A new session's first
+// frames can arrive before the engine knows whose it is (the agent sends
+// them as it answers Open): they make its row, which the thread takes when
+// its participant does.
+func (d *db) appendMirror(key sessionKey, blob []byte) error {
+	sqlTx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqlTx.Rollback() }()
+	if _, err := sqlTx.Exec(`INSERT INTO sessions (instance_id, native_session, touched_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+		string(key.instance), key.session, encodeTime(time.Now())); err != nil {
+		return err
+	}
+	if _, err := sqlTx.Exec(`INSERT INTO native_mirror (instance_id, native_session, seq, frames)
+		VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM native_mirror WHERE instance_id = ? AND native_session = ?), ?)`,
+		string(key.instance), key.session, string(key.instance), key.session, blob); err != nil {
+		return err
+	}
+	return sqlTx.Commit()
 }
 
 // instanceMirror is one instance's provider.Mirror.
@@ -1075,24 +1156,19 @@ func (m *instanceMirror) Load(ctx context.Context, session string) ([]json.RawMe
 	return frames, rows.Err()
 }
 
-func (m *instanceMirror) Fork(ctx context.Context, session, into string) error {
-	if err := m.writer.flush(ctx); err != nil {
-		return err
-	}
-	_, err := m.writer.db.sql.ExecContext(ctx, `INSERT INTO native_mirror (instance_id, native_session, seq, frames)
-		SELECT instance_id, ?, seq, frames FROM native_mirror WHERE instance_id = ? AND native_session = ?`, into, string(m.instance), session)
-	if err != nil {
-		return fmt.Errorf("fork native mirror: %w", err)
-	}
-	return nil
-}
-
+// Delete forgets the session's frames. A thread that was on it keeps its
+// entries of it; a session no thread has goes whole.
 func (m *instanceMirror) Delete(ctx context.Context, session string) error {
 	if err := m.writer.flush(ctx); err != nil {
 		return err
 	}
-	if _, err := m.writer.db.sql.ExecContext(ctx, `DELETE FROM native_mirror WHERE instance_id = ? AND native_session = ?`, string(m.instance), session); err != nil {
-		return fmt.Errorf("delete native mirror: %w", err)
+	for _, query := range []string{
+		`DELETE FROM native_mirror WHERE instance_id = ? AND native_session = ?`,
+		`DELETE FROM sessions WHERE instance_id = ? AND native_session = ? AND thread_id IS NULL`,
+	} {
+		if _, err := m.writer.db.sql.ExecContext(ctx, query, string(m.instance), session); err != nil {
+			return fmt.Errorf("delete native mirror: %w", err)
+		}
 	}
 	return nil
 }

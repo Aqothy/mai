@@ -112,6 +112,12 @@ func Open(cfg Config) (*Engine, error) {
 		waits: make(map[uint64]*waiter), dispatched: make(map[DeliveryID]bool), noticed: make(map[string]bool),
 	}
 	e.mirrors = newMirrorWriter(database, e.logger)
+	// No Open is in flight yet, so a session no thread has is one the last
+	// run's crash or late frames left.
+	if err := dropUnowned(ctx, database.sql, ""); err != nil {
+		cancel()
+		return nil, err
+	}
 	loaded, err := database.load(ctx)
 	if err != nil {
 		cancel()

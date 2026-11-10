@@ -39,7 +39,9 @@ type Host struct {
 // Mirror is durable, append-only storage of a session's native frames (the
 // lines or notifications the provider itself would replay), kept by the host
 // so a session's history survives the provider forgetting it. Frames are
-// opaque to the host.
+// opaque to the host. They are kept for the chat on the session and deleted
+// with it: a new session's from before Open returns it, and nothing for long
+// of a session no chat is on.
 type Mirror interface {
 	// Append adds frames after the session's earlier ones. It doesn't wait
 	// for the write.
@@ -47,8 +49,6 @@ type Mirror interface {
 	// Load returns the session's frames in the order appended, waiting for
 	// earlier appends; none when nothing was mirrored.
 	Load(ctx context.Context, session string) ([]json.RawMessage, error)
-	// Fork copies a session's frames to another session.
-	Fork(ctx context.Context, session, into string) error
 	// Delete forgets the session's frames.
 	Delete(ctx context.Context, session string) error
 }

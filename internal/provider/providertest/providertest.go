@@ -124,13 +124,6 @@ func (m *Mirror) Load(_ context.Context, session string) ([]json.RawMessage, err
 	return slices.Clone(m.sessions[session]), nil
 }
 
-func (m *Mirror) Fork(_ context.Context, session, into string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sessions[into] = slices.Clone(m.sessions[session])
-	return nil
-}
-
 func (m *Mirror) Delete(_ context.Context, session string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
