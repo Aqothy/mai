@@ -77,6 +77,25 @@ func (s *step) providerCall(participant *participantState, call func(ctx context
 	})
 }
 
+// releaseUnlessTaken hands the engine a session a provider call made, and
+// releases it unless take reports that a chat took it. The call's outcome
+// isn't returned to providerCall for this, which drops it once the
+// participant is gone (its chat deleted), and nothing else knows of the
+// session then.
+func (e *Engine) releaseUnlessTaken(ctx context.Context, instance provider.Instance, session string, take func(*step) bool) {
+	taken := make(chan bool, 1)
+	if !e.post(func(s *step) { taken <- take(s) }) {
+		return
+	}
+	select {
+	case kept := <-taken:
+		if session != "" && !kept {
+			_ = instance.Release(ctx, session)
+		}
+	case <-e.done:
+	}
+}
+
 // onWorker runs job on the participant's worker once the step commits.
 func (s *step) onWorker(participant *participantState, job func()) {
 	if participant.worker == nil {

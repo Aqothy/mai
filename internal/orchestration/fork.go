@@ -144,20 +144,7 @@ func (e *Engine) startFork(s *step, command Command, source forkSource, carryOn 
 				e.attachments.stripTurns(history)
 			}
 		}
-		// Posted here rather than returned, as providerCall drops what it is
-		// given once carryOn is gone (its chat deleted): the session the fork
-		// made goes unless a chat took it.
-		taken := make(chan bool, 1)
-		if !e.post(func(s *step) { taken <- e.forkCallDone(s, job, session, history, err) }) {
-			return nil
-		}
-		select {
-		case kept := <-taken:
-			if session != "" && !kept {
-				_ = instance.Release(ctx, session)
-			}
-		case <-e.done:
-		}
+		e.releaseUnlessTaken(ctx, instance, session, func(s *step) bool { return e.forkCallDone(s, job, session, history, err) })
 		return nil
 	}, func(s *step, err error) { e.forkCallDone(s, job, "", nil, err) })
 	return CommandResult{}, reply, nil

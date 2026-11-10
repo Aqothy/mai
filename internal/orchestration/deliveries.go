@@ -63,20 +63,7 @@ func (e *Engine) openParticipant(s *step, thread *threadState, participant *part
 	id := participant.ID
 	s.providerCall(participant, func(ctx context.Context, instance provider.Instance, generation uint64) func(*step) {
 		opened, err := instance.Open(ctx, in)
-		// Posted here rather than returned, as providerCall drops what it is
-		// given once the participant is gone (its chat deleted): the session
-		// Open made live is released then, as nothing else knows of it.
-		taken := make(chan bool, 1)
-		if !e.post(func(s *step) { taken <- e.opened(s, id, generation, opened, err) }) {
-			return nil
-		}
-		select {
-		case kept := <-taken:
-			if err == nil && !kept {
-				_ = instance.Release(ctx, opened.Session)
-			}
-		case <-e.done:
-		}
+		e.releaseUnlessTaken(ctx, instance, opened.Session, func(s *step) bool { return e.opened(s, id, generation, opened, err) })
 		return nil
 	}, func(s *step, err error) { e.opened(s, id, 0, provider.Opened{}, err) })
 }
@@ -103,6 +90,8 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 			}
 		}
 		e.dropOrphans(participant.Instance)
+		// Nothing to release: Open failed, or the session's key is another
+		// chat's, which a release would end.
 		return true
 	}
 	participant.live = &liveSession{generation: generation}
