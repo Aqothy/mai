@@ -63,7 +63,7 @@ func (e *Engine) openParticipant(s *step, thread *threadState, participant *part
 	id := participant.ID
 	s.providerCall(participant, func(ctx context.Context, instance provider.Instance, generation uint64) func(*step) {
 		opened, err := instance.Open(ctx, in)
-		e.releaseUnlessTaken(ctx, instance, opened.Session, func(s *step) bool { return e.opened(s, id, generation, opened, err) })
+		e.releaseUnlessTaken(instance, opened.Session, func(s *step) bool { return e.opened(s, id, generation, opened, err) })
 		return nil
 	}, func(s *step, err error) { e.opened(s, id, 0, provider.Opened{}, err) })
 }

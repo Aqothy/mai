@@ -547,6 +547,30 @@ func TestDeletingASessionDeletesTheWholeChatOnIt(t *testing.T) {
 	}
 }
 
+// Two deletes of one session at once both succeed: the second finds the
+// session gone, which providers answer with success.
+func TestDeletingASessionTwiceAtOnceSucceedsBoth(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	claude.info.Capabilities.Delete = true
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "Work")
+	h.settledTurns(chat.Thread, 1)
+	session := claude.messages()[0].session
+
+	results := make(chan error, 2)
+	for range 2 {
+		go func() { results <- h.engine.DeleteSession(context.Background(), h.device, "claude", session) }()
+	}
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if list, err := h.sub.List(context.Background()); err != nil || len(list.Threads) != 0 {
+		t.Fatalf("chats after the deletes = %#v, %v; want none", list.Threads, err)
+	}
+}
+
 // A provider's delete that fails is the caller's answer. The chat is gone by
 // then; the session is still the provider's.
 func TestAFailedSessionDeleteIsReportedAfterItsChatIsDeleted(t *testing.T) {

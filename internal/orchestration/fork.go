@@ -144,7 +144,7 @@ func (e *Engine) startFork(s *step, command Command, source forkSource, carryOn 
 				e.attachments.stripTurns(history)
 			}
 		}
-		e.releaseUnlessTaken(ctx, instance, session, func(s *step) bool { return e.forkCallDone(s, job, session, history, err) })
+		e.releaseUnlessTaken(instance, session, func(s *step) bool { return e.forkCallDone(s, job, session, history, err) })
 		return nil
 	}, func(s *step, err error) { e.forkCallDone(s, job, "", nil, err) })
 	return CommandResult{}, reply, nil

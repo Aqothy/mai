@@ -82,7 +82,7 @@ func (s *step) providerCall(participant *participantState, call func(ctx context
 // isn't returned to providerCall for this, which drops it once the
 // participant is gone (its chat deleted), and nothing else knows of the
 // session then.
-func (e *Engine) releaseUnlessTaken(ctx context.Context, instance provider.Instance, session string, take func(*step) bool) {
+func (e *Engine) releaseUnlessTaken(instance provider.Instance, session string, take func(*step) bool) {
 	taken := make(chan bool, 1)
 	if !e.post(func(s *step) { taken <- take(s) }) {
 		return
@@ -90,6 +90,9 @@ func (e *Engine) releaseUnlessTaken(ctx context.Context, instance provider.Insta
 	select {
 	case kept := <-taken:
 		if session != "" && !kept {
+			// The call's own time is spent by now.
+			ctx, cancel := context.WithTimeout(e.ctx, providerCallTimeout)
+			defer cancel()
 			_ = instance.Release(ctx, session)
 		}
 	case <-e.done:
