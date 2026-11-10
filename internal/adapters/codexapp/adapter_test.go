@@ -35,7 +35,7 @@ func openFakeInstance(t *testing.T, scenario string) testInstance {
 		t.Fatal(err)
 	}
 	events := providertest.NewRecorder()
-	instance, err := OpenInstance(testContext(t), provider.InstanceSpec{InstanceID: "codex-test", Name: "Codex Test", Driver: DriverKind, Config: config}, provider.Host{Emit: events.Emit, Mirror: providertest.NewMirror()})
+	instance, err := OpenInstance(testContext(t), provider.InstanceSpec{InstanceID: "codex-test", Name: "Codex Test", Driver: DriverKind, Config: config}, provider.Host{Emit: events.Emit, Exited: events.Exited, Mirror: providertest.NewMirror()})
 	if err != nil {
 		t.Fatalf("open fake app-server: %v", err)
 	}
@@ -640,8 +640,12 @@ func TestPendingTurnEndsOnceOnDisconnect(t *testing.T) {
 			case <-testContext(t).Done():
 				t.Fatal("provider did not exit")
 			}
+			events, exited := h.events.BeforeExit()
+			if !exited {
+				t.Fatal("the instance never said its process exited")
+			}
 			closed := false
-			for _, event := range h.events.Snapshot() {
+			for _, event := range events {
 				switch event.Body.(type) {
 				case provider.TurnSettled:
 					t.Fatalf("a turn Codex never started settled: %#v", event)

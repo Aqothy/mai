@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/Aqothy/maiD/api/wire"
 	"github.com/Aqothy/maiD/internal/orchestration"
 	"github.com/Aqothy/maiD/internal/provider"
+	"github.com/Aqothy/maiD/internal/provider/providertest"
 )
 
 func TestProviderStartAndList(t *testing.T) {
@@ -230,6 +232,37 @@ func TestDeletingASessionNoChatIsOn(t *testing.T) {
 	client.call(t, wire.MethodProviderListSessions, wire.ProviderListSessionsParams{InstanceID: "agent"}, &sessions)
 	if len(sessions) != 0 {
 		t.Fatalf("sessions after the delete = %#v, want none", sessions)
+	}
+}
+
+// An ACP agent's exit closes its sessions before the process is said gone,
+// so each ends with its own reason.
+func TestACPAgentExitIsReportedAfterItsSessionsClose(t *testing.T) {
+	events := providertest.NewRecorder()
+	spec := acpInstanceSpec("agent", "Agent", fakeACPAgentCommand())
+	instance, err := drivers[spec.Driver].Open(context.Background(), spec, provider.Host{Emit: events.Emit, Exited: events.Exited})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = instance.Close() })
+	opened, err := instance.Open(context.Background(), provider.OpenInput{Workspace: provider.Workspace{Cwd: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(instance.Info().PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	var before []provider.Event
+	waitUntil(t, "the agent's exit to be reported", func() bool {
+		var exited bool
+		before, exited = events.BeforeExit()
+		return exited
+	})
+	if !slices.ContainsFunc(before, func(event provider.Event) bool {
+		_, closed := event.Body.(provider.SessionClosed)
+		return closed && event.Session == opened.Session
+	}) {
+		t.Fatalf("events before the exit = %#v, want the session's close among them", before)
 	}
 }
 

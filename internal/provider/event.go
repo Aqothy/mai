@@ -128,6 +128,8 @@ type Warning struct {
 	Message string
 }
 
+// InstanceChanged: the instance's info changed while it runs (its account
+// signed in or out). That its process ended is Host.Exited's to say.
 type InstanceChanged struct{ Info InstanceInfo }
 
 func (TurnStarted) eventBody()     {}

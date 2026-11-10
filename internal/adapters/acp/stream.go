@@ -26,6 +26,9 @@ type sessionStream struct {
 	// disposed. Guarded by Instance.mu.
 	closed   bool
 	closeErr error
+	// consumed closes when the stream's consumer has returned
+	// (Instance.consuming).
+	consumed chan struct{}
 	// barriers maps PushMarker tags to waiters. The drain side effect runs only
 	// when the marker is dequeued; stream abandonment only releases the waiter.
 	// Guarded by Instance.mu.
@@ -84,6 +87,12 @@ func (h *Instance) sessionFor(stream *sessionStream) *acpSession {
 // barrier markers arrive in ONE ordered stream. A NextUpdate error means the
 // stream terminated (disposed, connection closed, or handle shutdown).
 func (h *Instance) consumeSessionStream(stream *sessionStream) {
+	defer func() {
+		h.mu.Lock()
+		delete(h.consuming, stream)
+		h.mu.Unlock()
+		close(stream.consumed)
+	}()
 	for {
 		msg, err := stream.session.NextUpdate(h.ctx)
 		if err != nil {

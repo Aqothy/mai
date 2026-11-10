@@ -23,6 +23,11 @@ type Driver struct {
 type Host struct {
 	// Emit receives the instance's events, in provider order per session.
 	Emit func(Event)
+	// Exited reports that the instance's process ended, by itself or by
+	// Close, once the instance has emitted what the process left behind (its
+	// turns' ends, its sessions' SessionClosed). An instance without a process
+	// of its own never calls it. Nil when nobody listens (tests).
+	Exited func()
 	// Mirror keeps native frames of sessions the provider may lose or can't
 	// replay. Nil when the daemon keeps none (tests).
 	Mirror Mirror

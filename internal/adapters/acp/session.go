@@ -460,8 +460,10 @@ func (h *Instance) attach(sessionID string, active *acp.ActiveSession, restored 
 		sessionID: sessionID,
 		session:   active,
 		barriers:  make(map[string]*sessionBarrier),
+		consumed:  make(chan struct{}),
 	}
 	session.stream = stream
+	h.consuming[stream] = struct{}{}
 	h.mu.Unlock()
 	go h.consumeSessionStream(stream)
 	return stream

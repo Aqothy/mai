@@ -325,11 +325,12 @@ func (h *Instance) waitProcess() {
 	h.processErr = err
 	h.info.Status = provider.InstanceStatusExited
 	h.info.PID = 0
-	info := h.info
 	h.mu.Unlock()
 	h.rpc.fail(firstError(err, io.EOF))
 	h.cancel()
-	h.emit("", provider.InstanceChanged{Info: info})
+	if h.host.Exited != nil {
+		h.host.Exited()
+	}
 	close(h.processDone)
 }
 

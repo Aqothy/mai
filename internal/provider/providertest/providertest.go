@@ -20,10 +20,30 @@ type Recorder struct {
 	mu      sync.Mutex
 	events  []provider.Event
 	added   chan struct{}
+	// exitedAfter is how many events came before Exited; -1 until then.
+	exitedAfter int
 }
 
 func NewRecorder() *Recorder {
-	return &Recorder{Timeout: 5 * time.Second, added: make(chan struct{}, 1)}
+	return &Recorder{Timeout: 5 * time.Second, added: make(chan struct{}, 1), exitedAfter: -1}
+}
+
+// Exited is the Host.Exited.
+func (r *Recorder) Exited() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.exitedAfter = len(r.events)
+}
+
+// BeforeExit returns the events emitted before the instance said its process
+// exited, and whether it has said so.
+func (r *Recorder) BeforeExit() ([]provider.Event, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.exitedAfter < 0 {
+		return nil, false
+	}
+	return slices.Clone(r.events[:r.exitedAfter]), true
 }
 
 // Emit is the Host.Emit.

@@ -193,7 +193,6 @@ func (e *Engine) applyEvent(s *step, thread *threadState, participant *participa
 		e.subagentSeen(s, thread, participant, body)
 	case provider.Warning:
 		e.warning(s, thread, participant, body, at)
-	case provider.InstanceChanged:
 	}
 }
 

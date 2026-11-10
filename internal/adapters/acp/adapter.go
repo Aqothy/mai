@@ -165,6 +165,9 @@ type Instance struct {
 	// sessions holds the live sessions, options sessions among them, by ACP
 	// session id.
 	sessions map[string]*acpSession
+	// consuming are the streams whose consumers haven't returned: a stream
+	// leaves sessions before its consumer reports the session closed.
+	consuming map[*sessionStream]struct{}
 
 	// signInAsk answers request-scoped elicitations while authenticate runs.
 	signInAsk func(context.Context, provider.Request) (provider.RequestAnswer, error)
@@ -174,7 +177,7 @@ type Instance struct {
 }
 
 func newInstance(host provider.Host) *Instance {
-	h := &Instance{host: host, sessions: make(map[string]*acpSession)}
+	h := &Instance{host: host, sessions: make(map[string]*acpSession), consuming: make(map[*sessionStream]struct{})}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h
 }
@@ -344,12 +347,21 @@ func (h *Instance) Close() error {
 }
 
 // wait retires the agent process once it exits, after the connection has
-// read what the agent wrote last.
+// read what the agent wrote last. The session streams end with the
+// connection, each reporting its session closed with the reason, so the
+// process is said gone only after their consumers.
 func (h *Instance) wait() {
 	h.process.Drain(h.conn.Done(), drainTimeout)
 	h.mu.Lock()
 	h.info.Status = provider.InstanceStatusExited
+	consuming := slices.Collect(maps.Keys(h.consuming))
 	h.mu.Unlock()
+	for _, stream := range consuming {
+		<-stream.consumed
+	}
+	if h.host.Exited != nil {
+		h.host.Exited()
+	}
 }
 
 func newID() string {

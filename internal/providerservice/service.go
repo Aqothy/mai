@@ -472,14 +472,15 @@ func (s *Service) start(ctx context.Context, spec provider.InstanceSpec, folder 
 	s.mu.Unlock()
 
 	id := spec.InstanceID
-	host := provider.Host{Folder: folder, Emit: func(event provider.Event) {
-		if changed, ok := event.Body.(provider.InstanceChanged); ok && changed.Info.Status == provider.InstanceStatusExited {
-			s.gone(id, launched)
-		}
-		if s.sink.Event != nil {
-			s.sink.Event(id, launched.generation, event)
-		}
-	}}
+	host := provider.Host{
+		Folder: folder,
+		Emit: func(event provider.Event) {
+			if s.sink.Event != nil {
+				s.sink.Event(id, launched.generation, event)
+			}
+		},
+		Exited: func() { s.gone(id, launched) },
+	}
 	if s.mirror != nil {
 		host.Mirror = s.mirror(id)
 	}

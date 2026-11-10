@@ -241,16 +241,17 @@ func TestExitedInstanceRestartsWhenNeeded(t *testing.T) {
 		t.Fatal(err)
 	}
 	exited := driver.instances()[0]
+	_, generation, _ := service.Instance(context.Background(), "agent", "")
 	_ = exited.Close()
-	exited.host.Emit(provider.Event{Body: provider.InstanceChanged{Info: exited.Info()}})
+	exited.host.Exited()
 	instance, _, err := service.Instance(context.Background(), "agent", "")
 	if err != nil || len(driver.instances()) != 2 || instance != driver.instances()[1] {
 		t.Fatalf("instance = %v, %v after %d opens; want a new process", instance, err, len(driver.instances()))
 	}
 	record.mu.Lock()
 	defer record.mu.Unlock()
-	if len(record.gone) != 1 || record.gone[0] != record.events[0] {
-		t.Fatalf("gone %v, want the exited generation", record.gone)
+	if len(record.gone) != 1 || record.gone[0] != generation {
+		t.Fatalf("gone %v, want the exited generation %d", record.gone, generation)
 	}
 }
 
