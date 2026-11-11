@@ -3,6 +3,7 @@ package providertest
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -29,27 +30,50 @@ func Golden(t *testing.T, path, got, why string) {
 	if got == string(want) {
 		return
 	}
-	var changed strings.Builder
-	recorded, current := lineSet(string(want)), lineSet(got)
-	for _, line := range strings.Split(string(want), "\n") {
-		if !current[line] {
-			changed.WriteString("- " + line + "\n")
-		}
-	}
-	for _, line := range strings.Split(got, "\n") {
-		if !recorded[line] {
-			changed.WriteString("+ " + line + "\n")
-		}
-	}
-	t.Fatalf("%s no longer matches what the code writes:\n\n%s\n%s\n\nThen record it: go test -run '^%s$' -update", path, changed.String(), why, t.Name())
+	t.Fatalf("%s no longer matches what the code writes:\n\n%s\n%s\n\nThen record it: go test -run '^%s$' -update", path, changedLines(string(want), got), why, t.Name())
 }
 
-func lineSet(text string) map[string]bool {
-	lines := make(map[string]bool)
-	for _, line := range strings.Split(text, "\n") {
-		lines[line] = true
+// changedLines is the lines want has and got doesn't (-) and the reverse
+// (+), in place: each run of them under the line it follows, so a line that
+// repeats elsewhere, or only moved, still shows where.
+func changedLines(want, got string) string {
+	a, b := strings.Split(want, "\n"), strings.Split(got, "\n")
+	// common[i][j] is how many lines a[i:] and b[j:] share, in order.
+	common := make([][]int, len(a)+1)
+	for i := range common {
+		common[i] = make([]int, len(b)+1)
 	}
-	return lines
+	for i := len(a) - 1; i >= 0; i-- {
+		for j := len(b) - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				common[i][j] = common[i+1][j+1] + 1
+			} else {
+				common[i][j] = max(common[i+1][j], common[i][j+1])
+			}
+		}
+	}
+	var changed strings.Builder
+	inRun := false
+	for i, j := 0, 0; i < len(a) || j < len(b); {
+		if i < len(a) && j < len(b) && a[i] == b[j] {
+			inRun = false
+			i++
+			j++
+			continue
+		}
+		if !inRun && i > 0 {
+			fmt.Fprintf(&changed, "  %s\n", a[i-1])
+		}
+		inRun = true
+		if i == len(a) || j < len(b) && common[i][j+1] > common[i+1][j] {
+			changed.WriteString("+ " + b[j] + "\n")
+			j++
+		} else {
+			changed.WriteString("- " + a[i] + "\n")
+			i++
+		}
+	}
+	return changed.String()
 }
 
 // SampleJSON is the JSON of a value of zero's type with every field set,
