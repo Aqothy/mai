@@ -310,7 +310,16 @@ session_entries.entry (provider.Entry)
         "data": "text",
         "uri": "text",
         "size": 1,
-        "annotations": {},
+        "annotations": {
+          "audience": [
+            "text"
+          ],
+          "priority": 1.5,
+          "lastModified": "text",
+          "_meta": {
+            "text": "any"
+          }
+        },
         "_meta": {
           "text": "any"
         },
@@ -348,12 +357,13 @@ session_entries.entry (provider.Entry)
           "allowsFreeText": true,
           "options": [
             {
-              "value": "",
-              "label": ""
+              "value": "text",
+              "label": "text",
+              "description": "text"
             }
           ],
           "default": [
-            ""
+            "text"
           ]
         }
       ],

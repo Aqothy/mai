@@ -21,7 +21,9 @@ import (
 // file of another version is set aside at startup (store.Open), so a change
 // that would misread rows written before it changes this number.
 // testdata/layout.golden records the layout, and TestLayoutGuard fails until
-// a change to it is recorded.
+// a change to it is recorded. The frames an adapter keeps in native_mirror
+// are that adapter's encoding, recorded beside it (internal/adapters/acp
+// testdata/frame.golden).
 const LayoutVersion = 3
 
 // Schema is the engine's tables, for store.Open.

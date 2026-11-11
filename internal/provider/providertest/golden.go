@@ -58,7 +58,7 @@ func lineSet(text string) map[string]bool {
 func SampleJSON(t *testing.T, zero any) string {
 	t.Helper()
 	value := reflect.New(reflect.TypeOf(zero)).Elem()
-	fill(value, 0)
+	fill(value, map[reflect.Type]bool{})
 	raw, err := json.MarshalIndent(value.Interface(), "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -71,11 +71,10 @@ var (
 	rawType  = reflect.TypeFor[json.RawMessage]()
 )
 
-func fill(value reflect.Value, depth int) {
-	// A type that contains itself is filled a few levels deep.
-	if depth > 6 {
-		return
-	}
+// fill sets every field of value. inside holds the struct types being
+// filled around it: a type that contains itself is filled once and left
+// zero where it comes up again.
+func fill(value reflect.Value, inside map[reflect.Type]bool) {
 	switch {
 	case value.Type() == timeType:
 		value.Set(reflect.ValueOf(time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)))
@@ -97,20 +96,25 @@ func fill(value reflect.Value, depth int) {
 		value.SetFloat(1.5)
 	case reflect.Pointer:
 		value.Set(reflect.New(value.Type().Elem()))
-		fill(value.Elem(), depth+1)
+		fill(value.Elem(), inside)
 	case reflect.Slice:
 		value.Set(reflect.MakeSlice(value.Type(), 1, 1))
-		fill(value.Index(0), depth+1)
+		fill(value.Index(0), inside)
 	case reflect.Map:
 		key, element := reflect.New(value.Type().Key()).Elem(), reflect.New(value.Type().Elem()).Elem()
-		fill(key, depth+1)
-		fill(element, depth+1)
+		fill(key, inside)
+		fill(element, inside)
 		value.Set(reflect.MakeMap(value.Type()))
 		value.SetMapIndex(key, element)
 	case reflect.Struct:
+		if inside[value.Type()] {
+			return
+		}
+		inside[value.Type()] = true
+		defer delete(inside, value.Type())
 		for index := range value.NumField() {
 			if field := value.Field(index); field.CanSet() {
-				fill(field, depth+1)
+				fill(field, inside)
 			}
 		}
 	case reflect.Interface:

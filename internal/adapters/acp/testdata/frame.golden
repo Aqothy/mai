@@ -1,0 +1,53 @@
+native_mirror.frames (acp.frame): every field a frame encodes
+
+{
+  "at": "2026-01-02T03:04:05.000000006Z",
+  "prompt": {
+    "turn": "text",
+    "text": "text",
+    "attachments": [
+      {
+        "id": "text",
+        "kind": "text",
+        "name": "text",
+        "title": "text",
+        "description": "text",
+        "mimeType": "text",
+        "data": "text",
+        "uri": "text",
+        "size": 1,
+        "annotations": {
+          "audience": [
+            "text"
+          ],
+          "priority": 1.5,
+          "lastModified": "text",
+          "_meta": {
+            "text": "any"
+          }
+        },
+        "_meta": {
+          "text": "any"
+        },
+        "resourceMeta": {
+          "text": "any"
+        }
+      }
+    ]
+  },
+  "update": {
+    "any": "json"
+  },
+  "replay": true,
+  "cancel": "text",
+  "stop": {
+    "turn": "text",
+    "state": "text",
+    "stopReason": "text",
+    "error": "text"
+  },
+  "lost": true
+}
+
+`update` is the agent's session/update as go-acp encodes it.
+Values stored as text (listed in internal/orchestration/testdata/layout.golden): AttachmentKind TurnState StopReason
