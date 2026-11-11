@@ -36,11 +36,11 @@ const LayoutVersion = 1
 //
 // A sessions row owns everything kept of a native session: its entries, its
 // frames, and how far the cache has it (marker, at the adapter's history
-// version). It is its thread's from the moment a participant is on the
-// session and for as long as the thread lives, also after its agent moved to
-// another session, since the thread's earlier turns still show from it. A row
-// without a thread is a session a provider just made, whose frames can arrive
-// before the engine hears of it (dropUnowned).
+// version). It is a participant's from the moment that agent is on the
+// session (takeSession) and for as long as its thread lives, also after the
+// agent moved to another session, since the thread's earlier turns still show
+// from it. A row without a participant is a session a provider just made,
+// whose frames can arrive before the engine hears of it (dropUnowned).
 const Schema = `
 CREATE TABLE IF NOT EXISTS threads (
 	thread_id TEXT PRIMARY KEY,
@@ -124,14 +124,14 @@ CREATE TABLE IF NOT EXISTS receipts (
 CREATE TABLE IF NOT EXISTS sessions (
 	instance_id TEXT NOT NULL,
 	native_session TEXT NOT NULL,
-	thread_id TEXT REFERENCES threads(thread_id) ON DELETE CASCADE,
+	participant_id TEXT REFERENCES participants(participant_id) ON DELETE CASCADE,
 	marker TEXT NOT NULL DEFAULT '',
 	version INTEGER NOT NULL DEFAULT 0,
 	touched_at TEXT NOT NULL,
 	PRIMARY KEY (instance_id, native_session)
 ) STRICT;
-CREATE INDEX IF NOT EXISTS sessions_thread ON sessions(thread_id);
-CREATE INDEX IF NOT EXISTS sessions_unowned ON sessions(instance_id) WHERE thread_id IS NULL;
+CREATE INDEX IF NOT EXISTS sessions_participant ON sessions(participant_id);
+CREATE INDEX IF NOT EXISTS sessions_unowned ON sessions(instance_id) WHERE participant_id IS NULL;
 CREATE TABLE IF NOT EXISTS session_entries (
 	instance_id TEXT NOT NULL,
 	native_session TEXT NOT NULL,
@@ -564,25 +564,23 @@ func (d *db) marker(ctx context.Context, instance provider.InstanceID, session s
 	return found, nil
 }
 
-// sessionThread is the thread a session is kept for, if any.
-func (d *db) sessionThread(ctx context.Context, key sessionKey) (ThreadID, bool, error) {
-	var thread sql.NullString
-	err := d.sql.QueryRowContext(ctx, `SELECT thread_id FROM sessions WHERE instance_id = ? AND native_session = ?`, string(key.instance), key.session).Scan(&thread)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !thread.Valid {
-		return "", false, nil
+// sessionOwner is the participant a session is kept for: the one on it, or
+// one that left it. Empty when it is no one's.
+func (d *db) sessionOwner(ctx context.Context, key sessionKey) (ParticipantID, error) {
+	var participant sql.NullString
+	err := d.sql.QueryRowContext(ctx, `SELECT participant_id FROM sessions WHERE instance_id = ? AND native_session = ?`, string(key.instance), key.session).Scan(&participant)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("load session owner: %w", err)
 	}
-	if err != nil {
-		return "", false, fmt.Errorf("load session owner: %w", err)
-	}
-	return ThreadID(thread.String), true, nil
+	return ParticipantID(participant.String), nil
 }
 
-// dropUnowned deletes what is kept of sessions no thread has, of one instance
-// or, without one, of all. Nothing of them is a chat's: a provider made the
-// session for an Open whose chat never took it, or went on writing frames of
-// a session whose chat was deleted.
+// dropUnowned deletes what is kept of sessions no participant has, of one
+// instance or, without one, of all. Nothing of them is a chat's: a provider
+// made the session for an Open whose chat never took it, or went on writing
+// frames of a session whose chat was deleted.
 func dropUnowned(ctx context.Context, sqlDB execer, instance provider.InstanceID) error {
-	query, args := `DELETE FROM sessions WHERE thread_id IS NULL`, []any(nil)
+	query, args := `DELETE FROM sessions WHERE participant_id IS NULL`, []any(nil)
 	if instance != "" {
 		query, args = query+` AND instance_id = ?`, []any{string(instance)}
 	}
@@ -653,10 +651,13 @@ type tx struct {
 	threads      map[ThreadID]Thread
 	deleted      []ThreadID
 	participants map[ParticipantID]Participant
-	// sessions are the sessions its participants were on, each its thread's
+	// sessions are the sessions participants took, each its participant's
 	// from here on.
-	sessions map[sessionKey]ThreadID
-	// unowned are the instances to drop the sessions no thread has of.
+	sessions map[sessionKey]ParticipantID
+	// imported are the sessions among them that existed before their chat:
+	// what was kept of them while no participant had them is dropped first.
+	imported []sessionKey
+	// unowned are the instances to drop the sessions no participant has of.
 	unowned         []provider.InstanceID
 	turns           map[TurnID]Turn
 	droppedTurns    []TurnID
@@ -692,7 +693,7 @@ func newTx() *tx {
 	return &tx{
 		threads:      make(map[ThreadID]Thread),
 		participants: make(map[ParticipantID]Participant),
-		sessions:     make(map[sessionKey]ThreadID),
+		sessions:     make(map[sessionKey]ParticipantID),
 		turns:        make(map[TurnID]Turn),
 		deliveries:   make(map[DeliveryID]Delivery),
 		markers:      make(map[sessionKey]marker),
@@ -769,13 +770,22 @@ func writeTx(ctx context.Context, sqlTx *sql.Tx, t *tx) error {
 			return fmt.Errorf("write participant: %w", err)
 		}
 	}
+	// An imported session's record is its provider's. Frames kept of it while
+	// no participant had it are the end of an earlier chat's (written after
+	// that chat was deleted), and an adapter that finds frames reads no more.
+	for _, key := range t.imported {
+		if _, err := sqlTx.ExecContext(ctx, `DELETE FROM sessions WHERE instance_id = ? AND native_session = ? AND participant_id IS NULL`,
+			string(key.instance), key.session); err != nil {
+			return fmt.Errorf("drop what was kept of an imported session: %w", err)
+		}
+	}
 	// Before the entries and markers below, which need their session's row.
 	// One that the mirror made for a new session's first frames becomes the
-	// thread's here.
-	for key, thread := range t.sessions {
-		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO sessions (instance_id, native_session, thread_id, touched_at) VALUES (?, ?, ?, ?)
-			ON CONFLICT (instance_id, native_session) DO UPDATE SET thread_id = excluded.thread_id`,
-			string(key.instance), key.session, string(thread), encodeTime(time.Now())); err != nil {
+	// participant's here.
+	for key, participant := range t.sessions {
+		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO sessions (instance_id, native_session, participant_id, touched_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT (instance_id, native_session) DO UPDATE SET participant_id = excluded.participant_id`,
+			string(key.instance), key.session, string(participant), encodeTime(time.Now())); err != nil {
 			return fmt.Errorf("write session: %w", err)
 		}
 	}
@@ -1110,8 +1120,8 @@ func (w *mirrorWriter) write(batch []mirrorWrite) {
 
 // appendMirror adds a row of frames to a session. A new session's first
 // frames can arrive before the engine knows whose it is (the agent sends
-// them as it answers Open): they make its row, which the thread takes when
-// its participant does.
+// them as it answers Open): they make its row, which the participant takes
+// with the session.
 func (d *db) appendMirror(key sessionKey, blob []byte) error {
 	sqlTx, err := d.sql.Begin()
 	if err != nil {
@@ -1164,15 +1174,15 @@ func (m *instanceMirror) Load(ctx context.Context, session string) ([]json.RawMe
 	return frames, rows.Err()
 }
 
-// Delete forgets the session's frames. A thread that was on it keeps its
-// entries of it; a session no thread has goes whole.
+// Delete forgets the session's frames. A chat that was on it keeps its
+// entries of it; a session no participant has goes whole.
 func (m *instanceMirror) Delete(ctx context.Context, session string) error {
 	if err := m.writer.flush(ctx); err != nil {
 		return err
 	}
 	for _, query := range []string{
 		`DELETE FROM native_mirror WHERE instance_id = ? AND native_session = ?`,
-		`DELETE FROM sessions WHERE instance_id = ? AND native_session = ? AND thread_id IS NULL`,
+		`DELETE FROM sessions WHERE instance_id = ? AND native_session = ? AND participant_id IS NULL`,
 	} {
 		if _, err := m.writer.db.sql.ExecContext(ctx, query, string(m.instance), session); err != nil {
 			return fmt.Errorf("delete native mirror: %w", err)

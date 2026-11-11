@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Aqothy/maiD/internal/provider"
@@ -32,11 +34,20 @@ var testFrame = []json.RawMessage{json.RawMessage(`{"frame":1}`)}
 // does, and run a turn of its own there.
 func moveOn(h *harness, agent *fakeInstance, chat CommandResult, from, to string) {
 	h.t.Helper()
+	turns := len(h.snapshot(chat.Thread).Turns)
+	agent.mu.Lock()
+	agent.sessions[to] = &fakeSession{delivered: make(map[string]bool)}
+	agent.live[to] = true
+	agent.mu.Unlock()
 	agent.send(from, provider.SessionReplaced{New: to})
 	agent.send(to, provider.TurnStarted{Turn: "wake:1", By: provider.TurnByProvider})
 	agent.send(to, provider.EntryUpserted{Entry: provider.Entry{Ref: "wake:1/m1", Turn: "wake:1", Kind: provider.ItemKindAssistantMessage, Status: provider.ItemStatusCompleted, Text: "Cleared."}})
 	agent.send(to, provider.TurnSettled{Turn: "wake:1", State: provider.TurnCompleted})
-	h.settledTurns(chat.Thread, 2)
+	h.settledTurns(chat.Thread, turns+1)
+}
+
+func importSession(h *harness, instance provider.InstanceID, session string) CreateThread {
+	return CreateThread{Workspace: provider.Workspace{Cwd: h.dir}, Participant: NewParticipant{Instance: instance, Session: session}}
 }
 
 // Deleting a chat deletes what was kept of every session it was on: also of
@@ -125,5 +136,124 @@ func TestFramesOfANewSessionAreKeptForItsChat(t *testing.T) {
 	}
 	if frames("agent-session-1") != 1 {
 		t.Fatal("the chat's frames didn't survive the restart")
+	}
+}
+
+// An imported session's record is the provider's. What was mirrored of it
+// while no chat had it (an agent's last frames of a session whose chat was
+// deleted) is only the end of it, and an adapter that finds frames reads no
+// more: the import starts without them.
+func TestAnImportDropsWhatWasMirroredWhileNoChatHadTheSession(t *testing.T) {
+	agent := newFakeInstance("agent", "Agent")
+	h := newHarness(t, agent)
+	chat := h.createThread("agent", "one")
+	h.settledTurns(chat.Thread, 1)
+	session := agent.messages()[0].session
+	h.do(DeleteThread{Thread: chat.Thread})
+	h.engine.Mirror("agent").Append(session, testFrame)
+	if _, _, frames := h.kept("agent", session); frames != 1 {
+		t.Fatalf("the frame written after the chat was deleted: %d kept, want it there until something drops it", frames)
+	}
+
+	h.do(importSession(h, "agent", session))
+	if _, _, frames := h.kept("agent", session); frames != 0 {
+		t.Fatalf("the imported chat's session has %d frames written while no chat had it, want none", frames)
+	}
+}
+
+// Importing a session that is a chat's opens that chat, and a prompt sent
+// with the import is delivered there, to the agent whose session it is.
+func TestAPromptSentWithAnImportOfAChatsSessionIsDelivered(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	first := claude.messages()[0].session
+	withPrompt := func(text string) CreateThread {
+		create := importSession(h, "claude", first)
+		create.Prompt = &MessageBody{Text: text}
+		return create
+	}
+
+	if on := h.do(withPrompt("two")); on.Thread != chat.Thread || on.Delivery == "" {
+		t.Fatalf("importing the chat's session with a prompt = %+v, want the chat %s and the prompt's delivery", on, chat.Thread)
+	}
+	h.settledTurns(chat.Thread, 2)
+	moveOn(h, claude, chat, first, "claude-session-9")
+	if left := h.do(withPrompt("three")); left.Thread != chat.Thread || left.Delivery == "" {
+		t.Fatalf("importing the session the chat left with a prompt = %+v, want the chat %s and the prompt's delivery", left, chat.Thread)
+	}
+	h.settledTurns(chat.Thread, 4)
+	got := claude.messages()
+	if last := got[len(got)-1]; len(got) != 3 || !strings.HasSuffix(last.in.Text, "three") || last.session != "claude-session-9" {
+		t.Fatalf("the agent got %d messages, the last %q on %q; want the three prompts, the last on the session it is on now", len(got), last.in.Text, last.session)
+	}
+}
+
+// The agent an import names is the one whose session it is, also among
+// several agents of one provider in a chat.
+func TestImportingASessionNamesTheAgentThatWasOnIt(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	chat := h.createThread("claude", "one")
+	h.settledTurns(chat.Thread, 1)
+	second := h.do(AddParticipant{Thread: chat.Thread, NewParticipant: NewParticipant{Instance: "claude"}})
+	h.do(Deliver{Thread: chat.Thread, Body: MessageBody{Text: "two"}})
+	h.settledTurns(chat.Thread, 2)
+	its := claude.messages()[1].session
+	moveOn(h, claude, chat, its, "claude-session-9")
+
+	if imported := h.do(importSession(h, "claude", its)); imported.Thread != chat.Thread || imported.Participant != second.Participant {
+		t.Fatalf("importing the session the second agent left = %+v, want the chat %s and that agent %s (the first is %s)", imported, chat.Thread, second.Participant, chat.Participant)
+	}
+}
+
+// A native session is one agent's, in one chat, for as long as that chat
+// lives. Naming it as another chat's agent's session would move what is kept
+// of it to that chat, and deleting that chat would take the first one's turns.
+func TestASessionAChatLeftCantBecomeAnotherChats(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	one := h.createThread("claude", "one")
+	h.settledTurns(one.Thread, 1)
+	left := claude.messages()[0].session
+	moveOn(h, claude, one, left, "claude-session-9")
+	two := h.createThread("claude", "two")
+	h.settledTurns(two.Thread, 1)
+	_, before, _ := h.kept("claude", left)
+
+	var refusal *CommandError
+	if _, err := h.doAs(h.device, AddParticipant{Thread: two.Thread, NewParticipant: NewParticipant{Instance: "claude", Session: left}}); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
+		t.Errorf("adding the session chat one left as an agent of chat two: %v, want it refused as invalid", err)
+	}
+	h.do(DeleteThread{Thread: two.Thread})
+	if _, entries, _ := h.kept("claude", left); entries != before {
+		t.Fatalf("after deleting chat two, chat one's session has %d entries, had %d", entries, before)
+	}
+}
+
+// Every command that takes an agent with a session refuses one that is
+// another chat's, and the daemon goes on.
+func TestASessionOfAChatIsRefusedToAnotherChat(t *testing.T) {
+	claude := newFakeInstance("claude", "Claude")
+	h := newHarness(t, claude)
+	one := h.createThread("claude", "one")
+	h.settledTurns(one.Thread, 1)
+	two := h.createThread("claude", "two")
+	h.settledTurns(two.Thread, 1)
+	taken := NewParticipant{Instance: "claude", Session: claude.messages()[0].session}
+
+	for name, command := range map[string]CommandBody{
+		"adding it as an agent":     AddParticipant{Thread: two.Thread, NewParticipant: taken},
+		"forking to an agent on it": ForkThread{Thread: two.Thread, Agent: &taken, Prompt: MessageBody{Text: "go on"}},
+		"spawning an agent on it":   Spawn{Parent: two.Thread, Brief: "look into it", Agent: taken},
+	} {
+		var refusal *CommandError
+		if _, err := h.doAs(h.device, command); !errors.As(err, &refusal) || refusal.Code != CodeInvalid {
+			t.Errorf("%s: %v, want it refused as invalid", name, err)
+		}
+	}
+	if again := h.createThread("claude", "three"); again.Thread == "" {
+		t.Fatal("the engine stopped")
 	}
 }

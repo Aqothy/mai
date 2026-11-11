@@ -36,6 +36,10 @@ func (e *Engine) InstanceGone(instance provider.InstanceID, generation uint64) {
 // deleted. A provider that can't delete is refused before the chat is
 // touched. When the provider's delete then fails, the chat is gone and the
 // session is still the provider's, to delete again or import.
+//
+// A session an agent left (/clear) has no chat on it: it is deleted from its
+// provider, and the chat that was on it stays, with the turns it shows from
+// it (the cache is their record then, as for any session a provider deleted).
 func (e *Engine) DeleteSession(ctx context.Context, actor Actor, instance provider.InstanceID, session string) error {
 	// A running process says what it can do; before one ran, its driver may
 	// not know.
@@ -435,13 +439,10 @@ func (e *Engine) sessionReplaced(s *step, thread *threadState, participant *part
 	if session == "" || session == participant.Session {
 		return
 	}
-	delete(e.bySession, sessionKey{participant.Instance, participant.Session})
-	participant.Session = session
-	e.bySession[sessionKey{participant.Instance, session}] = participant.ID
 	if thread.latest != nil {
 		participant.SeenThrough = thread.latest.ID
 	}
-	s.putParticipant(participant)
+	e.takeSession(s, participant, session)
 }
 
 // sessionClosed: the participant's live session ended. A turn it ran ends
@@ -515,7 +516,7 @@ func (e *Engine) replayOrphans(s *step, participant *participantState) {
 
 // dropOrphans forgets what waits for a session of an instance to be a chat's
 // once none of its Opens is in flight, as no such session is coming: its
-// orphans, and what its mirror kept of sessions no thread has.
+// orphans, and what its mirror kept of sessions no participant has.
 func (e *Engine) dropOrphans(s *step, instance provider.InstanceID) {
 	if e.opening[instance] > 0 {
 		return

@@ -213,8 +213,7 @@ func (e *Engine) forksDeleted(s *step) {
 func (e *Engine) forkedParticipant(s *step, thread *threadState, job *forkJob) *participantState {
 	carryOn := job.carryOn
 	participant := e.newParticipant(s, thread, NewParticipant{Instance: carryOn.Instance, Settings: carryOn.Settings})
-	participant.Session = job.session
-	e.bySession[sessionKey{participant.Instance, participant.Session}] = participant.ID
+	e.takeSession(s, participant, job.session)
 	var kept []Turn
 	for _, turn := range job.source.kept {
 		if turn.Participant == carryOn.ID {

@@ -198,13 +198,8 @@ func (s *step) putThread(thread *threadState) {
 	s.touch(thread.ID)
 }
 
-// putParticipant also makes the session the participant is on its thread's:
-// every session it is ever on passes through here.
 func (s *step) putParticipant(participant *participantState) {
 	s.tx.participants[participant.ID] = participant.Participant
-	if participant.Session != "" {
-		s.tx.sessions[sessionKey{participant.Instance, participant.Session}] = participant.Thread
-	}
 	s.touch(participant.Thread)
 }
 

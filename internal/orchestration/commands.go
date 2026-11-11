@@ -348,57 +348,44 @@ func (e *Engine) createThread(s *step, actor Actor, create CreateThread) (Comman
 	if err != nil {
 		return CommandResult{}, err
 	}
-	if err := e.validateParticipant(create.Participant, workspace); err != nil {
-		return CommandResult{}, err
-	}
 	if create.Prompt != nil {
 		if err := e.checkPrompt(*create.Prompt); err != nil {
 			return CommandResult{}, err
 		}
 	}
-	if create.Participant.Session != "" {
-		key := sessionKey{create.Participant.Instance, create.Participant.Session}
-		if id, ok := e.bySession[key]; ok {
-			participant := e.participants[id]
-			return CommandResult{Thread: participant.Thread, Participant: id}, nil
-		}
-		// A session a chat's agent left (/clear) is still that chat's: its
-		// earlier turns are the session's. Importing it opens that chat.
-		owner, owned, err := e.db.sessionThread(e.ctx, key)
-		if err != nil {
+	// Importing a session that is an agent's opens its chat: the one the
+	// agent is on, or one it left (/clear), whose turns that chat still shows.
+	var participant *participantState
+	if imported {
+		if participant, err = e.sessionOwner(create.Participant); err != nil {
 			return CommandResult{}, err
 		}
-		if thread := e.threads[owner]; owned && thread != nil {
-			result := CommandResult{Thread: thread.ID, Participant: thread.Address}
-			for _, id := range thread.participants {
-				if e.participants[id].Instance == key.instance {
-					result.Participant = id
-					break
-				}
+	}
+	if participant == nil {
+		if err := e.validateParticipant(create.Participant, workspace); err != nil {
+			return CommandResult{}, err
+		}
+		title := strings.TrimSpace(create.Title)
+		if title == "" && create.Prompt != nil {
+			title = provider.PromptPreviewTitle(create.Prompt.Text)
+			if runes := []rune(title); len(runes) > 80 {
+				title = string(runes[:80])
 			}
-			return result, nil
 		}
-	}
-	title := strings.TrimSpace(create.Title)
-	if title == "" && create.Prompt != nil {
-		title = provider.PromptPreviewTitle(create.Prompt.Text)
-		if runes := []rune(title); len(runes) > 80 {
-			title = string(runes[:80])
+		if title == "" {
+			title = "Untitled thread"
 		}
+		if imported && !e.allowsRoot(workspace.Cwd) {
+			e.addProject(s, workspace.Cwd)
+		}
+		thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
+		participant = e.newParticipant(s, thread, create.Participant)
+		thread.Address = participant.ID
+		s.putThread(thread)
 	}
-	if title == "" {
-		title = "Untitled thread"
-	}
-	if imported && !e.allowsRoot(workspace.Cwd) {
-		e.addProject(s, workspace.Cwd)
-	}
-	thread := e.newThread(s, title, workspace, Origin{Kind: OriginUser})
-	participant := e.newParticipant(s, thread, create.Participant)
-	thread.Address = participant.ID
-	s.putThread(thread)
-	result := CommandResult{Thread: thread.ID, Participant: participant.ID}
+	result := CommandResult{Thread: participant.Thread, Participant: participant.ID}
 	if create.Prompt != nil {
-		delivery, err := e.deliver(s, actor, Deliver{Thread: thread.ID, To: participant.ID, Body: *create.Prompt, Mode: ModeQueue})
+		delivery, err := e.deliver(s, actor, Deliver{Thread: participant.Thread, To: participant.ID, Body: *create.Prompt, Mode: ModeQueue})
 		if err != nil {
 			return CommandResult{}, err
 		}
@@ -421,17 +408,44 @@ func (e *Engine) newThread(s *step, title string, workspace provider.Workspace, 
 	return thread
 }
 
+// newParticipant adds an agent to thread; with new.Session, on that native
+// session, which exists already and is no other agent's (validateParticipant).
 func (e *Engine) newParticipant(s *step, thread *threadState, new NewParticipant) *participantState {
 	participant := &participantState{Participant: Participant{
-		ID: ParticipantID(newID()), Thread: thread.ID, Instance: new.Instance, Settings: slices.Clone(new.Settings), Session: new.Session,
+		ID: ParticipantID(newID()), Thread: thread.ID, Instance: new.Instance, Settings: slices.Clone(new.Settings),
 	}}
 	e.participants[participant.ID] = participant
 	thread.participants = append(thread.participants, participant.ID)
-	if participant.Session != "" {
-		e.bySession[sessionKey{participant.Instance, participant.Session}] = participant.ID
-	}
 	s.putParticipant(participant)
+	if new.Session != "" {
+		s.tx.imported = append(s.tx.imported, sessionKey{new.Instance, new.Session})
+		e.takeSession(s, participant, new.Session)
+	}
 	return participant
+}
+
+// takeSession puts the participant on a native session. The session is its
+// from here on, also once it moves to another: what is kept of it goes with
+// the participant's chat.
+func (e *Engine) takeSession(s *step, participant *participantState, session string) {
+	if participant.Session != "" {
+		delete(e.bySession, sessionKey{participant.Instance, participant.Session})
+	}
+	participant.Session = session
+	key := sessionKey{participant.Instance, session}
+	e.bySession[key] = participant.ID
+	s.tx.sessions[key] = participant.ID
+	s.putParticipant(participant)
+}
+
+// sessionOwner is the agent the native session new names belongs to: the one
+// on it, or one that left it. Nil when it is no chat's.
+func (e *Engine) sessionOwner(new NewParticipant) (*participantState, error) {
+	id, err := e.db.sessionOwner(e.ctx, sessionKey{new.Instance, new.Session})
+	if err != nil {
+		return nil, err
+	}
+	return e.participants[id], nil
 }
 
 func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Workspace) error {
@@ -442,8 +456,20 @@ func (e *Engine) validateParticipant(new NewParticipant, workspace provider.Work
 	if len(workspace.AdditionalDirectories) > 0 && info.Status != provider.InstanceStatusConfigured && !info.Capabilities.AdditionalDirectories {
 		return refused(CodeInvalid, "%s doesn't support additional directories", info.Name)
 	}
-	if new.Session != "" && info.Status != provider.InstanceStatusConfigured && !info.Capabilities.Resume {
+	if new.Session == "" {
+		return nil
+	}
+	if info.Status != provider.InstanceStatusConfigured && !info.Capabilities.Resume {
 		return refused(CodeInvalid, "%s can't open an existing session", info.Name)
+	}
+	// A native session is one agent's, in one chat: what is kept of it has
+	// one owner, and the ledger holds one participant per session.
+	owner, err := e.sessionOwner(new)
+	if err != nil {
+		return err
+	}
+	if owner != nil {
+		return refused(CodeInvalid, "that session is already part of the chat %q", e.threads[owner.Thread].Title)
 	}
 	return nil
 }

@@ -97,14 +97,11 @@ func (e *Engine) opened(s *step, id ParticipantID, generation uint64, opened pro
 	participant.live = &liveSession{generation: generation}
 	if opened.Session != participant.Session {
 		if participant.Session != "" {
-			delete(e.bySession, sessionKey{participant.Instance, participant.Session})
 			// A new session in place of one the provider couldn't resume has
 			// none of the conversation: the next turn's handoff carries it.
 			participant.SeenThrough = ""
 		}
-		participant.Session = opened.Session
-		e.bySession[sessionKey{participant.Instance, participant.Session}] = participant.ID
-		s.putParticipant(participant)
+		e.takeSession(s, participant, opened.Session)
 	}
 	participant.options, participant.commands, participant.skills, participant.goal = opened.Options, opened.Commands, opened.Skills, opened.Goal
 	e.notifyParticipant(s, thread, participant)
