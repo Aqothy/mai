@@ -18,13 +18,15 @@ import (
 // LayoutVersion names what maid.db holds: its tables (Schema here, and the
 // terminals' in internal/store), the JSON its columns keep, which is the
 // encoding of the Go types stored there, and the values stored as text. A
-// file of another version is set aside at startup (store.Open), so a change
-// that would misread rows written before it changes this number.
-// testdata/layout.golden records the layout, and TestLayoutGuard fails until
-// a change to it is recorded. The frames an adapter keeps in native_mirror
-// are that adapter's encoding, recorded beside it (internal/adapters/acp
-// testdata/frame.golden).
-const LayoutVersion = 3
+// file of another version is set aside at startup (store.Open).
+//
+// maiD is unreleased, so there is no file to migrate from: the number stays
+// as it is through layout changes, and whoever changes the layout deletes
+// their own maid.db. testdata/layout.golden records the layout, and
+// TestLayoutGuard fails until a change to it is recorded, which is how they
+// know. The frames an adapter keeps in native_mirror are that adapter's
+// encoding, recorded beside it (internal/adapters/acp testdata/frame.golden).
+const LayoutVersion = 1
 
 // Schema is the engine's tables, for store.Open.
 //

@@ -20,15 +20,14 @@ func TestFrameLayoutGuard(t *testing.T) {
 		strings.Join(providertest.StringTypes(frame{}), " ") + "\n"
 
 	providertest.Golden(t, filepath.Join("testdata", "frame.golden"), layout, `What an ACP frame encodes changed. Frames written before the change are in
-people's maid.db, and nothing else can rebuild their sessions, so decide what
-happens to them:
+maid.db, and nothing else can rebuild their sessions:
   - Frames written before would be misread (a field renamed, removed or
-    given another meaning): change orchestration.LayoutVersion, which sets
-    such a file aside at startup. After the first release that is not an
-    option: the change ships with a migration (ROADMAP, "P0: blocks a usable
-    product").
-  - Frames written before read the same (a new optional field): keep the
-    version.
+    given another meaning): delete your own maid.db. maiD is unreleased,
+    there is nothing to migrate, and orchestration.LayoutVersion stays as it
+    is. From the first release such a change ships with a migration instead
+    (ROADMAP, "P0: blocks a usable product").
+  - Frames written before read the same (a new optional field): nothing to
+    do.
 Frames that read the same but map to other entries are historyVersion's
 business, not this file's.`)
 }

@@ -86,13 +86,14 @@ func TestLayoutGuard(t *testing.T) {
 	}
 	fmt.Fprintf(&layout, "\nNot closed sets (IDs, or a type api/wire lists no values for): %s\n", strings.Join(open, " "))
 
-	providertest.Golden(t, filepath.Join("testdata", "layout.golden"), layout.String(), `What maid.db holds changed. A file written before the change is still on
-people's disks, so decide what happens to it:
+	providertest.Golden(t, filepath.Join("testdata", "layout.golden"), layout.String(), `What maid.db holds changed. A maid.db written before the change no longer
+matches the code:
   - Rows written before would be misread (a column, a JSON field or a stored
-    value renamed, removed or given another meaning): change
-    orchestration.LayoutVersion, which sets such a file aside at startup.
-    After the first release that is not an option for the ledger: the change
-    ships with a migration (ROADMAP, "P0: blocks a usable product").
+    value renamed, removed or given another meaning): delete your own
+    maid.db. maiD is unreleased, there is nothing to migrate, and
+    orchestration.LayoutVersion stays as it is. From the first release such
+    a change ships with a migration instead (ROADMAP, "P0: blocks a usable
+    product").
   - Rows written before read the same (a new optional JSON field, a new
-    value): keep the version.`)
+    value): nothing to do.`)
 }
